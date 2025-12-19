@@ -1,0 +1,83 @@
+"""Configuration management for Sibyl MCP Server."""
+
+from pathlib import Path
+from typing import Literal
+
+from pydantic import Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="SIBYL_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # Server configuration
+    server_name: str = Field(default="sibyl", description="MCP server name")
+    server_host: str = Field(default="localhost", description="Server bind host")
+    server_port: int = Field(default=3334, description="Server bind port")
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
+        default="INFO",
+        description="Logging level",
+    )
+
+    # FalkorDB configuration
+    falkordb_host: str = Field(default="localhost", description="FalkorDB host")
+    falkordb_port: int = Field(default=6380, description="FalkorDB port")
+    falkordb_password: str = Field(default="", description="FalkorDB password")
+    falkordb_graph_name: str = Field(
+        default="conventions",
+        description="Name of the graph in FalkorDB",
+    )
+
+    # Graphiti configuration
+    openai_api_key: SecretStr = Field(default=SecretStr(""), description="OpenAI API key for embeddings")
+    embedding_model: str = Field(
+        default="text-embedding-3-small",
+        description="OpenAI embedding model",
+    )
+    embedding_dimensions: int = Field(default=1536, description="Embedding vector dimensions")
+
+    # Conventions repository configuration
+    conventions_repo_path: Path = Field(
+        default=Path(__file__).parent.parent.parent.parent,
+        description="Path to conventions repository root",
+    )
+
+    # Content paths (relative to conventions_repo_path)
+    wisdom_path: str = Field(
+        default="docs/wisdom",
+        description="Path to wisdom documentation",
+    )
+    templates_path: str = Field(
+        default="templates",
+        description="Path to templates directory",
+    )
+    configs_path: str = Field(
+        default="configs",
+        description="Path to config templates directory",
+    )
+
+    # Ingestion configuration
+    chunk_max_tokens: int = Field(
+        default=1000,
+        description="Maximum tokens per chunk during ingestion",
+    )
+    chunk_overlap_tokens: int = Field(
+        default=100,
+        description="Token overlap between chunks",
+    )
+
+    @property
+    def falkordb_url(self) -> str:
+        """Construct FalkorDB connection URL."""
+        return f"redis://:{self.falkordb_password}@{self.falkordb_host}:{self.falkordb_port}"
+
+
+# Global settings instance
+settings = Settings()

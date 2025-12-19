@@ -1,0 +1,272 @@
+# Sibyl - Knowledge Graph MCP Server
+# Graphiti-powered oracle of development wisdom
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sibyl"
+version = "0.1.0"
+description = "Sibyl: MCP server providing AI agents access to development wisdom via Graphiti knowledge graph"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [{ name = "Stefanie Jane", email = "stef@hyperbliss.tech" }]
+keywords = ["mcp", "graphiti", "knowledge-graph", "ai", "conventions"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = [
+    # MCP Protocol
+    "mcp>=1.0.0",
+    # Knowledge Graph
+    "graphiti-core[falkordb]>=0.5",
+    # Async support
+    "anyio>=4.0",
+    # HTTP server (for streamable-http transport)
+    "uvicorn>=0.32.0",
+    "starlette>=0.41.0",
+    # Data validation
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    # Utilities
+    "structlog>=24.0",
+    "rich>=13.0",
+    # Markdown parsing
+    "mistune>=3.0",
+    "pyyaml>=6.0",
+    "typer>=0.20.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pre-commit>=4.0",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+]
+
+[project.scripts]
+sibyl = "sibyl.cli:main"
+sibyl-serve = "sibyl.main:main"
+
+[project.urls]
+Homepage = "https://github.com/hyperb1iss/conventions"
+Repository = "https://github.com/hyperb1iss/conventions"
+Issues = "https://github.com/hyperb1iss/conventions/issues"
+
+# ============================================================================
+# Hatch Build Configuration
+# ============================================================================
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sibyl"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/README.md", "/LICENSE"]
+
+# ============================================================================
+# Ruff Configuration - Comprehensive Linting
+# ============================================================================
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    # Core Python
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "C",      # flake8-comprehensions
+    "B",      # flake8-bugbear
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "RUF",    # Ruff-specific rules
+    # Testing
+    "PT",     # flake8-pytest-style
+    # Code quality
+    "SIM",    # flake8-simplify
+    "ASYNC",  # flake8-async
+    "BLE",    # flake8-blind-except
+    "DTZ",    # flake8-datetimez
+    "G",      # flake8-logging-format
+    "ICN",    # flake8-import-conventions
+    "PGH",    # pygrep-hooks
+    "PIE",    # flake8-pie
+    "PL",     # Pylint
+    "RET",    # flake8-return
+    "RSE",    # flake8-raise
+    "S",      # flake8-bandit (security)
+    "SLF",    # flake8-self
+    "TRY",    # tryceratops
+    "COM",    # flake8-commas
+    "ERA",    # eradicate (commented code)
+    "T20",    # flake8-print
+    "ARG",    # flake8-unused-arguments
+]
+
+ignore = [
+    "E501",    # Line too long (handled by formatter)
+    "COM812",  # Missing trailing comma (conflicts with formatter)
+    "ISC001",  # Single line implicit string concatenation
+    "PLR0913", # Too many arguments
+    "PLR2004", # Magic value in comparison
+    "S101",    # Use of assert (needed for tests)
+    "TRY003",  # Long exception messages
+    "G004",    # Logging f-string (we use structlog which handles this)
+    "PLW2901", # Loop variable overwritten (intentional in some cases)
+    "B005",    # Strip with multiple chars (edge case)
+    "S112",    # try-except-continue (acceptable for file parsing)
+    "C901",    # Too complex (will refactor later)
+    "PLR0912", # Too many branches (will refactor later)
+    "RUF012",  # ClassVar annotations (not critical for dataclasses)
+    "RUF022",  # __all__ sorting (comments make this awkward)
+    "PLC0415", # Import not at top level (lazy imports for optional deps)
+    "PIE810",  # Startswith tuple (readability preference)
+    "DTZ003",  # datetime.utcnow() (will fix later)
+    "ARG002",  # Unused arguments (placeholder for future impl)
+    "BLE001",  # Blind except (acceptable for graceful error handling in tools)
+    "E741",    # Ambiguous variable name `l` (clear in context)
+    "SIM102",  # Nested if (more readable for filter chains)
+    "SIM108",  # Ternary operator (explicit if/else clearer)
+    "TRY300",  # Return in try (acceptable pattern for tool handlers)
+    "TRY301",  # Abstract raise to inner function (style preference)
+    "B007",    # Unused loop variable (score from results tuple)
+    "PLR0911", # Too many returns (dispatch function by design)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",    # Assert allowed in tests
+    "ARG001",  # Unused function args (fixtures)
+    "PLR2004", # Magic values in tests OK
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sibyl"]
+force-single-line = false
+combine-as-imports = true
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+
+# ============================================================================
+# MyPy Configuration - Strict Type Checking
+# ============================================================================
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+strict_equality = true
+extra_checks = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = ["graphiti_core.*", "mcp.*"]
+ignore_missing_imports = true
+
+# ============================================================================
+# Pytest Configuration
+# ============================================================================
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "-v",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+]
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks tests as integration tests",
+]
+
+# ============================================================================
+# Coverage Configuration
+# ============================================================================
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+parallel = true
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "@abstractmethod",
+    "@overload",
+]
+fail_under = 80
+show_missing = true
+
+# ============================================================================
+# Pyright Configuration (Alternative to MyPy)
+# ============================================================================
+
+[tool.pyright]
+include = ["src"]
+exclude = ["**/__pycache__", "tests"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"  # Strict on our code, lenient on external libs
+reportMissingImports = false   # Graphiti not typed
+reportMissingTypeStubs = false
+reportUnknownMemberType = false        # External libs not typed
+reportUnknownVariableType = false      # External libs not typed
+reportUnknownArgumentType = false      # External libs not typed
+reportUnknownParameterType = false     # External libs not typed
+reportAttributeAccessIssue = false     # External libs not typed
+reportArgumentType = false             # MCP lib type mismatches
+reportDeprecated = "warning"           # Track deprecations
+reportCallIssue = "warning"            # Track API misuse
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.407",
+    "ruff>=0.14.9",
+]

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "conventions": {
+      "command": "uv",
+      "args": ["--directory", "${PROJECT_ROOT}/mcp-server", "run", "conventions-mcp"],
+      "env": {
+        "CONVENTIONS_OPENAI_API_KEY": "${OPENAI_API_KEY}",
+        "CONVENTIONS_LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}

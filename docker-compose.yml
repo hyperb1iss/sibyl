@@ -1,0 +1,20 @@
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: sibyl-falkordb
+    ports:
+      - "6380:6379"  # Redis port (mapped to 6380 to avoid gradial-redis conflict)
+      - "3001:3000"  # FalkorDB Browser UI (mapped to 3001 to avoid conflicts)
+    volumes:
+      - falkordb_data:/data
+    environment:
+      - FALKORDB_ARGS=--requirepass ${FALKORDB_PASSWORD:-conventions}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${FALKORDB_PASSWORD:-conventions}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  falkordb_data:
