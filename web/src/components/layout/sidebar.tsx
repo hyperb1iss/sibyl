@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { NAVIGATION } from '@/lib/constants';
+import { APP_CONFIG, NAVIGATION } from '@/lib/constants';
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -53,7 +53,7 @@ export function Sidebar() {
         <div className="text-xs text-sc-fg-subtle space-y-1">
           <p className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-sc-green animate-pulse" />
-            Sibyl v0.1.0
+{APP_CONFIG.NAME} v{APP_CONFIG.VERSION}
           </p>
           <p className="text-sc-cyan font-mono">localhost:3334</p>
         </div>

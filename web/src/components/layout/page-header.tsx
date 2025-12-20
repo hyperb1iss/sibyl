@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 
 interface PageHeaderProps {
   title: string;
@@ -33,19 +34,19 @@ interface BreadcrumbProps {
 
 export function Breadcrumb({ items }: BreadcrumbProps) {
   return (
-    <nav className="flex items-center gap-2 text-sm text-sc-fg-muted mb-4">
+    <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-sm text-sc-fg-muted mb-4">
       {items.map((item, index) => (
         <span key={item.label} className="flex items-center gap-2">
-          {index > 0 && <span className="text-sc-fg-subtle">/</span>}
+          {index > 0 && <span className="text-sc-fg-subtle" aria-hidden="true">/</span>}
           {item.href ? (
-            <a
+            <Link
               href={item.href}
               className="hover:text-sc-purple transition-colors"
             >
               {item.label}
-            </a>
+            </Link>
           ) : (
-            <span className="text-sc-fg-primary">{item.label}</span>
+            <span className="text-sc-fg-primary" aria-current="page">{item.label}</span>
           )}
         </span>
       ))}

@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useState } from 'react';
 
+import { GRAPH_DEFAULTS } from '@/lib/constants';
 import { Card } from '@/components/ui/card';
 import { ColorButton } from '@/components/ui/button';
 import { FilterChip } from '@/components/ui/toggle';
@@ -95,7 +96,7 @@ function GraphPageContent() {
         <KnowledgeGraph
           onNodeClick={handleNodeClick}
           selectedNodeId={selectedNodeId}
-          maxNodes={500}
+          maxNodes={GRAPH_DEFAULTS.MAX_NODES}
         />
       </div>
 

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { TIMING } from '@/lib/constants';
 import { Card, StatCard } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
@@ -25,7 +26,7 @@ export default function IngestPage() {
       path: customPath || undefined,
       force,
     });
-    setTimeout(() => refetchStats(), 2000);
+    setTimeout(() => refetchStats(), TIMING.REFETCH_DELAY);
   };
 
   const isRunning = status?.running ?? false;

@@ -1,4 +1,7 @@
+import { memo } from 'react';
 import { ENTITY_COLORS, ENTITY_TYPES } from '@/lib/constants';
+import { Spinner } from '@/components/ui/spinner';
+import { EmptyState } from '@/components/ui/tooltip';
 
 interface LegendProps {
   types?: string[];
@@ -50,11 +53,11 @@ interface EntityBreakdownProps {
   loading?: boolean;
 }
 
-export function EntityBreakdown({ counts, loading }: EntityBreakdownProps) {
+export const EntityBreakdown = memo(function EntityBreakdown({ counts, loading }: EntityBreakdownProps) {
   if (loading) {
     return (
       <div className="flex justify-center py-8">
-        <div className="w-8 h-8 border-2 border-sc-purple border-t-transparent rounded-full animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -63,7 +66,11 @@ export function EntityBreakdown({ counts, loading }: EntityBreakdownProps) {
 
   if (entries.length === 0) {
     return (
-      <p className="text-sc-fg-muted text-center py-8">No entities yet</p>
+      <EmptyState
+        variant="data"
+        title="No entities yet"
+        description="Start by ingesting documents to create entities"
+      />
     );
   }
 
@@ -91,4 +98,4 @@ export function EntityBreakdown({ counts, loading }: EntityBreakdownProps) {
       })}
     </div>
   );
-}
+});

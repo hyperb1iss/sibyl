@@ -1,26 +1,14 @@
 'use client';
 
+import { useMemo } from 'react';
 import { darkTheme, GraphCanvas, type GraphEdge, type GraphNode } from 'reagraph';
 
 import { useGraphData } from '@/lib/hooks';
+import { ENTITY_COLORS } from '@/lib/constants';
+import { LoadingState } from '@/components/ui/spinner';
+import { EmptyState, ErrorState } from '@/components/ui/tooltip';
 
-/**
- * SilkCircuit color palette for entity types.
- */
-const entityColors: Record<string, string> = {
-  pattern: '#e135ff', // Electric Purple
-  rule: '#ff6363', // Error Red
-  template: '#80ffea', // Neon Cyan
-  tool: '#f1fa8c', // Electric Yellow
-  language: '#ff6ac1', // Coral
-  topic: '#ff00ff', // Pure Magenta
-  episode: '#50fa7b', // Success Green
-  knowledge_source: '#8b85a0', // Muted
-  config_file: '#f1fa8c',
-  slash_command: '#80ffea',
-};
-
-const defaultNodeColor = '#8b85a0';
+const DEFAULT_NODE_COLOR = '#8b85a0';
 
 interface KnowledgeGraphProps {
   onNodeClick?: (nodeId: string) => void;
@@ -35,13 +23,36 @@ export function KnowledgeGraph({
 }: KnowledgeGraphProps) {
   const { data, isLoading, error } = useGraphData({ max_nodes: maxNodes, max_edges: 1000 });
 
+  // Memoize node/edge transformation to avoid recalculating on every render
+  const { nodes, edges } = useMemo(() => {
+    if (!data) return { nodes: [], edges: [] };
+
+    const transformedNodes: GraphNode[] = data.nodes.map(node => ({
+      id: node.id,
+      label: node.label,
+      fill: node.color || ENTITY_COLORS[node.type as keyof typeof ENTITY_COLORS] || DEFAULT_NODE_COLOR,
+      size: Math.max(10, Math.min(40, node.size * 5)),
+      data: { type: node.type },
+    }));
+
+    const transformedEdges: GraphEdge[] = data.edges.map(edge => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      label: edge.type,
+      size: Math.max(1, edge.weight * 2),
+    }));
+
+    return { nodes: transformedNodes, edges: transformedEdges };
+  }, [data]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full bg-sc-bg-dark">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-2 border-sc-purple border-t-transparent rounded-full animate-spin" />
-          <p className="text-sc-fg-muted">Loading knowledge graph...</p>
-        </div>
+        <LoadingState
+          message="Loading knowledge graph..."
+          variant="orbital"
+        />
       </div>
     );
   }
@@ -49,10 +60,11 @@ export function KnowledgeGraph({
   if (error) {
     return (
       <div className="flex items-center justify-center h-full bg-sc-bg-dark">
-        <div className="text-center">
-          <p className="text-sc-red text-lg mb-2">Failed to load graph</p>
-          <p className="text-sc-fg-muted text-sm">{error.message}</p>
-        </div>
+        <ErrorState
+          variant="error"
+          title="Failed to load graph"
+          message={error.message}
+        />
       </div>
     );
   }
@@ -60,32 +72,14 @@ export function KnowledgeGraph({
   if (!data || data.nodes.length === 0) {
     return (
       <div className="flex items-center justify-center h-full bg-sc-bg-dark">
-        <div className="text-center">
-          <p className="text-sc-fg-muted text-lg mb-2">No entities in the knowledge graph</p>
-          <p className="text-sc-fg-subtle text-sm">
-            Try ingesting some documents to populate the graph
-          </p>
-        </div>
+        <EmptyState
+          variant="data"
+          title="No entities in the knowledge graph"
+          description="Try ingesting some documents to populate the graph"
+        />
       </div>
     );
   }
-
-  // Transform API data to Reagraph format
-  const nodes: GraphNode[] = data.nodes.map(node => ({
-    id: node.id,
-    label: node.label,
-    fill: node.color || entityColors[node.type] || defaultNodeColor,
-    size: Math.max(10, Math.min(40, node.size * 5)),
-    data: { type: node.type },
-  }));
-
-  const edges: GraphEdge[] = data.edges.map(edge => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    label: edge.type,
-    size: Math.max(1, edge.weight * 2),
-  }));
 
   return (
     <div className="w-full h-full">

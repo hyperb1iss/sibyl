@@ -1,52 +1,14 @@
-import type { ReactNode } from 'react';
 import type { EntityType } from '@/lib/constants';
 import { ENTITY_STYLES } from '@/lib/constants';
 
-type BadgeVariant = 'default' | 'outline' | 'solid';
 type BadgeSize = 'sm' | 'md';
-
-interface BadgeProps {
-  variant?: BadgeVariant;
-  size?: BadgeSize;
-  color?: string;
-  children: ReactNode;
-  className?: string;
-}
 
 const sizes: Record<BadgeSize, string> = {
   sm: 'px-2 py-0.5 text-xs',
   md: 'px-3 py-1 text-sm',
 };
 
-export function Badge({
-  variant = 'default',
-  size = 'sm',
-  color,
-  children,
-  className = '',
-}: BadgeProps) {
-  const baseStyle = 'inline-flex items-center rounded font-medium capitalize';
-
-  const variantStyles: Record<BadgeVariant, string> = {
-    default: color
-      ? `bg-[${color}]/20 text-[${color}] border border-[${color}]/30`
-      : 'bg-sc-bg-highlight text-sc-fg-muted border border-sc-fg-subtle/20',
-    outline: color
-      ? `bg-transparent text-[${color}] border border-[${color}]/50`
-      : 'bg-transparent text-sc-fg-muted border border-sc-fg-subtle/30',
-    solid: color
-      ? `bg-[${color}] text-white`
-      : 'bg-sc-fg-subtle text-sc-bg-base',
-  };
-
-  return (
-    <span className={`${baseStyle} ${sizes[size]} ${variantStyles[variant]} ${className}`}>
-      {children}
-    </span>
-  );
-}
-
-// Specialized badge for entity types with consistent styling
+// Entity type badge with SilkCircuit colors
 interface EntityBadgeProps {
   type: string;
   size?: BadgeSize;
