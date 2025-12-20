@@ -109,13 +109,59 @@ Handle workflows and administrative operations:
 
 ```python
 # Task workflow
-manage("start_task", entity_id="task_abc", assignee="alice")
-manage("complete_task", entity_id="task_abc", hours=4.5,
-       learnings="OAuth redirect URIs must match exactly...")
+manage("start_task", entity_id="task_abc")
+manage("block_task", entity_id="task_abc", data={"reason": "Waiting on API keys"})
+manage("unblock_task", entity_id="task_abc")
+manage("submit_review", entity_id="task_abc", data={"pr_url": "github.com/..."})
+manage("complete_task", entity_id="task_abc", data={
+    "actual_hours": 4.5,
+    "learnings": "OAuth redirect URIs must match exactly..."
+})
 
 # Documentation crawling
-manage("crawl", url="https://vercel.com/docs", depth=3)
+manage("crawl", data={"url": "https://vercel.com/docs", "depth": 3})
+manage("sync", entity_id="source_abc")  # Re-crawl existing source
+
+# Analysis
+manage("estimate", entity_id="task_abc")  # Effort estimation
+manage("detect_cycles", entity_id="proj_abc")  # Find circular dependencies
+manage("suggest", entity_id="task_abc")  # Get knowledge suggestions
+
+# Admin
+manage("health")  # Server health check
+manage("stats")   # Graph statistics
 ```
+
+#### Task Workflow States
+
+```
+┌─────────┐    start     ┌───────┐    submit    ┌────────┐
+│ backlog │───────────────│ doing │──────────────│ review │
+└─────────┘               └───────┘              └────────┘
+     │                        │                       │
+     │                        │ block                 │ complete
+     v                        v                       v
+┌─────────┐               ┌─────────┐            ┌──────┐
+│  todo   │               │ blocked │            │ done │
+└─────────┘               └─────────┘            └──────┘
+                              │                       │
+                              │ unblock               │ archive
+                              v                       v
+                          ┌───────┐              ┌──────────┐
+                          │ doing │              │ archived │
+                          └───────┘              └──────────┘
+```
+
+**Actions:**
+| Action | Description | Creates Episode |
+|--------|-------------|-----------------|
+| `start_task` | Begin work (→ doing) | No |
+| `block_task` | Mark blocked with reason | No |
+| `unblock_task` | Resume work (→ doing) | No |
+| `submit_review` | Submit for review | No |
+| `complete_task` | Mark done with learnings | Yes |
+| `archive_task` | Archive without completing | No |
+| `update_task` | Update task fields | No |
 
 ## Installation
 
@@ -200,12 +246,28 @@ sibyl health          # Health check
 sibyl stats           # Graph statistics
 ```
 
+## Configuration
+
+Environment variables (prefix with `SIBYL_`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FALKORDB_HOST` | `localhost` | FalkorDB host |
+| `FALKORDB_PORT` | `6380` | FalkorDB port |
+| `FALKORDB_PASSWORD` | `conventions` | FalkorDB password |
+| `FALKORDB_GRAPH_NAME` | `conventions` | Graph database name |
+| `OPENAI_API_KEY` | (required) | OpenAI API key for embeddings |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
+| `EMBEDDING_DIMENSIONS` | `1536` | Embedding vector size |
+| `LOG_LEVEL` | `INFO` | Logging level |
+
 ## Documentation
 
 - **[Architecture](docs/CONSOLIDATED_ARCHITECTURE.md)** — Complete system design
 - **[Diagrams](docs/TASK_ARCHITECTURE_DIAGRAM.md)** — Visual architecture
 - **[Graph-RAG Research](docs/graph-rag-sota-research.md)** — SOTA research summary
 - **[Implementation Roadmap](docs/graph-rag-implementation-roadmap.md)** — Phase-by-phase plan
+- **[Examples](examples/)** — Sample scripts for common workflows
 
 ## Development
 

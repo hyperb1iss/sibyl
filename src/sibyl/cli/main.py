@@ -1,6 +1,6 @@
-"""CLI for Sibyl - Oracle of Development Wisdom.
+"""Main CLI application - ties all subcommands together.
 
-Snappy, async-first CLI with beautiful terminal output.
+This is the entry point for the sibyl CLI.
 """
 
 import asyncio
@@ -8,23 +8,34 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
-from rich.text import Text
 
-from sibyl.config import settings
+from sibyl.cli.common import (
+    CORAL,
+    ELECTRIC_PURPLE,
+    ELECTRIC_YELLOW,
+    NEON_CYAN,
+    SUCCESS_GREEN,
+    console,
+    create_panel,
+    create_table,
+    error,
+    info,
+    print_db_hint,
+    spinner,
+    success,
+)
 
-# SilkCircuit color palette
-ELECTRIC_PURPLE = "#e135ff"
-NEON_CYAN = "#80ffea"
-CORAL = "#ff6ac1"
-ELECTRIC_YELLOW = "#f1fa8c"
-SUCCESS_GREEN = "#50fa7b"
-ERROR_RED = "#ff6363"
+# Import subcommand apps
+from sibyl.cli.db import app as db_app
+from sibyl.cli.entity import app as entity_app
+from sibyl.cli.explore import app as explore_app
+from sibyl.cli.export import app as export_app
+from sibyl.cli.generate import app as generate_app
+from sibyl.cli.project import app as project_app
+from sibyl.cli.source import app as source_app
+from sibyl.cli.task import app as task_app
 
-console = Console()
+# Main app
 app = typer.Typer(
     name="sibyl",
     help="Sibyl - Oracle of Development Wisdom",
@@ -32,25 +43,20 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-
-def styled_header(text: str) -> Text:
-    """Create a styled header with SilkCircuit colors."""
-    return Text(text, style=f"bold {NEON_CYAN}")
-
-
-def success(message: str) -> None:
-    """Print a success message."""
-    console.print(f"[{SUCCESS_GREEN}]✓[/{SUCCESS_GREEN}] {message}")
-
-
-def error(message: str) -> None:
-    """Print an error message."""
-    console.print(f"[{ERROR_RED}]✗[/{ERROR_RED}] {message}")
+# Register subcommand groups
+app.add_typer(task_app, name="task")
+app.add_typer(project_app, name="project")
+app.add_typer(entity_app, name="entity")
+app.add_typer(explore_app, name="explore")
+app.add_typer(source_app, name="source")
+app.add_typer(export_app, name="export")
+app.add_typer(db_app, name="db")
+app.add_typer(generate_app, name="generate")
 
 
-def info(message: str) -> None:
-    """Print an info message."""
-    console.print(f"[{NEON_CYAN}]→[/{NEON_CYAN}] {message}")
+# ============================================================================
+# Root-level commands (existing functionality)
+# ============================================================================
 
 
 @app.command()
@@ -65,8 +71,6 @@ def serve(
     ),
 ) -> None:
     """Start the Sibyl MCP server daemon.
-
-    The server runs as a persistent daemon that clients connect to via HTTP.
 
     Examples:
         sibyl serve                    # Default: localhost:3334
@@ -90,20 +94,12 @@ def health() -> None:
         from sibyl.tools.admin import health_check
 
         try:
-            with Progress(
-                SpinnerColumn(style=NEON_CYAN),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
+            with spinner("Checking health...") as progress:
                 progress.add_task("Checking health...", total=None)
                 status = await health_check()
 
-            # Display results
-            table = Table(title="Health Status", border_style=NEON_CYAN)
-            table.add_column("Metric", style=ELECTRIC_PURPLE)
-            table.add_column("Value", style=NEON_CYAN)
-
-            status_color = SUCCESS_GREEN if status.status == "healthy" else ERROR_RED
+            table = create_table("Health Status", "Metric", "Value")
+            status_color = SUCCESS_GREEN if status.status == "healthy" else CORAL
             table.add_row("Status", f"[{status_color}]{status.status}[/{status_color}]")
             table.add_row("Server", status.server_name)
             table.add_row("Uptime", f"{status.uptime_seconds:.1f}s")
@@ -119,14 +115,13 @@ def health() -> None:
             console.print(table)
 
             if status.errors:
-                console.print(f"\n[{ERROR_RED}]Errors:[/{ERROR_RED}]")
+                console.print(f"\n[{CORAL}]Errors:[/{CORAL}]")
                 for err in status.errors:
                     console.print(f"  [{CORAL}]•[/{CORAL}] {err}")
 
         except Exception as e:
             error(f"Health check failed: {e}")
-            console.print(f"\n[{ELECTRIC_YELLOW}]Hint:[/{ELECTRIC_YELLOW}] Is FalkorDB running?")
-            console.print(f"  [{NEON_CYAN}]docker compose up -d[/{NEON_CYAN}]")
+            print_db_hint()
 
     asyncio.run(check_health())
 
@@ -141,54 +136,37 @@ def ingest(
     async def run_ingest() -> None:
         from sibyl.tools.admin import sync_wisdom_docs
 
-        console.print(
-            Panel(
-                f"[{ELECTRIC_PURPLE}]Ingesting Knowledge[/{ELECTRIC_PURPLE}]",
-                border_style=NEON_CYAN,
-            )
-        )
+        console.print(create_panel(f"[{ELECTRIC_PURPLE}]Ingesting Knowledge[/{ELECTRIC_PURPLE}]"))
 
         path_str = str(path) if path else None
 
         try:
-            with Progress(
-                SpinnerColumn(style=NEON_CYAN),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
-                task = progress.add_task("Ingesting documents...", total=None)
-
+            with spinner("Ingesting documents...") as progress:
+                progress.add_task("Ingesting documents...", total=None)
                 result = await sync_wisdom_docs(path=path_str, force=force)
 
-                progress.update(task, completed=True)
-
-            # Display results
             if result.success:
                 success("Ingestion complete!")
             else:
                 error("Ingestion had errors")
 
-            table = Table(border_style=NEON_CYAN)
-            table.add_column("Metric", style=ELECTRIC_PURPLE)
-            table.add_column("Value", style=NEON_CYAN)
+            table = create_table(None, "Metric", "Value")
             table.add_row("Files Processed", str(result.files_processed))
             table.add_row("Entities Created", str(result.entities_created))
             table.add_row("Entities Updated", str(result.entities_updated))
             table.add_row("Duration", f"{result.duration_seconds:.2f}s")
-
             console.print(table)
 
             if result.errors:
-                console.print(f"\n[{ERROR_RED}]Errors:[/{ERROR_RED}]")
-                for err in result.errors[:10]:  # Show first 10
+                console.print(f"\n[{CORAL}]Errors:[/{CORAL}]")
+                for err in result.errors[:10]:
                     console.print(f"  [{CORAL}]•[/{CORAL}] {err}")
                 if len(result.errors) > 10:
                     console.print(f"  ... and {len(result.errors) - 10} more")
 
         except Exception as e:
             error(f"Ingestion failed: {e}")
-            console.print(f"\n[{ELECTRIC_YELLOW}]Hint:[/{ELECTRIC_YELLOW}] Is FalkorDB running?")
-            console.print(f"  [{NEON_CYAN}]docker compose up -d[/{NEON_CYAN}]")
+            print_db_hint()
 
     asyncio.run(run_ingest())
 
@@ -205,14 +183,8 @@ def search(
         from sibyl.tools.core import search as unified_search
 
         try:
-            with Progress(
-                SpinnerColumn(style=NEON_CYAN),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
+            with spinner(f"Searching for '{query}'...") as progress:
                 progress.add_task(f"Searching for '{query}'...", total=None)
-
-                # Use unified search with optional type filter
                 types = [entity_type] if entity_type else None
                 response = await unified_search(query=query, types=types, limit=limit)
 
@@ -222,11 +194,7 @@ def search(
             )
 
             for i, result in enumerate(response.results, 1):
-                # Create result panel
                 title = f"{i}. {result.name}"
-                entity_type_str = result.type
-                score = result.score
-
                 content = []
                 if result.content:
                     display_content = result.content[:200] + "..." if len(result.content) > 200 else result.content
@@ -234,18 +202,16 @@ def search(
                 if result.source:
                     content.append(f"[dim]Source: {result.source}[/dim]")
 
-                panel = Panel(
+                panel = create_panel(
                     "\n".join(content) if content else "[dim]No description[/dim]",
-                    title=f"[{ELECTRIC_PURPLE}]{title}[/{ELECTRIC_PURPLE}]",
-                    subtitle=f"[{CORAL}]{entity_type_str}[/{CORAL}] [{ELECTRIC_YELLOW}]{score:.2f}[/{ELECTRIC_YELLOW}]",
-                    border_style=NEON_CYAN,
+                    title=title,
+                    subtitle=f"[{CORAL}]{result.type}[/{CORAL}] [{ELECTRIC_YELLOW}]{result.score:.2f}[/{ELECTRIC_YELLOW}]",
                 )
                 console.print(panel)
 
         except Exception as e:
             error(f"Search failed: {e}")
-            console.print(f"\n[{ELECTRIC_YELLOW}]Hint:[/{ELECTRIC_YELLOW}] Is FalkorDB running?")
-            console.print(f"  [{NEON_CYAN}]docker compose up -d[/{NEON_CYAN}]")
+            print_db_hint()
 
     asyncio.run(run_search())
 
@@ -258,33 +224,18 @@ def stats() -> None:
         from sibyl.tools.admin import get_stats as get_graph_stats
 
         try:
-            with Progress(
-                SpinnerColumn(style=NEON_CYAN),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
+            with spinner("Loading statistics...") as progress:
                 progress.add_task("Loading statistics...", total=None)
                 stats_data = await get_graph_stats()
 
-            console.print(
-                Panel(
-                    f"[{ELECTRIC_PURPLE}]Knowledge Graph Statistics[/{ELECTRIC_PURPLE}]",
-                    border_style=NEON_CYAN,
-                )
-            )
+            console.print(create_panel(f"[{ELECTRIC_PURPLE}]Knowledge Graph Statistics[/{ELECTRIC_PURPLE}]"))
 
-            # Entity counts table
             if entities := stats_data.get("entities"):
-                table = Table(title="Entities by Type", border_style=NEON_CYAN)
-                table.add_column("Type", style=ELECTRIC_PURPLE)
-                table.add_column("Count", style=NEON_CYAN, justify="right")
-
-                for entity_type, count in entities.items():
-                    table.add_row(entity_type, str(count))
-
+                table = create_table("Entities by Type", "Type", "Count")
+                for etype, count in entities.items():
+                    table.add_row(etype, str(count))
                 table.add_row("", "")
                 table.add_row("Total", f"[bold]{stats_data.get('total_entities', 0)}[/bold]")
-
                 console.print(table)
 
             if error_msg := stats_data.get("error"):
@@ -292,26 +243,19 @@ def stats() -> None:
 
         except Exception as e:
             error(f"Stats failed: {e}")
-            console.print(f"\n[{ELECTRIC_YELLOW}]Hint:[/{ELECTRIC_YELLOW}] Is FalkorDB running?")
-            console.print(f"  [{NEON_CYAN}]docker compose up -d[/{NEON_CYAN}]")
+            print_db_hint()
 
     asyncio.run(get_stats())
 
 
-@app.command()
-def config() -> None:
+@app.command("config")
+def show_config() -> None:
     """Show current configuration."""
-    console.print(
-        Panel(
-            f"[{ELECTRIC_PURPLE}]Configuration[/{ELECTRIC_PURPLE}]",
-            border_style=NEON_CYAN,
-        )
-    )
+    from sibyl.config import settings
 
-    table = Table(border_style=NEON_CYAN)
-    table.add_column("Setting", style=ELECTRIC_PURPLE)
-    table.add_column("Value", style=NEON_CYAN)
+    console.print(create_panel(f"[{ELECTRIC_PURPLE}]Configuration[/{ELECTRIC_PURPLE}]"))
 
+    table = create_table(None, "Setting", "Value")
     table.add_row("Server Name", settings.server_name)
     table.add_row("Repo Path", str(settings.conventions_repo_path))
     table.add_row("Log Level", settings.log_level)
@@ -319,22 +263,18 @@ def config() -> None:
     table.add_row("FalkorDB Port", str(settings.falkordb_port))
     table.add_row("Graph Name", settings.falkordb_graph_name)
     table.add_row("Embedding Model", settings.embedding_model)
-
     console.print(table)
 
 
 @app.command()
-def setup() -> None:
+def setup() -> None:  # noqa: PLR0915
     """Check environment and guide first-time setup."""
     import shutil
     import socket
 
-    console.print(
-        Panel(
-            f"[{ELECTRIC_PURPLE}]Sibyl Setup[/{ELECTRIC_PURPLE}]",
-            border_style=NEON_CYAN,
-        )
-    )
+    from sibyl.config import settings
+
+    console.print(create_panel(f"[{ELECTRIC_PURPLE}]Sibyl Setup[/{ELECTRIC_PURPLE}]"))
 
     all_good = True
 
@@ -349,7 +289,7 @@ def setup() -> None:
         success(".env file created - please update with your values")
         all_good = False
     else:
-        error(".env.example not found - are you in the mcp-server directory?")
+        error(".env.example not found - are you in the project directory?")
         all_good = False
 
     # Check 2: OpenAI API key
@@ -379,7 +319,7 @@ def setup() -> None:
         sock.close()
         falkor_running = result == 0
     except Exception:  # noqa: S110
-        pass  # Connection check - failure means not running
+        pass  # Socket connection check - failure means not running
 
     if falkor_running:
         success(f"FalkorDB running on {settings.falkordb_host}:{settings.falkordb_port}")
@@ -392,20 +332,18 @@ def setup() -> None:
     console.print()
     if all_good:
         console.print(
-            Panel(
+            create_panel(
                 f"[{SUCCESS_GREEN}]All checks passed![/{SUCCESS_GREEN}]\n\n"
                 f"[{NEON_CYAN}]Next steps:[/{NEON_CYAN}]\n"
-                f"  1. Run [{ELECTRIC_PURPLE}]sibyl ingest[/{ELECTRIC_PURPLE}] to load wisdom docs\n"
-                f"  2. Run [{ELECTRIC_PURPLE}]sibyl serve[/{ELECTRIC_PURPLE}] to start the daemon",
-                border_style=SUCCESS_GREEN,
+                f"  1. Run [{ELECTRIC_PURPLE}]sibyl ingest[/{ELECTRIC_PURPLE}] to load docs\n"
+                f"  2. Run [{ELECTRIC_PURPLE}]sibyl serve[/{ELECTRIC_PURPLE}] to start the daemon"
             )
         )
     else:
         console.print(
-            Panel(
+            create_panel(
                 f"[{ELECTRIC_YELLOW}]Setup incomplete[/{ELECTRIC_YELLOW}]\n\n"
-                "Please resolve the issues above, then run setup again.",
-                border_style=ELECTRIC_YELLOW,
+                "Please resolve the issues above, then run setup again."
             )
         )
 
@@ -414,11 +352,10 @@ def setup() -> None:
 def version() -> None:
     """Show version information."""
     console.print(
-        Panel(
+        create_panel(
             f"[{ELECTRIC_PURPLE}]Sibyl[/{ELECTRIC_PURPLE}] [{NEON_CYAN}]Oracle of Development Wisdom[/{NEON_CYAN}]\n"
             f"Version 0.1.0\n"
-            f"[dim]Graphiti-powered knowledge graph for development conventions[/dim]",
-            border_style=NEON_CYAN,
+            f"[dim]Graphiti-powered knowledge graph for development conventions[/dim]"
         )
     )
 

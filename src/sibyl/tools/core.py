@@ -912,12 +912,12 @@ async def add(
         elif entity_type == "project":
             entity = Project(
                 id=entity_id,
-                name=title,
+                title=title,
                 description=content,
                 status=ProjectStatus.ACTIVE,
                 repository_url=repository_url,
-                technologies=technologies or languages or [],
-                domain=category,
+                tech_stack=technologies or languages or [],
+                tags=tags or [],
                 metadata=full_metadata,
             )
 

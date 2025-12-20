@@ -112,7 +112,7 @@ class SearchResponse(BaseModel):
 class ExploreRequest(BaseModel):
     """Explore/graph traversal request."""
 
-    mode: Literal["list", "related", "traverse"] = Field(
+    mode: Literal["list", "related", "traverse", "dependencies"] = Field(
         default="list", description="Exploration mode"
     )
     types: list[str] | None = Field(default=None, description="Entity types to explore")
@@ -121,6 +121,8 @@ class ExploreRequest(BaseModel):
     depth: int = Field(default=1, ge=1, le=3, description="Traversal depth")
     language: str | None = None
     category: str | None = None
+    project: str | None = Field(default=None, description="Filter by project ID (for tasks)")
+    status: str | None = Field(default=None, description="Filter by status (for tasks)")
     limit: int = Field(default=50, ge=1, le=200)
 
 

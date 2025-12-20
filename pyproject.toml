@@ -161,6 +161,12 @@ ignore = [
     "ARG001",  # Unused function args (fixtures)
     "PLR2004", # Magic values in tests OK
 ]
+"examples/**/*.py" = [
+    "T201",    # Print statements OK in examples
+    "TRY002",  # Simple Exception OK in examples
+    "BLE001",  # Blind except OK in examples
+    "PLR0915", # Long functions OK in examples
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["sibyl"]

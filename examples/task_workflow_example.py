@@ -132,8 +132,9 @@ async def main():
     print(f"   Created task: {task2.title}")
 
     # Create dependency: task2 depends on task1
-    from sibyl.models.entities import Relationship, RelationshipType
     import uuid
+
+    from sibyl.models.entities import Relationship, RelationshipType
 
     await relationship_manager.create(Relationship(
         id=str(uuid.uuid4()),
@@ -143,7 +144,7 @@ async def main():
         weight=1.0,
         metadata={"blocking": True}
     ))
-    print(f"   Created dependency: task_002 DEPENDS_ON task_001")
+    print("   Created dependency: task_002 DEPENDS_ON task_001")
 
     # -------------------------------------------------------------------------
     # Step 3: Start Working on Task
@@ -232,7 +233,7 @@ async def main():
     print(f"   Actual time: {completed_task.actual_hours} hours")
     print(f"   Estimated: {completed_task.estimated_hours} hours")
     print(f"   Accuracy: {(completed_task.estimated_hours / completed_task.actual_hours) * 100:.1f}%")
-    print(f"   Learning episode created from task")
+    print("   Learning episode created from task")
 
     # -------------------------------------------------------------------------
     # Step 7: Find Similar Tasks
@@ -261,7 +262,7 @@ async def main():
     print(f"   Based on {estimate.based_on_tasks} similar tasks")
 
     if estimate.similar_tasks:
-        print(f"   Similar tasks used:")
+        print("   Similar tasks used:")
         for similar in estimate.similar_tasks:
             print(f"   - {similar['title']}: {similar['hours']}h (similarity: {similar['similarity']:.2f})")
 
@@ -307,14 +308,14 @@ async def main():
     print("WORKFLOW COMPLETE")
     print("=" * 80)
     print(f"\nProject: {project.title}")
-    print(f"Tasks created: 2")
-    print(f"Tasks completed: 1")
-    print(f"Learning episodes: 1")
-    print(f"Knowledge links: Auto-created based on semantic similarity")
-    print(f"\nNext steps:")
+    print("Tasks created: 2")
+    print("Tasks completed: 1")
+    print("Learning episodes: 1")
+    print("Knowledge links: Auto-created based on semantic similarity")
+    print("\nNext steps:")
     print(f"- Task '{task2.title}' ready to start (dependency completed)")
     print(f"- Estimated effort: {estimate.estimated_hours}h")
-    print(f"- Past learnings available for reference")
+    print("- Past learnings available for reference")
 
 
 if __name__ == "__main__":

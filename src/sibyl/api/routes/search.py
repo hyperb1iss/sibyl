@@ -47,6 +47,8 @@ async def explore(request: ExploreRequest) -> ExploreResponse:
             depth=request.depth,
             language=request.language,
             category=request.category,
+            project=request.project,
+            status=request.status,
             limit=request.limit,
         )
 
