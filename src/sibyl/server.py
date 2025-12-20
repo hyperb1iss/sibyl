@@ -1,7 +1,12 @@
-"""MCP Server definition using FastMCP with streamable-http transport."""
+"""MCP Server definition using FastMCP with streamable-http transport.
+
+Exposes 3 tools and 2 resources:
+- Tools: search, explore, add
+- Resources: sibyl://health, sibyl://stats
+"""
 
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -32,6 +37,7 @@ def create_mcp_server(
     )
 
     _register_tools(mcp)
+    _register_resources(mcp)
     return mcp
 
 
@@ -58,428 +64,209 @@ def _to_dict(obj: Any) -> Any:
 def _register_tools(mcp: FastMCP) -> None:
     """Register all MCP tools on the server instance."""
 
-    # ========================================================================
-    # Search Tools
-    # ========================================================================
+    # =========================================================================
+    # TOOL 1: search
+    # =========================================================================
 
     @mcp.tool()
-    async def search_wisdom(
+    async def search(
         query: str,
-        topic: str | None = None,
+        types: list[str] | None = None,
         language: str | None = None,
+        category: str | None = None,
         limit: int = 10,
-        include_sacred_rules: bool = True,
-    ) -> list[dict[str, Any]]:
-        """Semantic search across all development wisdom and patterns.
+        include_content: bool = True,
+    ) -> dict[str, Any]:
+        """Semantic search across the knowledge graph.
+
+        Search for patterns, rules, templates, episodes, and other knowledge
+        using natural language queries. Results are ranked by relevance.
 
         Args:
             query: Natural language search query
-            topic: Optional topic filter
-            language: Filter by programming language
-            limit: Maximum results to return
-            include_sacred_rules: Include sacred rules in results
-        """
-        from sibyl.tools.search import search_wisdom as _search_wisdom
+            types: Entity types to search (pattern, rule, template, topic,
+                   episode, tool, language, config_file, slash_command).
+                   If not specified, searches all types.
+            language: Filter results by programming language
+            category: Filter results by category/topic
+            limit: Maximum results to return (1-50, default: 10)
+            include_content: Include full content in results (default: True)
 
-        results = await _search_wisdom(
+        Returns:
+            Search results with id, type, name, content, score, and metadata
+
+        Examples:
+            search("error handling patterns", types=["pattern"], language="python")
+            search("authentication best practices")
+            search("typescript config", types=["template", "config_file"])
+        """
+        from sibyl.tools.core import search as _search
+
+        result = await _search(
             query=query,
-            topic=topic,
+            types=types,
             language=language,
-            limit=limit,
-            include_sacred_rules=include_sacred_rules,
-        )
-        return [_to_dict(r) for r in results]
-
-    @mcp.tool()
-    async def search_patterns(
-        query: str,
-        category: str | None = None,
-        language: str | None = None,
-        limit: int = 10,
-        detail_level: str = "summary",
-    ) -> list[dict[str, Any]]:
-        """Search for specific coding patterns and practices.
-
-        Args:
-            query: Search query
-            category: Category filter
-            language: Language filter
-            limit: Maximum results
-            detail_level: 'summary' or 'full'
-        """
-        from sibyl.tools.search import search_patterns as _search_patterns
-
-        results = await _search_patterns(
-            query=query,
             category=category,
-            language=language,
             limit=limit,
-            detail_level=detail_level,
-        )
-        return [_to_dict(r) for r in results]
-
-    @mcp.tool()
-    async def find_solution(
-        problem: str,
-        context: str | None = None,
-        language: str | None = None,
-        limit: int = 5,
-    ) -> list[dict[str, Any]]:
-        """Find solutions for a specific problem or error.
-
-        Args:
-            problem: Problem or error description
-            context: Additional context
-            language: Language filter
-            limit: Maximum results
-        """
-        from sibyl.tools.search import find_solution as _find_solution
-
-        results = await _find_solution(
-            problem=problem,
-            context=context,
-            language=language,
-            limit=limit,
-        )
-        return [_to_dict(r) for r in results]
-
-    @mcp.tool()
-    async def search_templates(
-        query: str,
-        template_type: str | None = None,
-        language: str | None = None,
-        limit: int = 10,
-    ) -> list[dict[str, Any]]:
-        """Search for code and configuration templates.
-
-        Args:
-            query: Search query
-            template_type: Type filter (code, config, project, workflow)
-            language: Language filter
-            limit: Maximum results
-        """
-        from sibyl.tools.search import search_templates as _search_templates
-
-        results = await _search_templates(
-            query=query,
-            template_type=template_type,
-            language=language,
-            limit=limit,
-        )
-        return [_to_dict(r) for r in results]
-
-    # ========================================================================
-    # Lookup Tools
-    # ========================================================================
-
-    @mcp.tool()
-    async def get_sacred_rules(
-        category: str | None = None,
-        language: str | None = None,
-        severity: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Get all sacred rules/invariants for a category or language.
-
-        Args:
-            category: Category filter (development, type_safety, database)
-            language: Language filter
-            severity: Severity filter (error, warning, info)
-        """
-        from sibyl.tools.lookup import get_sacred_rules as _get_sacred_rules
-
-        results = await _get_sacred_rules(
-            category=category,
-            language=language,
-            severity=severity,
-        )
-        return [_to_dict(r) for r in results]
-
-    @mcp.tool()
-    async def get_language_guide(
-        language: str,
-        section: str | None = None,
-    ) -> dict[str, Any]:
-        """Get the complete conventions guide for a programming language.
-
-        Args:
-            language: Language name (python, typescript, rust, swift)
-            section: Specific section (tooling, patterns, style, testing, all)
-        """
-        from sibyl.tools.lookup import get_language_guide as _get_language_guide
-
-        result = await _get_language_guide(
-            language=language,
-            section=section,
-        )
-        return _to_dict(result) if result else {"error": "Language guide not found"}
-
-    @mcp.tool()
-    async def get_template(
-        name: str,
-        template_type: str | None = None,
-        language: str | None = None,
-    ) -> dict[str, Any]:
-        """Get a specific template by name.
-
-        Args:
-            name: Template name or identifier
-            template_type: Type filter
-            language: Language filter
-        """
-        from sibyl.tools.lookup import get_template as _get_template
-
-        result = await _get_template(
-            name=name,
-            template_type=template_type,
-            language=language,
-        )
-        return _to_dict(result) if result else {"error": "Template not found"}
-
-    # ========================================================================
-    # Discovery Tools
-    # ========================================================================
-
-    @mcp.tool()
-    async def list_patterns(
-        category: str | None = None,
-        language: str | None = None,
-        limit: int = 50,
-    ) -> dict[str, Any]:
-        """List all available patterns.
-
-        Args:
-            category: Category filter
-            language: Language filter
-            limit: Maximum results
-        """
-        from sibyl.tools.discovery import list_patterns as _list_patterns
-
-        result = await _list_patterns(
-            category=category,
-            language=language,
-            limit=limit,
+            include_content=include_content,
         )
         return _to_dict(result)
 
-    @mcp.tool()
-    async def list_templates(
-        template_type: str | None = None,
-        language: str | None = None,
-        limit: int = 50,
-    ) -> dict[str, Any]:
-        """List all available templates.
-
-        Args:
-            template_type: Type filter (code, config, project, workflow)
-            language: Language filter
-            limit: Maximum results
-        """
-        from sibyl.tools.discovery import list_templates as _list_templates
-
-        result = await _list_templates(
-            template_type=template_type,
-            language=language,
-            limit=limit,
-        )
-        return _to_dict(result)
+    # =========================================================================
+    # TOOL 2: explore
+    # =========================================================================
 
     @mcp.tool()
-    async def list_rules(
-        severity: str | None = None,
-        language: str | None = None,
-        limit: int = 50,
-    ) -> dict[str, Any]:
-        """List all sacred rules.
-
-        Args:
-            severity: Severity filter (error, warning, info)
-            language: Language filter
-            limit: Maximum results
-        """
-        from sibyl.tools.discovery import list_rules as _list_rules
-
-        result = await _list_rules(
-            severity=severity,
-            language=language,
-            limit=limit,
-        )
-        return _to_dict(result)
-
-    @mcp.tool()
-    async def list_topics(
-        parent: str | None = None,
-        limit: int = 50,
-    ) -> dict[str, Any]:
-        """List all knowledge topics.
-
-        Args:
-            parent: Parent topic filter
-            limit: Maximum results
-        """
-        from sibyl.tools.discovery import list_topics as _list_topics
-
-        result = await _list_topics(
-            parent=parent,
-            limit=limit,
-        )
-        return _to_dict(result)
-
-    @mcp.tool()
-    async def get_related(
-        entity_id: str,
+    async def explore(
+        mode: Literal["list", "related", "traverse"] = "list",
+        types: list[str] | None = None,
+        entity_id: str | None = None,
         relationship_types: list[str] | None = None,
         depth: int = 1,
-        limit: int = 20,
-    ) -> list[dict[str, Any]]:
-        """Get entities related to a specific entity.
+        language: str | None = None,
+        category: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Explore and browse the knowledge graph.
+
+        Three modes of exploration:
+        - list: Browse entities by type with optional filters
+        - related: Find entities directly connected to a specific entity
+        - traverse: Multi-hop graph traversal from an entity
 
         Args:
-            entity_id: ID of the entity
+            mode: Exploration mode - "list", "related", or "traverse"
+            types: Entity types to explore (for list mode)
+            entity_id: Starting entity ID (required for related/traverse modes)
             relationship_types: Filter by relationship types
-            depth: Traversal depth (1-3)
-            limit: Maximum results
-        """
-        from sibyl.tools.discovery import get_related as _get_related
+                               (APPLIES_TO, REQUIRES, CONFLICTS_WITH, SUPERSEDES,
+                                DOCUMENTED_IN, ENABLES, BREAKS, PART_OF, RELATED_TO,
+                                DERIVED_FROM)
+            depth: Traversal depth for traverse mode (1-3, default: 1)
+            language: Filter by programming language
+            category: Filter by category
+            limit: Maximum results (1-200, default: 50)
 
-        results = await _get_related(
+        Returns:
+            Exploration results with entities and/or relationships
+
+        Examples:
+            explore(mode="list", types=["pattern"], language="typescript")
+            explore(mode="related", entity_id="pattern:error-handling")
+            explore(mode="traverse", entity_id="topic:auth", depth=2)
+        """
+        from sibyl.tools.core import explore as _explore
+
+        result = await _explore(
+            mode=mode,
+            types=types,
             entity_id=entity_id,
             relationship_types=relationship_types,
             depth=depth,
+            language=language,
+            category=category,
             limit=limit,
         )
-        return [_to_dict(r) for r in results]
+        return _to_dict(result)
 
-    # ========================================================================
-    # Mutation Tools
-    # ========================================================================
+    # =========================================================================
+    # TOOL 3: add
+    # =========================================================================
 
     @mcp.tool()
-    async def add_learning(
+    async def add(
         title: str,
         content: str,
-        category: str,
+        entity_type: str = "episode",
+        category: str | None = None,
         languages: list[str] | None = None,
+        tags: list[str] | None = None,
         related_to: list[str] | None = None,
-        source: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Add a new piece of wisdom or learning to the graph.
+        """Add new knowledge to the graph.
+
+        Creates a new knowledge entity that can be searched and explored.
+        Use this to record learnings, patterns, debugging victories, or
+        any other knowledge worth preserving.
 
         Args:
-            title: Title of the learning
-            content: Detailed content
-            category: Category (debugging, architecture, performance)
+            title: Short title for the knowledge (max 200 chars)
+            content: Full content/description (max 50000 chars)
+            entity_type: Type of entity - "episode" (default) or "pattern"
+            category: Category for organization (e.g., "debugging", "architecture")
             languages: Applicable programming languages
-            related_to: IDs of related entities
-            source: Source of the learning
-        """
-        from sibyl.tools.mutation import add_learning as _add_learning
+            tags: Searchable tags for discovery
+            related_to: IDs of related entities to link
+            metadata: Additional structured metadata (stored as JSON)
 
-        result = await _add_learning(
+        Returns:
+            Result with success status, entity ID, and message
+
+        Examples:
+            add("TypeScript strict mode", "Always enable strictNullChecks...",
+                category="type-safety", languages=["typescript"])
+
+            add("Debug: Redis timeout", "Problem was connection pool exhaustion",
+                entity_type="pattern", category="debugging",
+                metadata={"root_cause": "pool size", "solution": "increase pool"})
+        """
+        from sibyl.tools.core import add as _add
+
+        result = await _add(
             title=title,
             content=content,
+            entity_type=entity_type,
             category=category,
             languages=languages,
-            _related_to=related_to,
-            source=source,
+            tags=tags,
+            related_to=related_to,
+            metadata=metadata,
         )
         return _to_dict(result)
 
-    @mcp.tool()
-    async def record_debugging_victory(
-        problem: str,
-        root_cause: str,
-        solution: str,
-        prevention: str | None = None,
-        languages: list[str] | None = None,
-        tools: list[str] | None = None,
-        time_spent: str | None = None,
-    ) -> dict[str, Any]:
-        """Record a debugging victory with problem, root cause, and solution.
 
-        Args:
-            problem: The problem encountered
-            root_cause: Root cause discovered
-            solution: How it was solved
-            prevention: How to prevent in future
-            languages: Languages involved
-            tools: Tools involved
-            time_spent: Time spent debugging
+def _register_resources(mcp: FastMCP) -> None:
+    """Register MCP resources on the server instance."""
+
+    # =========================================================================
+    # RESOURCE: sibyl://health
+    # =========================================================================
+
+    @mcp.resource("sibyl://health")
+    async def health_resource() -> str:
+        """Server health and connectivity status.
+
+        Returns JSON with:
+        - status: "healthy" or "unhealthy"
+        - server_name: Name of the server
+        - uptime_seconds: Server uptime
+        - graph_connected: Whether FalkorDB is reachable
+        - entity_counts: Count of entities by type
+        - errors: Any error messages
         """
-        from sibyl.tools.mutation import (
-            record_debugging_victory as _record_debugging_victory,
-        )
+        import json
 
-        result = await _record_debugging_victory(
-            problem=problem,
-            root_cause=root_cause,
-            solution=solution,
-            prevention=prevention,
-            languages=languages,
-            tools=tools,
-            time_spent=time_spent,
-        )
-        return _to_dict(result)
+        from sibyl.tools.core import get_health
 
-    # ========================================================================
-    # Admin Tools
-    # ========================================================================
+        health = await get_health()
+        return json.dumps(health, indent=2)
 
-    @mcp.tool()
-    async def health_check() -> dict[str, Any]:
-        """Check server health and return status."""
-        from sibyl.tools.admin import health_check as _health_check
+    # =========================================================================
+    # RESOURCE: sibyl://stats
+    # =========================================================================
 
-        result = await _health_check()
-        return {
-            "status": result.status,
-            "server_name": result.server_name,
-            "uptime_seconds": result.uptime_seconds,
-            "graph_connected": result.graph_connected,
-            "search_latency_ms": result.search_latency_ms,
-            "entity_counts": result.entity_counts,
-            "errors": result.errors,
-        }
+    @mcp.resource("sibyl://stats")
+    async def stats_resource() -> str:
+        """Knowledge graph statistics.
 
-    @mcp.tool()
-    async def sync_wisdom_docs(
-        path: str | None = None,
-        force: bool = False,
-    ) -> dict[str, Any]:
-        """Re-ingest wisdom documentation from files.
-
-        Args:
-            path: Specific path to sync (optional)
-            force: Force re-process all files
+        Returns JSON with:
+        - entity_counts: Count of entities by type
+        - total_entities: Total entity count
         """
-        from sibyl.tools.admin import sync_wisdom_docs as _sync_wisdom_docs
+        import json
 
-        result = await _sync_wisdom_docs(path=path, force=force)
-        return {
-            "success": result.success,
-            "files_processed": result.files_processed,
-            "entities_created": result.entities_created,
-            "entities_updated": result.entities_updated,
-            "duration_seconds": result.duration_seconds,
-            "errors": result.errors,
-        }
+        from sibyl.tools.core import get_stats
 
-    @mcp.tool()
-    async def rebuild_indices(
-        index_type: str | None = None,
-    ) -> dict[str, Any]:
-        """Rebuild graph indices for better query performance.
-
-        Args:
-            index_type: Type of index to rebuild (search, relationships, all)
-        """
-        from sibyl.tools.admin import rebuild_indices as _rebuild_indices
-
-        result = await _rebuild_indices(index_type=index_type)
-        return _to_dict(result)
-
-    @mcp.tool()
-    async def get_stats() -> dict[str, Any]:
-        """Get detailed statistics about the knowledge graph."""
-        from sibyl.tools.admin import get_stats as _get_stats
-
-        return await _get_stats()
+        stats = await get_stats()
+        return json.dumps(stats, indent=2)

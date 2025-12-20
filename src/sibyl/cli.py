@@ -223,7 +223,7 @@ def search(
     """Search the knowledge graph."""
 
     async def run_search() -> None:
-        from sibyl.tools.search import search_wisdom
+        from sibyl.tools.core import search as unified_search
 
         try:
             with Progress(
@@ -233,24 +233,27 @@ def search(
             ) as progress:
                 progress.add_task(f"Searching for '{query}'...", total=None)
 
-                results = await search_wisdom(query=query, topic=entity_type, limit=limit)
+                # Use unified search with optional type filter
+                types = [entity_type] if entity_type else None
+                response = await unified_search(query=query, types=types, limit=limit)
 
             console.print(
-                f"\n[{ELECTRIC_PURPLE}]Found {len(results)} results for[/{ELECTRIC_PURPLE}] "
+                f"\n[{ELECTRIC_PURPLE}]Found {response.total} results for[/{ELECTRIC_PURPLE}] "
                 f"[{NEON_CYAN}]'{query}'[/{NEON_CYAN}]\n"
             )
 
-            for i, result in enumerate(results, 1):
+            for i, result in enumerate(response.results, 1):
                 # Create result panel
-                title = f"{i}. {result.get('name', 'Unknown')}"
-                entity_type_str = result.get("entity_type", "unknown")
-                score = result.get("score", 0)
+                title = f"{i}. {result.name}"
+                entity_type_str = result.type
+                score = result.score
 
                 content = []
-                if description := result.get("description"):
-                    content.append(description[:200] + "..." if len(description) > 200 else description)
-                if source := result.get("source_file"):
-                    content.append(f"[dim]Source: {source}[/dim]")
+                if result.content:
+                    display_content = result.content[:200] + "..." if len(result.content) > 200 else result.content
+                    content.append(display_content)
+                if result.source:
+                    content.append(f"[dim]Source: {result.source}[/dim]")
 
                 panel = Panel(
                     "\n".join(content) if content else "[dim]No description[/dim]",

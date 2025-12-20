@@ -1,13 +1,16 @@
 """MCP tool implementations.
 
-Provides all tool functions for the Conventions MCP Server:
-- search: Semantic search across wisdom, patterns, and templates
-- lookup: Direct access to rules, guides, and specific templates
-- discovery: Listing and exploration of available knowledge
-- mutation: Adding new knowledge to the graph
-- admin: Maintenance and diagnostic tools
+Sibyl exposes 3 unified tools:
+- search: Semantic search across the knowledge graph
+- explore: Browse and traverse the graph
+- add: Add new knowledge
+
+Plus admin tools for CLI usage (not exposed via MCP):
+- health_check, sync_wisdom_docs, rebuild_indices, get_stats
 """
 
+# Primary unified tools (exposed via MCP)
+# Admin tools (CLI only, not exposed via MCP)
 from sibyl.tools.admin import (
     HealthStatus,
     RebuildResult,
@@ -18,39 +21,39 @@ from sibyl.tools.admin import (
     rebuild_indices,
     sync_wisdom_docs,
 )
-from sibyl.tools.discovery import (
+from sibyl.tools.core import (
+    AddResponse,
     EntitySummary,
-    ListResult,
+    ExploreResponse,
     RelatedEntity,
-    get_related,
-    list_patterns,
-    list_rules,
-    list_templates,
-    list_topics,
-)
-from sibyl.tools.lookup import (
-    LanguageGuide,
-    RuleResult,
-    TemplateResult,
-    get_language_guide,
-    get_sacred_rules,
-    get_template,
-)
-from sibyl.tools.mutation import (
-    MutationResult,
-    add_learning,
-    record_debugging_victory,
-)
-from sibyl.tools.search import (
+    # Response types
+    SearchResponse,
     SearchResult,
-    find_solution,
-    search_patterns,
-    search_templates,
-    search_wisdom,
+    add,
+    explore,
+    # Resources
+    get_health,
+    get_stats as get_unified_stats,
+    # Tools
+    search,
 )
 
 __all__ = [
-    # Admin
+    # Unified tools (MCP)
+    "search",
+    "explore",
+    "add",
+    # Response types
+    "SearchResponse",
+    "SearchResult",
+    "ExploreResponse",
+    "EntitySummary",
+    "RelatedEntity",
+    "AddResponse",
+    # Resources
+    "get_health",
+    "get_unified_stats",
+    # Admin (CLI only)
     "HealthStatus",
     "RebuildResult",
     "SyncResult",
@@ -59,30 +62,4 @@ __all__ = [
     "mark_server_started",
     "rebuild_indices",
     "sync_wisdom_docs",
-    # Discovery
-    "EntitySummary",
-    "ListResult",
-    "RelatedEntity",
-    "get_related",
-    "list_patterns",
-    "list_rules",
-    "list_templates",
-    "list_topics",
-    # Lookup
-    "LanguageGuide",
-    "RuleResult",
-    "TemplateResult",
-    "get_language_guide",
-    "get_sacred_rules",
-    "get_template",
-    # Mutation
-    "MutationResult",
-    "add_learning",
-    "record_debugging_victory",
-    # Search
-    "SearchResult",
-    "find_solution",
-    "search_patterns",
-    "search_templates",
-    "search_wisdom",
 ]
