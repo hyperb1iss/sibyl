@@ -1,7 +1,7 @@
 """MCP Server definition using FastMCP with streamable-http transport.
 
-Exposes 3 tools and 2 resources:
-- Tools: search, explore, add
+Exposes 4 tools and 2 resources:
+- Tools: search, explore, add, manage
 - Resources: sibyl://health, sibyl://stats
 """
 
@@ -222,6 +222,71 @@ def _register_tools(mcp: FastMCP) -> None:
             tags=tags,
             related_to=related_to,
             metadata=metadata,
+        )
+        return _to_dict(result)
+
+    # =========================================================================
+    # TOOL 4: manage
+    # =========================================================================
+
+    @mcp.tool()
+    async def manage(
+        action: str,
+        entity_id: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Manage operations that modify state in the knowledge graph.
+
+        The manage() tool handles all state-changing operations including task
+        workflow, source operations, analysis, and admin actions.
+
+        Task Workflow Actions:
+            - start_task: Begin work on a task (sets status to 'doing')
+            - block_task: Mark task as blocked (data.reason required)
+            - unblock_task: Remove blocked status, resume work
+            - submit_review: Submit for code review (sets status to 'review')
+            - complete_task: Mark done (data.learnings optional)
+            - archive_task: Archive without completing
+            - update_task: Update task fields (data contains updates)
+
+        Source Operations:
+            - crawl: Trigger crawl of URL (data.url required, data.depth optional)
+            - sync: Re-crawl existing source (entity_id = source ID)
+            - refresh: Sync all sources
+
+        Analysis Actions:
+            - estimate: Estimate task effort from similar completed tasks
+            - prioritize: Get smart task ordering for project
+            - detect_cycles: Find circular dependencies in project
+            - suggest: Get knowledge suggestions for a task
+
+        Admin Actions:
+            - health: Server health check
+            - stats: Graph statistics
+            - rebuild_index: Rebuild search indices
+
+        Args:
+            action: Action to perform (see categories above)
+            entity_id: Target entity ID (required for most actions)
+            data: Action-specific data dict
+
+        Returns:
+            Result with success, action, entity_id, message, and data
+
+        Examples:
+            manage("start_task", entity_id="task-123")
+            manage("complete_task", entity_id="task-123",
+                   data={"learnings": "OAuth needs exact redirect URIs"})
+            manage("crawl", data={"url": "https://docs.example.com", "depth": 3})
+            manage("estimate", entity_id="task-456")
+            manage("health")
+        """
+        from sibyl.tools.manage import manage as _manage
+
+        result = await _manage(
+            action=action,
+            entity_id=entity_id,
+            data=data,
         )
         return _to_dict(result)
 
