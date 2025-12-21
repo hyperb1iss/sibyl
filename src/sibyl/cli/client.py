@@ -400,7 +400,7 @@ class SibylClient:
         if exclude_patterns:
             data["exclude_patterns"] = exclude_patterns
 
-        return await self._request("POST", "/crawler/sources", json=data)
+        return await self._request("POST", "/sources", json=data)
 
     async def list_crawl_sources(
         self,
@@ -411,15 +411,15 @@ class SibylClient:
         params: dict[str, Any] = {"limit": limit}
         if status:
             params["status"] = status
-        return await self._request("GET", "/crawler/sources", params=params)
+        return await self._request("GET", "/sources", params=params)
 
     async def get_crawl_source(self, source_id: str) -> dict[str, Any]:
         """Get a crawl source by ID."""
-        return await self._request("GET", f"/crawler/sources/{source_id}")
+        return await self._request("GET", f"/sources/{source_id}")
 
     async def delete_crawl_source(self, source_id: str) -> dict[str, Any]:
         """Delete a crawl source."""
-        return await self._request("DELETE", f"/crawler/sources/{source_id}")
+        return await self._request("DELETE", f"/sources/{source_id}")
 
     async def start_crawl(
         self,
@@ -434,11 +434,11 @@ class SibylClient:
             "max_depth": max_depth,
             "generate_embeddings": generate_embeddings,
         }
-        return await self._request("POST", f"/crawler/sources/{source_id}/ingest", json=data)
+        return await self._request("POST", f"/sources/{source_id}/ingest", json=data)
 
     async def get_crawl_status(self, source_id: str) -> dict[str, Any]:
         """Get status of a crawl job."""
-        return await self._request("GET", f"/crawler/sources/{source_id}/status")
+        return await self._request("GET", f"/sources/{source_id}/status")
 
     async def list_crawl_documents(
         self,
@@ -450,21 +450,21 @@ class SibylClient:
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if source_id:
             return await self._request(
-                "GET", f"/crawler/sources/{source_id}/documents", params=params
+                "GET", f"/sources/{source_id}/documents", params=params
             )
-        return await self._request("GET", "/crawler/documents", params=params)
+        return await self._request("GET", "/sources/documents", params=params)
 
     async def get_crawl_document(self, document_id: str) -> dict[str, Any]:
         """Get a crawled document by ID."""
-        return await self._request("GET", f"/crawler/documents/{document_id}")
+        return await self._request("GET", f"/sources/documents/{document_id}")
 
     async def crawler_stats(self) -> dict[str, Any]:
         """Get crawler statistics."""
-        return await self._request("GET", "/crawler/stats")
+        return await self._request("GET", "/sources/stats")
 
     async def crawler_health(self) -> dict[str, Any]:
         """Get crawler health status."""
-        return await self._request("GET", "/crawler/health")
+        return await self._request("GET", "/sources/health")
 
 
 # Singleton client instance

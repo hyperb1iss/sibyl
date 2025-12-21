@@ -160,17 +160,28 @@ class CrawlerService:
             for pattern in source.include_patterns:
                 filters.append(URLPatternFilter(patterns=[pattern]))
 
-        filter_chain = FilterChain(filters=filters) if filters else None
-
         # Configure deep crawl strategy
-        strategy = BFSDeepCrawlStrategy(
-            max_depth=max_depth,
-            include_external=False,
-            max_pages=max_pages,
-            filter_chain=filter_chain,
-        )
+        # Only pass filter_chain if we have filters
+        strategy_kwargs = {
+            "max_depth": max_depth,
+            "include_external": False,
+            "max_pages": max_pages,
+        }
+        if filters:
+            strategy_kwargs["filter_chain"] = FilterChain(filters=filters)
 
-        config = self._get_run_config(cache_mode=CacheMode.WRITE_ONLY)
+        strategy = BFSDeepCrawlStrategy(**strategy_kwargs)
+
+        # Build config with deep crawl strategy and streaming enabled
+        config = CrawlerRunConfig(
+            cache_mode=CacheMode.WRITE_ONLY,
+            word_count_threshold=50,
+            excluded_tags=["nav", "footer", "aside", "header", "script", "style"],
+            remove_forms=True,
+            only_text=False,
+            deep_crawl_strategy=strategy,
+            stream=True,  # Enable async iteration
+        )
 
         log.info(
             "Starting deep crawl",
@@ -180,10 +191,12 @@ class CrawlerService:
             max_depth=max_depth,
         )
 
-        # Update source status
+        # Update source status - fetch fresh to avoid detached instance issues
+        source_id = source.id
         async with get_session() as session:
-            source.crawl_status = CrawlStatus.IN_PROGRESS
-            session.add(source)
+            db_source = await session.get(CrawlSource, source_id)
+            if db_source:
+                db_source.crawl_status = CrawlStatus.IN_PROGRESS
 
         # Perform deep crawl
         crawled_count = 0
@@ -193,7 +206,6 @@ class CrawlerService:
             async for result in await self._crawler.arun(  # type: ignore[union-attr]
                 url=source.url,
                 config=config,
-                deep_crawl_strategy=strategy,
             ):
                 if not result.success:
                     error_count += 1
@@ -216,17 +228,19 @@ class CrawlerService:
         except Exception as e:
             log.error("Deep crawl failed", source=source.name, error=str(e))  # noqa: TRY400
             async with get_session() as session:
-                source.crawl_status = CrawlStatus.FAILED
-                source.last_error = str(e)
-                session.add(source)
+                db_source = await session.get(CrawlSource, source_id)
+                if db_source:
+                    db_source.crawl_status = CrawlStatus.FAILED
+                    db_source.last_error = str(e)
             raise
 
         # Update source with results
         async with get_session() as session:
-            source.crawl_status = CrawlStatus.COMPLETED if error_count == 0 else CrawlStatus.PARTIAL
-            source.last_crawled_at = datetime.now(UTC)
-            source.document_count = crawled_count
-            session.add(source)
+            db_source = await session.get(CrawlSource, source_id)
+            if db_source:
+                db_source.crawl_status = CrawlStatus.COMPLETED if error_count == 0 else CrawlStatus.PARTIAL
+                db_source.last_crawled_at = datetime.now(UTC)
+                db_source.document_count = crawled_count
 
         log.info(
             "Deep crawl completed",

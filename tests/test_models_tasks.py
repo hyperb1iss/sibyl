@@ -65,6 +65,7 @@ class TestTask:
         task = Task(
             id="task-001",
             title="Implement auth",
+            project_id="proj-001",  # Required field
         )
         assert task.id == "task-001"
         assert task.title == "Implement auth"
@@ -109,22 +110,22 @@ class TestTask:
 
     def test_task_name_property(self) -> None:
         """Test that name property returns title."""
-        task = Task(id="t1", title="Test Task")
+        task = Task(id="t1", title="Test Task", project_id="proj-001")
         assert task.name == "Test Task"
 
     def test_task_content_property(self) -> None:
         """Test that content property returns description."""
-        task = Task(id="t1", title="Test", description="Detailed description")
+        task = Task(id="t1", title="Test", description="Detailed description", project_id="proj-001")
         assert task.content == "Detailed description"
 
     def test_task_title_max_length(self) -> None:
         """Test title max length validation."""
         with pytest.raises(ValidationError):
-            Task(id="t1", title="x" * 201)
+            Task(id="t1", title="x" * 201, project_id="proj-001")
 
     def test_task_order_default(self) -> None:
         """Test task_order default value."""
-        task = Task(id="t1", title="Test")
+        task = Task(id="t1", title="Test", project_id="proj-001")
         assert task.task_order == 0
 
 

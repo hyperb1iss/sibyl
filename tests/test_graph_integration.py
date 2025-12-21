@@ -31,7 +31,12 @@ async def _ensure_graph_client():
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_entity_create_get_delete_preserves_id() -> None:
-    """EntityManager should persist caller-provided IDs and allow CRUD."""
+    """EntityManager should persist caller-provided IDs and allow CRUD.
+
+    Uses create_direct() for structured data where we need to preserve
+    IDs, entity types, and custom metadata. The regular create() method
+    uses LLM-powered ingestion which may transform data.
+    """
     client = await _ensure_graph_client()
     manager = EntityManager(client)
 
@@ -46,7 +51,8 @@ async def test_entity_create_get_delete_preserves_id() -> None:
         languages=["python"],
     )
 
-    created_id = await manager.create(pattern)
+    # Use create_direct for structured data with preserved metadata
+    created_id = await manager.create_direct(pattern)
     assert created_id == entity_id
 
     fetched = await manager.get(entity_id)
@@ -62,7 +68,11 @@ async def test_entity_create_get_delete_preserves_id() -> None:
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_relationship_dedup_and_delete() -> None:
-    """RelationshipManager should deduplicate by (source, target, type) and delete by relationship_id."""
+    """RelationshipManager should deduplicate by (source, target, type) and delete by relationship_id.
+
+    Uses create_direct() for structured data where we need to preserve entity IDs
+    for reliable relationship creation and testing.
+    """
     client = await _ensure_graph_client()
     entity_manager = EntityManager(client)
     rel_manager = RelationshipManager(client)
@@ -84,8 +94,9 @@ async def test_relationship_dedup_and_delete() -> None:
         description="tgt",
         content="tgt content",
     )
-    await entity_manager.create(src)
-    await entity_manager.create(tgt)
+    # Use create_direct for structured data with preserved IDs
+    await entity_manager.create_direct(src)
+    await entity_manager.create_direct(tgt)
 
     rel_id = f"rel_{uuid.uuid4().hex[:10]}"
     relationship = Relationship(

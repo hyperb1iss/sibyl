@@ -15,11 +15,16 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, Index, Text, text
+from sqlalchemy import ARRAY, Column, Index, String, Text, text
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
     pass
+
+
+def utcnow_naive() -> datetime:
+    """Get current UTC time as naive datetime (for TIMESTAMP WITHOUT TIME ZONE)."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 # =============================================================================
@@ -65,13 +70,13 @@ class TimestampMixin(SQLModel):
     """Mixin for created/updated timestamps."""
 
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=utcnow_naive,
         description="When this record was created",
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=utcnow_naive,
         description="When this record was last updated",
-        sa_column_kwargs={"onupdate": datetime.now(UTC)},
+        sa_column_kwargs={"onupdate": utcnow_naive},
     )
 
 
@@ -99,12 +104,12 @@ class CrawlSource(TimestampMixin, table=True):
     crawl_depth: int = Field(default=2, ge=0, le=10, description="Max link follow depth")
     include_patterns: list[str] = Field(
         default_factory=list,
-        sa_type=Text,  # Store as JSON text
+        sa_type=ARRAY(String),
         description="URL patterns to include (regex)",
     )
     exclude_patterns: list[str] = Field(
         default_factory=list,
-        sa_type=Text,
+        sa_type=ARRAY(String),
         description="URL patterns to exclude (regex)",
     )
     respect_robots: bool = Field(default=True, description="Respect robots.txt")
@@ -157,7 +162,7 @@ class CrawledDocument(TimestampMixin, table=True):
     parent_url: str | None = Field(default=None, max_length=2048, description="Parent page URL")
     section_path: list[str] = Field(
         default_factory=list,
-        sa_type=Text,
+        sa_type=ARRAY(String),
         description="Breadcrumb path",
     )
     depth: int = Field(default=0, ge=0, description="Depth from source root")
@@ -170,15 +175,15 @@ class CrawledDocument(TimestampMixin, table=True):
     is_index: bool = Field(default=False, description="Is an index/listing page")
 
     # Extracted data
-    headings: list[str] = Field(default_factory=list, sa_type=Text, description="Page headings")
-    links: list[str] = Field(default_factory=list, sa_type=Text, description="Outgoing links")
+    headings: list[str] = Field(default_factory=list, sa_type=ARRAY(String), description="Page headings")
+    links: list[str] = Field(default_factory=list, sa_type=ARRAY(String), description="Outgoing links")
     code_languages: list[str] = Field(
-        default_factory=list, sa_type=Text, description="Languages in code blocks"
+        default_factory=list, sa_type=ARRAY(String), description="Languages in code blocks"
     )
 
     # Crawl metadata
     crawled_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=utcnow_naive,
         description="When this page was crawled",
     )
     http_status: int | None = Field(default=None, description="HTTP response status")
@@ -246,7 +251,7 @@ class DocumentChunk(TimestampMixin, table=True):
     start_char: int = Field(default=0, ge=0, description="Start character offset")
     end_char: int = Field(default=0, ge=0, description="End character offset")
     heading_path: list[str] = Field(
-        default_factory=list, sa_type=Text, description="Heading hierarchy to this chunk"
+        default_factory=list, sa_type=ARRAY(String), description="Heading hierarchy to this chunk"
     )
 
     # Embeddings - using 1536 dims for OpenAI ada-002
@@ -264,7 +269,7 @@ class DocumentChunk(TimestampMixin, table=True):
     # Quality signals
     has_entities: bool = Field(default=False, description="Contains named entities")
     entity_ids: list[str] = Field(
-        default_factory=list, sa_type=Text, description="Extracted entity UUIDs"
+        default_factory=list, sa_type=ARRAY(String), description="Extracted entity UUIDs"
     )
 
     # Relationships

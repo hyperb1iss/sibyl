@@ -1,4 +1,8 @@
-"""Search and explore endpoints."""
+"""Unified search and explore endpoints.
+
+Search endpoint searches both knowledge graph AND crawled documentation,
+merging results by relevance score.
+"""
 
 from dataclasses import asdict
 
@@ -13,7 +17,17 @@ router = APIRouter(prefix="/search", tags=["search"])
 
 @router.post("", response_model=SearchResponse)
 async def search(request: SearchRequest) -> SearchResponse:
-    """Semantic search across the knowledge graph."""
+    """Unified semantic search across knowledge graph AND documentation.
+
+    Searches both Sibyl's knowledge graph (patterns, rules, episodes, tasks)
+    and crawled documentation (via pgvector). Results are merged and ranked
+    by relevance score.
+
+    Use filters to narrow scope:
+    - types: Limit to specific entity types (include 'document' for docs)
+    - source_id/source_name: Filter documentation by source
+    - include_documents/include_graph: Toggle which stores to search
+    """
     try:
         from sibyl.tools.core import search as core_search
 
@@ -22,8 +36,14 @@ async def search(request: SearchRequest) -> SearchResponse:
             types=request.types,
             language=request.language,
             category=request.category,
+            source_id=request.source_id,
+            source_name=request.source_name,
+            project=request.project,
+            status=request.status,
             limit=request.limit,
             include_content=request.include_content,
+            include_documents=request.include_documents,
+            include_graph=request.include_graph,
         )
 
         return SearchResponse(**asdict(result))

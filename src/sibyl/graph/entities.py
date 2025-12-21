@@ -1,11 +1,15 @@
-"""Entity management for the knowledge graph."""
+"""Entity management for the knowledge graph.
+
+This module provides entity CRUD operations using Graphiti's native node APIs.
+All graph operations go through EntityNode/EpisodicNode rather than raw Cypher.
+"""
 
 import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import structlog
-from graphiti_core.nodes import EntityNode
+from graphiti_core.nodes import EntityNode, EpisodicNode
 from pydantic import BaseModel
 
 from sibyl.errors import EntityNotFoundError, SearchError
@@ -92,14 +96,13 @@ class EntityManager:
             raise
 
     async def create_direct(self, entity: Entity) -> str:
-        """Create an entity directly in FalkorDB, bypassing Graphiti LLM.
+        """Create an entity directly using Graphiti's EntityNode, bypassing LLM.
 
-        This is much faster than create() as it skips LLM-based entity extraction.
+        This is faster than create() as it skips LLM-based entity extraction.
         Use this for structured entities (tasks, projects) where LLM extraction
         isn't needed. Embeddings can be generated asynchronously via background queue.
 
-        Uses MERGE for idempotency and serialized writes to prevent connection
-        contention when multiple concurrent requests share the FalkorDB connection.
+        Uses EntityNode.save() which handles idempotent creation (MERGE pattern).
 
         Args:
             entity: The entity to create.
@@ -108,94 +111,54 @@ class EntityManager:
             The ID of the created entity.
 
         Raises:
-            EntityCreationError: If creation fails or result verification fails.
+            EntityCreationError: If creation fails.
         """
         import json
 
         from sibyl.errors import EntityCreationError
 
         log.info(
-            "Creating entity directly",
+            "Creating entity directly via EntityNode",
             entity_type=entity.entity_type,
             name=entity.name,
         )
 
         try:
-            # Use full entity metadata including model-specific fields
+            # Build attributes dict - all values must be primitives (FalkorDB limitation)
+            # Serialize nested dicts to JSON strings
             metadata = self._entity_to_metadata(entity)
-            metadata_json = json.dumps(metadata) if metadata else "{}"
+            attributes = {
+                "entity_type": entity.entity_type.value,
+                "description": entity.description or "",
+                "content": entity.content or "",
+                "source_file": entity.source_file or "",
+                "updated_at": datetime.now(UTC).isoformat(),
+                "_direct_insert": True,
+                "metadata": json.dumps(metadata),  # Serialize to JSON string
+            }
 
-            created_at = (
-                entity.created_at.isoformat()
-                if entity.created_at
-                else datetime.now(UTC).isoformat()
-            )
-            updated_at = datetime.now(UTC).isoformat()
-
-            # Use MERGE for idempotency (safe for retries and concurrent writes)
-            # Include Graphiti-compatible fields for get_by_group_ids to work:
-            # - group_id: singular string (Graphiti queries: WHERE n.group_id IN $group_ids)
-            # - summary: required by EntityNode model (use description as summary)
-            # - labels: empty list (will be enriched later if needed)
-            summary = entity.description[:500] if entity.description else entity.name
-
-            # Use serialized write to prevent connection contention
-            result = await self._client.execute_write(
-                """
-                MERGE (n:Entity {uuid: $uuid})
-                SET n.name = $name,
-                    n.entity_type = $entity_type,
-                    n.description = $description,
-                    n.content = $content,
-                    n.created_at = $created_at,
-                    n.updated_at = $updated_at,
-                    n.metadata = $metadata,
-                    n.group_id = $group_id,
-                    n.summary = $summary,
-                    n.labels = $labels,
-                    n._direct_insert = true
-                RETURN n.uuid as id
-                """,
+            # Create EntityNode instance
+            node = EntityNode(
                 uuid=entity.id,
                 name=entity.name,
-                entity_type=entity.entity_type.value,
-                description=entity.description or "",
-                content=entity.content or "",
-                created_at=created_at,
-                updated_at=updated_at,
-                metadata=metadata_json,
                 group_id="conventions",
-                summary=summary,
-                labels=[],
+                labels=[entity.entity_type.value],
+                created_at=entity.created_at or datetime.now(UTC),
+                summary=entity.description[:500] if entity.description else entity.name,
+                attributes=attributes,
             )
 
-            # Verify the entity was actually created
-            if not result or not result[0].get("id"):
-                raise EntityCreationError(
-                    f"Entity creation returned no result for {entity.id}",
-                    entity_id=entity.id,
-                )
-
-            created_id = result[0]["id"]
-            if created_id != entity.id:
-                log.warning(
-                    "Entity ID mismatch",
-                    expected=entity.id,
-                    actual=created_id,
-                )
-
-            # Persist additional attributes for specialized entity types
-            await self._persist_entity_attributes(entity.id, entity)
+            # Save using Graphiti's serialized write
+            async with self._client.write_lock:
+                await node.save(self._client.driver)
 
             log.info(
-                "Entity created directly",
+                "Entity created via EntityNode.save",
                 entity_id=entity.id,
                 entity_type=entity.entity_type,
             )
             return entity.id
 
-        except EntityCreationError:
-            raise
         except Exception as e:
             log.exception(
                 "Failed to create entity directly",
@@ -208,7 +171,9 @@ class EntityManager:
             ) from e
 
     async def get(self, entity_id: str) -> Entity:
-        """Get an entity by ID.
+        """Get an entity by ID using Graphiti's node APIs.
+
+        Tries EntityNode first, then EpisodicNode, since nodes can be either type.
 
         Args:
             entity_id: The entity's unique identifier.
@@ -222,30 +187,35 @@ class EntityManager:
         log.debug("Fetching entity", entity_id=entity_id)
 
         try:
-            # Direct query to find both Episodic and Entity nodes by UUID
-            # EntityNode.get_by_uuids only finds Entity nodes, missing Episodic
-            result = await self._client.client.driver.execute_query(
-                """
-                MATCH (n)
-                WHERE (n:Episodic OR n:Entity) AND n.uuid = $entity_id
-                RETURN n
-                LIMIT 1
-                """,
-                entity_id=entity_id,
-            )
+            # Try EntityNode first (nodes created via create_direct or extracted)
+            try:
+                node = await EntityNode.get_by_uuid(self._client.driver, entity_id)
+                if node:
+                    entity = self._node_to_entity(node)
+                    log.debug(
+                        "Entity retrieved via EntityNode",
+                        entity_id=entity_id,
+                        entity_type=entity.entity_type,
+                    )
+                    return entity
+            except Exception:
+                pass  # Node might be Episodic, try that next
 
-            if not result or not result[0]:
-                raise EntityNotFoundError("Entity", entity_id)
+            # Try EpisodicNode (nodes created via add_episode)
+            try:
+                episodic = await EpisodicNode.get_by_uuid(self._client.driver, entity_id)
+                if episodic:
+                    entity = self._episodic_to_entity(episodic)
+                    log.debug(
+                        "Entity retrieved via EpisodicNode",
+                        entity_id=entity_id,
+                        entity_type=entity.entity_type,
+                    )
+                    return entity
+            except Exception:
+                pass  # Node doesn't exist
 
-            record = result[0][0]
-            node_data = record.get("n", record)
-            if hasattr(node_data, "properties"):
-                node_data = node_data.properties
-
-            entity = self._record_to_entity(node_data)
-
-            log.debug("Entity retrieved", entity_id=entity_id, entity_type=entity.entity_type)
-            return entity
+            raise EntityNotFoundError("Entity", entity_id)
 
         except EntityNotFoundError:
             raise
@@ -259,7 +229,7 @@ class EntityManager:
         entity_types: list[EntityType] | None = None,
         limit: int = 10,
     ) -> list[tuple[Entity, float]]:
-        """Semantic search for entities.
+        """Semantic search for entities using Graphiti's native search API.
 
         Args:
             query: Natural language search query.
@@ -280,52 +250,65 @@ class EntityManager:
             )
 
             # Extract unique nodes from edges
-            node_uuids = set()
-            for edge in edges:
-                node_uuids.add(edge.source_node_uuid)
-                node_uuids.add(edge.target_node_uuid)
+            node_uuids = list({edge.source_node_uuid for edge in edges} | {edge.target_node_uuid for edge in edges})
 
             if not node_uuids:
                 log.info("No search results found", query=query)
                 return []
 
-            # Retrieve full node details - query both Episodic and Entity nodes
-            # EntityNode.get_by_uuids only finds Entity nodes, missing Episodic
-            result = await self._client.client.driver.execute_query(
-                """
-                MATCH (n)
-                WHERE (n:Episodic OR n:Entity) AND n.uuid IN $uuids
-                RETURN n
-                """,
-                uuids=list(node_uuids),
-            )
-
-            # Convert nodes to entities and filter by type
+            # Retrieve full node details using Graphiti's node APIs
             results: list[tuple[Entity, float]] = []
-            records = result[0] if result and result[0] else []
-            for record in records:
-                try:
-                    node_data = record.get("n", record)
-                    if hasattr(node_data, "properties"):
-                        node_data = node_data.properties
-                    entity = self._record_to_entity(node_data)
+            uuid_to_position = {uuid: i for i, uuid in enumerate(node_uuids)}
 
-                    # Filter by entity types if specified
-                    if entity_types and entity.entity_type not in entity_types:
-                        continue
+            # Get EntityNodes by UUIDs
+            try:
+                entity_nodes = await EntityNode.get_by_uuids(
+                    self._client.driver, node_uuids
+                )
+                for node in entity_nodes:
+                    try:
+                        entity = self._node_to_entity(node)
 
-                    # Calculate relevance score (simple approach using node position)
-                    # In a real implementation, you'd use embedding similarity
-                    score = 1.0 / (len(results) + 1)
+                        # Filter by entity types if specified
+                        if entity_types and entity.entity_type not in entity_types:
+                            continue
 
-                    results.append((entity, score))
+                        # Score based on position in search results
+                        position = uuid_to_position.get(node.uuid, len(node_uuids))
+                        score = 1.0 / (position + 1)
 
-                    if len(results) >= limit:
-                        break
+                        results.append((entity, score))
+                    except Exception as e:
+                        log.debug("Failed to convert EntityNode", error=str(e))
+            except Exception as e:
+                log.debug("EntityNode.get_by_uuids failed", error=str(e))
 
-                except Exception as e:
-                    log.warning("Failed to convert record to entity", error=str(e))
-                    continue
+            # Get EpisodicNodes by UUIDs
+            try:
+                episodic_nodes = await EpisodicNode.get_by_uuids(
+                    self._client.driver, node_uuids
+                )
+                for node in episodic_nodes:
+                    try:
+                        entity = self._episodic_to_entity(node)
+
+                        # Filter by entity types if specified
+                        if entity_types and entity.entity_type not in entity_types:
+                            continue
+
+                        # Score based on position in search results
+                        position = uuid_to_position.get(node.uuid, len(node_uuids))
+                        score = 1.0 / (position + 1)
+
+                        results.append((entity, score))
+                    except Exception as e:
+                        log.debug("Failed to convert EpisodicNode", error=str(e))
+            except Exception as e:
+                log.debug("EpisodicNode.get_by_uuids failed", error=str(e))
+
+            # Sort by score and limit results
+            results.sort(key=lambda x: x[1], reverse=True)
+            results = results[:limit]
 
             log.info("Search completed", query=query, results_count=len(results))
             return results
@@ -388,7 +371,9 @@ class EntityManager:
             raise
 
     async def delete(self, entity_id: str) -> bool:
-        """Delete an entity from the graph.
+        """Delete an entity from the graph using Graphiti's node APIs.
+
+        Tries EntityNode first, then EpisodicNode deletion.
 
         Args:
             entity_id: The entity's unique identifier.
@@ -399,20 +384,27 @@ class EntityManager:
         log.info("Deleting entity", entity_id=entity_id)
 
         try:
-            result = await self._client.client.driver.execute_query(
-                """
-                MATCH (n {uuid: $entity_id})
-                DETACH DELETE n
-                RETURN 1 as deleted
-                """,
-                entity_id=entity_id,
-            )
+            # Try to delete as EntityNode first
+            try:
+                node = await EntityNode.get_by_uuid(self._client.driver, entity_id)
+                if node:
+                    await node.delete(self._client.driver)
+                    log.info("Entity deleted via EntityNode", entity_id=entity_id)
+                    return True
+            except Exception:
+                pass  # Might be EpisodicNode
 
-            if not result:
-                raise EntityNotFoundError("Entity", entity_id)
+            # Try to delete as EpisodicNode
+            try:
+                episodic = await EpisodicNode.get_by_uuid(self._client.driver, entity_id)
+                if episodic:
+                    await episodic.delete(self._client.driver)
+                    log.info("Entity deleted via EpisodicNode", entity_id=entity_id)
+                    return True
+            except Exception:
+                pass  # Node doesn't exist
 
-            log.info("Entity deleted successfully", entity_id=entity_id)
-            return True
+            raise EntityNotFoundError("Entity", entity_id)
 
         except EntityNotFoundError:
             raise
@@ -426,7 +418,9 @@ class EntityManager:
         limit: int = 50,
         offset: int = 0,
     ) -> list[Entity]:
-        """List all entities of a specific type.
+        """List all entities of a specific type using Graphiti's node APIs.
+
+        Uses get_by_group_ids() and filters by entity_type in Python.
 
         Args:
             entity_type: The type of entities to list.
@@ -439,46 +433,51 @@ class EntityManager:
         log.debug("Listing entities", entity_type=entity_type, limit=limit, offset=offset)
 
         try:
-            # Query both Episodic and Entity nodes:
-            # - Episodic: created by add_episode() in create()
-            # - Entity: created by create_direct() for faster batch imports
-            # Both have entity_type property set, unlike auto-extracted entities.
-            result = await self._client.client.driver.execute_query(
-                """
-                MATCH (n)
-                WHERE (n:Episodic OR n:Entity)
-                  AND n.entity_type = $entity_type
-                  AND n.group_id = 'conventions'
-                RETURN n
-                ORDER BY n.created_at DESC
-                SKIP $offset
-                LIMIT $limit
-                """,
-                entity_type=entity_type.value,
-                offset=offset,
-                limit=limit,
-            )
-
             entities: list[Entity] = []
-            if result and result[0]:
-                for record in result[0]:
-                    try:
-                        node = record.get("n", record)
-                        # FalkorDB returns Node objects with .properties
-                        node_data = node.properties if hasattr(node, "properties") else node
-                        entity = self._record_to_entity(node_data)
-                        entities.append(entity)
-                    except Exception as e:
-                        log.warning("Failed to convert record to entity", error=str(e))
-                        continue
+
+            # Get EntityNodes from the conventions group
+            # We request more than limit since we'll filter by type
+            fetch_limit = (limit + offset) * 5  # Over-fetch to handle filtering
+
+            try:
+                entity_nodes = await EntityNode.get_by_group_ids(
+                    self._client.driver,
+                    group_ids=["conventions"],
+                    limit=fetch_limit,
+                )
+                for node in entity_nodes:
+                    # Filter by entity_type attribute
+                    node_type = node.attributes.get("entity_type") if node.attributes else None
+                    if node_type == entity_type.value:
+                        entities.append(self._node_to_entity(node))
+            except Exception as e:
+                log.debug("EntityNode.get_by_group_ids failed", error=str(e))
+
+            # Get EpisodicNodes from the conventions group
+            try:
+                episodic_nodes = await EpisodicNode.get_by_group_ids(
+                    self._client.driver,
+                    group_ids=["conventions"],
+                    limit=fetch_limit,
+                )
+                for node in episodic_nodes:
+                    # EpisodicNode has entity_type as a property
+                    if hasattr(node, "entity_type") and node.entity_type == entity_type.value:
+                        entities.append(self._episodic_to_entity(node))
+            except Exception as e:
+                log.debug("EpisodicNode.get_by_group_ids failed", error=str(e))
+
+            # Sort by created_at descending and apply pagination
+            entities.sort(key=lambda e: e.created_at or datetime.min, reverse=True)
+            paginated = entities[offset : offset + limit]
 
             log.debug(
                 "Listed entities",
                 entity_type=entity_type,
-                count=len(entities),
-                limit=limit,
+                total=len(entities),
+                returned=len(paginated),
             )
-            return entities
+            return paginated
 
         except Exception as e:
             log.exception("Failed to list entities", entity_type=entity_type, error=str(e))
@@ -697,9 +696,9 @@ class EntityManager:
         entities: list[Entity],
         batch_size: int = 100,
     ) -> tuple[int, int]:
-        """Bulk create entities directly in FalkorDB, bypassing Graphiti LLM.
+        """Bulk create entities using Graphiti's EntityNode.save(), bypassing LLM.
 
-        This is much faster than create() as it skips LLM-based entity extraction.
+        This is faster than create() as it skips LLM-based entity extraction.
         Use this for stress testing or bulk imports where LLM processing isn't needed.
 
         Args:
@@ -719,42 +718,33 @@ class EntityManager:
 
             for entity in batch:
                 try:
-                    # Use full entity metadata including model-specific fields
+                    # Build attributes dict - serialize nested dicts to JSON strings
                     metadata = self._entity_to_metadata(entity)
-                    metadata_json = json.dumps(metadata) if metadata else "{}"
+                    attributes = {
+                        "entity_type": entity.entity_type.value,
+                        "description": entity.description or "",
+                        "content": entity.content or "",
+                        "source_file": entity.source_file or "",
+                        "updated_at": datetime.now(UTC).isoformat(),
+                        "_generated": True,
+                        "metadata": json.dumps(metadata),  # Serialize to JSON string
+                    }
 
-                    created_at = (
-                        entity.created_at.isoformat()
-                        if entity.created_at
-                        else datetime.now(UTC).isoformat()
-                    )
-                    updated_at = datetime.now(UTC).isoformat()
-
-                    # Create node with explicit properties (FalkorDB doesn't support $props dict)
-                    await self._client.client.driver.execute_query(
-                        """
-                        CREATE (n:Entity {
-                            uuid: $uuid,
-                            name: $name,
-                            entity_type: $entity_type,
-                            description: $description,
-                            content: $content,
-                            created_at: $created_at,
-                            updated_at: $updated_at,
-                            metadata: $metadata,
-                            _generated: true
-                        })
-                        RETURN n.uuid as id
-                        """,
+                    # Create EntityNode instance
+                    node = EntityNode(
                         uuid=entity.id,
                         name=entity.name,
-                        entity_type=entity.entity_type.value,
-                        description=entity.description or "",
-                        content=entity.content or "",
-                        created_at=created_at,
-                        updated_at=updated_at,
-                        metadata=metadata_json,
+                        group_id="conventions",
+                        labels=[entity.entity_type.value],
+                        created_at=entity.created_at or datetime.now(UTC),
+                        summary=entity.description[:500] if entity.description else entity.name,
+                        attributes=attributes,
                     )
+
+                    # Save using Graphiti's API with write lock
+                    async with self._client.write_lock:
+                        await node.save(self._client.driver)
+
                     created += 1
                 except Exception as e:
                     log.debug("Failed to create entity", entity_id=entity.id, error=str(e))
@@ -914,10 +904,23 @@ class EntityManager:
         metadata = {
             k: v
             for k, v in node.attributes.items()
-            if k not in {"entity_type", "description", "content", "source_file"}
+            if k not in {"entity_type", "description", "content", "source_file", "metadata"}
         }
-        if isinstance(node.attributes.get("metadata"), dict):
-            metadata.update(node.attributes["metadata"])
+
+        # Parse metadata - may be JSON string (from create_direct) or dict
+        raw_metadata = node.attributes.get("metadata")
+        if raw_metadata:
+            if isinstance(raw_metadata, str):
+                import json
+
+                try:
+                    parsed = json.loads(raw_metadata)
+                    if isinstance(parsed, dict):
+                        metadata.update(parsed)
+                except json.JSONDecodeError:
+                    pass  # Not valid JSON, skip
+            elif isinstance(raw_metadata, dict):
+                metadata.update(raw_metadata)
 
         return Entity(
             id=node.uuid,
@@ -930,4 +933,59 @@ class EntityManager:
             updated_at=node.created_at,  # Graphiti doesn't track updated_at
             source_file=source_file,
             embedding=node.name_embedding if node.name_embedding else None,
+        )
+
+    def _episodic_to_entity(self, node: EpisodicNode) -> Entity:
+        """Convert a Graphiti EpisodicNode to our Entity model.
+
+        EpisodicNodes are created via add_episode() and have different structure
+        than EntityNodes.
+
+        Args:
+            node: The EpisodicNode to convert.
+
+        Returns:
+            Converted Entity.
+        """
+
+        # EpisodicNode has: uuid, name, group_id, content, created_at, valid_at, source_description
+
+        # Try to extract entity_type from the name (format: "type:name")
+        entity_type_str = "episode"
+        name = node.name
+
+        if ":" in name:
+            parts = name.split(":", 1)
+            potential_type = parts[0].strip().lower()
+            # Check if it's a valid entity type
+            try:
+                entity_type = EntityType(potential_type)
+                entity_type_str = potential_type
+                name = parts[1].strip() if len(parts) > 1 else name
+            except ValueError:
+                pass  # Not a valid type prefix, use full name
+
+        try:
+            entity_type = EntityType(entity_type_str)
+        except ValueError:
+            entity_type = EntityType.EPISODE
+
+        # Extract content and description from node
+        content = node.content if hasattr(node, "content") else ""
+        description = node.source_description if hasattr(node, "source_description") else ""
+
+        # Try to parse metadata if stored in content as structured text
+        metadata: dict[str, Any] = {}
+        if hasattr(node, "entity_type"):
+            metadata["entity_type"] = node.entity_type
+
+        return Entity(
+            id=node.uuid,
+            entity_type=entity_type,
+            name=name,
+            description=description,
+            content=content,
+            metadata=metadata,
+            created_at=node.created_at if hasattr(node, "created_at") else None,
+            updated_at=node.created_at if hasattr(node, "created_at") else None,
         )

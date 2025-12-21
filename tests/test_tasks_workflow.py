@@ -196,6 +196,7 @@ class TestBranchNameGeneration:
             id="abc12345-test-id",
             title="Fix authentication bug",
             description="Auth is broken",
+            project_id="proj-001",
             technologies=["python"],
         )
 
@@ -215,6 +216,7 @@ class TestBranchNameGeneration:
             id="def67890-test-id",
             title="Add OAuth support",
             description="Add OAuth2",
+            project_id="proj-001",
             feature="authentication",
             technologies=["python"],
         )
@@ -232,6 +234,7 @@ class TestBranchNameGeneration:
             id="ghi11111-test-id",
             title="Major refactoring",
             description="Big refactor",
+            project_id="proj-001",
             complexity=TaskComplexity.EPIC,
             technologies=["python"],
         )
@@ -249,6 +252,7 @@ class TestBranchNameGeneration:
             id="jkl22222-test-id",
             title="Fix: Auth (Bug #123) & More!",
             description="Complex title",
+            project_id="proj-001",
             technologies=["python"],
         )
 
@@ -273,6 +277,7 @@ class TestBranchNameGeneration:
             id="mno33333-test-id",
             title=long_title,
             description="Long title test",
+            project_id="proj-001",
             technologies=["python"],
         )
 
@@ -398,6 +403,7 @@ async def test_workflow_transitions_persist_status_and_branch() -> None:
         id="task-1",
         title="Implement feature X",
         description="Do the work",
+        project_id="proj-001",
         status=TaskStatus.TODO,
     )
     entity_manager = _FakeEntityManager(task)

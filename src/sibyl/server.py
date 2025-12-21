@@ -65,7 +65,7 @@ def _register_tools(mcp: FastMCP) -> None:
     """Register all MCP tools on the server instance."""
 
     # =========================================================================
-    # TOOL 1: search
+    # TOOL 1: search - UNIFIED SEARCH (graph + documents)
     # =========================================================================
 
     @mcp.tool()
@@ -74,31 +74,57 @@ def _register_tools(mcp: FastMCP) -> None:
         types: list[str] | None = None,
         language: str | None = None,
         category: str | None = None,
+        source_id: str | None = None,
+        source_name: str | None = None,
+        project: str | None = None,
+        status: str | None = None,
         limit: int = 10,
         include_content: bool = True,
+        include_documents: bool = True,
+        include_graph: bool = True,
     ) -> dict[str, Any]:
-        """Semantic search across the knowledge graph.
+        """Unified semantic search across knowledge graph AND documentation.
 
-        Search for patterns, rules, templates, episodes, and other knowledge
-        using natural language queries. Results are ranked by relevance.
+        Searches both Sibyl's knowledge graph (patterns, rules, episodes, tasks)
+        AND crawled documentation (pgvector similarity search). Results are
+        merged and ranked by relevance score.
 
         Args:
             query: Natural language search query
-            types: Entity types to search (pattern, rule, template, topic,
-                   episode, tool, language, config_file, slash_command).
-                   If not specified, searches all types.
-            language: Filter results by programming language
-            category: Filter results by category/topic
+            types: Entity types to search. Options: pattern, rule, template,
+                   topic, episode, task, project, document.
+                   Include 'document' to search crawled docs.
+            language: Filter by programming language (python, typescript, etc.)
+            category: Filter by category/domain (authentication, database, etc.)
+            source_id: Filter documents by source UUID
+            source_name: Filter documents by source name (partial match)
+            project: Filter tasks by project ID
+            status: Filter tasks by status (backlog, todo, doing, blocked, review, done)
             limit: Maximum results to return (1-50, default: 10)
             include_content: Include full content in results (default: True)
+            include_documents: Search crawled documentation (default: True)
+            include_graph: Search knowledge graph entities (default: True)
 
         Returns:
-            Search results with id, type, name, content, score, and metadata
+            Unified search results with id, type, name, content, score, url,
+            result_origin (graph/document), and metadata. Also includes
+            graph_count and document_count for result breakdown.
 
         Examples:
-            search("error handling patterns", types=["pattern"], language="python")
-            search("authentication best practices")
-            search("typescript config", types=["template", "config_file"])
+            # Search everything
+            search("authentication patterns")
+
+            # Search only documentation
+            search("Next.js middleware", include_graph=False)
+
+            # Search specific doc source
+            search("environment variables", source_name="next-dynenv")
+
+            # Search only knowledge graph
+            search("OAuth implementation", include_documents=False)
+
+            # Search by type
+            search("error handling", types=["pattern", "document"])
         """
         from sibyl.tools.core import search as _search
 
@@ -107,8 +133,14 @@ def _register_tools(mcp: FastMCP) -> None:
             types=types,
             language=language,
             category=category,
+            source_id=source_id,
+            source_name=source_name,
+            project=project,
+            status=status,
             limit=limit,
             include_content=include_content,
+            include_documents=include_documents,
+            include_graph=include_graph,
         )
         return _to_dict(result)
 

@@ -28,12 +28,12 @@ class TestTaskWorkflowE2E:
         """Test: create task → start → block → unblock → review → complete."""
         ctx = ToolTestContext()
 
-        # Create a task entity
+        # Create a task entity (must include project_id in metadata for Task model)
         task = create_test_entity(
             entity_type=EntityType.TASK,
             name="Implement OAuth login",
             description="Add Google OAuth authentication",
-            metadata={"status": TaskStatus.TODO.value},
+            metadata={"status": TaskStatus.TODO.value, "project_id": "test-project"},
         )
         ctx.entity_manager.add_entity(task)
 
@@ -88,12 +88,12 @@ class TestTaskWorkflowE2E:
         ctx.entity_manager.add_entity(pattern)
         ctx.entity_manager.set_search_results([(pattern, 0.85)])
 
-        # Create task
+        # Create task (must include project_id)
         task = create_test_entity(
             entity_type=EntityType.TASK,
             name="Implement OAuth login",
             description="Add authentication",
-            metadata={"status": TaskStatus.TODO.value},
+            metadata={"status": TaskStatus.TODO.value, "project_id": "test-project"},
         )
         ctx.entity_manager.add_entity(task)
 
@@ -125,11 +125,12 @@ class TestProjectWorkflowE2E:
             )
             assert project_result.success
 
-            # 2. Create first task
+            # 2. Create first task (must specify project)
             task1_result = await add(
                 title="Setup authentication",
                 content="JWT-based auth with refresh tokens",
                 entity_type="task",
+                project=project_result.id,  # Required for tasks
                 related_to=[project_result.id] if project_result.id else None,
             )
             assert task1_result.success
@@ -139,6 +140,7 @@ class TestProjectWorkflowE2E:
                 title="User profile API",
                 content="REST endpoints for user management",
                 entity_type="task",
+                project=project_result.id,  # Required for tasks
                 related_to=[project_result.id] if project_result.id else None,
             )
             assert task2_result.success
@@ -152,14 +154,17 @@ class TestProjectWorkflowE2E:
         project = create_test_entity(
             entity_type=EntityType.PROJECT,
             name="Test Project",
+            entity_id="test-project",
         )
         task1 = create_test_entity(
             entity_type=EntityType.TASK,
             name="Task 1",
+            metadata={"project_id": "test-project"},
         )
         task2 = create_test_entity(
             entity_type=EntityType.TASK,
             name="Task 2",
+            metadata={"project_id": "test-project"},
         )
 
         ctx.entity_manager.add_entity(project)
@@ -388,11 +393,12 @@ class TestMultiStepWorkflowE2E:
             )
             assert project_result.success
 
-            # Step 3: Create task
+            # Step 3: Create task (requires project)
             task_result = await add(
                 title="Implement JWT validation",
                 content="Add middleware for JWT token validation",
                 entity_type="task",
+                project=project_result.id,
             )
             assert task_result.success
 

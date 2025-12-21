@@ -22,27 +22,20 @@ log = structlog.get_logger()
 # State Machine Definition
 # =============================================================================
 
-# All non-terminal states (any transition is allowed for flexibility)
-_ALL_ACTIVE_STATES = {
-    TaskStatus.BACKLOG,
-    TaskStatus.TODO,
-    TaskStatus.DOING,
-    TaskStatus.BLOCKED,
-    TaskStatus.REVIEW,
-    TaskStatus.DONE,
-    TaskStatus.ARCHIVED,
-}
-
-# Valid status transitions: any state can go to any other state
-# This allows flexibility for historical data, bulk updates, and edge cases
+# Valid status transitions following workflow constraints:
+# - Tasks progress through stages (backlog → todo → doing → review → done)
+# - Blocked is a detour from doing
+# - Any state can transition to archived
+# - ARCHIVED is terminal (no transitions out)
+# - DONE only allows transition to ARCHIVED
 VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
-    TaskStatus.BACKLOG: _ALL_ACTIVE_STATES,
-    TaskStatus.TODO: _ALL_ACTIVE_STATES,
-    TaskStatus.DOING: _ALL_ACTIVE_STATES,
-    TaskStatus.BLOCKED: _ALL_ACTIVE_STATES,
-    TaskStatus.REVIEW: _ALL_ACTIVE_STATES,
-    TaskStatus.DONE: _ALL_ACTIVE_STATES,
-    TaskStatus.ARCHIVED: _ALL_ACTIVE_STATES,  # Even archived can be reopened
+    TaskStatus.BACKLOG: {TaskStatus.TODO, TaskStatus.ARCHIVED},
+    TaskStatus.TODO: {TaskStatus.DOING, TaskStatus.BACKLOG, TaskStatus.ARCHIVED},
+    TaskStatus.DOING: {TaskStatus.BLOCKED, TaskStatus.REVIEW, TaskStatus.DONE, TaskStatus.TODO, TaskStatus.ARCHIVED},
+    TaskStatus.BLOCKED: {TaskStatus.DOING, TaskStatus.ARCHIVED},
+    TaskStatus.REVIEW: {TaskStatus.DONE, TaskStatus.DOING, TaskStatus.ARCHIVED},
+    TaskStatus.DONE: {TaskStatus.ARCHIVED},
+    TaskStatus.ARCHIVED: set(),  # Terminal state - no transitions out
 }
 
 
@@ -617,7 +610,18 @@ class TaskWorkflowEngine:
         Returns:
             Task instance
         """
-        # Extract task-specific fields from metadata
+        # If already a Task, return it directly
+        if isinstance(entity, Task):
+            return entity
+
+        # Extract task-specific fields from metadata, excluding fields we pass explicitly
+        metadata = entity.metadata or {}
+        excluded_keys = {
+            "id", "entity_type", "title", "description", "name", "content",
+            "created_at", "updated_at",
+        }
+        task_fields = {k: v for k, v in metadata.items() if k not in excluded_keys}
+
         return Task(
             id=entity.id,
             entity_type=entity.entity_type,
@@ -627,7 +631,6 @@ class TaskWorkflowEngine:
             content=entity.content,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
-            # Task-specific fields would be in metadata
-            # This is simplified - real implementation would use proper serialization
-            **entity.metadata,
+            # Task-specific fields from metadata
+            **task_fields,
         )

@@ -440,7 +440,7 @@ async def get_project_tags(client: "GraphClient", project_id: str) -> list[str]:
 
 @dataclass
 class SearchResult:
-    """A single search result."""
+    """A single search result - unified across graph entities and documents."""
 
     id: str
     type: str
@@ -448,17 +448,21 @@ class SearchResult:
     content: str
     score: float
     source: str | None = None
+    url: str | None = None
+    result_origin: Literal["graph", "document"] = "graph"
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class SearchResponse:
-    """Response from search operation."""
+    """Response from search operation - unified across graph and documents."""
 
     results: list[SearchResult]
     total: int
     query: str
     filters: dict[str, Any]
+    graph_count: int = 0
+    document_count: int = 0
 
 
 @dataclass
@@ -511,6 +515,103 @@ class AddResponse:
 # =============================================================================
 
 
+async def _search_documents(
+    query: str,
+    source_id: str | None = None,
+    source_name: str | None = None,
+    language: str | None = None,
+    limit: int = 10,
+    include_content: bool = True,
+) -> list[SearchResult]:
+    """Search crawled documentation using pgvector similarity.
+
+    Returns SearchResult objects for unified result merging.
+    """
+    try:
+        from uuid import UUID
+
+        from sqlalchemy import select
+        from sqlmodel import col
+
+        from sibyl.crawler.embedder import embed_text
+        from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
+        from sibyl.db.models import ChunkType
+
+        # Generate query embedding
+        query_embedding = await embed_text(query)
+
+        async with get_session() as session:
+            # Build similarity search query
+            similarity_expr = 1 - DocumentChunk.embedding.cosine_distance(query_embedding)
+
+            doc_query = (
+                select(
+                    DocumentChunk,
+                    CrawledDocument,
+                    CrawlSource.name.label("source_name"),
+                    CrawlSource.id.label("source_id"),
+                    similarity_expr.label("similarity"),
+                )
+                .join(CrawledDocument, DocumentChunk.document_id == CrawledDocument.id)
+                .join(CrawlSource, CrawledDocument.source_id == CrawlSource.id)
+                .where(col(DocumentChunk.embedding).is_not(None))
+            )
+
+            # Apply source filters
+            if source_id:
+                doc_query = doc_query.where(col(CrawlSource.id) == UUID(source_id))
+            if source_name:
+                doc_query = doc_query.where(col(CrawlSource.name).ilike(f"%{source_name}%"))
+
+            # Apply language filter (for code chunks)
+            if language:
+                doc_query = doc_query.where(
+                    (col(DocumentChunk.language).ilike(language))
+                    | (col(DocumentChunk.chunk_type) != ChunkType.CODE)
+                )
+
+            # Order by similarity and limit
+            doc_query = (
+                doc_query.where(similarity_expr >= 0.5)  # Minimum threshold
+                .order_by(similarity_expr.desc())
+                .limit(limit)
+            )
+
+            result = await session.execute(doc_query)
+            rows = result.all()
+
+            # Convert to SearchResult
+            results = []
+            for chunk, doc, src_name, src_id, similarity in rows:
+                content = chunk.content if include_content else chunk.content[:200]
+                results.append(
+                    SearchResult(
+                        id=str(chunk.id),
+                        type="document",
+                        name=doc.title,
+                        content=content,
+                        score=float(similarity),
+                        source=src_name,
+                        url=doc.url,
+                        result_origin="document",
+                        metadata={
+                            "document_id": str(doc.id),
+                            "source_id": str(src_id),
+                            "chunk_type": chunk.chunk_type.value if hasattr(chunk.chunk_type, "value") else str(chunk.chunk_type),
+                            "chunk_index": chunk.chunk_index,
+                            "heading_path": chunk.heading_path or [],
+                            "language": chunk.language,
+                            "has_code": doc.has_code,
+                        },
+                    )
+                )
+            return results
+
+    except Exception as e:
+        log.warning("document_search_failed", error=str(e))
+        return []
+
+
 async def search(  # noqa: PLR0915
     query: str,
     types: list[str] | None = None,
@@ -519,17 +620,22 @@ async def search(  # noqa: PLR0915
     status: str | None = None,
     project: str | None = None,
     source: str | None = None,
+    source_id: str | None = None,
+    source_name: str | None = None,
     assignee: str | None = None,
     since: str | None = None,
     limit: int = 10,
     include_content: bool = True,
+    include_documents: bool = True,
+    include_graph: bool = True,
     use_enhanced: bool = True,
     boost_recent: bool = True,
 ) -> SearchResponse:
-    """Search the Sibyl knowledge graph by meaning.
+    """Unified semantic search across knowledge graph AND documentation.
 
-    Use this tool to find knowledge across all entity types using natural
-    language queries. Results are ranked by semantic similarity.
+    Searches both Sibyl's knowledge graph (patterns, rules, episodes, tasks)
+    AND crawled documentation (pgvector similarity search). Results are
+    merged and ranked by relevance score.
 
     TASK MANAGEMENT WORKFLOW:
     For task searches, always include project filter:
@@ -537,49 +643,57 @@ async def search(  # noqa: PLR0915
     2. Then: search("query", types=["task"], project="<project_id>") - Search within project
 
     USE CASES:
-    • Find patterns/rules related to a technology: search("OAuth authentication best practices")
-    • Find tasks in a project: search("", types=["task"], project="proj_abc", status="todo")
-    • Find knowledge by technology: search("", language="python", types=["pattern"])
-    • Find recent learnings: search("", types=["episode"], since="2024-01-01")
-    • Find documentation: search("hooks state management", types=["document"])
+    • Find patterns/rules: search("OAuth authentication best practices")
+    • Search documentation: search("Next.js middleware", source_name="next-dynenv")
+    • Find tasks: search("", types=["task"], project="proj_abc", status="todo")
+    • Search by language: search("async patterns", language="python")
+    • Documentation only: search("hooks", include_graph=False)
+    • Graph only: search("debugging", include_documents=False)
 
     Args:
-        query: Natural language search query. Can be empty if using filters.
+        query: Natural language search query. Required.
         types: Entity types to search. Options: pattern, rule, template, topic,
-               episode, task, project, source, document. If None, searches all.
-        language: Filter by programming language (python, typescript, rust, etc.).
+               episode, task, project, document. Include 'document' to search docs.
+        language: Filter by programming language (python, typescript, etc.).
         category: Filter by category/domain (authentication, database, api, etc.).
-        status: Filter tasks by workflow status (backlog, todo, doing, blocked, review, done).
-        project: Filter by project_id to find tasks within a specific project.
-        source: Filter documents by source_id (documentation source).
+        status: Filter tasks by workflow status (backlog, todo, doing, etc.).
+        project: Filter by project_id for tasks.
+        source: Filter graph entities by source_id.
+        source_id: Filter documents by source UUID.
+        source_name: Filter documents by source name (partial match).
         assignee: Filter tasks by assignee name.
         since: Temporal filter - only return entities created after this ISO date.
         limit: Maximum results to return (1-50, default 10).
         include_content: Include full content in results (default True).
-        use_enhanced: Use enhanced Graph-RAG retrieval (hybrid search + temporal boosting).
-                      Falls back to vector-only if hybrid fails. Default True.
-        boost_recent: Apply temporal boosting to rank recent knowledge higher. Default True.
+        include_documents: Include crawled documentation in search (default True).
+        include_graph: Include knowledge graph entities in search (default True).
+        use_enhanced: Use enhanced hybrid retrieval for graph (default True).
+        boost_recent: Apply temporal boosting for graph results (default True).
 
     Returns:
-        SearchResponse with ranked results including id, name, type, score, and metadata.
+        SearchResponse with ranked results from both sources, including
+        graph_count and document_count for result breakdown.
 
     EXAMPLES:
         search("error handling patterns", types=["pattern"], language="python")
+        search("Next.js routing", source_name="next-dynenv")
         search("", types=["task"], status="todo", project="proj_auth")
-        search("database optimization", types=["pattern", "episode"])
     """
     # Clamp limit
     limit = max(1, min(limit, 50))
 
     log.info(
-        "search",
+        "unified_search",
         query=query[:100],
         types=types,
         language=language,
         category=category,
         status=status,
         project=project,
-        assignee=assignee,
+        source_id=source_id,
+        source_name=source_name,
+        include_documents=include_documents,
+        include_graph=include_graph,
         limit=limit,
     )
 
@@ -596,164 +710,211 @@ async def search(  # noqa: PLR0915
         filters["project"] = project
     if source:
         filters["source"] = source
+    if source_id:
+        filters["source_id"] = source_id
+    if source_name:
+        filters["source_name"] = source_name
     if assignee:
         filters["assignee"] = assignee
     if since:
         filters["since"] = since
 
-    try:
-        client = await get_graph_client()
-        entity_manager = EntityManager(client)
+    # Determine if we should search documents based on types filter
+    search_documents = include_documents
+    search_graph = include_graph
+    if types:
+        # If 'document' is in types, search documents
+        # If only 'document' is in types, skip graph search
+        type_set = {t.lower() for t in types}
+        if "document" in type_set:
+            search_documents = True
+            if type_set == {"document"}:
+                search_graph = False
+        elif source_id or source_name:
+            # If source filters are set but document not in types, add document search
+            search_documents = True
+        else:
+            # Types specified but document not included - skip document search
+            search_documents = False
 
-        # Determine entity types to search
-        entity_types = None
-        if types:
-            entity_types = []
-            for t in types:
-                if t.lower() in VALID_ENTITY_TYPES:
-                    entity_types.append(EntityType(t.lower()))
-                else:
-                    log.warning("unknown_entity_type", type=t)
+    graph_results: list[SearchResult] = []
+    doc_results: list[SearchResult] = []
 
-        # Parse since date if provided
-        since_date = None
-        if since:
-            try:
-                since_date = datetime.fromisoformat(since.replace("Z", "+00:00"))
-            except ValueError:
-                log.warning("invalid_since_date", since=since)
+    # =========================================================================
+    # GRAPH SEARCH - Search knowledge graph entities
+    # =========================================================================
+    if search_graph and query:
+        try:
+            client = await get_graph_client()
+            entity_manager = EntityManager(client)
 
-        # Perform search - try enhanced hybrid first, fall back to vector-only
-        raw_results: list[tuple[Any, float]] = []
+            # Determine entity types to search (exclude 'document' - that's for doc search)
+            entity_types = None
+            if types:
+                entity_types = []
+                for t in types:
+                    if t.lower() in VALID_ENTITY_TYPES and t.lower() != "document":
+                        entity_types.append(EntityType(t.lower()))
 
-        if use_enhanced and query:  # Enhanced only makes sense with a query
-            try:
-                # Configure hybrid search
-                hybrid_config = HybridConfig(
-                    apply_temporal=boost_recent,
-                    temporal_decay_days=365.0,
-                    graph_depth=2,
-                )
+            # Parse since date if provided
+            since_date = None
+            if since:
+                try:
+                    since_date = datetime.fromisoformat(since.replace("Z", "+00:00"))
+                except ValueError:
+                    log.warning("invalid_since_date", since=since)
 
-                hybrid_result = await with_timeout(
-                    hybrid_search(
+            # Perform search - try enhanced hybrid first, fall back to vector-only
+            raw_results: list[tuple[Any, float]] = []
+
+            if use_enhanced:
+                try:
+                    hybrid_config = HybridConfig(
+                        apply_temporal=boost_recent,
+                        temporal_decay_days=365.0,
+                        graph_depth=2,
+                    )
+
+                    hybrid_result = await with_timeout(
+                        hybrid_search(
+                            query=query,
+                            client=client,
+                            entity_manager=entity_manager,
+                            entity_types=entity_types,
+                            limit=limit * 3,
+                            config=hybrid_config,
+                        ),
+                        timeout_seconds=TIMEOUTS["search"],
+                        operation_name="hybrid_search",
+                    )
+                    raw_results = hybrid_result.results
+                    log.debug("graph_search_enhanced", results=len(raw_results))
+
+                except Exception as e:
+                    log.warning("enhanced_search_failed_fallback", error=str(e))
+
+            # Fall back to vector-only search
+            if not raw_results:
+                raw_results = await with_timeout(
+                    entity_manager.search(
                         query=query,
-                        client=client,
-                        entity_manager=entity_manager,
                         entity_types=entity_types,
-                        limit=limit * 3,  # Over-fetch for filtering
-                        config=hybrid_config,
+                        limit=limit * 3,
                     ),
                     timeout_seconds=TIMEOUTS["search"],
-                    operation_name="hybrid_search",
+                    operation_name="search",
                 )
-                raw_results = hybrid_result.results
-                log.debug("search_used_enhanced", results=len(raw_results))
+                if boost_recent and raw_results:
+                    raw_results = temporal_boost(raw_results, decay_days=365.0)
 
-            except Exception as e:
-                log.warning("enhanced_search_failed_fallback", error=str(e))
-                # Fall through to vector-only search
+            # Filter and convert to SearchResult
+            for entity, score in raw_results:
+                # Apply filters
+                if language:
+                    entity_langs = _get_field(entity, "languages", [])
+                    if language.lower() not in [lang.lower() for lang in entity_langs]:
+                        continue
 
-        # Fall back to vector-only search if enhanced failed or disabled
-        if not raw_results:
-            raw_results = await with_timeout(
-                entity_manager.search(
-                    query=query,
-                    entity_types=entity_types,
-                    limit=limit * 3,  # Over-fetch for filtering
-                ),
-                timeout_seconds=TIMEOUTS["search"],
-                operation_name="search",
-            )
+                if category:
+                    entity_cat = _get_field(entity, "category", "")
+                    if category.lower() not in entity_cat.lower():
+                        continue
 
-            # Apply temporal boosting to vector results if requested
-            if boost_recent and raw_results:
-                raw_results = temporal_boost(raw_results, decay_days=365.0)
+                if status:
+                    entity_status = _get_field(entity, "status")
+                    if entity_status is None:
+                        continue
+                    status_val = _serialize_enum(entity_status)
+                    if status.lower() != str(status_val).lower():
+                        continue
 
-        results = []
-        for entity, score in raw_results:
-            # Apply language filter
-            if language:
-                entity_langs = _get_field(entity, "languages", [])
-                if language.lower() not in [lang.lower() for lang in entity_langs]:
-                    continue
+                if project:
+                    if _get_field(entity, "project_id") != project:
+                        continue
 
-            # Apply category filter
-            if category:
-                entity_cat = _get_field(entity, "category", "")
-                if category.lower() not in entity_cat.lower():
-                    continue
+                if source:
+                    if _get_field(entity, "source_id") != source:
+                        continue
 
-            # Apply status filter (for tasks)
-            if status:
-                entity_status = _get_field(entity, "status")
-                if entity_status is None:
-                    continue
-                status_val = _serialize_enum(entity_status)
-                if status.lower() != str(status_val).lower():
-                    continue
+                if assignee:
+                    entity_assignees = _get_field(entity, "assignees", [])
+                    if assignee.lower() not in [a.lower() for a in entity_assignees]:
+                        continue
 
-            # Apply project filter
-            if project:
-                if _get_field(entity, "project_id") != project:
-                    continue
+                if since_date:
+                    entity_created = _get_field(entity, "created_at")
+                    if entity_created:
+                        try:
+                            if isinstance(entity_created, str):
+                                entity_created = datetime.fromisoformat(
+                                    entity_created.replace("Z", "+00:00")
+                                )
+                            if entity_created < since_date:
+                                continue
+                        except (ValueError, TypeError):
+                            pass
 
-            # Apply source filter
-            if source:
-                if _get_field(entity, "source_id") != source:
-                    continue
+                content = ""
+                if include_content:
+                    content = entity.content[:500] if entity.content else entity.description
+                else:
+                    content = entity.description[:200] if entity.description else ""
 
-            # Apply assignee filter (for tasks)
-            if assignee:
-                entity_assignees = _get_field(entity, "assignees", [])
-                if assignee.lower() not in [a.lower() for a in entity_assignees]:
-                    continue
-
-            # Apply temporal filter
-            if since_date:
-                entity_created = _get_field(entity, "created_at")
-                if entity_created:
-                    try:
-                        if isinstance(entity_created, str):
-                            entity_created = datetime.fromisoformat(
-                                entity_created.replace("Z", "+00:00")
-                            )
-                        if entity_created < since_date:
-                            continue
-                    except (ValueError, TypeError):
-                        pass  # Skip temporal filter if date parsing fails
-
-            # Build content based on include_content flag
-            if include_content:
-                content = entity.content[:500] if entity.content else entity.description
-            else:
-                content = entity.description[:200] if entity.description else ""
-
-            results.append(
-                SearchResult(
-                    id=entity.id,
-                    type=entity.entity_type.value,
-                    name=entity.name,
-                    content=content or "",
-                    score=score,
-                    source=entity.source_file,
-                    metadata=_build_entity_metadata(entity),
+                graph_results.append(
+                    SearchResult(
+                        id=entity.id,
+                        type=entity.entity_type.value,
+                        name=entity.name,
+                        content=content or "",
+                        score=score,
+                        source=entity.source_file,
+                        result_origin="graph",
+                        metadata=_build_entity_metadata(entity),
+                    )
                 )
+
+                if len(graph_results) >= limit:
+                    break
+
+        except Exception as e:
+            log.warning("graph_search_failed", error=str(e))
+
+    # =========================================================================
+    # DOCUMENT SEARCH - Search crawled documentation
+    # =========================================================================
+    if search_documents and query:
+        try:
+            doc_results = await _search_documents(
+                query=query,
+                source_id=source_id,
+                source_name=source_name,
+                language=language,
+                limit=limit,
+                include_content=include_content,
             )
+            log.debug("document_search_complete", results=len(doc_results))
+        except Exception as e:
+            log.warning("document_search_failed", error=str(e))
 
-            if len(results) >= limit:
-                break
+    # =========================================================================
+    # MERGE AND RANK RESULTS
+    # =========================================================================
+    all_results = graph_results + doc_results
 
-        return SearchResponse(
-            results=results,
-            total=len(results),
-            query=query,
-            filters=filters,
-        )
+    # Sort by score descending
+    all_results.sort(key=lambda r: r.score, reverse=True)
 
-    except Exception as e:
-        log.warning("search_failed", error=str(e))
-        return SearchResponse(results=[], total=0, query=query, filters=filters)
+    # Limit to requested count
+    final_results = all_results[:limit]
+
+    return SearchResponse(
+        results=final_results,
+        total=len(final_results),
+        query=query,
+        filters=filters,
+        graph_count=len([r for r in final_results if r.result_origin == "graph"]),
+        document_count=len([r for r in final_results if r.result_origin == "document"]),
+    )
 
 
 # =============================================================================
