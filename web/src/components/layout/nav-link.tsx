@@ -37,7 +37,9 @@ export function NavLink({ href, icon: Icon, children }: NavLinkProps) {
         size={18}
         strokeWidth={isActive ? 2.5 : 2}
         className={`transition-all duration-200 ${
-          isActive ? 'drop-shadow-[0_0_6px_rgba(225,53,255,0.5)]' : 'group-hover:text-sc-cyan'
+          isActive
+            ? 'text-sc-purple drop-shadow-[0_0_6px_rgba(225,53,255,0.5)]'
+            : 'text-sc-cyan/70 group-hover:text-sc-cyan'
         }`}
       />
 
