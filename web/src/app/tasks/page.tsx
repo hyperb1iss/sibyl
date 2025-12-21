@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useState } from 'react';
+import { Suspense, useCallback } from 'react';
 
 import { FilterChip } from '@/components/ui/toggle';
 import { LoadingState } from '@/components/ui/spinner';
@@ -16,7 +16,6 @@ function TasksPageContent() {
   const searchParams = useSearchParams();
 
   const projectFilter = searchParams.get('project') || undefined;
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   const { data: tasksData, isLoading, error } = useTasks({ project: projectFilter });
   const { data: projectsData } = useProjects();
@@ -49,11 +48,12 @@ function TasksPageContent() {
     [updateStatus]
   );
 
-  const handleTaskClick = useCallback((taskId: string) => {
-    setSelectedTaskId(taskId);
-    // TODO: Open task detail modal/sheet
-    console.log('Task clicked:', taskId);
-  }, []);
+  const handleTaskClick = useCallback(
+    (taskId: string) => {
+      router.push(`/tasks/${taskId}`);
+    },
+    [router]
+  );
 
   // Count tasks by status for the header
   const taskCounts = {

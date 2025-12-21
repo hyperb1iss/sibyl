@@ -1,0 +1,304 @@
+"""Relationship weaving for generated entities."""
+
+from collections import defaultdict
+
+from sibyl.generator.config import GeneratorConfig
+import uuid
+
+from sibyl.models.entities import Entity, Relationship, RelationshipType
+
+
+class RelationshipWeaver:
+    """Weave realistic relationships between generated entities.
+
+    Creates:
+    - Tasks → Projects (BELONGS_TO)
+    - Tasks → Tasks (DEPENDS_ON)
+    - Patterns → Tasks (REFERENCES)
+    - Episodes → Tasks (DERIVED_FROM)
+    - Rules → Patterns (ENFORCES)
+    """
+
+    def __init__(self, config: GeneratorConfig) -> None:
+        self.config = config
+        self._rng = None
+
+    @property
+    def rng(self):
+        """Get seeded random number generator."""
+        if self._rng is None:
+            import random
+
+            self._rng = random.Random(self.config.seed)  # noqa: S311 - deterministic seed for reproducibility
+        return self._rng
+
+    def weave(self, entities: list[Entity]) -> list[Relationship]:
+        """Weave relationships between entities.
+
+        Args:
+            entities: List of entities to connect.
+
+        Returns:
+            List of relationships.
+        """
+        # Index entities by type
+        by_type: dict[str, list[Entity]] = defaultdict(list)
+        for entity in entities:
+            by_type[entity.entity_type].append(entity)
+
+        relationships = []
+
+        # Tasks → Projects (BELONGS_TO)
+        relationships.extend(self._weave_task_projects(by_type["task"], by_type["project"]))
+
+        # Tasks → Tasks (DEPENDS_ON)
+        relationships.extend(self._weave_task_dependencies(by_type["task"]))
+
+        # Patterns → Tasks (REFERENCES)
+        relationships.extend(self._weave_pattern_references(by_type["pattern"], by_type["task"]))
+
+        # Episodes → Tasks (DERIVED_FROM)
+        relationships.extend(self._weave_episode_sources(by_type["episode"], by_type["task"]))
+
+        # Rules → Patterns (ENFORCES)
+        relationships.extend(self._weave_rule_patterns(by_type["rule"], by_type["pattern"]))
+
+        return relationships
+
+    def _weave_task_projects(
+        self,
+        tasks: list[Entity],
+        projects: list[Entity],
+    ) -> list[Relationship]:
+        """Connect tasks to their projects."""
+        if not projects:
+            return []
+
+        relationships = []
+        for task in tasks:
+            # Check if task already has a project_id in metadata
+            project_id = task.metadata.get("project_id") if task.metadata else None
+
+            if project_id:
+                # Verify project exists
+                project_exists = any(p.id == project_id for p in projects)
+                if project_exists:
+                    relationships.append(
+                        Relationship(
+                            source_id=task.id,
+                            target_id=project_id,
+                            type="BELONGS_TO",
+                            metadata={"_generated": True},
+                        )
+                    )
+            else:
+                # Assign to random project
+                project = self.rng.choice(projects)
+                relationships.append(
+                    Relationship(
+                        source_id=task.id,
+                        target_id=project.id,
+                        type="BELONGS_TO",
+                        metadata={"_generated": True},
+                    )
+                )
+
+        return relationships
+
+    def _weave_task_dependencies(self, tasks: list[Entity]) -> list[Relationship]:
+        """Create task dependency chains.
+
+        Uses config.dependency_density to determine what percentage
+        of tasks should have dependencies.
+        """
+        if len(tasks) < 2:
+            return []
+
+        relationships = []
+        dep_count = int(len(tasks) * self.config.dependency_density)
+
+        # Select random tasks to have dependencies
+        dependent_tasks = self.rng.sample(tasks, min(dep_count, len(tasks)))
+
+        for task in dependent_tasks:
+            # Find potential dependencies (tasks created before this one)
+            potential_deps = [
+                t for t in tasks
+                if t.id != task.id and t.created_at and task.created_at and t.created_at < task.created_at
+            ]
+
+            if not potential_deps:
+                # Just pick any other task
+                potential_deps = [t for t in tasks if t.id != task.id]
+
+            if potential_deps:
+                # Add 1-3 dependencies
+                num_deps = min(self.rng.randint(1, 3), len(potential_deps))
+                deps = self.rng.sample(potential_deps, num_deps)
+
+                for dep in deps:
+                    # Check for cycles
+                    if not self._would_create_cycle(relationships, task.id, dep.id):
+                        relationships.append(
+                            Relationship(
+                                source_id=task.id,
+                                target_id=dep.id,
+                                type="DEPENDS_ON",
+                                metadata={
+                                    "_generated": True,
+                                    "blocking": self.rng.random() > 0.7,
+                                },
+                            )
+                        )
+
+        return relationships
+
+    def _would_create_cycle(
+        self,
+        existing: list[Relationship],
+        source: str,
+        target: str,
+    ) -> bool:
+        """Check if adding source→target would create a dependency cycle."""
+        # Build adjacency map
+        deps: dict[str, set[str]] = defaultdict(set)
+        for rel in existing:
+            if rel.type == "DEPENDS_ON":
+                deps[rel.source_id].add(rel.target_id)
+
+        # Check if target can reach source (would mean cycle)
+        visited = set()
+        queue = [target]
+
+        while queue:
+            current = queue.pop(0)
+            if current == source:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            queue.extend(deps.get(current, []))
+
+        return False
+
+    def _weave_pattern_references(
+        self,
+        patterns: list[Entity],
+        tasks: list[Entity],
+    ) -> list[Relationship]:
+        """Connect patterns to tasks that reference them."""
+        if not patterns or not tasks:
+            return []
+
+        relationships = []
+        ref_count = int(len(tasks) * self.config.pattern_reference_density)
+
+        # Select tasks that will reference patterns
+        referencing_tasks = self.rng.sample(tasks, min(ref_count, len(tasks)))
+
+        for task in referencing_tasks:
+            # Find patterns in the same domain
+            task_feature = task.metadata.get("feature", "") if task.metadata else ""
+
+            # Match patterns by domain similarity
+            matching_patterns = [
+                p for p in patterns
+                if p.metadata and task_feature.lower() in p.metadata.get("domain", "").lower()
+            ]
+
+            if not matching_patterns:
+                matching_patterns = patterns  # Fallback to any pattern
+
+            # Add 1-2 pattern references
+            num_refs = min(self.rng.randint(1, 2), len(matching_patterns))
+            refs = self.rng.sample(matching_patterns, num_refs)
+
+            for pattern in refs:
+                relationships.append(
+                    Relationship(
+                        source_id=task.id,
+                        target_id=pattern.id,
+                        type="REFERENCES",
+                        metadata={
+                            "_generated": True,
+                            "context": "implementation",
+                        },
+                    )
+                )
+
+        return relationships
+
+    def _weave_episode_sources(
+        self,
+        episodes: list[Entity],
+        tasks: list[Entity],
+    ) -> list[Relationship]:
+        """Connect episodes to the tasks they were derived from."""
+        if not episodes or not tasks:
+            return []
+
+        relationships = []
+
+        for episode in episodes:
+            # Each episode is derived from 1-3 tasks
+            num_sources = min(self.rng.randint(1, 3), len(tasks))
+            source_tasks = self.rng.sample(tasks, num_sources)
+
+            for task in source_tasks:
+                relationships.append(
+                    Relationship(
+                        source_id=episode.id,
+                        target_id=task.id,
+                        type="DERIVED_FROM",
+                        metadata={
+                            "_generated": True,
+                            "learning_type": self.rng.choice([
+                                "implementation",
+                                "debugging",
+                                "review",
+                                "retrospective",
+                            ]),
+                        },
+                    )
+                )
+
+        return relationships
+
+    def _weave_rule_patterns(
+        self,
+        rules: list[Entity],
+        patterns: list[Entity],
+    ) -> list[Relationship]:
+        """Connect rules to the patterns they enforce."""
+        if not rules or not patterns:
+            return []
+
+        relationships = []
+
+        for rule in rules:
+            # Find patterns in the same domain
+            rule_domain = rule.metadata.get("domain", "") if rule.metadata else ""
+
+            matching_patterns = [
+                p for p in patterns
+                if p.metadata and p.metadata.get("domain", "") == rule_domain
+            ]
+
+            if not matching_patterns:
+                # Pick a random pattern
+                matching_patterns = [self.rng.choice(patterns)]
+
+            for pattern in matching_patterns:
+                relationships.append(
+                    Relationship(
+                        source_id=rule.id,
+                        target_id=pattern.id,
+                        type="ENFORCES",
+                        metadata={
+                            "_generated": True,
+                            "severity": rule.metadata.get("severity", "warning") if rule.metadata else "warning",
+                        },
+                    )
+                )
+
+        return relationships

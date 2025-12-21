@@ -48,6 +48,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+generator = [
+    "anthropic>=0.40.0",
+    "faker>=30.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",

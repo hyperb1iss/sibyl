@@ -16,6 +16,7 @@ from sibyl.graph.entities import EntityManager
 from sibyl.graph.relationships import RelationshipManager
 from sibyl.models.entities import EntityType, Episode, Pattern, Relationship, RelationshipType
 from sibyl.models.tasks import Project, ProjectStatus, Task, TaskPriority, TaskStatus
+from sibyl.retrieval import HybridConfig, hybrid_search, temporal_boost
 from sibyl.tasks.workflow import TaskWorkflowEngine
 from sibyl.utils.resilience import TIMEOUTS, with_timeout
 
@@ -117,6 +118,8 @@ async def search(
     since: str | None = None,
     limit: int = 10,
     include_content: bool = True,
+    use_enhanced: bool = True,
+    boost_recent: bool = True,
 ) -> SearchResponse:
     """Search the Sibyl knowledge graph by meaning.
 
@@ -144,6 +147,9 @@ async def search(
         since: Temporal filter - only return entities created after this ISO date.
         limit: Maximum results to return (1-50, default 10).
         include_content: Include full content in results (default True).
+        use_enhanced: Use enhanced Graph-RAG retrieval (hybrid search + temporal boosting).
+                      Falls back to vector-only if hybrid fails. Default True.
+        boost_recent: Apply temporal boosting to rank recent knowledge higher. Default True.
 
     Returns:
         SearchResponse with ranked results including id, name, type, score, and metadata.
@@ -208,16 +214,54 @@ async def search(
             except ValueError:
                 log.warning("invalid_since_date", since=since)
 
-        # Perform semantic search
-        raw_results = await with_timeout(
-            entity_manager.search(
-                query=query,
-                entity_types=entity_types,
-                limit=limit * 3,  # Over-fetch for filtering
-            ),
-            timeout_seconds=TIMEOUTS["search"],
-            operation_name="search",
-        )
+        # Perform search - try enhanced hybrid first, fall back to vector-only
+        raw_results: list[tuple[Any, float]] = []
+        used_enhanced = False
+
+        if use_enhanced and query:  # Enhanced only makes sense with a query
+            try:
+                # Configure hybrid search
+                hybrid_config = HybridConfig(
+                    apply_temporal=boost_recent,
+                    temporal_decay_days=365.0,
+                    graph_depth=2,
+                )
+
+                hybrid_result = await with_timeout(
+                    hybrid_search(
+                        query=query,
+                        client=client,
+                        entity_manager=entity_manager,
+                        entity_types=entity_types,
+                        limit=limit * 3,  # Over-fetch for filtering
+                        config=hybrid_config,
+                    ),
+                    timeout_seconds=TIMEOUTS["search"],
+                    operation_name="hybrid_search",
+                )
+                raw_results = hybrid_result.results
+                used_enhanced = True
+                log.debug("search_used_enhanced", results=len(raw_results))
+
+            except Exception as e:
+                log.warning("enhanced_search_failed_fallback", error=str(e))
+                # Fall through to vector-only search
+
+        # Fall back to vector-only search if enhanced failed or disabled
+        if not raw_results:
+            raw_results = await with_timeout(
+                entity_manager.search(
+                    query=query,
+                    entity_types=entity_types,
+                    limit=limit * 3,  # Over-fetch for filtering
+                ),
+                timeout_seconds=TIMEOUTS["search"],
+                operation_name="search",
+            )
+
+            # Apply temporal boosting to vector results if requested
+            if boost_recent and raw_results:
+                raw_results = temporal_boost(raw_results, decay_days=365.0)
 
         results = []
         for entity, score in raw_results:
