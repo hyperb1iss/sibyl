@@ -3,6 +3,11 @@
 Hosts both MCP protocol at /mcp and REST API at /api/*.
 """
 
+import os
+
+# Disable Graphiti telemetry before any imports
+os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
+
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
@@ -16,7 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
 
-def create_combined_app(host: str, port: int) -> Starlette:
+def create_combined_app(host: str | None = None, port: int | None = None) -> Starlette:
     """Create a combined Starlette app with MCP and REST API.
 
     Routes:
@@ -34,6 +39,10 @@ def create_combined_app(host: str, port: int) -> Starlette:
     from sibyl.api.app import create_api_app
     from sibyl.server import create_mcp_server
 
+    # Use settings defaults if not specified
+    host = host or settings.server_host
+    port = port or settings.server_port
+
     # Create FastAPI app for REST endpoints
     api_app = create_api_app()
 
@@ -45,10 +54,18 @@ def create_combined_app(host: str, port: int) -> Starlette:
 
     @asynccontextmanager
     async def lifespan(app: Starlette) -> "AsyncGenerator[None, None]":
-        """Combined lifespan that initializes MCP session manager."""
+        """Combined lifespan that initializes MCP session manager and background queue."""
+        from sibyl.background import init_background_queue, shutdown_background_queue
+
+        # Start background task queue for async enrichment
+        await init_background_queue()
+
         # The MCP session manager needs to be started for streamable HTTP
         async with mcp.session_manager.run():
             yield
+
+        # Shutdown background queue
+        await shutdown_background_queue()
 
     # Create combined app with both mounted
     # Note: streamable_http_app() already routes to /mcp internally

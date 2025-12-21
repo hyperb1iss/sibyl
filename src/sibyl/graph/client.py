@@ -136,6 +136,20 @@ class GraphClient:
         """Check if the client is connected."""
         return self._connected
 
+    @property
+    def driver(self) -> object:
+        """Get the underlying FalkorDB driver.
+
+        Convenience property to access client.driver directly.
+
+        Returns:
+            The FalkorDB driver instance.
+
+        Raises:
+            GraphConnectionError: If not connected.
+        """
+        return self.client.driver
+
     async def query_with_timeout(
         self,
         query_coro: object,

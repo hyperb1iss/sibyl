@@ -93,6 +93,96 @@ class EntityManager:
             log.exception("Failed to create entity", entity_id=entity.id, error=str(e))
             raise
 
+    async def create_direct(self, entity: Entity) -> str:
+        """Create an entity directly in FalkorDB, bypassing Graphiti LLM.
+
+        This is much faster than create() as it skips LLM-based entity extraction.
+        Use this for structured entities (tasks, projects) where LLM extraction
+        isn't needed. Embeddings can be generated asynchronously via background queue.
+
+        Args:
+            entity: The entity to create.
+
+        Returns:
+            The ID of the created entity.
+
+        Raises:
+            Exception: If creation fails.
+        """
+        import json
+
+        log.info(
+            "Creating entity directly",
+            entity_type=entity.entity_type,
+            name=entity.name,
+        )
+
+        try:
+            metadata = self._serialize_metadata(entity.metadata or {})
+            metadata_json = json.dumps(metadata) if metadata else "{}"
+
+            created_at = (
+                entity.created_at.isoformat()
+                if entity.created_at
+                else datetime.now(UTC).isoformat()
+            )
+            updated_at = datetime.now(UTC).isoformat()
+
+            # Create node with explicit properties
+            # Include Graphiti-compatible fields for get_by_group_ids to work:
+            # - group_id: singular string (Graphiti queries: WHERE n.group_id IN $group_ids)
+            # - summary: required by EntityNode model (use description as summary)
+            # - labels: empty list (will be enriched later if needed)
+            summary = entity.description[:500] if entity.description else entity.name
+            await self._client.client.driver.execute_query(
+                """
+                CREATE (n:Entity {
+                    uuid: $uuid,
+                    name: $name,
+                    entity_type: $entity_type,
+                    description: $description,
+                    content: $content,
+                    created_at: $created_at,
+                    updated_at: $updated_at,
+                    metadata: $metadata,
+                    group_id: $group_id,
+                    summary: $summary,
+                    labels: $labels,
+                    _direct_insert: true
+                })
+                RETURN n.uuid as id
+                """,
+                uuid=entity.id,
+                name=entity.name,
+                entity_type=entity.entity_type.value,
+                description=entity.description or "",
+                content=entity.content or "",
+                created_at=created_at,
+                updated_at=updated_at,
+                metadata=metadata_json,
+                group_id="conventions",
+                summary=summary,
+                labels=[],
+            )
+
+            # Persist additional attributes for specialized entity types
+            await self._persist_entity_attributes(entity.id, entity)
+
+            log.info(
+                "Entity created directly",
+                entity_id=entity.id,
+                entity_type=entity.entity_type,
+            )
+            return entity.id
+
+        except Exception as e:
+            log.exception(
+                "Failed to create entity directly",
+                entity_id=entity.id,
+                error=str(e),
+            )
+            raise
+
     async def get(self, entity_id: str) -> Entity:
         """Get an entity by ID.
 
@@ -306,40 +396,34 @@ class EntityManager:
         log.debug("Listing entities", entity_type=entity_type, limit=limit, offset=offset)
 
         try:
-            # Get all nodes in the conventions group
-            # Note: Graphiti doesn't have built-in pagination/filtering by attributes
-            # So we retrieve more than needed and filter in memory
-            nodes = await EntityNode.get_by_group_ids(
-                self._client.client.driver,
-                ["conventions"],
-                limit=limit * 5,  # Get extra for filtering
+            # Direct query filtered by entity_type - much more efficient than
+            # get_by_group_ids which doesn't filter and relies on in-memory filtering
+            result = await self._client.client.driver.execute_query(
+                """
+                MATCH (n:Entity)
+                WHERE n.entity_type = $entity_type AND n.group_id = 'conventions'
+                RETURN n
+                ORDER BY n.created_at DESC
+                SKIP $offset
+                LIMIT $limit
+                """,
+                entity_type=entity_type.value,
+                offset=offset,
+                limit=limit,
             )
 
-            # Convert nodes to entities and filter by type
             entities: list[Entity] = []
-            skipped = 0
-
-            for node in nodes:
-                try:
-                    entity = self._node_to_entity(node)
-
-                    # Filter by entity type
-                    if entity.entity_type != entity_type:
+            if result and result[0]:
+                for record in result[0]:
+                    try:
+                        node = record.get("n", record)
+                        # FalkorDB returns Node objects with .properties
+                        node_data = node.properties if hasattr(node, "properties") else node
+                        entity = self._record_to_entity(node_data)
+                        entities.append(entity)
+                    except Exception as e:
+                        log.warning("Failed to convert record to entity", error=str(e))
                         continue
-
-                    # Handle offset
-                    if skipped < offset:
-                        skipped += 1
-                        continue
-
-                    entities.append(entity)
-
-                    if len(entities) >= limit:
-                        break
-
-                except Exception as e:
-                    log.warning("Failed to convert node to entity", node_uuid=node.uuid, error=str(e))
-                    continue
 
             log.debug(
                 "Listed entities",
@@ -352,6 +436,56 @@ class EntityManager:
         except Exception as e:
             log.exception("Failed to list entities", entity_type=entity_type, error=str(e))
             return []
+
+    def _record_to_entity(self, node_data: dict[str, Any]) -> Entity:
+        """Convert a raw database record to an Entity.
+
+        Args:
+            node_data: Raw node data from Cypher query.
+
+        Returns:
+            Entity instance.
+        """
+        import json
+
+        # Parse metadata if it's a string
+        metadata = node_data.get("metadata", {})
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+
+        # Get entity type
+        entity_type_str = node_data.get("entity_type", "episode")
+        try:
+            entity_type = EntityType(entity_type_str)
+        except ValueError:
+            entity_type = EntityType.EPISODE
+
+        return Entity(
+            id=node_data.get("uuid", ""),
+            name=node_data.get("name", ""),
+            entity_type=entity_type,
+            description=node_data.get("description") or node_data.get("summary", ""),
+            content=node_data.get("content", ""),
+            metadata=metadata,
+            created_at=self._parse_datetime(node_data.get("created_at")),
+            updated_at=self._parse_datetime(node_data.get("updated_at")),
+        )
+
+    def _parse_datetime(self, value: Any) -> datetime | None:
+        """Parse datetime from various formats."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        return None
 
     async def _persist_entity_attributes(self, entity_id: str, entity: Entity) -> None:
         """Persist normalized attributes/metadata on a node for reliable querying."""

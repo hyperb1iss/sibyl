@@ -327,3 +327,75 @@ async def get_stats() -> dict[str, object]:
             "error": str(e),
             "timestamp": datetime.now(UTC).isoformat(),
         }
+
+
+@dataclass
+class MigrationResult:
+    """Result of a migration operation."""
+
+    success: bool
+    entities_updated: int
+    message: str
+    duration_seconds: float
+
+
+async def migrate_add_group_ids() -> MigrationResult:
+    """Add group_ids to entities that are missing it.
+
+    Entities created via direct insert before the group_ids fix
+    won't be discoverable via Graphiti's get_by_group_ids.
+    This migration adds group_ids=["conventions"] to all such entities.
+
+    Returns:
+        MigrationResult with migration status.
+    """
+    log.info("Running migration: add group_ids to entities")
+
+    start_time = time.time()
+    entities_updated = 0
+
+    try:
+        client = await get_graph_client()
+
+        # Fix entities for Graphiti compatibility:
+        # 1. group_id: singular string (Graphiti queries: WHERE n.group_id IN $group_ids)
+        # 2. summary: required by EntityNode model
+        # 3. labels: required by EntityNode model
+        result = await client.driver.execute_query(
+            """
+            MATCH (n:Entity)
+            WHERE n.group_id IS NULL OR n.summary IS NULL OR n.labels IS NULL
+            SET n.group_id = COALESCE(n.group_id, "conventions"),
+                n.summary = COALESCE(n.summary, SUBSTRING(COALESCE(n.description, n.name), 0, 500)),
+                n.labels = COALESCE(n.labels, [])
+            RETURN count(n) as updated
+            """
+        )
+
+        # Result is (results_list, column_names, meta)
+        if result and result[0]:
+            entities_updated = result[0][0].get("updated", 0)
+
+        duration = time.time() - start_time
+
+        log.info(
+            "Migration complete",
+            entities_updated=entities_updated,
+            duration_seconds=duration,
+        )
+
+        return MigrationResult(
+            success=True,
+            entities_updated=entities_updated,
+            message=f"Added group_ids to {entities_updated} entities",
+            duration_seconds=duration,
+        )
+
+    except Exception as e:
+        log.exception("Migration failed", error=str(e))
+        return MigrationResult(
+            success=False,
+            entities_updated=0,
+            message=f"Migration failed: {e}",
+            duration_seconds=time.time() - start_time,
+        )

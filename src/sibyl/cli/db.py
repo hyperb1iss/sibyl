@@ -248,3 +248,38 @@ def db_stats() -> None:
             print_db_hint()
 
     _stats()
+
+
+@app.command("migrate")
+def db_migrate() -> None:
+    """Run database migrations to fix schema issues.
+
+    Currently supports:
+    - Adding group_ids to entities for Graphiti compatibility
+    """
+
+    @run_async
+    async def _migrate() -> None:
+        from sibyl.tools.admin import migrate_add_group_ids
+
+        try:
+            info("Running database migrations...")
+
+            with spinner("Migrating...") as progress:
+                task = progress.add_task("Adding group_ids to entities...", total=None)
+
+                result = await migrate_add_group_ids()
+
+                progress.update(task, description="Migration complete")
+
+            if result.success:
+                success(f"Migration complete: {result.message}")
+                info(f"Duration: {result.duration_seconds:.2f}s")
+            else:
+                error(f"Migration failed: {result.message}")
+
+        except Exception as e:
+            error(f"Migration failed: {e}")
+            print_db_hint()
+
+    _migrate()

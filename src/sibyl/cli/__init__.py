@@ -11,6 +11,11 @@ This package provides a comprehensive CLI for Sibyl with subcommand groups:
 - generate: Synthetic data generation
 """
 
+import os
+
+# Disable Graphiti telemetry before any imports
+os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
+
 from sibyl.cli.main import app, main
 
 __all__ = ["app", "main"]

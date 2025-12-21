@@ -673,7 +673,7 @@ async def _explore_dependencies(
             entity = await entity_manager.get(task_id)
             if entity:
                 raw_status = getattr(entity, "status", None) or entity.metadata.get("status")
-                status_value = raw_status.value if hasattr(raw_status, "value") else raw_status
+                status_value = raw_status.value if raw_status and hasattr(raw_status, "value") else raw_status
 
                 results.append(
                     EntitySummary(
@@ -974,7 +974,34 @@ async def add(
             )
 
         # Store in graph
-        created_id = await entity_manager.create(entity)
+        # Use fast path (direct insert) for structured entities (tasks, projects)
+        # Use full Graphiti flow for knowledge entities (episodes, patterns)
+        use_fast_path = entity_type in ("task", "project")
+
+        if use_fast_path:
+            # Fast path: direct insert (~50ms) + background enrichment
+            created_id = await entity_manager.create_direct(entity)
+
+            # Queue background enrichment for embeddings
+            try:
+                from sibyl.background import get_background_queue
+
+                queue = get_background_queue()
+                await queue.enqueue(
+                    "enrich_entity",
+                    {
+                        "entity_id": created_id,
+                        "title": title,
+                        "content": content,
+                        "find_related": False,  # Skip for now, can enable later
+                    },
+                )
+            except Exception as e:
+                # Don't fail the request if background queue isn't running
+                log.debug("Background enrichment skipped", error=str(e))
+        else:
+            # Full Graphiti flow for knowledge entities (~5s)
+            created_id = await entity_manager.create(entity)
 
         # Create relationships
         relationships_created = []

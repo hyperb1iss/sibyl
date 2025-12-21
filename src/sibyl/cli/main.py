@@ -87,6 +87,53 @@ def serve(
 
 
 @app.command()
+def dev(
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
+    port: int = typer.Option(3334, "--port", "-p", help="Port to listen on"),
+) -> None:
+    """Start the server in development mode with hot reload.
+
+    Watches for file changes and automatically restarts the server.
+    Uses uvicorn's --reload flag for instant feedback during development.
+
+    Examples:
+        sibyl dev                      # Default: 0.0.0.0:3334
+        sibyl dev -p 9000              # Custom port
+    """
+    import subprocess
+    import sys
+
+    console.print(f"[{ELECTRIC_PURPLE}]Starting Sibyl in dev mode...[/{ELECTRIC_PURPLE}]")
+    console.print(f"[{NEON_CYAN}]Hot reload enabled - watching for changes[/{NEON_CYAN}]")
+    console.print(f"[dim]API: http://{host}:{port}/api[/dim]")
+    console.print(f"[dim]MCP: http://{host}:{port}/mcp[/dim]")
+    console.print(f"[dim]Docs: http://{host}:{port}/api/docs[/dim]\n")
+
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "sibyl.main:create_combined_app",
+                "--factory",
+                "--host",
+                host,
+                "--port",
+                str(port),
+                "--reload",
+                "--reload-dir",
+                "src",
+            ],
+            check=True,
+        )
+    except KeyboardInterrupt:
+        console.print(f"\n[{NEON_CYAN}]Shutting down...[/{NEON_CYAN}]")
+    except subprocess.CalledProcessError:
+        pass  # uvicorn handles its own exit
+
+
+@app.command()
 def health() -> None:
     """Check server health status."""
 
