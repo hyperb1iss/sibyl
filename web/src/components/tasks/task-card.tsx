@@ -12,6 +12,35 @@ interface TaskCardProps {
   onProjectClick?: (projectId: string) => void;
 }
 
+function formatDueDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const dueDay = new Date(date);
+  dueDay.setHours(0, 0, 0, 0);
+
+  if (dueDay.getTime() === today.getTime()) {
+    return 'Today';
+  }
+  if (dueDay.getTime() === tomorrow.getTime()) {
+    return 'Tomorrow';
+  }
+
+  const diffDays = Math.ceil((dueDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) {
+    return `${Math.abs(diffDays)}d overdue`;
+  }
+  if (diffDays <= 7) {
+    return `${diffDays}d left`;
+  }
+
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 export const TaskCard = memo(function TaskCard({
   task,
   projectName,
@@ -25,6 +54,10 @@ export const TaskCard = memo(function TaskCard({
   const priorityConfig = TASK_PRIORITY_CONFIG[priority as keyof typeof TASK_PRIORITY_CONFIG];
   const assignees = task.metadata.assignees ?? [];
   const projectId = task.metadata.project_id as string | undefined;
+  const dueDate = task.metadata.due_date as string | undefined;
+
+  // Check if overdue (not done and past due)
+  const isOverdue = dueDate && status !== 'done' && new Date(dueDate) < new Date();
 
   return (
     <div
@@ -32,11 +65,12 @@ export const TaskCard = memo(function TaskCard({
       onDragStart={e => onDragStart?.(e, task.id)}
       onClick={() => onClick?.(task.id)}
       className={`
-        bg-sc-bg-base border border-sc-fg-subtle/20 rounded-lg p-3
+        bg-sc-bg-base border rounded-lg p-3
         cursor-grab active:cursor-grabbing
         transition-all duration-150
-        hover:border-sc-fg-subtle/40 hover:shadow-md
+        hover:shadow-md
         group select-none
+        ${isOverdue ? 'border-sc-red/50 hover:border-sc-red/70' : 'border-sc-fg-subtle/20 hover:border-sc-fg-subtle/40'}
       `}
       role="button"
       tabIndex={0}
@@ -84,21 +118,40 @@ export const TaskCard = memo(function TaskCard({
 
       {/* Footer */}
       <div className="flex items-center justify-between">
-        {/* Assignees */}
-        <div className="flex items-center -space-x-1">
-          {assignees.slice(0, 3).map(assignee => (
-            <div
-              key={assignee}
-              className="w-5 h-5 rounded-full bg-sc-bg-elevated border border-sc-bg-base flex items-center justify-center text-[10px] text-sc-fg-muted"
-              title={assignee}
+        {/* Left side: Assignees + Due date */}
+        <div className="flex items-center gap-2">
+          {/* Assignees */}
+          <div className="flex items-center -space-x-1">
+            {assignees.slice(0, 3).map(assignee => (
+              <div
+                key={assignee}
+                className="w-5 h-5 rounded-full bg-sc-bg-elevated border border-sc-bg-base flex items-center justify-center text-[10px] text-sc-fg-muted"
+                title={assignee}
+              >
+                {assignee.charAt(0).toUpperCase()}
+              </div>
+            ))}
+            {assignees.length > 3 && (
+              <div className="w-5 h-5 rounded-full bg-sc-bg-elevated border border-sc-bg-base flex items-center justify-center text-[10px] text-sc-fg-subtle">
+                +{assignees.length - 3}
+              </div>
+            )}
+          </div>
+
+          {/* Due date badge */}
+          {dueDate && (
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded ${
+                isOverdue
+                  ? 'bg-sc-red/20 text-sc-red'
+                  : status === 'done'
+                    ? 'bg-sc-green/20 text-sc-green'
+                    : 'bg-sc-fg-subtle/10 text-sc-fg-subtle'
+              }`}
+              title={new Date(dueDate).toLocaleDateString()}
             >
-              {assignee.charAt(0).toUpperCase()}
-            </div>
-          ))}
-          {assignees.length > 3 && (
-            <div className="w-5 h-5 rounded-full bg-sc-bg-elevated border border-sc-bg-base flex items-center justify-center text-[10px] text-sc-fg-subtle">
-              +{assignees.length - 3}
-            </div>
+              {formatDueDate(dueDate)}
+            </span>
           )}
         </div>
 

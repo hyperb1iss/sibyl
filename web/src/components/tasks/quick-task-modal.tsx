@@ -4,15 +4,21 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TaskPriority } from '@/lib/api';
 import { TASK_PRIORITIES, TASK_PRIORITY_CONFIG } from '@/lib/constants';
 
+export interface QuickTaskData {
+  title: string;
+  description?: string;
+  priority: TaskPriority;
+  projectId?: string;
+  feature?: string;
+  assignees?: string[];
+  dueDate?: string;
+  estimatedHours?: number;
+}
+
 interface QuickTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (task: {
-    title: string;
-    description?: string;
-    priority: TaskPriority;
-    projectId?: string;
-  }) => void;
+  onSubmit: (task: QuickTaskData) => void;
   projects?: Array<{ id: string; name: string }>;
   defaultProjectId?: string;
   isSubmitting?: boolean;
@@ -30,6 +36,11 @@ export function QuickTaskModal({
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('medium');
   const [projectId, setProjectId] = useState(defaultProjectId ?? '');
+  const [feature, setFeature] = useState('');
+  const [assigneesInput, setAssigneesInput] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [estimatedHours, setEstimatedHours] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Reset form when opened
@@ -39,6 +50,11 @@ export function QuickTaskModal({
       setDescription('');
       setPriority('medium');
       setProjectId(defaultProjectId ?? '');
+      setFeature('');
+      setAssigneesInput('');
+      setDueDate('');
+      setEstimatedHours('');
+      setShowAdvanced(false);
       setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [isOpen, defaultProjectId]);
@@ -48,14 +64,33 @@ export function QuickTaskModal({
       e.preventDefault();
       if (!title.trim()) return;
 
+      const assignees = assigneesInput
+        .split(',')
+        .map(a => a.trim())
+        .filter(Boolean);
+
       onSubmit({
         title: title.trim(),
         description: description.trim() || undefined,
         priority,
         projectId: projectId || undefined,
+        feature: feature.trim() || undefined,
+        assignees: assignees.length > 0 ? assignees : undefined,
+        dueDate: dueDate || undefined,
+        estimatedHours: estimatedHours ? Number(estimatedHours) : undefined,
       });
     },
-    [title, description, priority, projectId, onSubmit]
+    [
+      title,
+      description,
+      priority,
+      projectId,
+      feature,
+      assigneesInput,
+      dueDate,
+      estimatedHours,
+      onSubmit,
+    ]
   );
 
   const handleKeyDown = useCallback(
@@ -77,7 +112,7 @@ export function QuickTaskModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh]"
       role="presentation"
       onClick={onClose}
     >
@@ -182,6 +217,96 @@ export function QuickTaskModal({
               </select>
             </div>
           </div>
+
+          {/* Toggle advanced fields */}
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="text-sm text-sc-fg-subtle hover:text-sc-purple transition-colors flex items-center gap-1"
+          >
+            <span
+              className="transition-transform duration-200"
+              style={{ transform: showAdvanced ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            >
+              ▶
+            </span>
+            {showAdvanced ? 'Hide' : 'Show'} more options
+          </button>
+
+          {/* Advanced fields */}
+          {showAdvanced && (
+            <div className="space-y-4 pt-2 border-t border-sc-fg-subtle/10">
+              {/* Feature & Due Date row */}
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label
+                    htmlFor="quick-task-feature"
+                    className="block text-xs text-sc-fg-subtle mb-1"
+                  >
+                    Feature / Tag
+                  </label>
+                  <input
+                    id="quick-task-feature"
+                    type="text"
+                    value={feature}
+                    onChange={e => setFeature(e.target.value)}
+                    placeholder="e.g., auth, api, ui"
+                    className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+                  />
+                </div>
+                <div className="w-40">
+                  <label htmlFor="quick-task-due" className="block text-xs text-sc-fg-subtle mb-1">
+                    Due Date
+                  </label>
+                  <input
+                    id="quick-task-due"
+                    type="date"
+                    value={dueDate}
+                    onChange={e => setDueDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* Assignees & Hours row */}
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label
+                    htmlFor="quick-task-assignees"
+                    className="block text-xs text-sc-fg-subtle mb-1"
+                  >
+                    Assignees
+                  </label>
+                  <input
+                    id="quick-task-assignees"
+                    type="text"
+                    value={assigneesInput}
+                    onChange={e => setAssigneesInput(e.target.value)}
+                    placeholder="Comma-separated names"
+                    className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+                  />
+                </div>
+                <div className="w-24">
+                  <label
+                    htmlFor="quick-task-hours"
+                    className="block text-xs text-sc-fg-subtle mb-1"
+                  >
+                    Est. Hours
+                  </label>
+                  <input
+                    id="quick-task-hours"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={estimatedHours}
+                    onChange={e => setEstimatedHours(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-3 py-2 bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex items-center justify-between pt-2">

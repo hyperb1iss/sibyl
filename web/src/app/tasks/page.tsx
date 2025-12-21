@@ -6,13 +6,13 @@ import { Suspense, useCallback, useState } from 'react';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { KanbanBoard } from '@/components/tasks/kanban-board';
-import { QuickTaskModal } from '@/components/tasks/quick-task-modal';
+import { type QuickTaskData, QuickTaskModal } from '@/components/tasks/quick-task-modal';
 import { CommandPalette, useKeyboardShortcuts } from '@/components/ui/command-palette';
 import { TasksEmptyState } from '@/components/ui/empty-state';
 import { LoadingState } from '@/components/ui/spinner';
 import { FilterChip } from '@/components/ui/toggle';
 import { ErrorState } from '@/components/ui/tooltip';
-import type { TaskPriority, TaskStatus } from '@/lib/api';
+import type { TaskStatus } from '@/lib/api';
 import { useCreateEntity, useProjects, useTasks, useTaskUpdateStatus } from '@/lib/hooks';
 
 function TasksPageContent() {
@@ -76,12 +76,7 @@ function TasksPageContent() {
   );
 
   const handleCreateTask = useCallback(
-    async (task: {
-      title: string;
-      description?: string;
-      priority: TaskPriority;
-      projectId?: string;
-    }) => {
+    async (task: QuickTaskData) => {
       try {
         await createEntity.mutateAsync({
           name: task.title,
@@ -91,6 +86,10 @@ function TasksPageContent() {
             status: 'todo',
             priority: task.priority,
             project_id: task.projectId,
+            feature: task.feature,
+            assignees: task.assignees,
+            due_date: task.dueDate,
+            estimated_hours: task.estimatedHours,
           },
         });
         setIsQuickTaskOpen(false);
