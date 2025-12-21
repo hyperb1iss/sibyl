@@ -21,6 +21,7 @@ from crawl4ai.deep_crawling.filters import FilterChain, URLPatternFilter
 from sqlalchemy import select
 from sqlmodel import col
 
+from sibyl.api.websocket import broadcast_event
 from sibyl.db import CrawledDocument, CrawlSource, CrawlStatus, SourceType, get_session
 
 if TYPE_CHECKING:
@@ -223,6 +224,18 @@ class CrawlerService:
                     words=doc.word_count,
                 )
 
+                # Broadcast progress every page
+                await broadcast_event(
+                    "crawl_progress",
+                    {
+                        "source_id": str(source_id),
+                        "pages_crawled": crawled_count,
+                        "max_pages": max_pages,
+                        "current_url": result.url,
+                        "percentage": min(100, int((crawled_count / max_pages) * 100)),
+                    },
+                )
+
                 yield doc
 
         except Exception as e:
@@ -231,6 +244,7 @@ class CrawlerService:
                 db_source = await session.get(CrawlSource, source_id)
                 if db_source:
                     db_source.crawl_status = CrawlStatus.FAILED
+                    db_source.current_job_id = None  # Clear job on failure
                     db_source.last_error = str(e)
             raise
 
@@ -239,6 +253,7 @@ class CrawlerService:
             db_source = await session.get(CrawlSource, source_id)
             if db_source:
                 db_source.crawl_status = CrawlStatus.COMPLETED if error_count == 0 else CrawlStatus.PARTIAL
+                db_source.current_job_id = None  # Clear job on completion
                 db_source.last_crawled_at = datetime.now(UTC)
                 db_source.document_count = crawled_count
 

@@ -368,7 +368,8 @@ class CrawlIngestResponse(BaseModel):
     """Response from starting a crawl."""
 
     source_id: str
-    status: str  # started, already_running, error
+    job_id: str | None = None  # Job ID for cancellation
+    status: str  # queued, already_running, cancelled
     message: str
 
 

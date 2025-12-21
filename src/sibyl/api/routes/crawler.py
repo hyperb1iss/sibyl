@@ -312,7 +312,7 @@ async def ingest_source(
     Jobs are processed by the arq worker for reliability and persistence.
     Run the worker with: uv run arq sibyl.jobs.WorkerSettings
     """
-    from sibyl.jobs import enqueue_crawl, get_job_status
+    from sibyl.jobs import enqueue_crawl
 
     # Verify source exists and check current status
     async with get_session() as session:
@@ -339,6 +339,13 @@ async def ingest_source(
             generate_embeddings=request.generate_embeddings,
         )
 
+        # Save job_id to source for cancellation support
+        async with get_session() as session:
+            source = await session.get(CrawlSource, UUID(source_id))
+            if source:
+                source.current_job_id = job_id
+                session.add(source)
+
         log.info(
             "Enqueued crawl job",
             source_id=source_id,
@@ -348,12 +355,13 @@ async def ingest_source(
 
         return CrawlIngestResponse(
             source_id=source_id,
+            job_id=job_id,
             status="queued",
-            message=f"Crawl job queued for {source_name} (job_id: {job_id})",
+            message=f"Crawl job queued for {source_name}",
         )
 
     except Exception as e:
-        log.error("Failed to enqueue crawl job", source_id=source_id, error=str(e))
+        log.exception("Failed to enqueue crawl job", source_id=source_id)
         raise HTTPException(
             status_code=503,
             detail=f"Failed to enqueue job. Is the job queue available? Error: {e}",
@@ -375,11 +383,63 @@ async def get_ingestion_status(source_id: str) -> dict[str, Any]:
         return {
             "source_id": source_id,
             "crawl_status": source.crawl_status.value,
+            "current_job_id": source.current_job_id,
             "document_count": source.document_count,
             "chunk_count": source.chunk_count,
             "last_crawled_at": source.last_crawled_at.isoformat() if source.last_crawled_at else None,
             "last_error": source.last_error,
         }
+
+
+@router.post("/{source_id}/cancel", response_model=CrawlIngestResponse)
+async def cancel_crawl(source_id: str) -> CrawlIngestResponse:
+    """Cancel an in-progress crawl for a source.
+
+    Cancels the job if running and resets the source status.
+    """
+    from sibyl.jobs.queue import cancel_job
+
+    async with get_session() as session:
+        source = await session.get(CrawlSource, UUID(source_id))
+        if not source:
+            raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+
+        # Check if there's a job to cancel
+        job_id = source.current_job_id
+        if not job_id:
+            return CrawlIngestResponse(
+                source_id=source_id,
+                status="no_job",
+                message="No active crawl job to cancel",
+            )
+
+        # Try to cancel the job
+        try:
+            cancelled = await cancel_job(job_id)
+        except Exception as e:
+            log.warning("Failed to cancel job", job_id=job_id, error=str(e))
+            cancelled = False
+
+        # Reset source status regardless of cancel result
+        source.crawl_status = CrawlStatus.PENDING
+        source.current_job_id = None
+        session.add(source)
+
+        log.info(
+            "Cancelled crawl",
+            source_id=source_id,
+            job_id=job_id,
+            job_cancelled=cancelled,
+        )
+
+        await broadcast_event("entity_updated", {"type": "crawl_source", "id": source_id})
+
+        return CrawlIngestResponse(
+            source_id=source_id,
+            job_id=job_id,
+            status="cancelled",
+            message=f"Crawl cancelled for {source.name}",
+        )
 
 
 @router.post("/{source_id}/sync")

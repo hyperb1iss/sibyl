@@ -22,25 +22,14 @@ log = structlog.get_logger()
 # State Machine Definition
 # =============================================================================
 
-# Valid status transitions following workflow constraints:
-# - Tasks progress through stages (backlog → todo → doing → review → done)
-# - Blocked is a detour from doing
-# - Any state can transition to archived
-# - ARCHIVED is terminal (no transitions out)
-# - DONE only allows transition to ARCHIVED
-VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
-    TaskStatus.BACKLOG: {TaskStatus.TODO, TaskStatus.ARCHIVED},
-    TaskStatus.TODO: {TaskStatus.DOING, TaskStatus.BACKLOG, TaskStatus.ARCHIVED},
-    TaskStatus.DOING: {TaskStatus.BLOCKED, TaskStatus.REVIEW, TaskStatus.DONE, TaskStatus.TODO, TaskStatus.ARCHIVED},
-    TaskStatus.BLOCKED: {TaskStatus.DOING, TaskStatus.ARCHIVED},
-    TaskStatus.REVIEW: {TaskStatus.DONE, TaskStatus.DOING, TaskStatus.ARCHIVED},
-    TaskStatus.DONE: {TaskStatus.ARCHIVED},
-    TaskStatus.ARCHIVED: set(),  # Terminal state - no transitions out
-}
+# All statuses except ARCHIVED (which is terminal)
+ALL_STATUSES = {s for s in TaskStatus if s != TaskStatus.ARCHIVED}
 
 
 def is_valid_transition(from_status: TaskStatus, to_status: TaskStatus) -> bool:
     """Check if a status transition is valid.
+
+    Allows any transition except out of ARCHIVED (terminal state).
 
     Args:
         from_status: Current status
@@ -49,10 +38,8 @@ def is_valid_transition(from_status: TaskStatus, to_status: TaskStatus) -> bool:
     Returns:
         True if transition is allowed
     """
-    if from_status == to_status:
-        return True  # No-op is always valid
-    allowed = VALID_TRANSITIONS.get(from_status, set())
-    return to_status in allowed
+    # No-op is valid, ARCHIVED is terminal, everything else is allowed
+    return from_status == to_status or from_status != TaskStatus.ARCHIVED
 
 
 def get_allowed_transitions(status: TaskStatus) -> set[TaskStatus]:
@@ -64,29 +51,20 @@ def get_allowed_transitions(status: TaskStatus) -> set[TaskStatus]:
     Returns:
         Set of valid target statuses
     """
-    return VALID_TRANSITIONS.get(status, set())
+    if status == TaskStatus.ARCHIVED:
+        return set()  # Terminal state
+    return ALL_STATUSES | {TaskStatus.ARCHIVED}
 
 
 class TaskWorkflowEngine:
     """Handles task status transitions and automations.
 
-    The workflow engine enforces the task status state machine:
+    Allows flexible status transitions - any status can transition to any
+    other status, with one constraint:
 
-    ```
-    backlog ──┬──> todo ──┬──> doing ──┬──> blocked ──> doing
-              │           │            │                  │
-              │           │            ├──> review ──> done
-              │           │            │       │
-              │           │            │       └──> doing (revision)
-              │           │            │
-              └───────────┴────────────┴──> archived (from any state)
-    ```
-
-    Key constraints:
-    - Tasks must progress through workflow stages (can't skip to done)
     - ARCHIVED is a terminal state (no transitions out)
-    - DONE only allows transition to ARCHIVED
-    - Any state can transition to ARCHIVED
+
+    This enables ad-hoc workflows without enforcing a rigid state machine.
     """
 
     def __init__(

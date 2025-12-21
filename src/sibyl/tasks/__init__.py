@@ -18,7 +18,6 @@ from sibyl.tasks.estimation import (
 )
 from sibyl.tasks.manager import TaskManager
 from sibyl.tasks.workflow import (
-    VALID_TRANSITIONS,
     TaskWorkflowEngine,
     get_allowed_transitions,
     is_valid_transition,
@@ -28,7 +27,6 @@ __all__ = [
     # Workflow
     "TaskManager",
     "TaskWorkflowEngine",
-    "VALID_TRANSITIONS",
     "is_valid_transition",
     "get_allowed_transitions",
     # Dependencies

@@ -162,6 +162,7 @@ async def crawl_source(
             db_source = await session.get(CrawlSource, UUID(source_id))
             if db_source:
                 db_source.crawl_status = CrawlStatus.FAILED
+                db_source.current_job_id = None  # Clear job on failure
                 db_source.last_error = str(e)[:1000]
 
         await _safe_broadcast("crawl_complete", {"source_id": source_id, "error": str(e)})
@@ -215,10 +216,12 @@ async def sync_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:  #
 
         if doc_count > 0 and source.crawl_status == CrawlStatus.IN_PROGRESS:
             source.crawl_status = CrawlStatus.COMPLETED
+            source.current_job_id = None  # Clear job on sync completion
             if source.last_crawled_at is None:
                 source.last_crawled_at = datetime.now(UTC)
         elif doc_count == 0 and source.crawl_status == CrawlStatus.IN_PROGRESS:
             source.crawl_status = CrawlStatus.PENDING
+            source.current_job_id = None  # Clear job on sync reset
 
         result = {
             "source_id": source_id,

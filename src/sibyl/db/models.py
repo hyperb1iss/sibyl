@@ -116,6 +116,7 @@ class CrawlSource(TimestampMixin, table=True):
 
     # Crawl status
     crawl_status: CrawlStatus = Field(default=CrawlStatus.PENDING, description="Current status")
+    current_job_id: str | None = Field(default=None, max_length=64, description="Active crawl job ID")
     last_crawled_at: datetime | None = Field(default=None, description="Last successful crawl")
     last_error: str | None = Field(default=None, sa_type=Text, description="Last error message")
 
