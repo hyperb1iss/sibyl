@@ -1,12 +1,9 @@
-'use client';
-
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+
+import { NavLink } from './nav-link';
 import { APP_CONFIG, NAVIGATION } from '@/lib/constants';
 
 export function Sidebar() {
-  const pathname = usePathname();
-
   return (
     <aside className="w-64 bg-sc-bg-base border-r border-sc-fg-subtle/20 flex flex-col">
       {/* Logo */}
@@ -24,28 +21,11 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 p-4 space-y-1">
-        {NAVIGATION.map((item) => {
-          const isActive = pathname === item.href;
-          return (
-            <Link
-              key={item.name}
-              href={item.href}
-              className={`
-                flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-150
-                ${isActive
-                  ? 'bg-sc-purple/20 text-sc-purple shadow-inner'
-                  : 'text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight hover:translate-x-1'
-                }
-              `}
-            >
-              <span className={`text-lg ${isActive ? 'animate-pulse' : ''}`}>{item.icon}</span>
-              <span className="font-medium">{item.name}</span>
-              {isActive && (
-                <span className="ml-auto w-1.5 h-1.5 rounded-full bg-sc-purple animate-pulse" />
-              )}
-            </Link>
-          );
-        })}
+        {NAVIGATION.map((item) => (
+          <NavLink key={item.name} href={item.href} icon={item.icon}>
+            {item.name}
+          </NavLink>
+        ))}
       </nav>
 
       {/* Footer */}
@@ -53,7 +33,7 @@ export function Sidebar() {
         <div className="text-xs text-sc-fg-subtle space-y-1">
           <p className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-sc-green animate-pulse" />
-{APP_CONFIG.NAME} v{APP_CONFIG.VERSION}
+            {APP_CONFIG.NAME} v{APP_CONFIG.VERSION}
           </p>
           <p className="text-sc-cyan font-mono">localhost:3334</p>
         </div>

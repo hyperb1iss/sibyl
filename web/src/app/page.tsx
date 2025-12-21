@@ -1,107 +1,16 @@
-'use client';
+import { Suspense } from 'react';
 
-import Link from 'next/link';
+import { DashboardSkeleton } from '@/components/suspense-boundary';
+import { fetchStats } from '@/lib/api-server';
+import { DashboardContent } from './dashboard-content';
 
-import { Card, StatCard } from '@/components/ui/card';
-import { ColorButton } from '@/components/ui/button';
-import { StatusBadge } from '@/components/ui/badge';
-import { LoadingState } from '@/components/ui/spinner';
-import { EntityBreakdown } from '@/components/entities/entity-legend';
-import { PageHeader } from '@/components/layout/page-header';
-import { useHealth, useStats } from '@/lib/hooks';
-import { formatUptime, QUICK_ACTIONS } from '@/lib/constants';
-
-export default function DashboardPage() {
-  const { data: health, isLoading: healthLoading } = useHealth();
-  const { data: stats, isLoading: statsLoading } = useStats();
-
-  const serverStatus = health?.status === 'healthy' ? 'healthy' : health?.status === 'unhealthy' ? 'unhealthy' : 'warning';
+export default async function DashboardPage() {
+  // Server-side fetch for initial stats
+  const stats = await fetchStats();
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <PageHeader
-        title="Dashboard"
-        description="Knowledge graph overview and server status"
-      />
-
-      {/* Status Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          label="Server Status"
-          value={healthLoading ? '...' : health?.status === 'healthy' ? 'Healthy' : 'Unhealthy'}
-          icon={
-            <span
-              className={`w-3 h-3 rounded-full inline-block ${
-                health?.status === 'healthy'
-                  ? 'bg-sc-green animate-pulse'
-                  : health?.status === 'unhealthy'
-                    ? 'bg-sc-red'
-                    : 'bg-sc-yellow animate-pulse'
-              }`}
-            />
-          }
-          sublabel={health?.graph_connected ? 'Graph connected' : 'Graph disconnected'}
-          loading={healthLoading}
-        />
-
-        <StatCard
-          label="Total Entities"
-          value={statsLoading ? '...' : (stats?.total_entities ?? 0)}
-          icon="▣"
-          sublabel="Across all types"
-          loading={statsLoading}
-        />
-
-        <StatCard
-          label="Uptime"
-          value={healthLoading ? '...' : formatUptime(health?.uptime_seconds ?? 0)}
-          icon="↑"
-          sublabel={health?.server_name ?? 'sibyl'}
-          loading={healthLoading}
-        />
-
-        <StatCard
-          label="Patterns"
-          value={statsLoading ? '...' : (stats?.entity_counts?.pattern ?? 0)}
-          icon="◆"
-          sublabel="Development patterns"
-          loading={statsLoading}
-        />
-      </div>
-
-      {/* Entity Breakdown */}
-      <Card>
-        <h3 className="text-lg font-semibold text-sc-fg-primary mb-4">Entity Types</h3>
-        <EntityBreakdown counts={stats?.entity_counts ?? {}} loading={statsLoading} />
-      </Card>
-
-      {/* Quick Actions */}
-      <Card>
-        <h3 className="text-lg font-semibold text-sc-fg-primary mb-4">Quick Actions</h3>
-        <div className="flex flex-wrap gap-3">
-          {QUICK_ACTIONS.map((action) => (
-            <Link key={action.href} href={action.href}>
-              <ColorButton color={action.color} icon={action.icon}>
-                {action.label}
-              </ColorButton>
-            </Link>
-          ))}
-        </div>
-      </Card>
-
-      {/* Errors */}
-      {health?.errors && health.errors.length > 0 && (
-        <Card className="!bg-sc-red/10 !border-sc-red/30">
-          <h3 className="text-lg font-semibold text-sc-red mb-2">Errors</h3>
-          <ul className="space-y-1">
-            {health.errors.map((error: string) => (
-              <li key={error} className="text-sc-fg-muted text-sm">
-                • {error}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-    </div>
+    <Suspense fallback={<DashboardSkeleton />}>
+      <DashboardContent initialStats={stats} />
+    </Suspense>
   );
 }
