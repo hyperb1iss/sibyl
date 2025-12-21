@@ -9,13 +9,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol
 
 import structlog
 
 log = structlog.get_logger()
-
-T = TypeVar("T")
 
 
 class HasTimestamp(Protocol):
@@ -143,13 +141,13 @@ def calculate_boost(
 
 
 def temporal_boost(
-    results: list[tuple[T, float]],
+    results: list[tuple[Any, float]],
     decay_days: float = 365.0,
     min_boost: float = 0.1,
     max_age_days: float = 1825.0,
     timestamp_field: str = "auto",
     reference_time: datetime | None = None,
-) -> list[tuple[T, float]]:
+) -> list[tuple[Any, float]]:
     """Apply temporal boosting to search results.
 
     Multiplies each result's score by a decay factor based on entity age.
@@ -177,7 +175,7 @@ def temporal_boost(
     if reference_time is None:
         reference_time = datetime.now(UTC)
 
-    boosted_results: list[tuple[T, float]] = []
+    boosted_results: list[tuple[Any, float]] = []
     boost_stats = {"boosted": 0, "unchanged": 0, "no_timestamp": 0}
 
     for entity, score in results:
@@ -214,7 +212,7 @@ def temporal_boost(
 
 
 def temporal_boost_single(
-    entity: T,
+    entity: Any,
     score: float,
     config: TemporalConfig | None = None,
     reference_time: datetime | None = None,

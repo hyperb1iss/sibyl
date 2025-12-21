@@ -35,6 +35,7 @@ def export_graph(
 
     @run_async
     async def _export() -> None:
+        from sibyl.graph.client import get_graph_client
         from sibyl.graph.entities import EntityManager
         from sibyl.graph.relationships import RelationshipManager
 
@@ -42,8 +43,9 @@ def export_graph(
             with spinner("Exporting graph...") as progress:
                 task = progress.add_task("Exporting graph...", total=None)
 
-                entity_mgr = EntityManager()
-                rel_mgr = RelationshipManager()
+                client = await get_graph_client()
+                entity_mgr = EntityManager(client)
+                rel_mgr = RelationshipManager(client)
 
                 # Get all entities
                 progress.update(task, description="Loading entities...")

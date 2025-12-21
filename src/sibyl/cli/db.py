@@ -46,8 +46,11 @@ def backup_db(
             with spinner("Creating backup...") as progress:
                 task = progress.add_task("Creating backup...", total=None)
 
-                entity_mgr = EntityManager()
-                rel_mgr = RelationshipManager()
+                from sibyl.graph.client import get_graph_client
+
+                client = await get_graph_client()
+                entity_mgr = EntityManager(client)
+                rel_mgr = RelationshipManager(client)
 
                 # Get all entity types
                 progress.update(task, description="Backing up entities...")
@@ -136,8 +139,11 @@ def restore_db(
             with spinner("Restoring...") as progress:
                 task = progress.add_task("Restoring...", total=None)
 
-                entity_mgr = EntityManager()
-                rel_mgr = RelationshipManager()
+                from sibyl.graph.client import get_graph_client
+
+                client = await get_graph_client()
+                entity_mgr = EntityManager(client)
+                rel_mgr = RelationshipManager(client)
 
                 # Restore entities
                 progress.update(task, description="Restoring entities...")

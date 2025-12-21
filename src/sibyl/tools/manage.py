@@ -384,7 +384,7 @@ async def _crawl_source(
     source_id = f"source_{url_hash}"
 
     # Create source entity
-    source = Source(
+    source = Source(  # type: ignore[call-arg]  # model_validator sets name from url
         id=source_id,
         url=url,
         source_type=SourceType.WEBSITE,

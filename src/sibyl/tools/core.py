@@ -931,7 +931,7 @@ async def add(  # noqa: PLR0915
                 except ValueError:
                     log.warning("invalid_priority", priority=priority)
 
-            entity = Task(
+            entity = Task(  # type: ignore[call-arg]  # model_validator sets name from title
                 id=entity_id,
                 title=title,
                 description=content,
@@ -946,7 +946,7 @@ async def add(  # noqa: PLR0915
             )
 
         elif entity_type == "project":
-            entity = Project(
+            entity = Project(  # type: ignore[call-arg]  # model_validator sets name from title
                 id=entity_id,
                 title=title,
                 description=content,

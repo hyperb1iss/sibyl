@@ -144,7 +144,7 @@ class StressTestGenerator(BaseGenerator):
 
         # Distribute remaining to largest type
         if remaining > 0:
-            largest_type = max(type_counts, key=type_counts.get)
+            largest_type = max(type_counts, key=lambda k: type_counts[k])
             type_counts[largest_type] += remaining
 
         # Generate entities by type

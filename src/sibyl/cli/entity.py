@@ -137,12 +137,14 @@ def show_entity(
 
     @run_async
     async def _show() -> None:
+        from sibyl.graph.client import get_graph_client
         from sibyl.graph.entities import EntityManager
 
         try:
             with spinner("Loading entity...") as progress:
                 progress.add_task("Loading entity...", total=None)
-                manager = EntityManager()
+                client = await get_graph_client()
+                manager = EntityManager(client)
                 entity = await manager.get(entity_id)
 
             if not entity:
@@ -249,12 +251,14 @@ def delete_entity(
 
     @run_async
     async def _delete() -> None:
+        from sibyl.graph.client import get_graph_client
         from sibyl.graph.entities import EntityManager
 
         try:
             with spinner("Deleting entity...") as progress:
                 progress.add_task("Deleting entity...", total=None)
-                manager = EntityManager()
+                client = await get_graph_client()
+                manager = EntityManager(client)
                 deleted = await manager.delete(entity_id)
 
             if deleted:

@@ -108,13 +108,15 @@ def show_project(
 
     @run_async
     async def _show() -> None:
+        from sibyl.graph.client import get_graph_client
         from sibyl.graph.entities import EntityManager
         from sibyl.tools.core import explore
 
         try:
             with spinner("Loading project...") as progress:
                 progress.add_task("Loading project...", total=None)
-                manager = EntityManager()
+                client = await get_graph_client()
+                manager = EntityManager(client)
                 entity = await manager.get(project_id)
 
                 # Get task counts

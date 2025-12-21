@@ -166,12 +166,14 @@ def source_status(
 
     @run_async
     async def _status() -> None:
+        from sibyl.graph.client import get_graph_client
         from sibyl.graph.entities import EntityManager
 
         try:
             with spinner("Loading status...") as progress:
                 progress.add_task("Loading status...", total=None)
-                manager = EntityManager()
+                client = await get_graph_client()
+                manager = EntityManager(client)
                 entity = await manager.get(source_id)
 
             if not entity:

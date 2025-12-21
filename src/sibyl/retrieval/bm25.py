@@ -11,13 +11,11 @@ import re
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any
 
 import structlog
 
 log = structlog.get_logger()
-
-T = TypeVar("T")
 
 
 @dataclass
@@ -173,7 +171,7 @@ class BM25Index:
         self._avg_doc_length: float = 0.0
         self._total_docs: int = 0
 
-    def add(self, entity: T) -> str:
+    def add(self, entity: Any) -> str:
         """Add an entity to the index.
 
         Args:
@@ -293,7 +291,7 @@ class BM25Index:
         query: str,
         limit: int = 10,
         min_score: float = 0.0,
-    ) -> list[tuple[T, float]]:
+    ) -> list[tuple[Any, float]]:
         """Search the index for matching entities.
 
         Args:
@@ -320,7 +318,7 @@ class BM25Index:
         scores.sort(key=lambda x: x[1], reverse=True)
 
         # Build result list
-        results: list[tuple[T, float]] = []
+        results: list[tuple[Any, float]] = []
         for entity_id, score in scores[:limit]:
             results.append((self._entities[entity_id], score))
 

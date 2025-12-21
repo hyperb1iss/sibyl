@@ -132,12 +132,14 @@ def show_task(
 
     @run_async
     async def _show() -> None:
+        from sibyl.graph.client import get_graph_client
         from sibyl.graph.entities import EntityManager
 
         try:
             with spinner("Loading task...") as progress:
                 progress.add_task("Loading task...", total=None)
-                manager = EntityManager()
+                client = await get_graph_client()
+                manager = EntityManager(client)
                 entity = await manager.get(task_id)
 
             if not entity:

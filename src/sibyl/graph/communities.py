@@ -77,7 +77,7 @@ async def export_to_networkx(client: GraphClient) -> Any:
         ImportError: If networkx is not installed.
     """
     try:
-        import networkx as nx
+        import networkx as nx  # type: ignore[import-not-found]
     except ImportError as e:
         raise ImportError(
             "networkx is required for community detection. Install with: pip install networkx"
