@@ -2,11 +2,24 @@
 
 import asyncio
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
+from dotenv import load_dotenv
 
 from sibyl.config import settings
+
+# Load .env BEFORE graphiti is imported to ensure SEMAPHORE_LIMIT is set
+# This prevents FalkorDB race condition crashes by serializing Graphiti operations
+_env_path = Path(__file__).parent.parent.parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path)
+
+# Set SEMAPHORE_LIMIT to 1 if not already set (prevents FalkorDB concurrent write crashes)
+if not os.getenv("SEMAPHORE_LIMIT"):
+    os.environ["SEMAPHORE_LIMIT"] = "1"
+
 from sibyl.errors import GraphConnectionError
 from sibyl.utils.resilience import GRAPH_RETRY, TIMEOUTS, retry, with_timeout
 
@@ -21,12 +34,23 @@ class GraphClient:
 
     This client manages the connection to FalkorDB and provides
     high-level methods for graph operations.
+
+    Uses a semaphore to serialize write operations, preventing connection
+    contention when multiple async tasks share the same FalkorDB connection.
     """
+
+    # Limit concurrent DB operations to prevent connection contention
+    # FalkorDB uses a single connection, so concurrent writes can corrupt it
+    _write_semaphore: asyncio.Semaphore | None = None
+    _MAX_CONCURRENT_WRITES = 1  # Serialize all writes for safety
 
     def __init__(self) -> None:
         """Initialize the graph client."""
         self._client: Graphiti | None = None
         self._connected = False
+        # Initialize semaphore lazily to avoid event loop issues
+        if GraphClient._write_semaphore is None:
+            GraphClient._write_semaphore = asyncio.Semaphore(self._MAX_CONCURRENT_WRITES)
 
     def _create_llm_client(self) -> object:
         """Create the LLM client based on provider settings.
@@ -72,8 +96,10 @@ class GraphClient:
             GraphConnectionError: If connection fails.
         """
         try:
+            from falkordb.asyncio import FalkorDB
             from graphiti_core import Graphiti
             from graphiti_core.driver.falkordb_driver import FalkorDriver
+            from redis.asyncio import BlockingConnectionPool
 
             log.info(
                 "Connecting to FalkorDB",
@@ -82,13 +108,34 @@ class GraphClient:
                 graph=settings.falkordb_graph_name,
                 llm_provider=settings.llm_provider,
                 llm_model=settings.llm_model,
+                max_connections=50,
+                semaphore_limit=os.getenv("SEMAPHORE_LIMIT", "20"),
             )
 
-            # Create FalkorDB driver with connection details
-            driver = FalkorDriver(
+            # Create a BlockingConnectionPool - this is the key to stability!
+            # Unlike regular ConnectionPool which errors when exhausted,
+            # BlockingConnectionPool waits for a connection to become available.
+            # This prevents "connection reset by peer" errors under concurrent load.
+            # See: https://redis.io/docs/latest/develop/clients/pools-and-muxing/
+            connection_pool = BlockingConnectionPool(
                 host=settings.falkordb_host,
                 port=settings.falkordb_port,
                 password=settings.falkordb_password or None,
+                max_connections=50,  # Pool size (BlockingConnectionPool default)
+                timeout=30,  # Wait up to 30s for a connection
+                socket_timeout=30.0,  # 30s timeout for operations
+                socket_connect_timeout=10.0,  # 10s timeout for connect
+                socket_keepalive=True,  # Keep connections alive
+                health_check_interval=15,  # Check connection health every 15s
+                decode_responses=True,  # FalkorDB expects decoded responses
+            )
+
+            # Create FalkorDB client with the blocking connection pool
+            falkor_client = FalkorDB(connection_pool=connection_pool)
+
+            # Create FalkorDB driver with our configured client
+            driver = FalkorDriver(
+                falkor_db=falkor_client,
                 database=settings.falkordb_graph_name,
             )
 
@@ -166,6 +213,41 @@ class GraphClient:
         """
         timeout = TIMEOUTS.get(operation_name, TIMEOUTS["graph_query"])
         return await with_timeout(query_coro, timeout, operation_name)  # type: ignore[arg-type]
+
+    @property
+    def write_lock(self) -> asyncio.Semaphore:
+        """Get the write semaphore for serializing DB operations.
+
+        Returns:
+            Semaphore that limits concurrent writes to prevent connection contention.
+        """
+        if GraphClient._write_semaphore is None:
+            GraphClient._write_semaphore = asyncio.Semaphore(self._MAX_CONCURRENT_WRITES)
+        return GraphClient._write_semaphore
+
+    async def execute_write(self, query: str, **params: object) -> list[dict]:
+        """Execute a write query with serialization and result verification.
+
+        Uses a semaphore to prevent concurrent writes from corrupting the
+        FalkorDB connection. Returns the query results for verification.
+
+        Args:
+            query: Cypher query to execute
+            **params: Query parameters
+
+        Returns:
+            List of result records as dicts
+
+        Raises:
+            Exception: If query execution fails
+        """
+        async with self.write_lock:
+            result = await self.client.driver.execute_query(query, **params)
+            # FalkorDB driver returns (records, header, None)
+            if isinstance(result, tuple):
+                records, _, _ = result
+                return records if records else []
+            return result if result else []
 
     async def __aenter__(self) -> "GraphClient":
         """Async context manager entry."""

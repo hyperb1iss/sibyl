@@ -98,6 +98,9 @@ class EntityManager:
         Use this for structured entities (tasks, projects) where LLM extraction
         isn't needed. Embeddings can be generated asynchronously via background queue.
 
+        Uses MERGE for idempotency and serialized writes to prevent connection
+        contention when multiple concurrent requests share the FalkorDB connection.
+
         Args:
             entity: The entity to create.
 
@@ -105,9 +108,11 @@ class EntityManager:
             The ID of the created entity.
 
         Raises:
-            Exception: If creation fails.
+            EntityCreationError: If creation fails or result verification fails.
         """
         import json
+
+        from sibyl.errors import EntityCreationError
 
         log.info(
             "Creating entity directly",
@@ -126,28 +131,28 @@ class EntityManager:
             )
             updated_at = datetime.now(UTC).isoformat()
 
-            # Create node with explicit properties
+            # Use MERGE for idempotency (safe for retries and concurrent writes)
             # Include Graphiti-compatible fields for get_by_group_ids to work:
             # - group_id: singular string (Graphiti queries: WHERE n.group_id IN $group_ids)
             # - summary: required by EntityNode model (use description as summary)
             # - labels: empty list (will be enriched later if needed)
             summary = entity.description[:500] if entity.description else entity.name
-            await self._client.client.driver.execute_query(
+
+            # Use serialized write to prevent connection contention
+            result = await self._client.execute_write(
                 """
-                CREATE (n:Entity {
-                    uuid: $uuid,
-                    name: $name,
-                    entity_type: $entity_type,
-                    description: $description,
-                    content: $content,
-                    created_at: $created_at,
-                    updated_at: $updated_at,
-                    metadata: $metadata,
-                    group_id: $group_id,
-                    summary: $summary,
-                    labels: $labels,
-                    _direct_insert: true
-                })
+                MERGE (n:Entity {uuid: $uuid})
+                SET n.name = $name,
+                    n.entity_type = $entity_type,
+                    n.description = $description,
+                    n.content = $content,
+                    n.created_at = $created_at,
+                    n.updated_at = $updated_at,
+                    n.metadata = $metadata,
+                    n.group_id = $group_id,
+                    n.summary = $summary,
+                    n.labels = $labels,
+                    n._direct_insert = true
                 RETURN n.uuid as id
                 """,
                 uuid=entity.id,
@@ -163,6 +168,21 @@ class EntityManager:
                 labels=[],
             )
 
+            # Verify the entity was actually created
+            if not result or not result[0].get("id"):
+                raise EntityCreationError(
+                    f"Entity creation returned no result for {entity.id}",
+                    entity_id=entity.id,
+                )
+
+            created_id = result[0]["id"]
+            if created_id != entity.id:
+                log.warning(
+                    "Entity ID mismatch",
+                    expected=entity.id,
+                    actual=created_id,
+                )
+
             # Persist additional attributes for specialized entity types
             await self._persist_entity_attributes(entity.id, entity)
 
@@ -173,13 +193,18 @@ class EntityManager:
             )
             return entity.id
 
+        except EntityCreationError:
+            raise
         except Exception as e:
             log.exception(
                 "Failed to create entity directly",
                 entity_id=entity.id,
                 error=str(e),
             )
-            raise
+            raise EntityCreationError(
+                f"Failed to create entity: {e}",
+                entity_id=entity.id,
+            ) from e
 
     async def get(self, entity_id: str) -> Entity:
         """Get an entity by ID.

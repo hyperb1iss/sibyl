@@ -24,6 +24,13 @@ class EntityNotFoundError(ConventionsMCPError):
         )
 
 
+class EntityCreationError(ConventionsMCPError):
+    """Raised when entity creation fails or cannot be verified."""
+
+    def __init__(self, message: str, *, entity_id: str | None = None) -> None:
+        super().__init__(message, details={"entity_id": entity_id})
+
+
 class IngestionError(ConventionsMCPError):
     """Raised when content ingestion fails."""
 
