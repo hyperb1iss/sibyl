@@ -7,7 +7,6 @@ Tests complete user journeys through the 4-tool API:
 4. Knowledge creation and discovery
 """
 
-
 import pytest
 
 from sibyl.models.entities import EntityType, RelationshipType

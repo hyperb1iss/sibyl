@@ -156,6 +156,11 @@ async def create_entity(entity: EntityCreate) -> EntityResponse:
     try:
         from sibyl.tools.core import add
 
+        # Extract task-specific fields from metadata if present
+        project = entity.metadata.get("project_id") if entity.metadata else None
+        priority = entity.metadata.get("priority") if entity.metadata else None
+        assignees = entity.metadata.get("assignees") if entity.metadata else None
+
         result = await add(
             title=entity.name,
             content=entity.content,
@@ -164,6 +169,10 @@ async def create_entity(entity: EntityCreate) -> EntityResponse:
             languages=entity.languages,
             tags=entity.tags,
             metadata=entity.metadata,
+            # Task-specific fields
+            project=project,
+            priority=priority,
+            assignees=assignees,
         )
 
         if not result.success or not result.id:

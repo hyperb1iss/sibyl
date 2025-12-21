@@ -1,12 +1,14 @@
 """Entity CRUD CLI commands.
 
 Generic commands for all entity types: list, show, create, update, delete, related.
+All commands communicate with the REST API to ensure proper event broadcasting.
 """
 
 from typing import Annotated
 
 import typer
 
+from sibyl.cli.client import SibylClientError, get_client
 from sibyl.cli.common import (
     CORAL,
     ELECTRIC_PURPLE,
@@ -16,7 +18,6 @@ from sibyl.cli.common import (
     create_table,
     error,
     info,
-    print_db_hint,
     run_async,
     spinner,
     success,
@@ -52,6 +53,19 @@ ENTITY_TYPES = [
 ]
 
 
+def _handle_client_error(e: SibylClientError) -> None:
+    """Handle client errors with helpful messages."""
+    if "Cannot connect" in str(e):
+        error(str(e))
+        info("Start the server with: sibyl serve")
+    elif e.status_code == 404:
+        error(f"Not found: {e.detail}")
+    elif e.status_code == 400:
+        error(f"Invalid request: {e.detail}")
+    else:
+        error(str(e))
+
+
 @app.command("list")
 def list_entities(
     entity_type: Annotated[
@@ -64,11 +78,13 @@ def list_entities(
         str | None, typer.Option("--category", "-c", help="Filter by category")
     ] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 50,
-    format_: Annotated[
-        str, typer.Option("--format", "-f", help="Output format: table, json, csv")
-    ] = "table",
+    table_out: Annotated[
+        bool, typer.Option("--table", help="Table output (human-readable)")
+    ] = False,
+    csv_out: Annotated[bool, typer.Option("--csv", help="CSV output")] = False,
 ) -> None:
-    """List entities by type with optional filters."""
+    """List entities by type with optional filters. Default: JSON output."""
+    format_ = "table" if table_out else ("csv" if csv_out else "json")
     if entity_type not in ENTITY_TYPES:
         error(f"Invalid entity type: {entity_type}")
         info(f"Valid types: {', '.join(ENTITY_TYPES)}")
@@ -76,25 +92,34 @@ def list_entities(
 
     @run_async
     async def _list() -> None:
-        from sibyl.tools.core import explore
+        client = get_client()
 
         try:
-            with spinner(f"Loading {entity_type}s...") as progress:
-                progress.add_task(f"Loading {entity_type}s...", total=None)
-                response = await explore(
+            if format_ in ("json", "csv"):
+                response = await client.explore(
                     mode="list",
                     types=[entity_type],
                     language=language,
                     category=category,
                     limit=limit,
                 )
+            else:
+                with spinner(f"Loading {entity_type}s...") as progress:
+                    progress.add_task(f"Loading {entity_type}s...", total=None)
+                    response = await client.explore(
+                        mode="list",
+                        types=[entity_type],
+                        language=language,
+                        category=category,
+                        limit=limit,
+                    )
 
-            entities = response.entities or []
+            entities = response.get("entities", [])
 
             if format_ == "json":
                 import json
 
-                console.print(json.dumps([e.model_dump() for e in entities], indent=2, default=str))
+                console.print(json.dumps(entities, indent=2, default=str, ensure_ascii=False))
                 return
 
             if format_ == "csv":
@@ -104,7 +129,14 @@ def list_entities(
                 writer = csv.writer(sys.stdout)
                 writer.writerow(["id", "name", "type", "description"])
                 for e in entities:
-                    writer.writerow([e.id, e.name, e.type, truncate(e.description or "", 100)])
+                    writer.writerow(
+                        [
+                            e.get("id", ""),
+                            e.get("name", ""),
+                            e.get("type", ""),
+                            truncate(e.get("description") or "", 100),
+                        ]
+                    )
                 return
 
             if not entities:
@@ -114,17 +146,16 @@ def list_entities(
             table = create_table(f"{entity_type.title()}s", "ID", "Name", "Description")
             for e in entities:
                 table.add_row(
-                    e.id[:8] + "...",
-                    truncate(e.name, 35),
-                    truncate(e.description or "", 50),
+                    e.get("id", "")[:8] + "...",
+                    truncate(e.get("name", ""), 35),
+                    truncate(e.get("description") or "", 50),
                 )
 
             console.print(table)
             console.print(f"\n[dim]Showing {len(entities)} {entity_type}(s)[/dim]")
 
-        except Exception as e:
-            error(f"Failed to list entities: {e}")
-            print_db_hint()
+        except SibylClientError as e:
+            _handle_client_error(e)
 
     _list()
 
@@ -132,64 +163,70 @@ def list_entities(
 @app.command("show")
 def show_entity(
     entity_id: Annotated[str, typer.Argument(help="Entity ID")],
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
 ) -> None:
-    """Show detailed entity information."""
+    """Show detailed entity information. Default: JSON output."""
 
     @run_async
     async def _show() -> None:
-        from sibyl.graph.client import get_graph_client
-        from sibyl.graph.entities import EntityManager
+        client = get_client()
 
         try:
-            with spinner("Loading entity...") as progress:
-                progress.add_task("Loading entity...", total=None)
-                client = await get_graph_client()
-                manager = EntityManager(client)
-                entity = await manager.get(entity_id)
+            if table_out:
+                with spinner("Loading entity...") as progress:
+                    progress.add_task("Loading entity...", total=None)
+                    entity = await client.get_entity(entity_id)
+            else:
+                entity = await client.get_entity(entity_id)
 
-            if not entity:
-                error(f"Entity not found: {entity_id}")
+            # JSON output (default)
+            if not table_out:
+                import json
+
+                console.print(json.dumps(entity, indent=2, default=str, ensure_ascii=False))
                 return
 
+            # Table output
             lines = [
-                f"[{ELECTRIC_PURPLE}]Name:[/{ELECTRIC_PURPLE}] {entity.name}",
-                f"[{ELECTRIC_PURPLE}]Type:[/{ELECTRIC_PURPLE}] {entity.entity_type}",
-                f"[{ELECTRIC_PURPLE}]ID:[/{ELECTRIC_PURPLE}] {entity.id}",
+                f"[{ELECTRIC_PURPLE}]Name:[/{ELECTRIC_PURPLE}] {entity.get('name', '')}",
+                f"[{ELECTRIC_PURPLE}]Type:[/{ELECTRIC_PURPLE}] {entity.get('entity_type', '')}",
+                f"[{ELECTRIC_PURPLE}]ID:[/{ELECTRIC_PURPLE}] {entity.get('id', '')}",
                 "",
                 f"[{NEON_CYAN}]Description:[/{NEON_CYAN}]",
-                entity.description or "[dim]No description[/dim]",
+                entity.get("description") or "[dim]No description[/dim]",
             ]
 
-            if entity.content and entity.content != entity.description:
+            content = entity.get("content", "")
+            if content and content != entity.get("description"):
                 lines.extend(
                     [
                         "",
                         f"[{NEON_CYAN}]Content:[/{NEON_CYAN}]",
-                        entity.content[:500] + "..."
-                        if len(entity.content) > 500
-                        else entity.content,
+                        content[:500] + "..." if len(content) > 500 else content,
                     ]
                 )
 
-            meta = entity.metadata or {}
+            meta = entity.get("metadata", {})
             if meta:
                 lines.extend(["", f"[{CORAL}]Metadata:[/{CORAL}]"])
                 for k, v in list(meta.items())[:10]:
                     lines.append(f"  {k}: {truncate(str(v), 60)}")
 
-            panel = create_panel("\n".join(lines), title=f"{entity.entity_type.title()} Details")
+            entity_type = entity.get("entity_type", "entity")
+            panel = create_panel("\n".join(lines), title=f"{entity_type.title()} Details")
             console.print(panel)
 
-        except Exception as e:
-            error(f"Failed to show entity: {e}")
-            print_db_hint()
+        except SibylClientError as e:
+            _handle_client_error(e)
 
     _show()
 
 
 @app.command("create")
 def create_entity(
-    entity_type: Annotated[str, typer.Option("--type", "-t", help="Entity type", prompt=True)],
+    entity_type: Annotated[str, typer.Option("--type", "-T", help="Entity type", prompt=True)],
     name: Annotated[str, typer.Option("--name", "-n", help="Entity name", prompt=True)],
     content: Annotated[str | None, typer.Option("--content", "-c", help="Entity content")] = None,
     category: Annotated[str | None, typer.Option("--category", help="Category")] = None,
@@ -197,8 +234,11 @@ def create_entity(
         str | None, typer.Option("--languages", "-l", help="Comma-separated languages")
     ] = None,
     tags: Annotated[str | None, typer.Option("--tags", help="Comma-separated tags")] = None,
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
 ) -> None:
-    """Create a new entity."""
+    """Create a new entity. Default: JSON output."""
     if entity_type not in ENTITY_TYPES:
         error(f"Invalid entity type: {entity_type}")
         info(f"Valid types: {', '.join(ENTITY_TYPES)}")
@@ -206,16 +246,30 @@ def create_entity(
 
     @run_async
     async def _create() -> None:
-        from sibyl.tools.core import add
+        import json
+
+        client = get_client()
 
         try:
-            lang_list = [l.strip() for l in languages.split(",")] if languages else None
-            tag_list = [t.strip() for t in tags.split(",")] if tags else None
+            lang_list = [lang.strip() for lang in languages.split(",")] if languages else None
+            tag_list = [tag.strip() for tag in tags.split(",")] if tags else None
 
-            with spinner("Creating entity...") as progress:
-                progress.add_task("Creating entity...", total=None)
-                response = await add(
-                    title=name,
+            if table_out:
+                with spinner("Creating entity...") as progress:
+                    progress.add_task("Creating entity...", total=None)
+                    response = await client.create_entity(
+                        name=name,
+                        content=content or f"{entity_type}: {name}",
+                        entity_type=entity_type
+                        if entity_type in ["episode", "pattern", "task", "project"]
+                        else "episode",
+                        category=category,
+                        languages=lang_list,
+                        tags=tag_list,
+                    )
+            else:
+                response = await client.create_entity(
+                    name=name,
                     content=content or f"{entity_type}: {name}",
                     entity_type=entity_type
                     if entity_type in ["episode", "pattern", "task", "project"]
@@ -225,14 +279,19 @@ def create_entity(
                     tags=tag_list,
                 )
 
-            if response.success:
-                success(f"Entity created: {response.id}")
-            else:
-                error(f"Failed to create entity: {response.message}")
+            # JSON output (default)
+            if not table_out:
+                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                return
 
-        except Exception as e:
-            error(f"Failed to create entity: {e}")
-            print_db_hint()
+            # Table output
+            if response.get("id"):
+                success(f"Entity created: {response['id']}")
+            else:
+                error("Failed to create entity")
+
+        except SibylClientError as e:
+            _handle_client_error(e)
 
     _create()
 
@@ -241,8 +300,11 @@ def create_entity(
 def delete_entity(
     entity_id: Annotated[str, typer.Argument(help="Entity ID to delete")],
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
 ) -> None:
-    """Delete an entity (with confirmation)."""
+    """Delete an entity (with confirmation). Default: JSON output."""
     if not yes:
         confirm = typer.confirm(f"Delete entity {entity_id[:8]}...? This cannot be undone.")
         if not confirm:
@@ -251,24 +313,29 @@ def delete_entity(
 
     @run_async
     async def _delete() -> None:
-        from sibyl.graph.client import get_graph_client
-        from sibyl.graph.entities import EntityManager
+        import json
+
+        client = get_client()
 
         try:
-            with spinner("Deleting entity...") as progress:
-                progress.add_task("Deleting entity...", total=None)
-                client = await get_graph_client()
-                manager = EntityManager(client)
-                deleted = await manager.delete(entity_id)
-
-            if deleted:
-                success(f"Entity deleted: {entity_id[:8]}...")
+            if table_out:
+                with spinner("Deleting entity...") as progress:
+                    progress.add_task("Deleting entity...", total=None)
+                    await client.delete_entity(entity_id)
             else:
-                error(f"Entity not found: {entity_id}")
+                await client.delete_entity(entity_id)
 
-        except Exception as e:
-            error(f"Failed to delete entity: {e}")
-            print_db_hint()
+            # JSON output (default)
+            if not table_out:
+                response = {"deleted": True, "id": entity_id}
+                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                return
+
+            # Table output
+            success(f"Entity deleted: {entity_id[:8]}...")
+
+        except SibylClientError as e:
+            _handle_client_error(e)
 
     _delete()
 
@@ -277,43 +344,61 @@ def delete_entity(
 def related_entities(
     entity_id: Annotated[str, typer.Argument(help="Entity ID")],
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
 ) -> None:
-    """Show entities related to the given entity (1-hop)."""
+    """Show entities related to the given entity (1-hop). Default: JSON output."""
 
     @run_async
     async def _related() -> None:
-        from sibyl.tools.core import explore
+        client = get_client()
 
         try:
-            with spinner("Finding related entities...") as progress:
-                progress.add_task("Finding related entities...", total=None)
-                response = await explore(
+            if table_out:
+                with spinner("Finding related entities...") as progress:
+                    progress.add_task("Finding related entities...", total=None)
+                    response = await client.explore(
+                        mode="related",
+                        entity_id=entity_id,
+                        limit=limit,
+                    )
+            else:
+                response = await client.explore(
                     mode="related",
                     entity_id=entity_id,
                     limit=limit,
                 )
 
-            entities = response.entities or []
+            entities = response.get("entities", [])
 
+            # JSON output (default)
+            if not table_out:
+                import json
+
+                console.print(json.dumps(entities, indent=2, default=str, ensure_ascii=False))
+                return
+
+            # Table output
             if not entities:
                 info("No related entities found")
                 return
 
             table = create_table("Related Entities", "ID", "Name", "Type", "Relationship")
             for e in entities:
-                rel_type = e.metadata.get("relationship_type", "-") if e.metadata else "-"
+                meta = e.get("metadata", {})
+                rel_type = meta.get("relationship_type", "-") if meta else "-"
                 table.add_row(
-                    e.id[:8] + "...",
-                    truncate(e.name, 30),
-                    e.type,
+                    e.get("id", "")[:8] + "...",
+                    truncate(e.get("name", ""), 30),
+                    e.get("type", ""),
                     rel_type,
                 )
 
             console.print(table)
             console.print(f"\n[dim]Found {len(entities)} related entity(ies)[/dim]")
 
-        except Exception as e:
-            error(f"Failed to find related entities: {e}")
-            print_db_hint()
+        except SibylClientError as e:
+            _handle_client_error(e)
 
     _related()

@@ -121,7 +121,8 @@ class EntityManager:
         )
 
         try:
-            metadata = self._serialize_metadata(entity.metadata or {})
+            # Use full entity metadata including model-specific fields
+            metadata = self._entity_to_metadata(entity)
             metadata_json = json.dumps(metadata) if metadata else "{}"
 
             created_at = (
@@ -323,9 +324,7 @@ class EntityManager:
                         break
 
                 except Exception as e:
-                    log.warning(
-                        "Failed to convert record to entity", error=str(e)
-                    )
+                    log.warning("Failed to convert record to entity", error=str(e))
                     continue
 
             log.info("Search completed", query=query, results_count=len(results))
@@ -538,7 +537,8 @@ class EntityManager:
     async def _persist_entity_attributes(self, entity_id: str, entity: Entity) -> None:
         """Persist normalized attributes/metadata on a node for reliable querying."""
         props = self._collect_properties(entity)
-        metadata = self._serialize_metadata(entity.metadata or {})
+        # Use _entity_to_metadata to include model-specific fields (Task.status, etc.)
+        metadata = self._entity_to_metadata(entity)
 
         # Remove None values to appease FalkorDB property constraints
         props = {k: v for k, v in props.items() if v is not None}
@@ -620,6 +620,9 @@ class EntityManager:
                 # Serialize datetimes to isoformat for storage
                 if isinstance(value, datetime):
                     props[field] = value.isoformat()
+                # Serialize enums to their string value
+                elif hasattr(value, "value"):
+                    props[field] = value.value
                 else:
                     props[field] = value
 
@@ -631,9 +634,63 @@ class EntityManager:
         for key, value in metadata.items():
             if isinstance(value, datetime):
                 serialized[key] = value.isoformat()
+            elif hasattr(value, "value"):  # Enum
+                serialized[key] = value.value
             elif value is not None:
                 serialized[key] = value
         return serialized
+
+    def _entity_to_metadata(self, entity: Entity) -> dict[str, Any]:
+        """Extract all entity fields as metadata for storage.
+
+        This ensures model-specific fields (Task.status, Project.tech_stack, etc.)
+        are persisted in the metadata JSON, not just the generic metadata dict.
+        """
+        from sibyl.models.tasks import Project, Task
+
+        # Start with explicit metadata
+        metadata = dict(entity.metadata or {})
+
+        # Add Task-specific fields
+        if isinstance(entity, Task):
+            metadata["status"] = entity.status.value if entity.status else "todo"
+            metadata["priority"] = entity.priority.value if entity.priority else "medium"
+            metadata["project_id"] = entity.project_id
+            metadata["task_order"] = entity.task_order
+            if entity.assignees:
+                metadata["assignees"] = entity.assignees
+            if entity.technologies:
+                metadata["technologies"] = entity.technologies
+            if entity.feature:
+                metadata["feature"] = entity.feature
+            if entity.domain:
+                metadata["domain"] = entity.domain
+            if entity.due_date:
+                metadata["due_date"] = entity.due_date.isoformat()
+            if entity.estimated_hours:
+                metadata["estimated_hours"] = entity.estimated_hours
+            if entity.branch_name:
+                metadata["branch_name"] = entity.branch_name
+            if entity.pr_url:
+                metadata["pr_url"] = entity.pr_url
+
+        # Add Project-specific fields
+        elif isinstance(entity, Project):
+            metadata["status"] = entity.status.value if entity.status else "active"
+            if entity.tech_stack:
+                metadata["tech_stack"] = entity.tech_stack
+            if entity.repository_url:
+                metadata["repository_url"] = entity.repository_url
+
+        # Common fields (check hasattr since not all entities have these)
+        if hasattr(entity, "languages") and entity.languages:
+            metadata["languages"] = entity.languages
+        if hasattr(entity, "tags") and entity.tags:
+            metadata["tags"] = entity.tags
+        if hasattr(entity, "category") and entity.category:
+            metadata["category"] = entity.category
+
+        return self._serialize_metadata(metadata)
 
     async def bulk_create_direct(
         self,
@@ -662,7 +719,8 @@ class EntityManager:
 
             for entity in batch:
                 try:
-                    metadata = self._serialize_metadata(entity.metadata or {})
+                    # Use full entity metadata including model-specific fields
+                    metadata = self._entity_to_metadata(entity)
                     metadata_json = json.dumps(metadata) if metadata else "{}"
 
                     created_at = (

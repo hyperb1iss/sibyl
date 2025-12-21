@@ -1,14 +1,15 @@
 """Main CLI application - ties all subcommands together.
 
 This is the entry point for the sibyl CLI.
+All commands communicate with the REST API to ensure proper event broadcasting.
 """
 
-import asyncio
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from sibyl.cli.client import SibylClientError, get_client
 from sibyl.cli.common import (
     CORAL,
     ELECTRIC_PURPLE,
@@ -20,12 +21,13 @@ from sibyl.cli.common import (
     create_table,
     error,
     info,
-    print_db_hint,
+    run_async,
     spinner,
     success,
 )
 
 # Import subcommand apps
+from sibyl.cli.crawl import app as crawl_app
 from sibyl.cli.db import app as db_app
 from sibyl.cli.entity import app as entity_app
 from sibyl.cli.explore import app as explore_app
@@ -49,9 +51,23 @@ app.add_typer(project_app, name="project")
 app.add_typer(entity_app, name="entity")
 app.add_typer(explore_app, name="explore")
 app.add_typer(source_app, name="source")
+app.add_typer(crawl_app, name="crawl")
 app.add_typer(export_app, name="export")
 app.add_typer(db_app, name="db")
 app.add_typer(generate_app, name="generate")
+
+
+def _handle_client_error(e: SibylClientError) -> None:
+    """Handle client errors with helpful messages."""
+    if "Cannot connect" in str(e):
+        error(str(e))
+        info("Start the server with: sibyl serve")
+    elif e.status_code == 404:
+        error(f"Not found: {e.detail}")
+    elif e.status_code == 400:
+        error(f"Invalid request: {e.detail}")
+    else:
+        error(str(e))
 
 
 # ============================================================================
@@ -134,43 +150,59 @@ def dev(
 
 
 @app.command()
-def health() -> None:
-    """Check server health status."""
+def health(
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
+) -> None:
+    """Check server health status. Default: JSON output."""
 
+    @run_async
     async def check_health() -> None:
-        from sibyl.tools.admin import health_check
+        client = get_client()
 
         try:
-            with spinner("Checking health...") as progress:
-                progress.add_task("Checking health...", total=None)
-                status = await health_check()
+            if table_out:
+                with spinner("Checking health...") as progress:
+                    progress.add_task("Checking health...", total=None)
+                    status = await client.health()
+            else:
+                status = await client.health()
 
+            # JSON output (default)
+            if not table_out:
+                import json
+
+                console.print(json.dumps(status, indent=2, default=str, ensure_ascii=False))
+                return
+
+            # Table output
             table = create_table("Health Status", "Metric", "Value")
-            status_color = SUCCESS_GREEN if status.status == "healthy" else CORAL
-            table.add_row("Status", f"[{status_color}]{status.status}[/{status_color}]")
-            table.add_row("Server", status.server_name)
-            table.add_row("Uptime", f"{status.uptime_seconds:.1f}s")
-            table.add_row("Graph Connected", "Yes" if status.graph_connected else "No")
+            status_str = status.get("status", "unknown")
+            status_color = SUCCESS_GREEN if status_str == "healthy" else CORAL
+            table.add_row("Status", f"[{status_color}]{status_str}[/{status_color}]")
+            table.add_row("Server", status.get("server_name", "unknown"))
+            table.add_row("Uptime", f"{status.get('uptime_seconds', 0):.1f}s")
+            table.add_row("Graph Connected", "Yes" if status.get("graph_connected") else "No")
 
-            if status.search_latency_ms:
-                table.add_row("Search Latency", f"{status.search_latency_ms:.2f}ms")
+            if status.get("search_latency_ms"):
+                table.add_row("Search Latency", f"{status['search_latency_ms']:.2f}ms")
 
-            if status.entity_counts:
-                for entity_type, count in status.entity_counts.items():
+            if entity_counts := status.get("entity_counts"):
+                for entity_type, count in entity_counts.items():
                     table.add_row(f"Entities: {entity_type}", str(count))
 
             console.print(table)
 
-            if status.errors:
+            if status.get("errors"):
                 console.print(f"\n[{CORAL}]Errors:[/{CORAL}]")
-                for err in status.errors:
+                for err in status["errors"]:
                     console.print(f"  [{CORAL}]•[/{CORAL}] {err}")
 
-        except Exception as e:
-            error(f"Health check failed: {e}")
-            print_db_hint()
+        except SibylClientError as e:
+            _handle_client_error(e)
 
-    asyncio.run(check_health())
+    check_health()
 
 
 @app.command()
@@ -179,45 +211,60 @@ def ingest(
         Path | None, typer.Argument(help="Path to ingest (default: entire repo)")
     ] = None,
     force: Annotated[bool, typer.Option("--force", "-f", help="Force re-ingestion")] = False,
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
 ) -> None:
-    """Ingest wisdom documents into the knowledge graph."""
+    """Ingest wisdom documents into the knowledge graph. Default: JSON output."""
 
+    @run_async
     async def run_ingest() -> None:
-        from sibyl.tools.admin import sync_wisdom_docs
-
-        console.print(create_panel(f"[{ELECTRIC_PURPLE}]Ingesting Knowledge[/{ELECTRIC_PURPLE}]"))
+        client = get_client()
 
         path_str = str(path) if path else None
 
         try:
-            with spinner("Ingesting documents...") as progress:
-                progress.add_task("Ingesting documents...", total=None)
-                result = await sync_wisdom_docs(path=path_str, force=force)
+            if table_out:
+                console.print(
+                    create_panel(f"[{ELECTRIC_PURPLE}]Ingesting Knowledge[/{ELECTRIC_PURPLE}]")
+                )
+                with spinner("Ingesting documents...") as progress:
+                    progress.add_task("Ingesting documents...", total=None)
+                    result = await client.ingest(path=path_str, force=force)
+            else:
+                result = await client.ingest(path=path_str, force=force)
 
-            if result.success:
+            # JSON output (default)
+            if not table_out:
+                import json
+
+                console.print(json.dumps(result, indent=2, default=str, ensure_ascii=False))
+                return
+
+            # Table output
+            if result.get("success"):
                 success("Ingestion complete!")
             else:
                 error("Ingestion had errors")
 
             table = create_table(None, "Metric", "Value")
-            table.add_row("Files Processed", str(result.files_processed))
-            table.add_row("Entities Created", str(result.entities_created))
-            table.add_row("Entities Updated", str(result.entities_updated))
-            table.add_row("Duration", f"{result.duration_seconds:.2f}s")
+            table.add_row("Files Processed", str(result.get("files_processed", 0)))
+            table.add_row("Entities Created", str(result.get("entities_created", 0)))
+            table.add_row("Entities Updated", str(result.get("entities_updated", 0)))
+            table.add_row("Duration", f"{result.get('duration_seconds', 0):.2f}s")
             console.print(table)
 
-            if result.errors:
+            if result.get("errors"):
                 console.print(f"\n[{CORAL}]Errors:[/{CORAL}]")
-                for err in result.errors[:10]:
+                for err in result["errors"][:10]:
                     console.print(f"  [{CORAL}]•[/{CORAL}] {err}")
-                if len(result.errors) > 10:
-                    console.print(f"  ... and {len(result.errors) - 10} more")
+                if len(result["errors"]) > 10:
+                    console.print(f"  ... and {len(result['errors']) - 10} more")
 
-        except Exception as e:
-            error(f"Ingestion failed: {e}")
-            print_db_hint()
+        except SibylClientError as e:
+            _handle_client_error(e)
 
-    asyncio.run(run_ingest())
+    run_ingest()
 
 
 @app.command()
@@ -225,62 +272,176 @@ def search(
     query: str = typer.Argument(..., help="Search query"),
     limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
     entity_type: str = typer.Option(None, "--type", "-t", help="Filter by entity type"),
+    table_out: Annotated[
+        bool, typer.Option("--table", help="Table output (human-readable)")
+    ] = False,
 ) -> None:
-    """Search the knowledge graph."""
+    """Search the knowledge graph. Default: JSON output."""
 
+    @run_async
     async def run_search() -> None:
-        from sibyl.tools.core import search as unified_search
+        client = get_client()
 
         try:
-            with spinner(f"Searching for '{query}'...") as progress:
-                progress.add_task(f"Searching for '{query}'...", total=None)
-                types = [entity_type] if entity_type else None
-                response = await unified_search(query=query, types=types, limit=limit)
+            types = [entity_type] if entity_type else None
 
+            if table_out:
+                with spinner(f"Searching for '{query}'...") as progress:
+                    progress.add_task(f"Searching for '{query}'...", total=None)
+                    response = await client.search(query=query, types=types, limit=limit)
+            else:
+                response = await client.search(query=query, types=types, limit=limit)
+
+            results = response.get("results", [])
+
+            # JSON output (default)
+            if not table_out:
+                import json
+
+                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                return
+
+            # Table output
+            total = response.get("total", len(results))
             console.print(
-                f"\n[{ELECTRIC_PURPLE}]Found {response.total} results for[/{ELECTRIC_PURPLE}] "
+                f"\n[{ELECTRIC_PURPLE}]Found {total} results for[/{ELECTRIC_PURPLE}] "
                 f"[{NEON_CYAN}]'{query}'[/{NEON_CYAN}]\n"
             )
 
-            for i, result in enumerate(response.results, 1):
-                title = f"{i}. {result.name}"
+            for i, result in enumerate(results, 1):
+                title = f"{i}. {result.get('name', 'Unknown')}"
                 content = []
-                if result.content:
+                if result.get("content"):
                     display_content = (
-                        result.content[:200] + "..."
-                        if len(result.content) > 200
-                        else result.content
+                        result["content"][:200] + "..."
+                        if len(result["content"]) > 200
+                        else result["content"]
                     )
                     content.append(display_content)
-                if result.source:
-                    content.append(f"[dim]Source: {result.source}[/dim]")
+                if result.get("source"):
+                    content.append(f"[dim]Source: {result['source']}[/dim]")
 
                 panel = create_panel(
                     "\n".join(content) if content else "[dim]No description[/dim]",
                     title=title,
-                    subtitle=f"[{CORAL}]{result.type}[/{CORAL}] [{ELECTRIC_YELLOW}]{result.score:.2f}[/{ELECTRIC_YELLOW}]",
+                    subtitle=f"[{CORAL}]{result.get('type', '')}[/{CORAL}] [{ELECTRIC_YELLOW}]{result.get('score', 0):.2f}[/{ELECTRIC_YELLOW}]",
                 )
                 console.print(panel)
 
-        except Exception as e:
-            error(f"Search failed: {e}")
-            print_db_hint()
+        except SibylClientError as e:
+            _handle_client_error(e)
 
-    asyncio.run(run_search())
+    run_search()
+
+
+@app.command("add")
+def add_knowledge(
+    title: Annotated[str, typer.Argument(help="Title of the knowledge")],
+    content: Annotated[str | None, typer.Argument(help="Content/description")] = None,
+    entity_type: Annotated[
+        str, typer.Option("--type", "-T", help="Entity type: episode, pattern, rule")
+    ] = "episode",
+    category: Annotated[str | None, typer.Option("--category", "-c", help="Category")] = None,
+    languages: Annotated[
+        str | None, typer.Option("--languages", "-l", help="Comma-separated languages")
+    ] = None,
+    tags: Annotated[str | None, typer.Option("--tags", help="Comma-separated tags")] = None,
+    auto_link: Annotated[
+        bool, typer.Option("--auto-link", "-a", help="Auto-link to related entities")
+    ] = False,
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
+) -> None:
+    """Quickly add knowledge to the graph. Default: JSON output.
+
+    Examples:
+        sibyl add "Redis insight" "Connection pool sizing..."
+        sibyl add "OAuth pattern" --type pattern -l python
+        sibyl add "Debugging tip" -c debugging --auto-link
+    """
+
+    @run_async
+    async def run_add() -> None:
+        import json
+
+        client = get_client()
+
+        try:
+            lang_list = [lang.strip() for lang in languages.split(",")] if languages else None
+            tag_list = [tag.strip() for tag in tags.split(",")] if tags else None
+            actual_content = content or title
+
+            if table_out:
+                with spinner("Adding knowledge...") as progress:
+                    progress.add_task("Adding knowledge...", total=None)
+                    response = await client.add_knowledge(
+                        title=title,
+                        content=actual_content,
+                        entity_type=entity_type,
+                        category=category,
+                        languages=lang_list,
+                        tags=tag_list,
+                        auto_link=auto_link,
+                    )
+            else:
+                response = await client.add_knowledge(
+                    title=title,
+                    content=actual_content,
+                    entity_type=entity_type,
+                    category=category,
+                    languages=lang_list,
+                    tags=tag_list,
+                    auto_link=auto_link,
+                )
+
+            # JSON output (default)
+            if not table_out:
+                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                return
+
+            # Table output
+            if response.get("id"):
+                success(f"Added: {response['id']}")
+                if auto_link:
+                    info("Auto-linked to related entities")
+            else:
+                error("Failed to add knowledge")
+
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_add()
 
 
 @app.command()
-def stats() -> None:
-    """Show knowledge graph statistics."""
+def stats(
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
+) -> None:
+    """Show knowledge graph statistics. Default: JSON output."""
 
+    @run_async
     async def get_stats() -> None:
-        from sibyl.tools.admin import get_stats as get_graph_stats
+        client = get_client()
 
         try:
-            with spinner("Loading statistics...") as progress:
-                progress.add_task("Loading statistics...", total=None)
-                stats_data = await get_graph_stats()
+            if table_out:
+                with spinner("Loading statistics...") as progress:
+                    progress.add_task("Loading statistics...", total=None)
+                    stats_data = await client.stats()
+            else:
+                stats_data = await client.stats()
 
+            # JSON output (default)
+            if not table_out:
+                import json
+
+                console.print(json.dumps(stats_data, indent=2, default=str, ensure_ascii=False))
+                return
+
+            # Table output
             console.print(
                 create_panel(f"[{ELECTRIC_PURPLE}]Knowledge Graph Statistics[/{ELECTRIC_PURPLE}]")
             )
@@ -296,11 +457,10 @@ def stats() -> None:
             if error_msg := stats_data.get("error"):
                 error(f"Failed to get stats: {error_msg}")
 
-        except Exception as e:
-            error(f"Stats failed: {e}")
-            print_db_hint()
+        except SibylClientError as e:
+            _handle_client_error(e)
 
-    asyncio.run(get_stats())
+    get_stats()
 
 
 @app.command("config")

@@ -283,6 +283,17 @@ pnpm build         # Production build
 pnpm lint          # Biome lint
 ```
 
+**Dev Server:** Runs on port **3337** (Next.js 16)
+
+**Browser Automation:** Use the `next-devtools` MCP for UI testing and automation:
+```typescript
+// Evaluate in browser context
+mcp__next-devtools__browser_eval({ code: "document.title", port: 3337 })
+
+// Initialize Next.js DevTools context
+mcp__next-devtools__init({ project_path: "/Users/bliss/dev/sibyl/web" })
+```
+
 ### Docker
 
 ```bash

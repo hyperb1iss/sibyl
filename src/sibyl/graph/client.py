@@ -225,7 +225,7 @@ class GraphClient:
             GraphClient._write_semaphore = asyncio.Semaphore(self._MAX_CONCURRENT_WRITES)
         return GraphClient._write_semaphore
 
-    async def execute_write(self, query: str, **params: object) -> list[dict]:
+    async def execute_write(self, query: str, **params: object) -> list[dict]:  # type: ignore[type-arg]
         """Execute a write query with serialization and result verification.
 
         Uses a semaphore to prevent concurrent writes from corrupting the
@@ -246,8 +246,8 @@ class GraphClient:
             # FalkorDB driver returns (records, header, None)
             if isinstance(result, tuple):
                 records, _, _ = result
-                return records if records else []
-            return result if result else []
+                return records if records else []  # type: ignore[return-value]
+            return result if result else []  # type: ignore[return-value]
 
     async def __aenter__(self) -> "GraphClient":
         """Async context manager entry."""

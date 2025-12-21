@@ -50,6 +50,7 @@ dependencies = [
     "pgvector>=0.4.2",
     "alembic>=1.17.2",
     "greenlet>=3.3.0",
+    "crawl4ai>=0.7.8",
 ]
 
 [project.optional-dependencies]

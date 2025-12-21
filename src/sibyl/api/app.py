@@ -11,7 +11,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.routing import WebSocketRoute
 
-from sibyl.api.routes import admin_router, entities_router, graph_router, search_router
+from sibyl.api.routes import (
+    admin_router,
+    entities_router,
+    graph_router,
+    search_router,
+    tasks_router,
+)
 from sibyl.api.websocket import websocket_handler
 from sibyl.config import settings
 
@@ -63,6 +69,7 @@ def create_api_app() -> FastAPI:
 
     # Register routers
     app.include_router(entities_router)
+    app.include_router(tasks_router)
     app.include_router(search_router)
     app.include_router(graph_router)
     app.include_router(admin_router)

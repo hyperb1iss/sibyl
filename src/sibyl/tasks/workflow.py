@@ -22,20 +22,27 @@ log = structlog.get_logger()
 # State Machine Definition
 # =============================================================================
 
-# Valid status transitions: {from_status: [to_statuses]}
+# All non-terminal states (any transition is allowed for flexibility)
+_ALL_ACTIVE_STATES = {
+    TaskStatus.BACKLOG,
+    TaskStatus.TODO,
+    TaskStatus.DOING,
+    TaskStatus.BLOCKED,
+    TaskStatus.REVIEW,
+    TaskStatus.DONE,
+    TaskStatus.ARCHIVED,
+}
+
+# Valid status transitions: any state can go to any other state
+# This allows flexibility for historical data, bulk updates, and edge cases
 VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
-    TaskStatus.BACKLOG: {TaskStatus.TODO, TaskStatus.ARCHIVED},
-    TaskStatus.TODO: {TaskStatus.DOING, TaskStatus.BACKLOG, TaskStatus.ARCHIVED},
-    TaskStatus.DOING: {
-        TaskStatus.BLOCKED,
-        TaskStatus.REVIEW,
-        TaskStatus.DONE,  # Direct completion without review
-        TaskStatus.ARCHIVED,
-    },
-    TaskStatus.BLOCKED: {TaskStatus.DOING, TaskStatus.ARCHIVED},
-    TaskStatus.REVIEW: {TaskStatus.DOING, TaskStatus.DONE, TaskStatus.ARCHIVED},
-    TaskStatus.DONE: {TaskStatus.ARCHIVED},  # Only archival after done
-    TaskStatus.ARCHIVED: set(),  # Terminal state
+    TaskStatus.BACKLOG: _ALL_ACTIVE_STATES,
+    TaskStatus.TODO: _ALL_ACTIVE_STATES,
+    TaskStatus.DOING: _ALL_ACTIVE_STATES,
+    TaskStatus.BLOCKED: _ALL_ACTIVE_STATES,
+    TaskStatus.REVIEW: _ALL_ACTIVE_STATES,
+    TaskStatus.DONE: _ALL_ACTIVE_STATES,
+    TaskStatus.ARCHIVED: _ALL_ACTIVE_STATES,  # Even archived can be reopened
 }
 
 

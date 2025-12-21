@@ -1,12 +1,14 @@
 """Project management CLI commands.
 
 Commands: list, show, create, update, progress.
+All commands communicate with the REST API to ensure proper event broadcasting.
 """
 
 from typing import Annotated
 
 import typer
 
+from sibyl.cli.client import SibylClientError, get_client
 from sibyl.cli.common import (
     ELECTRIC_PURPLE,
     NEON_CYAN,
@@ -16,7 +18,6 @@ from sibyl.cli.common import (
     create_table,
     error,
     info,
-    print_db_hint,
     run_async,
     spinner,
     success,
@@ -30,34 +31,56 @@ app = typer.Typer(
 )
 
 
+def _handle_client_error(e: SibylClientError) -> None:
+    """Handle client errors with helpful messages."""
+    if "Cannot connect" in str(e):
+        error(str(e))
+        info("Start the server with: sibyl serve")
+    elif e.status_code == 404:
+        error(f"Not found: {e.detail}")
+    elif e.status_code == 400:
+        error(f"Invalid request: {e.detail}")
+    else:
+        error(str(e))
+
+
 @app.command("list")
 def list_projects(
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
-    format_: Annotated[
-        str, typer.Option("--format", "-f", help="Output format: table, json, csv")
-    ] = "table",
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
+    csv_out: Annotated[bool, typer.Option("--csv", help="CSV output")] = False,
 ) -> None:
-    """List all projects."""
+    """List all projects. Default: JSON output."""
+    format_ = "table" if table_out else ("csv" if csv_out else "json")
 
     @run_async
     async def _list() -> None:
-        from sibyl.tools.core import explore
+        client = get_client()
 
         try:
-            with spinner("Loading projects...") as progress:
-                progress.add_task("Loading projects...", total=None)
-                response = await explore(
+            if format_ in ("json", "csv"):
+                response = await client.explore(
                     mode="list",
                     types=["project"],
                     limit=limit,
                 )
+            else:
+                with spinner("Loading projects...") as progress:
+                    progress.add_task("Loading projects...", total=None)
+                    response = await client.explore(
+                        mode="list",
+                        types=["project"],
+                        limit=limit,
+                    )
 
-            entities = response.entities or []
+            entities = response.get("entities", [])
 
             if format_ == "json":
                 import json
 
-                console.print(json.dumps([e.model_dump() for e in entities], indent=2, default=str))
+                console.print(json.dumps(entities, indent=2, default=str, ensure_ascii=False))
                 return
 
             if format_ == "csv":
@@ -67,12 +90,13 @@ def list_projects(
                 writer = csv.writer(sys.stdout)
                 writer.writerow(["id", "name", "status", "description"])
                 for e in entities:
+                    meta = e.get("metadata", {})
                     writer.writerow(
                         [
-                            e.id,
-                            e.name,
-                            e.metadata.get("status", ""),
-                            truncate(e.description or "", 100),
+                            e.get("id", ""),
+                            e.get("name", ""),
+                            meta.get("status", ""),
+                            truncate(e.get("description") or "", 100),
                         ]
                     )
                 return
@@ -83,19 +107,19 @@ def list_projects(
 
             table = create_table("Projects", "ID", "Name", "Status", "Description")
             for e in entities:
+                meta = e.get("metadata", {})
                 table.add_row(
-                    e.id[:8] + "...",
-                    truncate(e.name, 30),
-                    e.metadata.get("status", "active"),
-                    truncate(e.description or "", 40),
+                    e.get("id", "")[:8] + "...",
+                    truncate(e.get("name", ""), 30),
+                    meta.get("status", "active"),
+                    truncate(e.get("description") or "", 40),
                 )
 
             console.print(table)
             console.print(f"\n[dim]Showing {len(entities)} project(s)[/dim]")
 
-        except Exception as e:
-            error(f"Failed to list projects: {e}")
-            print_db_hint()
+        except SibylClientError as e:
+            _handle_client_error(e)
 
     _list()
 
@@ -103,47 +127,71 @@ def list_projects(
 @app.command("show")
 def show_project(
     project_id: Annotated[str, typer.Argument(help="Project ID")],
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
 ) -> None:
-    """Show project details with task summary."""
+    """Show project details with task summary. Default: JSON output."""
 
     @run_async
     async def _show() -> None:
-        from sibyl.graph.client import get_graph_client
-        from sibyl.graph.entities import EntityManager
-        from sibyl.tools.core import explore
+        client = get_client()
 
         try:
-            with spinner("Loading project...") as progress:
-                progress.add_task("Loading project...", total=None)
-                client = await get_graph_client()
-                manager = EntityManager(client)
-                entity = await manager.get(project_id)
-
-                # Get task counts
-                tasks_response = await explore(
+            if table_out:
+                with spinner("Loading project...") as progress:
+                    progress.add_task("Loading project...", total=None)
+                    entity = await client.get_entity(project_id)
+                    tasks_response = await client.explore(
+                        mode="list",
+                        types=["task"],
+                        project=project_id,
+                        limit=500,
+                    )
+            else:
+                entity = await client.get_entity(project_id)
+                tasks_response = await client.explore(
                     mode="list",
                     types=["task"],
                     project=project_id,
                     limit=500,
                 )
 
-            if not entity:
-                error(f"Project not found: {project_id}")
+            # JSON output (default)
+            if not table_out:
+                import json
+
+                # Include task summary in output
+                tasks = tasks_response.get("entities", [])
+                status_counts: dict[str, int] = {}
+                for t in tasks:
+                    status = t.get("metadata", {}).get("status", "unknown")
+                    status_counts[status] = status_counts.get(status, 0) + 1
+
+                output = {
+                    **entity,
+                    "task_summary": {
+                        "total": len(tasks),
+                        "by_status": status_counts,
+                    },
+                }
+                console.print(json.dumps(output, indent=2, default=str, ensure_ascii=False))
                 return
 
-            tasks = tasks_response.entities or []
+            # Table output
+            tasks = tasks_response.get("entities", [])
             status_counts: dict[str, int] = {}
             for t in tasks:
-                status = t.metadata.get("status", "unknown")
+                status = t.get("metadata", {}).get("status", "unknown")
                 status_counts[status] = status_counts.get(status, 0) + 1
 
-            meta = entity.metadata or {}
+            meta = entity.get("metadata", {})
             lines = [
-                f"[{ELECTRIC_PURPLE}]Name:[/{ELECTRIC_PURPLE}] {entity.name}",
+                f"[{ELECTRIC_PURPLE}]Name:[/{ELECTRIC_PURPLE}] {entity.get('name', '')}",
                 f"[{ELECTRIC_PURPLE}]Status:[/{ELECTRIC_PURPLE}] {meta.get('status', 'active')}",
                 "",
                 f"[{NEON_CYAN}]Description:[/{NEON_CYAN}]",
-                entity.description or "[dim]No description[/dim]",
+                entity.get("description") or "[dim]No description[/dim]",
                 "",
                 f"[{NEON_CYAN}]Task Summary:[/{NEON_CYAN}]",
             ]
@@ -164,12 +212,11 @@ def show_project(
                     f"\n[{NEON_CYAN}]Tech Stack:[/{NEON_CYAN}] {', '.join(meta['tech_stack'])}"
                 )
 
-            panel = create_panel("\n".join(lines), title=f"Project {entity.id[:8]}")
+            panel = create_panel("\n".join(lines), title=f"Project {entity.get('id', '')[:8]}")
             console.print(panel)
 
-        except Exception as e:
-            error(f"Failed to show project: {e}")
-            print_db_hint()
+        except SibylClientError as e:
+            _handle_client_error(e)
 
     _show()
 
@@ -181,31 +228,53 @@ def create_project(
         str | None, typer.Option("--description", "-d", help="Project description")
     ] = None,
     repo: Annotated[str | None, typer.Option("--repo", "-r", help="Repository URL")] = None,
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
 ) -> None:
-    """Create a new project."""
+    """Create a new project. Default: JSON output."""
 
     @run_async
     async def _create() -> None:
-        from sibyl.tools.core import add
+        import json
+
+        client = get_client()
 
         try:
-            with spinner("Creating project...") as progress:
-                progress.add_task("Creating project...", total=None)
-                response = await add(
-                    title=name,
+            metadata = {}
+            if repo:
+                metadata["repository_url"] = repo
+
+            if table_out:
+                with spinner("Creating project...") as progress:
+                    progress.add_task("Creating project...", total=None)
+                    response = await client.create_entity(
+                        name=name,
+                        content=description or f"Project: {name}",
+                        entity_type="project",
+                        metadata=metadata if metadata else None,
+                    )
+            else:
+                response = await client.create_entity(
+                    name=name,
                     content=description or f"Project: {name}",
                     entity_type="project",
-                    metadata={"repository_url": repo} if repo else None,
+                    metadata=metadata if metadata else None,
                 )
 
-            if response.success:
-                success(f"Project created: {response.id}")
-            else:
-                error(f"Failed to create project: {response.message}")
+            # JSON output (default)
+            if not table_out:
+                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                return
 
-        except Exception as e:
-            error(f"Failed to create project: {e}")
-            print_db_hint()
+            # Table output
+            if response.get("id"):
+                success(f"Project created: {response['id']}")
+            else:
+                error("Failed to create project")
+
+        except SibylClientError as e:
+            _handle_client_error(e)
 
     _create()
 
@@ -213,36 +282,63 @@ def create_project(
 @app.command("progress")
 def project_progress(
     project_id: Annotated[str, typer.Argument(help="Project ID")],
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
 ) -> None:
-    """Show project progress with visual breakdown."""
+    """Show project progress with visual breakdown. Default: JSON output."""
 
     @run_async
     async def _progress() -> None:
-        from sibyl.tools.core import explore
+        client = get_client()
 
         try:
-            with spinner("Loading progress...") as progress:
-                progress.add_task("Loading progress...", total=None)
-                response = await explore(
+            if table_out:
+                with spinner("Loading progress...") as progress:
+                    progress.add_task("Loading progress...", total=None)
+                    response = await client.explore(
+                        mode="list",
+                        types=["task"],
+                        project=project_id,
+                        limit=500,
+                    )
+            else:
+                response = await client.explore(
                     mode="list",
                     types=["task"],
                     project=project_id,
                     limit=500,
                 )
 
-            tasks = response.entities or []
-            if not tasks:
-                info("No tasks found for this project")
-                return
+            tasks = response.get("entities", [])
 
             status_counts: dict[str, int] = {}
             for t in tasks:
-                status = t.metadata.get("status", "unknown")
+                status = t.get("metadata", {}).get("status", "unknown")
                 status_counts[status] = status_counts.get(status, 0) + 1
 
             total = len(tasks)
             done = status_counts.get("done", 0)
             pct = (done / total) * 100 if total > 0 else 0
+
+            # JSON output (default)
+            if not table_out:
+                import json
+
+                output = {
+                    "project_id": project_id,
+                    "total_tasks": total,
+                    "completed": done,
+                    "progress_percent": round(pct, 1),
+                    "by_status": status_counts,
+                }
+                console.print(json.dumps(output, indent=2, default=str, ensure_ascii=False))
+                return
+
+            # Table output
+            if not tasks:
+                info("No tasks found for this project")
+                return
 
             console.print(f"\n[{ELECTRIC_PURPLE}]Project Progress[/{ELECTRIC_PURPLE}]\n")
 
@@ -261,8 +357,7 @@ def project_progress(
                     status_bar = "█" * min(count, 30)
                     console.print(f"  {status:10} [{NEON_CYAN}]{status_bar}[/{NEON_CYAN}] {count}")
 
-        except Exception as e:
-            error(f"Failed to get progress: {e}")
-            print_db_hint()
+        except SibylClientError as e:
+            _handle_client_error(e)
 
     _progress()

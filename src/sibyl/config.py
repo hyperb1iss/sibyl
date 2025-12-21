@@ -39,7 +39,9 @@ class Settings(BaseSettings):
     postgres_host: str = Field(default="localhost", description="PostgreSQL host")
     postgres_port: int = Field(default=5433, description="PostgreSQL port")
     postgres_user: str = Field(default="sibyl", description="PostgreSQL user")
-    postgres_password: SecretStr = Field(default=SecretStr("sibyl_dev"), description="PostgreSQL password")
+    postgres_password: SecretStr = Field(
+        default=SecretStr("sibyl_dev"), description="PostgreSQL password"
+    )
     postgres_db: str = Field(default="sibyl", description="PostgreSQL database name")
     postgres_pool_size: int = Field(default=10, description="Connection pool size")
     postgres_max_overflow: int = Field(default=20, description="Max overflow connections")

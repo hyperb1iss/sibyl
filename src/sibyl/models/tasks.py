@@ -68,6 +68,7 @@ class Task(Entity):
     domain: str | None = Field(default=None, description="Knowledge domain (auth, db, api, etc)")
     technologies: list[str] = Field(default_factory=list, description="Technologies involved")
     complexity: TaskComplexity = Field(default=TaskComplexity.MEDIUM, description="Task complexity")
+    tags: list[str] = Field(default_factory=list, description="Auto-generated and manual tags")
 
     # Git integration
     branch_name: str | None = Field(default=None, description="Associated Git branch")

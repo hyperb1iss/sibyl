@@ -1,6 +1,5 @@
 """Tests for task effort estimation."""
 
-
 from sibyl.tasks.estimation import (
     SimilarTask,
     TaskEstimate,

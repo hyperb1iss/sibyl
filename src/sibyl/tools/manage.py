@@ -284,9 +284,11 @@ async def _update_task(
         )
 
     # Filter allowed update fields
+    # Note: status is included for historical/bulk updates that need to bypass workflow
     allowed_fields = {
         "title",
         "description",
+        "status",  # For historical/bulk updates
         "priority",
         "complexity",
         "feature",
