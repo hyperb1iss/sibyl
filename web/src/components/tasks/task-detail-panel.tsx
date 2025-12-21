@@ -12,6 +12,7 @@ import {
   GitPullRequest,
   Loader2,
   Pause,
+  Pencil,
   Play,
   RotateCcw,
   Send,
@@ -27,6 +28,7 @@ import { toast } from 'sonner';
 
 import { EditableDate, EditableSelect, EditableTags, EditableText } from '@/components/editable';
 import { EntityBadge } from '@/components/ui/badge';
+import { Markdown } from '@/components/ui/markdown';
 import type { Entity, TaskStatus } from '@/lib/api';
 import {
   formatDateTime,
@@ -84,6 +86,8 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
   const { data: projectsData } = useProjects();
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [editingContent, setEditingContent] = useState(false);
+  const [editingLearnings, setEditingLearnings] = useState(false);
 
   const status = (task.metadata.status as TaskStatusType) || 'backlog';
   const priority = (task.metadata.priority as TaskPriorityType) || 'medium';
@@ -368,18 +372,45 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
         <div className="lg:col-span-2 space-y-6">
           {/* Details */}
           <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-6">
-            <h2 className="text-sm font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4">
-              Details
-            </h2>
-            <div className="text-sc-fg-primary leading-relaxed whitespace-pre-wrap">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-sc-fg-subtle uppercase tracking-wide">
+                Details
+              </h2>
+              <button
+                type="button"
+                onClick={() => setEditingContent(!editingContent)}
+                className={`p-1.5 rounded-lg transition-all ${
+                  editingContent
+                    ? 'bg-sc-purple/20 text-sc-purple'
+                    : 'text-sc-fg-subtle hover:text-sc-fg-muted hover:bg-sc-bg-highlight/50'
+                }`}
+                title={editingContent ? 'View markdown' : 'Edit'}
+              >
+                <Pencil size={14} />
+              </button>
+            </div>
+            {editingContent ? (
               <EditableText
                 value={task.content || ''}
-                onSave={v => updateField('content', v || undefined, false)}
-                placeholder="Add detailed content, requirements, notes..."
+                onSave={async v => {
+                  await updateField('content', v || undefined, false);
+                  setEditingContent(false);
+                }}
+                placeholder="Add detailed content, requirements, notes... (Markdown supported)"
                 multiline
-                rows={6}
+                rows={10}
               />
-            </div>
+            ) : task.content ? (
+              <Markdown content={task.content} />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditingContent(true)}
+                className="text-sc-fg-subtle italic hover:text-sc-fg-muted transition-colors"
+              >
+                Add detailed content, requirements, notes...
+              </button>
+            )}
           </div>
 
           {/* Technologies */}
@@ -399,19 +430,46 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
           {/* Learnings - show when done or has content */}
           {(status === 'done' || learnings) && (
             <div className="bg-gradient-to-br from-sc-green/10 to-sc-cyan/5 border border-sc-green/20 rounded-2xl p-6">
-              <h2 className="text-sm font-semibold text-sc-green uppercase tracking-wide mb-4 flex items-center gap-2">
-                <CheckCircle2 size={16} />
-                Learnings
-              </h2>
-              <div className="text-sc-fg-primary leading-relaxed">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold text-sc-green uppercase tracking-wide flex items-center gap-2">
+                  <CheckCircle2 size={16} />
+                  Learnings
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setEditingLearnings(!editingLearnings)}
+                  className={`p-1.5 rounded-lg transition-all ${
+                    editingLearnings
+                      ? 'bg-sc-green/20 text-sc-green'
+                      : 'text-sc-fg-subtle hover:text-sc-fg-muted hover:bg-sc-bg-highlight/50'
+                  }`}
+                  title={editingLearnings ? 'View markdown' : 'Edit'}
+                >
+                  <Pencil size={14} />
+                </button>
+              </div>
+              {editingLearnings ? (
                 <EditableText
                   value={learnings || ''}
-                  onSave={v => updateField('learnings', v || undefined)}
-                  placeholder="What did you learn? Capture insights..."
+                  onSave={async v => {
+                    await updateField('learnings', v || undefined);
+                    setEditingLearnings(false);
+                  }}
+                  placeholder="What did you learn? Capture insights... (Markdown supported)"
                   multiline
-                  rows={4}
+                  rows={6}
                 />
-              </div>
+              ) : learnings ? (
+                <Markdown content={learnings} />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEditingLearnings(true)}
+                  className="text-sc-fg-subtle italic hover:text-sc-fg-muted transition-colors"
+                >
+                  What did you learn? Capture insights...
+                </button>
+              )}
             </div>
           )}
 

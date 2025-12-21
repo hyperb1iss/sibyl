@@ -13,6 +13,9 @@
         "noStaticElementInteractions": "off",
         "useSemanticElements": "off"
       },
+      "performance": {
+        "noImgElement": "off"
+      },
       "complexity": {
         "noBannedTypes": "error",
         "noUselessTypeConstraint": "error"

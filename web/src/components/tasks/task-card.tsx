@@ -1,12 +1,14 @@
 'use client';
 
+import { AlertTriangle, Calendar, Clock, Pause, Zap } from 'lucide-react';
 import { memo } from 'react';
 import type { TaskPriority, TaskStatus, TaskSummary } from '@/lib/api';
-import { TASK_PRIORITY_CONFIG, TASK_STATUS_CONFIG } from '@/lib/constants';
+import { TASK_STATUS_CONFIG } from '@/lib/constants';
 
 interface TaskCardProps {
   task: TaskSummary;
   projectName?: string;
+  showProject?: boolean;
   onDragStart?: (e: React.DragEvent, taskId: string) => void;
   onClick?: (taskId: string) => void;
   onProjectClick?: (projectId: string) => void;
@@ -23,27 +25,65 @@ function formatDueDate(dateStr: string): string {
   const dueDay = new Date(date);
   dueDay.setHours(0, 0, 0, 0);
 
-  if (dueDay.getTime() === today.getTime()) {
-    return 'Today';
-  }
-  if (dueDay.getTime() === tomorrow.getTime()) {
-    return 'Tomorrow';
-  }
+  if (dueDay.getTime() === today.getTime()) return 'Today';
+  if (dueDay.getTime() === tomorrow.getTime()) return 'Tomorrow';
 
   const diffDays = Math.ceil((dueDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-  if (diffDays < 0) {
-    return `${Math.abs(diffDays)}d overdue`;
-  }
-  if (diffDays <= 7) {
-    return `${diffDays}d left`;
-  }
+  if (diffDays < 0) return `${Math.abs(diffDays)}d overdue`;
+  if (diffDays <= 7) return `${diffDays}d`;
 
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+// Priority-based card styling - make each priority visually distinct
+const PRIORITY_STYLES: Record<
+  string,
+  { bg: string; border: string; accent: string; badge: string }
+> = {
+  critical: {
+    bg: 'bg-gradient-to-br from-sc-red/15 via-sc-bg-base to-sc-bg-base',
+    border: 'border-sc-red/40 hover:border-sc-red/60',
+    accent: 'bg-sc-red',
+    badge: 'bg-sc-red/20 text-sc-red border-sc-red/30',
+  },
+  high: {
+    bg: 'bg-gradient-to-br from-sc-coral/10 via-sc-bg-base to-sc-bg-base',
+    border: 'border-sc-coral/30 hover:border-sc-coral/50',
+    accent: 'bg-sc-coral',
+    badge: 'bg-sc-coral/20 text-sc-coral border-sc-coral/30',
+  },
+  medium: {
+    bg: 'bg-sc-bg-base',
+    border: 'border-sc-purple/20 hover:border-sc-purple/40',
+    accent: 'bg-sc-purple',
+    badge: 'bg-sc-purple/20 text-sc-purple border-sc-purple/30',
+  },
+  low: {
+    bg: 'bg-sc-bg-base',
+    border: 'border-sc-cyan/20 hover:border-sc-cyan/40',
+    accent: 'bg-sc-cyan',
+    badge: 'bg-sc-cyan/20 text-sc-cyan border-sc-cyan/30',
+  },
+  someday: {
+    bg: 'bg-sc-bg-base',
+    border: 'border-sc-fg-subtle/20 hover:border-sc-fg-subtle/40',
+    accent: 'bg-sc-fg-subtle',
+    badge: 'bg-sc-fg-subtle/20 text-sc-fg-subtle border-sc-fg-subtle/30',
+  },
+};
+
+const PRIORITY_LABELS: Record<string, string> = {
+  critical: 'URGENT',
+  high: 'High',
+  medium: 'Med',
+  low: 'Low',
+  someday: 'Later',
+};
+
 export const TaskCard = memo(function TaskCard({
   task,
   projectName,
+  showProject = true,
   onDragStart,
   onClick,
   onProjectClick,
@@ -51,13 +91,30 @@ export const TaskCard = memo(function TaskCard({
   const status = (task.metadata.status ?? 'todo') as TaskStatus;
   const priority = (task.metadata.priority ?? 'medium') as TaskPriority;
   const statusConfig = TASK_STATUS_CONFIG[status as keyof typeof TASK_STATUS_CONFIG];
-  const priorityConfig = TASK_PRIORITY_CONFIG[priority as keyof typeof TASK_PRIORITY_CONFIG];
   const assignees = task.metadata.assignees ?? [];
   const projectId = task.metadata.project_id as string | undefined;
   const dueDate = task.metadata.due_date as string | undefined;
+  const feature = task.metadata.feature as string | undefined;
 
-  // Check if overdue (not done and past due)
   const isOverdue = dueDate && status !== 'done' && new Date(dueDate) < new Date();
+  const isBlocked = status === 'blocked';
+  const isDoing = status === 'doing';
+  const priorityStyle = PRIORITY_STYLES[priority] || PRIORITY_STYLES.medium;
+
+  // Override styles for special statuses
+  const cardBg = isBlocked
+    ? 'bg-gradient-to-br from-sc-yellow/10 via-sc-bg-base to-sc-bg-base'
+    : isDoing
+      ? 'bg-gradient-to-br from-sc-purple/10 via-sc-bg-base to-sc-bg-base'
+      : priorityStyle.bg;
+
+  const cardBorder = isBlocked
+    ? 'border-sc-yellow/40 hover:border-sc-yellow/60'
+    : isDoing
+      ? 'border-sc-purple/40 hover:border-sc-purple/60'
+      : isOverdue
+        ? 'border-sc-red/50 hover:border-sc-red/70'
+        : priorityStyle.border;
 
   return (
     <div
@@ -65,12 +122,13 @@ export const TaskCard = memo(function TaskCard({
       onDragStart={e => onDragStart?.(e, task.id)}
       onClick={() => onClick?.(task.id)}
       className={`
-        bg-sc-bg-base border rounded-lg p-3
+        relative rounded-xl overflow-hidden
         cursor-grab active:cursor-grabbing
-        transition-all duration-150
-        hover:shadow-md
+        transition-all duration-200
+        hover:shadow-lg hover:shadow-black/20
+        hover:-translate-y-0.5
         group select-none
-        ${isOverdue ? 'border-sc-red/50 hover:border-sc-red/70' : 'border-sc-fg-subtle/20 hover:border-sc-fg-subtle/40'}
+        border ${cardBorder} ${cardBg}
       `}
       role="button"
       tabIndex={0}
@@ -81,84 +139,119 @@ export const TaskCard = memo(function TaskCard({
         }
       }}
     >
-      {/* Project badge + Priority indicator */}
-      <div className="flex items-center gap-2 mb-2 flex-wrap">
-        {projectName && projectId && (
-          <button
-            type="button"
-            onClick={e => {
-              e.stopPropagation();
-              onProjectClick?.(projectId);
-            }}
-            className="text-xs px-1.5 py-0.5 rounded bg-sc-cyan/20 text-sc-cyan border border-sc-cyan/30 hover:bg-sc-cyan/30 transition-colors truncate max-w-[120px]"
-            title={`View ${projectName} tasks`}
-          >
-            ◇ {projectName}
-          </button>
-        )}
-        <span
-          className={`text-xs px-1.5 py-0.5 rounded ${priorityConfig?.bgClass} ${priorityConfig?.textClass}`}
-        >
-          {priorityConfig?.label ?? priority}
-        </span>
-        {typeof task.metadata.feature === 'string' && task.metadata.feature && (
-          <span className="text-xs text-sc-fg-subtle truncate">{task.metadata.feature}</span>
-        )}
-      </div>
+      {/* Priority accent bar */}
+      <div className={`absolute left-0 top-0 bottom-0 w-1 ${priorityStyle.accent}`} />
 
-      {/* Title */}
-      <h4 className="text-sm font-medium text-sc-fg-primary line-clamp-2 mb-2 group-hover:text-sc-purple transition-colors">
-        {task.name}
-      </h4>
-
-      {/* Description preview */}
-      {task.description && (
-        <p className="text-xs text-sc-fg-muted line-clamp-2 mb-3">{task.description}</p>
+      {/* Blocked overlay pattern */}
+      {isBlocked && (
+        <div
+          className="absolute inset-0 opacity-5 pointer-events-none"
+          style={{
+            backgroundImage:
+              'repeating-linear-gradient(45deg, transparent, transparent 10px, currentColor 10px, currentColor 11px)',
+          }}
+        />
       )}
 
-      {/* Footer */}
-      <div className="flex items-center justify-between">
-        {/* Left side: Assignees + Due date */}
-        <div className="flex items-center gap-2">
-          {/* Assignees */}
-          <div className="flex items-center -space-x-1">
-            {assignees.slice(0, 3).map(assignee => (
-              <div
-                key={assignee}
-                className="w-5 h-5 rounded-full bg-sc-bg-elevated border border-sc-bg-base flex items-center justify-center text-[10px] text-sc-fg-muted"
-                title={assignee}
+      <div className="pl-4 pr-3 py-3">
+        {/* Top row: Priority badge + Project/Feature + Status indicator */}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            {/* Priority badge - always visible */}
+            <span
+              className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border ${priorityStyle.badge}`}
+            >
+              {priority === 'critical' && <Zap size={10} className="animate-pulse" />}
+              {PRIORITY_LABELS[priority]}
+            </span>
+
+            {/* Project badge */}
+            {showProject && projectName && projectId && (
+              <button
+                type="button"
+                onClick={e => {
+                  e.stopPropagation();
+                  onProjectClick?.(projectId);
+                }}
+                className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-sc-bg-elevated text-sc-fg-muted hover:text-sc-cyan hover:bg-sc-cyan/10 transition-colors truncate max-w-[80px]"
+                title={`Filter by ${projectName}`}
               >
-                {assignee.charAt(0).toUpperCase()}
-              </div>
-            ))}
-            {assignees.length > 3 && (
-              <div className="w-5 h-5 rounded-full bg-sc-bg-elevated border border-sc-bg-base flex items-center justify-center text-[10px] text-sc-fg-subtle">
-                +{assignees.length - 3}
+                {projectName}
+              </button>
+            )}
+
+            {/* Feature tag */}
+            {feature && <span className="text-[10px] text-sc-fg-subtle truncate">{feature}</span>}
+          </div>
+
+          {/* Status indicator */}
+          <div className={`shrink-0 flex items-center gap-1 text-xs ${statusConfig?.textClass}`}>
+            {isBlocked && <Pause size={12} className="text-sc-yellow" />}
+            {isDoing && <Clock size={12} className="text-sc-purple animate-pulse" />}
+            {!isBlocked && !isDoing && <span className="opacity-60">{statusConfig?.icon}</span>}
+          </div>
+        </div>
+
+        {/* Title */}
+        <h4
+          className={`text-sm font-medium line-clamp-2 leading-snug transition-colors ${
+            isBlocked
+              ? 'text-sc-yellow'
+              : isDoing
+                ? 'text-sc-fg-primary'
+                : 'text-sc-fg-primary group-hover:text-white'
+          }`}
+        >
+          {task.name}
+        </h4>
+
+        {/* Description preview */}
+        {task.description && (
+          <p className="text-xs text-sc-fg-subtle line-clamp-1 mt-1.5">{task.description}</p>
+        )}
+
+        {/* Footer */}
+        <div className="flex items-center justify-between mt-3 pt-2 border-t border-sc-fg-subtle/10">
+          {/* Left: Assignees */}
+          <div className="flex items-center gap-2">
+            {assignees.length > 0 && (
+              <div className="flex items-center -space-x-1.5">
+                {assignees.slice(0, 2).map(assignee => (
+                  <div
+                    key={assignee}
+                    className="w-5 h-5 rounded-full bg-sc-bg-surface border-2 border-sc-bg-base flex items-center justify-center text-[10px] font-medium text-sc-fg-muted"
+                    title={assignee}
+                  >
+                    {assignee.charAt(0).toUpperCase()}
+                  </div>
+                ))}
+                {assignees.length > 2 && (
+                  <div className="w-5 h-5 rounded-full bg-sc-bg-surface border-2 border-sc-bg-base flex items-center justify-center text-[9px] text-sc-fg-subtle">
+                    +{assignees.length - 2}
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          {/* Due date badge */}
+          {/* Right: Due date */}
           {dueDate && (
             <span
-              className={`text-[10px] px-1.5 py-0.5 rounded ${
+              className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded ${
                 isOverdue
                   ? 'bg-sc-red/20 text-sc-red'
                   : status === 'done'
                     ? 'bg-sc-green/20 text-sc-green'
-                    : 'bg-sc-fg-subtle/10 text-sc-fg-subtle'
+                    : 'bg-sc-bg-elevated text-sc-fg-muted'
               }`}
               title={new Date(dueDate).toLocaleDateString()}
             >
+              {isOverdue && <AlertTriangle size={10} />}
+              <Calendar size={10} />
               {formatDueDate(dueDate)}
             </span>
           )}
         </div>
-
-        {/* Status icon */}
-        <span className={`text-sm ${statusConfig?.textClass}`} title={statusConfig?.label}>
-          {statusConfig?.icon}
-        </span>
       </div>
     </div>
   );
@@ -166,17 +259,21 @@ export const TaskCard = memo(function TaskCard({
 
 export function TaskCardSkeleton() {
   return (
-    <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-lg p-3 animate-pulse">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="h-4 w-12 bg-sc-bg-elevated rounded" />
-      </div>
-      <div className="h-4 w-full bg-sc-bg-elevated rounded mb-2" />
-      <div className="h-3 w-3/4 bg-sc-bg-elevated rounded mb-3" />
-      <div className="flex items-center justify-between">
-        <div className="flex -space-x-1">
-          <div className="w-5 h-5 rounded-full bg-sc-bg-elevated" />
+    <div className="relative bg-sc-bg-base rounded-xl overflow-hidden border border-sc-fg-subtle/10 animate-pulse">
+      <div className="absolute left-0 top-0 bottom-0 w-1 bg-sc-fg-subtle/20" />
+      <div className="pl-4 pr-3 py-3">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="h-4 w-12 bg-sc-bg-elevated rounded" />
+          <div className="h-4 w-16 bg-sc-bg-elevated rounded" />
         </div>
-        <div className="w-4 h-4 bg-sc-bg-elevated rounded" />
+        <div className="h-4 w-full bg-sc-bg-elevated rounded mb-1" />
+        <div className="h-4 w-3/4 bg-sc-bg-elevated rounded" />
+        <div className="flex items-center justify-between mt-3 pt-2 border-t border-sc-fg-subtle/10">
+          <div className="flex -space-x-1">
+            <div className="w-5 h-5 rounded-full bg-sc-bg-elevated" />
+          </div>
+          <div className="h-4 w-14 bg-sc-bg-elevated rounded" />
+        </div>
       </div>
     </div>
   );

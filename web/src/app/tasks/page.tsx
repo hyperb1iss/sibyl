@@ -173,6 +173,7 @@ function TasksPageContent() {
           tasks={tasks}
           projects={projects.map(p => ({ id: p.id, name: p.name }))}
           isLoading={isLoading}
+          currentProjectId={projectFilter}
           onStatusChange={handleStatusChange}
           onTaskClick={handleTaskClick}
           onProjectFilter={handleProjectFilter}
