@@ -182,6 +182,8 @@ class CrawlerService:
             only_text=False,
             deep_crawl_strategy=strategy,
             stream=True,  # Enable async iteration
+            semaphore_count=3,  # Reduce concurrency to avoid browser context exhaustion
+            page_timeout=90000,  # 90s timeout for slow pages
         )
 
         log.info(

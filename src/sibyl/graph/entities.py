@@ -418,9 +418,10 @@ class EntityManager:
         limit: int = 50,
         offset: int = 0,
     ) -> list[Entity]:
-        """List all entities of a specific type using Graphiti's node APIs.
+        """List all entities of a specific type using direct Cypher query.
 
-        Uses get_by_group_ids() and filters by entity_type in Python.
+        Note: Graphiti's get_by_group_ids() doesn't return custom properties like
+        entity_type, so we use a direct Cypher query instead.
 
         Args:
             entity_type: The type of entities to list.
@@ -433,51 +434,61 @@ class EntityManager:
         log.debug("Listing entities", entity_type=entity_type, limit=limit, offset=offset)
 
         try:
+            # Direct Cypher query to get entities with all their properties
+            # This is more reliable than Graphiti's get_by_group_ids which doesn't
+            # return custom properties like entity_type
+            result = await self._client.client.driver.execute_query(
+                """
+                MATCH (n)
+                WHERE n.entity_type = $entity_type AND n.group_id = 'conventions'
+                RETURN n.uuid AS uuid,
+                       n.name AS name,
+                       n.entity_type AS entity_type,
+                       n.content AS content,
+                       n.description AS description,
+                       n.summary AS summary,
+                       n.metadata AS metadata,
+                       n.created_at AS created_at,
+                       n.updated_at AS updated_at,
+                       n.status AS status,
+                       n.priority AS priority,
+                       n.project_id AS project_id,
+                       n.task_order AS task_order,
+                       n.feature AS feature,
+                       n.complexity AS complexity,
+                       n.due_date AS due_date,
+                       n.tags AS tags,
+                       n.assignees AS assignees,
+                       n.learnings AS learnings,
+                       labels(n) AS labels
+                ORDER BY n.created_at DESC
+                SKIP $offset
+                LIMIT $limit
+                """,
+                entity_type=entity_type.value,
+                offset=offset,
+                limit=limit,
+            )
+
             entities: list[Entity] = []
 
-            # Get EntityNodes from the conventions group
-            # We request more than limit since we'll filter by type
-            fetch_limit = (limit + offset) * 5  # Over-fetch to handle filtering
-
-            try:
-                entity_nodes = await EntityNode.get_by_group_ids(
-                    self._client.driver,
-                    group_ids=["conventions"],
-                    limit=fetch_limit,
-                )
-                for node in entity_nodes:
-                    # Filter by entity_type attribute
-                    node_type = node.attributes.get("entity_type") if node.attributes else None
-                    if node_type == entity_type.value:
-                        entities.append(self._node_to_entity(node))
-            except Exception as e:
-                log.debug("EntityNode.get_by_group_ids failed", error=str(e))
-
-            # Get EpisodicNodes from the conventions group
-            try:
-                episodic_nodes = await EpisodicNode.get_by_group_ids(
-                    self._client.driver,
-                    group_ids=["conventions"],
-                    limit=fetch_limit,
-                )
-                for node in episodic_nodes:
-                    # EpisodicNode has entity_type as a property
-                    if hasattr(node, "entity_type") and node.entity_type == entity_type.value:
-                        entities.append(self._episodic_to_entity(node))
-            except Exception as e:
-                log.debug("EpisodicNode.get_by_group_ids failed", error=str(e))
-
-            # Sort by created_at descending and apply pagination
-            entities.sort(key=lambda e: e.created_at or datetime.min, reverse=True)
-            paginated = entities[offset : offset + limit]
+            # Handle FalkorDB result format: (records, header, stats)
+            if result:
+                records = result[0] if isinstance(result, tuple) else result
+                if records and isinstance(records, list):
+                    for record in records:
+                        try:
+                            entity = self._record_to_entity(record)
+                            entities.append(entity)
+                        except Exception as e:
+                            log.debug("Failed to convert record to entity", error=str(e))
 
             log.debug(
                 "Listed entities",
                 entity_type=entity_type,
-                total=len(entities),
-                returned=len(paginated),
+                returned=len(entities),
             )
-            return paginated
+            return entities
 
         except Exception as e:
             log.exception("Failed to list entities", entity_type=entity_type, error=str(e))

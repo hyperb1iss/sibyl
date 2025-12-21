@@ -27,6 +27,8 @@ interface BreadcrumbProps {
   items?: BreadcrumbItem[];
   /** Override automatic path-based breadcrumbs */
   custom?: boolean;
+  /** Additional class names */
+  className?: string;
 }
 
 // Route name mappings for automatic breadcrumbs
@@ -42,7 +44,7 @@ const ROUTE_NAMES: Record<string, { label: string; icon: IconComponent }> = {
   ingest: { label: 'Ingest', icon: RefreshCw },
 };
 
-export function Breadcrumb({ items, custom }: BreadcrumbProps) {
+export function Breadcrumb({ items, custom, className = '' }: BreadcrumbProps) {
   const pathname = usePathname();
 
   // Auto-generate breadcrumbs from pathname if not custom
@@ -80,7 +82,7 @@ export function Breadcrumb({ items, custom }: BreadcrumbProps) {
   return (
     <nav
       aria-label="Breadcrumb"
-      className="flex items-center gap-1.5 text-sm text-sc-fg-muted h-6 overflow-hidden"
+      className={`flex items-center gap-1.5 text-sm text-sc-fg-muted h-6 overflow-hidden ${className}`}
       style={{ viewTransitionName: 'breadcrumb' }}
     >
       {breadcrumbs.map((crumb, index) => {

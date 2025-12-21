@@ -196,6 +196,11 @@ class RelationshipManager:
                 entity_id,
             )
 
+            # Defensive: ensure edges is iterable (FalkorDB can return Query object on connection issues)
+            if not isinstance(edges, list):
+                log.warning("get_by_node_uuid returned non-list", type=type(edges).__name__)
+                return []
+
             relationships = []
             for edge in edges:
                 # Filter by direction
@@ -331,6 +336,12 @@ class RelationshipManager:
 
         try:
             edges = await EntityEdge.get_by_node_uuid(self._client.driver, entity_id)
+
+            # Defensive: ensure edges is iterable (FalkorDB can return Query object on connection issues)
+            if not isinstance(edges, list):
+                log.warning("get_by_node_uuid returned non-list for delete", type=type(edges).__name__)
+                return 0
+
             deleted = 0
 
             for edge in edges:
@@ -364,22 +375,48 @@ class RelationshipManager:
         log.debug("Listing all relationships", limit=limit, types=relationship_types)
 
         try:
-            # Use Graphiti's search to find edges
-            # Note: This is a simplified implementation
-            # For a full list, we'd need to iterate through all entities
-            edges = await EntityEdge.get_by_group_ids(
-                self._client.driver,
-                group_ids=["conventions"],
-                limit=limit * 2 if relationship_types else limit,  # Over-fetch if filtering
-            )
-
-            relationships = [self._from_graphiti_edge(edge) for edge in edges]
-
-            # Apply relationship type filter if specified
+            # Direct Cypher query to get edges (Graphiti's EntityEdge.get_by_group_ids
+            # expects ENTITY_EDGE label but our edges have RELATES_TO, MENTIONS, etc.)
+            type_filter = ""
             if relationship_types:
-                type_set = set(relationship_types)
-                relationships = [r for r in relationships if r.relationship_type in type_set]
-                relationships = relationships[:limit]
+                type_names = [rt.value for rt in relationship_types]
+                type_filter = f"AND type(r) IN {type_names}"
+
+            query = f"""
+                MATCH (source)-[r]->(target)
+                WHERE r.group_id = 'conventions'
+                {type_filter}
+                RETURN r.uuid as id,
+                       source.uuid as source_id,
+                       target.uuid as target_id,
+                       type(r) as rel_type,
+                       r.created_at as created_at
+                LIMIT {limit}
+            """
+
+            result = await self._client.driver.execute_query(query)
+            # Result is a tuple: (rows, column_names, metadata)
+            rows = result[0] if result else []
+
+            relationships = []
+            for row in rows:
+                # Row is a dict with keys: id, source_id, target_id, rel_type, created_at
+                rel_type = row.get("rel_type", "RELATED_TO")
+                # Parse relationship type
+                try:
+                    relationship_type = RelationshipType(rel_type)
+                except ValueError:
+                    relationship_type = RelationshipType.RELATED_TO
+
+                relationships.append(
+                    Relationship(
+                        id=row.get("id") or str(uuid4()),
+                        source_id=row.get("source_id", ""),
+                        target_id=row.get("target_id", ""),
+                        relationship_type=relationship_type,
+                        weight=1.0,
+                    )
+                )
 
             log.debug("Listed relationships", count=len(relationships))
             return relationships

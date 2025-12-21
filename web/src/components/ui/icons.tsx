@@ -16,6 +16,7 @@ import {
   CheckCircle,
   Circle,
   Clock,
+  Collapse,
   Combine,
   Copy,
   Cube,
@@ -24,6 +25,7 @@ import {
   Download,
   Edit,
   EditPencil,
+  Expand,
   Eye,
   Filter,
   FireFlame,
@@ -42,6 +44,7 @@ import {
   Link,
   List,
   Menu as MenuIcon,
+  MinusCircle,
   MoreHoriz,
   MoreVert,
   NavArrowDown,
@@ -53,6 +56,7 @@ import {
   Pause,
   Play,
   Plus,
+  PlusCircle,
   RefreshDouble,
   Restart,
   Search,
@@ -75,6 +79,8 @@ import {
   WifiOff,
   Xmark,
   XmarkCircle,
+  ZoomIn,
+  ZoomOut,
 } from 'iconoir-react';
 import type { ComponentType, SVGProps } from 'react';
 
@@ -162,6 +168,14 @@ export {
   Undo,
   EditPencil,
   ViewGrid,
+  // Zoom/View controls
+  ZoomIn,
+  ZoomOut,
+  Expand as Maximize2,
+  Collapse as Minimize2,
+  PlusCircle,
+  MinusCircle,
+  ZoomIn as Focus,  // Using ZoomIn for focus/fit-to-view
   // Direct exports (same name in both)
   Sparks,
   Flash,

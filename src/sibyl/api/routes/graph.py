@@ -12,6 +12,50 @@ from sibyl.models.entities import EntityType, RelationshipType
 log = structlog.get_logger()
 router = APIRouter(prefix="/graph", tags=["graph"])
 
+
+@router.get("/debug")
+async def debug_graph():
+    """Debug endpoint to trace graph data issue."""
+    client = await get_graph_client()
+
+    # Get nodes
+    node_query = """
+        MATCH (n)
+        WHERE (n:Episodic OR n:Entity) AND n.group_id = 'conventions'
+        RETURN n.uuid as id LIMIT 500
+    """
+    node_result = await client.driver.execute_query(node_query)
+    node_rows = node_result[0] if node_result else []
+    node_ids = {row.get("id") for row in node_rows if row.get("id")}
+
+    # Get edges
+    edge_query = """
+        MATCH (s)-[r]->(t)
+        WHERE r.group_id = 'conventions'
+        RETURN s.uuid as src, t.uuid as tgt LIMIT 1000
+    """
+    edge_result = await client.driver.execute_query(edge_query)
+    edge_rows = edge_result[0] if edge_result else []
+
+    # Check overlap
+    matching = sum(
+        1 for row in edge_rows
+        if row.get("src") in node_ids and row.get("tgt") in node_ids
+    )
+
+    sample_edges = edge_rows[:3] if edge_rows else []
+    sample_nodes = list(node_ids)[:5]
+
+    return {
+        "node_count": len(node_ids),
+        "edge_count": len(edge_rows),
+        "matching_edges": matching,
+        "sample_nodes": sample_nodes,
+        "sample_edges": [{"src": e.get("src"), "tgt": e.get("tgt")} for e in sample_edges],
+        "first_edge_src_in_nodes": sample_edges[0].get("src") in node_ids if sample_edges else None,
+        "first_edge_tgt_in_nodes": sample_edges[0].get("tgt") in node_ids if sample_edges else None,
+    }
+
 # SilkCircuit color palette for entity types
 ENTITY_COLORS: dict[EntityType, str] = {
     EntityType.PATTERN: "#e135ff",  # Electric Purple
@@ -39,51 +83,76 @@ async def get_all_nodes(
     types: list[EntityType] | None = Query(default=None, description="Filter by entity types"),
     limit: int = Query(default=500, ge=1, le=2000, description="Maximum nodes"),
 ) -> list[GraphNode]:
-    """Get all nodes for graph visualization."""
+    """Get all nodes for graph visualization.
+
+    Queries the graph directly to get actual node UUIDs that match edge references.
+    """
     try:
         client = await get_graph_client()
-        entity_manager = EntityManager(client)
-        relationship_manager = RelationshipManager(client)
 
-        # Fetch entities
-        target_types = types or list(EntityType)
-        all_entities = []
-        for entity_type in target_types:
-            entities = await entity_manager.list_by_type(entity_type, limit=limit)
-            all_entities.extend(entities)
+        # Build type filter for Cypher query
+        type_filter = ""
+        if types:
+            type_values = [f"'{t.value}'" for t in types]
+            type_filter = f"AND n.entity_type IN [{', '.join(type_values)}]"
 
-        # Build connection counts via single batch fetch (avoids N+1)
+        # Query nodes directly from graph - both Episodic and Entity labels
+        query = f"""
+            MATCH (n)
+            WHERE (n:Episodic OR n:Entity)
+            AND n.group_id = 'conventions'
+            {type_filter}
+            RETURN n.uuid as id,
+                   n.name as name,
+                   n.entity_type as entity_type,
+                   n.summary as summary
+            LIMIT {limit}
+        """
+
+        result = await client.driver.execute_query(query)
+        rows = result[0] if result else []
+
+        # Count connections for sizing
         connection_counts: dict[str, int] = {}
         try:
-            # Fetch all relationships in one query
-            all_relationships = await relationship_manager.list_all(limit=limit * 10)
-            # Count connections per entity (both as source and target)
-            for rel in all_relationships:
-                connection_counts[rel.source_id] = connection_counts.get(rel.source_id, 0) + 1
-                connection_counts[rel.target_id] = connection_counts.get(rel.target_id, 0) + 1
+            conn_query = """
+                MATCH (n)-[r]-(m)
+                WHERE n.group_id = 'conventions'
+                RETURN n.uuid as id, count(r) as cnt
+            """
+            conn_result = await client.driver.execute_query(conn_query)
+            for row in conn_result[0] if conn_result else []:
+                connection_counts[row.get("id", "")] = row.get("cnt", 0)
         except Exception:
-            log.debug("relationship_fetch_failed", msg="falling back to zero connections")
+            log.debug("connection_count_failed", msg="falling back to zero")
 
-        # Normalize sizes (1.0 to 3.0 based on connections)
         max_connections = max(connection_counts.values()) if connection_counts else 1
-        max_connections = max(max_connections, 1)  # Avoid division by zero
+        max_connections = max(max_connections, 1)
 
         nodes = []
-        for entity in all_entities[:limit]:
-            conn_count = connection_counts.get(entity.id, 0)
+        for row in rows:
+            node_id = row.get("id", "")
+            if not node_id:
+                continue
+
+            entity_type_str = row.get("entity_type", "episode")
+            try:
+                entity_type = EntityType(entity_type_str)
+            except ValueError:
+                entity_type = EntityType.EPISODE
+
+            conn_count = connection_counts.get(node_id, 0)
             size = 1.0 + (conn_count / max_connections) * 2.0
 
             nodes.append(
                 GraphNode(
-                    id=entity.id,
-                    type=entity.entity_type.value,
-                    label=entity.name[:50],  # Truncate for display
-                    color=get_entity_color(entity.entity_type),
+                    id=node_id,
+                    type=entity_type.value,
+                    label=(row.get("name") or node_id[:20])[:50],
+                    color=get_entity_color(entity_type),
                     size=size,
                     metadata={
-                        "description": entity.description[:100] if entity.description else "",
-                        "category": getattr(entity, "category", None),
-                        "languages": getattr(entity, "languages", []),
+                        "description": (row.get("summary") or "")[:100],
                         "connections": conn_count,
                     },
                 )
@@ -137,26 +206,98 @@ async def get_all_edges(
 @router.get("/full", response_model=GraphData)
 async def get_full_graph(
     types: list[EntityType] | None = Query(default=None, description="Filter by entity types"),
-    max_nodes: int = Query(default=200, ge=1, le=1000, description="Maximum nodes"),
-    max_edges: int = Query(default=500, ge=1, le=2000, description="Maximum edges"),
+    max_nodes: int = Query(default=500, ge=1, le=1000, description="Maximum nodes"),
+    max_edges: int = Query(default=1000, ge=1, le=5000, description="Maximum edges"),
 ) -> GraphData:
     """Get complete graph data for visualization."""
     try:
-        # Fetch nodes and edges
-        nodes = await get_all_nodes(types=types, limit=max_nodes)
-        edges = await get_all_edges(limit=max_edges)
+        # Fetch nodes and edges - call underlying logic directly
+        client = await get_graph_client()
 
-        # Filter edges to only include those connecting existing nodes
-        node_ids = {node.id for node in nodes}
-        filtered_edges = [
-            edge for edge in edges if edge.source in node_ids and edge.target in node_ids
-        ]
+        # === NODES: Direct Cypher query ===
+        type_filter = ""
+        if types:
+            type_values = [f"'{t.value}'" for t in types]
+            type_filter = f"AND n.entity_type IN [{', '.join(type_values)}]"
+
+        node_query = f"""
+            MATCH (n)
+            WHERE (n:Episodic OR n:Entity)
+            AND n.group_id = 'conventions'
+            {type_filter}
+            RETURN n.uuid as id,
+                   n.name as name,
+                   n.entity_type as entity_type,
+                   n.summary as summary
+            LIMIT {max_nodes}
+        """
+        node_result = await client.driver.execute_query(node_query)
+        node_rows = node_result[0] if node_result else []
+
+        nodes = []
+        node_ids: set[str] = set()
+        for row in node_rows:
+            node_id = row.get("id", "")
+            if not node_id:
+                continue
+            node_ids.add(node_id)
+
+            entity_type_str = row.get("entity_type", "episode")
+            try:
+                entity_type = EntityType(entity_type_str)
+            except ValueError:
+                entity_type = EntityType.EPISODE
+
+            nodes.append(
+                GraphNode(
+                    id=node_id,
+                    type=entity_type.value,
+                    label=(row.get("name") or node_id[:20])[:50],
+                    color=get_entity_color(entity_type),
+                    size=1.5,
+                    metadata={},
+                )
+            )
+
+        # === EDGES: Direct Cypher query ===
+        edge_query = f"""
+            MATCH (source)-[r]->(target)
+            WHERE r.group_id = 'conventions'
+            RETURN r.uuid as id,
+                   source.uuid as source_id,
+                   target.uuid as target_id,
+                   type(r) as rel_type
+            LIMIT {max_edges}
+        """
+        edge_result = await client.driver.execute_query(edge_query)
+        edge_rows = edge_result[0] if edge_result else []
+
+        log.info("graph_full_raw", node_count=len(nodes), edge_rows=len(edge_rows), node_ids_sample=list(node_ids)[:3])
+
+        # Filter edges to nodes we have
+        edges = []
+        for row in edge_rows:
+            source_id = row.get("source_id", "")
+            target_id = row.get("target_id", "")
+            if source_id in node_ids and target_id in node_ids:
+                edges.append(
+                    GraphEdge(
+                        id=row.get("id") or f"{source_id}-{target_id}",
+                        source=source_id,
+                        target=target_id,
+                        type=row.get("rel_type", "RELATED_TO"),
+                        label=row.get("rel_type", "").replace("_", " ").title(),
+                        weight=1.0,
+                    )
+                )
+
+        log.info("graph_full_filtered", edges_after_filter=len(edges))
 
         return GraphData(
             nodes=nodes,
-            edges=filtered_edges,
+            edges=edges,
             node_count=len(nodes),
-            edge_count=len(filtered_edges),
+            edge_count=len(edges),
         )
 
     except Exception as e:
