@@ -537,3 +537,10 @@ class SourcePagesResponse(BaseModel):
     pages: list[CrawlDocumentResponse]
     total: int
     has_more: bool
+
+
+class DocumentUpdateRequest(BaseModel):
+    """Update a crawled document's content."""
+
+    title: str | None = Field(default=None, max_length=512, description="New document title")
+    content: str | None = Field(default=None, max_length=500000, description="New document content")

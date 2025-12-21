@@ -23,13 +23,17 @@ structlog.configure(
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),
-        structlog.dev.ConsoleRenderer(colors=False, pad_event=30),
+        structlog.dev.ConsoleRenderer(colors=True, pad_event=30),
     ],
     wrapper_class=structlog.stdlib.BoundLogger,
     context_class=dict,
     logger_factory=structlog.stdlib.LoggerFactory(),
     cache_logger_on_first_use=False,
 )
+
+# Suppress noisy arq logging
+logging.getLogger("arq.worker").setLevel(logging.WARNING)
+logging.getLogger("arq.jobs").setLevel(logging.INFO)
 
 from sibyl.config import Settings  # noqa: E402 - must come after structlog config
 

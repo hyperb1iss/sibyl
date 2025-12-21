@@ -24,6 +24,7 @@ from sibyl.db import (
     DocumentChunk,
     get_session,
 )
+from sibyl.db.models import utcnow_naive
 
 log = structlog.get_logger()
 
@@ -50,8 +51,10 @@ def get_redis_settings() -> RedisSettings:
 
 async def startup(ctx: dict[str, Any]) -> None:
     """Worker startup - initialize resources."""
-    log.info("Job worker starting up")
-    # Could initialize shared resources here
+    log.info(
+        "Job worker online - ready to process crawl jobs",
+        functions=["crawl_source", "sync_source", "sync_all_sources"],
+    )
     ctx["start_time"] = datetime.now(UTC)
 
 
@@ -135,7 +138,7 @@ async def crawl_source(
                 db_source.crawl_status = (
                     CrawlStatus.COMPLETED if stats.errors == 0 else CrawlStatus.PARTIAL
                 )
-                db_source.last_crawled_at = datetime.now(UTC)
+                db_source.last_crawled_at = utcnow_naive()
                 db_source.document_count = stats.documents_stored
                 db_source.chunk_count = stats.chunks_created
 
@@ -218,7 +221,7 @@ async def sync_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:  #
             source.crawl_status = CrawlStatus.COMPLETED
             source.current_job_id = None  # Clear job on sync completion
             if source.last_crawled_at is None:
-                source.last_crawled_at = datetime.now(UTC)
+                source.last_crawled_at = utcnow_naive()
         elif doc_count == 0 and source.crawl_status == CrawlStatus.IN_PROGRESS:
             source.crawl_status = CrawlStatus.PENDING
             source.current_job_id = None  # Clear job on sync reset
@@ -293,17 +296,28 @@ async def run_worker_async() -> None:
     """
     from arq import Worker
 
-    log.info("Starting in-process job worker")
-
-    worker = Worker(
-        functions=WorkerSettings.functions,
-        redis_settings=WorkerSettings.redis_settings,
-        on_startup=WorkerSettings.on_startup,
-        on_shutdown=WorkerSettings.on_shutdown,
+    settings = WorkerSettings.redis_settings
+    log.info(
+        "Starting in-process job worker",
+        redis_host=settings.host,
+        redis_port=settings.port,
+        redis_db=settings.database,
         max_jobs=WorkerSettings.max_jobs,
-        job_timeout=WorkerSettings.job_timeout,
-        keep_result=WorkerSettings.keep_result,
-        poll_delay=WorkerSettings.poll_delay,
     )
 
-    await worker.async_run()
+    try:
+        worker = Worker(
+            functions=WorkerSettings.functions,
+            redis_settings=settings,
+            on_startup=WorkerSettings.on_startup,
+            on_shutdown=WorkerSettings.on_shutdown,
+            max_jobs=WorkerSettings.max_jobs,
+            job_timeout=WorkerSettings.job_timeout,
+            keep_result=WorkerSettings.keep_result,
+            poll_delay=WorkerSettings.poll_delay,
+        )
+
+        await worker.async_run()
+    except Exception:
+        log.exception("Job worker crashed")
+        raise

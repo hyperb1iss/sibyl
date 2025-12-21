@@ -8,6 +8,8 @@ Provides semantic search over crawled documentation:
 - Archon-compatible API surface
 """
 
+import hashlib
+import re
 from uuid import UUID
 
 import structlog
@@ -20,6 +22,7 @@ from sibyl.api.schemas import (
     CodeExampleResponse,
     CodeExampleResult,
     CrawlDocumentResponse,
+    DocumentUpdateRequest,
     FullPageResponse,
     RAGChunkResult,
     RAGPageResult,
@@ -472,4 +475,91 @@ async def hybrid_search(request: RAGSearchRequest) -> RAGSearchResponse:
         query=request.query,
         source_filter=source_filter_name,
         return_mode="chunks",
+    )
+
+
+# =============================================================================
+# Document Update
+# =============================================================================
+
+
+def _extract_headings(content: str) -> list[str]:
+    """Extract markdown headings from content."""
+    headings: list[str] = []
+    for line in content.split("\n"):
+        match = re.match(r"^(#{1,6})\s+(.+)$", line.strip())
+        if match:
+            headings.append(match.group(2).strip())
+    return headings
+
+
+def _detect_code_presence(content: str) -> bool:
+    """Check if content contains code blocks."""
+    return "```" in content or content.count("    ") > 5
+
+
+def _estimate_token_count(content: str) -> int:
+    """Rough token estimate (~4 chars per token)."""
+    return len(content) // 4
+
+
+@router.patch("/pages/{document_id}", response_model=FullPageResponse)
+async def update_document(document_id: str, request: DocumentUpdateRequest) -> FullPageResponse:
+    """Update a document's title and/or content.
+
+    When content is updated, recalculates derived fields:
+    - word_count, token_count, content_hash
+    - has_code, headings
+    """
+    if request.title is None and request.content is None:
+        raise HTTPException(status_code=400, detail="At least one of title or content must be provided")
+
+    try:
+        doc_uuid = UUID(document_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid document ID format: {document_id}")
+
+    async with get_session() as session:
+        doc = await session.get(CrawledDocument, doc_uuid)
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
+
+        # Update title if provided
+        if request.title is not None:
+            doc.title = request.title
+
+        # Update content and recalculate derived fields
+        if request.content is not None:
+            doc.content = request.content
+            doc.word_count = len(request.content.split())
+            doc.token_count = _estimate_token_count(request.content)
+            doc.content_hash = hashlib.sha256(request.content.encode()).hexdigest()
+            doc.has_code = _detect_code_presence(request.content)
+            doc.headings = _extract_headings(request.content)
+
+        session.add(doc)
+        await session.commit()
+        await session.refresh(doc)
+
+        # Get source name
+        source = await session.get(CrawlSource, doc.source_id)
+        source_name = source.name if source else "Unknown"
+
+    log.info("Document updated", document_id=document_id, title_updated=request.title is not None, content_updated=request.content is not None)
+
+    return FullPageResponse(
+        document_id=str(doc.id),
+        source_id=str(doc.source_id),
+        source_name=source_name,
+        url=doc.url,
+        title=doc.title,
+        content=doc.content,
+        raw_content=doc.raw_content if len(doc.raw_content) < 100000 else None,
+        word_count=doc.word_count,
+        token_count=doc.token_count,
+        has_code=doc.has_code,
+        headings=doc.headings or [],
+        code_languages=doc.code_languages or [],
+        links=doc.links or [],
+        crawled_at=doc.crawled_at,
     )

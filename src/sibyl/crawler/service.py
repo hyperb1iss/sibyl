@@ -10,7 +10,6 @@ This service handles:
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -23,6 +22,7 @@ from sqlmodel import col
 
 from sibyl.api.websocket import broadcast_event
 from sibyl.db import CrawledDocument, CrawlSource, CrawlStatus, SourceType, get_session
+from sibyl.db.models import utcnow_naive
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -254,7 +254,7 @@ class CrawlerService:
             if db_source:
                 db_source.crawl_status = CrawlStatus.COMPLETED if error_count == 0 else CrawlStatus.PARTIAL
                 db_source.current_job_id = None  # Clear job on completion
-                db_source.last_crawled_at = datetime.now(UTC)
+                db_source.last_crawled_at = utcnow_naive()
                 db_source.document_count = crawled_count
 
         log.info(

@@ -7,7 +7,6 @@ Provides REST API for:
 - Crawler health and stats
 """
 
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -37,6 +36,7 @@ from sibyl.db import (
     check_postgres_health,
     get_session,
 )
+from sibyl.db.models import utcnow_naive
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/sources", tags=["sources"])
@@ -477,7 +477,7 @@ async def sync_source(source_id: str) -> dict[str, Any]:
             if source.crawl_status == CrawlStatus.IN_PROGRESS:
                 source.crawl_status = CrawlStatus.COMPLETED
                 if source.last_crawled_at is None:
-                    source.last_crawled_at = datetime.now(UTC)
+                    source.last_crawled_at = utcnow_naive()
         elif source.crawl_status == CrawlStatus.IN_PROGRESS:
             # No documents but stuck in progress - reset to pending
             source.crawl_status = CrawlStatus.PENDING
