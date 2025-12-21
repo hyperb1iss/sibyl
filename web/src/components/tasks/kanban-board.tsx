@@ -1,9 +1,9 @@
 'use client';
 
 import * as Popover from '@radix-ui/react-popover';
-import { ArrowDownAZ, ArrowUpDown, Calendar, Check, Flame, Sparkles, Zap } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { ArrowDownAZ, ArrowUpDown, Calendar, Check, Flame, Sparkles, Zap } from '@/components/ui/icons';
 import type { TaskStatus, TaskSummary } from '@/lib/api';
 import { TASK_STATUS_CONFIG, TASK_STATUSES } from '@/lib/constants';
 import { TaskCard, TaskCardSkeleton } from './task-card';
@@ -11,11 +11,11 @@ import { TaskCard, TaskCardSkeleton } from './task-card';
 type SortOption = 'priority' | 'due_date' | 'created' | 'name' | 'manual';
 
 const SORT_OPTIONS: Array<{ value: SortOption; label: string; icon: React.ReactNode }> = [
-  { value: 'priority', label: 'Priority', icon: <Zap size={14} /> },
-  { value: 'due_date', label: 'Due Date', icon: <Calendar size={14} /> },
-  { value: 'created', label: 'Newest First', icon: <Sparkles size={14} /> },
-  { value: 'name', label: 'Alphabetical', icon: <ArrowDownAZ size={14} /> },
-  { value: 'manual', label: 'Manual', icon: <ArrowUpDown size={14} /> },
+  { value: 'priority', label: 'Priority', icon: <Zap width={14} height={14} /> },
+  { value: 'due_date', label: 'Due Date', icon: <Calendar width={14} height={14} /> },
+  { value: 'created', label: 'Newest First', icon: <Sparkles width={14} height={14} /> },
+  { value: 'name', label: 'Alphabetical', icon: <ArrowDownAZ width={14} height={14} /> },
+  { value: 'manual', label: 'Manual', icon: <ArrowUpDown width={14} height={14} /> },
 ];
 
 const PRIORITY_ORDER: Record<string, number> = {
@@ -131,7 +131,7 @@ const SortDropdown = memo(function SortDropdown({
           className="p-1 rounded-md text-sc-fg-subtle hover:text-sc-fg-muted hover:bg-sc-bg-highlight/50 transition-colors"
           title={`Sort by ${current?.label}`}
         >
-          <ArrowUpDown size={12} />
+          <ArrowUpDown width={12} height={12} />
         </button>
       </Popover.Trigger>
 
@@ -162,7 +162,7 @@ const SortDropdown = memo(function SortDropdown({
                   >
                     <span className="opacity-70">{option.icon}</span>
                     <span className="flex-1 text-left">{option.label}</span>
-                    {value === option.value && <Check size={12} className="text-sc-purple" />}
+                    {value === option.value && <Check width={12} height={12} className="text-sc-purple" />}
                   </button>
                 ))}
               </motion.div>
@@ -252,7 +252,7 @@ const KanbanColumn = memo(function KanbanColumn({
           </span>
           {urgentCount > 0 && (
             <span className="flex items-center gap-0.5 text-[10px] text-sc-coral bg-sc-coral/10 px-1.5 py-0.5 rounded-full">
-              <Flame size={10} />
+              <Flame width={10} height={10} />
               {urgentCount}
             </span>
           )}

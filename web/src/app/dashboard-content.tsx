@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import {
   Activity,
   ArrowRight,
@@ -18,8 +19,7 @@ import {
   Sparkles,
   Target,
   Zap,
-} from 'lucide-react';
-import Link from 'next/link';
+} from '@/components/ui/icons';
 import { useMemo } from 'react';
 import type { StatsResponse } from '@/lib/api';
 import { ENTITY_COLORS, formatUptime } from '@/lib/constants';
@@ -167,7 +167,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
         style={{ viewTransitionName: 'breadcrumb' }}
       >
         <span className="flex items-center gap-1.5 text-sc-fg-primary font-medium">
-          <LayoutDashboard size={14} strokeWidth={2} />
+          <LayoutDashboard width={14} height={14} />
           <span>Dashboard</span>
         </span>
       </nav>
@@ -179,7 +179,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
           <div className="flex-1 space-y-3 sm:space-y-4 min-w-0">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-sc-purple via-sc-magenta to-sc-coral flex items-center justify-center shadow-lg shadow-sc-purple/30 shrink-0">
-                <Sparkles size={20} className="text-white sm:w-6 sm:h-6" />
+                <Sparkles width={20} height={20} className="text-white sm:w-6 sm:h-6" />
               </div>
               <div className="min-w-0">
                 <h1 className="text-xl sm:text-2xl font-bold text-sc-fg-primary truncate">
@@ -189,7 +189,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                   <StatusIndicator status={serverStatus} />
                   {health?.graph_connected && (
                     <div className="flex items-center gap-1.5 text-xs sm:text-sm text-sc-fg-muted">
-                      <Database size={12} className="text-sc-cyan shrink-0" />
+                      <Database width={12} height={12} className="text-sc-cyan shrink-0" />
                       <span>Graph Connected</span>
                     </div>
                   )}
@@ -200,7 +200,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
             {/* Quick Stats Row */}
             <div className="flex flex-wrap gap-3 sm:gap-6">
               <div className="flex items-center gap-2">
-                <Clock size={14} className="text-sc-cyan shrink-0 sm:w-4 sm:h-4" />
+                <Clock width={14} height={14} className="text-sc-cyan shrink-0 sm:w-4 sm:h-4" />
                 <span className="text-xs sm:text-sm text-sc-fg-muted">
                   Uptime:{' '}
                   <span className="text-sc-fg-primary font-medium">
@@ -209,13 +209,13 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <FolderKanban size={14} className="text-sc-purple shrink-0 sm:w-4 sm:h-4" />
+                <FolderKanban width={14} height={14} className="text-sc-purple shrink-0 sm:w-4 sm:h-4" />
                 <span className="text-xs sm:text-sm text-sc-fg-muted">
                   <span className="text-sc-fg-primary font-medium">{projectCount}</span> Projects
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <ListTodo size={14} className="text-sc-coral shrink-0 sm:w-4 sm:h-4" />
+                <ListTodo width={14} height={14} className="text-sc-coral shrink-0 sm:w-4 sm:h-4" />
                 <span className="text-xs sm:text-sm text-sc-fg-muted">
                   <span className="text-sc-fg-primary font-medium">{taskStats.total}</span> Tasks
                 </span>
@@ -253,7 +253,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
           <div className="flex items-center justify-between mb-4 sm:mb-6 gap-2">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-coral/10 border border-sc-coral/20 flex items-center justify-center shrink-0">
-                <ListTodo size={16} className="text-sc-coral sm:w-5 sm:h-5" />
+                <ListTodo width={16} height={16} className="text-sc-coral sm:w-5 sm:h-5" />
               </div>
               <div className="min-w-0">
                 <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary truncate">
@@ -267,7 +267,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm text-sc-purple hover:text-sc-purple/80 transition-colors shrink-0"
             >
               <span className="hidden xs:inline">View all</span>
-              <ArrowRight size={14} />
+              <ArrowRight width={14} height={14} />
             </Link>
           </div>
 
@@ -278,7 +278,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               className="bg-sc-bg-elevated rounded-lg sm:rounded-xl p-3 sm:p-4 border border-sc-fg-subtle/10 hover:border-sc-cyan/30 transition-all group"
             >
               <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
-                <Target size={14} className="text-sc-cyan sm:w-4 sm:h-4" />
+                <Target width={14} height={14} className="text-sc-cyan sm:w-4 sm:h-4" />
                 <span className="text-xs sm:text-sm text-sc-fg-muted">To Do</span>
               </div>
               <p className="text-xl sm:text-2xl font-bold text-sc-fg-primary group-hover:text-sc-cyan transition-colors">
@@ -291,7 +291,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               className="bg-sc-bg-elevated rounded-lg sm:rounded-xl p-3 sm:p-4 border border-sc-fg-subtle/10 hover:border-sc-purple/30 transition-all group"
             >
               <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
-                <Play size={14} className="text-sc-purple sm:w-4 sm:h-4" />
+                <Play width={14} height={14} className="text-sc-purple sm:w-4 sm:h-4" />
                 <span className="text-xs sm:text-sm text-sc-fg-muted">In Progress</span>
               </div>
               <p className="text-xl sm:text-2xl font-bold text-sc-fg-primary group-hover:text-sc-purple transition-colors">
@@ -304,7 +304,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               className="bg-sc-bg-elevated rounded-lg sm:rounded-xl p-3 sm:p-4 border border-sc-fg-subtle/10 hover:border-sc-yellow/30 transition-all group"
             >
               <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
-                <RefreshCw size={14} className="text-sc-yellow sm:w-4 sm:h-4" />
+                <RefreshCw width={14} height={14} className="text-sc-yellow sm:w-4 sm:h-4" />
                 <span className="text-xs sm:text-sm text-sc-fg-muted">In Review</span>
               </div>
               <p className="text-xl sm:text-2xl font-bold text-sc-fg-primary group-hover:text-sc-yellow transition-colors">
@@ -317,7 +317,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               className="bg-sc-bg-elevated rounded-lg sm:rounded-xl p-3 sm:p-4 border border-sc-fg-subtle/10 hover:border-sc-green/30 transition-all group"
             >
               <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
-                <CheckCircle2 size={14} className="text-sc-green sm:w-4 sm:h-4" />
+                <CheckCircle2 width={14} height={14} className="text-sc-green sm:w-4 sm:h-4" />
                 <span className="text-xs sm:text-sm text-sc-fg-muted">Completed</span>
               </div>
               <p className="text-xl sm:text-2xl font-bold text-sc-fg-primary group-hover:text-sc-green transition-colors">
@@ -359,7 +359,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
         <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">
           <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
             <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
-              <Zap size={16} className="text-sc-purple sm:w-5 sm:h-5" />
+              <Zap width={16} height={16} className="text-sc-purple sm:w-5 sm:h-5" />
             </div>
             <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">Quick Actions</h2>
           </div>
@@ -370,7 +370,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-cyan/30 hover:bg-sc-bg-highlight transition-all group"
             >
               <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-cyan/10 flex items-center justify-center shrink-0">
-                <Search size={16} className="text-sc-cyan sm:w-[18px] sm:h-[18px]" />
+                <Search width={16} height={16} className="text-sc-cyan sm:w-[18px] sm:h-[18px]" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-cyan transition-colors truncate">
@@ -381,7 +381,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 </div>
               </div>
               <ArrowRight
-                size={14}
+                width={14} height={14}
                 className="text-sc-fg-subtle group-hover:text-sc-cyan transition-colors shrink-0 sm:w-4 sm:h-4"
               />
             </Link>
@@ -391,7 +391,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-purple/30 hover:bg-sc-bg-highlight transition-all group"
             >
               <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-purple/10 flex items-center justify-center shrink-0">
-                <Network size={16} className="text-sc-purple sm:w-[18px] sm:h-[18px]" />
+                <Network width={16} height={16} className="text-sc-purple sm:w-[18px] sm:h-[18px]" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-purple transition-colors truncate">
@@ -402,7 +402,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 </div>
               </div>
               <ArrowRight
-                size={14}
+                width={14} height={14}
                 className="text-sc-fg-subtle group-hover:text-sc-purple transition-colors shrink-0 sm:w-4 sm:h-4"
               />
             </Link>
@@ -412,7 +412,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-coral/30 hover:bg-sc-bg-highlight transition-all group"
             >
               <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-coral/10 flex items-center justify-center shrink-0">
-                <Boxes size={16} className="text-sc-coral sm:w-[18px] sm:h-[18px]" />
+                <Boxes width={16} height={16} className="text-sc-coral sm:w-[18px] sm:h-[18px]" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-coral transition-colors truncate">
@@ -423,7 +423,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 </div>
               </div>
               <ArrowRight
-                size={14}
+                width={14} height={14}
                 className="text-sc-fg-subtle group-hover:text-sc-coral transition-colors shrink-0 sm:w-4 sm:h-4"
               />
             </Link>
@@ -433,7 +433,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-green/30 hover:bg-sc-bg-highlight transition-all group"
             >
               <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-green/10 flex items-center justify-center shrink-0">
-                <RefreshCw size={16} className="text-sc-green sm:w-[18px] sm:h-[18px]" />
+                <RefreshCw width={16} height={16} className="text-sc-green sm:w-[18px] sm:h-[18px]" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-green transition-colors truncate">
@@ -444,7 +444,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 </div>
               </div>
               <ArrowRight
-                size={14}
+                width={14} height={14}
                 className="text-sc-fg-subtle group-hover:text-sc-green transition-colors shrink-0 sm:w-4 sm:h-4"
               />
             </Link>
@@ -456,7 +456,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
       <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">
         <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
           <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center shrink-0">
-            <Layers size={16} className="text-sc-cyan sm:w-5 sm:h-5" />
+            <Layers width={16} height={16} className="text-sc-cyan sm:w-5 sm:h-5" />
           </div>
           <div className="min-w-0">
             <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary truncate">
@@ -517,7 +517,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
         <div className="bg-sc-red/10 border border-sc-red/30 rounded-xl sm:rounded-2xl p-4 sm:p-6">
           <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
             <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-red/20 flex items-center justify-center">
-              <Activity size={16} className="text-sc-red sm:w-5 sm:h-5" />
+              <Activity width={16} height={16} className="text-sc-red sm:w-5 sm:h-5" />
             </div>
             <h2 className="text-base sm:text-lg font-semibold text-sc-red">System Errors</h2>
           </div>

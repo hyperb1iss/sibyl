@@ -10,7 +10,7 @@ import {
   Loader2,
   Square,
   X,
-} from 'lucide-react';
+} from '@/components/ui/icons';
 import { AnimatePresence, motion } from 'motion/react';
 import { memo, useState } from 'react';
 
@@ -105,13 +105,13 @@ const CrawlOperationCard = memo(function CrawlOperationCard({
             {/* Status Icon */}
             <div className={`shrink-0 p-2 rounded-lg ${statusConfig.bg}`}>
               {isActive ? (
-                <Loader2 size={16} className={`${statusConfig.color} animate-spin`} />
+                <Loader2 width={16} height={16} className={`${statusConfig.color} animate-spin`} />
               ) : operation.status === 'completed' ? (
-                <CheckCircle2 size={16} className={statusConfig.color} />
+                <CheckCircle2 width={16} height={16} className={statusConfig.color} />
               ) : operation.status === 'error' ? (
-                <AlertCircle size={16} className={statusConfig.color} />
+                <AlertCircle width={16} height={16} className={statusConfig.color} />
               ) : (
-                <Square size={16} className={statusConfig.color} />
+                <Square width={16} height={16} className={statusConfig.color} />
               )}
             </div>
 
@@ -138,7 +138,7 @@ const CrawlOperationCard = memo(function CrawlOperationCard({
                 className="p-1.5 text-sc-fg-subtle hover:text-sc-red hover:bg-sc-red/10 rounded-lg transition-colors"
                 title="Stop crawl"
               >
-                <Square size={14} />
+                <Square width={14} height={14} />
               </button>
             )}
             {isFinished && onDismiss && (
@@ -148,7 +148,7 @@ const CrawlOperationCard = memo(function CrawlOperationCard({
                 className="p-1.5 text-sc-fg-subtle hover:text-sc-fg-primary hover:bg-sc-bg-highlight rounded-lg transition-colors"
                 title="Dismiss"
               >
-                <X size={14} />
+                <X width={14} height={14} />
               </button>
             )}
           </div>
@@ -200,7 +200,7 @@ const CrawlOperationCard = memo(function CrawlOperationCard({
               className="w-full flex items-center justify-between text-xs text-sc-fg-subtle hover:text-sc-fg-muted transition-colors"
             >
               <span>{operation.discoveredUrls.length} discovered URLs</span>
-              {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              {isExpanded ? <ChevronUp width={14} height={14} /> : <ChevronDown width={14} height={14} />}
             </button>
 
             <AnimatePresence>
@@ -231,7 +231,7 @@ const CrawlOperationCard = memo(function CrawlOperationCard({
             onClick={() => onViewSource(operation.sourceId)}
             className="w-full mt-2 px-3 py-2 text-sm text-sc-fg-muted hover:text-sc-purple hover:bg-sc-purple/10 rounded-lg transition-colors flex items-center justify-center gap-2"
           >
-            <Globe size={14} />
+            <Globe width={14} height={14} />
             View Source
           </button>
         )}
@@ -278,7 +278,7 @@ export const CrawlProgressPanel = memo(function CrawlProgressPanel({
           onClick={() => setIsCollapsed(!isCollapsed)}
           className="p-1 text-sc-fg-subtle hover:text-sc-fg-primary transition-colors"
         >
-          {isCollapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          {isCollapsed ? <ChevronUp width={16} height={16} /> : <ChevronDown width={16} height={16} />}
         </button>
       </div>
 
@@ -296,7 +296,7 @@ export const CrawlProgressPanel = memo(function CrawlProgressPanel({
               {activeOperations.length > 0 && (
                 <div className="space-y-2">
                   <h4 className="text-xs text-sc-fg-subtle uppercase tracking-wide flex items-center gap-2">
-                    <Loader2 size={12} className="animate-spin text-sc-purple" />
+                    <Loader2 width={12} height={12} className="animate-spin text-sc-purple" />
                     Active ({activeOperations.length})
                   </h4>
                   <AnimatePresence mode="popLayout">
@@ -316,7 +316,7 @@ export const CrawlProgressPanel = memo(function CrawlProgressPanel({
               {finishedOperations.length > 0 && (
                 <div className="space-y-2">
                   <h4 className="text-xs text-sc-fg-subtle uppercase tracking-wide flex items-center gap-2">
-                    <FileText size={12} />
+                    <FileText width={12} height={12} />
                     Recent ({finishedOperations.length})
                   </h4>
                   <AnimatePresence mode="popLayout">

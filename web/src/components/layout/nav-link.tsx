@@ -1,12 +1,12 @@
 'use client';
 
-import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import type { IconComponent } from '@/components/ui/icons';
 
 interface NavLinkProps {
   href: string;
-  icon: LucideIcon;
+  icon: IconComponent;
   children: React.ReactNode;
   onClick?: () => void;
 }
@@ -36,8 +36,8 @@ export function NavLink({ href, icon: Icon, children, onClick }: NavLinkProps) {
       )}
 
       <Icon
-        size={18}
-        strokeWidth={isActive ? 2.5 : 2}
+        width={18}
+        height={18}
         className={`transition-all duration-200 ${
           isActive
             ? 'text-sc-purple drop-shadow-[0_0_6px_rgba(225,53,255,0.5)]'

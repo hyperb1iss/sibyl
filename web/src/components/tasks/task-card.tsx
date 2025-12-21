@@ -1,7 +1,7 @@
 'use client';
 
-import { AlertTriangle, Calendar, Clock, Pause, Zap } from 'lucide-react';
 import { memo } from 'react';
+import { AlertTriangle, Calendar, Clock, Pause, Zap } from '@/components/ui/icons';
 import type { TaskPriority, TaskStatus, TaskSummary } from '@/lib/api';
 import { TASK_STATUS_CONFIG } from '@/lib/constants';
 
@@ -189,7 +189,7 @@ export const TaskCard = memo(function TaskCard({
             <span
               className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border ${priorityStyle.badge}`}
             >
-              {priority === 'critical' && <Zap size={10} className="animate-pulse" />}
+              {priority === 'critical' && <Zap width={10} height={10} className="animate-pulse" />}
               {PRIORITY_LABELS[priority]}
             </span>
 
@@ -214,8 +214,8 @@ export const TaskCard = memo(function TaskCard({
 
           {/* Status indicator */}
           <div className={`shrink-0 flex items-center gap-1 text-xs ${statusConfig?.textClass}`}>
-            {isBlocked && <Pause size={12} className="text-sc-yellow" />}
-            {isDoing && <Clock size={12} className="text-sc-purple animate-pulse" />}
+            {isBlocked && <Pause width={12} height={12} className="text-sc-yellow" />}
+            {isDoing && <Clock width={12} height={12} className="text-sc-purple animate-pulse" />}
             {!isBlocked && !isDoing && <span className="opacity-60">{statusConfig?.icon}</span>}
           </div>
         </div>
@@ -293,8 +293,8 @@ export const TaskCard = memo(function TaskCard({
               }`}
               title={new Date(dueDate).toLocaleDateString()}
             >
-              {isOverdue && <AlertTriangle size={10} />}
-              <Calendar size={10} />
+              {isOverdue && <AlertTriangle width={10} height={10} />}
+              <Calendar width={10} height={10} />
               {formatDueDate(dueDate)}
             </span>
           )}

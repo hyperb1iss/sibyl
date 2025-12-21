@@ -1,28 +1,28 @@
 'use client';
 
+import { AnimatePresence, motion } from 'motion/react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
 import {
   BookOpen,
   Boxes,
   FolderKanban,
+  type IconComponent,
   LayoutDashboard,
   ListTodo,
-  type LucideIcon,
   Network,
   RefreshCw,
   Search,
   Sparkles,
   X,
-} from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useEffect } from 'react';
+} from '@/components/ui/icons';
 import { APP_CONFIG } from '@/lib/constants';
 import { useMobileNav } from './mobile-nav-context';
 import { NavLink } from './nav-link';
 
-// Navigation with Lucide icons
-const NAVIGATION: Array<{ name: string; href: string; icon: LucideIcon }> = [
+// Navigation with Iconoir icons
+const NAVIGATION: Array<{ name: string; href: string; icon: IconComponent }> = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Projects', href: '/projects', icon: FolderKanban },
   { name: 'Tasks', href: '/tasks', icon: ListTodo },
@@ -44,7 +44,7 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
             <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-sc-purple via-sc-magenta to-sc-coral blur-lg opacity-50 group-hover:opacity-75 transition-opacity" />
             {/* Logo container */}
             <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-sc-purple via-sc-magenta to-sc-coral flex items-center justify-center shadow-lg">
-              <Sparkles size={20} className="text-white" strokeWidth={2.5} />
+              <Sparkles width={20} height={20} className="text-white" />
             </div>
           </div>
           <div>
@@ -135,7 +135,7 @@ export function Sidebar() {
                 className="absolute top-4 right-4 p-2 rounded-lg text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors"
                 aria-label="Close navigation"
               >
-                <X size={20} />
+                <X width={20} height={20} />
               </button>
 
               <SidebarContent onNavClick={close} />

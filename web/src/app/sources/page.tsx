@@ -9,7 +9,7 @@ import {
   Plus,
   RefreshCw,
   Search,
-} from 'lucide-react';
+} from '@/components/ui/icons';
 import { AnimatePresence, motion } from 'motion/react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useMemo, useState } from 'react';
@@ -18,16 +18,14 @@ import { toast } from 'sonner';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import {
-  type ActiveCrawlOperation,
   AddSourceDialog,
-  CrawlProgressPanel,
   SourceCardEnhanced,
   SourceCardSkeleton,
   type UrlSourceData,
 } from '@/components/sources';
 import { EmptyState } from '@/components/ui/tooltip';
 import type { CrawlStatusType, SourceTypeValue } from '@/lib/constants';
-import { useCrawlSource, useCreateSource, useDeleteSource, useSources } from '@/lib/hooks';
+import { useCancelCrawl, useCrawlSource, useCreateSource, useDeleteSource, useSources, useSyncSource } from '@/lib/hooks';
 
 type ViewMode = 'grid' | 'list';
 type SortBy = 'name' | 'updated' | 'documents';
@@ -39,6 +37,8 @@ export default function SourcesPage() {
   const createSource = useCreateSource();
   const deleteSource = useDeleteSource();
   const crawlSource = useCrawlSource();
+  const syncSource = useSyncSource();
+  const cancelCrawl = useCancelCrawl();
 
   // UI State
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -48,8 +48,8 @@ export default function SourcesPage() {
   const [sortBy, setSortBy] = useState<SortBy>('updated');
   const [showFilters, setShowFilters] = useState(false);
 
-  // Mock active operations (in real app, this would come from WebSocket or polling)
-  const [activeOperations, setActiveOperations] = useState<ActiveCrawlOperation[]>([]);
+  // Track which sources have active crawl operations
+  const [crawlingSourceIds, setCrawlingSourceIds] = useState<Set<string>>(new Set());
 
   const sources = sourcesData?.entities ?? [];
 
@@ -125,23 +125,7 @@ export default function SourcesPage() {
 
         // Optionally auto-start crawl
         if (result?.id) {
-          // Add to active operations mock
-          const newOp: ActiveCrawlOperation = {
-            id: `op-${Date.now()}`,
-            sourceId: result.id,
-            sourceName: data.name,
-            sourceUrl: data.url,
-            status: 'starting',
-            progress: 0,
-            message: 'Initializing crawl...',
-            startedAt: new Date().toISOString(),
-            pagesProcessed: 0,
-            documentsCreated: 0,
-            errorsCount: 0,
-          };
-          setActiveOperations(prev => [...prev, newOp]);
-
-          // Trigger actual crawl
+          setCrawlingSourceIds(prev => new Set(prev).add(result.id));
           await crawlSource.mutateAsync(result.id);
         }
       } catch (err) {
@@ -158,31 +142,39 @@ export default function SourcesPage() {
       const source = sources.find(s => s.id === id);
       if (!source) return;
 
-      try {
-        // Add to active operations
-        const newOp: ActiveCrawlOperation = {
-          id: `op-${Date.now()}`,
-          sourceId: id,
-          sourceName: source.name,
-          sourceUrl: source.metadata.url as string,
-          status: 'starting',
-          progress: 0,
-          message: 'Starting crawl...',
-          startedAt: new Date().toISOString(),
-          pagesProcessed: 0,
-          documentsCreated: 0,
-          errorsCount: 0,
-        };
-        setActiveOperations(prev => [...prev, newOp]);
+      // Check if already crawling
+      if (
+        crawlingSourceIds.has(id) ||
+        source.metadata.crawl_status === 'in_progress'
+      ) {
+        toast.info('Crawl already in progress');
+        return;
+      }
 
-        await crawlSource.mutateAsync(id);
-        toast.success(`Started crawling "${source.name}"`);
+      try {
+        // Mark as crawling immediately
+        setCrawlingSourceIds(prev => new Set(prev).add(id));
+
+        const result = await crawlSource.mutateAsync(id);
+
+        // Check if backend says already running
+        if (result?.status === 'already_running') {
+          toast.info('Crawl already in progress');
+        } else {
+          toast.success(`Started crawling "${source.name}"`);
+        }
       } catch (err) {
         console.error('Failed to start crawl:', err);
         toast.error('Failed to start crawl');
+        // Remove from crawling set on error
+        setCrawlingSourceIds(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
       }
     },
-    [sources, crawlSource]
+    [sources, crawlSource, crawlingSourceIds]
   );
 
   const handleDelete = useCallback(
@@ -199,15 +191,44 @@ export default function SourcesPage() {
     [sources, deleteSource]
   );
 
-  const handleDismissOperation = useCallback((opId: string) => {
-    setActiveOperations(prev => prev.filter(op => op.id !== opId));
-  }, []);
-
-  const handleViewSource = useCallback(
-    (sourceId: string) => {
-      router.push(`/sources/${sourceId}`);
+  const handleSync = useCallback(
+    async (id: string) => {
+      const source = sources.find(s => s.id === id);
+      try {
+        await syncSource.mutateAsync(id);
+        // Clear from crawling set if it was there
+        setCrawlingSourceIds(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        toast.success(`Synced "${source?.name || 'source'}"`);
+      } catch (err) {
+        console.error('Failed to sync source:', err);
+        toast.error('Failed to sync source');
+      }
     },
-    [router]
+    [sources, syncSource]
+  );
+
+  const handleCancel = useCallback(
+    async (id: string) => {
+      const source = sources.find(s => s.id === id);
+      try {
+        await cancelCrawl.mutateAsync(id);
+        // Clear from crawling set
+        setCrawlingSourceIds(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        toast.success(`Cancelled crawl for "${source?.name || 'source'}"`);
+      } catch (err) {
+        console.error('Failed to cancel crawl:', err);
+        toast.error('Failed to cancel crawl');
+      }
+    },
+    [sources, cancelCrawl]
   );
 
   // Breadcrumb
@@ -251,11 +272,11 @@ export default function SourcesPage() {
         meta={
           <div className="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-xs">
             <span className="flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-1 bg-sc-bg-base rounded-lg">
-              <Globe size={10} className="text-sc-purple sm:w-3 sm:h-3" />
+              <Globe width={10} height={10} className="text-sc-purple sm:w-3 sm:h-3" />
               <span className="text-sc-fg-muted">{stats.total}</span>
             </span>
             <span className="hidden xs:flex items-center gap-1.5 px-2 py-1 bg-sc-bg-base rounded-lg">
-              <Database size={12} className="text-sc-cyan" />
+              <Database width={12} height={12} className="text-sc-cyan" />
               <span className="text-sc-fg-muted">{stats.totalDocs} docs</span>
             </span>
             {stats.inProgress > 0 && (
@@ -271,7 +292,7 @@ export default function SourcesPage() {
             onClick={() => setShowAddDialog(true)}
             className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg sm:rounded-xl font-medium transition-colors shadow-lg shadow-sc-purple/25 text-sm sm:text-base"
           >
-            <Plus size={16} className="sm:w-[18px] sm:h-[18px]" />
+            <Plus width={16} height={16} className="sm:w-[18px] sm:h-[18px]" />
             <span className="hidden xs:inline">Add Source</span>
           </button>
         }
@@ -282,7 +303,7 @@ export default function SourcesPage() {
         {/* Search */}
         <div className="relative flex-1 sm:max-w-md">
           <Search
-            size={16}
+            width={16} height={16}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-sc-fg-subtle"
           />
           <input
@@ -306,7 +327,7 @@ export default function SourcesPage() {
                 : 'bg-sc-bg-base border-sc-fg-subtle/20 text-sc-fg-muted hover:border-sc-fg-subtle/40'
             }`}
           >
-            <Filter size={16} />
+            <Filter width={16} height={16} />
             <span className="hidden xs:inline text-sm">Filters</span>
             {filterStatus !== 'all' && <span className="w-2 h-2 bg-sc-purple rounded-full" />}
           </button>
@@ -323,7 +344,7 @@ export default function SourcesPage() {
               }`}
               title="Grid view"
             >
-              <Grid3X3 size={16} />
+              <Grid3X3 width={16} height={16} />
             </button>
             <button
               type="button"
@@ -335,7 +356,7 @@ export default function SourcesPage() {
               }`}
               title="List view"
             >
-              <LayoutList size={16} />
+              <LayoutList width={16} height={16} />
             </button>
           </div>
 
@@ -346,7 +367,7 @@ export default function SourcesPage() {
             className="p-2 sm:p-2.5 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-lg sm:rounded-xl text-sc-fg-muted hover:text-sc-fg-primary hover:border-sc-fg-subtle/40 transition-colors"
             title="Refresh"
           >
-            <RefreshCw size={16} />
+            <RefreshCw width={16} height={16} />
           </button>
         </div>
       </div>
@@ -437,7 +458,7 @@ export default function SourcesPage() {
       ) : filteredSources.length === 0 ? (
         sources.length === 0 ? (
           <EmptyState
-            icon={<Globe size={48} className="text-sc-purple" />}
+            icon={<Globe width={48} height={48} className="text-sc-purple" />}
             title="No knowledge sources yet"
             description="Add documentation websites or upload files to build your knowledge graph"
             action={
@@ -446,14 +467,14 @@ export default function SourcesPage() {
                 onClick={() => setShowAddDialog(true)}
                 className="flex items-center gap-2 px-5 py-2.5 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-xl font-medium transition-colors"
               >
-                <Plus size={18} />
+                <Plus width={18} height={18} />
                 Add Your First Source
               </button>
             }
           />
         ) : (
           <EmptyState
-            icon={<Search size={48} className="text-sc-fg-subtle" />}
+            icon={<Search width={48} height={48} className="text-sc-fg-subtle" />}
             title="No sources match your filters"
             description="Try adjusting your search or filters"
             action={
@@ -485,8 +506,13 @@ export default function SourcesPage() {
                 key={source.id}
                 source={source}
                 onCrawl={handleCrawl}
+                onCancel={handleCancel}
                 onDelete={handleDelete}
-                isCrawling={crawlSource.isPending}
+                onRefresh={handleSync}
+                isCrawling={
+                  crawlingSourceIds.has(source.id) ||
+                  source.metadata.crawl_status === 'in_progress'
+                }
               />
             ))}
           </AnimatePresence>
@@ -499,13 +525,6 @@ export default function SourcesPage() {
         onClose={() => setShowAddDialog(false)}
         onSubmitUrl={handleAddSource}
         isSubmitting={createSource.isPending}
-      />
-
-      {/* Crawl Progress Panel */}
-      <CrawlProgressPanel
-        operations={activeOperations}
-        onDismiss={handleDismissOperation}
-        onViewSource={handleViewSource}
       />
     </div>
   );

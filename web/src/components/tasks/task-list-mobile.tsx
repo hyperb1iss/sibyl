@@ -1,8 +1,8 @@
 'use client';
 
-import { ArrowDownAZ, Calendar, Sparkles, Zap } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { memo, useMemo, useState } from 'react';
+import { ArrowDownAZ, Calendar, Sparkles, Zap } from '@/components/ui/icons';
 import type { TaskStatus, TaskSummary } from '@/lib/api';
 import { TASK_STATUS_CONFIG, type TaskStatusType } from '@/lib/constants';
 import { TaskCard } from './task-card';
@@ -13,10 +13,10 @@ const MOBILE_STATUSES: TaskStatusType[] = ['todo', 'doing', 'review', 'done'];
 type SortOption = 'priority' | 'due_date' | 'created' | 'name';
 
 const SORT_OPTIONS: Array<{ value: SortOption; label: string; icon: React.ReactNode }> = [
-  { value: 'priority', label: 'Priority', icon: <Zap size={14} /> },
-  { value: 'due_date', label: 'Due Date', icon: <Calendar size={14} /> },
-  { value: 'created', label: 'Newest', icon: <Sparkles size={14} /> },
-  { value: 'name', label: 'A-Z', icon: <ArrowDownAZ size={14} /> },
+  { value: 'priority', label: 'Priority', icon: <Zap width={14} height={14} /> },
+  { value: 'due_date', label: 'Due Date', icon: <Calendar width={14} height={14} /> },
+  { value: 'created', label: 'Newest', icon: <Sparkles width={14} height={14} /> },
+  { value: 'name', label: 'A-Z', icon: <ArrowDownAZ width={14} height={14} /> },
 ];
 
 const PRIORITY_ORDER: Record<string, number> = {

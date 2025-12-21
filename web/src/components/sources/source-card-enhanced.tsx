@@ -1,5 +1,6 @@
 'use client';
 
+import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -11,9 +12,9 @@ import {
   MoreVertical,
   Play,
   RefreshCw,
+  StopCircle,
   Trash2,
-} from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+} from '@/components/ui/icons';
 import Link from 'next/link';
 import { memo, useState } from 'react';
 import type { SourceSummary } from '@/lib/api';
@@ -27,6 +28,7 @@ import {
 interface SourceCardEnhancedProps {
   source: SourceSummary;
   onCrawl?: (id: string) => void;
+  onCancel?: (id: string) => void;
   onDelete?: (id: string) => void;
   onRefresh?: (id: string) => void;
   isCrawling?: boolean;
@@ -42,15 +44,16 @@ export interface CrawlProgress {
 }
 
 const SOURCE_TYPE_ICONS: Record<SourceTypeValue, React.ReactNode> = {
-  website: <Globe size={18} className="text-sc-purple" />,
-  github: <Globe size={18} className="text-sc-cyan" />,
-  local: <FileText size={18} className="text-sc-coral" />,
-  api_docs: <FileText size={18} className="text-sc-green" />,
+  website: <Globe width={18} height={18} className="text-sc-purple" />,
+  github: <Globe width={18} height={18} className="text-sc-cyan" />,
+  local: <FileText width={18} height={18} className="text-sc-coral" />,
+  api_docs: <FileText width={18} height={18} className="text-sc-green" />,
 };
 
 export const SourceCardEnhanced = memo(function SourceCardEnhanced({
   source,
   onCrawl,
+  onCancel,
   onDelete,
   onRefresh,
   isCrawling,
@@ -126,7 +129,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
               }`}
             >
               {isActive ? (
-                <Loader2 size={18} className="text-sc-purple animate-spin" />
+                <Loader2 width={18} height={18} className="text-sc-purple animate-spin" />
               ) : (
                 SOURCE_TYPE_ICONS[sourceType]
               )}
@@ -145,7 +148,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
                 onClick={e => e.stopPropagation()}
               >
                 {getDomain(url)}
-                <ExternalLink size={10} />
+                <ExternalLink width={10} height={10} />
               </a>
             </div>
           </div>
@@ -155,13 +158,13 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
             className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium ${statusConfig.bgClass} ${statusConfig.textClass}`}
           >
             {isActive ? (
-              <Loader2 size={12} className="animate-spin" />
+              <Loader2 width={12} height={12} className="animate-spin" />
             ) : crawlStatus === 'completed' ? (
-              <CheckCircle2 size={12} />
+              <CheckCircle2 width={12} height={12} />
             ) : crawlStatus === 'failed' ? (
-              <AlertCircle size={12} />
+              <AlertCircle width={12} height={12} />
             ) : (
-              <Clock size={12} />
+              <Clock width={12} height={12} />
             )}
             {isActive ? 'Crawling...' : statusConfig.label}
           </div>
@@ -216,7 +219,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
         {/* Stats Row */}
         <div className="flex items-center gap-4 text-xs text-sc-fg-subtle mb-4">
           <div className="flex items-center gap-1.5 px-2 py-1 bg-sc-bg-dark rounded-lg">
-            <FileText size={12} className="text-sc-cyan" />
+            <FileText width={12} height={12} className="text-sc-cyan" />
             <span className="font-medium text-sc-fg-muted">{documentCount}</span>
             <span>docs</span>
           </div>
@@ -228,7 +231,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
           )}
           {lastCrawled && (
             <div className="flex items-center gap-1.5 text-sc-fg-subtle">
-              <Clock size={12} />
+              <Clock width={12} height={12} />
               <span>{formatDateTime(lastCrawled)}</span>
             </div>
           )}
@@ -255,36 +258,39 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
 
         {/* Actions */}
         <div className="flex items-center gap-2">
-          {/* Primary Action */}
-          <button
-            type="button"
-            onClick={() => onCrawl?.(source.id)}
-            disabled={isActive}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-              isActive
-                ? 'bg-sc-bg-dark text-sc-fg-subtle cursor-not-allowed'
-                : crawlStatus === 'completed'
+          {/* Primary Action - Crawl or Cancel */}
+          {isActive ? (
+            <button
+              type="button"
+              onClick={() => onCancel?.(source.id)}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-red/20 text-sc-red hover:bg-sc-red/30 border border-sc-red/30 transition-all"
+            >
+              <StopCircle width={14} height={14} />
+              Cancel
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onCrawl?.(source.id)}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                crawlStatus === 'completed'
                   ? 'bg-sc-bg-highlight text-sc-fg-primary hover:bg-sc-purple/20 hover:text-sc-purple border border-sc-fg-subtle/10'
                   : 'bg-sc-purple hover:bg-sc-purple/80 text-white shadow-lg shadow-sc-purple/25'
-            }`}
-          >
-            {isActive ? (
-              <>
-                <Loader2 size={14} className="animate-spin" />
-                Crawling...
-              </>
-            ) : crawlStatus === 'completed' ? (
-              <>
-                <RefreshCw size={14} />
-                Re-crawl
-              </>
-            ) : (
-              <>
-                <Play size={14} />
-                Start Crawl
-              </>
-            )}
-          </button>
+              }`}
+            >
+              {crawlStatus === 'completed' ? (
+                <>
+                  <RefreshCw width={14} height={14} />
+                  Re-crawl
+                </>
+              ) : (
+                <>
+                  <Play width={14} height={14} />
+                  Start Crawl
+                </>
+              )}
+            </button>
+          )}
 
           {/* View Button */}
           <Link
@@ -301,7 +307,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
               onClick={() => setShowMenu(!showMenu)}
               className="p-2.5 rounded-xl text-sc-fg-subtle hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors"
             >
-              <MoreVertical size={16} />
+              <MoreVertical width={16} height={16} />
             </button>
 
             <AnimatePresence>
@@ -333,7 +339,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
                         }}
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors"
                       >
-                        <RefreshCw size={14} />
+                        <RefreshCw width={14} height={14} />
                         Refresh
                       </button>
                     )}
@@ -346,7 +352,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
                         }}
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm text-sc-red hover:bg-sc-red/10 transition-colors"
                       >
-                        <Trash2 size={14} />
+                        <Trash2 width={14} height={14} />
                         Delete
                       </button>
                     )}
@@ -368,7 +374,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
             className="absolute inset-0 bg-sc-bg-dark/95 backdrop-blur-sm flex items-center justify-center p-4"
           >
             <div className="text-center space-y-3">
-              <AlertCircle size={32} className="mx-auto text-sc-red" />
+              <AlertCircle width={32} height={32} className="mx-auto text-sc-red" />
               <p className="text-sm text-sc-fg-primary">Delete this source?</p>
               <p className="text-xs text-sc-fg-subtle">
                 This will remove all {documentCount} documents.

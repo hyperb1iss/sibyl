@@ -1,9 +1,9 @@
 'use client';
 
 import * as Popover from '@radix-ui/react-popover';
-import { Calendar, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useRef, useState } from 'react';
+import { Calendar, X } from '@/components/ui/icons';
 
 interface EditableDateProps {
   value: string | undefined;
@@ -85,7 +85,7 @@ export function EditableDate({
             ${!value ? 'text-sc-fg-subtle' : isOverdue ? 'text-sc-red' : 'text-sc-fg-primary'}
           `}
         >
-          {showIcon && <Calendar size={14} className="opacity-60" />}
+          {showIcon && <Calendar width={14} height={14} className="opacity-60" />}
           <span className={!value ? 'italic' : ''}>{date ? formatDisplay(date) : placeholder}</span>
           {value && !disabled && (
             <span
@@ -95,7 +95,7 @@ export function EditableDate({
               tabIndex={0}
               className="opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity"
             >
-              <X size={12} />
+              <X width={12} height={12} />
             </span>
           )}
           {isSaving && (

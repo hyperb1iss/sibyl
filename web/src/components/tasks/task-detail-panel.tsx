@@ -21,7 +21,7 @@ import {
   Trash2,
   Users,
   Zap,
-} from 'lucide-react';
+} from '@/components/ui/icons';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
@@ -54,12 +54,12 @@ interface TaskDetailPanelProps {
 
 // Status icons
 const STATUS_ICONS: Record<TaskStatusType, React.ReactNode> = {
-  backlog: <Circle size={14} />,
-  todo: <Target size={14} />,
-  doing: <Play size={14} />,
-  blocked: <Pause size={14} />,
-  review: <Send size={14} />,
-  done: <CheckCircle2 size={14} />,
+  backlog: <Circle width={14} height={14} />,
+  todo: <Target width={14} height={14} />,
+  doing: <Play width={14} height={14} />,
+  blocked: <Pause width={14} height={14} />,
+  review: <Send width={14} height={14} />,
+  done: <CheckCircle2 width={14} height={14} />,
 };
 
 const STATUS_FLOW: TaskStatusType[] = ['backlog', 'todo', 'doing', 'review', 'done'];
@@ -75,7 +75,7 @@ const statusOptions = TASK_STATUSES.map(s => ({
 const priorityOptions = TASK_PRIORITIES.map(p => ({
   value: p,
   label: TASK_PRIORITY_CONFIG[p].label,
-  icon: <Zap size={14} />,
+  icon: <Zap width={14} height={14} />,
   color: TASK_PRIORITY_CONFIG[p].textClass,
 }));
 
@@ -114,11 +114,11 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
 
   // Project options for select
   const projectOptions = [
-    { value: '', label: 'No project', icon: <Circle size={14} /> },
+    { value: '', label: 'No project', icon: <Circle width={14} height={14} /> },
     ...(projectsData?.entities?.map(p => ({
       value: p.id,
       label: p.name,
-      icon: <Target size={14} />,
+      icon: <Target width={14} height={14} />,
     })) || []),
   ];
 
@@ -197,7 +197,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                   className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${statusConfig.bgClass} ${statusConfig.textClass} border border-current/20`}
                 >
                   {updateStatus.isPending ? (
-                    <Loader2 size={14} className="animate-spin" />
+                    <Loader2 width={14} height={14} className="animate-spin" />
                   ) : (
                     STATUS_ICONS[status]
                   )}
@@ -215,7 +215,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                 <span
                   className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${priorityConfig.bgClass} ${priorityConfig.textClass}`}
                 >
-                  <Zap size={12} />
+                  <Zap width={12} height={12} />
                   {opt?.label}
                 </span>
               )}
@@ -275,7 +275,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
         {status === 'blocked' && (
           <div className="mx-6 mb-4 p-4 bg-sc-red/10 border border-sc-red/30 rounded-xl">
             <div className="flex items-start gap-3">
-              <AlertCircle size={20} className="text-sc-red shrink-0 mt-0.5" />
+              <AlertCircle width={20} height={20} className="text-sc-red shrink-0 mt-0.5" />
               <div className="flex-1">
                 <span className="text-sm font-semibold text-sc-red">Blocked</span>
                 <div className="text-sm text-sc-fg-muted mt-1">
@@ -302,7 +302,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                 disabled={updateStatus.isPending}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-purple text-white hover:bg-sc-purple/80 shadow-lg shadow-sc-purple/25 transition-all disabled:opacity-50"
               >
-                <Play size={16} />
+                <Play width={16} height={16} />
                 Start Working
               </button>
             )}
@@ -315,7 +315,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                   disabled={updateStatus.isPending}
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-purple text-white hover:bg-sc-purple/80 shadow-lg shadow-sc-purple/25 transition-all disabled:opacity-50"
                 >
-                  <Send size={16} />
+                  <Send width={16} height={16} />
                   Submit for Review
                 </button>
                 <button
@@ -323,7 +323,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                   onClick={() => handleStatusChange('blocked')}
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-bg-elevated border border-sc-fg-subtle/20 text-sc-red hover:border-sc-red/30 transition-all"
                 >
-                  <Pause size={16} />
+                  <Pause width={16} height={16} />
                   Mark Blocked
                 </button>
               </>
@@ -336,7 +336,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                 disabled={updateStatus.isPending}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-green text-sc-bg-dark hover:bg-sc-green/80 shadow-lg shadow-sc-green/25 transition-all disabled:opacity-50"
               >
-                <CheckCircle2 size={16} />
+                <CheckCircle2 width={16} height={16} />
                 Complete Task
               </button>
             )}
@@ -348,7 +348,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                 disabled={updateStatus.isPending}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-purple text-white hover:bg-sc-purple/80 shadow-lg shadow-sc-purple/25 transition-all disabled:opacity-50"
               >
-                <Play size={16} />
+                <Play width={16} height={16} />
                 Unblock & Resume
               </button>
             )}
@@ -360,7 +360,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                 disabled={updateStatus.isPending}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-bg-elevated border border-sc-fg-subtle/20 text-sc-fg-muted hover:text-sc-fg-primary hover:border-sc-fg-subtle/40 transition-all disabled:opacity-50"
               >
-                <RotateCcw size={16} />
+                <RotateCcw width={16} height={16} />
                 Reopen Task
               </button>
             )}
@@ -388,7 +388,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                 }`}
                 title={editingContent ? 'View markdown' : 'Edit'}
               >
-                <Pencil size={14} />
+                <Pencil width={14} height={14} />
               </button>
             </div>
             {editingContent ? (
@@ -432,7 +432,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
           {/* Tags */}
           <div className="bg-gradient-to-br from-sc-bg-base to-sc-purple/5 border border-sc-purple/20 rounded-2xl p-6">
             <h2 className="text-sm font-semibold text-sc-purple uppercase tracking-wide mb-4 flex items-center gap-2">
-              <Hash size={16} />
+              <Hash width={16} height={16} />
               Tags
             </h2>
             <EditableTags
@@ -469,7 +469,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
             <div className="bg-gradient-to-br from-sc-green/10 to-sc-cyan/5 border border-sc-green/20 rounded-2xl p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-semibold text-sc-green uppercase tracking-wide flex items-center gap-2">
-                  <CheckCircle2 size={16} />
+                  <CheckCircle2 width={16} height={16} />
                   Learnings
                 </h2>
                 <button
@@ -482,7 +482,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                   }`}
                   title={editingLearnings ? 'View markdown' : 'Edit'}
                 >
-                  <Pencil size={14} />
+                  <Pencil width={14} height={14} />
                 </button>
               </div>
               {editingLearnings ? (
@@ -531,7 +531,8 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                       <span className="text-xs text-sc-fg-subtle">{item.relationship}</span>
                     </div>
                     <ChevronRight
-                      size={16}
+                      width={16}
+                      height={16}
                       className="text-sc-fg-subtle group-hover:text-sc-purple transition-colors"
                     />
                   </Link>
@@ -551,7 +552,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
             <div className="space-y-4">
               {/* Project */}
               <div className="flex items-start gap-3">
-                <Target size={16} className="text-sc-fg-subtle mt-0.5 shrink-0" />
+                <Target width={16} height={16} className="text-sc-fg-subtle mt-0.5 shrink-0" />
                 <div className="flex-1">
                   <div className="text-xs text-sc-fg-subtle mb-1">Project</div>
                   <EditableSelect
@@ -569,7 +570,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
 
               {/* Assignees */}
               <div className="flex items-start gap-3">
-                <Users size={16} className="text-sc-fg-subtle mt-0.5 shrink-0" />
+                <Users width={16} height={16} className="text-sc-fg-subtle mt-0.5 shrink-0" />
                 <div className="flex-1">
                   <div className="text-xs text-sc-fg-subtle mb-1">Assignees</div>
                   <EditableTags
@@ -583,7 +584,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
 
               {/* Time Tracking */}
               <div className="flex items-start gap-3">
-                <Clock size={16} className="text-sc-fg-subtle mt-0.5 shrink-0" />
+                <Clock width={16} height={16} className="text-sc-fg-subtle mt-0.5 shrink-0" />
                 <div className="flex-1">
                   <div className="text-xs text-sc-fg-subtle mb-1">Time</div>
                   <div className="flex items-center gap-3 text-sm">
@@ -612,7 +613,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
               {/* Timeline */}
               {(task.created_at || task.updated_at) && (
                 <div className="flex items-start gap-3">
-                  <Calendar size={16} className="text-sc-fg-subtle mt-0.5 shrink-0" />
+                  <Calendar width={16} height={16} className="text-sc-fg-subtle mt-0.5 shrink-0" />
                   <div className="flex-1">
                     <div className="text-xs text-sc-fg-subtle mb-1">Timeline</div>
                     <div className="space-y-1 text-sm">
@@ -647,7 +648,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
             <div className="space-y-4">
               {/* Branch */}
               <div className="flex items-start gap-3">
-                <GitBranch size={16} className="text-sc-cyan mt-0.5 shrink-0" />
+                <GitBranch width={16} height={16} className="text-sc-cyan mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs text-sc-fg-subtle mb-1">Branch</div>
                   <div className="text-sm font-mono bg-sc-bg-dark px-2.5 py-1.5 rounded-lg text-sc-cyan">
@@ -663,7 +664,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
 
               {/* PR */}
               <div className="flex items-start gap-3">
-                <GitPullRequest size={16} className="text-sc-purple mt-0.5 shrink-0" />
+                <GitPullRequest width={16} height={16} className="text-sc-purple mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs text-sc-fg-subtle mb-1">Pull Request</div>
                   {prUrl ? (
@@ -674,7 +675,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                       className="inline-flex items-center gap-1.5 text-sm text-sc-purple hover:underline"
                     >
                       View PR
-                      <ExternalLink size={12} />
+                      <ExternalLink width={12} height={12} />
                     </a>
                   ) : (
                     <EditableText
@@ -696,7 +697,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
               className="flex items-center gap-3 p-4 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl hover:border-sc-cyan/30 hover:bg-sc-bg-elevated transition-all group"
             >
               <div className="w-10 h-10 rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center">
-                <Target size={18} className="text-sc-cyan" />
+                <Target width={18} height={18} className="text-sc-cyan" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-sc-fg-primary group-hover:text-sc-cyan transition-colors">
@@ -705,7 +706,8 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                 <div className="text-xs text-sc-fg-subtle truncate">{projectId}</div>
               </div>
               <ChevronRight
-                size={18}
+                width={18}
+                height={18}
                 className="text-sc-fg-subtle group-hover:text-sc-cyan transition-colors"
               />
             </Link>
@@ -734,9 +736,9 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                     className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-sc-red text-white rounded-lg text-sm font-medium hover:bg-sc-red/80 transition-colors disabled:opacity-50"
                   >
                     {deleteEntity.isPending ? (
-                      <Loader2 size={14} className="animate-spin" />
+                      <Loader2 width={14} height={14} className="animate-spin" />
                     ) : (
-                      <Trash2 size={14} />
+                      <Trash2 width={14} height={14} />
                     )}
                     Delete
                   </button>
@@ -748,7 +750,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
                 onClick={() => setShowDeleteConfirm(true)}
                 className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-sc-red/30 text-sc-red rounded-lg text-sm hover:bg-sc-red/10 transition-colors"
               >
-                <Trash2 size={14} />
+                <Trash2 width={14} height={14} />
                 Delete Task
               </button>
             )}

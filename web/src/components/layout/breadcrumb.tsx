@@ -1,25 +1,25 @@
 'use client';
 
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { Fragment, useMemo } from 'react';
 import {
   BookOpen,
   Boxes,
   ChevronRight,
   FolderKanban,
+  type IconComponent,
   LayoutDashboard,
   ListTodo,
-  type LucideIcon,
   Network,
   RefreshCw,
   Search,
-} from 'lucide-react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { Fragment, useMemo } from 'react';
+} from '@/components/ui/icons';
 
 interface BreadcrumbItem {
   label: string;
   href?: string;
-  icon?: LucideIcon;
+  icon?: IconComponent;
 }
 
 interface BreadcrumbProps {
@@ -29,7 +29,7 @@ interface BreadcrumbProps {
 }
 
 // Route name mappings for automatic breadcrumbs
-const ROUTE_NAMES: Record<string, { label: string; icon: LucideIcon }> = {
+const ROUTE_NAMES: Record<string, { label: string; icon: IconComponent }> = {
   '': { label: 'Dashboard', icon: LayoutDashboard },
   projects: { label: 'Projects', icon: FolderKanban },
   tasks: { label: 'Tasks', icon: ListTodo },
@@ -87,19 +87,19 @@ export function Breadcrumb({ items, custom }: BreadcrumbProps) {
         return (
           <Fragment key={crumb.href ?? crumb.label}>
             {index > 0 && (
-              <ChevronRight size={14} className="text-sc-fg-subtle/50 shrink-0" aria-hidden="true" />
+              <ChevronRight width={14} height={14} className="text-sc-fg-subtle/50 shrink-0" aria-hidden="true" />
             )}
             {crumb.href && !isLast ? (
               <Link
                 href={crumb.href}
                 className="flex items-center gap-1.5 hover:text-sc-purple transition-colors shrink-0"
               >
-                {Icon && <Icon size={14} strokeWidth={2} />}
+                {Icon && <Icon width={14} height={14} />}
                 <span className="hidden xs:inline">{crumb.label}</span>
               </Link>
             ) : (
               <span className={`flex items-center gap-1.5 text-sc-fg-primary font-medium ${isLast ? 'min-w-0 truncate' : 'shrink-0'}`}>
-                {Icon && <Icon size={14} strokeWidth={2} className="shrink-0" />}
+                {Icon && <Icon width={14} height={14} className="shrink-0" />}
                 <span className={isLast ? 'truncate' : ''}>{crumb.label}</span>
               </span>
             )}

@@ -1,7 +1,7 @@
 'use client';
 
 import * as Dialog from '@radix-ui/react-dialog';
-import { FileText, Globe, Loader2, Plus, Upload, X } from 'lucide-react';
+import { FileText, Globe, Loader2, Plus, Upload, X } from '@/components/ui/icons';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useState } from 'react';
 
@@ -225,7 +225,7 @@ export function AddSourceDialog({
                 {/* Header */}
                 <div className="flex items-center justify-between p-5 border-b border-sc-fg-subtle/10">
                   <Dialog.Title className="text-lg font-semibold text-sc-fg-primary flex items-center gap-2">
-                    <Plus size={20} className="text-sc-purple" />
+                    <Plus width={20} height={20} className="text-sc-purple" />
                     Add Knowledge Source
                   </Dialog.Title>
                   <Dialog.Close asChild>
@@ -233,7 +233,7 @@ export function AddSourceDialog({
                       type="button"
                       className="p-1.5 rounded-lg text-sc-fg-subtle hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors"
                     >
-                      <X size={18} />
+                      <X width={18} height={18} />
                     </button>
                   </Dialog.Close>
                 </div>
@@ -249,7 +249,7 @@ export function AddSourceDialog({
                         : 'text-sc-fg-muted hover:text-sc-fg-primary'
                     }`}
                   >
-                    <Globe size={16} />
+                    <Globe width={16} height={16} />
                     Crawl Website
                     {activeTab === 'url' && (
                       <motion.div
@@ -268,7 +268,7 @@ export function AddSourceDialog({
                         : 'text-sc-fg-muted hover:text-sc-fg-primary'
                     } ${!onSubmitFile ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    <Upload size={16} />
+                    <Upload width={16} height={16} />
                     Upload Document
                     {activeTab === 'file' && (
                       <motion.div
@@ -391,7 +391,7 @@ export function AddSourceDialog({
                                   onClick={() => handleRemoveTag(tag)}
                                   className="hover:text-white transition-colors"
                                 >
-                                  <X size={12} />
+                                  <X width={12} height={12} />
                                 </button>
                               </span>
                             ))}
@@ -497,12 +497,12 @@ export function AddSourceDialog({
                           >
                             {isSubmitting ? (
                               <>
-                                <Loader2 size={16} className="animate-spin" />
+                                <Loader2 width={16} height={16} className="animate-spin" />
                                 Starting...
                               </>
                             ) : (
                               <>
-                                <Globe size={16} />
+                                <Globe width={16} height={16} />
                                 Start Crawl
                               </>
                             )}
@@ -543,7 +543,7 @@ export function AddSourceDialog({
                           />
                           {file ? (
                             <div className="space-y-2">
-                              <FileText size={40} className="mx-auto text-sc-green" />
+                              <FileText width={40} height={40} className="mx-auto text-sc-green" />
                               <p className="text-sm font-medium text-sc-fg-primary">{file.name}</p>
                               <p className="text-xs text-sc-fg-subtle">
                                 {(file.size / 1024).toFixed(1)} KB
@@ -558,7 +558,7 @@ export function AddSourceDialog({
                             </div>
                           ) : (
                             <div className="space-y-2">
-                              <Upload size={40} className="mx-auto text-sc-fg-subtle" />
+                              <Upload width={40} height={40} className="mx-auto text-sc-fg-subtle" />
                               <p className="text-sm text-sc-fg-muted">
                                 Drop a file here or click to browse
                               </p>
@@ -625,7 +625,7 @@ export function AddSourceDialog({
                                   onClick={() => handleRemoveTag(tag, true)}
                                   className="hover:text-white transition-colors"
                                 >
-                                  <X size={12} />
+                                  <X width={12} height={12} />
                                 </button>
                               </span>
                             ))}
@@ -661,12 +661,12 @@ export function AddSourceDialog({
                           >
                             {isSubmitting ? (
                               <>
-                                <Loader2 size={16} className="animate-spin" />
+                                <Loader2 width={16} height={16} className="animate-spin" />
                                 Uploading...
                               </>
                             ) : (
                               <>
-                                <Upload size={16} />
+                                <Upload width={16} height={16} />
                                 Upload Document
                               </>
                             )}

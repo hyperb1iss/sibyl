@@ -1,7 +1,7 @@
 'use client';
 
-import { FolderKanban, Hash, LayoutDashboard, ListTodo, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { FolderKanban, Hash, LayoutDashboard, ListTodo, X } from '@/components/ui/icons';
 import { Suspense, useCallback, useMemo, useState } from 'react';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { KanbanBoard } from '@/components/tasks/kanban-board';
@@ -204,7 +204,7 @@ function TasksPageContent() {
         {allTags.length > 0 && (
           <div className="hidden sm:flex flex-wrap items-center gap-2">
             <span className="text-xs text-sc-fg-subtle font-medium flex items-center gap-1">
-              <Hash size={12} />
+              <Hash width={12} height={12} />
               Tags:
             </span>
             {tagFilter && (
@@ -213,7 +213,7 @@ function TasksPageContent() {
                 onClick={() => handleTagFilter(null)}
                 className="text-xs text-sc-fg-muted hover:text-sc-fg-primary flex items-center gap-1 px-2 py-0.5 rounded bg-sc-bg-elevated hover:bg-sc-bg-highlight transition-colors"
               >
-                <X size={12} />
+                <X width={12} height={12} />
                 Clear
               </button>
             )}

@@ -2,142 +2,210 @@
  * SilkCircuit Icon System
  *
  * Centralized icon exports with consistent styling.
- * Using Lucide icons with electric neon aesthetic.
+ * Using Iconoir icons with electric neon aesthetic.
  */
 
 import {
   Activity,
-  AlertCircle,
   Archive,
   ArrowLeft,
   ArrowRight,
-  BookOpen,
-  Boxes,
+  Book,
   Calendar,
   Check,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
+  CheckCircle,
   Circle,
-  CircleCheck,
-  CircleDot,
-  CirclePause,
-  CircleX,
   Clock,
-  Command,
+  Combine,
   Copy,
+  Cube,
+  Dashboard,
+  Database,
   Download,
   Edit,
-  ExternalLink,
+  EditPencil,
   Eye,
-  FileText,
   Filter,
-  Flame,
+  FireFlame,
+  Flash,
   Folder,
-  FolderKanban,
+  GitBranch,
+  GitPullRequest,
   Github,
   Globe,
-  Hash,
-  LayoutDashboard,
+  Group,
+  Hashtag,
+  InfoCircle,
+  KanbanBoard,
+  KeyCommand,
+  Label,
   Link,
-  ListTodo,
-  Loader2,
-  type LucideIcon,
-  MoreHorizontal,
+  List,
+  Menu as MenuIcon,
+  MoreHoriz,
+  MoreVert,
+  NavArrowDown,
+  NavArrowRight,
+  NavArrowUp,
   Network,
+  OpenNewWindow,
+  Page,
+  Pause,
+  Play,
   Plus,
-  RefreshCw,
+  RefreshDouble,
+  Restart,
   Search,
+  Send,
   Settings,
-  SortAsc,
-  SortDesc,
-  Sparkles,
+  Sort,
+  SortDown,
+  SortUp,
+  Sparks,
+  Square,
   Star,
-  Tag,
-  Trash2,
+  Trash,
+  Undo,
   Upload,
   User,
-  Users,
+  ViewGrid,
+  WarningCircle,
+  WarningTriangle,
   Wifi,
   WifiOff,
-  X,
-  Zap,
-} from 'lucide-react';
+  Xmark,
+  XmarkCircle,
+} from 'iconoir-react';
+import type { ComponentType, SVGProps } from 'react';
 
-// Re-export all icons
+// Icon component type for Iconoir
+export type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
+
+// Re-export all icons with consistent naming
 export {
   Search,
-  Command,
-  LayoutDashboard,
-  FolderKanban,
-  ListTodo,
-  BookOpen,
+  KeyCommand as Command,
+  Dashboard as LayoutDashboard,
+  KanbanBoard as FolderKanban,
+  List as ListTodo,
+  Book as BookOpen,
   Network,
-  Boxes,
-  RefreshCw,
+  Cube as Boxes,
+  RefreshDouble as RefreshCw,
   Plus,
-  ChevronRight,
-  ChevronDown,
-  ChevronUp,
+  NavArrowRight as ChevronRight,
+  NavArrowDown as ChevronDown,
+  NavArrowUp as ChevronUp,
   Check,
-  X,
-  AlertCircle,
-  Loader2,
-  Zap,
+  Xmark as X,
+  WarningCircle as AlertCircle,
+  RefreshDouble as Loader2,
+  Flash as Zap,
   Circle,
-  CircleDot,
-  CircleCheck,
-  CirclePause,
-  CircleX,
+  Circle as CircleDot,
+  CheckCircle as CircleCheck,
+  Pause as CirclePause,
+  XmarkCircle as CircleX,
   Clock,
   Archive,
-  Sparkles,
+  Sparks as Sparkles,
   Activity,
   Wifi,
   WifiOff,
   Settings,
-  ExternalLink,
+  OpenNewWindow as ExternalLink,
   Github,
   Globe,
-  FileText,
+  Page as FileText,
   Folder,
   ArrowLeft,
   ArrowRight,
-  MoreHorizontal,
+  MoreHoriz as MoreHorizontal,
   Edit,
-  Trash2,
+  Trash as Trash2,
   Eye,
   Link,
   Copy,
   Download,
   Upload,
   Filter,
-  SortAsc,
-  SortDesc,
+  NavArrowUp as SortAsc,
+  NavArrowDown as SortDesc,
   Calendar,
   User,
-  Users,
-  Tag,
-  Hash,
+  Group as Users,
+  Label as Tag,
+  Hashtag as Hash,
   Star,
-  Flame,
+  FireFlame as Flame,
+  InfoCircle,
+  MenuIcon as Menu,
+  Sort as ArrowUpDown,
+  SortDown as ArrowDownAZ,
+  WarningTriangle as AlertTriangle,
+  Database,
+  GitBranch,
+  Play,
+  Combine as Layers,
+  CheckCircle as CheckCircle2,
+  Circle as Target,
+  MoreVert as MoreVertical,
+  XmarkCircle as StopCircle,
+  Undo as RotateCcw,
+  EditPencil as Pencil,
+  Send,
+  GitPullRequest,
+  ViewGrid as Grid3X3,
+  List as LayoutList,
+  Restart,
+  MoreVert,
+  Undo,
+  EditPencil,
+  ViewGrid,
+  // Direct exports (same name in both)
+  Sparks,
+  Flash,
+  Pause,
+  Xmark,
+  Cube,
+  Book,
+  List,
+  Page,
+  KanbanBoard,
+  Dashboard,
+  RefreshDouble,
+  NavArrowDown,
+  NavArrowRight,
+  NavArrowUp,
+  MoreHoriz,
+  OpenNewWindow,
+  WarningCircle,
+  WarningTriangle,
+  XmarkCircle,
+  CheckCircle,
+  Trash,
+  Label,
+  Group,
+  Sort,
+  SortDown,
+  SortUp,
+  Square,
+  Combine,
 };
-
-export type { LucideIcon };
 
 // =============================================================================
 // Navigation Icons
 // =============================================================================
 
 export const NAV_ICONS = {
-  dashboard: LayoutDashboard,
-  projects: FolderKanban,
-  tasks: ListTodo,
-  sources: BookOpen,
+  dashboard: Dashboard,
+  projects: KanbanBoard,
+  tasks: List,
+  sources: Book,
   graph: Network,
-  entities: Boxes,
+  entities: Cube,
   search: Search,
-  ingest: RefreshCw,
+  ingest: RefreshDouble,
 } as const;
 
 // =============================================================================
@@ -146,17 +214,17 @@ export const NAV_ICONS = {
 
 export const STATUS_ICONS = {
   backlog: Circle,
-  todo: CircleDot,
-  doing: Loader2,
-  blocked: CirclePause,
+  todo: Circle,
+  doing: RefreshDouble,
+  blocked: Pause,
   review: Clock,
-  done: CircleCheck,
+  done: CheckCircle,
   archived: Archive,
 } as const;
 
 export const PRIORITY_ICONS = {
-  critical: Flame,
-  high: Zap,
+  critical: FireFlame,
+  high: Flash,
   medium: Star,
   low: Circle,
   someday: Clock,
@@ -167,7 +235,7 @@ export const PRIORITY_ICONS = {
 // =============================================================================
 
 interface IconProps {
-  icon: LucideIcon;
+  icon: IconComponent;
   size?: 'xs' | 'sm' | 'md' | 'lg';
   className?: string;
 }
@@ -180,7 +248,7 @@ const ICON_SIZES = {
 } as const;
 
 export function Icon({ icon: IconComponent, size = 'md', className = '' }: IconProps) {
-  return <IconComponent size={ICON_SIZES[size]} className={className} strokeWidth={2} />;
+  return <IconComponent width={ICON_SIZES[size]} height={ICON_SIZES[size]} className={className} />;
 }
 
 // =============================================================================
@@ -202,7 +270,7 @@ export function StatusIndicator({ status, showLabel = true }: StatusIndicatorPro
       bg: 'bg-sc-green/5 border-sc-green/20',
     },
     connecting: {
-      icon: Loader2,
+      icon: RefreshDouble,
       label: 'Syncing',
       className: 'text-sc-yellow animate-spin',
       glow: '',
@@ -217,7 +285,7 @@ export function StatusIndicator({ status, showLabel = true }: StatusIndicatorPro
     },
   };
 
-  const { icon: IconComponent, label, className, bg } = config[status];
+  const { icon: IconComp, label, className, bg } = config[status];
 
   return (
     <div
@@ -228,7 +296,7 @@ export function StatusIndicator({ status, showLabel = true }: StatusIndicatorPro
         ${bg} ${className}
       `}
     >
-      <IconComponent size={14} strokeWidth={2.5} />
+      <IconComp width={14} height={14} />
       {showLabel && <span className="hidden sm:inline">{label}</span>}
     </div>
   );

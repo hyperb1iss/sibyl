@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -10,8 +11,7 @@ import {
   Pause,
   Plus,
   Zap,
-} from 'lucide-react';
-import Link from 'next/link';
+} from '@/components/ui/icons';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useMemo } from 'react';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
@@ -206,7 +206,7 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
             type="button"
             className="px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
           >
-            <Plus size={16} />
+            <Plus width={16} height={16} />
             <span>New Project</span>
           </button>
         }
@@ -313,13 +313,13 @@ function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) 
         <div className="flex items-center gap-1 shrink-0">
           {stats?.blocked && stats.blocked > 0 && (
             <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-sc-yellow/20 text-sc-yellow">
-              <Pause size={10} />
+              <Pause width={10} height={10} />
               {stats.blocked}
             </span>
           )}
           {stats?.critical && stats.critical > 0 && (
             <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-sc-red/20 text-sc-red">
-              <Zap size={10} />
+              <Zap width={10} height={10} />
               {stats.critical}
             </span>
           )}
@@ -348,12 +348,12 @@ function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) 
           <div className="flex items-center justify-between text-[10px]">
             <div className="flex items-center gap-2 text-sc-fg-subtle">
               <span className="flex items-center gap-1">
-                <CheckCircle2 size={10} className="text-sc-green" />
+                <CheckCircle2 width={10} height={10} className="text-sc-green" />
                 {stats.done}/{stats.total}
               </span>
               {stats.doing > 0 && (
                 <span className="flex items-center gap-1 text-sc-purple">
-                  <Clock size={10} />
+                  <Clock width={10} height={10} />
                   {stats.doing} active
                 </span>
               )}
@@ -459,14 +459,14 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
               className="p-2 bg-sc-bg-elevated hover:bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-muted hover:text-sc-cyan transition-colors"
               title="View Repository"
             >
-              <GitBranch size={18} />
+              <GitBranch width={18} height={18} />
             </a>
           )}
           <Link
             href={`/tasks?project=${project.id}`}
             className="px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
           >
-            <FolderKanban size={16} />
+            <FolderKanban width={16} height={16} />
             <span>Task Board</span>
           </Link>
         </div>
@@ -501,7 +501,7 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
         {/* Active Work */}
         <div className="bg-sc-bg-base border border-sc-purple/30 rounded-xl p-5">
           <div className="flex items-center gap-2 text-sc-purple mb-1">
-            <Clock size={16} />
+            <Clock width={16} height={16} />
             <span className="text-sm font-medium">Active</span>
           </div>
           <div className="text-3xl font-bold text-sc-fg-primary">{stats?.doing ?? 0}</div>
@@ -521,7 +521,7 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
               (stats?.blocked ?? 0) > 0 ? 'text-sc-yellow' : 'text-sc-coral'
             }`}
           >
-            {(stats?.blocked ?? 0) > 0 ? <Pause size={16} /> : <AlertTriangle size={16} />}
+            {(stats?.blocked ?? 0) > 0 ? <Pause width={16} height={16} /> : <AlertTriangle width={16} height={16} />}
             <span className="text-sm font-medium">
               {(stats?.blocked ?? 0) > 0 ? 'Blocked' : 'Urgent'}
             </span>
@@ -622,7 +622,7 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
             href={`/tasks?project=${project.id}`}
             className="inline-flex items-center gap-2 px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors"
           >
-            <Plus size={16} />
+            <Plus width={16} height={16} />
             <span>Add Task</span>
           </Link>
         </div>

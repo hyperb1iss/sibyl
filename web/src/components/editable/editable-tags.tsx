@@ -1,9 +1,9 @@
 'use client';
 
 import * as Popover from '@radix-ui/react-popover';
-import { Plus, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useRef, useState } from 'react';
+import { Plus, X } from '@/components/ui/icons';
 
 interface EditableTagsProps {
   values: string[];
@@ -105,7 +105,7 @@ export function EditableTags({
                 disabled={isSaving}
                 className="opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity"
               >
-                <X size={12} />
+                <X width={12} height={12} />
               </button>
             )}
           </motion.span>
@@ -124,7 +124,7 @@ export function EditableTags({
                 focus:outline-none focus:ring-2 focus:ring-sc-purple/30
               `}
             >
-              <Plus size={14} />
+              <Plus width={14} height={14} />
               {values.length === 0 && placeholder}
             </button>
           </Popover.Trigger>

@@ -1,9 +1,9 @@
 'use client';
 
-import { Command, Loader2, Menu, Search, Sparkles, Wifi, WifiOff } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
+import { Command, Loader2, Menu, Search, Sparkles, Wifi, WifiOff } from '@/components/ui/icons';
 import { useConnectionStatus, useHealth } from '@/lib/hooks';
 import { useMobileNav } from './mobile-nav-context';
 
@@ -55,11 +55,11 @@ export function Header() {
           className="p-2 -ml-1 rounded-lg text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors"
           aria-label="Open navigation menu"
         >
-          <Menu size={22} />
+          <Menu width={22} height={22} />
         </button>
         <Link href="/" className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-sc-purple via-sc-magenta to-sc-coral flex items-center justify-center">
-            <Sparkles size={16} className="text-white" strokeWidth={2.5} />
+            <Sparkles width={16} height={16} className="text-white" />
           </div>
           <span className="font-bold text-sc-fg-primary">Sibyl</span>
         </Link>
@@ -73,13 +73,13 @@ export function Header() {
           </label>
 
           <Search
-            size={16}
+            width={16}
+            height={16}
             className={`absolute left-3 top-1/2 -translate-y-1/2 transition-all duration-300 ${
               isFocused
                 ? 'text-sc-purple drop-shadow-[0_0_8px_rgba(225,53,255,0.5)]'
                 : 'text-sc-fg-muted'
             }`}
-            strokeWidth={2}
           />
 
           <input
@@ -119,7 +119,7 @@ export function Header() {
               }
             `}
           >
-            <Command size={10} strokeWidth={2.5} />
+            <Command width={10} height={10} />
             <span>K</span>
           </div>
         </div>
@@ -132,7 +132,7 @@ export function Header() {
         className="sm:hidden p-2 rounded-lg text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors"
         aria-label="Search"
       >
-        <Search size={20} />
+        <Search width={20} height={20} />
       </button>
 
       {/* Connection Status */}
@@ -151,8 +151,8 @@ export function Header() {
         `}
       >
         <statusConfig.icon
-          size={14}
-          strokeWidth={2.5}
+          width={14}
+          height={14}
           className={isReconnecting ? 'animate-spin' : ''}
         />
         <span className="hidden sm:inline">{statusConfig.label}</span>
