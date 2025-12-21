@@ -1,8 +1,8 @@
 'use client';
 
-import { FolderKanban, LayoutDashboard, ListTodo } from 'lucide-react';
+import { FolderKanban, Hash, LayoutDashboard, ListTodo, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useState } from 'react';
+import { Suspense, useCallback, useMemo, useState } from 'react';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { KanbanBoard } from '@/components/tasks/kanban-board';
@@ -10,7 +10,7 @@ import { type QuickTaskData, QuickTaskModal } from '@/components/tasks/quick-tas
 import { CommandPalette, useKeyboardShortcuts } from '@/components/ui/command-palette';
 import { TasksEmptyState } from '@/components/ui/empty-state';
 import { LoadingState } from '@/components/ui/spinner';
-import { FilterChip } from '@/components/ui/toggle';
+import { FilterChip, TagChip } from '@/components/ui/toggle';
 import { ErrorState } from '@/components/ui/tooltip';
 import type { TaskStatus } from '@/lib/api';
 import { useCreateEntity, useProjects, useTasks, useTaskUpdateStatus } from '@/lib/hooks';
@@ -20,6 +20,7 @@ function TasksPageContent() {
   const searchParams = useSearchParams();
 
   const projectFilter = searchParams.get('project') || undefined;
+  const tagFilter = searchParams.get('tag') || undefined;
 
   // State for modals
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -31,7 +32,28 @@ function TasksPageContent() {
   const createEntity = useCreateEntity();
 
   const projects = projectsData?.entities ?? [];
-  const tasks = tasksData?.entities ?? [];
+  const allTasks = tasksData?.entities ?? [];
+
+  // Extract all unique tags from tasks
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    for (const task of allTasks) {
+      const tags = (task.metadata.tags as string[]) ?? [];
+      for (const tag of tags) {
+        tagSet.add(tag);
+      }
+    }
+    return Array.from(tagSet).sort();
+  }, [allTasks]);
+
+  // Filter tasks by tag if filter is active
+  const tasks = useMemo(() => {
+    if (!tagFilter) return allTasks;
+    return allTasks.filter(task => {
+      const tags = (task.metadata.tags as string[]) ?? [];
+      return tags.includes(tagFilter);
+    });
+  }, [allTasks, tagFilter]);
 
   // Find current project name for filtered view
   const currentProjectName = projectFilter
@@ -51,6 +73,19 @@ function TasksPageContent() {
         params.set('project', projectId);
       } else {
         params.delete('project');
+      }
+      router.push(`/tasks?${params.toString()}`);
+    },
+    [router, searchParams]
+  );
+
+  const handleTagFilter = useCallback(
+    (tag: string | null) => {
+      const params = new URLSearchParams(searchParams);
+      if (tag) {
+        params.set('tag', tag);
+      } else {
+        params.delete('tag');
       }
       router.push(`/tasks?${params.toString()}`);
     },
@@ -140,20 +175,52 @@ function TasksPageContent() {
         }
       />
 
-      {/* Project Filter */}
-      <div className="flex flex-wrap gap-2">
-        <FilterChip active={!projectFilter} onClick={() => handleProjectFilter(null)}>
-          All Projects
-        </FilterChip>
-        {projects.map(project => (
-          <FilterChip
-            key={project.id}
-            active={projectFilter === project.id}
-            onClick={() => handleProjectFilter(project.id)}
-          >
-            {project.name}
+      {/* Filters */}
+      <div className="space-y-3">
+        {/* Project Filter */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-sc-fg-subtle font-medium">Project:</span>
+          <FilterChip active={!projectFilter} onClick={() => handleProjectFilter(null)}>
+            All
           </FilterChip>
-        ))}
+          {projects.map(project => (
+            <FilterChip
+              key={project.id}
+              active={projectFilter === project.id}
+              onClick={() => handleProjectFilter(project.id)}
+            >
+              {project.name}
+            </FilterChip>
+          ))}
+        </div>
+
+        {/* Tag Filter */}
+        {allTags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-sc-fg-subtle font-medium flex items-center gap-1">
+              <Hash size={12} />
+              Tags:
+            </span>
+            {tagFilter && (
+              <button
+                type="button"
+                onClick={() => handleTagFilter(null)}
+                className="text-xs text-sc-fg-muted hover:text-sc-fg-primary flex items-center gap-1 px-2 py-0.5 rounded bg-sc-bg-elevated hover:bg-sc-bg-highlight transition-colors"
+              >
+                <X size={12} />
+                Clear
+              </button>
+            )}
+            {allTags.map(tag => (
+              <TagChip
+                key={tag}
+                tag={tag}
+                active={tagFilter === tag}
+                onClick={() => handleTagFilter(tagFilter === tag ? null : tag)}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Kanban Board or Empty State */}

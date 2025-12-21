@@ -94,3 +94,130 @@ export function FilterChip({ active, onClick, children, disabled }: FilterChipPr
     </button>
   );
 }
+
+// Tag styles matching TaskCard for visual consistency
+const TAG_STYLES: Record<string, { bg: string; text: string; border: string; activeBg: string }> = {
+  // Domain tags
+  frontend: {
+    bg: 'bg-sc-cyan/10',
+    text: 'text-sc-cyan',
+    border: 'border-sc-cyan/20',
+    activeBg: 'bg-sc-cyan/25',
+  },
+  backend: {
+    bg: 'bg-sc-purple/10',
+    text: 'text-sc-purple',
+    border: 'border-sc-purple/20',
+    activeBg: 'bg-sc-purple/25',
+  },
+  database: {
+    bg: 'bg-sc-coral/10',
+    text: 'text-sc-coral',
+    border: 'border-sc-coral/20',
+    activeBg: 'bg-sc-coral/25',
+  },
+  devops: {
+    bg: 'bg-sc-yellow/10',
+    text: 'text-sc-yellow',
+    border: 'border-sc-yellow/20',
+    activeBg: 'bg-sc-yellow/25',
+  },
+  testing: {
+    bg: 'bg-sc-green/10',
+    text: 'text-sc-green',
+    border: 'border-sc-green/20',
+    activeBg: 'bg-sc-green/25',
+  },
+  security: {
+    bg: 'bg-sc-red/10',
+    text: 'text-sc-red',
+    border: 'border-sc-red/20',
+    activeBg: 'bg-sc-red/25',
+  },
+  performance: {
+    bg: 'bg-sc-coral/10',
+    text: 'text-sc-coral',
+    border: 'border-sc-coral/20',
+    activeBg: 'bg-sc-coral/25',
+  },
+  docs: {
+    bg: 'bg-sc-fg-subtle/10',
+    text: 'text-sc-fg-muted',
+    border: 'border-sc-fg-subtle/20',
+    activeBg: 'bg-sc-fg-subtle/25',
+  },
+  // Type tags
+  feature: {
+    bg: 'bg-sc-green/10',
+    text: 'text-sc-green',
+    border: 'border-sc-green/20',
+    activeBg: 'bg-sc-green/25',
+  },
+  bug: {
+    bg: 'bg-sc-red/10',
+    text: 'text-sc-red',
+    border: 'border-sc-red/20',
+    activeBg: 'bg-sc-red/25',
+  },
+  refactor: {
+    bg: 'bg-sc-purple/10',
+    text: 'text-sc-purple',
+    border: 'border-sc-purple/20',
+    activeBg: 'bg-sc-purple/25',
+  },
+  chore: {
+    bg: 'bg-sc-fg-subtle/10',
+    text: 'text-sc-fg-muted',
+    border: 'border-sc-fg-subtle/20',
+    activeBg: 'bg-sc-fg-subtle/25',
+  },
+  research: {
+    bg: 'bg-sc-cyan/10',
+    text: 'text-sc-cyan',
+    border: 'border-sc-cyan/20',
+    activeBg: 'bg-sc-cyan/25',
+  },
+};
+
+const DEFAULT_TAG_STYLE = {
+  bg: 'bg-sc-bg-elevated',
+  text: 'text-sc-fg-muted',
+  border: 'border-sc-fg-subtle/20',
+  activeBg: 'bg-sc-bg-highlight',
+};
+
+function getTagStyle(tag: string) {
+  return TAG_STYLES[tag.toLowerCase()] || DEFAULT_TAG_STYLE;
+}
+
+// Tag chip for filtering by tag - styled to match task card tags
+interface TagChipProps {
+  tag: string;
+  active: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+}
+
+export function TagChip({ tag, active, onClick, disabled }: TagChipProps) {
+  const style = getTagStyle(tag);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`
+        px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-150
+        border
+        ${active ? style.activeBg : style.bg}
+        ${style.text}
+        ${active ? `${style.border} ring-1 ring-current/30` : style.border}
+        ${active ? 'shadow-sm' : ''}
+        hover:scale-105
+        ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+      `}
+    >
+      {tag}
+    </button>
+  );
+}

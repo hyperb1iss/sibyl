@@ -80,6 +80,31 @@ const PRIORITY_LABELS: Record<string, string> = {
   someday: 'Later',
 };
 
+// Tag category colors for visual distinction
+const TAG_STYLES: Record<string, string> = {
+  // Domain tags
+  frontend: 'bg-sc-cyan/15 text-sc-cyan border-sc-cyan/30',
+  backend: 'bg-sc-purple/15 text-sc-purple border-sc-purple/30',
+  database: 'bg-sc-coral/15 text-sc-coral border-sc-coral/30',
+  devops: 'bg-sc-yellow/15 text-sc-yellow border-sc-yellow/30',
+  testing: 'bg-sc-green/15 text-sc-green border-sc-green/30',
+  security: 'bg-sc-red/15 text-sc-red border-sc-red/30',
+  performance: 'bg-sc-coral/15 text-sc-coral border-sc-coral/30',
+  docs: 'bg-sc-fg-subtle/15 text-sc-fg-muted border-sc-fg-subtle/30',
+  // Type tags
+  feature: 'bg-sc-green/15 text-sc-green border-sc-green/30',
+  bug: 'bg-sc-red/15 text-sc-red border-sc-red/30',
+  refactor: 'bg-sc-purple/15 text-sc-purple border-sc-purple/30',
+  chore: 'bg-sc-fg-subtle/15 text-sc-fg-muted border-sc-fg-subtle/30',
+  research: 'bg-sc-cyan/15 text-sc-cyan border-sc-cyan/30',
+};
+
+const DEFAULT_TAG_STYLE = 'bg-sc-bg-elevated text-sc-fg-muted border-sc-fg-subtle/20';
+
+function getTagStyle(tag: string): string {
+  return TAG_STYLES[tag.toLowerCase()] || DEFAULT_TAG_STYLE;
+}
+
 export const TaskCard = memo(function TaskCard({
   task,
   projectName,
@@ -95,6 +120,7 @@ export const TaskCard = memo(function TaskCard({
   const projectId = task.metadata.project_id as string | undefined;
   const dueDate = task.metadata.due_date as string | undefined;
   const feature = task.metadata.feature as string | undefined;
+  const tags = (task.metadata.tags as string[]) ?? [];
 
   const isOverdue = dueDate && status !== 'done' && new Date(dueDate) < new Date();
   const isBlocked = status === 'blocked';
@@ -208,6 +234,25 @@ export const TaskCard = memo(function TaskCard({
         {/* Description preview */}
         {task.description && (
           <p className="text-xs text-sc-fg-subtle line-clamp-1 mt-1.5">{task.description}</p>
+        )}
+
+        {/* Tags */}
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-2">
+            {tags.slice(0, 4).map(tag => (
+              <span
+                key={tag}
+                className={`text-[9px] px-1.5 py-0.5 rounded-full border font-medium ${getTagStyle(tag)}`}
+              >
+                {tag}
+              </span>
+            ))}
+            {tags.length > 4 && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-sc-bg-elevated text-sc-fg-subtle">
+                +{tags.length - 4}
+              </span>
+            )}
+          </div>
         )}
 
         {/* Footer */}

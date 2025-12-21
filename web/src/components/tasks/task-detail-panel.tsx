@@ -10,6 +10,7 @@ import {
   ExternalLink,
   GitBranch,
   GitPullRequest,
+  Hash,
   Loader2,
   Pause,
   Pencil,
@@ -102,6 +103,7 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
   const estimatedHours = task.metadata.estimated_hours as number | undefined;
   const actualHours = task.metadata.actual_hours as number | undefined;
   const technologies = (task.metadata.technologies as string[]) || [];
+  const tags = (task.metadata.tags as string[]) || [];
   const blockerReason = task.metadata.blocker_reason as string | undefined;
   const learnings = task.metadata.learnings as string | undefined;
   const dueDate = task.metadata.due_date as string | undefined;
@@ -425,6 +427,41 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
               placeholder="Add technology"
               suggestions={['React', 'TypeScript', 'Python', 'Next.js', 'GraphQL', 'Tailwind']}
             />
+          </div>
+
+          {/* Tags */}
+          <div className="bg-gradient-to-br from-sc-bg-base to-sc-purple/5 border border-sc-purple/20 rounded-2xl p-6">
+            <h2 className="text-sm font-semibold text-sc-purple uppercase tracking-wide mb-4 flex items-center gap-2">
+              <Hash size={16} />
+              Tags
+            </h2>
+            <EditableTags
+              values={tags}
+              onSave={v => updateField('tags', v.length > 0 ? v : undefined)}
+              tagClassName="bg-sc-purple/10 text-sc-purple border-sc-purple/20"
+              placeholder="Add tag"
+              addPlaceholder="Type tag and press Enter"
+              suggestions={[
+                'frontend',
+                'backend',
+                'database',
+                'devops',
+                'testing',
+                'docs',
+                'security',
+                'performance',
+                'feature',
+                'bug',
+                'refactor',
+                'chore',
+                'research',
+              ]}
+            />
+            {tags.length === 0 && (
+              <p className="text-xs text-sc-fg-subtle mt-3 italic">
+                Tags are auto-generated when creating tasks. Add more to help organize and filter.
+              </p>
+            )}
           </div>
 
           {/* Learnings - show when done or has content */}
