@@ -9,7 +9,8 @@ import { Button, ColorButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input, Textarea } from '@/components/ui/input';
 import type { Entity } from '@/lib/api';
-import { ENTITY_ICONS, formatDateTime, getEntityStyles, type EntityType } from '@/lib/constants';
+import { EntityIcon } from '@/components/ui/entity-icon';
+import { ENTITY_COLORS, formatDateTime, type EntityType } from '@/lib/constants';
 import { useDeleteEntity, useEntity, useUpdateEntity } from '@/lib/hooks';
 
 interface EntityDetailContentProps {
@@ -32,8 +33,7 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
 
   // Use entity from query (may be more up-to-date) or fall back to initial
   const currentEntity = entity ?? initialEntity;
-  const styles = getEntityStyles(currentEntity.entity_type);
-  const icon = ENTITY_ICONS[currentEntity.entity_type as EntityType] ?? '◇';
+  const color = ENTITY_COLORS[currentEntity.entity_type as EntityType] ?? '#8b85a0';
 
   const handleStartEdit = () => {
     setEditedName(currentEntity.name);
@@ -71,21 +71,26 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
 
       {/* Hero Header */}
       <div
-        className={`
-          relative overflow-hidden rounded-xl
-          bg-gradient-to-br ${styles.gradient}
-          border ${styles.border}
-        `}
+        className="relative overflow-hidden rounded-xl border"
+        style={{
+          background: `linear-gradient(135deg, ${color}18 0%, var(--sc-bg-base) 50%, var(--sc-bg-base) 100%)`,
+          borderColor: `${color}40`,
+        }}
       >
         {/* Accent bar */}
-        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${styles.accent}`} />
+        <div
+          className="absolute left-0 top-0 bottom-0 w-1.5"
+          style={{ backgroundColor: color }}
+        />
 
         <div className="pl-5 pr-4 py-5">
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
               {/* Icon + Badge */}
               <div className="flex items-center gap-3 mb-3">
-                <span className={`text-2xl ${styles.dot.replace('bg-', 'text-')}`}>{icon}</span>
+                <span style={{ color }}>
+                  <EntityIcon type={currentEntity.entity_type} size={28} />
+                </span>
                 <EntityBadge type={currentEntity.entity_type} size="md" showIcon />
               </div>
 

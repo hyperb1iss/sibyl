@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { memo } from 'react';
 import { EntityBadge } from '@/components/ui/badge';
-import { ENTITY_COLORS, ENTITY_ICONS, type EntityType } from '@/lib/constants';
+import { EntityIcon } from '@/components/ui/entity-icon';
+import { ENTITY_COLORS, type EntityType } from '@/lib/constants';
 
 interface Entity {
   id: string;
@@ -24,7 +25,6 @@ export const EntityCard = memo(function EntityCard({
   onDelete,
   showActions = true,
 }: EntityCardProps) {
-  const icon = ENTITY_ICONS[entity.entity_type as EntityType] ?? '◇';
   const color = ENTITY_COLORS[entity.entity_type as EntityType] ?? '#8b85a0';
 
   return (
@@ -55,8 +55,8 @@ export const EntityCard = memo(function EntityCard({
           <div className="flex-1 min-w-0">
             {/* Header: Icon + Badge */}
             <div className="flex items-center gap-2 mb-2.5">
-              <span className="text-lg" style={{ color }}>
-                {icon}
+              <span style={{ color }}>
+                <EntityIcon type={entity.entity_type} size={18} />
               </span>
               <EntityBadge type={entity.entity_type} />
             </div>
@@ -78,7 +78,7 @@ export const EntityCard = memo(function EntityCard({
             {/* Source file */}
             {entity.source_file && (
               <p className="text-sc-fg-subtle text-xs mt-2.5 font-mono truncate flex items-center gap-1.5">
-                <span className="opacity-60">📁</span>
+                <EntityIcon type="document" size={12} className="opacity-60" />
                 {entity.source_file}
               </p>
             )}

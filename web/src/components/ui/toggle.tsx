@@ -1,4 +1,5 @@
-import { ENTITY_COLORS, ENTITY_ICONS, type EntityType } from '@/lib/constants';
+import { ENTITY_COLORS, type EntityType } from '@/lib/constants';
+import { EntityIcon } from './entity-icon';
 
 interface ToggleProps {
   checked: boolean;
@@ -240,7 +241,6 @@ export function EntityTypeChip({
   count,
   disabled,
 }: EntityTypeChipProps) {
-  const icon = ENTITY_ICONS[entityType as EntityType] ?? '◇';
   const color = ENTITY_COLORS[entityType as EntityType] ?? '#8b85a0';
 
   return (
@@ -278,10 +278,10 @@ export function EntityTypeChip({
     >
       <span className="relative flex items-center gap-1.5">
         <span
-          className="text-sm transition-transform duration-200 group-hover:scale-110"
+          className="transition-transform duration-200 group-hover:scale-110"
           style={{ color }}
         >
-          {icon}
+          <EntityIcon type={entityType} size={14} />
         </span>
         <span style={{ color: active ? color : 'var(--sc-fg-muted)' }}>
           {entityType.replace(/_/g, ' ')}

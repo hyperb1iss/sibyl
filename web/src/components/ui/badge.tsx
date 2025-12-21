@@ -1,11 +1,12 @@
-import { ENTITY_ICONS, ENTITY_STYLES, type EntityType } from '@/lib/constants';
+import { ENTITY_COLORS, type EntityType } from '@/lib/constants';
+import { EntityIcon } from './entity-icon';
 
 type BadgeSize = 'sm' | 'md' | 'lg';
 
-const sizes: Record<BadgeSize, string> = {
-  sm: 'px-2 py-0.5 text-xs gap-1',
-  md: 'px-2.5 py-1 text-sm gap-1.5',
-  lg: 'px-3 py-1.5 text-sm gap-2',
+const sizes: Record<BadgeSize, { classes: string; iconSize: number }> = {
+  sm: { classes: 'px-2 py-0.5 text-xs gap-1', iconSize: 12 },
+  md: { classes: 'px-2.5 py-1 text-sm gap-1.5', iconSize: 14 },
+  lg: { classes: 'px-3 py-1.5 text-sm gap-2', iconSize: 16 },
 };
 
 // Entity type badge with SilkCircuit colors
@@ -17,19 +18,19 @@ interface EntityBadgeProps {
 }
 
 export function EntityBadge({ type, size = 'sm', showIcon = false, className = '' }: EntityBadgeProps) {
-  const style = ENTITY_STYLES[type as EntityType] ?? ENTITY_STYLES.knowledge_source;
-  const icon = ENTITY_ICONS[type as EntityType] ?? '◇';
+  const color = ENTITY_COLORS[type as EntityType] ?? '#8b85a0';
+  const sizeConfig = sizes[size];
 
   return (
     <span
-      className={`
-        inline-flex items-center rounded font-medium capitalize border
-        ${sizes[size]}
-        ${style.badge}
-        ${className}
-      `}
+      className={`inline-flex items-center rounded font-medium capitalize border ${sizeConfig.classes} ${className}`}
+      style={{
+        backgroundColor: `${color}20`,
+        color: color,
+        borderColor: `${color}40`,
+      }}
     >
-      {showIcon && <span className="opacity-80">{icon}</span>}
+      {showIcon && <EntityIcon type={type} size={sizeConfig.iconSize} className="opacity-80" />}
       {type.replace(/_/g, ' ')}
     </span>
   );
