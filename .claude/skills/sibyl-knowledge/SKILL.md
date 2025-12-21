@@ -1,7 +1,7 @@
 ---
 name: sibyl-knowledge
 description: Graph-RAG knowledge oracle with CLI interface. Use `uv run sibyl` for semantic search, task management, knowledge capture, and graph exploration. Invoke when you need persistent memory across sessions, pattern/learning lookup, or task tracking. Requires FalkorDB running.
-allowed-tools: Bash(uv run sibyl:*)
+allowed-tools: Bash
 ---
 
 # Sibyl Knowledge Oracle
@@ -17,14 +17,15 @@ uv run sibyl search "authentication patterns"
 # Quickly add a learning
 uv run sibyl add "Redis insight" "Connection pool must be >= concurrent requests"
 
-# List your projects
+# List tasks (always filter with --status to reduce noise)
+uv run sibyl task list --status todo
+uv run sibyl task list --status done
+
+# List projects
 uv run sibyl project list
 
 # Create a task in a project
 uv run sibyl task create --title "Implement OAuth" --project proj_abc --priority high
-
-# List tasks in a project
-uv run sibyl task list --project proj_abc --status todo
 
 # Start a task
 uv run sibyl task start task_xyz --assignee alice
@@ -32,6 +33,12 @@ uv run sibyl task start task_xyz --assignee alice
 # Complete with learnings
 uv run sibyl task complete task_xyz --learnings "OAuth tokens expire..."
 ```
+
+**Pro tips:**
+- **Always use JSON output** (default) - it's structured and jq-parseable
+- Always filter with `--status` or `--project` to avoid noise
+- Use `2>&1` when piping to capture all output (spinner goes to stderr)
+- Parse with `jq` for reliable field extraction
 
 ---
 
@@ -257,32 +264,41 @@ uv run sibyl task complete task_xyz \
 
 ## Output Formats
 
-**All list commands output JSON by default** (optimal for LLM parsing). Use flags to change:
+**Always use JSON output** (the default). Parse with `jq`.
+
+### Extracting Data with jq
 
 ```bash
-# Default: JSON output (clean, structured)
-uv run sibyl task list
+# Extract just task names
+uv run sibyl task list --status todo 2>&1 | jq -r '.[].name'
 
-# Human-readable table
-uv run sibyl task list --table
-uv run sibyl task list -t
+# Count tasks by status
+uv run sibyl task list --status todo 2>&1 | jq 'length'
 
-# CSV for spreadsheets
-uv run sibyl task list --csv
+# Get names and priorities
+uv run sibyl task list --status todo 2>&1 | jq -r '.[] | "\(.metadata.priority)\t\(.name)"'
 
-# Same for other commands
-uv run sibyl project list          # JSON
-uv run sibyl project list --table  # Table
-uv run sibyl entity list --type pattern --csv
+# Filter by priority
+uv run sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "high") | .name'
+
+# Get tasks grouped by feature
+uv run sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.feature) | .[] | "\(.[0].metadata.feature // "none"):\n\(.[].name | "  - \(.)")"'
+
+# Sorted by priority (critical first)
+uv run sibyl task list --status todo 2>&1 | jq -r 'sort_by(.metadata.priority) | .[].name'
 ```
 
-**Output format by command:**
-| Command | Default | Table Flag | CSV Flag |
-|---------|---------|------------|----------|
-| `task list` | JSON | `--table` / `-t` | `--csv` |
-| `project list` | JSON | `--table` / `-t` | `--csv` |
-| `entity list` | JSON | `--table` | `--csv` |
-| `source list` | JSON | `--table` / `-t` | - |
+### JSON Output Notes
+
+- **Clean output**: Embeddings are automatically stripped from CLI output
+- **Valid JSON**: Output is properly escaped and jq-parseable
+
+### CSV Export (Alternative)
+
+```bash
+uv run sibyl task list --csv
+uv run sibyl entity list --type pattern --csv
+```
 
 ---
 
@@ -297,6 +313,89 @@ uv run sibyl entity list --type pattern --csv
    - `pattern` - Reusable coding patterns
    - `rule` - Hard constraints, must-follow rules
    - `task` - Work items with lifecycle
+
+---
+
+## CLI vs MCP Tools
+
+**Prefer CLI over MCP tools** (`mcp__sibyl__*`):
+
+| Aspect | CLI (`uv run sibyl`) | MCP Tools |
+|--------|---------------------|-----------|
+| Reliability | Always works | May have session issues |
+| Output control | `--table`, `--csv`, JSON | JSON only |
+| Bulk operations | Pipes, grep, scripts | One call at a time |
+| Status filtering | `--status`, `--project` | Parameters in JSON |
+
+The MCP tools (`mcp__sibyl__search`, `mcp__sibyl__add`, etc.) are available but may return session errors if the server isn't running. **CLI is the reliable path.**
+
+---
+
+## Troubleshooting
+
+### "No valid session ID" from MCP tools
+The Sibyl MCP server isn't running. Use CLI instead:
+```bash
+uv run sibyl search "query"  # Instead of mcp__sibyl__search
+```
+
+### FalkorDB connection errors
+```bash
+# Check if FalkorDB is running
+docker ps | grep falkordb
+
+# Start it
+docker compose up -d
+
+# Verify
+uv run sibyl health
+```
+
+### Task list shows old/test data
+Filter by status or project to focus:
+```bash
+uv run sibyl task list --status todo      # Active work only
+uv run sibyl task list --project my-proj  # Specific project
+```
+
+---
+
+## Task Reporting Recipes
+
+### Get task counts by status
+```bash
+echo "TODO: $(uv run sibyl task list --status todo 2>&1 | jq 'length')"
+echo "DOING: $(uv run sibyl task list --status doing 2>&1 | jq 'length')"
+echo "DONE: $(uv run sibyl task list --status done 2>&1 | jq 'length')"
+```
+
+### List task names by status
+```bash
+uv run sibyl task list --status todo 2>&1 | jq -r '.[].name'
+```
+
+### List tasks with priority and feature (sorted)
+```bash
+# Priority + feature + name, sorted
+uv run sibyl task list --status todo 2>&1 | jq -r '.[] | "\(.metadata.priority)\t\(.metadata.feature // "-")\t\(.name)"' | sort
+```
+
+### Filter by priority
+```bash
+# Only critical/high priority
+uv run sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "critical" or .metadata.priority == "high") | .name'
+```
+
+### Group by feature
+```bash
+uv run sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.feature) | .[] | "\(.[0].metadata.feature // "other"):", (.[].name | "  - \(.)")'
+```
+
+### Export for external tools
+```bash
+# CSV export for spreadsheets
+uv run sibyl task list --status todo --csv > tasks.csv
+```
 
 ---
 

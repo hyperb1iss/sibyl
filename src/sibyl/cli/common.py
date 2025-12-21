@@ -23,8 +23,33 @@ ELECTRIC_YELLOW = "#f1fa8c"
 SUCCESS_GREEN = "#50fa7b"
 ERROR_RED = "#ff6363"
 
-# Shared console instance
+# Shared console instance (for styled output only, NOT for JSON)
 console = Console()
+
+
+def _strip_embeddings(obj: object) -> object:
+    """Recursively strip embedding arrays from data structures."""
+    if isinstance(obj, dict):
+        return {k: _strip_embeddings(v) for k, v in obj.items() if k != "embedding"}
+    if isinstance(obj, list):
+        return [_strip_embeddings(item) for item in obj]
+    return obj
+
+
+def print_json(data: object) -> None:
+    """Print JSON to stdout without Rich formatting.
+
+    IMPORTANT: Never use console.print() for JSON output - Rich wraps
+    long lines at terminal width, inserting literal newlines that break
+    JSON parsing.
+
+    Also strips embedding arrays which are useless in CLI output and bloat
+    the response (1536 floats per entity).
+    """
+    import json
+
+    clean_data = _strip_embeddings(data)
+    print(json.dumps(clean_data, indent=2, default=str, ensure_ascii=False))  # noqa: T201
 
 # Type vars for async decorator
 P = ParamSpec("P")

@@ -10,6 +10,7 @@ import {
   FileText,
   Hash,
   Loader2,
+  Network,
   Pencil,
   X,
 } from '@/components/ui/icons';
@@ -19,8 +20,8 @@ import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Breadcrumb } from '@/components/layout/breadcrumb';
-import { formatDateTime } from '@/lib/constants';
-import { useFullPage, useUpdateDocument } from '@/lib/hooks';
+import { ENTITY_STYLES, formatDateTime } from '@/lib/constants';
+import { useDocumentEntities, useFullPage, useUpdateDocument } from '@/lib/hooks';
 
 interface DocumentDetailPageProps {
   params: Promise<{ id: string; docId: string }>;
@@ -29,6 +30,7 @@ interface DocumentDetailPageProps {
 export default function DocumentDetailPage({ params }: DocumentDetailPageProps) {
   const { id: sourceId, docId } = use(params);
   const { data: document, isLoading, error } = useFullPage(docId);
+  const { data: entitiesData } = useDocumentEntities(docId);
   const updateDocument = useUpdateDocument();
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -389,6 +391,57 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
                 {document.links.length > 10 && (
                   <p className="text-xs text-sc-fg-subtle mt-2">
                     +{document.links.length - 10} more
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Graph Connections */}
+          {entitiesData && entitiesData.entities.length > 0 && (
+            <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Network width={14} height={14} className="text-sc-purple" />
+                <h3 className="text-xs font-semibold text-sc-fg-subtle uppercase tracking-wide">
+                  Graph Connections ({entitiesData.total})
+                </h3>
+              </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {entitiesData.entities.slice(0, 12).map(entity => {
+                  const style = ENTITY_STYLES[entity.entity_type as keyof typeof ENTITY_STYLES];
+                  const dotClass = style?.dot ?? 'bg-sc-fg-subtle';
+                  return (
+                    <Link
+                      key={entity.id}
+                      href={`/entities/${entity.id}`}
+                      className="flex items-center gap-3 p-2 -mx-2 rounded-lg hover:bg-sc-bg-highlight transition-colors group"
+                    >
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${dotClass}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-sc-fg-primary truncate group-hover:text-sc-cyan transition-colors">
+                          {entity.name}
+                        </p>
+                        <p className="text-xs text-sc-fg-subtle truncate">
+                          {entity.entity_type}
+                          {entity.chunk_count > 0 && (
+                            <span className="text-sc-fg-subtle/60">
+                              {' '}
+                              · {entity.chunk_count}% match
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <ChevronRight
+                        width={12}
+                        height={12}
+                        className="text-sc-fg-subtle/50 group-hover:text-sc-cyan shrink-0 transition-colors"
+                      />
+                    </Link>
+                  );
+                })}
+                {entitiesData.entities.length > 12 && (
+                  <p className="text-xs text-sc-fg-subtle pt-2">
+                    +{entitiesData.entities.length - 12} more
                   </p>
                 )}
               </div>

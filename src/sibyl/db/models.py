@@ -16,6 +16,7 @@ from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import ARRAY, Column, Index, String, Text, text
+from pydantic import field_validator
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -133,6 +134,14 @@ class CrawlSource(TimestampMixin, table=True):
 
     def __repr__(self) -> str:
         return f"<CrawlSource {self.name} ({self.url})>"
+
+    @field_validator("last_crawled_at", "created_at", "updated_at", mode="before")
+    @classmethod
+    def strip_timezone(cls, v: datetime | None) -> datetime | None:
+        """Ensure datetimes are naive (PostgreSQL TIMESTAMP WITHOUT TIME ZONE)."""
+        if v is not None and v.tzinfo is not None:
+            return v.replace(tzinfo=None)
+        return v
 
 
 # =============================================================================

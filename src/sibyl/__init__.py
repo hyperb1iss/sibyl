@@ -13,10 +13,13 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
 # Suppress noisy "Index already exists" from FalkorDB driver
 logging.getLogger("graphiti_core.driver.falkordb_driver").setLevel(logging.WARNING)
+# Suppress httpx HTTP request logs (extremely noisy during crawls/embeddings)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
+# Configure structlog to print directly (bypasses stdlib double-logging)
 structlog.configure(
     processors=[
-        structlog.stdlib.filter_by_level,
         structlog.stdlib.add_log_level,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.TimeStamper(fmt="%H:%M:%S"),
@@ -27,13 +30,22 @@ structlog.configure(
     ],
     wrapper_class=structlog.stdlib.BoundLogger,
     context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
+    logger_factory=structlog.PrintLoggerFactory(),  # Direct print, no stdlib double-logging
     cache_logger_on_first_use=False,
 )
 
-# Suppress noisy arq logging
+# Route stdlib logging through structlog for third-party libs
+logging.basicConfig(
+    format="%(message)s",
+    level=logging.INFO,
+    handlers=[logging.StreamHandler()],
+)
+
+# Suppress noisy third-party logging
 logging.getLogger("arq.worker").setLevel(logging.WARNING)
-logging.getLogger("arq.jobs").setLevel(logging.INFO)
+logging.getLogger("arq.jobs").setLevel(logging.WARNING)
+logging.getLogger("mcp").setLevel(logging.WARNING)  # FastMCP session manager spam
+logging.getLogger("fastmcp").setLevel(logging.WARNING)
 
 from sibyl.config import Settings  # noqa: E402 - must come after structlog config
 

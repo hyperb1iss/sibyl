@@ -21,6 +21,7 @@ from sibyl.cli.common import (
     create_table,
     error,
     info,
+    print_json,
     run_async,
     spinner,
     success,
@@ -116,6 +117,8 @@ def dev(
         sibyl dev                      # Default: 0.0.0.0:3334
         sibyl dev -p 9000              # Custom port
     """
+    import os
+    import signal
     import subprocess
     import sys
 
@@ -125,28 +128,45 @@ def dev(
     console.print(f"[dim]MCP: http://{host}:{port}/mcp[/dim]")
     console.print(f"[dim]Docs: http://{host}:{port}/api/docs[/dim]\n")
 
+    # preexec_fn=os.setsid makes uvicorn the leader of a new process group
+    # This allows us to kill it AND all its children (reloader spawns workers)
+    process = subprocess.Popen(  # noqa: S603
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "sibyl.main:create_combined_app",
+            "--factory",
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--reload",
+            "--reload-dir",
+            "src",
+            "--log-level",
+            "warning",
+        ],
+        preexec_fn=os.setsid,  # New process group
+    )
+
+    def kill_process_group() -> None:
+        """Kill uvicorn and ALL its children via process group."""
+        try:
+            pgid = os.getpgid(process.pid)
+            os.killpg(pgid, signal.SIGTERM)
+            process.wait(timeout=3)
+        except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+
     try:
-        subprocess.run(  # noqa: S603
-            [
-                sys.executable,
-                "-m",
-                "uvicorn",
-                "sibyl.main:create_combined_app",
-                "--factory",
-                "--host",
-                host,
-                "--port",
-                str(port),
-                "--reload",
-                "--reload-dir",
-                "src",
-            ],
-            check=True,
-        )
+        process.wait()
     except KeyboardInterrupt:
         console.print(f"\n[{NEON_CYAN}]Shutting down...[/{NEON_CYAN}]")
-    except subprocess.CalledProcessError:
-        pass  # uvicorn handles its own exit
+        kill_process_group()
 
 
 @app.command()
@@ -171,9 +191,8 @@ def health(
 
             # JSON output (default)
             if not table_out:
-                import json
 
-                console.print(json.dumps(status, indent=2, default=str, ensure_ascii=False))
+                print_json(status)
                 return
 
             # Table output
@@ -236,9 +255,8 @@ def ingest(
 
             # JSON output (default)
             if not table_out:
-                import json
 
-                console.print(json.dumps(result, indent=2, default=str, ensure_ascii=False))
+                print_json(result)
                 return
 
             # Table output
@@ -296,9 +314,8 @@ def search(
 
             # JSON output (default)
             if not table_out:
-                import json
 
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -363,7 +380,6 @@ def add_knowledge(
 
     @run_async
     async def run_add() -> None:
-        import json
 
         client = get_client()
 
@@ -397,7 +413,7 @@ def add_knowledge(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -436,9 +452,8 @@ def stats(
 
             # JSON output (default)
             if not table_out:
-                import json
 
-                console.print(json.dumps(stats_data, indent=2, default=str, ensure_ascii=False))
+                print_json(stats_data)
                 return
 
             # Table output
@@ -592,7 +607,6 @@ def worker(
         sibyl worker           # Run continuously
         sibyl worker --burst   # Process pending jobs and exit
     """
-    import asyncio
 
     from arq import run_worker
 

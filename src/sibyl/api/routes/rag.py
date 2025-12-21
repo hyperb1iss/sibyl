@@ -22,6 +22,8 @@ from sibyl.api.schemas import (
     CodeExampleResponse,
     CodeExampleResult,
     CrawlDocumentResponse,
+    DocumentRelatedEntitiesResponse,
+    DocumentRelatedEntity,
     DocumentUpdateRequest,
     FullPageResponse,
     RAGChunkResult,
@@ -562,4 +564,77 @@ async def update_document(document_id: str, request: DocumentUpdateRequest) -> F
         code_languages=doc.code_languages or [],
         links=doc.links or [],
         crawled_at=doc.crawled_at,
+    )
+
+
+# =============================================================================
+# Document Related Entities
+# =============================================================================
+
+
+@router.get("/pages/{document_id}/entities", response_model=DocumentRelatedEntitiesResponse)
+async def get_document_related_entities(document_id: str) -> DocumentRelatedEntitiesResponse:
+    """Get knowledge graph entities related to a document.
+
+    Uses semantic search to find entities (tasks, patterns, episodes, etc.)
+    that are relevant to this document's content based on its title.
+    """
+    try:
+        doc_uuid = UUID(document_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid document ID format: {document_id}")
+
+    async with get_session() as session:
+        # Get the document
+        doc = await session.get(CrawledDocument, doc_uuid)
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
+
+        doc_title = doc.title
+
+    # Search the knowledge graph using document title as query
+    entities: list[DocumentRelatedEntity] = []
+    try:
+        from sibyl.graph.client import get_graph_client
+        from sibyl.graph.entities import EntityManager
+
+        client = await get_graph_client()
+        entity_manager = EntityManager(client)
+
+        # Semantic search using document title
+        search_results = await entity_manager.search(
+            query=doc_title,
+            limit=15,
+        )
+
+        for entity, score in search_results:
+            # Skip very low relevance matches
+            if score < 0.1:
+                continue
+
+            entities.append(
+                DocumentRelatedEntity(
+                    id=entity.id,
+                    name=entity.name,
+                    entity_type=entity.entity_type.value,
+                    description=entity.description or "",
+                    chunk_count=int(score * 100),  # Use score as relevance indicator
+                )
+            )
+
+    except Exception as e:
+        log.warning("graph_search_failed", error=str(e), document_id=document_id)
+        # Return empty if graph is unavailable
+        return DocumentRelatedEntitiesResponse(
+            document_id=document_id,
+            entities=[],
+            total=0,
+        )
+
+    log.debug("document_entities_found", document_id=document_id, title=doc_title, count=len(entities))
+
+    return DocumentRelatedEntitiesResponse(
+        document_id=document_id,
+        entities=entities,
+        total=len(entities),
     )

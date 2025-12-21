@@ -7,9 +7,12 @@ Provides REST API for:
 - Crawler health and stats
 """
 
+import re
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
+import httpx
 import structlog
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import func, select
@@ -189,6 +192,69 @@ async def get_document(document_id: str) -> CrawlDocumentResponse:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
         return _document_to_response(doc)
+
+
+# =============================================================================
+# URL Preview
+# =============================================================================
+
+
+@router.get("/preview")
+async def preview_url(url: str) -> dict[str, str | None]:
+    """Fetch metadata from a URL to help with source naming.
+
+    Returns the page title and suggested name for use when creating a source.
+    """
+    try:
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            raise HTTPException(status_code=400, detail="Invalid URL")
+
+        # Fetch the page
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            response = await client.get(url, headers={"User-Agent": "Sibyl/1.0"})
+            response.raise_for_status()
+
+        html = response.text[:50000]  # Only check first 50KB
+
+        # Extract title
+        title_match = re.search(r"<title[^>]*>([^<]+)</title>", html, re.IGNORECASE)
+        title = title_match.group(1).strip() if title_match else None
+
+        # Clean up title for use as name
+        suggested_name = None
+        if title:
+            # Remove common suffixes like "| Company" or "- Docs"
+            suggested_name = re.sub(r"\s*[\|\-–—]\s*[^|\-–—]+$", "", title).strip()
+            # If still too generic, use domain + title
+            if len(suggested_name) < 3:
+                suggested_name = f"{parsed.netloc} - {title}"
+
+        return {
+            "url": url,
+            "title": title,
+            "suggested_name": suggested_name or parsed.netloc,
+            "domain": parsed.netloc,
+        }
+
+    except httpx.HTTPStatusError as e:
+        log.warning("URL preview failed", url=url, status=e.response.status_code)
+        return {
+            "url": url,
+            "title": None,
+            "suggested_name": urlparse(url).netloc,
+            "domain": urlparse(url).netloc,
+            "error": f"HTTP {e.response.status_code}",
+        }
+    except Exception as e:
+        log.warning("URL preview failed", url=url, error=str(e))
+        return {
+            "url": url,
+            "title": None,
+            "suggested_name": urlparse(url).netloc,
+            "domain": urlparse(url).netloc,
+            "error": str(e),
+        }
 
 
 # =============================================================================

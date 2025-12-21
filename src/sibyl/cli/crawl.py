@@ -4,7 +4,6 @@ Commands for crawling documentation sites and managing the ingestion pipeline.
 All commands communicate with the REST API.
 """
 
-import json
 from typing import Annotated
 
 import typer
@@ -20,6 +19,7 @@ from sibyl.cli.common import (
     create_table,
     error,
     info,
+    print_json,
     run_async,
     spinner,
     success,
@@ -76,7 +76,7 @@ def list_sources(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -159,7 +159,7 @@ def add_source(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -222,7 +222,7 @@ def ingest(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -264,7 +264,7 @@ def crawl_status(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -330,7 +330,7 @@ def list_documents(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -380,7 +380,7 @@ def stats(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -425,7 +425,7 @@ def health(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -482,7 +482,7 @@ def delete_source(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output

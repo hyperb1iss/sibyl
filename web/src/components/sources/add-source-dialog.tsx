@@ -3,7 +3,8 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { FileText, Globe, Loader2, Plus, Upload, X } from '@/components/ui/icons';
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api } from '@/lib/api';
 
 interface AddSourceDialogProps {
   isOpen: boolean;
@@ -61,6 +62,9 @@ export function AddSourceDialog({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [includePatterns, setIncludePatterns] = useState('');
   const [excludePatterns, setExcludePatterns] = useState('');
+  const [isFetchingTitle, setIsFetchingTitle] = useState(false);
+  const [userEditedName, setUserEditedName] = useState(false);
+  const previewAbortRef = useRef<AbortController | null>(null);
 
   // File form state
   const [file, setFile] = useState<File | null>(null);
@@ -79,6 +83,9 @@ export function AddSourceDialog({
     setShowAdvanced(false);
     setIncludePatterns('');
     setExcludePatterns('');
+    setIsFetchingTitle(false);
+    setUserEditedName(false);
+    previewAbortRef.current?.abort();
     setFile(null);
     setFileName('');
     setFileDescription('');
@@ -179,26 +186,59 @@ export function AddSourceDialog({
     }
   }, []);
 
-  // Auto-generate name from URL
-  const handleUrlChange = useCallback(
-    (value: string) => {
-      setUrl(value);
-      if (!urlName && value) {
-        try {
-          const parsed = new URL(value);
-          const pathParts = parsed.pathname.split('/').filter(Boolean);
-          const suggestedName =
-            pathParts.length > 0
-              ? `${parsed.hostname} - ${pathParts.join(' / ')}`
-              : parsed.hostname;
-          setUrlName(suggestedName);
-        } catch {
-          // Invalid URL, don't auto-fill
+  // Fetch remote page title when URL changes (debounced)
+  useEffect(() => {
+    // Skip if user manually edited the name
+    if (userEditedName || !url) return;
+
+    // Quick validation
+    try {
+      new URL(url);
+    } catch {
+      return;
+    }
+
+    // Debounce the fetch
+    const timer = setTimeout(async () => {
+      // Cancel any pending request
+      previewAbortRef.current?.abort();
+      previewAbortRef.current = new AbortController();
+
+      setIsFetchingTitle(true);
+      try {
+        const preview = await api.sources.preview(url);
+        // Only update if we got a good suggested name
+        if (preview.suggested_name) {
+          setUrlName(preview.suggested_name);
         }
+      } catch {
+        // Fallback to domain-based name
+        try {
+          const parsed = new URL(url);
+          setUrlName(parsed.hostname);
+        } catch {
+          // Invalid URL
+        }
+      } finally {
+        setIsFetchingTitle(false);
       }
-    },
-    [urlName]
-  );
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [url, userEditedName]);
+
+  // Handle URL input change
+  const handleUrlChange = useCallback((value: string) => {
+    setUrl(value);
+  }, []);
+
+  // Handle name input change (marks as user-edited)
+  const handleNameChange = useCallback((value: string) => {
+    setUrlName(value);
+    if (value) {
+      setUserEditedName(true);
+    }
+  }, []);
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={open => !open && handleClose()}>
@@ -318,13 +358,19 @@ export function AddSourceDialog({
                             className="block text-sm font-medium text-sc-fg-muted mb-2"
                           >
                             Display Name
+                            {isFetchingTitle && (
+                              <span className="ml-2 text-sc-purple text-xs">
+                                <Loader2 width={12} height={12} className="inline animate-spin mr-1" />
+                                Fetching title...
+                              </span>
+                            )}
                           </label>
                           <input
                             id="source-name"
                             type="text"
                             value={urlName}
-                            onChange={e => setUrlName(e.target.value)}
-                            placeholder="Auto-generated from URL"
+                            onChange={e => handleNameChange(e.target.value)}
+                            placeholder={isFetchingTitle ? 'Fetching from website...' : 'Auto-generated from page title'}
                             className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-1 focus:ring-sc-purple/30 transition-colors"
                           />
                         </div>

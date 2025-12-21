@@ -16,6 +16,7 @@ from sibyl.cli.common import (
     create_table,
     error,
     info,
+    print_json,
     run_async,
     spinner,
     success,
@@ -75,9 +76,8 @@ def list_sources(
             entities = response.get("entities", [])
 
             if format_ == "json":
-                import json
 
-                console.print(json.dumps(entities, indent=2, default=str, ensure_ascii=False))
+                print_json(entities)
                 return
 
             if not entities:
@@ -119,7 +119,6 @@ def add_source(
 
     @run_async
     async def _add() -> None:
-        import json
 
         client = get_client()
 
@@ -155,7 +154,7 @@ def add_source(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -194,9 +193,8 @@ def show_source(
 
             # JSON output (default)
             if not table_out:
-                import json
 
-                console.print(json.dumps(entity, indent=2, default=str, ensure_ascii=False))
+                print_json(entity)
                 return
 
             # Table output
@@ -254,7 +252,6 @@ def source_status(
 
             # JSON output (default)
             if not table_out:
-                import json
 
                 status_data = {
                     "id": entity.get("id"),
@@ -265,7 +262,7 @@ def source_status(
                     "last_crawled": meta.get("last_crawled"),
                     "crawl_error": meta.get("crawl_error"),
                 }
-                console.print(json.dumps(status_data, indent=2, default=str, ensure_ascii=False))
+                print_json(status_data)
                 return
 
             # Table output
@@ -323,9 +320,8 @@ def list_documents(
 
             # JSON output (default)
             if not table_out:
-                import json
 
-                console.print(json.dumps(entities, indent=2, default=str, ensure_ascii=False))
+                print_json(entities)
                 return
 
             # Table output

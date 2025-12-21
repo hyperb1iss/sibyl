@@ -19,6 +19,7 @@ from sibyl.cli.common import (
     error,
     format_status,
     info,
+    print_json,
     run_async,
     spinner,
     truncate,
@@ -87,9 +88,8 @@ def explore_related(
 
             # JSON output (default)
             if not table_out:
-                import json
 
-                console.print(json.dumps(entities, indent=2, default=str, ensure_ascii=False))
+                print_json(entities)
                 return
 
             # Table output
@@ -156,9 +156,8 @@ def explore_traverse(
 
             # JSON output (default)
             if not table_out:
-                import json
 
-                console.print(json.dumps(entities, indent=2, default=str, ensure_ascii=False))
+                print_json(entities)
                 return
 
             # Table output
@@ -238,13 +237,12 @@ def explore_dependencies(
 
             # JSON output (default)
             if not table_out:
-                import json
 
                 output = {
                     "entities": entities,
                     "has_cycles": metadata.get("has_cycles", False),
                 }
-                console.print(json.dumps(output, indent=2, default=str, ensure_ascii=False))
+                print_json(output)
                 return
 
             # Table output
@@ -328,7 +326,6 @@ def explore_path(
 
             # JSON output (default)
             if not table_out:
-                import json
 
                 output = {
                     "from_id": from_id,
@@ -338,7 +335,7 @@ def explore_path(
                     "path_length": path_length,
                     "entities": entities,
                 }
-                console.print(json.dumps(output, indent=2, default=str, ensure_ascii=False))
+                print_json(output)
                 return
 
             # Table output

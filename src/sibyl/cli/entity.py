@@ -18,6 +18,7 @@ from sibyl.cli.common import (
     create_table,
     error,
     info,
+    print_json,
     run_async,
     spinner,
     success,
@@ -117,9 +118,8 @@ def list_entities(
             entities = response.get("entities", [])
 
             if format_ == "json":
-                import json
 
-                console.print(json.dumps(entities, indent=2, default=str, ensure_ascii=False))
+                print_json(entities)
                 return
 
             if format_ == "csv":
@@ -183,9 +183,8 @@ def show_entity(
 
             # JSON output (default)
             if not table_out:
-                import json
 
-                console.print(json.dumps(entity, indent=2, default=str, ensure_ascii=False))
+                print_json(entity)
                 return
 
             # Table output
@@ -246,7 +245,6 @@ def create_entity(
 
     @run_async
     async def _create() -> None:
-        import json
 
         client = get_client()
 
@@ -281,7 +279,7 @@ def create_entity(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -313,7 +311,6 @@ def delete_entity(
 
     @run_async
     async def _delete() -> None:
-        import json
 
         client = get_client()
 
@@ -328,7 +325,7 @@ def delete_entity(
             # JSON output (default)
             if not table_out:
                 response = {"deleted": True, "id": entity_id}
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -374,9 +371,8 @@ def related_entities(
 
             # JSON output (default)
             if not table_out:
-                import json
 
-                console.print(json.dumps(entities, indent=2, default=str, ensure_ascii=False))
+                print_json(entities)
                 return
 
             # Table output

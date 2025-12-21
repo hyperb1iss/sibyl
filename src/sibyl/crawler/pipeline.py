@@ -19,6 +19,7 @@ from uuid import UUID
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col
 
 from sibyl.crawler.chunker import ChunkStrategy, DocumentChunker
@@ -208,10 +209,16 @@ class IngestionPipeline:
                 log.debug("Document already exists, skipping", url=document.url)
                 return
 
-            # Store document
-            session.add(document)
-            await session.flush()
-            await session.refresh(document)
+            # Store document - handle race condition with concurrent crawls
+            try:
+                session.add(document)
+                await session.flush()
+                await session.refresh(document)
+            except IntegrityError:
+                # Another concurrent crawl already inserted this URL
+                log.debug("Document inserted by concurrent crawl, skipping", url=document.url)
+                await session.rollback()
+                return
 
             # Chunk document
             chunks = self._chunker.chunk_document(

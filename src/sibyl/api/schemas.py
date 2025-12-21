@@ -544,3 +544,21 @@ class DocumentUpdateRequest(BaseModel):
 
     title: str | None = Field(default=None, max_length=512, description="New document title")
     content: str | None = Field(default=None, max_length=500000, description="New document content")
+
+
+class DocumentRelatedEntity(BaseModel):
+    """An entity related to a document through extraction."""
+
+    id: str
+    name: str
+    entity_type: str
+    description: str = ""
+    chunk_count: int = Field(default=1, description="Number of chunks mentioning this entity")
+
+
+class DocumentRelatedEntitiesResponse(BaseModel):
+    """Related entities for a document."""
+
+    document_id: str
+    entities: list[DocumentRelatedEntity]
+    total: int

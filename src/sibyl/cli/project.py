@@ -18,6 +18,7 @@ from sibyl.cli.common import (
     create_table,
     error,
     info,
+    print_json,
     run_async,
     spinner,
     success,
@@ -78,9 +79,8 @@ def list_projects(
             entities = response.get("entities", [])
 
             if format_ == "json":
-                import json
 
-                console.print(json.dumps(entities, indent=2, default=str, ensure_ascii=False))
+                print_json(entities)
                 return
 
             if format_ == "csv":
@@ -159,7 +159,6 @@ def show_project(
 
             # JSON output (default)
             if not table_out:
-                import json
 
                 # Include task summary in output
                 tasks = tasks_response.get("entities", [])
@@ -175,7 +174,7 @@ def show_project(
                         "by_status": status_counts,
                     },
                 }
-                console.print(json.dumps(output, indent=2, default=str, ensure_ascii=False))
+                print_json(output)
                 return
 
             # Table output
@@ -236,7 +235,6 @@ def create_project(
 
     @run_async
     async def _create() -> None:
-        import json
 
         client = get_client()
 
@@ -264,7 +262,7 @@ def create_project(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             # Table output
@@ -323,7 +321,6 @@ def project_progress(
 
             # JSON output (default)
             if not table_out:
-                import json
 
                 output = {
                     "project_id": project_id,
@@ -332,7 +329,7 @@ def project_progress(
                     "progress_percent": round(pct, 1),
                     "by_status": status_counts,
                 }
-                console.print(json.dumps(output, indent=2, default=str, ensure_ascii=False))
+                print_json(output)
                 return
 
             # Table output

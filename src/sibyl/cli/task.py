@@ -7,7 +7,6 @@ All commands communicate with the REST API to ensure proper event broadcasting.
 All commands output JSON by default for LLM consumption. Use -t for table output.
 """
 
-import json
 from typing import Annotated
 
 import typer
@@ -24,6 +23,7 @@ from sibyl.cli.common import (
     format_priority,
     format_status,
     info,
+    print_json,
     run_async,
     spinner,
     success,
@@ -53,7 +53,7 @@ def _handle_client_error(e: SibylClientError) -> None:
 def _output_response(response: dict, table_out: bool, success_msg: str | None = None) -> None:
     """Output response as JSON or table message."""
     if not table_out:
-        console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+        print_json(response)
     elif success_msg and response.get("success"):
         success(success_msg)
     elif not response.get("success"):
@@ -111,7 +111,7 @@ def list_tasks(
                 ]
 
             if fmt == "json":
-                console.print(json.dumps(entities, indent=2, default=str, ensure_ascii=False))
+                print_json(entities)
                 return
 
             if fmt == "csv":
@@ -182,7 +182,7 @@ def show_task(
 
             # JSON output (default)
             if not table_out:
-                console.print(json.dumps(entity, indent=2, default=str, ensure_ascii=False))
+                print_json(entity)
                 return
 
             # Table output
@@ -249,7 +249,7 @@ def start_task(
                 response = await client.start_task(task_id, assignee)
 
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             if response.get("success"):
@@ -288,7 +288,7 @@ def block_task(
                 response = await client.block_task(task_id, reason)
 
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             if response.get("success"):
@@ -324,7 +324,7 @@ def unblock_task(
                 response = await client.unblock_task(task_id)
 
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             if response.get("success"):
@@ -366,7 +366,7 @@ def submit_review(
                 response = await client.submit_review(task_id, pr_url, commit_list)
 
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             if response.get("success"):
@@ -406,7 +406,7 @@ def complete_task(
                 response = await client.complete_task(task_id, hours, learnings)
 
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             if response.get("success"):
@@ -451,7 +451,7 @@ def archive_task(
                 response = await client.archive_task(task_id, reason)
 
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             if response.get("success"):
@@ -529,7 +529,7 @@ def create_task(
                 )
 
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             if response.get("id"):
@@ -600,7 +600,7 @@ def update_task(
                 )
 
             if not table_out:
-                console.print(json.dumps(response, indent=2, default=str, ensure_ascii=False))
+                print_json(response)
                 return
 
             if response.get("success"):
