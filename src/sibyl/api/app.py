@@ -3,6 +3,10 @@
 Creates the REST API app that gets mounted alongside MCP.
 """
 
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.routing import WebSocketRoute
@@ -10,6 +14,21 @@ from starlette.routing import WebSocketRoute
 from sibyl.api.routes import admin_router, entities_router, graph_router, search_router
 from sibyl.api.websocket import websocket_handler
 from sibyl.config import settings
+
+log = structlog.get_logger()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Pre-warm graph client on startup for fast first requests."""
+    log.info("Pre-warming graph client connection...")
+    try:
+        from sibyl.graph.client import get_graph_client
+        await get_graph_client()
+        log.info("Graph client ready")
+    except Exception as e:
+        log.warning("Failed to pre-warm graph client", error=str(e))
+    yield
 
 
 def create_api_app() -> FastAPI:
@@ -25,6 +44,7 @@ def create_api_app() -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
 
     # CORS for frontend (localhost:3337)

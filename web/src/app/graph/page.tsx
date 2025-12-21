@@ -1,16 +1,15 @@
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useState } from 'react';
 
 import { GRAPH_DEFAULTS } from '@/lib/constants';
 import { Card } from '@/components/ui/card';
-import { ColorButton } from '@/components/ui/button';
 import { FilterChip } from '@/components/ui/toggle';
 import { LoadingState } from '@/components/ui/spinner';
 import { EntityLegend } from '@/components/entities/entity-legend';
 import { PageHeader } from '@/components/layout/page-header';
 import { KnowledgeGraph } from '@/components/graph/knowledge-graph';
+import { EntityDetailPanel } from '@/components/graph/entity-detail-panel';
 import { useStats } from '@/lib/hooks';
 
 function GraphControls({
@@ -49,55 +48,45 @@ function GraphControls({
 }
 
 function GraphPageContent() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const selectedNodeId = searchParams.get('selected');
-
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [filters, setFilters] = useState<{ types?: string[] }>({});
 
-  const handleNodeClick = useCallback(
-    (nodeId: string) => {
-      const params = new URLSearchParams(searchParams);
-      if (nodeId === selectedNodeId) {
-        params.delete('selected');
-      } else {
-        params.set('selected', nodeId);
-      }
-      router.push(`/graph?${params.toString()}`);
-    },
-    [router, searchParams, selectedNodeId]
-  );
+  const handleNodeClick = useCallback((nodeId: string) => {
+    setSelectedNodeId(prev => prev === nodeId ? null : nodeId);
+  }, []);
 
-  const handleViewEntity = useCallback(() => {
-    if (selectedNodeId) {
-      router.push(`/entities/${selectedNodeId}`);
-    }
-  }, [router, selectedNodeId]);
+  const handleClosePanel = useCallback(() => {
+    setSelectedNodeId(null);
+  }, []);
 
   return (
     <div className="h-full flex flex-col gap-4">
       <PageHeader
         title="Knowledge Graph"
         description="Explore entity relationships and patterns"
-        action={
-          selectedNodeId ? (
-            <ColorButton color="cyan" onClick={handleViewEntity}>
-              View Entity
-            </ColorButton>
-          ) : null
-        }
       />
 
       {/* Controls */}
       <GraphControls filters={filters} onFilterChange={setFilters} />
 
-      {/* Graph */}
-      <div className="flex-1 bg-sc-bg-dark rounded-xl border border-sc-fg-subtle/20 overflow-hidden min-h-[400px]">
-        <KnowledgeGraph
-          onNodeClick={handleNodeClick}
-          selectedNodeId={selectedNodeId}
-          maxNodes={GRAPH_DEFAULTS.MAX_NODES}
-        />
+      {/* Main content area */}
+      <div className="flex-1 flex gap-4 min-h-0">
+        {/* Graph container */}
+        <div className="flex-1 relative bg-sc-bg-dark rounded-xl border border-sc-fg-subtle/20 overflow-hidden">
+          <KnowledgeGraph
+            onNodeClick={handleNodeClick}
+            selectedNodeId={selectedNodeId}
+            maxNodes={GRAPH_DEFAULTS.MAX_NODES}
+          />
+        </div>
+
+        {/* Entity detail panel */}
+        {selectedNodeId && (
+          <EntityDetailPanel
+            entityId={selectedNodeId}
+            onClose={handleClosePanel}
+          />
+        )}
       </div>
 
       {/* Legend */}

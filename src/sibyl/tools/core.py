@@ -1442,24 +1442,44 @@ async def get_health() -> dict[str, Any]:
 
 
 async def get_stats() -> dict[str, Any]:
-    """Get knowledge graph statistics."""
+    """Get knowledge graph statistics.
+
+    Uses a single aggregation query for performance instead of N separate queries.
+    """
     try:
         client = await get_graph_client()
-        entity_manager = EntityManager(client)
 
-        stats = {
+        # Single aggregation query - much faster than N separate list queries
+        result = await client.client.driver.execute_query(
+            """
+            MATCH (n)
+            WHERE n.entity_type IS NOT NULL
+            RETURN n.entity_type as type, count(*) as count
+            """
+        )
+
+        stats: dict[str, Any] = {
             "entity_counts": {},
             "total_entities": 0,
         }
 
+        # Initialize all known types to 0
         for entity_type in EntityType:
-            try:
-                entities = await entity_manager.list_by_type(entity_type, limit=10000)
-                count = len(entities)
-                stats["entity_counts"][entity_type.value] = count
-                stats["total_entities"] += count
-            except Exception:
-                stats["entity_counts"][entity_type.value] = 0
+            stats["entity_counts"][entity_type.value] = 0
+
+        # Fill in actual counts from query
+        if result and len(result) > 0:
+            data = result[0] if isinstance(result, tuple) else result
+            for row in data:
+                if isinstance(row, dict):
+                    etype = row.get("type")
+                    count = row.get("count", 0)
+                else:
+                    etype, count = row[0], row[1]
+
+                if etype:
+                    stats["entity_counts"][etype] = count
+                    stats["total_entities"] += count
 
         return stats
 

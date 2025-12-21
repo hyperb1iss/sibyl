@@ -82,11 +82,11 @@ export function KnowledgeGraph({
   }
 
   return (
-    <div className="w-full h-full">
+    <div className="relative w-full h-full" style={{ minHeight: '400px' }}>
       <GraphCanvas
         nodes={nodes}
         edges={edges}
-        cameraMode="rotate"
+        cameraMode="pan"
         layoutType="forceDirected2d"
         draggable
         animated
