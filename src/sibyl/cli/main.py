@@ -577,6 +577,41 @@ def version() -> None:
     )
 
 
+@app.command()
+def worker(
+    burst: Annotated[
+        bool, typer.Option("--burst", "-b", help="Process jobs and exit (don't run continuously)")
+    ] = False,
+) -> None:
+    """Start the background job worker.
+
+    Processes crawl jobs, sync tasks, and other background work.
+    Uses Redis (via FalkorDB) for job persistence and retries.
+
+    Examples:
+        sibyl worker           # Run continuously
+        sibyl worker --burst   # Process pending jobs and exit
+    """
+    import asyncio
+
+    from arq import run_worker
+
+    from sibyl.jobs.worker import WorkerSettings
+
+    console.print(
+        create_panel(
+            f"[{ELECTRIC_PURPLE}]Sibyl Job Worker[/{ELECTRIC_PURPLE}]\n"
+            f"[{NEON_CYAN}]Processing background jobs...[/{NEON_CYAN}]\n"
+            f"[dim]Press Ctrl+C to stop[/dim]"
+        )
+    )
+
+    try:
+        run_worker(WorkerSettings, burst=burst)
+    except KeyboardInterrupt:
+        info("Worker stopped")
+
+
 def main() -> None:
     """Entry point for the CLI."""
     app()

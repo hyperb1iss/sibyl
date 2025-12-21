@@ -12,7 +12,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import func, select
 from sqlmodel import col
 
@@ -40,9 +40,6 @@ from sibyl.db import (
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/sources", tags=["sources"])
-
-# Track running ingestion jobs
-_ingestion_jobs: dict[str, dict[str, Any]] = {}
 
 
 def _source_to_response(source: CrawlSource) -> CrawlSourceResponse:
@@ -301,128 +298,88 @@ async def delete_source(source_id: str) -> dict[str, Any]:
 
 
 # =============================================================================
-# Ingestion
+# Ingestion (via arq job queue)
 # =============================================================================
-
-
-async def _run_ingestion(
-    source_id: str,
-    max_pages: int,
-    max_depth: int,
-    generate_embeddings: bool,
-) -> None:
-    """Run ingestion job in background."""
-    from sibyl.crawler import IngestionPipeline
-    from sibyl.db import get_session
-
-    job_status = _ingestion_jobs.get(source_id, {})
-    job_status["running"] = True
-    job_status["documents_crawled"] = 0
-    job_status["documents_stored"] = 0
-    job_status["chunks_created"] = 0
-    job_status["errors"] = 0
-    _ingestion_jobs[source_id] = job_status
-
-    try:
-        async with get_session() as session:
-            source = await session.get(CrawlSource, UUID(source_id))
-            if not source:
-                raise ValueError(f"Source not found: {source_id}")
-
-            # Detach from session for background processing
-            session.expunge(source)
-
-        await broadcast_event("crawl_started", {
-            "source_id": source_id,
-            "source_name": source.name,
-            "max_pages": max_pages,
-        })
-
-        async with IngestionPipeline(generate_embeddings=generate_embeddings) as pipeline:
-            stats = await pipeline.ingest_source(
-                source,
-                max_pages=max_pages,
-                max_depth=max_depth,
-            )
-
-        job_status["running"] = False
-        job_status["documents_crawled"] = stats.documents_crawled
-        job_status["documents_stored"] = stats.documents_stored
-        job_status["chunks_created"] = stats.chunks_created
-        job_status["embeddings_generated"] = stats.embeddings_generated
-        job_status["errors"] = stats.errors
-        job_status["duration_seconds"] = stats.duration_seconds
-
-        await broadcast_event("crawl_complete", {
-            "source_id": source_id,
-            "source_name": source.name,
-            "stats": {
-                "documents_crawled": stats.documents_crawled,
-                "documents_stored": stats.documents_stored,
-                "chunks_created": stats.chunks_created,
-                "embeddings_generated": stats.embeddings_generated,
-                "errors": stats.errors,
-                "duration_seconds": stats.duration_seconds,
-            },
-        })
-
-        log.info("Ingestion complete", source_id=source_id, stats=str(stats))
-
-    except Exception as e:
-        job_status["running"] = False
-        job_status["error"] = str(e)
-        log.exception("Ingestion failed", source_id=source_id, error=str(e))
-
-        await broadcast_event("crawl_complete", {
-            "source_id": source_id,
-            "error": str(e),
-        })
 
 
 @router.post("/{source_id}/ingest", response_model=CrawlIngestResponse)
 async def ingest_source(
     source_id: str,
     request: CrawlIngestRequest,
-    background_tasks: BackgroundTasks,
 ) -> CrawlIngestResponse:
-    """Start crawling a source (runs in background)."""
-    # Check if already running
-    if source_id in _ingestion_jobs and _ingestion_jobs[source_id].get("running"):
-        return CrawlIngestResponse(
-            source_id=source_id,
-            status="already_running",
-            message="Ingestion already in progress for this source",
-        )
+    """Start crawling a source via job queue.
 
-    # Verify source exists
+    Jobs are processed by the arq worker for reliability and persistence.
+    Run the worker with: uv run arq sibyl.jobs.WorkerSettings
+    """
+    from sibyl.jobs import enqueue_crawl, get_job_status
+
+    # Verify source exists and check current status
     async with get_session() as session:
         source = await session.get(CrawlSource, UUID(source_id))
         if not source:
             raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
 
-    # Start background task
-    background_tasks.add_task(
-        _run_ingestion,
-        source_id,
-        request.max_pages,
-        request.max_depth,
-        request.generate_embeddings,
-    )
+        # Check if already crawling
+        if source.crawl_status == CrawlStatus.IN_PROGRESS:
+            return CrawlIngestResponse(
+                source_id=source_id,
+                status="already_running",
+                message="Crawl already in progress for this source",
+            )
 
-    return CrawlIngestResponse(
-        source_id=source_id,
-        status="started",
-        message=f"Started crawling {source.name} (max {request.max_pages} pages)",
-    )
+        source_name = source.name
+
+    # Enqueue the crawl job
+    try:
+        job_id = await enqueue_crawl(
+            source_id,
+            max_pages=request.max_pages,
+            max_depth=request.max_depth,
+            generate_embeddings=request.generate_embeddings,
+        )
+
+        log.info(
+            "Enqueued crawl job",
+            source_id=source_id,
+            job_id=job_id,
+            max_pages=request.max_pages,
+        )
+
+        return CrawlIngestResponse(
+            source_id=source_id,
+            status="queued",
+            message=f"Crawl job queued for {source_name} (job_id: {job_id})",
+        )
+
+    except Exception as e:
+        log.error("Failed to enqueue crawl job", source_id=source_id, error=str(e))
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to enqueue job. Is the job queue available? Error: {e}",
+        ) from e
 
 
 @router.get("/{source_id}/status")
 async def get_ingestion_status(source_id: str) -> dict[str, Any]:
-    """Get status of an ingestion job."""
-    if source_id not in _ingestion_jobs:
-        return {"source_id": source_id, "running": False, "message": "No ingestion job found"}
+    """Get crawl status for a source.
 
-    return {"source_id": source_id, **_ingestion_jobs[source_id]}
+    Returns both the source's crawl_status and any active job status.
+    """
+    # Get source status from DB
+    async with get_session() as session:
+        source = await session.get(CrawlSource, UUID(source_id))
+        if not source:
+            raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+
+        return {
+            "source_id": source_id,
+            "crawl_status": source.crawl_status.value,
+            "document_count": source.document_count,
+            "chunk_count": source.chunk_count,
+            "last_crawled_at": source.last_crawled_at.isoformat() if source.last_crawled_at else None,
+            "last_error": source.last_error,
+        }
 
 
 @router.post("/{source_id}/sync")

@@ -55,14 +55,26 @@ def create_combined_app(host: str | None = None, port: int | None = None) -> Sta
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> "AsyncGenerator[None, None]":
         """Combined lifespan that initializes MCP session manager and background queue."""
+        import asyncio
+        import contextlib
+
         from sibyl.background import init_background_queue, shutdown_background_queue
+        from sibyl.jobs.worker import run_worker_async
 
         # Start background task queue for async enrichment
         await init_background_queue()
 
+        # Start arq worker in background for job processing
+        worker_task = asyncio.create_task(run_worker_async())
+
         # The MCP session manager needs to be started for streamable HTTP
         async with mcp.session_manager.run():
             yield
+
+        # Shutdown worker
+        worker_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await worker_task
 
         # Shutdown background queue
         await shutdown_background_queue()

@@ -29,10 +29,14 @@ class Settings(BaseSettings):
     # FalkorDB configuration
     falkordb_host: str = Field(default="localhost", description="FalkorDB host")
     falkordb_port: int = Field(default=6380, description="FalkorDB port")
-    falkordb_password: str = Field(default="", description="FalkorDB password")
+    falkordb_password: str = Field(default="conventions", description="FalkorDB password")
     falkordb_graph_name: str = Field(
         default="conventions",
         description="Name of the graph in FalkorDB",
+    )
+    redis_jobs_db: int = Field(
+        default=1,
+        description="Redis database number for job queue (0 is graph data)",
     )
 
     # PostgreSQL configuration
