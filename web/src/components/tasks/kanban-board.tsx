@@ -3,7 +3,7 @@
 import * as Popover from '@radix-ui/react-popover';
 import { ArrowDownAZ, ArrowUpDown, Calendar, Check, Flame, Sparkles, Zap } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { memo, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import type { TaskStatus, TaskSummary } from '@/lib/api';
 import { TASK_STATUS_CONFIG, TASK_STATUSES } from '@/lib/constants';
 import { TaskCard, TaskCardSkeleton } from './task-card';
@@ -35,7 +35,6 @@ function sortTasks(tasks: TaskSummary[], sortBy: SortOption): TaskSummary[] {
         const aPriority = PRIORITY_ORDER[a.metadata.priority as string] ?? 2;
         const bPriority = PRIORITY_ORDER[b.metadata.priority as string] ?? 2;
         if (aPriority !== bPriority) return aPriority - bPriority;
-        // Secondary sort by due date
         const aDue = a.metadata.due_date as string | undefined;
         const bDue = b.metadata.due_date as string | undefined;
         if (aDue && bDue) return new Date(aDue).getTime() - new Date(bDue).getTime();
@@ -51,7 +50,6 @@ function sortTasks(tasks: TaskSummary[], sortBy: SortOption): TaskSummary[] {
         if (aDue && bDue) return new Date(aDue).getTime() - new Date(bDue).getTime();
         if (aDue) return -1;
         if (bDue) return 1;
-        // Secondary sort by priority
         const aPriority = PRIORITY_ORDER[a.metadata.priority as string] ?? 2;
         const bPriority = PRIORITY_ORDER[b.metadata.priority as string] ?? 2;
         return aPriority - bPriority;
@@ -59,23 +57,35 @@ function sortTasks(tasks: TaskSummary[], sortBy: SortOption): TaskSummary[] {
 
     case 'created':
       return sorted.sort((a, b) => {
-        // Use metadata.created_at or fall back to id comparison (UUIDs are time-ordered)
         const aCreated = (a.metadata.created_at as string) || a.id;
         const bCreated = (b.metadata.created_at as string) || b.id;
-        return bCreated.localeCompare(aCreated); // Newest first
+        return bCreated.localeCompare(aCreated);
       });
 
     case 'name':
       return sorted.sort((a, b) => a.name.localeCompare(b.name));
 
-    default: // 'manual' or unknown
+    default:
       return sorted.sort((a, b) => {
         const aOrder = (a.metadata.task_order as number) ?? 0;
         const bOrder = (b.metadata.task_order as number) ?? 0;
-        return bOrder - aOrder; // Higher order = more important = first
+        return bOrder - aOrder;
       });
   }
 }
+
+// Drop indicator component
+const DropIndicator = memo(function DropIndicator() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scaleX: 0.8 }}
+      animate={{ opacity: 1, scaleX: 1 }}
+      exit={{ opacity: 0, scaleX: 0.8 }}
+      transition={{ duration: 0.15 }}
+      className="h-1 bg-sc-purple rounded-full mx-1 my-1 shadow-lg shadow-sc-purple/50"
+    />
+  );
+});
 
 interface KanbanBoardProps {
   tasks: TaskSummary[];
@@ -97,8 +107,9 @@ interface KanbanColumnProps {
   onDrop: (taskId: string, status: TaskStatus) => void;
   onTaskClick?: (taskId: string) => void;
   onProjectClick?: (projectId: string) => void;
-  dragOverStatus: TaskStatus | null;
-  onDragOver: (status: TaskStatus) => void;
+  isDragOver: boolean;
+  dropIndex: number;
+  onDragOver: (status: TaskStatus, index: number) => void;
   onDragLeave: () => void;
 }
 
@@ -173,25 +184,47 @@ const KanbanColumn = memo(function KanbanColumn({
   onDrop,
   onTaskClick,
   onProjectClick,
-  dragOverStatus,
+  isDragOver,
+  dropIndex,
   onDragOver,
   onDragLeave,
 }: KanbanColumnProps) {
   const config = TASK_STATUS_CONFIG[status as keyof typeof TASK_STATUS_CONFIG];
-  const isDragOver = dragOverStatus === status;
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Sort tasks
   const sortedTasks = useMemo(() => sortTasks(tasks, sortBy), [tasks, sortBy]);
 
-  // Count high priority tasks
   const urgentCount = tasks.filter(
     t => t.metadata.priority === 'critical' || t.metadata.priority === 'high'
   ).length;
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    onDragOver(status);
-  };
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+
+      const container = containerRef.current;
+      if (!container) return;
+
+      const cards = container.querySelectorAll('[data-task-card]');
+      const mouseY = e.clientY;
+
+      let newIndex = sortedTasks.length;
+
+      for (let i = 0; i < cards.length; i++) {
+        const card = cards[i] as HTMLElement;
+        const rect = card.getBoundingClientRect();
+        const cardMiddle = rect.top + rect.height / 2;
+
+        if (mouseY < cardMiddle) {
+          newIndex = i;
+          break;
+        }
+      }
+
+      onDragOver(status, newIndex);
+    },
+    [status, sortedTasks.length, onDragOver]
+  );
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -229,31 +262,46 @@ const KanbanColumn = memo(function KanbanColumn({
 
       {/* Column content */}
       <div
+        ref={containerRef}
         className={`
           min-h-[200px] p-2 rounded-xl
           bg-sc-bg-highlight/20 border-2 border-dashed
-          transition-all duration-200
-          ${isDragOver ? 'border-sc-purple/50 bg-sc-purple/5 scale-[1.01]' : 'border-transparent'}
+          transition-colors duration-200
+          ${isDragOver ? 'border-sc-purple/50 bg-sc-purple/5' : 'border-transparent'}
         `}
       >
         <div className="space-y-2">
-          {sortedTasks.map(task => {
+          <AnimatePresence>
+            {/* Show drop indicator at top if dropping at index 0 */}
+            {isDragOver && dropIndex === 0 && <DropIndicator key="drop-indicator-top" />}
+          </AnimatePresence>
+
+          {sortedTasks.map((task, index) => {
             const projectId = task.metadata.project_id as string | undefined;
             const projectName = projectId ? projectMap.get(projectId) : undefined;
 
             return (
-              <TaskCard
-                key={task.id}
-                task={task}
-                projectName={projectName}
-                showProject={showProjectOnCards}
-                onDragStart={(e, id) => {
-                  e.dataTransfer.setData('text/plain', id);
-                  e.dataTransfer.effectAllowed = 'move';
-                }}
-                onClick={onTaskClick}
-                onProjectClick={onProjectClick}
-              />
+              <div key={task.id}>
+                <div data-task-card>
+                  <TaskCard
+                    task={task}
+                    projectName={projectName}
+                    showProject={showProjectOnCards}
+                    onDragStart={(e, id) => {
+                      e.dataTransfer.setData('text/plain', id);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onClick={onTaskClick}
+                    onProjectClick={onProjectClick}
+                  />
+                </div>
+                <AnimatePresence>
+                  {/* Show drop indicator after this card if dropping at next index */}
+                  {isDragOver && dropIndex === index + 1 && (
+                    <DropIndicator key={`drop-indicator-${index}`} />
+                  )}
+                </AnimatePresence>
+              </div>
             );
           })}
         </div>
@@ -265,15 +313,10 @@ const KanbanColumn = memo(function KanbanColumn({
           </div>
         )}
 
-        {isDragOver && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            className="flex items-center justify-center h-14 mt-2 border-2 border-dashed border-sc-purple/40 rounded-xl bg-sc-purple/5 text-sc-purple text-sm"
-          >
-            Drop here
-          </motion.div>
-        )}
+        {/* Show indicator in empty column */}
+        <AnimatePresence>
+          {isDragOver && tasks.length === 0 && <DropIndicator key="drop-indicator-empty" />}
+        </AnimatePresence>
       </div>
     </div>
   );
@@ -288,7 +331,7 @@ export function KanbanBoard({
   onTaskClick,
   onProjectFilter,
 }: KanbanBoardProps) {
-  const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null);
+  const [dragState, setDragState] = useState<{ status: TaskStatus; index: number } | null>(null);
   const [columnSorts, setColumnSorts] = useState<Record<TaskStatus, SortOption>>({
     backlog: 'priority',
     todo: 'priority',
@@ -299,7 +342,6 @@ export function KanbanBoard({
     archived: 'created',
   });
 
-  // Build project lookup map
   const projectMap = useMemo(() => {
     const map = new Map<string, string>();
     for (const project of projects ?? []) {
@@ -308,7 +350,6 @@ export function KanbanBoard({
     return map;
   }, [projects]);
 
-  // Group tasks by status
   const tasksByStatus = useMemo(() => {
     const grouped: Record<TaskStatus, TaskSummary[]> = {
       backlog: [],
@@ -330,7 +371,6 @@ export function KanbanBoard({
     return grouped;
   }, [tasks]);
 
-  // Don't show project on cards if we're already filtering by project
   const showProjectOnCards = !currentProjectId;
 
   const handleDrop = (taskId: string, newStatus: TaskStatus) => {
@@ -340,6 +380,17 @@ export function KanbanBoard({
   const handleSortChange = (status: TaskStatus, sort: SortOption) => {
     setColumnSorts(prev => ({ ...prev, [status]: sort }));
   };
+
+  const handleDragOver = useCallback((status: TaskStatus, index: number) => {
+    setDragState(prev => {
+      if (prev?.status === status && prev?.index === index) return prev;
+      return { status, index };
+    });
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    setDragState(null);
+  }, []);
 
   if (isLoading) {
     return (
@@ -374,9 +425,10 @@ export function KanbanBoard({
           onDrop={handleDrop}
           onTaskClick={onTaskClick}
           onProjectClick={onProjectFilter}
-          dragOverStatus={dragOverStatus}
-          onDragOver={setDragOverStatus}
-          onDragLeave={() => setDragOverStatus(null)}
+          isDragOver={dragState?.status === status}
+          dropIndex={dragState?.status === status ? dragState.index : -1}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
         />
       ))}
     </div>
