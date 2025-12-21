@@ -54,7 +54,7 @@ class Task(Entity):
     task_order: int = Field(default=0, description="Order within project (higher = more important)")
 
     # Project organization
-    project_id: str | None = Field(default=None, description="Parent project UUID")
+    project_id: str = Field(..., description="Parent project UUID (required)")
     feature: str | None = Field(default=None, description="Feature area")
     sprint: str | None = Field(default=None, description="Sprint/milestone")
 

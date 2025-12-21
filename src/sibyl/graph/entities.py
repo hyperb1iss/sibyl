@@ -221,14 +221,27 @@ class EntityManager:
         log.debug("Fetching entity", entity_id=entity_id)
 
         try:
-            # Retrieve the node by UUID
-            nodes = await EntityNode.get_by_uuids(self._client.client.driver, [entity_id])
+            # Direct query to find both Episodic and Entity nodes by UUID
+            # EntityNode.get_by_uuids only finds Entity nodes, missing Episodic
+            result = await self._client.client.driver.execute_query(
+                """
+                MATCH (n)
+                WHERE (n:Episodic OR n:Entity) AND n.uuid = $entity_id
+                RETURN n
+                LIMIT 1
+                """,
+                entity_id=entity_id,
+            )
 
-            if not nodes:
+            if not result or not result[0]:
                 raise EntityNotFoundError("Entity", entity_id)
 
-            node = nodes[0]
-            entity = self._node_to_entity(node)
+            record = result[0][0]
+            node_data = record.get("n", record)
+            if hasattr(node_data, "properties"):
+                node_data = node_data.properties
+
+            entity = self._record_to_entity(node_data)
 
             log.debug("Entity retrieved", entity_id=entity_id, entity_type=entity.entity_type)
             return entity
@@ -275,14 +288,26 @@ class EntityManager:
                 log.info("No search results found", query=query)
                 return []
 
-            # Retrieve full node details
-            nodes = await EntityNode.get_by_uuids(self._client.client.driver, list(node_uuids))
+            # Retrieve full node details - query both Episodic and Entity nodes
+            # EntityNode.get_by_uuids only finds Entity nodes, missing Episodic
+            result = await self._client.client.driver.execute_query(
+                """
+                MATCH (n)
+                WHERE (n:Episodic OR n:Entity) AND n.uuid IN $uuids
+                RETURN n
+                """,
+                uuids=list(node_uuids),
+            )
 
             # Convert nodes to entities and filter by type
             results: list[tuple[Entity, float]] = []
-            for node in nodes:
+            records = result[0] if result and result[0] else []
+            for record in records:
                 try:
-                    entity = self._node_to_entity(node)
+                    node_data = record.get("n", record)
+                    if hasattr(node_data, "properties"):
+                        node_data = node_data.properties
+                    entity = self._record_to_entity(node_data)
 
                     # Filter by entity types if specified
                     if entity_types and entity.entity_type not in entity_types:
@@ -299,7 +324,7 @@ class EntityManager:
 
                 except Exception as e:
                     log.warning(
-                        "Failed to convert node to entity", node_uuid=node.uuid, error=str(e)
+                        "Failed to convert record to entity", error=str(e)
                     )
                     continue
 
@@ -415,12 +440,16 @@ class EntityManager:
         log.debug("Listing entities", entity_type=entity_type, limit=limit, offset=offset)
 
         try:
-            # Direct query filtered by entity_type - much more efficient than
-            # get_by_group_ids which doesn't filter and relies on in-memory filtering
+            # Query both Episodic and Entity nodes:
+            # - Episodic: created by add_episode() in create()
+            # - Entity: created by create_direct() for faster batch imports
+            # Both have entity_type property set, unlike auto-extracted entities.
             result = await self._client.client.driver.execute_query(
                 """
-                MATCH (n:Entity)
-                WHERE n.entity_type = $entity_type AND n.group_id = 'conventions'
+                MATCH (n)
+                WHERE (n:Episodic OR n:Entity)
+                  AND n.entity_type = $entity_type
+                  AND n.group_id = 'conventions'
                 RETURN n
                 ORDER BY n.created_at DESC
                 SKIP $offset
