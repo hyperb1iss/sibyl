@@ -86,7 +86,9 @@ async def list_entities(
                     description=entity.description or "",
                     content=entity.content or "",
                     category=getattr(entity, "category", None) or entity.metadata.get("category"),
-                    languages=getattr(entity, "languages", None) or entity.metadata.get("languages", []) or [],
+                    languages=getattr(entity, "languages", None)
+                    or entity.metadata.get("languages", [])
+                    or [],
                     tags=getattr(entity, "tags", None) or entity.metadata.get("tags", []) or [],
                     metadata=getattr(entity, "metadata", {}) or {},
                     source_file=getattr(entity, "source_file", None),
@@ -126,7 +128,9 @@ async def get_entity(entity_id: str) -> EntityResponse:
             description=entity.description or "",
             content=entity.content or "",
             category=getattr(entity, "category", None) or entity.metadata.get("category"),
-            languages=getattr(entity, "languages", None) or entity.metadata.get("languages", []) or [],
+            languages=getattr(entity, "languages", None)
+            or entity.metadata.get("languages", [])
+            or [],
             tags=getattr(entity, "tags", None) or entity.metadata.get("tags", []) or [],
             metadata=getattr(entity, "metadata", {}) or {},
             source_file=getattr(entity, "source_file", None),
@@ -180,7 +184,9 @@ async def create_entity(entity: EntityCreate) -> EntityResponse:
             description=created.description or "",
             content=created.content or "",
             category=getattr(created, "category", None) or created.metadata.get("category"),
-            languages=getattr(created, "languages", None) or created.metadata.get("languages", []) or [],
+            languages=getattr(created, "languages", None)
+            or created.metadata.get("languages", [])
+            or [],
             tags=getattr(created, "tags", None) or created.metadata.get("tags", []) or [],
             metadata=getattr(created, "metadata", {}) or {},
             source_file=getattr(created, "source_file", None),
@@ -251,7 +257,9 @@ async def update_entity(entity_id: str, update: EntityUpdate) -> EntityResponse:
             description=updated.description or "",
             content=updated.content or "",
             category=getattr(updated, "category", None) or updated.metadata.get("category"),
-            languages=getattr(updated, "languages", None) or updated.metadata.get("languages", []) or [],
+            languages=getattr(updated, "languages", None)
+            or updated.metadata.get("languages", [])
+            or [],
             tags=getattr(updated, "tags", None) or updated.metadata.get("tags", []) or [],
             metadata=getattr(updated, "metadata", {}) or {},
             source_file=getattr(updated, "source_file", None),

@@ -139,8 +139,8 @@ class EntityDeduplicator:
         await dedup.merge_entities(keep_id="id1", remove_id="id2")
     """
 
-    client: "GraphClient"
-    entity_manager: "EntityManager"
+    client: GraphClient
+    entity_manager: EntityManager
     config: DedupConfig = field(default_factory=DedupConfig)
 
     # Internal state
@@ -180,7 +180,7 @@ class EntityDeduplicator:
         seen_pairs: set[tuple[str, str]] = set()
 
         for i, (id1, name1, type1, emb1) in enumerate(entities):
-            for id2, name2, type2, emb2 in entities[i + 1:]:
+            for id2, name2, type2, emb2 in entities[i + 1 :]:
                 # Skip if same entity
                 if id1 == id2:
                     continue
@@ -295,8 +295,7 @@ class EntityDeduplicator:
 
             # Remove from cached pairs
             self._duplicate_pairs = [
-                p for p in self._duplicate_pairs
-                if p.entity1_id != remove_id and p.entity2_id != remove_id
+                p for p in self._duplicate_pairs if remove_id not in {p.entity1_id, p.entity2_id}
             ]
 
             log.info(
@@ -406,7 +405,7 @@ class EntityDeduplicator:
                 if result:
                     for record in result:
                         if isinstance(record, (list, tuple)) and len(record) > 0:
-                            total_redirected += record[0] or 0
+                            total_redirected += int(record[0] or 0)
                         elif hasattr(record, "get"):
                             total_redirected += record.get("redirected", 0)
 
@@ -450,12 +449,12 @@ _deduplicator: EntityDeduplicator | None = None
 
 
 def get_deduplicator(
-    client: "GraphClient",
-    entity_manager: "EntityManager",
+    client: GraphClient,
+    entity_manager: EntityManager,
     config: DedupConfig | None = None,
 ) -> EntityDeduplicator:
     """Get or create a global deduplicator instance."""
-    global _deduplicator
+    global _deduplicator  # noqa: PLW0603
     if _deduplicator is None or config is not None:
         _deduplicator = EntityDeduplicator(
             client=client,
@@ -466,8 +465,8 @@ def get_deduplicator(
 
 
 async def find_duplicates(
-    client: "GraphClient",
-    entity_manager: "EntityManager",
+    client: GraphClient,
+    entity_manager: EntityManager,
     threshold: float = 0.95,
     entity_types: list[str] | None = None,
 ) -> list[DuplicatePair]:

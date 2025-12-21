@@ -9,25 +9,49 @@ from sibyl.models.entities import Entity, EntityType
 # Template data for realistic generation
 PATTERN_TEMPLATES = {
     "API Design": [
-        ("RESTful Resource Naming", "Use plural nouns for resource endpoints, kebab-case for multi-word resources"),
-        ("API Versioning Strategy", "Prefix API paths with version number (v1, v2) for backward compatibility"),
-        ("Error Response Format", "Return structured error objects with code, message, and optional details"),
-        ("Pagination Pattern", "Use cursor-based pagination for large collections, include total count"),
+        (
+            "RESTful Resource Naming",
+            "Use plural nouns for resource endpoints, kebab-case for multi-word resources",
+        ),
+        (
+            "API Versioning Strategy",
+            "Prefix API paths with version number (v1, v2) for backward compatibility",
+        ),
+        (
+            "Error Response Format",
+            "Return structured error objects with code, message, and optional details",
+        ),
+        (
+            "Pagination Pattern",
+            "Use cursor-based pagination for large collections, include total count",
+        ),
         ("Rate Limiting Headers", "Include X-RateLimit-* headers to communicate limits to clients"),
     ],
     "Authentication": [
         ("JWT Token Structure", "Use short-lived access tokens with longer refresh tokens"),
-        ("OAuth2 PKCE Flow", "Implement PKCE for public clients to prevent authorization code interception"),
+        (
+            "OAuth2 PKCE Flow",
+            "Implement PKCE for public clients to prevent authorization code interception",
+        ),
         ("Session Management", "Store sessions server-side with secure, httpOnly cookies"),
-        ("Multi-factor Authentication", "Require MFA for sensitive operations, support TOTP and WebAuthn"),
+        (
+            "Multi-factor Authentication",
+            "Require MFA for sensitive operations, support TOTP and WebAuthn",
+        ),
         ("API Key Rotation", "Implement automatic key rotation with grace period for old keys"),
     ],
     "Database": [
         ("Connection Pooling", "Use connection pools with appropriate min/max sizes for workload"),
         ("Query Optimization", "Add indices for frequently queried columns, use EXPLAIN to verify"),
-        ("Migration Strategy", "Use versioned migrations with up/down scripts, never modify existing"),
+        (
+            "Migration Strategy",
+            "Use versioned migrations with up/down scripts, never modify existing",
+        ),
         ("Soft Delete Pattern", "Add deleted_at column instead of hard deletes for audit trail"),
-        ("Denormalization Strategy", "Denormalize for read-heavy paths, maintain via triggers or events"),
+        (
+            "Denormalization Strategy",
+            "Denormalize for read-heavy paths, maintain via triggers or events",
+        ),
     ],
     "Testing": [
         ("Test Pyramid", "More unit tests than integration, more integration than E2E"),
@@ -235,12 +259,14 @@ class TemplateGenerator(BaseGenerator):
             entity_type=EntityType.PROJECT,
             description=description,
             content=f"# {name}\n\n{description}\n\n## Tech Stack\n- {language}\n- {framework}",
-            metadata=self.mark_generated({
-                "team": team,
-                "language": language,
-                "framework": framework,
-                "status": self.pick(["active", "planning", "completed"]),
-            }),
+            metadata=self.mark_generated(
+                {
+                    "team": team,
+                    "language": language,
+                    "framework": framework,
+                    "status": self.pick(["active", "planning", "completed"]),
+                }
+            ),
             created_at=self.now() - timedelta(days=self.rng.randint(1, 90)),
         )
 
@@ -268,15 +294,19 @@ class TemplateGenerator(BaseGenerator):
             name=title,
             entity_type=EntityType.TASK,
             description=f"Task to {title.lower()}. Part of ongoing {feature} improvements.",
-            metadata=self.mark_generated({
-                "status": status,
-                "priority": priority,
-                "project_id": project_id,
-                "feature": feature,
-                "component": component,
-                "assignees": self.pick_n(["alice", "bob", "charlie", "diana", "eve"], self.rng.randint(1, 2)),
-                "estimated_hours": self.rng.randint(1, 16),
-            }),
+            metadata=self.mark_generated(
+                {
+                    "status": status,
+                    "priority": priority,
+                    "project_id": project_id,
+                    "feature": feature,
+                    "component": component,
+                    "assignees": self.pick_n(
+                        ["alice", "bob", "charlie", "diana", "eve"], self.rng.randint(1, 2)
+                    ),
+                    "estimated_hours": self.rng.randint(1, 16),
+                }
+            ),
             created_at=self.now() - timedelta(days=self.rng.randint(0, 30)),
         )
 
@@ -309,11 +339,13 @@ See related code examples in the repository.
             entity_type=EntityType.PATTERN,
             description=description,
             content=content,
-            metadata=self.mark_generated({
-                "domain": domain,
-                "language": language,
-                "confidence": self.rng.uniform(0.7, 1.0),
-            }),
+            metadata=self.mark_generated(
+                {
+                    "domain": domain,
+                    "language": language,
+                    "confidence": self.rng.uniform(0.7, 1.0),
+                }
+            ),
             created_at=self.now() - timedelta(days=self.rng.randint(30, 365)),
         )
 
@@ -341,12 +373,14 @@ See related code examples in the repository.
             entity_type=EntityType.RULE,
             description=description,
             content=f"# {name}\n\n{description}\n\nApplies to: {language} code in {domain} domain.",
-            metadata=self.mark_generated({
-                "domain": domain,
-                "language": language,
-                "severity": self.pick(["error", "warning", "info"]),
-                "auto_fixable": self.rng.random() > 0.7,
-            }),
+            metadata=self.mark_generated(
+                {
+                    "domain": domain,
+                    "language": language,
+                    "severity": self.pick(["error", "warning", "info"]),
+                    "auto_fixable": self.rng.random() > 0.7,
+                }
+            ),
             created_at=self.now() - timedelta(days=self.rng.randint(30, 180)),
         )
 
@@ -373,11 +407,13 @@ See related code examples in the repository.
             entity_type=EntityType.TEMPLATE,
             description=description,
             content=f"# {name}\n\n{description}\n\nFor use with {framework} ({language}).",
-            metadata=self.mark_generated({
-                "language": language,
-                "framework": framework,
-                "category": self.pick(["backend", "frontend", "infrastructure", "testing"]),
-            }),
+            metadata=self.mark_generated(
+                {
+                    "language": language,
+                    "framework": framework,
+                    "category": self.pick(["backend", "frontend", "infrastructure", "testing"]),
+                }
+            ),
             created_at=self.now() - timedelta(days=self.rng.randint(60, 365)),
         )
 
@@ -389,68 +425,88 @@ See related code examples in the repository.
         # Fill in template
         content = template.format(
             domain=domain,
-            observation=self.pick([
-                "caching significantly reduced latency",
-                "connection pooling was exhausted",
-                "memory usage spiked during peak hours",
-                "the retry logic caused cascading failures",
-            ]),
-            context=self.pick([
-                "deploying to production",
-                "running load tests",
-                "debugging a customer issue",
-                "reviewing the logs",
-            ]),
-            solution=self.pick([
-                "implement circuit breaker pattern",
-                "add proper timeout handling",
-                "increase resource limits",
-                "refactor to use async operations",
-            ]),
-            issue=self.pick([
-                "slow response times",
-                "memory leaks",
-                "race conditions",
-                "deadlocks",
-            ]),
-            root_cause=self.pick([
-                "N+1 query problem",
-                "missing index",
-                "synchronous I/O blocking",
-                "improper error handling",
-            ]),
-            fix=self.pick([
-                "adding batch queries",
-                "creating composite index",
-                "switching to async/await",
-                "implementing proper retry logic",
-            ]),
+            observation=self.pick(
+                [
+                    "caching significantly reduced latency",
+                    "connection pooling was exhausted",
+                    "memory usage spiked during peak hours",
+                    "the retry logic caused cascading failures",
+                ]
+            ),
+            context=self.pick(
+                [
+                    "deploying to production",
+                    "running load tests",
+                    "debugging a customer issue",
+                    "reviewing the logs",
+                ]
+            ),
+            solution=self.pick(
+                [
+                    "implement circuit breaker pattern",
+                    "add proper timeout handling",
+                    "increase resource limits",
+                    "refactor to use async operations",
+                ]
+            ),
+            issue=self.pick(
+                [
+                    "slow response times",
+                    "memory leaks",
+                    "race conditions",
+                    "deadlocks",
+                ]
+            ),
+            root_cause=self.pick(
+                [
+                    "N+1 query problem",
+                    "missing index",
+                    "synchronous I/O blocking",
+                    "improper error handling",
+                ]
+            ),
+            fix=self.pick(
+                [
+                    "adding batch queries",
+                    "creating composite index",
+                    "switching to async/await",
+                    "implementing proper retry logic",
+                ]
+            ),
             improvement=self.pick(["50%", "3x", "10x", "80%"]),
-            change=self.pick([
-                "implementing caching",
-                "optimizing queries",
-                "adding connection pooling",
-                "enabling compression",
-            ]),
-            insight=self.pick([
-                "observability",
-                "proper error handling",
-                "performance testing",
-                "incremental rollouts",
-            ]),
+            change=self.pick(
+                [
+                    "implementing caching",
+                    "optimizing queries",
+                    "adding connection pooling",
+                    "enabling compression",
+                ]
+            ),
+            insight=self.pick(
+                [
+                    "observability",
+                    "proper error handling",
+                    "performance testing",
+                    "incremental rollouts",
+                ]
+            ),
             component=self.pick(TASK_COMPONENTS),
-            reason=self.pick([
-                "code had become unmaintainable",
-                "performance was degrading",
-                "new requirements emerged",
-                "security audit findings",
-            ]),
-            outcome=self.pick([
-                "cleaner architecture",
-                "better performance",
-                "improved maintainability",
-                "reduced complexity",
-            ]),
+            reason=self.pick(
+                [
+                    "code had become unmaintainable",
+                    "performance was degrading",
+                    "new requirements emerged",
+                    "security audit findings",
+                ]
+            ),
+            outcome=self.pick(
+                [
+                    "cleaner architecture",
+                    "better performance",
+                    "improved maintainability",
+                    "reduced complexity",
+                ]
+            ),
         )
 
         return Entity(
@@ -459,10 +515,14 @@ See related code examples in the repository.
             entity_type=EntityType.EPISODE,
             description=content[:200],
             content=content,
-            metadata=self.mark_generated({
-                "domain": domain,
-                "impact": self.pick(["high", "medium", "low"]),
-                "source": self.pick(["production_incident", "code_review", "design_discussion", "retrospective"]),
-            }),
+            metadata=self.mark_generated(
+                {
+                    "domain": domain,
+                    "impact": self.pick(["high", "medium", "low"]),
+                    "source": self.pick(
+                        ["production_incident", "code_review", "design_discussion", "retrospective"]
+                    ),
+                }
+            ),
             created_at=self.now() - timedelta(days=self.rng.randint(1, 60)),
         )

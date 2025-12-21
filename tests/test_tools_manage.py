@@ -86,9 +86,7 @@ class TestActionCategories:
 
     def test_all_actions_combined(self) -> None:
         """Verify ALL_ACTIONS includes all categories."""
-        assert ALL_ACTIONS == (
-            TASK_ACTIONS | SOURCE_ACTIONS | ANALYSIS_ACTIONS | ADMIN_ACTIONS
-        )
+        assert ALL_ACTIONS == (TASK_ACTIONS | SOURCE_ACTIONS | ANALYSIS_ACTIONS | ADMIN_ACTIONS)
 
     def test_no_duplicate_actions(self) -> None:
         """Verify no action appears in multiple categories."""

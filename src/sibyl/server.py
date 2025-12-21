@@ -43,7 +43,7 @@ def create_mcp_server(
 
 def get_mcp_server() -> FastMCP:
     """Get or create the default MCP server instance."""
-    global _mcp
+    global _mcp  # noqa: PLW0603
     if _mcp is None:
         _mcp = create_mcp_server(
             host=settings.server_host,

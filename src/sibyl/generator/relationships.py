@@ -54,19 +54,27 @@ class RelationshipWeaver:
         relationships = []
 
         # Tasks → Projects (BELONGS_TO)
-        relationships.extend(self._weave_task_projects(by_type[EntityType.TASK], by_type[EntityType.PROJECT]))
+        relationships.extend(
+            self._weave_task_projects(by_type[EntityType.TASK], by_type[EntityType.PROJECT])
+        )
 
         # Tasks → Tasks (DEPENDS_ON)
         relationships.extend(self._weave_task_dependencies(by_type[EntityType.TASK]))
 
         # Patterns → Tasks (RELATED_TO)
-        relationships.extend(self._weave_pattern_references(by_type[EntityType.PATTERN], by_type[EntityType.TASK]))
+        relationships.extend(
+            self._weave_pattern_references(by_type[EntityType.PATTERN], by_type[EntityType.TASK])
+        )
 
         # Episodes → Tasks (DERIVED_FROM)
-        relationships.extend(self._weave_episode_sources(by_type[EntityType.EPISODE], by_type[EntityType.TASK]))
+        relationships.extend(
+            self._weave_episode_sources(by_type[EntityType.EPISODE], by_type[EntityType.TASK])
+        )
 
         # Rules → Patterns (ENABLES)
-        relationships.extend(self._weave_rule_patterns(by_type[EntityType.RULE], by_type[EntityType.PATTERN]))
+        relationships.extend(
+            self._weave_rule_patterns(by_type[EntityType.RULE], by_type[EntityType.PATTERN])
+        )
 
         return relationships
 
@@ -130,8 +138,12 @@ class RelationshipWeaver:
         for task in dependent_tasks:
             # Find potential dependencies (tasks created before this one)
             potential_deps = [
-                t for t in tasks
-                if t.id != task.id and t.created_at and task.created_at and t.created_at < task.created_at
+                t
+                for t in tasks
+                if t.id != task.id
+                and t.created_at
+                and task.created_at
+                and t.created_at < task.created_at
             ]
 
             if not potential_deps:
@@ -210,7 +222,8 @@ class RelationshipWeaver:
 
             # Match patterns by domain similarity
             matching_patterns = [
-                p for p in patterns
+                p
+                for p in patterns
                 if p.metadata and task_feature.lower() in p.metadata.get("domain", "").lower()
             ]
 
@@ -262,12 +275,14 @@ class RelationshipWeaver:
                         relationship_type=RelationshipType.DERIVED_FROM,
                         metadata={
                             "_generated": True,
-                            "learning_type": self.rng.choice([
-                                "implementation",
-                                "debugging",
-                                "review",
-                                "retrospective",
-                            ]),
+                            "learning_type": self.rng.choice(
+                                [
+                                    "implementation",
+                                    "debugging",
+                                    "review",
+                                    "retrospective",
+                                ]
+                            ),
                         },
                     )
                 )
@@ -290,8 +305,7 @@ class RelationshipWeaver:
             rule_domain = rule.metadata.get("domain", "") if rule.metadata else ""
 
             matching_patterns = [
-                p for p in patterns
-                if p.metadata and p.metadata.get("domain", "") == rule_domain
+                p for p in patterns if p.metadata and p.metadata.get("domain", "") == rule_domain
             ]
 
             if not matching_patterns:
@@ -307,7 +321,9 @@ class RelationshipWeaver:
                         relationship_type=RelationshipType.ENABLES,
                         metadata={
                             "_generated": True,
-                            "severity": rule.metadata.get("severity", "warning") if rule.metadata else "warning",
+                            "severity": rule.metadata.get("severity", "warning")
+                            if rule.metadata
+                            else "warning",
                         },
                     )
                 )

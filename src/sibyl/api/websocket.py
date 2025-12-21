@@ -136,17 +136,13 @@ async def websocket_handler(websocket: WebSocket) -> None:
                     # For now, all clients receive all events
                     # Future: implement topic-based filtering
                     topics = data.get("topics", [])
-                    await manager.send_personal(
-                        websocket, "subscribed", {"topics": topics}
-                    )
+                    await manager.send_personal(websocket, "subscribed", {"topics": topics})
                 else:
                     await manager.send_personal(
                         websocket, "error", {"message": f"Unknown message type: {msg_type}"}
                     )
             except ValueError:
-                await manager.send_personal(
-                    websocket, "error", {"message": "Invalid JSON"}
-                )
+                await manager.send_personal(websocket, "error", {"message": "Invalid JSON"})
     except WebSocketDisconnect:
         pass
     finally:

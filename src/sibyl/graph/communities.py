@@ -6,6 +6,7 @@ GraphRAG-style retrieval and summarization.
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -63,7 +64,7 @@ class DetectedCommunity:
         return len(self.member_ids)
 
 
-async def export_to_networkx(client: "GraphClient") -> Any:
+async def export_to_networkx(client: GraphClient) -> Any:
     """Export knowledge graph to NetworkX format.
 
     Args:
@@ -79,14 +80,13 @@ async def export_to_networkx(client: "GraphClient") -> Any:
         import networkx as nx
     except ImportError as e:
         raise ImportError(
-            "networkx is required for community detection. "
-            "Install with: pip install networkx"
+            "networkx is required for community detection. Install with: pip install networkx"
         ) from e
 
     log.info("export_to_networkx_start")
 
     # Create undirected graph for community detection
-    G = nx.Graph()
+    G = nx.Graph()  # noqa: N806
 
     # Fetch all entities (nodes)
     node_query = """
@@ -148,7 +148,7 @@ async def export_to_networkx(client: "GraphClient") -> Any:
 
 
 def detect_communities_louvain(
-    G: Any,
+    G: Any,  # noqa: N803
     resolution: float = 1.0,
 ) -> tuple[dict[str, int], float]:
     """Detect communities using Louvain algorithm.
@@ -182,7 +182,7 @@ def detect_communities_louvain(
 
 
 def detect_communities_leiden(
-    G: Any,
+    G: Any,  # noqa: N803
     resolution: float = 1.0,
 ) -> tuple[dict[str, int], float]:
     """Detect communities using Leiden algorithm.
@@ -210,8 +210,7 @@ def detect_communities_leiden(
         return {}, 0.0
 
     # Convert NetworkX to igraph
-    import networkx as nx
-    G_ig = ig.Graph.from_networkx(G)
+    G_ig = ig.Graph.from_networkx(G)  # noqa: N806
 
     # Run Leiden algorithm
     partition = leidenalg.find_partition(
@@ -314,7 +313,7 @@ def link_hierarchy(
 
 
 async def detect_communities(
-    client: "GraphClient",
+    client: GraphClient,
     config: CommunityConfig | None = None,
     algorithm: str = "louvain",
 ) -> list[DetectedCommunity]:
@@ -339,7 +338,7 @@ async def detect_communities(
     )
 
     # Export graph to NetworkX
-    G = await export_to_networkx(client)
+    G = await export_to_networkx(client)  # noqa: N806
 
     if G.number_of_nodes() < config.min_community_size:
         log.info("detect_communities_too_few_nodes", nodes=G.number_of_nodes())
@@ -354,7 +353,7 @@ async def detect_communities(
     # Detect communities at each resolution level
     all_level_communities: list[list[DetectedCommunity]] = []
 
-    for level, resolution in enumerate(config.resolutions[:config.max_levels]):
+    for level, resolution in enumerate(config.resolutions[: config.max_levels]):
         try:
             partition, modularity = detect_fn(G, resolution=resolution)
 
@@ -377,7 +376,7 @@ async def detect_communities(
             )
 
         except ImportError as e:
-            log.error("detect_communities_missing_dependency", error=str(e))
+            log.exception("detect_communities_missing_dependency", error=str(e))
             raise
         except Exception as e:
             log.warning("detect_communities_level_failed", level=level, error=str(e))
@@ -396,7 +395,7 @@ async def detect_communities(
 
 
 async def store_communities(
-    client: "GraphClient",
+    client: GraphClient,
     communities: list[DetectedCommunity],
     clear_existing: bool = True,
 ) -> int:
@@ -476,21 +475,19 @@ async def store_communities(
             MATCH (e:Entity {uuid: $entity_id}), (c:Entity {uuid: $community_id})
             MERGE (e)-[:BELONGS_TO]->(c)
             """
-            try:
+            with contextlib.suppress(Exception):
                 await client.client.driver.execute_query(
                     link_query,
                     entity_id=member_id,
                     community_id=community.id,
                 )
-            except Exception:
-                pass  # Skip failed links silently
 
     log.info("store_communities_complete", stored=stored)
     return stored
 
 
 async def get_entity_communities(
-    client: "GraphClient",
+    client: GraphClient,
     entity_id: str,
 ) -> list[dict[str, Any]]:
     """Get communities that an entity belongs to.
@@ -544,7 +541,7 @@ async def get_entity_communities(
 
 
 async def get_community_members(
-    client: "GraphClient",
+    client: GraphClient,
     community_id: str,
     limit: int = 100,
 ) -> list[dict[str, Any]]:

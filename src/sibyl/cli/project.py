@@ -33,7 +33,9 @@ app = typer.Typer(
 @app.command("list")
 def list_projects(
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
-    format_: Annotated[str, typer.Option("--format", "-f", help="Output format: table, json, csv")] = "table",
+    format_: Annotated[
+        str, typer.Option("--format", "-f", help="Output format: table, json, csv")
+    ] = "table",
 ) -> None:
     """List all projects."""
 
@@ -65,12 +67,14 @@ def list_projects(
                 writer = csv.writer(sys.stdout)
                 writer.writerow(["id", "name", "status", "description"])
                 for e in entities:
-                    writer.writerow([
-                        e.id,
-                        e.name,
-                        e.metadata.get("status", ""),
-                        truncate(e.description or "", 100),
-                    ])
+                    writer.writerow(
+                        [
+                            e.id,
+                            e.name,
+                            e.metadata.get("status", ""),
+                            truncate(e.description or "", 100),
+                        ]
+                    )
                 return
 
             if not entities:
@@ -154,7 +158,9 @@ def show_project(
                 lines.append(f"\n[{ELECTRIC_PURPLE}]Progress:[/{ELECTRIC_PURPLE}] {bar} {pct:.0f}%")
 
             if meta.get("tech_stack"):
-                lines.append(f"\n[{NEON_CYAN}]Tech Stack:[/{NEON_CYAN}] {', '.join(meta['tech_stack'])}")
+                lines.append(
+                    f"\n[{NEON_CYAN}]Tech Stack:[/{NEON_CYAN}] {', '.join(meta['tech_stack'])}"
+                )
 
             panel = create_panel("\n".join(lines), title=f"Project {entity.id[:8]}")
             console.print(panel)
@@ -169,7 +175,9 @@ def show_project(
 @app.command("create")
 def create_project(
     name: Annotated[str, typer.Option("--name", "-n", help="Project name", prompt=True)],
-    description: Annotated[str | None, typer.Option("--description", "-d", help="Project description")] = None,
+    description: Annotated[
+        str | None, typer.Option("--description", "-d", help="Project description")
+    ] = None,
     repo: Annotated[str | None, typer.Option("--repo", "-r", help="Repository URL")] = None,
 ) -> None:
     """Create a new project."""

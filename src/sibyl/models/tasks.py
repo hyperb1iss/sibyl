@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Self
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -12,33 +12,33 @@ from sibyl.models.entities import Entity, EntityType
 class TaskStatus(StrEnum):
     """Task workflow states."""
 
-    BACKLOG = "backlog"      # Future work, not yet committed
-    TODO = "todo"            # Committed to sprint/milestone
-    DOING = "doing"          # Active development
-    BLOCKED = "blocked"      # Waiting on something
-    REVIEW = "review"        # In code review
-    DONE = "done"            # Completed and merged
-    ARCHIVED = "archived"    # Closed without completion
+    BACKLOG = "backlog"  # Future work, not yet committed
+    TODO = "todo"  # Committed to sprint/milestone
+    DOING = "doing"  # Active development
+    BLOCKED = "blocked"  # Waiting on something
+    REVIEW = "review"  # In code review
+    DONE = "done"  # Completed and merged
+    ARCHIVED = "archived"  # Closed without completion
 
 
 class TaskPriority(StrEnum):
     """Task priority levels."""
 
-    CRITICAL = "critical"    # P0: System down, blocking everything
-    HIGH = "high"            # P1: Important feature, blocking other work
-    MEDIUM = "medium"        # P2: Normal priority
-    LOW = "low"              # P3: Nice to have
-    SOMEDAY = "someday"      # P4: Future consideration
+    CRITICAL = "critical"  # P0: System down, blocking everything
+    HIGH = "high"  # P1: Important feature, blocking other work
+    MEDIUM = "medium"  # P2: Normal priority
+    LOW = "low"  # P3: Nice to have
+    SOMEDAY = "someday"  # P4: Future consideration
 
 
 class TaskComplexity(StrEnum):
     """Task complexity for effort estimation."""
 
-    TRIVIAL = "trivial"      # < 30 minutes
-    SIMPLE = "simple"        # 30m - 2 hours
-    MEDIUM = "medium"        # 2 - 8 hours (1 day)
-    COMPLEX = "complex"      # 1 - 3 days
-    EPIC = "epic"            # > 3 days (should be broken down)
+    TRIVIAL = "trivial"  # < 30 minutes
+    SIMPLE = "simple"  # 30m - 2 hours
+    MEDIUM = "medium"  # 2 - 8 hours (1 day)
+    COMPLEX = "complex"  # 1 - 3 days
+    EPIC = "epic"  # > 3 days (should be broken down)
 
 
 class Task(Entity):
@@ -71,7 +71,9 @@ class Task(Entity):
 
     # Git integration
     branch_name: str | None = Field(default=None, description="Associated Git branch")
-    commit_shas: list[str] = Field(default_factory=list, description="Commits implementing this task")
+    commit_shas: list[str] = Field(
+        default_factory=list, description="Commits implementing this task"
+    )
     pr_url: str | None = Field(default=None, description="Pull request URL")
 
     # Learning capture
@@ -98,11 +100,11 @@ class Task(Entity):
 class ProjectStatus(StrEnum):
     """Project lifecycle states."""
 
-    PLANNING = "planning"        # Not started yet
-    ACTIVE = "active"            # Active development
-    ON_HOLD = "on_hold"          # Paused
-    COMPLETED = "completed"      # Finished
-    ARCHIVED = "archived"        # Historical record
+    PLANNING = "planning"  # Not started yet
+    ACTIVE = "active"  # Active development
+    ON_HOLD = "on_hold"  # Paused
+    COMPLETED = "completed"  # Finished
+    ARCHIVED = "archived"  # Historical record
 
 
 class Project(Entity):
@@ -132,8 +134,7 @@ class Project(Entity):
 
     # Knowledge domain
     knowledge_domains: list[str] = Field(
-        default_factory=list,
-        description="Knowledge domains this project touches"
+        default_factory=list, description="Knowledge domains this project touches"
     )
 
     # Metadata
@@ -253,8 +254,7 @@ class TaskEstimate(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Confidence in estimate")
     based_on_tasks: int = Field(default=0, description="Number of similar tasks used")
     similar_tasks: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Similar tasks used for estimation"
+        default_factory=list, description="Similar tasks used for estimation"
     )
     reason: str = Field(default="", description="Explanation of estimate")
 
@@ -263,22 +263,17 @@ class TaskKnowledgeSuggestion(BaseModel):
     """Suggested knowledge entities for a task."""
 
     patterns: list[tuple[str, float]] = Field(
-        default_factory=list,
-        description="Suggested patterns (id, score)"
+        default_factory=list, description="Suggested patterns (id, score)"
     )
     rules: list[tuple[str, float]] = Field(
-        default_factory=list,
-        description="Applicable rules (id, score)"
+        default_factory=list, description="Applicable rules (id, score)"
     )
     templates: list[tuple[str, float]] = Field(
-        default_factory=list,
-        description="Relevant templates (id, score)"
+        default_factory=list, description="Relevant templates (id, score)"
     )
     past_learnings: list[tuple[str, float]] = Field(
-        default_factory=list,
-        description="Related episodes (id, score)"
+        default_factory=list, description="Related episodes (id, score)"
     )
     error_patterns: list[tuple[str, float]] = Field(
-        default_factory=list,
-        description="Relevant error patterns (id, score)"
+        default_factory=list, description="Relevant error patterns (id, score)"
     )

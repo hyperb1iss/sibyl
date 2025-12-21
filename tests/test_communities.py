@@ -176,7 +176,9 @@ class TestLinkHierarchy:
         ]
         level1 = [
             # Parent contains both level0 communities
-            DetectedCommunity(id="c3", member_ids=["e1", "e2", "e3", "e4"], level=1, resolution=1.0),
+            DetectedCommunity(
+                id="c3", member_ids=["e1", "e2", "e3", "e4"], level=1, resolution=1.0
+            ),
         ]
 
         result = link_hierarchy([level0, level1])

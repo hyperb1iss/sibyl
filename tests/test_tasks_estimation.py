@@ -151,10 +151,7 @@ class TestEstimationAlgorithm:
     def test_high_confidence_scenario(self) -> None:
         """Test scenario that should produce high confidence."""
         # Many samples with high similarity
-        similar_tasks = [
-            SimilarTask(f"t{i}", f"Task {i}", 0.9, 5.0)
-            for i in range(10)
-        ]
+        similar_tasks = [SimilarTask(f"t{i}", f"Task {i}", 0.9, 5.0) for i in range(10)]
 
         total_weight = sum(t.similarity_score for t in similar_tasks)
         avg_similarity = total_weight / len(similar_tasks)

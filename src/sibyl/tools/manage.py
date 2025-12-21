@@ -42,35 +42,35 @@ class ManageResponse:
 
 # Task workflow actions
 TASK_ACTIONS = {
-    "start_task",      # Move task to doing status
-    "block_task",      # Mark task as blocked with reason
-    "unblock_task",    # Remove blocked status
-    "submit_review",   # Move task to review status
-    "complete_task",   # Mark task as done, capture learnings
-    "archive_task",    # Archive without completing
-    "update_task",     # Update task fields
+    "start_task",  # Move task to doing status
+    "block_task",  # Mark task as blocked with reason
+    "unblock_task",  # Remove blocked status
+    "submit_review",  # Move task to review status
+    "complete_task",  # Mark task as done, capture learnings
+    "archive_task",  # Archive without completing
+    "update_task",  # Update task fields
 }
 
 # Source operations
 SOURCE_ACTIONS = {
-    "crawl",           # Trigger crawl of URL
-    "sync",            # Re-crawl existing source
-    "refresh",         # Sync all sources
+    "crawl",  # Trigger crawl of URL
+    "sync",  # Re-crawl existing source
+    "refresh",  # Sync all sources
 }
 
 # Analysis actions
 ANALYSIS_ACTIONS = {
-    "estimate",        # Estimate task effort
-    "prioritize",      # Smart task ordering
-    "detect_cycles",   # Find circular dependencies
-    "suggest",         # Suggest knowledge for task
+    "estimate",  # Estimate task effort
+    "prioritize",  # Smart task ordering
+    "detect_cycles",  # Find circular dependencies
+    "suggest",  # Suggest knowledge for task
 }
 
 # Admin actions
 ADMIN_ACTIONS = {
-    "health",          # Server health check
-    "stats",           # Graph statistics
-    "rebuild_index",   # Rebuild FalkorDB indices
+    "health",  # Server health check
+    "stats",  # Graph statistics
+    "rebuild_index",  # Rebuild FalkorDB indices
 }
 
 ALL_ACTIONS = TASK_ACTIONS | SOURCE_ACTIONS | ANALYSIS_ACTIONS | ADMIN_ACTIONS
@@ -139,12 +139,12 @@ async def manage(
         # Route to appropriate handler
         if action in TASK_ACTIONS:
             return await _handle_task_action(action, entity_id, data)
-        elif action in SOURCE_ACTIONS:
+        if action in SOURCE_ACTIONS:
             return await _handle_source_action(action, entity_id, data)
-        elif action in ANALYSIS_ACTIONS:
+        if action in ANALYSIS_ACTIONS:
             return await _handle_analysis_action(action, entity_id, data)
-        else:  # ADMIN_ACTIONS
-            return await _handle_admin_action(action, entity_id, data)
+        # ADMIN_ACTIONS
+        return await _handle_admin_action(action, entity_id, data)
 
     except Exception as e:
         log.exception("manage_failed", action=action, error=str(e))
@@ -199,7 +199,7 @@ async def _handle_task_action(
                 data={"status": task.status.value, "branch_name": task.branch_name},
             )
 
-        elif action == "block_task":
+        if action == "block_task":
             reason = data.get("reason", "No reason provided")
             task = await workflow.block_task(entity_id, reason)
             return ManageResponse(
@@ -210,7 +210,7 @@ async def _handle_task_action(
                 data={"status": task.status.value, "reason": reason},
             )
 
-        elif action == "unblock_task":
+        if action == "unblock_task":
             task = await workflow.unblock_task(entity_id)
             return ManageResponse(
                 success=True,
@@ -220,7 +220,7 @@ async def _handle_task_action(
                 data={"status": task.status.value},
             )
 
-        elif action == "submit_review":
+        if action == "submit_review":
             commit_shas = data.get("commit_shas", [])
             pr_url = data.get("pr_url")
             task = await workflow.submit_for_review(entity_id, commit_shas, pr_url)
@@ -232,7 +232,7 @@ async def _handle_task_action(
                 data={"status": task.status.value, "pr_url": task.pr_url},
             )
 
-        elif action == "complete_task":
+        if action == "complete_task":
             learnings = data.get("learnings", "")
             actual_hours = data.get("actual_hours")
             task = await workflow.complete_task(entity_id, actual_hours, learnings)
@@ -244,7 +244,7 @@ async def _handle_task_action(
                 data={"status": task.status.value, "learnings": learnings},
             )
 
-        elif action == "archive_task":
+        if action == "archive_task":
             reason = data.get("reason", "")
             task = await workflow.archive_task(entity_id, reason)
             return ManageResponse(
@@ -255,7 +255,7 @@ async def _handle_task_action(
                 data={"status": task.status.value},
             )
 
-        elif action == "update_task":
+        if action == "update_task":
             return await _update_task(entity_manager, entity_id, data)
 
     except InvalidTransitionError as e:
@@ -285,9 +285,21 @@ async def _update_task(
 
     # Filter allowed update fields
     allowed_fields = {
-        "title", "description", "priority", "complexity", "feature",
-        "sprint", "assignees", "due_date", "estimated_hours", "actual_hours",
-        "domain", "technologies", "branch_name", "pr_url", "task_order",
+        "title",
+        "description",
+        "priority",
+        "complexity",
+        "feature",
+        "sprint",
+        "assignees",
+        "due_date",
+        "estimated_hours",
+        "actual_hours",
+        "domain",
+        "technologies",
+        "branch_name",
+        "pr_url",
+        "task_order",
     }
 
     updates = {k: v for k, v in data.items() if k in allowed_fields}
@@ -343,7 +355,7 @@ async def _handle_source_action(
         depth = data.get("depth", 2)
         return await _crawl_source(entity_manager, url, depth, data)
 
-    elif action == "sync":
+    if action == "sync":
         if not entity_id:
             return ManageResponse(
                 success=False,
@@ -352,7 +364,7 @@ async def _handle_source_action(
             )
         return await _sync_source(entity_manager, entity_id)
 
-    elif action == "refresh":
+    if action == "refresh":
         return await _refresh_all_sources(entity_manager)
 
     return ManageResponse(success=False, action=action, message="Unknown source action")
@@ -407,9 +419,9 @@ async def _sync_source(
     source_id: str,
 ) -> ManageResponse:
     """Re-crawl an existing source."""
-    # Get source entity
+    # Validate source exists
     try:
-        entity = await entity_manager.get(source_id)
+        await entity_manager.get(source_id)
     except Exception:
         return ManageResponse(
             success=False,
@@ -465,7 +477,7 @@ async def _refresh_all_sources(
 async def _handle_analysis_action(
     action: str,
     entity_id: str | None,
-    data: dict[str, Any],
+    _data: dict[str, Any],
 ) -> ManageResponse:
     """Handle analysis actions."""
     if not entity_id:
@@ -482,13 +494,13 @@ async def _handle_analysis_action(
     if action == "estimate":
         return await _estimate_effort(entity_manager, entity_id)
 
-    elif action == "prioritize":
+    if action == "prioritize":
         return await _prioritize_tasks(entity_manager, relationship_manager, entity_id)
 
-    elif action == "detect_cycles":
+    if action == "detect_cycles":
         return await _detect_cycles(relationship_manager, entity_id)
 
-    elif action == "suggest":
+    if action == "suggest":
         return await _suggest_knowledge(entity_manager, entity_id)
 
     return ManageResponse(success=False, action=action, message="Unknown analysis action")
@@ -508,7 +520,7 @@ async def _estimate_effort(
     # Get the task
     try:
         entity = await entity_manager.get(task_id)
-        task = task_manager._entity_to_task(entity)
+        task = task_manager._entity_to_task(entity)  # noqa: SLF001
     except Exception:
         return ManageResponse(
             success=False,
@@ -537,7 +549,7 @@ async def _estimate_effort(
 
 async def _prioritize_tasks(
     entity_manager: EntityManager,
-    relationship_manager: RelationshipManager,
+    _relationship_manager: RelationshipManager,
     project_id: str,
 ) -> ManageResponse:
     """Get smart task ordering for a project."""
@@ -545,10 +557,7 @@ async def _prioritize_tasks(
     all_tasks = await entity_manager.list_by_type(EntityType.TASK, limit=500)
 
     # Filter by project
-    project_tasks = [
-        t for t in all_tasks
-        if t.metadata.get("project_id") == project_id
-    ]
+    project_tasks = [t for t in all_tasks if t.metadata.get("project_id") == project_id]
 
     if not project_tasks:
         return ManageResponse(
@@ -597,7 +606,7 @@ async def _prioritize_tasks(
 
 
 async def _detect_cycles(
-    relationship_manager: RelationshipManager,
+    _relationship_manager: RelationshipManager,
     project_id: str,
 ) -> ManageResponse:
     """Detect circular dependencies in a project."""
@@ -631,7 +640,7 @@ async def _suggest_knowledge(
     # Get the task
     try:
         entity = await entity_manager.get(task_id)
-        task = task_manager._entity_to_task(entity)
+        task = task_manager._entity_to_task(entity)  # noqa: SLF001
     except Exception:
         return ManageResponse(
             success=False,
@@ -670,17 +679,17 @@ async def _suggest_knowledge(
 
 async def _handle_admin_action(
     action: str,
-    entity_id: str | None,
-    data: dict[str, Any],
+    _entity_id: str | None,
+    _data: dict[str, Any],
 ) -> ManageResponse:
     """Handle admin actions."""
     if action == "health":
         return await _get_health()
 
-    elif action == "stats":
+    if action == "stats":
         return await _get_stats()
 
-    elif action == "rebuild_index":
+    if action == "rebuild_index":
         return await _rebuild_index()
 
     return ManageResponse(success=False, action=action, message="Unknown admin action")

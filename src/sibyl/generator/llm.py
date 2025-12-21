@@ -79,11 +79,15 @@ class LLMContentGenerator(BaseGenerator):
         self._cache[key] = response
 
         cache_file = CACHE_DIR / f"{key}.json"
-        cache_file.write_text(json.dumps({
-            "prompt": prompt[:500],  # Truncate for storage
-            "model": model,
-            "response": response,
-        }))
+        cache_file.write_text(
+            json.dumps(
+                {
+                    "prompt": prompt[:500],  # Truncate for storage
+                    "model": model,
+                    "response": response,
+                }
+            )
+        )
 
     async def _generate_content(
         self,
@@ -140,7 +144,7 @@ class LLMContentGenerator(BaseGenerator):
 
 Domain: {domain}
 Language: {language}
-{f'Name hint: {name}' if name else ''}
+{f"Name hint: {name}" if name else ""}
 
 Respond in this exact JSON format:
 {{
@@ -223,7 +227,9 @@ Respond in this exact JSON format:
 
 Make it feel like a real experience from a development team."""
 
-        response = await self._generate_content(prompt, model=ModelType.OPUS)  # Use Opus for richer narratives
+        response = await self._generate_content(
+            prompt, model=ModelType.OPUS
+        )  # Use Opus for richer narratives
 
         try:
             start = response.find("{")
@@ -325,15 +331,17 @@ Respond in JSON:
                 name=data["name"],
                 entity_type=EntityType.PROJECT,
                 description=data["description"],
-                content=f"# {data['name']}\n\n{data['description']}\n\n## Objectives\n" +
-                        "\n".join(f"- {obj}" for obj in data.get("objectives", [])),
-                metadata=self._template_gen.mark_generated({
-                    "team": team,
-                    "language": language,
-                    "framework": framework,
-                    "status": "active",
-                    "objectives": data.get("objectives", []),
-                }),
+                content=f"# {data['name']}\n\n{data['description']}\n\n## Objectives\n"
+                + "\n".join(f"- {obj}" for obj in data.get("objectives", [])),
+                metadata=self._template_gen.mark_generated(
+                    {
+                        "team": team,
+                        "language": language,
+                        "framework": framework,
+                        "status": "active",
+                        "objectives": data.get("objectives", []),
+                    }
+                ),
                 created_at=self._template_gen.now() - timedelta(days=self.rng.randint(7, 90)),
             )
         except (json.JSONDecodeError, KeyError):
@@ -353,12 +361,14 @@ Respond in JSON:
             entity_type=EntityType.PATTERN,
             description=description,
             content=content,
-            metadata=self._template_gen.mark_generated({
-                "domain": domain,
-                "language": language,
-                "llm_generated": True,
-                "model": self.config.model.value,
-            }),
+            metadata=self._template_gen.mark_generated(
+                {
+                    "domain": domain,
+                    "language": language,
+                    "llm_generated": True,
+                    "model": self.config.model.value,
+                }
+            ),
             created_at=self._template_gen.now() - timedelta(days=self.rng.randint(30, 365)),
         )
 
@@ -377,14 +387,18 @@ Respond in JSON:
             entity_type=EntityType.TASK,
             description=description[:500],  # Truncate for entity description
             content=description,
-            metadata=self._template_gen.mark_generated({
-                "status": self._template_gen.pick(["backlog", "todo", "doing", "review", "done"]),
-                "priority": self._template_gen.pick(["critical", "high", "medium", "low"]),
-                "project_id": project.id if project else None,
-                "feature": feature,
-                "component": component,
-                "llm_generated": True,
-            }),
+            metadata=self._template_gen.mark_generated(
+                {
+                    "status": self._template_gen.pick(
+                        ["backlog", "todo", "doing", "review", "done"]
+                    ),
+                    "priority": self._template_gen.pick(["critical", "high", "medium", "low"]),
+                    "project_id": project.id if project else None,
+                    "feature": feature,
+                    "component": component,
+                    "llm_generated": True,
+                }
+            ),
             created_at=self._template_gen.now() - timedelta(days=self.rng.randint(0, 30)),
         )
 
@@ -409,12 +423,14 @@ Respond in JSON:
             entity_type=EntityType.EPISODE,
             description=summary,
             content=learnings,
-            metadata=self._template_gen.mark_generated({
-                "domain": domain,
-                "context": context,
-                "impact": self._template_gen.pick(["high", "medium", "low"]),
-                "llm_generated": True,
-                "model": ModelType.OPUS.value,  # Episodes use Opus
-            }),
+            metadata=self._template_gen.mark_generated(
+                {
+                    "domain": domain,
+                    "context": context,
+                    "impact": self._template_gen.pick(["high", "medium", "low"]),
+                    "llm_generated": True,
+                    "model": ModelType.OPUS.value,  # Episodes use Opus
+                }
+            ),
             created_at=self._template_gen.now() - timedelta(days=self.rng.randint(1, 60)),
         )

@@ -201,26 +201,34 @@ class TestBM25Integration:
         index = BM25Index()
 
         # Add programming patterns
-        index.add({
-            "id": "1",
-            "name": "Python Error Handling",
-            "description": "Best practices for handling errors in Python applications",
-        })
-        index.add({
-            "id": "2",
-            "name": "JavaScript Async Patterns",
-            "description": "Using async/await and promises effectively",
-        })
-        index.add({
-            "id": "3",
-            "name": "Python Async Programming",
-            "description": "Asyncio patterns for concurrent Python code",
-        })
-        index.add({
-            "id": "4",
-            "name": "Database Error Recovery",
-            "description": "Handling database connection errors gracefully",
-        })
+        index.add(
+            {
+                "id": "1",
+                "name": "Python Error Handling",
+                "description": "Best practices for handling errors in Python applications",
+            }
+        )
+        index.add(
+            {
+                "id": "2",
+                "name": "JavaScript Async Patterns",
+                "description": "Using async/await and promises effectively",
+            }
+        )
+        index.add(
+            {
+                "id": "3",
+                "name": "Python Async Programming",
+                "description": "Asyncio patterns for concurrent Python code",
+            }
+        )
+        index.add(
+            {
+                "id": "4",
+                "name": "Database Error Recovery",
+                "description": "Handling database connection errors gracefully",
+            }
+        )
 
         return index
 
@@ -405,8 +413,7 @@ class TestEndToEndRetrieval:
 
         # Check if community matches query
         matched_concepts = [
-            c for c in community["key_concepts"]
-            if any(q in c.lower() for q in query_concepts)
+            c for c in community["key_concepts"] if any(q in c.lower() for q in query_concepts)
         ]
 
         assert len(matched_concepts) >= 2

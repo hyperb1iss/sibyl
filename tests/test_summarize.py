@@ -264,9 +264,7 @@ class TestGenerateCommunitySummaries:
     @pytest.mark.asyncio
     async def test_fetches_community_ids(self, mock_client: MagicMock) -> None:
         """Fetches community IDs when not provided."""
-        mock_client.client.driver.execute_query = AsyncMock(
-            return_value=[("c1",), ("c2",)]
-        )
+        mock_client.client.driver.execute_query = AsyncMock(return_value=[("c1",), ("c2",)])
 
         await generate_community_summaries(mock_client, store=False)
 

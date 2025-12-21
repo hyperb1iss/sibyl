@@ -372,7 +372,7 @@ async def migrate_add_group_ids() -> MigrationResult:
             """
         )
 
-        # Result is (results_list, column_names, meta)
+        # Parse execute_query result tuple: (results_list, column_names, meta)
         if result and result[0]:
             entities_updated = result[0][0].get("updated", 0)
 

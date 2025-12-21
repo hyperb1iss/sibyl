@@ -72,7 +72,9 @@ def create_table(title: str | None = None, *columns: str) -> Table:
     table = Table(title=title, border_style=NEON_CYAN)
     for i, col in enumerate(columns):
         style = ELECTRIC_PURPLE if i == 0 else NEON_CYAN
-        justify = "left" if i == 0 else "right" if col.lower() in ("count", "score", "value") else "left"
+        justify = (
+            "left" if i == 0 else "right" if col.lower() in ("count", "score", "value") else "left"
+        )
         table.add_column(col, style=style, justify=justify)
     return table
 

@@ -277,7 +277,11 @@ async def store_ingestion_results(
     Returns:
         StorageResult with counts and errors.
     """
-    log.info("Storing ingestion results to graph", entities=len(entities), relationships=len(relationships))
+    log.info(
+        "Storing ingestion results to graph",
+        entities=len(entities),
+        relationships=len(relationships),
+    )
 
     all_errors: list[str] = []
 

@@ -52,7 +52,9 @@ class Settings(BaseSettings):
     )
 
     # OpenAI configuration (for embeddings, or LLM if provider=openai)
-    openai_api_key: SecretStr = Field(default=SecretStr(""), description="OpenAI API key for embeddings")
+    openai_api_key: SecretStr = Field(
+        default=SecretStr(""), description="OpenAI API key for embeddings"
+    )
     embedding_model: str = Field(
         default="text-embedding-3-small",
         description="OpenAI embedding model",

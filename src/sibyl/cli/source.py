@@ -31,7 +31,9 @@ app = typer.Typer(
 @app.command("list")
 def list_sources(
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
-    format_: Annotated[str, typer.Option("--format", "-f", help="Output format: table, json")] = "table",
+    format_: Annotated[
+        str, typer.Option("--format", "-f", help="Output format: table, json")
+    ] = "table",
 ) -> None:
     """List all documentation sources."""
 
@@ -84,7 +86,9 @@ def list_sources(
 def add_source(
     url: Annotated[str, typer.Argument(help="Source URL")],
     name: Annotated[str | None, typer.Option("--name", "-n", help="Source name")] = None,
-    source_type: Annotated[str, typer.Option("--type", "-t", help="Source type: website, github, api_docs")] = "website",
+    source_type: Annotated[
+        str, typer.Option("--type", "-t", help="Source type: website, github, api_docs")
+    ] = "website",
     depth: Annotated[int, typer.Option("--depth", "-d", help="Crawl depth")] = 2,
 ) -> None:
     """Add a new documentation source."""
@@ -207,12 +211,17 @@ def list_documents(
         try:
             with spinner("Loading documents...") as progress:
                 progress.add_task("Loading documents...", total=None)
+                # Filter documents by source using their metadata
                 response = await explore(
                     mode="list",
                     types=["document"],
-                    source=source_id,
-                    limit=limit,
+                    limit=limit * 5,  # Fetch more to filter
                 )
+                # Filter by source
+                if response.entities:
+                    response.entities = [
+                        e for e in response.entities if e.metadata.get("source_id") == source_id
+                    ][:limit]
 
             entities = response.entities or []
 

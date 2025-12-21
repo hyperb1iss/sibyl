@@ -102,11 +102,17 @@ async def test_relationship_dedup_and_delete() -> None:
     assert first == rel_id
     assert second == rel_id
 
-    rels = await rel_manager.get_for_entity(src_id, relationship_types=[RelationshipType.RELATED_TO])
-    assert any(r.relationship_type == RelationshipType.RELATED_TO and r.target_id == tgt_id for r in rels)
+    rels = await rel_manager.get_for_entity(
+        src_id, relationship_types=[RelationshipType.RELATED_TO]
+    )
+    assert any(
+        r.relationship_type == RelationshipType.RELATED_TO and r.target_id == tgt_id for r in rels
+    )
 
     await rel_manager.delete(rel_id)
-    rels_after = await rel_manager.get_for_entity(src_id, relationship_types=[RelationshipType.RELATED_TO])
+    rels_after = await rel_manager.get_for_entity(
+        src_id, relationship_types=[RelationshipType.RELATED_TO]
+    )
     assert all(r.target_id != tgt_id for r in rels_after)
 
     # Cleanup entities

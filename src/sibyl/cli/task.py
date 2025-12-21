@@ -36,10 +36,16 @@ app = typer.Typer(
 @app.command("list")
 def list_tasks(
     status: Annotated[str | None, typer.Option("--status", "-s", help="Filter by status")] = None,
-    project: Annotated[str | None, typer.Option("--project", "-p", help="Filter by project ID")] = None,
-    assignee: Annotated[str | None, typer.Option("--assignee", "-a", help="Filter by assignee")] = None,
+    project: Annotated[
+        str | None, typer.Option("--project", "-p", help="Filter by project ID")
+    ] = None,
+    assignee: Annotated[
+        str | None, typer.Option("--assignee", "-a", help="Filter by assignee")
+    ] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 50,
-    format_: Annotated[str, typer.Option("--format", "-f", help="Output format: table, json, csv")] = "table",
+    format_: Annotated[
+        str, typer.Option("--format", "-f", help="Output format: table, json, csv")
+    ] = "table",
 ) -> None:
     """List tasks with optional filters."""
 
@@ -63,7 +69,9 @@ def list_tasks(
             # Filter by assignee if specified (done client-side)
             if assignee:
                 entities = [
-                    e for e in entities if assignee.lower() in str(e.metadata.get("assignees", [])).lower()
+                    e
+                    for e in entities
+                    if assignee.lower() in str(e.metadata.get("assignees", [])).lower()
                 ]
 
             if format_ == "json":
@@ -79,14 +87,16 @@ def list_tasks(
                 writer = csv.writer(sys.stdout)
                 writer.writerow(["id", "title", "status", "priority", "project", "assignees"])
                 for e in entities:
-                    writer.writerow([
-                        e.id,
-                        e.name,
-                        e.metadata.get("status", ""),
-                        e.metadata.get("priority", ""),
-                        e.metadata.get("project_id", ""),
-                        ",".join(e.metadata.get("assignees", [])),
-                    ])
+                    writer.writerow(
+                        [
+                            e.id,
+                            e.name,
+                            e.metadata.get("status", ""),
+                            e.metadata.get("priority", ""),
+                            e.metadata.get("project_id", ""),
+                            ",".join(e.metadata.get("assignees", [])),
+                        ]
+                    )
                 return
 
             # Table format (default)
@@ -146,10 +156,16 @@ def show_task(
             ]
 
             if meta.get("project_id"):
-                lines.insert(3, f"[{ELECTRIC_PURPLE}]Project:[/{ELECTRIC_PURPLE}] {meta['project_id'][:8]}...")
+                lines.insert(
+                    3,
+                    f"[{ELECTRIC_PURPLE}]Project:[/{ELECTRIC_PURPLE}] {meta['project_id'][:8]}...",
+                )
 
             if meta.get("assignees"):
-                lines.insert(4, f"[{ELECTRIC_PURPLE}]Assignees:[/{ELECTRIC_PURPLE}] {', '.join(meta['assignees'])}")
+                lines.insert(
+                    4,
+                    f"[{ELECTRIC_PURPLE}]Assignees:[/{ELECTRIC_PURPLE}] {', '.join(meta['assignees'])}",
+                )
 
             if meta.get("feature"):
                 lines.append(f"\n[{CORAL}]Feature:[/{CORAL}] {meta['feature']}")
@@ -270,7 +286,9 @@ def unblock_task(
 def submit_review(
     task_id: Annotated[str, typer.Argument(help="Task ID to submit for review")],
     pr_url: Annotated[str | None, typer.Option("--pr", help="Pull request URL")] = None,
-    commits: Annotated[str | None, typer.Option("--commits", "-c", help="Comma-separated commit SHAs")] = None,
+    commits: Annotated[
+        str | None, typer.Option("--commits", "-c", help="Comma-separated commit SHAs")
+    ] = None,
 ) -> None:
     """Submit a task for review."""
 
@@ -306,7 +324,9 @@ def submit_review(
 def complete_task(
     task_id: Annotated[str, typer.Argument(help="Task ID to complete")],
     hours: Annotated[float | None, typer.Option("--hours", "-h", help="Actual hours spent")] = None,
-    learnings: Annotated[str | None, typer.Option("--learnings", "-l", help="Key learnings (creates episode)")] = None,
+    learnings: Annotated[
+        str | None, typer.Option("--learnings", "-l", help="Key learnings (creates episode)")
+    ] = None,
 ) -> None:
     """Complete a task and optionally capture learnings."""
 
@@ -358,10 +378,11 @@ def archive_task(
         try:
             with spinner("Archiving task...") as progress:
                 progress.add_task("Archiving task...", total=None)
+                # Note: archive_reason captured in learnings if provided
                 response = await manage(
                     action="archive",
                     entity_id=task_id,
-                    archive_reason=reason,
+                    learnings=reason if reason else None,
                 )
 
             if response.success:

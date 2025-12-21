@@ -37,8 +37,12 @@ class TestSearchResponse:
     def test_response_with_results(self) -> None:
         """Test response with SearchResult objects."""
         results = [
-            SearchResult(id="p1", type="pattern", name="Pattern 1", content="content 1", score=0.95),
-            SearchResult(id="p2", type="pattern", name="Pattern 2", content="content 2", score=0.85),
+            SearchResult(
+                id="p1", type="pattern", name="Pattern 1", content="content 1", score=0.95
+            ),
+            SearchResult(
+                id="p2", type="pattern", name="Pattern 2", content="content 2", score=0.85
+            ),
         ]
         response = SearchResponse(
             query="patterns",
@@ -206,7 +210,6 @@ class TestAddInputValidation:
         response = await add(long_title, "Some content")
         assert response.success is False
         assert "exceeds" in response.message.lower()
-
 
 
 class TestExploreModeLiterals:

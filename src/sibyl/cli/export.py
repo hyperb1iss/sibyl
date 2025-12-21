@@ -27,7 +27,9 @@ app = typer.Typer(
 
 @app.command("graph")
 def export_graph(
-    output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path("sibyl_graph.json"),
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path(
+        "sibyl_graph.json"
+    ),
 ) -> None:
     """Export the full graph to JSON."""
 
@@ -57,7 +59,11 @@ def export_graph(
                 # Build export data
                 export_data = {
                     "metadata": {
-                        "exported_at": str(__import__("datetime").datetime.now(tz=__import__("datetime").timezone.utc)),
+                        "exported_at": str(
+                            __import__("datetime").datetime.now(
+                                tz=__import__("datetime").timezone.utc
+                            )
+                        ),
                         "entity_count": len(entities),
                         "relationship_count": len(relationships),
                     },
@@ -81,10 +87,16 @@ def export_graph(
 
 @app.command("tasks")
 def export_tasks(
-    output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path("tasks.csv"),
-    project: Annotated[str | None, typer.Option("--project", "-p", help="Filter by project")] = None,
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path(
+        "tasks.csv"
+    ),
+    project: Annotated[
+        str | None, typer.Option("--project", "-p", help="Filter by project")
+    ] = None,
     status: Annotated[str | None, typer.Option("--status", "-s", help="Filter by status")] = None,
-    format_: Annotated[str, typer.Option("--format", "-f", help="Output format: json, csv")] = "csv",
+    format_: Annotated[
+        str, typer.Option("--format", "-f", help="Output format: json, csv")
+    ] = "csv",
 ) -> None:
     """Export tasks to CSV or JSON."""
 
@@ -119,30 +131,34 @@ def export_tasks(
                 output_path = output.with_suffix(".csv")
                 with open(output_path, "w", newline="") as f:  # noqa: ASYNC230
                     writer = csv.writer(f)
-                    writer.writerow([
-                        "id",
-                        "title",
-                        "description",
-                        "status",
-                        "priority",
-                        "project_id",
-                        "feature",
-                        "assignees",
-                        "created_at",
-                    ])
+                    writer.writerow(
+                        [
+                            "id",
+                            "title",
+                            "description",
+                            "status",
+                            "priority",
+                            "project_id",
+                            "feature",
+                            "assignees",
+                            "created_at",
+                        ]
+                    )
                     for e in entities:
                         meta = e.metadata or {}
-                        writer.writerow([
-                            e.id,
-                            e.name,
-                            e.description or "",
-                            meta.get("status", ""),
-                            meta.get("priority", ""),
-                            meta.get("project_id", ""),
-                            meta.get("feature", ""),
-                            ",".join(meta.get("assignees", [])),
-                            str(e.created_at) if e.created_at else "",
-                        ])
+                        writer.writerow(
+                            [
+                                e.id,
+                                e.name,
+                                e.description or "",
+                                meta.get("status", ""),
+                                meta.get("priority", ""),
+                                meta.get("project_id", ""),
+                                meta.get("feature", ""),
+                                ",".join(meta.get("assignees", [])),
+                                str(e.created_at) if e.created_at else "",
+                            ]
+                        )
 
             success(f"Exported {len(entities)} tasks to {output_path}")
 
@@ -156,8 +172,12 @@ def export_tasks(
 @app.command("entities")
 def export_entities(
     entity_type: Annotated[str, typer.Option("--type", "-t", help="Entity type to export")],
-    output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path("entities.json"),
-    format_: Annotated[str, typer.Option("--format", "-f", help="Output format: json, csv")] = "json",
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path(
+        "entities.json"
+    ),
+    format_: Annotated[
+        str, typer.Option("--format", "-f", help="Output format: json, csv")
+    ] = "json",
 ) -> None:
     """Export entities of a specific type."""
 
@@ -192,13 +212,15 @@ def export_entities(
                     writer = csv.writer(f)
                     writer.writerow(["id", "name", "type", "description", "created_at"])
                     for e in entities:
-                        writer.writerow([
-                            e.id,
-                            e.name,
-                            e.type,
-                            e.description or "",
-                            str(e.created_at) if e.created_at else "",
-                        ])
+                        writer.writerow(
+                            [
+                                e.id,
+                                e.name,
+                                e.type,
+                                e.description or "",
+                                str(e.created_at) if e.created_at else "",
+                            ]
+                        )
 
             success(f"Exported {len(entities)} {entity_type}(s) to {output_path}")
 

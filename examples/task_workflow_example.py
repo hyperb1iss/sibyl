@@ -86,10 +86,7 @@ async def main():
         estimated_hours=8.0,
     )
 
-    task1_id = await task_manager.create_task_with_knowledge_links(
-        task1,
-        auto_link_threshold=0.7
-    )
+    task1_id = await task_manager.create_task_with_knowledge_links(task1, auto_link_threshold=0.7)
     print(f"   Created task: {task1.title}")
 
     # Suggest knowledge for task
@@ -97,7 +94,7 @@ async def main():
         task_title=task1.title,
         task_description=task1.description,
         technologies=task1.technologies,
-        limit=3
+        limit=3,
     )
 
     print("\n   Suggested Knowledge:")
@@ -136,14 +133,16 @@ async def main():
 
     from sibyl.models.entities import Relationship, RelationshipType
 
-    await relationship_manager.create(Relationship(
-        id=str(uuid.uuid4()),
-        source_id=task2_id,
-        target_id=task1_id,
-        relationship_type=RelationshipType.DEPENDS_ON,
-        weight=1.0,
-        metadata={"blocking": True}
-    ))
+    await relationship_manager.create(
+        Relationship(
+            id=str(uuid.uuid4()),
+            source_id=task2_id,
+            target_id=task1_id,
+            relationship_type=RelationshipType.DEPENDS_ON,
+            weight=1.0,
+            metadata={"blocking": True},
+        )
+    )
     print("   Created dependency: task_002 DEPENDS_ON task_001")
 
     # -------------------------------------------------------------------------
@@ -151,10 +150,7 @@ async def main():
     # -------------------------------------------------------------------------
     print("\n3. Starting task (alice@company.com)...")
 
-    started_task = await workflow_engine.start_task(
-        task_id=task1_id,
-        assignee="alice@company.com"
-    )
+    started_task = await workflow_engine.start_task(task_id=task1_id, assignee="alice@company.com")
 
     print(f"   Status: {started_task.status}")
     print(f"   Assignee: {started_task.assignees[0]}")
@@ -172,7 +168,7 @@ async def main():
 
     blocked_task = await workflow_engine.block_task(
         task_id=task1_id,
-        blocker_description="Google OAuth requires exact redirect URI match including trailing slash"
+        blocker_description="Google OAuth requires exact redirect URI match including trailing slash",
     )
     print(f"   Status: {blocked_task.status}")
 
@@ -190,7 +186,7 @@ async def main():
     reviewed_task = await workflow_engine.submit_for_review(
         task_id=task1_id,
         commit_shas=["abc123", "def456", "ghi789"],
-        pr_url="https://github.com/company/ecommerce-v2/pull/42"
+        pr_url="https://github.com/company/ecommerce-v2/pull/42",
     )
 
     print(f"   Status: {reviewed_task.status}")
@@ -224,15 +220,15 @@ async def main():
     """
 
     completed_task = await workflow_engine.complete_task(
-        task_id=task1_id,
-        actual_hours=6.5,
-        learnings=learnings.strip()
+        task_id=task1_id, actual_hours=6.5, learnings=learnings.strip()
     )
 
     print(f"   Status: {completed_task.status}")
     print(f"   Actual time: {completed_task.actual_hours} hours")
     print(f"   Estimated: {completed_task.estimated_hours} hours")
-    print(f"   Accuracy: {(completed_task.estimated_hours / completed_task.actual_hours) * 100:.1f}%")
+    print(
+        f"   Accuracy: {(completed_task.estimated_hours / completed_task.actual_hours) * 100:.1f}%"
+    )
     print("   Learning episode created from task")
 
     # -------------------------------------------------------------------------
@@ -243,7 +239,7 @@ async def main():
     similar_tasks = await task_manager.find_similar_tasks(
         task2,  # User profile API task
         status_filter=[TaskStatus.DONE],
-        limit=5
+        limit=5,
     )
 
     print(f"   Found {len(similar_tasks)} similar completed tasks:")
@@ -264,7 +260,9 @@ async def main():
     if estimate.similar_tasks:
         print("   Similar tasks used:")
         for similar in estimate.similar_tasks:
-            print(f"   - {similar['title']}: {similar['hours']}h (similarity: {similar['similarity']:.2f})")
+            print(
+                f"   - {similar['title']}: {similar['hours']}h (similarity: {similar['similarity']:.2f})"
+            )
 
     # -------------------------------------------------------------------------
     # Step 9: Check Dependencies
@@ -290,9 +288,7 @@ async def main():
     from sibyl.models.entities import EntityType
 
     oauth_learnings = await entity_manager.search(
-        query="OAuth redirect URI error troubleshooting",
-        entity_types=[EntityType.EPISODE],
-        limit=5
+        query="OAuth redirect URI error troubleshooting", entity_types=[EntityType.EPISODE], limit=5
     )
 
     print(f"   Found {len(oauth_learnings)} relevant learnings:")

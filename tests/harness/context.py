@@ -54,6 +54,7 @@ class ToolTestContext:
         Yields:
             Self, allowing access to mocks for assertions.
         """
+
         # Create mock constructors that return our mock instances
         def make_entity_manager(*args: Any, **kwargs: Any) -> MockEntityManager:
             return self.entity_manager

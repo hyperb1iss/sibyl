@@ -52,23 +52,23 @@ class RelationshipType(StrEnum):
     DERIVED_FROM = "DERIVED_FROM"
 
     # Task management relationships
-    BELONGS_TO = "BELONGS_TO"        # Task -> Project
-    CONTAINS = "CONTAINS"            # Project -> Task
-    DEPENDS_ON = "DEPENDS_ON"        # Task -> Task (blocking)
-    BLOCKS = "BLOCKS"                # Task -> Task (inverse of DEPENDS_ON)
-    ASSIGNED_TO = "ASSIGNED_TO"      # Task -> Person
-    MEMBER_OF = "MEMBER_OF"          # Person -> Team
-    OWNS = "OWNS"                    # Team -> Project
-    INVOLVES = "INVOLVES"            # Project -> Topic/Domain
-    REFERENCES = "REFERENCES"        # Task -> Pattern/Rule/Template
-    ENCOUNTERED = "ENCOUNTERED"      # Task -> ErrorPattern
-    IMPLEMENTED = "IMPLEMENTED"      # Task -> Pattern/Feature
-    VALIDATED_BY = "VALIDATED_BY"    # Task -> Rule (verified compliance)
+    BELONGS_TO = "BELONGS_TO"  # Task -> Project
+    CONTAINS = "CONTAINS"  # Project -> Task
+    DEPENDS_ON = "DEPENDS_ON"  # Task -> Task (blocking)
+    BLOCKS = "BLOCKS"  # Task -> Task (inverse of DEPENDS_ON)
+    ASSIGNED_TO = "ASSIGNED_TO"  # Task -> Person
+    MEMBER_OF = "MEMBER_OF"  # Person -> Team
+    OWNS = "OWNS"  # Team -> Project
+    INVOLVES = "INVOLVES"  # Project -> Topic/Domain
+    REFERENCES = "REFERENCES"  # Task -> Pattern/Rule/Template
+    ENCOUNTERED = "ENCOUNTERED"  # Task -> ErrorPattern
+    IMPLEMENTED = "IMPLEMENTED"  # Task -> Pattern/Feature
+    VALIDATED_BY = "VALIDATED_BY"  # Task -> Rule (verified compliance)
 
     # Documentation crawling relationships
-    CRAWLED_FROM = "CRAWLED_FROM"    # Document -> Source
-    CHILD_OF = "CHILD_OF"            # Document -> Document (page hierarchy)
-    MENTIONS = "MENTIONS"            # Document -> Entity (extracted reference)
+    CRAWLED_FROM = "CRAWLED_FROM"  # Document -> Source
+    CHILD_OF = "CHILD_OF"  # Document -> Document (page hierarchy)
+    MENTIONS = "MENTIONS"  # Document -> Entity (extracted reference)
 
 
 class Entity(BaseModel):

@@ -274,9 +274,7 @@ class TestTaskEstimate:
             estimated_hours=6.5,
             confidence=0.85,
             based_on_tasks=8,
-            similar_tasks=[
-                {"id": "t1", "title": "Similar task", "hours": 6.0}
-            ],
+            similar_tasks=[{"id": "t1", "title": "Similar task", "hours": 6.0}],
             reason="Based on 8 similar auth tasks",
         )
         assert estimate.estimated_hours == 6.5

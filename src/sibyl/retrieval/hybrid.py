@@ -74,7 +74,7 @@ class HybridResult:
 
 async def vector_search(
     query: str,
-    entity_manager: "EntityManager",
+    entity_manager: EntityManager,
     entity_types: list[Any] | None = None,
     limit: int = 20,
 ) -> list[tuple[Any, float]]:
@@ -104,7 +104,7 @@ async def vector_search(
 
 async def graph_traversal(
     seed_ids: list[str],
-    client: "GraphClient",
+    client: GraphClient,
     depth: int = 2,
     limit: int = 20,
 ) -> list[tuple[Any, float]]:
@@ -170,7 +170,8 @@ async def graph_traversal(
                     "description": description,
                 }
                 # Score decreases with distance
-                score = 1.0 / (distance + 1)
+                dist = int(distance) if distance else 1
+                score = 1.0 / (dist + 1)
                 results.append((entity, score))
 
         log.debug(
@@ -188,8 +189,8 @@ async def graph_traversal(
 
 async def hybrid_search(
     query: str,
-    client: "GraphClient",
-    entity_manager: "EntityManager",
+    client: GraphClient,
+    entity_manager: EntityManager,
     entity_types: list[Any] | None = None,
     limit: int = 10,
     config: HybridConfig | None = None,
@@ -232,10 +233,7 @@ async def hybrid_search(
     graph_results: list[tuple[Any, float]] = []
     if vector_results and config.graph_weight > 0:
         # Use top 5 results as seeds
-        seed_ids = [
-            e.id if hasattr(e, "id") else e.get("id", "")
-            for e, _ in vector_results[:5]
-        ]
+        seed_ids = [e.id if hasattr(e, "id") else e.get("id", "") for e, _ in vector_results[:5]]
         seed_ids = [sid for sid in seed_ids if sid]
 
         if seed_ids:
@@ -275,8 +273,7 @@ async def hybrid_search(
         )
         merged = [(e, s) for e, s, _ in merged_with_meta]
         source_metadata = {
-            e.id if hasattr(e, "id") else e.get("id", ""): m
-            for e, _, m in merged_with_meta
+            e.id if hasattr(e, "id") else e.get("id", ""): m for e, _, m in merged_with_meta
         }
     else:
         merged = rrf_merge(
@@ -313,7 +310,10 @@ async def hybrid_search(
         "hybrid_search_complete",
         query=query[:50],
         results=len(final_results),
-        **{f"{n}_count": c for n, c in zip(list_names, [len(r) for r in result_lists], strict=False)},
+        **{
+            f"{n}_count": c
+            for n, c in zip(list_names, [len(r) for r in result_lists], strict=False)
+        },
     )
 
     return HybridResult(results=final_results, metadata=metadata)
@@ -321,7 +321,7 @@ async def hybrid_search(
 
 async def simple_hybrid_search(
     query: str,
-    entity_manager: "EntityManager",
+    entity_manager: EntityManager,
     entity_types: list[Any] | None = None,
     limit: int = 10,
     apply_temporal: bool = True,

@@ -205,9 +205,7 @@ class TestEntityDeduplicator:
         """Single entity returns empty duplicates."""
         # Return single entity with embedding
         mock_client.client.driver.execute_query = AsyncMock(
-            return_value=[
-                ("id1", "Entity One", "pattern", [1.0, 0.0, 0.0])
-            ]
+            return_value=[("id1", "Entity One", "pattern", [1.0, 0.0, 0.0])]
         )
 
         pairs = await dedup.find_duplicates()
@@ -259,7 +257,12 @@ class TestEntityDeduplicator:
         mock_client.client.driver.execute_query = AsyncMock(
             return_value=[
                 ("id1", "Error handling", "pattern", [1.0, 0.0, 0.0]),
-                ("id2", "Error handling", "rule", [1.0, 0.0, 0.0]),  # Same embedding, different type
+                (
+                    "id2",
+                    "Error handling",
+                    "rule",
+                    [1.0, 0.0, 0.0],
+                ),  # Same embedding, different type
             ]
         )
 
@@ -405,7 +408,8 @@ class TestEntityDeduplicator:
     def test_suggest_keep_longer_name(self, dedup: EntityDeduplicator) -> None:
         """Longer name is suggested for keep."""
         suggested = dedup._suggest_keep(
-            "id1", "id2",
+            "id1",
+            "id2",
             "Short name",
             "Much longer and more descriptive name",
         )
@@ -414,7 +418,8 @@ class TestEntityDeduplicator:
     def test_suggest_keep_similar_names(self, dedup: EntityDeduplicator) -> None:
         """Similar length names default to first ID."""
         suggested = dedup._suggest_keep(
-            "id1", "id2",
+            "id1",
+            "id2",
             "Error handling",
             "Error handlers",
         )

@@ -97,7 +97,10 @@ async def get_task_dependencies(
             if dep_id:
                 dependencies.append(dep_id)
                 # Check if dependency is incomplete (blocking)
-                if dep_status and dep_status not in (TaskStatus.DONE.value, TaskStatus.ARCHIVED.value):
+                if dep_status and dep_status not in (
+                    TaskStatus.DONE.value,
+                    TaskStatus.ARCHIVED.value,
+                ):
                     blockers.append(dep_id)
 
         log.info(
@@ -163,7 +166,10 @@ async def get_blocking_tasks(
 
             if dep_id:
                 blocked_tasks.append(dep_id)
-                if dep_status and dep_status not in (TaskStatus.DONE.value, TaskStatus.ARCHIVED.value):
+                if dep_status and dep_status not in (
+                    TaskStatus.DONE.value,
+                    TaskStatus.ARCHIVED.value,
+                ):
                     incomplete.append(dep_id)
 
         log.info(
@@ -288,7 +294,7 @@ async def detect_dependency_cycles(
         )
 
 
-async def suggest_task_order(
+async def suggest_task_order(  # noqa: PLR0915
     client: "GraphClient",
     project_id: str | None = None,
     status_filter: list[TaskStatus] | None = None,
@@ -315,7 +321,9 @@ async def suggest_task_order(
             MATCH (task)-[r:RELATIONSHIP {relationship_type: 'BELONGS_TO'}]->(project {uuid: $project_id})
             RETURN task.uuid as task_id, task.status as status, task.task_order as priority
             """
-            task_result = await client.client.driver.execute_query(task_query, project_id=project_id)
+            task_result = await client.client.driver.execute_query(
+                task_query, project_id=project_id
+            )
         else:
             task_query = """
             MATCH (task)
@@ -402,7 +410,9 @@ async def suggest_task_order(
         # Tasks not in ordered list are in cycles
         unordered = [task_id for task_id in tasks if task_id not in ordered]
         if unordered:
-            warnings.append(f"{len(unordered)} task(s) could not be ordered due to circular dependencies")
+            warnings.append(
+                f"{len(unordered)} task(s) could not be ordered due to circular dependencies"
+            )
 
         log.info(
             "task_order_complete",

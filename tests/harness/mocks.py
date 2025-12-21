@@ -137,9 +137,7 @@ class MockEntityManager:
         **kwargs: Any,
     ) -> list[Entity]:
         """List entities by type."""
-        return [
-            e for e in self._entities.values() if e.entity_type == entity_type
-        ][:limit]
+        return [e for e in self._entities.values() if e.entity_type == entity_type][:limit]
 
 
 @dataclass

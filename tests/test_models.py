@@ -1,6 +1,5 @@
 """Tests for Pydantic models."""
 
-
 from sibyl.models.entities import (
     Entity,
     EntityType,

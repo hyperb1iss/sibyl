@@ -19,18 +19,14 @@ class TaskManager:
     """Manages task creation and knowledge integration."""
 
     def __init__(
-        self,
-        entity_manager: "EntityManager",
-        relationship_manager: "RelationshipManager"
+        self, entity_manager: "EntityManager", relationship_manager: "RelationshipManager"
     ) -> None:
         """Initialize task manager with graph managers."""
         self._entity_manager = entity_manager
         self._relationship_manager = relationship_manager
 
     async def create_task_with_knowledge_links(
-        self,
-        task: Task,
-        auto_link_threshold: float = 0.75
+        self, task: Task, auto_link_threshold: float = 0.75
     ) -> str:
         """Create task and automatically link to relevant knowledge.
 
@@ -56,9 +52,9 @@ class TaskManager:
                 EntityType.PATTERN,
                 EntityType.RULE,
                 EntityType.TEMPLATE,
-                EntityType.EPISODE
+                EntityType.EPISODE,
             ],
-            limit=10
+            limit=10,
         )
 
         # Auto-link high-relevance items
@@ -66,56 +62,52 @@ class TaskManager:
         for entity, score in related:
             if score >= auto_link_threshold:
                 rel_type = self._determine_relationship_type(entity.entity_type)
-                await self._relationship_manager.create(Relationship(
-                    id=str(uuid.uuid4()),
-                    source_id=task_id,
-                    target_id=entity.id,
-                    relationship_type=rel_type,
-                    weight=score,
-                    metadata={"auto_created": True, "confidence": score}
-                ))
+                await self._relationship_manager.create(
+                    Relationship(
+                        id=str(uuid.uuid4()),
+                        source_id=task_id,
+                        target_id=entity.id,
+                        relationship_type=rel_type,
+                        weight=score,
+                        metadata={"auto_created": True, "confidence": score},
+                    )
+                )
                 links_created += 1
 
         # Link to domain topic if specified
         if task.domain:
             topic_entities = await self._entity_manager.search(
-                query=task.domain,
-                entity_types=[EntityType.TOPIC],
-                limit=1
+                query=task.domain, entity_types=[EntityType.TOPIC], limit=1
             )
             if topic_entities:
-                await self._relationship_manager.create(Relationship(
-                    id=str(uuid.uuid4()),
-                    source_id=task_id,
-                    target_id=topic_entities[0][0].id,
-                    relationship_type=RelationshipType.PART_OF,
-                    weight=1.0
-                ))
+                await self._relationship_manager.create(
+                    Relationship(
+                        id=str(uuid.uuid4()),
+                        source_id=task_id,
+                        target_id=topic_entities[0][0].id,
+                        relationship_type=RelationshipType.PART_OF,
+                        weight=1.0,
+                    )
+                )
                 links_created += 1
 
         # Link to project
         if task.project_id:
-            await self._relationship_manager.create(Relationship(
-                id=str(uuid.uuid4()),
-                source_id=task_id,
-                target_id=task.project_id,
-                relationship_type=RelationshipType.BELONGS_TO,
-                weight=1.0
-            ))
+            await self._relationship_manager.create(
+                Relationship(
+                    id=str(uuid.uuid4()),
+                    source_id=task_id,
+                    target_id=task.project_id,
+                    relationship_type=RelationshipType.BELONGS_TO,
+                    weight=1.0,
+                )
+            )
 
-        log.info(
-            "Task created with knowledge links",
-            task_id=task_id,
-            links_created=links_created
-        )
+        log.info("Task created with knowledge links", task_id=task_id, links_created=links_created)
         return task_id
 
     async def suggest_task_knowledge(
-        self,
-        task_title: str,
-        task_description: str,
-        technologies: list[str],
-        limit: int = 5
+        self, task_title: str, task_description: str, technologies: list[str], limit: int = 5
     ) -> TaskKnowledgeSuggestion:
         """Suggest relevant knowledge for a new task.
 
@@ -134,33 +126,23 @@ class TaskManager:
 
         # Search across all knowledge types
         patterns = await self._entity_manager.search(
-            query=query,
-            entity_types=[EntityType.PATTERN],
-            limit=limit
+            query=query, entity_types=[EntityType.PATTERN], limit=limit
         )
 
         rules = await self._entity_manager.search(
-            query=query,
-            entity_types=[EntityType.RULE],
-            limit=limit
+            query=query, entity_types=[EntityType.RULE], limit=limit
         )
 
         templates = await self._entity_manager.search(
-            query=query,
-            entity_types=[EntityType.TEMPLATE],
-            limit=limit
+            query=query, entity_types=[EntityType.TEMPLATE], limit=limit
         )
 
         episodes = await self._entity_manager.search(
-            query=query,
-            entity_types=[EntityType.EPISODE],
-            limit=limit
+            query=query, entity_types=[EntityType.EPISODE], limit=limit
         )
 
         error_patterns = await self._entity_manager.search(
-            query=query,
-            entity_types=[EntityType.ERROR_PATTERN],
-            limit=limit
+            query=query, entity_types=[EntityType.ERROR_PATTERN], limit=limit
         )
 
         return TaskKnowledgeSuggestion(
@@ -172,10 +154,7 @@ class TaskManager:
         )
 
     async def find_similar_tasks(
-        self,
-        task: Task,
-        status_filter: list[TaskStatus] | None = None,
-        limit: int = 10
+        self, task: Task, status_filter: list[TaskStatus] | None = None, limit: int = 10
     ) -> list[tuple[Task, float]]:
         """Find tasks similar to the given task.
 
@@ -195,7 +174,7 @@ class TaskManager:
         similar = await self._entity_manager.search(
             query=query,
             entity_types=[EntityType.TASK],
-            limit=limit * 2  # Get extra for filtering
+            limit=limit * 2,  # Get extra for filtering
         )
 
         # Filter and convert to Task objects
@@ -232,35 +211,31 @@ class TaskManager:
         log.info("Estimating task effort", task_id=task.id)
 
         # Find similar completed tasks
-        similar = await self.find_similar_tasks(
-            task,
-            status_filter=[TaskStatus.DONE],
-            limit=20
-        )
+        similar = await self.find_similar_tasks(task, status_filter=[TaskStatus.DONE], limit=20)
 
         if not similar:
             return TaskEstimate(
-                estimated_hours=None,
-                confidence=0.0,
-                reason="No similar completed tasks found"
+                estimated_hours=None, confidence=0.0, reason="No similar completed tasks found"
             )
 
         # Extract actual hours from similar tasks
         efforts = []
         for similar_task, similarity in similar:
             if similar_task.actual_hours:
-                efforts.append({
-                    "hours": similar_task.actual_hours,
-                    "weight": similarity,
-                    "task_id": similar_task.id,
-                    "task_title": similar_task.title
-                })
+                efforts.append(
+                    {
+                        "hours": similar_task.actual_hours,
+                        "weight": similarity,
+                        "task_id": similar_task.id,
+                        "task_title": similar_task.title,
+                    }
+                )
 
         if not efforts:
             return TaskEstimate(
                 estimated_hours=None,
                 confidence=0.0,
-                reason="Similar tasks found but none have time tracking"
+                reason="Similar tasks found but none have time tracking",
             )
 
         # Weighted average
@@ -280,16 +255,13 @@ class TaskManager:
                     "id": e["task_id"],
                     "title": e["task_title"],
                     "hours": e["hours"],
-                    "similarity": e["weight"]
+                    "similarity": e["weight"],
                 }
                 for e in efforts[:5]  # Top 5
-            ]
+            ],
         )
 
-    async def get_task_dependencies(
-        self,
-        task_id: str
-    ) -> list[tuple[Task, str]]:
+    async def get_task_dependencies(self, task_id: str) -> list[tuple[Task, str]]:
         """Get tasks that this task depends on.
 
         Args:
@@ -302,9 +274,7 @@ class TaskManager:
 
         # Get dependency relationships
         relationships = await self._relationship_manager.get_for_entity(
-            task_id,
-            relationship_types=[RelationshipType.DEPENDS_ON],
-            direction="outgoing"
+            task_id, relationship_types=[RelationshipType.DEPENDS_ON], direction="outgoing"
         )
 
         # Fetch the actual task entities
@@ -316,10 +286,7 @@ class TaskManager:
 
         return dependencies
 
-    async def get_blocking_tasks(
-        self,
-        task_id: str
-    ) -> list[Task]:
+    async def get_blocking_tasks(self, task_id: str) -> list[Task]:
         """Get tasks that are blocked by this task.
 
         Args:
@@ -332,9 +299,7 @@ class TaskManager:
 
         # Get incoming DEPENDS_ON relationships (tasks that depend on this one)
         relationships = await self._relationship_manager.get_for_entity(
-            task_id,
-            relationship_types=[RelationshipType.DEPENDS_ON],
-            direction="incoming"
+            task_id, relationship_types=[RelationshipType.DEPENDS_ON], direction="incoming"
         )
 
         # Fetch the actual task entities
@@ -346,10 +311,7 @@ class TaskManager:
 
         return blocked_tasks
 
-    def _determine_relationship_type(
-        self,
-        entity_type: EntityType
-    ) -> RelationshipType:
+    def _determine_relationship_type(self, entity_type: EntityType) -> RelationshipType:
         """Determine appropriate relationship type for task-knowledge link.
 
         Args:

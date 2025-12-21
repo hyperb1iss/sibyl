@@ -299,7 +299,11 @@ class RelationshipManager:
                 # Extract metadata (stored as JSON string)
                 metadata_raw = rel_props.get("metadata", "{}")
                 try:
-                    metadata = json.loads(metadata_raw) if isinstance(metadata_raw, str) else metadata_raw or {}
+                    metadata = (
+                        json.loads(metadata_raw)
+                        if isinstance(metadata_raw, str)
+                        else metadata_raw or {}
+                    )
                 except json.JSONDecodeError:
                     metadata = {}
 
@@ -407,7 +411,9 @@ class RelationshipManager:
                 metadata_raw = rel_data.get("metadata", "{}")
                 try:
                     metadata = (
-                        json.loads(metadata_raw) if isinstance(metadata_raw, str) else metadata_raw or {}
+                        json.loads(metadata_raw)
+                        if isinstance(metadata_raw, str)
+                        else metadata_raw or {}
                     )
                 except json.JSONDecodeError:
                     metadata = {}
@@ -522,7 +528,11 @@ class RelationshipManager:
         try:
             # Build relationship type filter
             type_filter = ""
-            if relationship_types and isinstance(relationship_types, list) and len(relationship_types) > 0:
+            if (
+                relationship_types
+                and isinstance(relationship_types, list)
+                and len(relationship_types) > 0
+            ):
                 types_str = ", ".join(f"'{t.value}'" for t in relationship_types)
                 type_filter = f"WHERE r.relationship_type IN [{types_str}]"
 
@@ -563,7 +573,11 @@ class RelationshipManager:
                 # Extract metadata
                 metadata_raw = rel_props.get("metadata", "{}")
                 try:
-                    metadata = json.loads(metadata_raw) if isinstance(metadata_raw, str) else metadata_raw or {}
+                    metadata = (
+                        json.loads(metadata_raw)
+                        if isinstance(metadata_raw, str)
+                        else metadata_raw or {}
+                    )
                 except json.JSONDecodeError:
                     metadata = {}
 

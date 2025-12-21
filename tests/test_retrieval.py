@@ -6,7 +6,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from sibyl.retrieval.bm25 import BM25Index, tokenize
-from sibyl.retrieval.fusion import rrf_merge, rrf_merge_with_metadata, rrf_score, weighted_score_merge
+from sibyl.retrieval.fusion import (
+    rrf_merge,
+    rrf_merge_with_metadata,
+    rrf_score,
+    weighted_score_merge,
+)
 from sibyl.retrieval.temporal import (
     calculate_age_days,
     calculate_boost,
@@ -35,9 +40,7 @@ class TestTemporalBoosting:
 
     def test_calculate_boost_max_age(self) -> None:
         """Entities at max age get min boost."""
-        boost = calculate_boost(
-            age_days=2000, decay_days=365.0, min_boost=0.1, max_age_days=1825
-        )
+        boost = calculate_boost(age_days=2000, decay_days=365.0, min_boost=0.1, max_age_days=1825)
         assert boost == 0.1
 
     def test_get_entity_timestamp_dict(self) -> None:

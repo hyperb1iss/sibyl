@@ -44,9 +44,7 @@ class EntityManager:
 
             # Store the entity metadata in custom entity_types for extraction
             # Cast to dict[str, type[BaseModel]] for type safety
-            entity_types: dict[str, type[BaseModel]] = {
-                entity.entity_type.value: BaseModel
-            }
+            entity_types: dict[str, type[BaseModel]] = {entity.entity_type.value: BaseModel}
 
             # Sanitize the episode name for RediSearch compatibility
             # First: remove markdown formatting (bold/italic)
@@ -199,10 +197,7 @@ class EntityManager:
 
         try:
             # Retrieve the node by UUID
-            nodes = await EntityNode.get_by_uuids(
-                self._client.client.driver,
-                [entity_id]
-            )
+            nodes = await EntityNode.get_by_uuids(self._client.client.driver, [entity_id])
 
             if not nodes:
                 raise EntityNotFoundError("Entity", entity_id)
@@ -256,10 +251,7 @@ class EntityManager:
                 return []
 
             # Retrieve full node details
-            nodes = await EntityNode.get_by_uuids(
-                self._client.client.driver,
-                list(node_uuids)
-            )
+            nodes = await EntityNode.get_by_uuids(self._client.client.driver, list(node_uuids))
 
             # Convert nodes to entities and filter by type
             results: list[tuple[Entity, float]] = []
@@ -281,7 +273,9 @@ class EntityManager:
                         break
 
                 except Exception as e:
-                    log.warning("Failed to convert node to entity", node_uuid=node.uuid, error=str(e))
+                    log.warning(
+                        "Failed to convert node to entity", node_uuid=node.uuid, error=str(e)
+                    )
                     continue
 
             log.info("Search completed", query=query, results_count=len(results))
@@ -526,7 +520,14 @@ class EntityManager:
         }
 
         # Common optional fields
-        for field in ("category", "languages", "tags", "severity", "template_type", "file_extension"):
+        for field in (
+            "category",
+            "languages",
+            "tags",
+            "severity",
+            "template_type",
+            "file_extension",
+        ):
             value = getattr(entity, field, None)
             if value is None:
                 value = entity.metadata.get(field)
@@ -610,7 +611,11 @@ class EntityManager:
                     metadata = self._serialize_metadata(entity.metadata or {})
                     metadata_json = json.dumps(metadata) if metadata else "{}"
 
-                    created_at = entity.created_at.isoformat() if entity.created_at else datetime.now(UTC).isoformat()
+                    created_at = (
+                        entity.created_at.isoformat()
+                        if entity.created_at
+                        else datetime.now(UTC).isoformat()
+                    )
                     updated_at = datetime.now(UTC).isoformat()
 
                     # Create node with explicit properties (FalkorDB doesn't support $props dict)
@@ -655,6 +660,7 @@ class EntityManager:
         Returns:
             Formatted episode body.
         """
+
         # Sanitize text for RediSearch compatibility
         def sanitize(text: str) -> str:
             # Remove markdown formatting (bold/italic markers)
@@ -683,7 +689,7 @@ class EntityManager:
 
         return "\n".join(parts)
 
-    def _format_specialized_fields(
+    def _format_specialized_fields(  # noqa: PLR0915
         self,
         entity: Entity,
         sanitize: Any,
@@ -794,7 +800,8 @@ class EntityManager:
 
         # Remove known fields from attributes to get clean metadata
         metadata = {
-            k: v for k, v in node.attributes.items()
+            k: v
+            for k, v in node.attributes.items()
             if k not in {"entity_type", "description", "content", "source_file"}
         }
         if isinstance(node.attributes.get("metadata"), dict):

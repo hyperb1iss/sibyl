@@ -268,7 +268,9 @@ class TestCachedEntityManager:
                 self.entities[eid] = {"id": eid}
                 return eid
 
-            async def update(self, entity_id: str, updates: dict[str, object]) -> dict[str, object] | None:
+            async def update(
+                self, entity_id: str, updates: dict[str, object]
+            ) -> dict[str, object] | None:
                 if entity_id in self.entities:
                     self.entities[entity_id].update(updates)
                     return self.entities[entity_id]

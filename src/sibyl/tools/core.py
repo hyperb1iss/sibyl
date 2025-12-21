@@ -144,7 +144,7 @@ class AddResponse:
 # =============================================================================
 
 
-async def search(
+async def search(  # noqa: PLR0915
     query: str,
     types: list[str] | None = None,
     language: str | None = None,
@@ -254,7 +254,6 @@ async def search(
 
         # Perform search - try enhanced hybrid first, fall back to vector-only
         raw_results: list[tuple[Any, float]] = []
-        used_enhanced = False
 
         if use_enhanced and query:  # Enhanced only makes sense with a query
             try:
@@ -278,7 +277,6 @@ async def search(
                     operation_name="hybrid_search",
                 )
                 raw_results = hybrid_result.results
-                used_enhanced = True
                 log.debug("search_used_enhanced", results=len(raw_results))
 
             except Exception as e:
@@ -346,7 +344,9 @@ async def search(
                 if entity_created:
                     try:
                         if isinstance(entity_created, str):
-                            entity_created = datetime.fromisoformat(entity_created.replace("Z", "+00:00"))
+                            entity_created = datetime.fromisoformat(
+                                entity_created.replace("Z", "+00:00")
+                            )
                         if entity_created < since_date:
                             continue
                     except (ValueError, TypeError):
@@ -532,7 +532,9 @@ async def _explore_list(
 
     all_entities = []
     for entity_type in target_types:
-        entities = await entity_manager.list_by_type(entity_type, limit=limit * 2)  # Over-fetch for filtering
+        entities = await entity_manager.list_by_type(
+            entity_type, limit=limit * 2
+        )  # Over-fetch for filtering
         all_entities.extend(entities)
 
     # Apply filters and convert to summaries
@@ -651,7 +653,9 @@ async def _explore_dependencies(
             if rel.source_id == task_id:
                 # Apply project filter if specified
                 if project:
-                    dep_project = getattr(dep_entity, "project_id", None) or dep_entity.metadata.get("project_id")
+                    dep_project = getattr(
+                        dep_entity, "project_id", None
+                    ) or dep_entity.metadata.get("project_id")
                     if dep_project != project:
                         continue
                 await traverse_dependencies(dep_entity.id, depth + 1)
@@ -673,7 +677,9 @@ async def _explore_dependencies(
             entity = await entity_manager.get(task_id)
             if entity:
                 raw_status = getattr(entity, "status", None) or entity.metadata.get("status")
-                status_value = raw_status.value if raw_status and hasattr(raw_status, "value") else raw_status
+                status_value = (
+                    raw_status.value if raw_status and hasattr(raw_status, "value") else raw_status
+                )
 
                 results.append(
                     EntitySummary(
@@ -685,7 +691,8 @@ async def _explore_dependencies(
                             "status": status_value,
                             "depth": depth,
                             "is_root": entity.id == entity_id,
-                            "project_id": getattr(entity, "project_id", None) or entity.metadata.get("project_id"),
+                            "project_id": getattr(entity, "project_id", None)
+                            or entity.metadata.get("project_id"),
                         },
                     )
                 )
@@ -776,7 +783,7 @@ async def _explore_related(
 # =============================================================================
 
 
-async def add(
+async def add(  # noqa: PLR0915
     title: str,
     content: str,
     entity_type: str = "episode",
@@ -1035,7 +1042,12 @@ async def add(
                     await relationship_manager.create(rel)
                     relationships_created.append(f"DEPENDS_ON:{dep_id}")
                 except Exception as e:
-                    log.warning("relationship_creation_failed", error=str(e), type="DEPENDS_ON", target=dep_id)
+                    log.warning(
+                        "relationship_creation_failed",
+                        error=str(e),
+                        type="DEPENDS_ON",
+                        target=dep_id,
+                    )
 
         # Generic RELATED_TO relationships
         if related_to:
@@ -1051,7 +1063,12 @@ async def add(
                     await relationship_manager.create(rel)
                     relationships_created.append(f"RELATED_TO:{related_id}")
                 except Exception as e:
-                    log.warning("relationship_creation_failed", error=str(e), type="RELATED_TO", target=related_id)
+                    log.warning(
+                        "relationship_creation_failed",
+                        error=str(e),
+                        type="RELATED_TO",
+                        target=related_id,
+                    )
 
         # Auto-link: discover and create REFERENCES relationships
         if auto_link:
@@ -1085,7 +1102,9 @@ async def add(
                     except Exception as e:
                         log.warning("auto_link_failed", error=str(e), target=linked_id)
 
-                log.info("auto_link_complete", entity_id=created_id, links_found=len(auto_link_results))
+                log.info(
+                    "auto_link_complete", entity_id=created_id, links_found=len(auto_link_results)
+                )
             except Exception as e:
                 log.warning("auto_link_search_failed", error=str(e))
 

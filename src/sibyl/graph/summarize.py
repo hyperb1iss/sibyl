@@ -97,7 +97,7 @@ def format_entity_for_prompt(entity: dict[str, Any], max_chars: int = 500) -> st
 
 
 async def get_community_content(
-    client: "GraphClient",
+    client: GraphClient,
     community_id: str,
     max_members: int = 20,
 ) -> list[dict[str, Any]]:
@@ -174,7 +174,7 @@ async def summarize_with_openai(
     try:
         from openai import AsyncOpenAI
     except ImportError:
-        log.error("openai package required for summarization. Install with: pip install openai")
+        log.warning("openai package required for summarization. Install with: pip install openai")
         return None
 
     if not entities:
@@ -193,7 +193,10 @@ async def summarize_with_openai(
         response = await client.chat.completions.create(
             model=config.model,
             messages=[
-                {"role": "system", "content": "You are a helpful assistant that analyzes software development knowledge."},
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that analyzes software development knowledge.",
+                },
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
@@ -211,7 +214,7 @@ async def summarize_with_openai(
         return CommunitySummary(
             community_id="",  # Will be set by caller
             summary=data.get("summary", ""),
-            key_concepts=data.get("key_concepts", [])[:config.max_concepts],
+            key_concepts=data.get("key_concepts", [])[: config.max_concepts],
             representative_entities=[e["id"] for e in entities[:3]],
         )
 
@@ -221,7 +224,7 @@ async def summarize_with_openai(
 
 
 async def generate_community_summary(
-    client: "GraphClient",
+    client: GraphClient,
     community_id: str,
     config: SummaryConfig | None = None,
 ) -> CommunitySummary | None:
@@ -261,7 +264,7 @@ async def generate_community_summary(
 
 
 async def store_community_summary(
-    client: "GraphClient",
+    client: GraphClient,
     summary: CommunitySummary,
 ) -> bool:
     """Store summary in community entity.
@@ -304,12 +307,14 @@ async def store_community_summary(
         return success
 
     except Exception as e:
-        log.warning("store_community_summary_failed", community_id=summary.community_id, error=str(e))
+        log.warning(
+            "store_community_summary_failed", community_id=summary.community_id, error=str(e)
+        )
         return False
 
 
 async def generate_community_summaries(
-    client: "GraphClient",
+    client: GraphClient,
     community_ids: list[str] | None = None,
     config: SummaryConfig | None = None,
     store: bool = True,
@@ -374,7 +379,7 @@ async def generate_community_summaries(
 
 
 async def update_stale_summaries(
-    client: "GraphClient",
+    client: GraphClient,
     config: SummaryConfig | None = None,
 ) -> int:
     """Update summaries for communities with changed members.

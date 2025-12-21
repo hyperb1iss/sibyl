@@ -339,11 +339,18 @@ class _FakeEntityManager:
 
     async def update(self, entity_id: str, updates: dict) -> Task:
         # Persist status and arbitrary fields into metadata for parity with real manager
-        meta = {**self.task.metadata, **{k: v for k, v in updates.items() if k not in {"name", "description", "content"}}}
+        meta = {
+            **self.task.metadata,
+            **{k: v for k, v in updates.items() if k not in {"name", "description", "content"}},
+        }
         self.task.metadata = meta
         if "status" in updates:
             self.task.status = updates["status"]
-            self.task.metadata["status"] = updates["status"].value if hasattr(updates["status"], "value") else updates["status"]
+            self.task.metadata["status"] = (
+                updates["status"].value
+                if hasattr(updates["status"], "value")
+                else updates["status"]
+            )
         if "branch_name" in updates:
             self.task.branch_name = updates["branch_name"]
         if "blockers_encountered" in updates:
@@ -362,7 +369,9 @@ class _FakeEntityManager:
 
 
 class _FakeRelationshipManager:
-    async def get_for_entity(self, entity_id: str, relationship_types=None, direction: str = "outgoing"):
+    async def get_for_entity(
+        self, entity_id: str, relationship_types=None, direction: str = "outgoing"
+    ):
         return []
 
     async def create(self, relationship):

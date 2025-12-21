@@ -3,7 +3,7 @@
 These map directly to TypeScript interfaces via OpenAPI generation.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -256,4 +256,4 @@ class WebSocketEvent(BaseModel):
         "health_update",
     ]
     data: dict[str, Any]
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))

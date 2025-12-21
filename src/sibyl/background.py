@@ -171,9 +171,7 @@ class BackgroundQueue:
             return
 
         self._running = True
-        self._workers = [
-            asyncio.create_task(self._worker(i)) for i in range(self._max_workers)
-        ]
+        self._workers = [asyncio.create_task(self._worker(i)) for i in range(self._max_workers)]
         log.info("Background queue started", workers=self._max_workers)
 
     async def stop(self) -> None:
@@ -210,7 +208,7 @@ _background_queue: BackgroundQueue | None = None
 
 def get_background_queue() -> BackgroundQueue:
     """Get or create the global background queue."""
-    global _background_queue
+    global _background_queue  # noqa: PLW0603
     if _background_queue is None:
         _background_queue = BackgroundQueue()
     return _background_queue
@@ -230,7 +228,7 @@ async def init_background_queue() -> BackgroundQueue:
 
 async def shutdown_background_queue() -> None:
     """Shutdown the background queue."""
-    global _background_queue
+    global _background_queue  # noqa: PLW0603
     if _background_queue is not None:
         await _background_queue.stop()
         _background_queue = None

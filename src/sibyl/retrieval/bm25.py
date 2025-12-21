@@ -9,8 +9,9 @@ from __future__ import annotations
 import math
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 import structlog
 
@@ -33,13 +34,57 @@ class BM25Config:
     k1: float = 1.5
     b: float = 0.75
     min_token_length: int = 2
-    stop_words: set[str] = field(default_factory=lambda: {
-        "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
-        "of", "with", "by", "from", "as", "is", "was", "are", "were", "been",
-        "be", "have", "has", "had", "do", "does", "did", "will", "would",
-        "could", "should", "may", "might", "must", "shall", "can", "need",
-        "this", "that", "these", "those", "it", "its", "they", "them", "their",
-    })
+    stop_words: set[str] = field(
+        default_factory=lambda: {
+            "the",
+            "a",
+            "an",
+            "and",
+            "or",
+            "but",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "of",
+            "with",
+            "by",
+            "from",
+            "as",
+            "is",
+            "was",
+            "are",
+            "were",
+            "been",
+            "be",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "must",
+            "shall",
+            "can",
+            "need",
+            "this",
+            "that",
+            "these",
+            "those",
+            "it",
+            "its",
+            "they",
+            "them",
+            "their",
+        }
+    )
 
 
 def tokenize(text: str, min_length: int = 2, stop_words: set[str] | None = None) -> list[str]:
@@ -171,9 +216,7 @@ class BM25Index:
         if is_new:
             self._total_docs += 1
         self._avg_doc_length = (
-            sum(self._doc_lengths.values()) / self._total_docs
-            if self._total_docs > 0
-            else 0.0
+            sum(self._doc_lengths.values()) / self._total_docs if self._total_docs > 0 else 0.0
         )
 
         return entity_id
@@ -202,9 +245,7 @@ class BM25Index:
 
         # Recalculate average
         self._avg_doc_length = (
-            sum(self._doc_lengths.values()) / self._total_docs
-            if self._total_docs > 0
-            else 0.0
+            sum(self._doc_lengths.values()) / self._total_docs if self._total_docs > 0 else 0.0
         )
 
         return True
@@ -313,7 +354,7 @@ _bm25_index: BM25Index | None = None
 
 def get_bm25_index() -> BM25Index:
     """Get the global BM25 index."""
-    global _bm25_index
+    global _bm25_index  # noqa: PLW0603
     if _bm25_index is None:
         _bm25_index = BM25Index()
     return _bm25_index
@@ -321,7 +362,7 @@ def get_bm25_index() -> BM25Index:
 
 def reset_bm25_index() -> None:
     """Reset the global BM25 index."""
-    global _bm25_index
+    global _bm25_index  # noqa: PLW0603
     if _bm25_index is not None:
         _bm25_index.clear()
     _bm25_index = None

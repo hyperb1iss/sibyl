@@ -33,7 +33,9 @@ app = typer.Typer(
 @app.command("related")
 def explore_related(
     entity_id: Annotated[str, typer.Argument(help="Starting entity ID")],
-    relationship_types: Annotated[str | None, typer.Option("--rel", "-r", help="Relationship types (comma-sep)")] = None,
+    relationship_types: Annotated[
+        str | None, typer.Option("--rel", "-r", help="Relationship types (comma-sep)")
+    ] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
 ) -> None:
     """Find directly connected entities (1-hop)."""
@@ -43,7 +45,9 @@ def explore_related(
         from sibyl.tools.core import explore
 
         try:
-            rel_list = [r.strip() for r in relationship_types.split(",")] if relationship_types else None
+            rel_list = (
+                [r.strip() for r in relationship_types.split(",")] if relationship_types else None
+            )
 
             with spinner("Exploring relationships...") as progress:
                 progress.add_task("Exploring relationships...", total=None)
@@ -120,14 +124,18 @@ def explore_traverse(
 
             tree = create_tree(f"Traversal from {entity_id[:8]}...")
             for dist in sorted(by_distance.keys()):
-                hop_branch = tree.add(f"[{NEON_CYAN}]Hop {dist}[/{NEON_CYAN}] ({len(by_distance[dist])} entities)")
+                hop_branch = tree.add(
+                    f"[{NEON_CYAN}]Hop {dist}[/{NEON_CYAN}] ({len(by_distance[dist])} entities)"
+                )
                 for e in by_distance[dist][:10]:  # Limit per hop
                     hop_branch.add(f"[{CORAL}]{e.type}[/{CORAL}] {truncate(e.name, 40)}")
                 if len(by_distance[dist]) > 10:
                     hop_branch.add(f"[dim]... and {len(by_distance[dist]) - 10} more[/dim]")
 
             console.print(tree)
-            console.print(f"\n[dim]Total: {len(entities)} entities across {len(by_distance)} hop(s)[/dim]")
+            console.print(
+                f"\n[dim]Total: {len(entities)} entities across {len(by_distance)} hop(s)[/dim]"
+            )
 
         except Exception as e:
             error(f"Traversal failed: {e}")
@@ -139,7 +147,9 @@ def explore_traverse(
 @app.command("dependencies")
 def explore_dependencies(
     entity_id: Annotated[str | None, typer.Argument(help="Task or Project ID")] = None,
-    project: Annotated[str | None, typer.Option("--project", "-p", help="Project ID for all deps")] = None,
+    project: Annotated[
+        str | None, typer.Option("--project", "-p", help="Project ID for all deps")
+    ] = None,
 ) -> None:
     """Show task dependency graph with topological ordering."""
     if not entity_id and not project:
@@ -169,7 +179,9 @@ def explore_dependencies(
             if response.metadata and response.metadata.get("has_cycles"):
                 console.print(f"[{CORAL}]Warning: Circular dependencies detected![/{CORAL}]\n")
 
-            console.print(f"[{ELECTRIC_PURPLE}]Dependency Order (execute top to bottom):[/{ELECTRIC_PURPLE}]\n")
+            console.print(
+                f"[{ELECTRIC_PURPLE}]Dependency Order (execute top to bottom):[/{ELECTRIC_PURPLE}]\n"
+            )
 
             for i, e in enumerate(entities, 1):
                 status = e.metadata.get("status", "unknown") if e.metadata else "unknown"
@@ -226,13 +238,17 @@ def explore_path(
                 result = await client.driver.execute_query(query, from_id=from_id, to_id=to_id)
 
             if not result or not result.result_set:
-                info(f"No path found between {from_id[:8]} and {to_id[:8]} (max depth: {max_depth})")
+                info(
+                    f"No path found between {from_id[:8]} and {to_id[:8]} (max depth: {max_depth})"
+                )
                 return
 
             row = result.result_set[0]
             path_length = row[1] if len(row) > 1 else 0
 
-            console.print(f"\n[{ELECTRIC_PURPLE}]Path Found[/{ELECTRIC_PURPLE}] (length: {path_length})\n")
+            console.print(
+                f"\n[{ELECTRIC_PURPLE}]Path Found[/{ELECTRIC_PURPLE}] (length: {path_length})\n"
+            )
             console.print(f"  [{NEON_CYAN}]{from_id[:8]}...[/{NEON_CYAN}]")
 
             for i in range(int(path_length)):

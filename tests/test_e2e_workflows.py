@@ -170,14 +170,10 @@ class TestProjectWorkflowE2E:
 
         # Create relationships
         ctx.relationship_manager.add_relationship(
-            create_test_relationship(
-                task1.id, project.id, RelationshipType.BELONGS_TO
-            )
+            create_test_relationship(task1.id, project.id, RelationshipType.BELONGS_TO)
         )
         ctx.relationship_manager.add_relationship(
-            create_test_relationship(
-                task2.id, project.id, RelationshipType.BELONGS_TO
-            )
+            create_test_relationship(task2.id, project.id, RelationshipType.BELONGS_TO)
         )
 
         async with ctx.patch():
@@ -220,11 +216,13 @@ class TestSearchE2E:
         ctx.entity_manager.add_entity(episode)
 
         # Set up search to return all
-        ctx.entity_manager.set_search_results([
-            (pattern, 0.9),
-            (rule, 0.85),
-            (episode, 0.8),
-        ])
+        ctx.entity_manager.set_search_results(
+            [
+                (pattern, 0.9),
+                (rule, 0.85),
+                (episode, 0.8),
+            ]
+        )
 
         async with ctx.patch():
             # Search without type filter
@@ -237,7 +235,9 @@ class TestSearchE2E:
                 types=["pattern"],
                 limit=5,
             )
-            assert "pattern" in (result.filters.get("types") or []) or result.filters == {"types": ["pattern"]}
+            assert "pattern" in (result.filters.get("types") or []) or result.filters == {
+                "types": ["pattern"]
+            }
 
     @pytest.mark.asyncio
     async def test_search_with_filters(self) -> None:

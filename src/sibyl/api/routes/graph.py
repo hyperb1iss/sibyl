@@ -62,7 +62,7 @@ async def get_all_nodes(
                 connection_counts[rel.source_id] = connection_counts.get(rel.source_id, 0) + 1
                 connection_counts[rel.target_id] = connection_counts.get(rel.target_id, 0) + 1
         except Exception:
-            pass  # Fall back to zero connections if fetch fails
+            log.debug("relationship_fetch_failed", msg="falling back to zero connections")
 
         # Normalize sizes (1.0 to 3.0 based on connections)
         max_connections = max(connection_counts.values()) if connection_counts else 1

@@ -9,8 +9,9 @@ This produces a unified ranking that balances results from different sources.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 import structlog
 
@@ -202,11 +203,11 @@ def rrf_merge_with_metadata(
         lambda: {"sources": [], "ranks": {}, "original_scores": {}}
     )
 
-    for list_idx, results in enumerate(result_lists):
+    for list_idx, result_list in enumerate(result_lists):
         weight = weights[list_idx]
         list_name = list_names[list_idx] if list_idx < len(list_names) else f"list_{list_idx}"
 
-        for rank, (entity, original_score) in enumerate(results, start=1):
+        for rank, (entity, original_score) in enumerate(result_list, start=1):
             key = dedup_key(entity)
 
             rrf = rrf_score(rank, k) * weight

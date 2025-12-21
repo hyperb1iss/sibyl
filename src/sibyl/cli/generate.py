@@ -44,8 +44,12 @@ def generate_realistic(  # noqa: PLR0915 - complex CLI command
     episodes: Annotated[int, typer.Option("--episodes", "-e", help="Number of episodes")] = 100,
     seed: Annotated[int | None, typer.Option("--seed", "-s", help="Random seed")] = None,
     model: Annotated[str, typer.Option("--model", "-m", help="LLM model: sonnet, opus")] = "sonnet",
-    no_llm: Annotated[bool, typer.Option("--no-llm", help="Use templates only (no API calls)")] = False,
-    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be generated")] = False,
+    no_llm: Annotated[
+        bool, typer.Option("--no-llm", help="Use templates only (no API calls)")
+    ] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Show what would be generated")
+    ] = False,
 ) -> None:
     """Generate a realistic development scenario with interconnected data.
 
@@ -60,12 +64,18 @@ def generate_realistic(  # noqa: PLR0915 - complex CLI command
         sibyl generate realistic -p 10 -t 30        # 10 projects, 30 tasks each
     """
     if dry_run:
-        console.print(create_panel(f"[{ELECTRIC_PURPLE}]Dry Run - Generation Plan[/{ELECTRIC_PURPLE}]"))
+        console.print(
+            create_panel(f"[{ELECTRIC_PURPLE}]Dry Run - Generation Plan[/{ELECTRIC_PURPLE}]")
+        )
         console.print(f"\n  Projects: [{NEON_CYAN}]{projects}[/{NEON_CYAN}]")
-        console.print(f"  Tasks: [{NEON_CYAN}]{projects * tasks_per_project}[/{NEON_CYAN}] ({tasks_per_project}/project)")
+        console.print(
+            f"  Tasks: [{NEON_CYAN}]{projects * tasks_per_project}[/{NEON_CYAN}] ({tasks_per_project}/project)"
+        )
         console.print(f"  Patterns: [{NEON_CYAN}]{patterns}[/{NEON_CYAN}]")
         console.print(f"  Episodes: [{NEON_CYAN}]{episodes}[/{NEON_CYAN}]")
-        console.print(f"  Model: [{NEON_CYAN}]{model if not no_llm else 'none (template only)'}[/{NEON_CYAN}]")
+        console.print(
+            f"  Model: [{NEON_CYAN}]{model if not no_llm else 'none (template only)'}[/{NEON_CYAN}]"
+        )
         console.print(f"  Seed: [{NEON_CYAN}]{seed or 'random'}[/{NEON_CYAN}]")
         console.print("\n[dim]Run without --dry-run to generate data[/dim]")
         return
@@ -99,7 +109,9 @@ def generate_realistic(  # noqa: PLR0915 - complex CLI command
             generator = LLMContentGenerator(config)
             gen_name = f"LLM Generator ({model_type.value})"
 
-        console.print(create_panel(f"[{ELECTRIC_PURPLE}]Generating Realistic Data[/{ELECTRIC_PURPLE}]"))
+        console.print(
+            create_panel(f"[{ELECTRIC_PURPLE}]Generating Realistic Data[/{ELECTRIC_PURPLE}]")
+        )
         console.print(f"\n  Using: [{NEON_CYAN}]{gen_name}[/{NEON_CYAN}]")
 
         try:
@@ -112,7 +124,9 @@ def generate_realistic(  # noqa: PLR0915 - complex CLI command
                 weaver = RelationshipWeaver(config)
                 result.relationships = weaver.weave(result.entities)
 
-            console.print(f"\n[{SUCCESS_GREEN}]Generated {result.entity_count} entities, {result.relationship_count} relationships[/{SUCCESS_GREEN}]")
+            console.print(
+                f"\n[{SUCCESS_GREEN}]Generated {result.entity_count} entities, {result.relationship_count} relationships[/{SUCCESS_GREEN}]"
+            )
 
             # Show summary
             table = create_table("Generation Results", "Metric", "Value")
@@ -128,13 +142,18 @@ def generate_realistic(  # noqa: PLR0915 - complex CLI command
                     progress.add_task("Storing in graph...", total=None)
 
                     from sibyl.graph.client import get_graph_client
+
                     client = await get_graph_client()
                     entity_mgr = EntityManager(client)
                     rel_mgr = RelationshipManager(client)
 
                     # Use bulk_create_direct for speed (bypasses Graphiti LLM)
-                    stored_entities, _ = await entity_mgr.bulk_create_direct(result.entities, batch_size=100)
-                    stored_rels, _ = await rel_mgr.bulk_create_direct(result.relationships, batch_size=100)
+                    stored_entities, _ = await entity_mgr.bulk_create_direct(
+                        result.entities, batch_size=100
+                    )
+                    stored_rels, _ = await rel_mgr.bulk_create_direct(
+                        result.relationships, batch_size=100
+                    )
 
                 success(f"Stored {stored_entities} entities, {stored_rels} relationships")
             else:
@@ -155,12 +174,16 @@ def generate_realistic(  # noqa: PLR0915 - complex CLI command
 
 
 @app.command("stress")
-def generate_stress(  # noqa: PLR0915 - complex CLI command
+def generate_stress(
     entities: Annotated[int, typer.Option("--entities", "-e", help="Total entities")] = 5000,
-    relationships: Annotated[int, typer.Option("--relationships", "-r", help="Total relationships")] = 10000,
+    relationships: Annotated[
+        int, typer.Option("--relationships", "-r", help="Total relationships")
+    ] = 10000,
     depth: Annotated[int, typer.Option("--depth", "-d", help="Max graph depth")] = 5,
     seed: Annotated[int | None, typer.Option("--seed", "-s", help="Random seed")] = None,
-    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show what would be generated")] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Show what would be generated")
+    ] = False,
 ) -> None:
     """Generate maximum-scale data for stress testing.
 
@@ -196,8 +219,12 @@ def generate_stress(  # noqa: PLR0915 - complex CLI command
 
         generator = StressTestGenerator(stress_config, seed=seed)
 
-        console.print(create_panel(f"[{ELECTRIC_PURPLE}]Stress Test Generation[/{ELECTRIC_PURPLE}]"))
-        console.print(f"\n  Target: [{CORAL}]{entities:,}[/{CORAL}] entities, [{CORAL}]{relationships:,}[/{CORAL}] relationships")
+        console.print(
+            create_panel(f"[{ELECTRIC_PURPLE}]Stress Test Generation[/{ELECTRIC_PURPLE}]")
+        )
+        console.print(
+            f"\n  Target: [{CORAL}]{entities:,}[/{CORAL}] entities, [{CORAL}]{relationships:,}[/{CORAL}] relationships"
+        )
 
         try:
             with spinner("Generating stress test data...") as progress:
@@ -210,7 +237,9 @@ def generate_stress(  # noqa: PLR0915 - complex CLI command
             table.add_row("Entities Generated", f"{result.entity_count:,}")
             table.add_row("Relationships Generated", f"{result.relationship_count:,}")
             table.add_row("Duration", f"{result.duration_seconds:.2f}s")
-            rate = result.entity_count / result.duration_seconds if result.duration_seconds > 0 else 0
+            rate = (
+                result.entity_count / result.duration_seconds if result.duration_seconds > 0 else 0
+            )
             table.add_row("Rate", f"{rate:,.0f} entities/sec")
             console.print(table)
 
@@ -221,16 +250,21 @@ def generate_stress(  # noqa: PLR0915 - complex CLI command
                     task = progress.add_task("Storing...", total=None)
 
                     from sibyl.graph.client import get_graph_client
+
                     client = await get_graph_client()
                     entity_mgr = EntityManager(client)
                     rel_mgr = RelationshipManager(client)
 
                     # Use bulk_create_direct for speed (bypasses Graphiti LLM)
                     progress.update(task, description="Storing entities...")
-                    stored, failed_ents = await entity_mgr.bulk_create_direct(result.entities, batch_size=500)
+                    stored, _failed_ents = await entity_mgr.bulk_create_direct(
+                        result.entities, batch_size=500
+                    )
 
                     progress.update(task, description="Storing relationships...")
-                    stored_rels, failed_rels = await rel_mgr.bulk_create_direct(result.relationships, batch_size=500)
+                    stored_rels, _failed_rels = await rel_mgr.bulk_create_direct(
+                        result.relationships, batch_size=500
+                    )
 
                 success(f"Stored {stored:,} entities, {stored_rels:,} relationships")
             else:
@@ -245,7 +279,9 @@ def generate_stress(  # noqa: PLR0915 - complex CLI command
 @app.command("scenario")
 def generate_scenario(  # noqa: PLR0915 - complex CLI command
     name: Annotated[str | None, typer.Argument(help="Scenario name")] = None,
-    list_scenarios: Annotated[bool, typer.Option("--list", "-l", help="List available scenarios")] = False,
+    list_scenarios: Annotated[
+        bool, typer.Option("--list", "-l", help="List available scenarios")
+    ] = False,
     model: Annotated[str, typer.Option("--model", "-m", help="LLM model: sonnet, opus")] = "sonnet",
     no_llm: Annotated[bool, typer.Option("--no-llm", help="Use templates only")] = False,
     seed: Annotated[int | None, typer.Option("--seed", "-s", help="Random seed")] = None,
@@ -271,7 +307,9 @@ def generate_scenario(  # noqa: PLR0915 - complex CLI command
             scenario = SCENARIOS[scenario_name]
             console.print(f"  [{NEON_CYAN}]{scenario_name}[/{NEON_CYAN}]")
             console.print(f"    {description}")
-            console.print(f"    [dim]{scenario.projects} projects, {scenario.projects * scenario.tasks_per_project} tasks, {scenario.patterns} patterns[/dim]")
+            console.print(
+                f"    [dim]{scenario.projects} projects, {scenario.projects * scenario.tasks_per_project} tasks, {scenario.patterns} patterns[/dim]"
+            )
             console.print()
         return
 
@@ -293,15 +331,19 @@ def generate_scenario(  # noqa: PLR0915 - complex CLI command
         table.add_row("Episodes", str(scenario.episodes))
         table.add_row("Rules", str(scenario.rules))
         table.add_row("Templates", str(scenario.templates))
-        table.add_row("Languages", ", ".join(scenario.languages) if scenario.languages else "default")
-        table.add_row("Frameworks", ", ".join(scenario.frameworks) if scenario.frameworks else "default")
+        table.add_row(
+            "Languages", ", ".join(scenario.languages) if scenario.languages else "default"
+        )
+        table.add_row(
+            "Frameworks", ", ".join(scenario.frameworks) if scenario.frameworks else "default"
+        )
         console.print(table)
 
         console.print("\n[dim]Run without --dry-run to generate data[/dim]")
         return
 
     @run_async
-    async def _scenario() -> None:  # noqa: PLR0915 - complex CLI logic
+    async def _scenario() -> None:
         from sibyl.generator.config import ModelType
         from sibyl.generator.scenarios import ScenarioRunner
         from sibyl.graph.entities import EntityManager
@@ -316,7 +358,9 @@ def generate_scenario(  # noqa: PLR0915 - complex CLI command
             seed=seed,
         )
 
-        console.print(create_panel(f"[{ELECTRIC_PURPLE}]Running Scenario: {name}[/{ELECTRIC_PURPLE}]"))
+        console.print(
+            create_panel(f"[{ELECTRIC_PURPLE}]Running Scenario: {name}[/{ELECTRIC_PURPLE}]")
+        )
         console.print(f"\n  {scenario.description}\n")
 
         try:
@@ -342,13 +386,18 @@ def generate_scenario(  # noqa: PLR0915 - complex CLI command
                     progress.add_task("Storing...", total=None)
 
                     from sibyl.graph.client import get_graph_client
+
                     client = await get_graph_client()
                     entity_mgr = EntityManager(client)
                     rel_mgr = RelationshipManager(client)
 
                     # Use bulk_create_direct for speed (bypasses Graphiti LLM)
-                    stored_entities, _ = await entity_mgr.bulk_create_direct(result.entities, batch_size=100)
-                    stored_rels, _ = await rel_mgr.bulk_create_direct(result.relationships, batch_size=100)
+                    stored_entities, _ = await entity_mgr.bulk_create_direct(
+                        result.entities, batch_size=100
+                    )
+                    stored_rels, _ = await rel_mgr.bulk_create_direct(
+                        result.relationships, batch_size=100
+                    )
 
                 success(f"Stored {stored_entities:,} entities, {stored_rels:,} relationships")
             else:
@@ -371,7 +420,9 @@ def generate_scenario(  # noqa: PLR0915 - complex CLI command
 @app.command("clean")
 def clean_generated(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
-    preserve_real: Annotated[bool, typer.Option("--preserve-real", help="Keep non-generated data")] = True,
+    preserve_real: Annotated[
+        bool, typer.Option("--preserve-real", help="Keep non-generated data")
+    ] = True,
 ) -> None:
     """Clean up generated test data.
 
@@ -385,7 +436,9 @@ def clean_generated(
     """
     if not yes:
         if preserve_real:
-            console.print(f"[{ELECTRIC_YELLOW}]This will remove all generated test data.[/{ELECTRIC_YELLOW}]")
+            console.print(
+                f"[{ELECTRIC_YELLOW}]This will remove all generated test data.[/{ELECTRIC_YELLOW}]"
+            )
         else:
             console.print(f"[{CORAL}]WARNING: This will remove ALL data from the graph![/{CORAL}]")
 

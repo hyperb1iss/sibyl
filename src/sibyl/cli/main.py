@@ -88,7 +88,7 @@ def serve(
 
 @app.command()
 def dev(
-    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),  # noqa: S104
     port: int = typer.Option(3334, "--port", "-p", help="Port to listen on"),
 ) -> None:
     """Start the server in development mode with hot reload.
@@ -110,7 +110,7 @@ def dev(
     console.print(f"[dim]Docs: http://{host}:{port}/api/docs[/dim]\n")
 
     try:
-        subprocess.run(
+        subprocess.run(  # noqa: S603
             [
                 sys.executable,
                 "-m",
@@ -175,7 +175,9 @@ def health() -> None:
 
 @app.command()
 def ingest(
-    path: Annotated[Path | None, typer.Argument(help="Path to ingest (default: entire repo)")] = None,
+    path: Annotated[
+        Path | None, typer.Argument(help="Path to ingest (default: entire repo)")
+    ] = None,
     force: Annotated[bool, typer.Option("--force", "-f", help="Force re-ingestion")] = False,
 ) -> None:
     """Ingest wisdom documents into the knowledge graph."""
@@ -244,7 +246,11 @@ def search(
                 title = f"{i}. {result.name}"
                 content = []
                 if result.content:
-                    display_content = result.content[:200] + "..." if len(result.content) > 200 else result.content
+                    display_content = (
+                        result.content[:200] + "..."
+                        if len(result.content) > 200
+                        else result.content
+                    )
                     content.append(display_content)
                 if result.source:
                     content.append(f"[dim]Source: {result.source}[/dim]")
@@ -275,7 +281,9 @@ def stats() -> None:
                 progress.add_task("Loading statistics...", total=None)
                 stats_data = await get_graph_stats()
 
-            console.print(create_panel(f"[{ELECTRIC_PURPLE}]Knowledge Graph Statistics[/{ELECTRIC_PURPLE}]"))
+            console.print(
+                create_panel(f"[{ELECTRIC_PURPLE}]Knowledge Graph Statistics[/{ELECTRIC_PURPLE}]")
+            )
 
             if entities := stats_data.get("entities"):
                 table = create_table("Entities by Type", "Type", "Count")
@@ -354,7 +362,9 @@ def setup() -> None:  # noqa: PLR0915
         success("Docker available")
     else:
         error("Docker not found")
-        console.print(f"  [{NEON_CYAN}]Install Docker: https://docs.docker.com/get-docker/[/{NEON_CYAN}]")
+        console.print(
+            f"  [{NEON_CYAN}]Install Docker: https://docs.docker.com/get-docker/[/{NEON_CYAN}]"
+        )
         all_good = False
 
     # Check 4: FalkorDB connection

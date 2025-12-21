@@ -31,7 +31,9 @@ app = typer.Typer(
 
 @app.command("backup")
 def backup_db(
-    output: Annotated[Path, typer.Option("--output", "-o", help="Backup file path")] = Path("sibyl_backup.json"),
+    output: Annotated[Path, typer.Option("--output", "-o", help="Backup file path")] = Path(
+        "sibyl_backup.json"
+    ),
 ) -> None:
     """Backup the graph database to a JSON file."""
 
@@ -75,7 +77,9 @@ def backup_db(
                 # Build backup data
                 backup_data = {
                     "version": "1.0",
-                    "created_at": str(__import__("datetime").datetime.now(tz=__import__("datetime").timezone.utc)),
+                    "created_at": str(
+                        __import__("datetime").datetime.now(tz=__import__("datetime").timezone.utc)
+                    ),
                     "entity_count": len(all_entities),
                     "relationship_count": len(relationships),
                     "entities": [e.model_dump() for e in all_entities],
@@ -173,7 +177,9 @@ def clear_db(
 ) -> None:
     """Clear all data from the database. USE WITH CAUTION!"""
     if not yes:
-        console.print(f"\n[{ERROR_RED}]WARNING: This will DELETE ALL DATA from the graph![/{ERROR_RED}]\n")
+        console.print(
+            f"\n[{ERROR_RED}]WARNING: This will DELETE ALL DATA from the graph![/{ERROR_RED}]\n"
+        )
         confirm = typer.confirm("Are you absolutely sure?")
         if not confirm:
             info("Cancelled")
@@ -221,11 +227,15 @@ def db_stats() -> None:
                 client = await get_graph_client()
 
                 # Get node count
-                node_result = await client.driver.execute_query("MATCH (n) RETURN count(n) as count")
+                node_result = await client.driver.execute_query(
+                    "MATCH (n) RETURN count(n) as count"
+                )
                 node_count = node_result.result_set[0][0] if node_result.result_set else 0
 
                 # Get relationship count
-                rel_result = await client.driver.execute_query("MATCH ()-[r]->() RETURN count(r) as count")
+                rel_result = await client.driver.execute_query(
+                    "MATCH ()-[r]->() RETURN count(r) as count"
+                )
                 rel_count = rel_result.result_set[0][0] if rel_result.result_set else 0
 
                 # Get node types

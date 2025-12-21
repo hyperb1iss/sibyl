@@ -93,7 +93,7 @@ class TaskWorkflowEngine:
         self,
         entity_manager: "EntityManager",
         relationship_manager: "RelationshipManager",
-        graph_client: "GraphClient"
+        graph_client: "GraphClient",
     ) -> None:
         """Initialize workflow engine with graph managers."""
         self._entity_manager = entity_manager
@@ -207,7 +207,7 @@ class TaskWorkflowEngine:
 
         # Add assignee if not already assigned
         if assignee not in task.assignees:
-            updates["assignees"] = task.assignees + [assignee]
+            updates["assignees"] = [*task.assignees, assignee]
 
         # Auto-suggest branch name if not set
         if not task.branch_name:
@@ -223,10 +223,7 @@ class TaskWorkflowEngine:
         return updated_task
 
     async def submit_for_review(
-        self,
-        task_id: str,
-        commit_shas: list[str],
-        pr_url: str | None = None
+        self, task_id: str, commit_shas: list[str], pr_url: str | None = None
     ) -> Task:
         """Move task to review status.
 
@@ -264,10 +261,7 @@ class TaskWorkflowEngine:
         return updated_task
 
     async def complete_task(
-        self,
-        task_id: str,
-        actual_hours: float | None = None,
-        learnings: str = ""
+        self, task_id: str, actual_hours: float | None = None, learnings: str = ""
     ) -> Task:
         """Mark task as done and capture learnings.
 
@@ -316,11 +310,7 @@ class TaskWorkflowEngine:
         log.info("Task completed successfully", task_id=task_id)
         return updated_task
 
-    async def block_task(
-        self,
-        task_id: str,
-        blocker_description: str
-    ) -> Task:
+    async def block_task(self, task_id: str, blocker_description: str) -> Task:
         """Mark task as blocked.
 
         Args:
@@ -341,7 +331,7 @@ class TaskWorkflowEngine:
         self._validate_transition(task.status, TaskStatus.BLOCKED)
 
         # Add blocker to list
-        blockers = task.blockers_encountered + [blocker_description]
+        blockers = [*task.blockers_encountered, blocker_description]
 
         updates: dict = {
             "status": TaskStatus.BLOCKED,
@@ -446,31 +436,37 @@ class TaskWorkflowEngine:
             accuracy = (task.estimated_hours / task.actual_hours) * 100
             content_parts.append(f"**Estimation Accuracy**: {accuracy:.1f}%")
 
-        content_parts.extend([
-            "",
-            "### What Was Done",
-            "",
-            task.description,
-            "",
-            "### Learnings",
-            "",
-            task.learnings,
-        ])
+        content_parts.extend(
+            [
+                "",
+                "### What Was Done",
+                "",
+                task.description,
+                "",
+                "### Learnings",
+                "",
+                task.learnings,
+            ]
+        )
 
         if task.blockers_encountered:
-            content_parts.extend([
-                "",
-                "### Blockers Encountered",
-                "",
-            ])
+            content_parts.extend(
+                [
+                    "",
+                    "### Blockers Encountered",
+                    "",
+                ]
+            )
             content_parts.extend(f"- {b}" for b in task.blockers_encountered)
 
         if task.commit_shas:
-            content_parts.extend([
-                "",
-                "### Related Commits",
-                "",
-            ])
+            content_parts.extend(
+                [
+                    "",
+                    "### Related Commits",
+                    "",
+                ]
+            )
             content_parts.extend(f"- `{sha}`" for sha in task.commit_shas)
 
         # Create episode
@@ -501,12 +497,14 @@ class TaskWorkflowEngine:
         episode_id = await self._entity_manager.create(episode)
 
         # Link episode back to task
-        await self._relationship_manager.create(Relationship(
-            id=f"rel_episode_{task.id}",
-            source_id=episode_id,
-            target_id=task.id,
-            relationship_type=RelationshipType.DERIVED_FROM,
-        ))
+        await self._relationship_manager.create(
+            Relationship(
+                id=f"rel_episode_{task.id}",
+                source_id=episode_id,
+                target_id=task.id,
+                relationship_type=RelationshipType.DERIVED_FROM,
+            )
+        )
 
         # Inherit knowledge relationships from task
         task_relationships = await self._relationship_manager.get_for_entity(
@@ -515,17 +513,19 @@ class TaskWorkflowEngine:
                 RelationshipType.REQUIRES,
                 RelationshipType.REFERENCES,
                 RelationshipType.PART_OF,
-            ]
+            ],
         )
 
         for rel in task_relationships:
-            await self._relationship_manager.create(Relationship(
-                id=f"rel_episode_{episode_id}_{rel.target_id}",
-                source_id=episode_id,
-                target_id=rel.target_id,
-                relationship_type=RelationshipType.REFERENCES,
-                metadata={"inherited_from_task": task.id},
-            ))
+            await self._relationship_manager.create(
+                Relationship(
+                    id=f"rel_episode_{episode_id}_{rel.target_id}",
+                    source_id=episode_id,
+                    target_id=rel.target_id,
+                    relationship_type=RelationshipType.REFERENCES,
+                    metadata={"inherited_from_task": task.id},
+                )
+            )
 
         log.info("Learning episode created", episode_id=episode_id, task_id=task.id)
         return episode_id
@@ -548,10 +548,7 @@ class TaskWorkflowEngine:
         RETURN total, done, doing
         """
 
-        result = await self._graph_client.client.driver.execute_query(
-            query,
-            project_id=project_id
-        )
+        result = await self._graph_client.client.driver.execute_query(query, project_id=project_id)
 
         if result and len(result) > 0:
             record = result[0]
@@ -560,18 +557,21 @@ class TaskWorkflowEngine:
             doing = record.get("doing", 0)
 
             # Update project entity
-            await self._entity_manager.update(project_id, {
-                "total_tasks": total,
-                "completed_tasks": done,
-                "in_progress_tasks": doing,
-            })
+            await self._entity_manager.update(
+                project_id,
+                {
+                    "total_tasks": total,
+                    "completed_tasks": done,
+                    "in_progress_tasks": doing,
+                },
+            )
 
             log.debug(
                 "Project progress updated",
                 project_id=project_id,
                 total=total,
                 done=done,
-                doing=doing
+                doing=doing,
             )
 
     def _generate_branch_name(self, task: Task) -> str:
@@ -588,8 +588,8 @@ class TaskWorkflowEngine:
 
         # Slugify title
         slug = task.title.lower()
-        slug = re.sub(r'[^a-z0-9]+', '-', slug)
-        slug = slug.strip('-')[:50]
+        slug = re.sub(r"[^a-z0-9]+", "-", slug)
+        slug = slug.strip("-")[:50]
 
         # Determine prefix based on feature/complexity
         if task.complexity == "epic":
@@ -622,5 +622,5 @@ class TaskWorkflowEngine:
             updated_at=entity.updated_at,
             # Task-specific fields would be in metadata
             # This is simplified - real implementation would use proper serialization
-            **entity.metadata
+            **entity.metadata,
         )

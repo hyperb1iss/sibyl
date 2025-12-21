@@ -114,7 +114,9 @@ class ScenarioRunner:
     use_llm: bool = True
     seed: int | None = None
 
-    async def run(self, progress_callback: Callable[[str, int, int], None] | None = None) -> GeneratorResult:
+    async def run(
+        self, progress_callback: Callable[[str, int, int], None] | None = None
+    ) -> GeneratorResult:
         """Execute the scenario and generate all data.
 
         Args:
@@ -138,12 +140,12 @@ class ScenarioRunner:
 
         # Progress tracking
         total_entities = (
-            config.projects +
-            config.total_tasks +
-            config.patterns +
-            config.episodes +
-            config.rules +
-            config.templates
+            config.projects
+            + config.total_tasks
+            + config.patterns
+            + config.episodes
+            + config.rules
+            + config.templates
         )
 
         if progress_callback:

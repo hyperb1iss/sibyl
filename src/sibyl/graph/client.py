@@ -1,8 +1,8 @@
 """Graphiti client wrapper for FalkorDB."""
 
 import asyncio
-from typing import TYPE_CHECKING
 import os
+from typing import TYPE_CHECKING
 
 import structlog
 
@@ -51,19 +51,19 @@ class GraphClient:
             log.debug("Using Anthropic LLM client", model=settings.llm_model)
             return AnthropicClient(config=config)
 
-        else:  # openai
-            from graphiti_core.llm_client.openai_client import OpenAIClient
+        # openai
+        from graphiti_core.llm_client.openai_client import OpenAIClient
 
-            api_key = settings.openai_api_key.get_secret_value()
-            if not api_key:
-                api_key = os.getenv("OPENAI_API_KEY", "")
+        api_key = settings.openai_api_key.get_secret_value()
+        if not api_key:
+            api_key = os.getenv("OPENAI_API_KEY", "")
 
-            config = LLMConfig(
-                api_key=api_key,
-                model=settings.llm_model,
-            )
-            log.debug("Using OpenAI LLM client", model=settings.llm_model)
-            return OpenAIClient(config=config)
+        config = LLMConfig(
+            api_key=api_key,
+            model=settings.llm_model,
+        )
+        log.debug("Using OpenAI LLM client", model=settings.llm_model)
+        return OpenAIClient(config=config)
 
     async def connect(self) -> None:
         """Establish connection to FalkorDB via Graphiti.

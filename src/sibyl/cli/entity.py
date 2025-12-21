@@ -54,11 +54,19 @@ ENTITY_TYPES = [
 
 @app.command("list")
 def list_entities(
-    entity_type: Annotated[str, typer.Option("--type", "-t", help="Entity type to list")] = "pattern",
-    language: Annotated[str | None, typer.Option("--language", "-l", help="Filter by language")] = None,
-    category: Annotated[str | None, typer.Option("--category", "-c", help="Filter by category")] = None,
+    entity_type: Annotated[
+        str, typer.Option("--type", "-t", help="Entity type to list")
+    ] = "pattern",
+    language: Annotated[
+        str | None, typer.Option("--language", "-l", help="Filter by language")
+    ] = None,
+    category: Annotated[
+        str | None, typer.Option("--category", "-c", help="Filter by category")
+    ] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 50,
-    format_: Annotated[str, typer.Option("--format", "-f", help="Output format: table, json, csv")] = "table",
+    format_: Annotated[
+        str, typer.Option("--format", "-f", help="Output format: table, json, csv")
+    ] = "table",
 ) -> None:
     """List entities by type with optional filters."""
     if entity_type not in ENTITY_TYPES:
@@ -151,11 +159,15 @@ def show_entity(
             ]
 
             if entity.content and entity.content != entity.description:
-                lines.extend([
-                    "",
-                    f"[{NEON_CYAN}]Content:[/{NEON_CYAN}]",
-                    entity.content[:500] + "..." if len(entity.content) > 500 else entity.content,
-                ])
+                lines.extend(
+                    [
+                        "",
+                        f"[{NEON_CYAN}]Content:[/{NEON_CYAN}]",
+                        entity.content[:500] + "..."
+                        if len(entity.content) > 500
+                        else entity.content,
+                    ]
+                )
 
             meta = entity.metadata or {}
             if meta:
@@ -179,7 +191,9 @@ def create_entity(
     name: Annotated[str, typer.Option("--name", "-n", help="Entity name", prompt=True)],
     content: Annotated[str | None, typer.Option("--content", "-c", help="Entity content")] = None,
     category: Annotated[str | None, typer.Option("--category", help="Category")] = None,
-    languages: Annotated[str | None, typer.Option("--languages", "-l", help="Comma-separated languages")] = None,
+    languages: Annotated[
+        str | None, typer.Option("--languages", "-l", help="Comma-separated languages")
+    ] = None,
     tags: Annotated[str | None, typer.Option("--tags", help="Comma-separated tags")] = None,
 ) -> None:
     """Create a new entity."""
@@ -201,7 +215,9 @@ def create_entity(
                 response = await add(
                     title=name,
                     content=content or f"{entity_type}: {name}",
-                    entity_type=entity_type if entity_type in ["episode", "pattern", "task", "project"] else "episode",
+                    entity_type=entity_type
+                    if entity_type in ["episode", "pattern", "task", "project"]
+                    else "episode",
                     category=category,
                     languages=lang_list,
                     tags=tag_list,

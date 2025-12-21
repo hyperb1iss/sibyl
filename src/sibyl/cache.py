@@ -193,16 +193,12 @@ class QueryCache:
             entity_ttl: Entity lookup TTL in seconds.
             community_ttl: Community summary TTL in seconds.
         """
-        self._search_cache: LRUCache[Any] = LRUCache(
-            maxsize=search_maxsize, default_ttl=search_ttl
-        )
-        self._entity_cache: LRUCache[Any] = LRUCache(
-            maxsize=entity_maxsize, default_ttl=entity_ttl
-        )
+        self._search_cache: LRUCache[Any] = LRUCache(maxsize=search_maxsize, default_ttl=search_ttl)
+        self._entity_cache: LRUCache[Any] = LRUCache(maxsize=entity_maxsize, default_ttl=entity_ttl)
         self._community_cache: LRUCache[Any] = LRUCache(
             maxsize=community_maxsize, default_ttl=community_ttl
         )
-        self._redis: Redis[bytes] | None = None
+        self._redis: Redis | None = None  # type: ignore[type-arg]
 
     @staticmethod
     def _make_search_key(query: str, **filters: Any) -> str:
@@ -221,7 +217,9 @@ class QueryCache:
         key = self._make_search_key(query, **filters)
         return self._search_cache.get(key)
 
-    def set_search(self, query: str, results: Any, ttl: float | None = None, **filters: Any) -> None:
+    def set_search(
+        self, query: str, results: Any, ttl: float | None = None, **filters: Any
+    ) -> None:
         """Cache search results."""
         key = self._make_search_key(query, **filters)
         self._search_cache.set(key, results, ttl)
@@ -324,7 +322,7 @@ _cache: QueryCache | None = None
 
 def get_cache() -> QueryCache:
     """Get the global cache instance."""
-    global _cache
+    global _cache  # noqa: PLW0603
     if _cache is None:
         _cache = QueryCache()
         log.info("cache_initialized")
@@ -333,7 +331,7 @@ def get_cache() -> QueryCache:
 
 def reset_cache() -> None:
     """Reset the global cache instance."""
-    global _cache
+    global _cache  # noqa: PLW0603
     if _cache is not None:
         _cache.clear_all()
     _cache = None
