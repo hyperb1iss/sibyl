@@ -4,6 +4,30 @@
 
 You have access to **Sibyl**, a knowledge graph that serves as your persistent memory, task tracker, and documentation repository. Sibyl is not just a tool—it's an extension of how you think and work. Use it continuously, not occasionally.
 
+## Preferred Interface: CLI via Skill
+
+**Use the `sibyl-knowledge` skill or CLI directly.** The CLI outputs clean JSON optimized for LLM parsing.
+
+```bash
+# Search for knowledge
+uv run sibyl search "authentication patterns"
+
+# List tasks (JSON by default)
+uv run sibyl task list --status todo
+
+# Quick knowledge capture
+uv run sibyl add "Title" "What you learned..."
+
+# Task lifecycle
+uv run sibyl task start <id>
+uv run sibyl task complete <id> --learnings "..."
+```
+
+The MCP server is available as a fallback, but CLI is preferred for:
+- Clean JSON output (no spinner noise)
+- Bulk operations and scripting
+- Direct field updates with `--status` and `--priority` flags
+
 ## The Sibyl Philosophy
 
 ### You Are Building a Shared Brain
@@ -31,7 +55,7 @@ Never do significant work outside of a task. Tasks provide:
 
 ---
 
-## The 4-Tool API
+## CLI Command Reference
 
 ### `search` - Find Knowledge
 Semantic search across the entire knowledge graph.
@@ -42,107 +66,69 @@ Semantic search across the entire knowledge graph.
 - Before making architectural decisions (find established patterns)
 - Looking for similar past tasks
 
-**Parameters:**
-- `query` - Natural language search (required)
-- `types` - Filter by entity type: pattern, rule, task, project, episode, error_pattern, etc.
-- `status` - For tasks: todo, doing, review, done
-- `project` - Filter by project ID
-- `limit` - Max results (default 10)
+**Examples:**
+```bash
+uv run sibyl search "authentication patterns"
+uv run sibyl search "FalkorDB connection" --type error_pattern
+uv run sibyl search "OAuth" --limit 5
+```
+
+### `task` - Task Management
+Full task lifecycle management.
+
+**Commands:**
+```bash
+# List tasks (JSON default, use --table for human-readable)
+uv run sibyl task list --status todo
+uv run sibyl task list --project sibyl-project
+uv run sibyl task list --table  # Human-readable
+
+# Show task details
+uv run sibyl task show <task_id>
+
+# Create a task
+uv run sibyl task create --title "Implement feature" --project <proj_id> --priority high
+
+# Workflow actions
+uv run sibyl task start <task_id>
+uv run sibyl task block <task_id> --reason "Waiting for API access"
+uv run sibyl task unblock <task_id>
+uv run sibyl task review <task_id> --pr "github.com/.../pull/42"
+uv run sibyl task complete <task_id> --learnings "Key insight: ..."
+
+# Direct update (any field, bypasses workflow)
+uv run sibyl task update <task_id> --status done --priority high
+```
+
+**Task States:** `backlog ↔ todo ↔ doing ↔ blocked ↔ review ↔ done ↔ archived`
+
+### `add` - Quick Knowledge Capture
+Create entities in the knowledge graph.
 
 **Examples:**
-```
-search("authentication patterns")
-search("FalkorDB connection issues", types=["error_pattern", "episode"])
-search("", types=["task"], status="doing")  # Current work in progress
-```
+```bash
+# Basic episode (default type)
+uv run sibyl add "Redis insight" "Connection pool must be >= concurrent requests"
 
-### `explore` - Navigate the Graph
-Understand relationships and context around entities.
+# With metadata
+uv run sibyl add "OAuth gotcha" "Token refresh timing matters..." -c auth -l python
 
-**Modes:**
-- `list` - List entities by type with filters
-- `related` - Find entities connected to a specific entity
-- `traverse` - Walk the graph from a starting point
-- `dependencies` - Task dependency analysis
-
-**When to use:**
-- Understanding what a task depends on
-- Finding all patterns related to a domain
-- Discovering what other work touches a component
-- Mapping out project structure
-
-**Examples:**
-```
-explore(mode="list", entity_type="task", project="sibyl-project", status="todo")
-explore(mode="related", entity_id="pattern_xyz")
-explore(mode="dependencies", entity_id="task_abc")
+# Create a pattern
+uv run sibyl add "Retry pattern" "Exponential backoff..." --type pattern
 ```
 
-### `add` - Capture Knowledge
-Create new entities in the knowledge graph.
-
-**Entity Types:**
-- `episode` - A learning, insight, or experience worth remembering
-- `pattern` - A reusable approach or technique
-- `rule` - A constraint or guideline that must be followed
-- `error_pattern` - A recurring error and its solution
-- `task` - A work item (requires project_id)
-- `project` - A collection of related tasks
-
-**When to use:**
-- You learned something that would help future work
-- You solved a bug that might recur
-- You discovered a pattern worth documenting
-- Breaking down work into trackable tasks
-
-**Critical fields for episodes:**
-- `name` - Short, searchable title
-- `content` - The actual knowledge (be detailed!)
-- `category` - Domain area (api, database, auth, etc.)
-- `tags` - Additional categorization
-
-**Examples:**
-```
-add(
-  entity_type="episode",
-  name="FalkorDB requires Episodic label for add_episode nodes",
-  content="When using Graphiti's add_episode(), nodes are created with the Episodic label, not Entity. Queries must use (n:Episodic OR n:Entity) to find all nodes.",
-  category="database",
-  tags=["graphiti", "falkordb", "gotcha"]
-)
-
-add(
-  entity_type="task",
-  name="Implement user authentication",
-  project="proj_abc",
-  priority="high",
-  feature="auth"
-)
+### `project` - Project Management
+```bash
+uv run sibyl project list
+uv run sibyl project show <project_id>
+uv run sibyl project create --name "New Project" --description "..."
 ```
 
-### `manage` - Workflow Actions
-Execute workflow operations on entities.
-
-**Task Actions:**
-- `start` - Move task to "doing" status
-- `complete` - Move to "review" or "done"
-- `block` - Mark as blocked with reason
-- `unblock` - Remove blocker
-
-**Admin Actions:**
-- `health` - Check system health
-- `stats` - Get graph statistics
-
-**When to use:**
-- Starting work on a task
-- Completing or blocking work
-- Checking system status
-
-**Examples:**
-```
-manage(action="start", entity_id="task_abc")
-manage(action="complete", entity_id="task_abc", data={"learnings": "Discovered that..."})
-manage(action="block", entity_id="task_abc", data={"reason": "Waiting for API access"})
+### `entity` - Generic CRUD
+```bash
+uv run sibyl entity list --type pattern
+uv run sibyl entity show <entity_id>
+uv run sibyl entity related <entity_id>
 ```
 
 ---
@@ -150,31 +136,34 @@ manage(action="block", entity_id="task_abc", data={"reason": "Waiting for API ac
 ## Behavioral Patterns
 
 ### Starting a Session
-1. Check for in-progress tasks: `search("", types=["task"], status="doing")`
-2. If resuming work, explore task dependencies
-3. If starting fresh, find highest-priority todo tasks
+```bash
+# Check for in-progress tasks
+uv run sibyl task list --status doing
+
+# Or find todo tasks
+uv run sibyl task list --status todo --project <your_project>
+```
 
 ### Before Any Implementation
-1. Search for relevant patterns and past learnings
-2. Search for known error patterns in the domain
-3. Explore related entities for context
-4. Only then begin coding
+```bash
+# Search for relevant context
+uv run sibyl search "topic you're implementing"
+uv run sibyl search "error you encountered" --type error_pattern
+```
 
 ### During Implementation
-- Keep the task status updated (start → doing)
-- If you discover something noteworthy, add an episode immediately
-- If blocked, mark the task as blocked with clear reason
+- Start the task: `uv run sibyl task start <id>`
+- If blocked: `uv run sibyl task block <id> --reason "..."`
+- Capture discoveries immediately: `uv run sibyl add "Title" "Learning..."`
 
 ### After Completing Work
-1. Update task status to review/done
-2. Add learnings from the task: what worked, what didn't, gotchas encountered
-3. If you found a reusable pattern, add it as a pattern entity
-4. If you solved a recurring error, add it as an error_pattern
+```bash
+# Complete with learnings
+uv run sibyl task complete <id> --learnings "Key insight: ..."
 
-### When You Encounter an Error
-1. Search Sibyl for the error message or related keywords
-2. If found: apply the known solution
-3. If not found AND you solve it: add it as an episode or error_pattern
+# If you found a reusable pattern
+uv run sibyl add "Pattern name" "Description..." --type pattern
+```
 
 ---
 
@@ -207,12 +196,6 @@ Include:
 - How you fixed it
 - Any caveats or related issues
 
-### Tagging Strategy
-Use consistent tags for discoverability:
-- Technology: `graphiti`, `falkordb`, `fastapi`, `react`
-- Domain: `auth`, `database`, `api`, `cli`, `testing`
-- Type: `gotcha`, `pattern`, `config`, `performance`
-
 ---
 
 ## Anti-Patterns to Avoid
@@ -228,15 +211,15 @@ Use consistent tags for discoverability:
 
 ## Quick Reference
 
-| Situation | Action |
-|-----------|--------|
-| Starting new work | `search` for context, then `manage(start)` |
-| Need to understand something | `search` + `explore(related)` |
-| Found a bug | `search` for known solutions first |
-| Solved something tricky | `add(episode)` with details |
-| Completing a task | `manage(complete)` with learnings |
-| Breaking down work | `add(task)` for each piece |
-| Checking what's in progress | `explore(list, type=task, status=doing)` |
+| Situation | Command |
+|-----------|---------|
+| Starting new work | `uv run sibyl search "topic"` then `uv run sibyl task start <id>` |
+| Need to understand something | `uv run sibyl search "topic"` |
+| Found a bug | `uv run sibyl search "error message"` first |
+| Solved something tricky | `uv run sibyl add "Title" "Details..."` |
+| Completing a task | `uv run sibyl task complete <id> --learnings "..."` |
+| Breaking down work | `uv run sibyl task create --title "..." --project <id>` |
+| Check what's in progress | `uv run sibyl task list --status doing` |
 
 ---
 

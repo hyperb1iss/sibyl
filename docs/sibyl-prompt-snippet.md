@@ -2,55 +2,62 @@
 
 ## Sibyl - Your Persistent Memory
 
-You have access to Sibyl, a knowledge graph that serves as your extended memory. Use it continuously:
+You have access to Sibyl, a knowledge graph that serves as your extended memory.
+
+**Preferred: Use CLI via the `sibyl-knowledge` skill.** CLI outputs clean JSON optimized for LLM parsing.
 
 **Before acting:** Search for relevant patterns, past learnings, known issues
 **During work:** Track tasks, update status, note blockers
 **After completing:** Capture what you learned for future agents
 
-### Core Tools
+### Core CLI Commands
 
-**search(query, types?, status?, project?)** - Find knowledge
-- Start every task by searching for relevant context
-- Search before implementing anything non-trivial
-- Search error messages before debugging from scratch
+**Search for knowledge:**
+```bash
+uv run sibyl search "authentication patterns"
+uv run sibyl search "error message" --type error_pattern
+```
 
-**explore(mode, entity_type?, entity_id?)** - Navigate relationships
-- Modes: list, related, traverse, dependencies
-- Use to understand task dependencies and related work
-- Find all entities connected to a domain or pattern
+**Task management:**
+```bash
+uv run sibyl task list --status todo           # JSON output
+uv run sibyl task list --project <id> --table  # Human-readable
+uv run sibyl task start <id>
+uv run sibyl task complete <id> --learnings "Key insight: ..."
+uv run sibyl task update <id> --status done --priority high  # Direct update
+```
 
-**add(entity_type, name, content, ...)** - Capture knowledge
-- Types: episode, pattern, rule, error_pattern, task, project
-- Add episodes for learnings, gotchas, solutions
-- Tasks require project_id - never work outside a project
+**Capture knowledge:**
+```bash
+uv run sibyl add "Short title" "Detailed explanation of what you learned"
+uv run sibyl add "Pattern name" "Description..." --type pattern
+```
 
-**manage(action, entity_id, data?)** - Workflow actions
-- Task actions: start, complete, block, unblock
-- Always start tasks before working, complete with learnings
+**Explore graph:**
+```bash
+uv run sibyl entity list --type pattern
+uv run sibyl entity related <id>
+```
 
 ### Mandatory Behaviors
 
 1. **Task-Driven Work**: Never do significant work without a task. Create one if needed.
 
 2. **Research First**: Before implementing:
-   ```
-   search("relevant topic")
-   search("error message or domain", types=["error_pattern", "episode"])
+   ```bash
+   uv run sibyl search "relevant topic"
+   uv run sibyl search "error or domain" --type error_pattern
    ```
 
 3. **Capture Learnings**: When you solve something non-obvious:
-   ```
-   add(entity_type="episode",
-       name="Short searchable title",
-       content="Detailed explanation: what, why, how, caveats",
-       category="domain", tags=["tech", "type"])
+   ```bash
+   uv run sibyl add "Short searchable title" "Detailed: what, why, how, caveats" -c domain
    ```
 
 4. **Track Progress**: Update task status as you work:
-   ```
-   manage(action="start", entity_id="task_xxx")
-   manage(action="complete", entity_id="task_xxx", data={"learnings": "..."})
+   ```bash
+   uv run sibyl task start <id>
+   uv run sibyl task complete <id> --learnings "..."
    ```
 
 ### What to Capture
@@ -62,7 +69,7 @@ You have access to Sibyl, a knowledge graph that serves as your extended memory.
 ### Quality Bar for Episodes
 
 **Bad:** "Fixed the auth bug"
-**Good:** "JWT refresh tokens fail silently when Redis TTL expires. Root cause: token service doesn't handle WRONGTYPE error. Fix: Add try/except with token regeneration fallback. Related: see pattern_xxx for token refresh architecture."
+**Good:** "JWT refresh tokens fail silently when Redis TTL expires. Root cause: token service doesn't handle WRONGTYPE error. Fix: Add try/except with token regeneration fallback."
 
 ---
 

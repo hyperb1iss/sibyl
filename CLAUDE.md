@@ -13,7 +13,31 @@
 
 ## Sibyl Integration
 
-**This project uses Sibyl as its own knowledge repository.** Use it based on task scope:
+**This project uses Sibyl as its own knowledge repository.**
+
+### Preferred: Use the `sibyl-knowledge` Skill
+
+**Invoke `/sibyl-knowledge` or use the CLI directly.** The skill provides full access to Sibyl's 4-tool API via CLI commands with JSON output optimized for LLM consumption.
+
+```bash
+# Search for knowledge
+uv run sibyl search "authentication patterns"
+
+# List tasks (JSON by default)
+uv run sibyl task list --status todo
+
+# Quick knowledge capture
+uv run sibyl add "Title" "What you learned..."
+
+# Task lifecycle
+uv run sibyl task start <id>
+uv run sibyl task complete <id> --learnings "..."
+```
+
+The MCP server (`mcp__sibyl`) is also available but the CLI is preferred for:
+- Clean JSON output (no spinner noise)
+- Bulk operations and scripting
+- Direct task updates with `--status` and `--priority` flags
 
 ### When to Use Sibyl
 
@@ -30,18 +54,10 @@
 
 ### Sibyl Workflow (Complex Work)
 
-1. **Search first:** `search("relevant topic")` - find patterns, gotchas, past solutions
-2. **Check tasks:** `explore(mode="list", types=["task"], status="todo")` - see what's tracked
+1. **Search first:** `uv run sibyl search "topic"` - find patterns, gotchas, past solutions
+2. **Check tasks:** `uv run sibyl task list --status todo` - see what's tracked
 3. **Work in context:** Start a task if one exists, or create one for significant work
-4. **Capture learnings:** Add episodes for non-obvious discoveries
-
-```bash
-# MCP tools:
-search(query, types?, limit?)     # Find knowledge
-explore(mode, types?, entity_id?) # Navigate graph
-add(entity_type, name, content)   # Capture knowledge
-manage(action, entity_id, data?)  # Task workflow
-```
+4. **Capture learnings:** `uv run sibyl add "Title" "Learning..."` for discoveries
 
 ---
 
