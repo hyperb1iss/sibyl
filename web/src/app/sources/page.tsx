@@ -234,20 +234,11 @@ export default function SourcesPage() {
     [sources, cancelCrawl]
   );
 
-  // Breadcrumb
-  const breadcrumbItems = [
-    { label: 'Dashboard', href: '/' },
-    { label: 'Sources', icon: Database },
-  ];
-
   if (error) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <Breadcrumb items={breadcrumbItems} custom />
-        <PageHeader
-          title="Knowledge Sources"
-          description="Manage documentation sources for the knowledge graph"
-        />
+        <Breadcrumb />
+        <PageHeader description="Manage documentation sources for the knowledge graph" />
         <div className="bg-sc-red/10 border border-sc-red/30 rounded-xl p-6 text-center">
           <p className="text-sc-red font-medium mb-2">Failed to load sources</p>
           <p className="text-sm text-sc-fg-muted mb-4">
@@ -267,11 +258,10 @@ export default function SourcesPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <Breadcrumb items={breadcrumbItems} custom />
+      <Breadcrumb />
 
       <PageHeader
-        title="Knowledge Sources"
-        description="Crawl documentation websites and upload files to build your knowledge graph"
+        description="Crawl documentation and upload files to build your knowledge graph"
         meta={
           <div className="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-xs">
             <span className="flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-1 bg-sc-bg-base rounded-lg">

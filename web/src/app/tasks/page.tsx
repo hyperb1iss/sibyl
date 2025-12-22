@@ -2,13 +2,13 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useMemo, useState } from 'react';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
+import { Breadcrumb, ROUTE_CONFIG } from '@/components/layout/breadcrumb';
 import { KanbanBoard } from '@/components/tasks/kanban-board';
 import { type QuickTaskData, QuickTaskModal } from '@/components/tasks/quick-task-modal';
 import { TaskListMobile } from '@/components/tasks/task-list-mobile';
 import { CommandPalette, useKeyboardShortcuts } from '@/components/ui/command-palette';
 import { TasksEmptyState } from '@/components/ui/empty-state';
-import { FolderKanban, Hash, LayoutDashboard, ListTodo, X } from '@/components/ui/icons';
+import { Hash, X } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
 import { FilterChip, TagChip } from '@/components/ui/toggle';
 import { ErrorState } from '@/components/ui/tooltip';
@@ -135,16 +135,18 @@ function TasksPageContent() {
     [createEntity]
   );
 
-  // Build breadcrumb items based on filter
-  const breadcrumbItems = [
-    { label: 'Dashboard', href: '/', icon: LayoutDashboard },
-    { label: 'Tasks', href: '/tasks', icon: ListTodo },
-    ...(currentProjectName ? [{ label: currentProjectName, icon: FolderKanban }] : []),
-  ];
+  // Build breadcrumb items based on filter (only needed when filtering by project)
+  const breadcrumbItems = currentProjectName
+    ? [
+        { label: 'Dashboard', href: '/', icon: ROUTE_CONFIG[''].icon },
+        { label: 'Tasks', href: '/tasks', icon: ROUTE_CONFIG.tasks.icon },
+        { label: currentProjectName, icon: ROUTE_CONFIG.projects.icon },
+      ]
+    : undefined;
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <Breadcrumb items={breadcrumbItems} custom />
+      <Breadcrumb items={breadcrumbItems} />
 
       {/* Filters - Mobile: inline row, Desktop: chips */}
       <div className="space-y-2 sm:space-y-3">

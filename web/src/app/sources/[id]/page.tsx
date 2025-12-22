@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { use, useCallback, useState } from 'react';
 import { toast } from 'sonner';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
+import { Breadcrumb, ROUTE_CONFIG } from '@/components/layout/breadcrumb';
 import {
   ArrowLeft,
   Calendar,
@@ -77,15 +77,15 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
   }, [id, syncSource]);
 
   const breadcrumbItems = [
-    { label: 'Dashboard', href: '/' },
-    { label: 'Sources', href: '/sources' },
-    { label: source?.name || 'Loading...', href: `/sources/${id}` },
+    { label: 'Dashboard', href: '/', icon: ROUTE_CONFIG[''].icon },
+    { label: 'Sources', href: '/sources', icon: ROUTE_CONFIG.sources.icon },
+    { label: source?.name || 'Loading...' },
   ];
 
   if (error) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <Breadcrumb items={breadcrumbItems} custom />
+        <Breadcrumb items={breadcrumbItems} />
         <div className="bg-sc-bg-base border border-sc-red/30 rounded-2xl p-8 text-center">
           <p className="text-sc-red font-medium">Failed to load source</p>
           <p className="text-sc-fg-subtle text-sm mt-2">
@@ -106,7 +106,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
   if (isLoading || !source) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <Breadcrumb items={breadcrumbItems} custom />
+        <Breadcrumb items={breadcrumbItems} />
         <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-8">
           <div className="animate-pulse space-y-4">
             <div className="h-8 bg-sc-bg-highlight rounded w-1/3" />

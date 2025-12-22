@@ -90,9 +90,8 @@ export function EntitiesContent({
       <Breadcrumb />
 
       <PageHeader
-        title="Entities"
         description="Browse and manage knowledge entities"
-        meta={`${data?.total ?? 0} total entities`}
+        meta={`${data?.total ?? 0} total`}
       />
 
       {/* Filters */}

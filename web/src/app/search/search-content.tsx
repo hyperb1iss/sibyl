@@ -182,7 +182,6 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
       <Breadcrumb />
 
       <PageHeader
-        title="Search"
         description="Find knowledge, documentation, and code"
         meta={
           submittedQuery

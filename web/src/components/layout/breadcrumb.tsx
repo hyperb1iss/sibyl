@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Fragment, useMemo } from 'react';
+import { Fragment, memo, useMemo } from 'react';
 import {
   BookOpen,
   Boxes,
@@ -17,22 +17,11 @@ import {
   Search,
 } from '@/components/ui/icons';
 
-interface BreadcrumbItem {
-  label: string;
-  href?: string;
-  icon?: IconComponent;
-}
-
-interface BreadcrumbProps {
-  items?: BreadcrumbItem[];
-  /** Override automatic path-based breadcrumbs */
-  custom?: boolean;
-  /** Additional class names */
-  className?: string;
-}
-
-// Route name mappings for automatic breadcrumbs
-const ROUTE_NAMES: Record<string, { label: string; icon: IconComponent }> = {
+/**
+ * Canonical route configuration - single source of truth for navigation icons.
+ * Import this when you need consistent icons for routes.
+ */
+export const ROUTE_CONFIG: Record<string, { label: string; icon: IconComponent }> = {
   '': { label: 'Dashboard', icon: LayoutDashboard },
   projects: { label: 'Projects', icon: FolderKanban },
   tasks: { label: 'Tasks', icon: ListTodo },
@@ -44,20 +33,36 @@ const ROUTE_NAMES: Record<string, { label: string; icon: IconComponent }> = {
   ingest: { label: 'Ingest', icon: RefreshCw },
 };
 
-export function Breadcrumb({ items, custom, className = '' }: BreadcrumbProps) {
+interface BreadcrumbItem {
+  label: string;
+  href?: string;
+  icon?: IconComponent;
+}
+
+interface BreadcrumbProps {
+  /** Custom breadcrumb items - if provided, overrides auto-generation */
+  items?: BreadcrumbItem[];
+  /** Additional class names */
+  className?: string;
+}
+
+function BreadcrumbInner({ items, className = '' }: BreadcrumbProps) {
   const pathname = usePathname();
 
-  // Auto-generate breadcrumbs from pathname if not custom
   const breadcrumbs = useMemo(() => {
-    if (custom && items) return items;
+    // Use custom items if provided
+    if (items) return items;
 
+    // Auto-generate from pathname
     const segments = pathname.split('/').filter(Boolean);
-    const crumbs: BreadcrumbItem[] = [{ label: 'Dashboard', href: '/', icon: LayoutDashboard }];
+    const crumbs: BreadcrumbItem[] = [
+      { label: 'Dashboard', href: '/', icon: ROUTE_CONFIG[''].icon },
+    ];
 
     let currentPath = '';
     for (const segment of segments) {
       currentPath += `/${segment}`;
-      const route = ROUTE_NAMES[segment];
+      const route = ROUTE_CONFIG[segment];
 
       if (route) {
         crumbs.push({
@@ -66,7 +71,7 @@ export function Breadcrumb({ items, custom, className = '' }: BreadcrumbProps) {
           icon: route.icon,
         });
       } else {
-        // Dynamic segment (ID) - don't add href, it's current page
+        // Dynamic segment (ID) - truncate if long
         crumbs.push({
           label: segment.length > 20 ? `${segment.slice(0, 8)}...` : segment,
         });
@@ -74,7 +79,7 @@ export function Breadcrumb({ items, custom, className = '' }: BreadcrumbProps) {
     }
 
     return crumbs;
-  }, [pathname, items, custom]);
+  }, [pathname, items]);
 
   // Don't render if only home
   if (breadcrumbs.length <= 1) return null;
@@ -121,7 +126,13 @@ export function Breadcrumb({ items, custom, className = '' }: BreadcrumbProps) {
   );
 }
 
-// Context-aware breadcrumb for entity detail pages
+// Memoize to prevent unnecessary re-renders
+export const Breadcrumb = memo(BreadcrumbInner);
+
+/**
+ * Context-aware breadcrumb for entity detail pages.
+ * Automatically uses correct icons from ROUTE_CONFIG.
+ */
 interface EntityBreadcrumbProps {
   entityType: 'project' | 'task' | 'entity' | 'source';
   entityName: string;
@@ -129,27 +140,27 @@ interface EntityBreadcrumbProps {
 }
 
 export function EntityBreadcrumb({ entityType, entityName, parentProject }: EntityBreadcrumbProps) {
-  const items: BreadcrumbItem[] = [{ label: 'Dashboard', href: '/', icon: LayoutDashboard }];
+  const items: BreadcrumbItem[] = [{ label: 'Dashboard', href: '/', icon: ROUTE_CONFIG[''].icon }];
 
   // Add parent context based on entity type
   if (entityType === 'task') {
-    items.push({ label: 'Tasks', href: '/tasks', icon: ListTodo });
+    items.push({ label: 'Tasks', href: '/tasks', icon: ROUTE_CONFIG.tasks.icon });
     if (parentProject) {
       items.push({
         label: parentProject.name,
         href: `/tasks?project=${parentProject.id}`,
-        icon: FolderKanban,
+        icon: ROUTE_CONFIG.projects.icon,
       });
     }
   } else if (entityType === 'project') {
-    items.push({ label: 'Projects', href: '/projects', icon: FolderKanban });
+    items.push({ label: 'Projects', href: '/projects', icon: ROUTE_CONFIG.projects.icon });
   } else if (entityType === 'entity') {
-    items.push({ label: 'Entities', href: '/entities', icon: Boxes });
+    items.push({ label: 'Entities', href: '/entities', icon: ROUTE_CONFIG.entities.icon });
   } else if (entityType === 'source') {
-    items.push({ label: 'Sources', href: '/sources', icon: BookOpen });
+    items.push({ label: 'Sources', href: '/sources', icon: ROUTE_CONFIG.sources.icon });
   }
 
   items.push({ label: entityName });
 
-  return <Breadcrumb items={items} custom />;
+  return <Breadcrumb items={items} />;
 }

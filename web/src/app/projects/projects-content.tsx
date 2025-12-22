@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useMemo } from 'react';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
+import { Breadcrumb, ROUTE_CONFIG } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { ProjectsEmptyState } from '@/components/ui/empty-state';
 import {
@@ -12,7 +12,6 @@ import {
   Clock,
   FolderKanban,
   GitBranch,
-  LayoutDashboard,
   Pause,
   Plus,
   Zap,
@@ -145,12 +144,14 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
     [router, searchParams]
   );
 
-  // Breadcrumb items
-  const breadcrumbItems = [
-    { label: 'Dashboard', href: '/', icon: LayoutDashboard },
-    { label: 'Projects', href: '/projects', icon: FolderKanban },
-    ...(selectedProject ? [{ label: selectedProject.name }] : []),
-  ];
+  // Build breadcrumb items (only needed when viewing a specific project)
+  const breadcrumbItems = selectedProject
+    ? [
+        { label: 'Dashboard', href: '/', icon: ROUTE_CONFIG[''].icon },
+        { label: 'Projects', href: '/projects', icon: ROUTE_CONFIG.projects.icon },
+        { label: selectedProject.name },
+      ]
+    : undefined;
 
   const isLoading = projectsLoading || tasksLoading;
 
@@ -168,8 +169,8 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
   if (projectsError) {
     return (
       <div className="space-y-4">
-        <Breadcrumb items={breadcrumbItems} custom />
-        <PageHeader title="Projects" description="Manage your development projects" />
+        <Breadcrumb />
+        <PageHeader description="Manage your development projects" />
         <ErrorState
           title="Failed to load projects"
           message={projectsError instanceof Error ? projectsError.message : 'Unknown error'}
@@ -182,12 +183,8 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
   if (!isLoading && projects.length === 0) {
     return (
       <div className="space-y-4">
-        <Breadcrumb items={breadcrumbItems} custom />
-        <PageHeader
-          title="Projects"
-          description="Manage your development projects"
-          meta="0 projects"
-        />
+        <Breadcrumb />
+        <PageHeader description="Manage your development projects" meta="0 projects" />
         <ProjectsEmptyState />
       </div>
     );
@@ -195,10 +192,9 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <Breadcrumb items={breadcrumbItems} custom />
+      <Breadcrumb items={breadcrumbItems} />
 
       <PageHeader
-        title="Projects"
         description="Manage your development projects"
         meta={`${projects.length} projects | ${totalStats.tasks} tasks | ${totalStats.active} active`}
         action={

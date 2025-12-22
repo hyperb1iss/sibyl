@@ -36,10 +36,7 @@ export default function IngestPage() {
     <div className="space-y-4 animate-fade-in">
       <Breadcrumb />
 
-      <PageHeader
-        title="Document Ingestion"
-        description="Sync documents and extract knowledge entities"
-      />
+      <PageHeader description="Sync documents and extract knowledge entities" />
 
       {/* Status Card */}
       <Card>
