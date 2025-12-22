@@ -1,5 +1,3 @@
-import os
-
 from sibyl.config import Settings
 
 
@@ -23,3 +21,7 @@ def test_settings_server_url_default() -> None:
     s = Settings(_env_file=None)
     assert s.server_url.startswith("http")
 
+
+def test_settings_mcp_auth_mode_default() -> None:
+    s = Settings(_env_file=None)
+    assert s.mcp_auth_mode == "auto"

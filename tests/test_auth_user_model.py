@@ -10,11 +10,15 @@ def test_user_table_shape() -> None:
         "email",
         "name",
         "avatar_url",
+        "password_salt",
+        "password_hash",
+        "password_iterations",
         "created_at",
         "updated_at",
     }
 
     assert table.columns["github_id"].unique is True
+    assert table.columns["github_id"].nullable is True
     assert table.columns["email"].unique is True
 
     index_cols = {tuple(idx.columns.keys()) for idx in table.indexes}

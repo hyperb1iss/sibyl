@@ -138,7 +138,7 @@ class SibylClient:
                     detail = (
                         f"{detail}\n\n"
                         "Auth required. Set SIBYL_AUTH_TOKEN or create ~/.sibyl/auth.json "
-                        "with {\"access_token\": \"...\"}."
+                        'with {"access_token": "..."}.'
                     )
 
                 raise SibylClientError(
@@ -199,6 +199,18 @@ class SibylClient:
 
     async def revoke_api_key(self, api_key_id: str) -> dict[str, Any]:
         return await self._request("POST", f"/auth/api-keys/{api_key_id}/revoke")
+
+    async def list_orgs(self) -> dict[str, Any]:
+        return await self._request("GET", "/orgs")
+
+    async def create_org(self, name: str, slug: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {"name": name}
+        if slug:
+            payload["slug"] = slug
+        return await self._request("POST", "/orgs", json=payload)
+
+    async def switch_org(self, slug: str) -> dict[str, Any]:
+        return await self._request("POST", f"/orgs/{slug}/switch")
 
     async def get_entity(self, entity_id: str) -> dict[str, Any]:
         """Get a single entity by ID."""

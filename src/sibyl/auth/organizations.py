@@ -6,7 +6,6 @@ import re
 from typing import Any, Self
 from uuid import UUID
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -35,9 +34,7 @@ class OrganizationManager:
         return await self._session.get(Organization, org_id)
 
     async def get_by_slug(self, slug: str) -> Organization | None:
-        result = await self._session.execute(
-            select(Organization).where(Organization.slug == slug)
-        )
+        result = await self._session.execute(select(Organization).where(Organization.slug == slug))
         return result.scalar_one_or_none()
 
     async def list(self, limit: int = 100) -> list[Organization]:
@@ -61,10 +58,7 @@ class OrganizationManager:
             graph_name=graph_name or "conventions",
         )
         self._session.add(org)
-        try:
-            await self._session.flush()
-        except IntegrityError:
-            raise
+        await self._session.flush()
         return org
 
     async def update(
@@ -95,12 +89,13 @@ class OrganizationManager:
 
         Uses a deterministic slug so repeated calls are naturally idempotent.
         """
-        slug = f"u-{user.github_id}"
+        suffix = str(user.github_id) if user.github_id is not None else str(user.id)
+        slug = f"u-{suffix}"
         existing = await self.get_by_slug(slug)
         if existing is not None:
             return existing
         return await self.create(
-            name=user.name or f"User {user.github_id}",
+            name=user.name or f"User {suffix}",
             slug=slug,
             is_personal=True,
             settings={},

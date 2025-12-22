@@ -349,6 +349,10 @@ class _FakeEntityManager:
         # Accept creation of derived episodes; return provided id
         return entity.id
 
+    async def create_direct(self, entity) -> str:  # type: ignore[override]
+        # Mirror real EntityManager API used by TaskWorkflowEngine
+        return await self.create(entity)
+
     async def update(self, entity_id: str, updates: dict) -> Task:
         # Persist status and arbitrary fields into metadata for parity with real manager
         meta = {

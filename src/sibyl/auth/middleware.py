@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import structlog
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -34,5 +32,4 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 log.debug("Invalid bearer token", error=str(e))
                 request.state.jwt_claims = None
 
-        response = await call_next(request)
-        return response
+        return await call_next(request)

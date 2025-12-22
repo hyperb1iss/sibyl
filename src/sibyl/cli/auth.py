@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import typer
 
+from sibyl.cli.auth_store import clear_access_token, read_auth_data, set_access_token
 from sibyl.cli.client import SibylClientError, get_client
 from sibyl.cli.common import error, print_json, run_async, success
-from sibyl.cli.auth_store import clear_access_token, read_auth_data, set_access_token
 
 app = typer.Typer(help="Authentication and credentials")
 
@@ -80,4 +80,3 @@ def api_key_revoke(api_key_id: str) -> None:
         print_json(result)
     except SibylClientError as e:
         error(str(e))
-

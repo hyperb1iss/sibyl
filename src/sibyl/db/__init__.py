@@ -30,6 +30,7 @@ from sibyl.db.models import (
     CrawlStatus,
     DocumentChunk,
     Organization,
+    OrganizationInvitation,
     OrganizationMember,
     OrganizationRole,
     SourceType,
@@ -52,6 +53,7 @@ __all__ = [
     "Organization",
     "OrganizationMember",
     "OrganizationRole",
+    "OrganizationInvitation",
     "User",
     # Enums
     "SourceType",

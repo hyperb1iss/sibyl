@@ -27,4 +27,3 @@ def test_org_membership_table_shape() -> None:
     assert "ix_organization_members_org_user_unique" in indexes
     assert isinstance(indexes["ix_organization_members_org_user_unique"], Index)
     assert indexes["ix_organization_members_org_user_unique"].unique is True
-

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode, urlparse
 from uuid import UUID
 
 import httpx
@@ -15,8 +15,13 @@ from sqlmodel import select
 
 from sibyl import config as config_module
 from sibyl.auth.api_keys import ApiKeyManager
-from sibyl.auth.dependencies import get_auth_context, get_current_user, resolve_claims, require_org_admin
 from sibyl.auth.context import AuthContext
+from sibyl.auth.dependencies import (
+    get_auth_context,
+    get_current_user,
+    require_org_admin,
+    resolve_claims,
+)
 from sibyl.auth.jwt import create_access_token
 from sibyl.auth.memberships import OrganizationMembershipManager
 from sibyl.auth.oauth_state import OAuthStateError, issue_state, verify_state
@@ -28,10 +33,10 @@ from sibyl.db.models import ApiKey, Organization, OrganizationMember, Organizati
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
-GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
+GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"  # noqa: S105
 GITHUB_API_URL = "https://api.github.com"
 
-ACCESS_TOKEN_COOKIE = "sibyl_access_token"
+ACCESS_TOKEN_COOKIE = "sibyl_access_token"  # noqa: S105
 OAUTH_STATE_COOKIE = "sibyl_oauth_state"
 
 
@@ -41,11 +46,84 @@ class ApiKeyCreateRequest(BaseModel):
 
 
 def _cookie_secure() -> bool:
+    if config_module.settings.cookie_secure is not None:
+        return bool(config_module.settings.cookie_secure)
     return config_module.settings.server_url.startswith("https://")
 
 
 def _frontend_redirect(request: Request) -> str:
-    return request.query_params.get("redirect", "http://localhost:3337/")
+    return request.query_params.get("redirect", config_module.settings.frontend_url)
+
+
+def _safe_frontend_redirect(redirect_value: str | None) -> str:
+    target = (redirect_value or "").strip()
+    if not target:
+        return config_module.settings.frontend_url
+
+    if target.startswith("/"):
+        base = config_module.settings.frontend_url
+        parsed = urlparse(base)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        return origin + target
+
+    base_parsed = urlparse(config_module.settings.frontend_url)
+    target_parsed = urlparse(target)
+    if (
+        target_parsed.scheme
+        and target_parsed.netloc
+        and target_parsed.scheme == base_parsed.scheme
+        and target_parsed.netloc == base_parsed.netloc
+    ):
+        return target
+
+    return config_module.settings.frontend_url
+
+
+def _frontend_login_url(*, error: str | None = None) -> str:
+    base = config_module.settings.frontend_url
+    parsed = urlparse(base)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    url = origin + "/login"
+    if error:
+        url += f"?error={quote(error)}"
+    return url
+
+
+async def _read_auth_payload(request: Request) -> dict[str, str]:
+    content_type = (request.headers.get("content-type") or "").lower()
+    try:
+        if "application/json" in content_type:
+            payload = await request.json()
+            if isinstance(payload, dict):
+                return {str(k): str(v) for k, v in payload.items() if v is not None}
+            return {}
+        form = await request.form()
+        return {str(k): str(v) for k, v in dict(form).items() if v is not None}
+    except Exception:
+        return {}
+
+
+def _require_jwt_secret() -> str:
+    secret = config_module.settings.jwt_secret.get_secret_value()
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="JWT secret not configured",
+        )
+    return secret
+
+
+class LocalSignupRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=8, max_length=1024)
+    name: str = Field(..., min_length=1, max_length=255)
+    redirect: str | None = None
+
+
+class LocalLoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1, max_length=1024)
+    redirect: str | None = None
 
 
 async def _github_exchange_code(*, code: str, redirect_uri: str) -> str:
@@ -84,14 +162,20 @@ async def _github_fetch_identity(access_token: str) -> GitHubUserIdentity:
     async with httpx.AsyncClient(timeout=10) as client:
         user_resp = await client.get(
             f"{GITHUB_API_URL}/user",
-            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github+json"},
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/vnd.github+json",
+            },
         )
         user_resp.raise_for_status()
         user_json = user_resp.json()
 
         email_resp = await client.get(
             f"{GITHUB_API_URL}/user/emails",
-            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github+json"},
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/vnd.github+json",
+            },
         )
         email_resp.raise_for_status()
         emails = email_resp.json()
@@ -110,13 +194,8 @@ async def _github_fetch_identity(access_token: str) -> GitHubUserIdentity:
 
 
 @router.get("/github")
-async def github_login(request: Request) -> Response:
-    jwt_secret = config_module.settings.jwt_secret.get_secret_value()
-    if not jwt_secret:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="JWT secret not configured",
-        )
+async def github_login() -> Response:
+    jwt_secret = _require_jwt_secret()
 
     client_id = config_module.settings.github_client_id.get_secret_value()
     client_secret = config_module.settings.github_client_secret.get_secret_value()
@@ -145,6 +224,7 @@ async def github_login(request: Request) -> Response:
         secure=_cookie_secure(),
         samesite="lax",
         max_age=10 * 60,
+        domain=config_module.settings.cookie_domain,
         path="/",
     )
     return response
@@ -155,12 +235,7 @@ async def github_callback(
     request: Request,
     session: AsyncSession = Depends(get_session_dependency),
 ) -> Response:
-    jwt_secret = config_module.settings.jwt_secret.get_secret_value()
-    if not jwt_secret:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="JWT secret not configured",
-        )
+    jwt_secret = _require_jwt_secret()
     try:
         verify_state(
             secret=jwt_secret,
@@ -196,16 +271,132 @@ async def github_callback(
         secure=_cookie_secure(),
         samesite="lax",
         max_age=int(timedelta(hours=config_module.settings.jwt_expiry_hours).total_seconds()),
+        domain=config_module.settings.cookie_domain,
         path="/",
     )
-    response.delete_cookie(OAUTH_STATE_COOKIE, path="/")
+    response.delete_cookie(
+        OAUTH_STATE_COOKIE, domain=config_module.settings.cookie_domain, path="/"
+    )
     return response
+
+
+@router.post("/local/signup", response_model=None)
+async def local_signup(
+    request: Request,
+    session: AsyncSession = Depends(get_session_dependency),
+):
+    _ = _require_jwt_secret()
+    data = await _read_auth_payload(request)
+    body = LocalSignupRequest.model_validate(data)
+
+    try:
+        user = await UserManager(session).create_local_user(
+            email=body.email,
+            password=body.password,
+            name=body.name,
+        )
+    except ValueError as e:
+        if body.redirect is not None or request.query_params.get("redirect") is not None:
+            return RedirectResponse(
+                url=_frontend_login_url(error=str(e)),
+                status_code=status.HTTP_302_FOUND,
+            )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+
+    org = await OrganizationManager(session).create_personal_for_user(user)
+    await OrganizationMembershipManager(session).add_member(
+        organization_id=org.id,
+        user_id=user.id,
+        role=OrganizationRole.OWNER,
+    )
+
+    token = create_access_token(user_id=user.id, organization_id=org.id)
+
+    redirect = _safe_frontend_redirect(body.redirect or request.query_params.get("redirect"))
+    response: Response
+    if body.redirect is not None or request.query_params.get("redirect") is not None:
+        response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
+    else:
+        response = Response(status_code=status.HTTP_201_CREATED)
+
+    response.set_cookie(
+        ACCESS_TOKEN_COOKIE,
+        token,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        max_age=int(timedelta(hours=config_module.settings.jwt_expiry_hours).total_seconds()),
+        domain=config_module.settings.cookie_domain,
+        path="/",
+    )
+    if isinstance(response, RedirectResponse):
+        return response
+    return {
+        "user": {"id": str(user.id), "email": user.email, "name": user.name},
+        "organization": {"id": str(org.id), "slug": org.slug, "name": org.name},
+        "access_token": token,
+    }
+
+
+@router.post("/local/login", response_model=None)
+async def local_login(
+    request: Request,
+    session: AsyncSession = Depends(get_session_dependency),
+):
+    _ = _require_jwt_secret()
+    data = await _read_auth_payload(request)
+    body = LocalLoginRequest.model_validate(data)
+
+    user = await UserManager(session).authenticate_local(email=body.email, password=body.password)
+    if user is None:
+        if body.redirect is not None or request.query_params.get("redirect") is not None:
+            return RedirectResponse(
+                url=_frontend_login_url(error="invalid_credentials"),
+                status_code=status.HTTP_302_FOUND,
+            )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    org = await OrganizationManager(session).create_personal_for_user(user)
+    await OrganizationMembershipManager(session).add_member(
+        organization_id=org.id,
+        user_id=user.id,
+        role=OrganizationRole.OWNER,
+    )
+
+    token = create_access_token(user_id=user.id, organization_id=org.id)
+
+    redirect = _safe_frontend_redirect(body.redirect or request.query_params.get("redirect"))
+    response: Response
+    if body.redirect is not None or request.query_params.get("redirect") is not None:
+        response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
+    else:
+        response = Response(status_code=status.HTTP_200_OK)
+
+    response.set_cookie(
+        ACCESS_TOKEN_COOKIE,
+        token,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        max_age=int(timedelta(hours=config_module.settings.jwt_expiry_hours).total_seconds()),
+        domain=config_module.settings.cookie_domain,
+        path="/",
+    )
+    if isinstance(response, RedirectResponse):
+        return response
+    return {
+        "user": {"id": str(user.id), "email": user.email, "name": user.name},
+        "organization": {"id": str(org.id), "slug": org.slug, "name": org.name},
+        "access_token": token,
+    }
 
 
 @router.post("/logout")
 async def logout() -> Response:
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
-    response.delete_cookie(ACCESS_TOKEN_COOKIE, path="/")
+    response.delete_cookie(
+        ACCESS_TOKEN_COOKIE, domain=config_module.settings.cookie_domain, path="/"
+    )
     return response
 
 
@@ -320,8 +511,6 @@ async def me(
             "name": user.name,
             "avatar_url": user.avatar_url,
         },
-        "organization": (
-            {"id": str(org.id), "slug": org.slug, "name": org.name} if org else None
-        ),
+        "organization": ({"id": str(org.id), "slug": org.slug, "name": org.name} if org else None),
         "org_role": role,
     }

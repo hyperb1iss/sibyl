@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Command, Loader2, Menu, Search, Sparkles, Wifi, WifiOff } from '@/components/ui/icons';
 import { useConnectionStatus, useHealth } from '@/lib/hooks';
 import { useMobileNav } from './mobile-nav-context';
+import { OrgSwitcher } from './org-switcher';
 
 export function Header() {
   const router = useRouter();
@@ -134,6 +135,8 @@ export function Header() {
       >
         <Search width={20} height={20} />
       </button>
+
+      <OrgSwitcher />
 
       {/* Connection Status */}
       <div

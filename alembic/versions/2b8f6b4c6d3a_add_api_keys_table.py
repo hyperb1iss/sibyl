@@ -51,4 +51,3 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_api_keys_organization_id"), table_name="api_keys")
     op.drop_index(op.f("ix_api_keys_key_prefix"), table_name="api_keys")
     op.drop_table("api_keys")
-

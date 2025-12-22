@@ -103,4 +103,3 @@ class OrganizationMembershipManager:
             )
         )
         return int(result.scalar() or 0)
-

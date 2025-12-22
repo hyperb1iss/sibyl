@@ -13,5 +13,5 @@ def test_extract_bearer_token() -> None:
 
 def test_select_access_token() -> None:
     assert select_access_token(authorization=None, cookie_token=None) is None
-    assert select_access_token(authorization="Bearer a", cookie_token="b") == "a"
-    assert select_access_token(authorization=None, cookie_token="  b ") == "b"
+    assert select_access_token(authorization="Bearer a", cookie_token="b") == "a"  # noqa: S106
+    assert select_access_token(authorization=None, cookie_token="  b ") == "b"  # noqa: S106

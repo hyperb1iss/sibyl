@@ -29,11 +29,33 @@ def create_mcp_server(
     Returns:
         Configured FastMCP server instance
     """
+
+    auth_mode = settings.mcp_auth_mode
+    jwt_secret_set = bool(settings.jwt_secret.get_secret_value())
+    auth_enabled = auth_mode == "on" or (auth_mode == "auto" and jwt_secret_set)
+
+    auth_settings = None
+    token_verifier = None
+    if auth_enabled:
+        from mcp.server.auth.settings import AuthSettings
+
+        from sibyl.auth.mcp_auth import SibylMcpTokenVerifier
+
+        server_url = settings.server_url.rstrip("/")
+        auth_settings = AuthSettings(
+            issuer_url=server_url,
+            resource_server_url=f"{server_url}/mcp",
+            required_scopes=None,
+        )
+        token_verifier = SibylMcpTokenVerifier()
+
     mcp = FastMCP(
         settings.server_name,
         host=host,
         port=port,
         stateless_http=False,  # Maintain session state
+        auth=auth_settings,
+        token_verifier=token_verifier,
     )
 
     _register_tools(mcp)

@@ -10,4 +10,3 @@ def test_api_key_hash_roundtrip() -> None:
 def test_api_key_prefix() -> None:
     assert api_key_prefix("abc", length=2) == "ab"
     assert api_key_prefix("abc", length=999) == "abc"
-

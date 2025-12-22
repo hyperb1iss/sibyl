@@ -90,14 +90,19 @@ class TimestampMixin(SQLModel):
 
 
 class User(TimestampMixin, table=True):
-    """A user identity record (GitHub-backed for now)."""
+    """A user identity record (GitHub OAuth or local email/password)."""
 
     __tablename__ = "users"  # type: ignore[assignment]
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
 
     # GitHub identity
-    github_id: int = Field(index=True, unique=True, description="GitHub numeric user id")
+    github_id: int | None = Field(
+        default=None,
+        index=True,
+        unique=True,
+        description="GitHub numeric user id (null for local users)",
+    )
 
     # Profile info
     email: str | None = Field(
@@ -114,8 +119,24 @@ class User(TimestampMixin, table=True):
         description="Profile avatar URL",
     )
 
+    # Local auth (PBKDF2 hash)
+    password_salt: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Hex salt for local password hash (null if no local password)",
+    )
+    password_hash: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Hex PBKDF2 hash for local password (null if no local password)",
+    )
+    password_iterations: int | None = Field(
+        default=None,
+        description="PBKDF2 iteration count used for password hash",
+    )
+
     def __repr__(self) -> str:
-        return f"<User github_id={self.github_id} email={self.email!r}>"
+        return f"<User github_id={self.github_id!r} email={self.email!r}>"
 
 
 # =============================================================================
@@ -218,6 +239,40 @@ class ApiKey(TimestampMixin, table=True):
 
     revoked_at: datetime | None = Field(default=None, description="Revocation timestamp")
     last_used_at: datetime | None = Field(default=None, description="Last usage timestamp")
+
+
+# =============================================================================
+# Org Invitations - Invite a user (by email) to an org
+# =============================================================================
+
+
+class OrganizationInvitation(TimestampMixin, table=True):
+    """Invitation to join an organization."""
+
+    __tablename__ = "organization_invitations"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(foreign_key="organizations.id", index=True)
+    invited_email: str = Field(max_length=255, index=True, description="Invitee email")
+    invited_role: OrganizationRole = Field(
+        default=OrganizationRole.MEMBER,
+        sa_column=Column(
+            Enum(
+                OrganizationRole,
+                name="organizationrole",
+                values_callable=lambda enum: [e.value for e in enum],
+            ),
+            nullable=False,
+            server_default=text("'member'"),
+        ),
+        description="Role to grant when accepted",
+    )
+    token: str = Field(max_length=96, unique=True, index=True, description="Opaque invite token")
+    created_by_user_id: UUID = Field(foreign_key="users.id", index=True)
+
+    expires_at: datetime | None = Field(default=None, description="Expiry timestamp")
+    accepted_at: datetime | None = Field(default=None, description="Acceptance timestamp")
+    accepted_by_user_id: UUID | None = Field(default=None, foreign_key="users.id", index=True)
 
 
 # =============================================================================

@@ -44,6 +44,35 @@ class Settings(BaseSettings):
         default="http://localhost:3334",
         description="Public base URL for this server (used for OAuth redirects)",
     )
+    frontend_url: str = Field(
+        default="http://localhost:3337/",
+        description="Frontend base URL for auth redirects",
+    )
+
+    cookie_domain: str | None = Field(
+        default=None,
+        description="Cookie domain override (optional; defaults to host-only cookies)",
+    )
+    cookie_secure: bool | None = Field(
+        default=None,
+        description="Force Secure cookies on/off (default: auto based on server_url https)",
+    )
+
+    password_pepper: SecretStr = Field(
+        default=SecretStr(""),
+        description="Optional password pepper to harden hash storage (recommended in prod)",
+    )
+    password_iterations: int = Field(
+        default=310_000,
+        ge=100_000,
+        le=2_000_000,
+        description="PBKDF2-HMAC-SHA256 iterations for local passwords",
+    )
+
+    mcp_auth_mode: Literal["auto", "on", "off"] = Field(
+        default="auto",
+        description=("Require Bearer auth for MCP endpoints. auto=enforce when JWT secret is set."),
+    )
 
     # FalkorDB configuration
     falkordb_host: str = Field(default="localhost", description="FalkorDB host")

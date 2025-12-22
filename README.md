@@ -71,7 +71,7 @@ uv sync --all-extras
 
 # Configure
 cp .env.example .env
-# Add your SIBYL_OPENAI_API_KEY
+# Add your SIBYL_OPENAI_API_KEY + SIBYL_JWT_SECRET
 
 # Verify
 uv run sibyl health
@@ -81,6 +81,29 @@ uv run sibyl serve
 ```
 
 Server runs at `localhost:3334`. Web UI at `localhost:3337` (if running frontend).
+
+## 🔐 Auth
+
+Sibyl uses a signed JWT access token for web auth (stored in the `sibyl_access_token` HTTP-only cookie) and supports scoped API keys for programmatic access.
+
+**Required env:**
+- `SIBYL_JWT_SECRET` (JWT signing secret)
+
+**Optional env (GitHub login):**
+- `SIBYL_GITHUB_CLIENT_ID`, `SIBYL_GITHUB_CLIENT_SECRET`
+- `SIBYL_SERVER_URL` (public base URL; used for OAuth callbacks)
+- `SIBYL_FRONTEND_URL` (default post-login redirect)
+
+**Cookie defaults:**
+- `Secure` auto-enables when `SIBYL_SERVER_URL` starts with `https://` (override with `SIBYL_COOKIE_SECURE=true|false`)
+- Host-only cookies by default (override with `SIBYL_COOKIE_DOMAIN=…`)
+
+**Local users (email/password):**
+- `POST /api/auth/local/signup` and `POST /api/auth/local/login` (accept JSON or form posts)
+- Optional hardening: set `SIBYL_PASSWORD_PEPPER` and (if needed) `SIBYL_PASSWORD_ITERATIONS`
+
+**MCP protection:**
+- Set `SIBYL_MCP_AUTH_MODE=auto|on|off` (auto enforces when `SIBYL_JWT_SECRET` is set)
 
 ## 🪄 The CLI
 

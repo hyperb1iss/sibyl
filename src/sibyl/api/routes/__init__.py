@@ -7,6 +7,9 @@ from sibyl.api.routes.entities import router as entities_router
 from sibyl.api.routes.graph import router as graph_router
 from sibyl.api.routes.jobs import router as jobs_router
 from sibyl.api.routes.manage import router as manage_router
+from sibyl.api.routes.org_invitations import invitations_router, router as org_invitations_router
+from sibyl.api.routes.org_members import router as org_members_router
+from sibyl.api.routes.orgs import router as orgs_router
 from sibyl.api.routes.rag import router as rag_router
 from sibyl.api.routes.search import router as search_router
 from sibyl.api.routes.tasks import router as tasks_router
@@ -18,7 +21,11 @@ __all__ = [
     "entities_router",
     "graph_router",
     "jobs_router",
+    "invitations_router",
     "manage_router",
+    "org_invitations_router",
+    "org_members_router",
+    "orgs_router",
     "rag_router",
     "search_router",
     "tasks_router",

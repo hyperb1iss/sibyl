@@ -8,10 +8,10 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
+from sibyl.auth.api_keys import ApiKeyManager
+from sibyl.auth.context import AuthContext
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import JwtError, verify_access_token
-from sibyl.auth.context import AuthContext
-from sibyl.auth.api_keys import ApiKeyManager
 from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import Organization, OrganizationMember, OrganizationRole, User
 

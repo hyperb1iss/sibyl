@@ -14,4 +14,3 @@ def test_auth_context_properties() -> None:
 
     ctx2 = AuthContext(user=user, organization=object(), org_role=OrganizationRole.OWNER)
     assert ctx2.is_org_scoped is True
-

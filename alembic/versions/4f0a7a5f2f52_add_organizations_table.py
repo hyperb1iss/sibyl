@@ -9,9 +9,9 @@ Create Date: 2025-12-22 04:53:00
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 import sqlmodel.sql.sqltypes
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "4f0a7a5f2f52"
@@ -47,4 +47,3 @@ def downgrade() -> None:
     """Drop organizations table."""
     op.drop_index(op.f("ix_organizations_slug"), table_name="organizations")
     op.drop_table("organizations")
-

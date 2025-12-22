@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import ENUM as PGEnum
+from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
 
 # revision identifiers, used by Alembic.
 revision: str = "3a5c2a6f88b1"
@@ -23,7 +23,7 @@ def upgrade() -> None:
     """Create organization_members table."""
     # Use PostgreSQL ENUM explicitly so create_type=False is honored.
     # This prevents SQLAlchemy from trying to re-create the enum during CREATE TABLE.
-    role_enum = PGEnum(
+    role_enum = PG_ENUM(
         "owner",
         "admin",
         "member",
@@ -72,12 +72,10 @@ def downgrade() -> None:
     op.drop_index(
         op.f("ix_organization_members_organization_id"), table_name="organization_members"
     )
-    op.drop_index(
-        "ix_organization_members_org_user_unique", table_name="organization_members"
-    )
+    op.drop_index("ix_organization_members_org_user_unique", table_name="organization_members")
     op.drop_table("organization_members")
 
-    role_enum = PGEnum(
+    role_enum = PG_ENUM(
         "owner",
         "admin",
         "member",

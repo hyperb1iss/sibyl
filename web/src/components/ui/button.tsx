@@ -34,6 +34,7 @@ export function Button({
   size = 'md',
   loading = false,
   icon,
+  type = 'button',
   disabled,
   children,
   className = '',
@@ -42,7 +43,7 @@ export function Button({
 }: ButtonProps) {
   return (
     <button
-      type="button"
+      type={type}
       disabled={disabled || loading}
       className={`
         inline-flex items-center justify-center font-medium
@@ -94,6 +95,7 @@ export function ColorButton({
   size = 'md',
   loading = false,
   icon,
+  type = 'button',
   disabled,
   children,
   className = '',
@@ -102,7 +104,7 @@ export function ColorButton({
 }: ColorButtonProps) {
   return (
     <button
-      type="button"
+      type={type}
       disabled={disabled || loading}
       className={`
         inline-flex items-center justify-center font-medium
@@ -145,6 +147,7 @@ export function IconButton({
   label,
   size = 'md',
   variant = 'default',
+  type = 'button',
   className = '',
   ...props
 }: IconButtonProps) {
@@ -162,7 +165,7 @@ export function IconButton({
 
   return (
     <button
-      type="button"
+      type={type}
       className={`
         inline-flex items-center justify-center rounded-lg
         text-sc-fg-muted
@@ -201,6 +204,7 @@ export function GradientButton({
   size = 'md',
   loading = false,
   icon,
+  type = 'button',
   disabled,
   children,
   className = '',
@@ -208,7 +212,7 @@ export function GradientButton({
 }: GradientButtonProps) {
   return (
     <button
-      type="button"
+      type={type}
       disabled={disabled || loading}
       className={`
         inline-flex items-center justify-center font-medium

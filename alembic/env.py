@@ -22,6 +22,7 @@ from sibyl.db.models import (  # noqa: F401
     CrawlSource,
     DocumentChunk,
     Organization,
+    OrganizationInvitation,
     OrganizationMember,
     User,
 )

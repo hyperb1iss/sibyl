@@ -11,20 +11,24 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.routing import WebSocketRoute
 
-from sibyl.auth.middleware import AuthMiddleware
 from sibyl.api.routes import (
     admin_router,
     auth_router,
     crawler_router,
     entities_router,
     graph_router,
+    invitations_router,
     jobs_router,
     manage_router,
+    org_invitations_router,
+    org_members_router,
+    orgs_router,
     rag_router,
     search_router,
     tasks_router,
 )
 from sibyl.api.websocket import websocket_handler
+from sibyl.auth.middleware import AuthMiddleware
 from sibyl.config import settings
 
 log = structlog.get_logger()
@@ -84,6 +88,10 @@ def create_api_app() -> FastAPI:
     app.include_router(admin_router)
     app.include_router(auth_router)
     app.include_router(crawler_router)
+    app.include_router(orgs_router)
+    app.include_router(org_members_router)
+    app.include_router(org_invitations_router)
+    app.include_router(invitations_router)
     app.include_router(rag_router)
     app.include_router(jobs_router)
     app.include_router(manage_router)

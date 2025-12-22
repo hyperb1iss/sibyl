@@ -1,6 +1,9 @@
-import json
-
-from sibyl.cli.auth_store import clear_access_token, read_auth_data, set_access_token, write_auth_data
+from sibyl.cli.auth_store import (
+    clear_access_token,
+    read_auth_data,
+    set_access_token,
+    write_auth_data,
+)
 
 
 def test_auth_store_roundtrip(tmp_path) -> None:
@@ -8,7 +11,7 @@ def test_auth_store_roundtrip(tmp_path) -> None:
     assert read_auth_data(path) == {}
 
     set_access_token("tok", path)
-    assert read_auth_data(path)["access_token"] == "tok"
+    assert read_auth_data(path)["access_token"] == "tok"  # noqa: S105
 
     clear_access_token(path)
     assert not path.exists()
@@ -28,4 +31,3 @@ def test_auth_store_ignores_invalid_json(tmp_path) -> None:
     path = tmp_path / "auth.json"
     path.write_text("{not json", encoding="utf-8")
     assert read_auth_data(path) == {}
-

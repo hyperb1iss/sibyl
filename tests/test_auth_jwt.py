@@ -37,4 +37,3 @@ def test_jwt_rejects_wrong_secret(monkeypatch) -> None:
 
     with pytest.raises(JwtError):
         verify_access_token(token)
-

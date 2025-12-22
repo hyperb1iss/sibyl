@@ -42,4 +42,3 @@ def clear_access_token(path: Path | None = None) -> None:
             p.unlink()
         return
     write_auth_data(data, path)
-

@@ -79,4 +79,3 @@ def verify_state(
         raise OAuthStateError("OAuth state expired")
 
     return OAuthState(state=state, issued_at=issued_at)
-

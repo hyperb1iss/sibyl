@@ -21,4 +21,3 @@ class AuthContext:
     @property
     def is_org_scoped(self) -> bool:
         return self.organization is not None
-
