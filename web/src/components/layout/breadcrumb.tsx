@@ -22,7 +22,7 @@ import {
  * Import this when you need consistent icons for routes.
  */
 export const ROUTE_CONFIG: Record<string, { label: string; icon: IconComponent }> = {
-  '': { label: 'Dashboard', icon: LayoutDashboard },
+  '': { label: 'Home', icon: LayoutDashboard },
   projects: { label: 'Projects', icon: FolderKanban },
   tasks: { label: 'Tasks', icon: ListTodo },
   sources: { label: 'Sources', icon: BookOpen },
@@ -56,7 +56,7 @@ function BreadcrumbInner({ items, className = '' }: BreadcrumbProps) {
     // Auto-generate from pathname
     const segments = pathname.split('/').filter(Boolean);
     const crumbs: BreadcrumbItem[] = [
-      { label: 'Dashboard', href: '/', icon: ROUTE_CONFIG[''].icon },
+      { label: ROUTE_CONFIG[''].label, href: '/', icon: ROUTE_CONFIG[''].icon },
     ];
 
     let currentPath = '';
@@ -140,7 +140,7 @@ interface EntityBreadcrumbProps {
 }
 
 export function EntityBreadcrumb({ entityType, entityName, parentProject }: EntityBreadcrumbProps) {
-  const items: BreadcrumbItem[] = [{ label: 'Dashboard', href: '/', icon: ROUTE_CONFIG[''].icon }];
+  const items: BreadcrumbItem[] = [{ label: ROUTE_CONFIG[''].label, href: '/', icon: ROUTE_CONFIG[''].icon }];
 
   // Add parent context based on entity type
   if (entityType === 'task') {

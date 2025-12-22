@@ -283,10 +283,10 @@ export default function SourcesPage() {
           <button
             type="button"
             onClick={() => setShowAddDialog(true)}
-            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg sm:rounded-xl font-medium transition-colors shadow-lg shadow-sc-purple/25 text-sm sm:text-base"
+            className="shrink-0 px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors flex items-center gap-1.5 text-sm"
           >
-            <Plus width={16} height={16} className="sm:w-[18px] sm:h-[18px]" />
-            <span className="hidden xs:inline">Add Source</span>
+            <span>+</span>
+            <span>Add Source</span>
           </button>
         }
       />
@@ -459,10 +459,10 @@ export default function SourcesPage() {
               <button
                 type="button"
                 onClick={() => setShowAddDialog(true)}
-                className="flex items-center gap-2 px-5 py-2.5 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-xl font-medium transition-colors"
+                className="shrink-0 px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors flex items-center gap-1.5 text-sm"
               >
-                <Plus width={18} height={18} />
-                Add Your First Source
+                <span>+</span>
+                <span>Add Your First Source</span>
               </button>
             }
           />

@@ -147,7 +147,7 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
   // Build breadcrumb items (only needed when viewing a specific project)
   const breadcrumbItems = selectedProject
     ? [
-        { label: 'Dashboard', href: '/', icon: ROUTE_CONFIG[''].icon },
+        { label: ROUTE_CONFIG[''].label, href: '/', icon: ROUTE_CONFIG[''].icon },
         { label: 'Projects', href: '/projects', icon: ROUTE_CONFIG.projects.icon },
         { label: selectedProject.name },
       ]
@@ -200,9 +200,9 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
         action={
           <button
             type="button"
-            className="px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+            className="shrink-0 px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors flex items-center gap-1.5 text-sm"
           >
-            <Plus width={16} height={16} />
+            <span>+</span>
             <span>New Project</span>
           </button>
         }
@@ -460,10 +460,10 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
           )}
           <Link
             href={`/tasks?project=${project.id}`}
-            className="px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+            className="px-3 py-2 bg-sc-bg-elevated hover:bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded-lg text-sc-fg-muted hover:text-sc-cyan transition-colors flex items-center gap-1.5 text-sm"
           >
-            <FolderKanban width={16} height={16} />
-            <span>Task Board</span>
+            <FolderKanban width={14} height={14} />
+            <span>Tasks</span>
           </Link>
         </div>
       </div>

@@ -77,7 +77,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
   }, [id, syncSource]);
 
   const breadcrumbItems = [
-    { label: 'Dashboard', href: '/', icon: ROUTE_CONFIG[''].icon },
+    { label: ROUTE_CONFIG[''].label, href: '/', icon: ROUTE_CONFIG[''].icon },
     { label: 'Sources', href: '/sources', icon: ROUTE_CONFIG.sources.icon },
     { label: source?.name || 'Loading...' },
   ];
@@ -129,7 +129,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <Breadcrumb items={breadcrumbItems} custom />
+      <Breadcrumb items={breadcrumbItems} />
 
       {/* Header */}
       <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-6">

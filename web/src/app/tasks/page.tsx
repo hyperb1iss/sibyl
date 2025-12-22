@@ -138,7 +138,7 @@ function TasksPageContent() {
   // Build breadcrumb items based on filter (only needed when filtering by project)
   const breadcrumbItems = currentProjectName
     ? [
-        { label: 'Dashboard', href: '/', icon: ROUTE_CONFIG[''].icon },
+        { label: ROUTE_CONFIG[''].label, href: '/', icon: ROUTE_CONFIG[''].icon },
         { label: 'Tasks', href: '/tasks', icon: ROUTE_CONFIG.tasks.icon },
         { label: currentProjectName, icon: ROUTE_CONFIG.projects.icon },
       ]

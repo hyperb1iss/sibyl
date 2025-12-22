@@ -126,7 +126,7 @@ function StatusIndicator({ status }: { status: 'healthy' | 'unhealthy' | 'unknow
 export function DashboardContent({ initialStats }: DashboardContentProps) {
   const { data: health, isLoading: healthLoading } = useHealth();
   const { data: stats } = useStats(initialStats);
-  const { data: tasksData } = useTasks({});
+  const { data: tasksData } = useTasks();
   const { data: projectsData } = useProjects();
 
   // Calculate task stats
