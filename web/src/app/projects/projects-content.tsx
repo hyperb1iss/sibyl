@@ -309,16 +309,16 @@ function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) 
 
         {/* Status badges */}
         <div className="flex items-center gap-1 shrink-0">
-          {stats?.blocked && stats.blocked > 0 && (
+          {(stats?.blocked ?? 0) > 0 && (
             <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-sc-yellow/20 text-sc-yellow">
               <Pause width={10} height={10} />
-              {stats.blocked}
+              {stats?.blocked}
             </span>
           )}
-          {stats?.critical && stats.critical > 0 && (
+          {(stats?.critical ?? 0) > 0 && (
             <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-sc-red/20 text-sc-red">
               <Zap width={10} height={10} />
-              {stats.critical}
+              {stats?.critical}
             </span>
           )}
         </div>
