@@ -23,12 +23,17 @@ from sibyl.db.connection import (
     init_db,
 )
 from sibyl.db.models import (
+    ApiKey,
     ChunkType,
     CrawledDocument,
     CrawlSource,
     CrawlStatus,
     DocumentChunk,
+    Organization,
+    OrganizationMember,
+    OrganizationRole,
     SourceType,
+    User,
 )
 
 __all__ = [
@@ -40,9 +45,14 @@ __all__ = [
     "async_session_factory",
     "check_postgres_health",
     # Models
+    "ApiKey",
     "CrawlSource",
     "CrawledDocument",
     "DocumentChunk",
+    "Organization",
+    "OrganizationMember",
+    "OrganizationRole",
+    "User",
     # Enums
     "SourceType",
     "CrawlStatus",

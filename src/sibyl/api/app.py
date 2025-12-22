@@ -11,8 +11,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.routing import WebSocketRoute
 
+from sibyl.auth.middleware import AuthMiddleware
 from sibyl.api.routes import (
     admin_router,
+    auth_router,
     crawler_router,
     entities_router,
     graph_router,
@@ -71,12 +73,16 @@ def create_api_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Auth: decode bearer JWTs (no enforcement by default)
+    app.add_middleware(AuthMiddleware)
+
     # Register routers
     app.include_router(entities_router)
     app.include_router(tasks_router)
     app.include_router(search_router)
     app.include_router(graph_router)
     app.include_router(admin_router)
+    app.include_router(auth_router)
     app.include_router(crawler_router)
     app.include_router(rag_router)
     app.include_router(jobs_router)

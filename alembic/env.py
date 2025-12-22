@@ -16,7 +16,15 @@ from sqlmodel import SQLModel
 from sibyl.config import settings
 
 # Import all models to ensure they're registered with SQLModel.metadata
-from sibyl.db.models import CrawledDocument, CrawlSource, DocumentChunk  # noqa: F401
+from sibyl.db.models import (  # noqa: F401
+    ApiKey,
+    CrawledDocument,
+    CrawlSource,
+    DocumentChunk,
+    Organization,
+    OrganizationMember,
+    User,
+)
 
 # Alembic Config object
 config = context.config

@@ -4,11 +4,39 @@ The CLI is a thin client - all operations go through the REST API,
 ensuring consistent event broadcasting and state management.
 """
 
+import json
+import os
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 from sibyl.config import settings
+
+
+def _load_default_auth_token() -> str | None:
+    env_token = os.environ.get("SIBYL_AUTH_TOKEN", "").strip()
+    if env_token:
+        return env_token
+
+    auth_path = Path.home() / ".sibyl" / "auth.json"
+    if not auth_path.exists():
+        return None
+
+    try:
+        data = json.loads(auth_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    token = str(data.get("access_token", "")).strip()
+    if token:
+        return token
+
+    token = str(data.get("api_key", "")).strip()
+    if token:
+        return token
+
+    return None
 
 
 class SibylClientError(Exception):
@@ -27,16 +55,29 @@ class SibylClient:
     Handles connection errors, retries, and error responses.
     """
 
-    def __init__(self, base_url: str | None = None, timeout: float = 30.0):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: float = 30.0,
+        auth_token: str | None = None,
+    ):
         """Initialize the client.
 
         Args:
             base_url: API base URL. Defaults to http://localhost:{server_port}/api
             timeout: Request timeout in seconds.
+            auth_token: Optional bearer token or API key to send as Authorization header.
         """
         self.base_url = base_url or f"http://localhost:{settings.server_port}/api"
         self.timeout = timeout
+        self.auth_token = auth_token or _load_default_auth_token()
         self._client: httpx.AsyncClient | None = None
+
+    def _default_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+        return headers
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create async HTTP client."""
@@ -44,7 +85,7 @@ class SibylClient:
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
                 timeout=self.timeout,
-                headers={"Content-Type": "application/json"},
+                headers=self._default_headers(),
             )
         return self._client
 
@@ -93,6 +134,13 @@ class SibylClient:
                 except Exception:
                     detail = response.text
 
+                if response.status_code in {401, 403}:
+                    detail = (
+                        f"{detail}\n\n"
+                        "Auth required. Set SIBYL_AUTH_TOKEN or create ~/.sibyl/auth.json "
+                        "with {\"access_token\": \"...\"}."
+                    )
+
                 raise SibylClientError(
                     f"API error: {detail}",
                     status_code=response.status_code,
@@ -138,6 +186,19 @@ class SibylClient:
             params["category"] = category
 
         return await self._request("GET", "/entities", params=params)
+
+    # =========================================================================
+    # Auth Operations
+    # =========================================================================
+
+    async def list_api_keys(self) -> dict[str, Any]:
+        return await self._request("GET", "/auth/api-keys")
+
+    async def create_api_key(self, name: str, live: bool = True) -> dict[str, Any]:
+        return await self._request("POST", "/auth/api-keys", json={"name": name, "live": live})
+
+    async def revoke_api_key(self, api_key_id: str) -> dict[str, Any]:
+        return await self._request("POST", f"/auth/api-keys/{api_key_id}/revoke")
 
     async def get_entity(self, entity_id: str) -> dict[str, Any]:
         """Get a single entity by ID."""

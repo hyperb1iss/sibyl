@@ -31,6 +31,7 @@ from sibyl.cli.common import (
 # Import subcommand apps
 from sibyl.cli.crawl import app as crawl_app
 from sibyl.cli.db import app as db_app
+from sibyl.cli.auth import app as auth_app
 from sibyl.cli.entity import app as entity_app
 from sibyl.cli.explore import app as explore_app
 from sibyl.cli.export import app as export_app
@@ -57,6 +58,7 @@ app.add_typer(crawl_app, name="crawl")
 app.add_typer(export_app, name="export")
 app.add_typer(db_app, name="db")
 app.add_typer(generate_app, name="generate")
+app.add_typer(auth_app, name="auth")
 
 
 def _handle_client_error(e: SibylClientError) -> None:

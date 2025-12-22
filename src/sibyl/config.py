@@ -27,6 +27,24 @@ class Settings(BaseSettings):
         description="Logging level",
     )
 
+    # Auth configuration
+    jwt_secret: SecretStr = Field(
+        default=SecretStr(""),
+        description="JWT signing secret (required for auth)",
+    )
+    jwt_algorithm: str = Field(default="HS256", description="JWT signing algorithm")
+    jwt_expiry_hours: int = Field(default=24, ge=1, le=720, description="Access token TTL (hours)")
+
+    github_client_id: SecretStr = Field(default=SecretStr(""), description="GitHub OAuth client id")
+    github_client_secret: SecretStr = Field(
+        default=SecretStr(""), description="GitHub OAuth client secret"
+    )
+
+    server_url: str = Field(
+        default="http://localhost:3334",
+        description="Public base URL for this server (used for OAuth redirects)",
+    )
+
     # FalkorDB configuration
     falkordb_host: str = Field(default="localhost", description="FalkorDB host")
     falkordb_port: int = Field(default=6380, description="FalkorDB port")
@@ -86,6 +104,23 @@ class Settings(BaseSettings):
             fallback = os.environ.get("OPENAI_API_KEY", "")
             if fallback:
                 object.__setattr__(self, "openai_api_key", SecretStr(fallback))
+
+        # GitHub OAuth: fall back to non-prefixed env vars
+        if not self.github_client_id.get_secret_value():
+            fallback = os.environ.get("GITHUB_CLIENT_ID", "")
+            if fallback:
+                object.__setattr__(self, "github_client_id", SecretStr(fallback))
+
+        if not self.github_client_secret.get_secret_value():
+            fallback = os.environ.get("GITHUB_CLIENT_SECRET", "")
+            if fallback:
+                object.__setattr__(self, "github_client_secret", SecretStr(fallback))
+
+        # JWT: fall back to non-prefixed env vars
+        if not self.jwt_secret.get_secret_value():
+            fallback = os.environ.get("JWT_SECRET", "")
+            if fallback:
+                object.__setattr__(self, "jwt_secret", SecretStr(fallback))
 
         return self
 

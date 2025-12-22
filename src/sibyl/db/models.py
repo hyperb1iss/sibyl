@@ -1,9 +1,11 @@
-"""SQLModel schemas for document storage with pgvector support.
+"""SQLModel schemas for Sibyl PostgreSQL storage.
 
-This module defines the PostgreSQL tables for storing crawled documents,
-chunks, and embeddings. Uses pgvector for efficient vector similarity search.
+This module defines the PostgreSQL tables for:
+- Auth/account primitives (users)
+- Crawled documents, chunks, and embeddings (pgvector)
 
 Architecture:
+- User: Auth identity (GitHub-backed for now)
 - CrawlSource: Track documentation sources (websites, repos)
 - CrawledDocument: Store raw crawled documents
 - DocumentChunk: Store chunked content with embeddings for hybrid search
@@ -16,7 +18,8 @@ from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
 from pydantic import field_validator
-from sqlalchemy import ARRAY, Column, Index, String, Text, text
+from sqlalchemy import ARRAY, Column, Enum, Index, String, Text, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -79,6 +82,142 @@ class TimestampMixin(SQLModel):
         description="When this record was last updated",
         sa_column_kwargs={"onupdate": utcnow_naive},
     )
+
+
+# =============================================================================
+# User - Authentication identity
+# =============================================================================
+
+
+class User(TimestampMixin, table=True):
+    """A user identity record (GitHub-backed for now)."""
+
+    __tablename__ = "users"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+
+    # GitHub identity
+    github_id: int = Field(index=True, unique=True, description="GitHub numeric user id")
+
+    # Profile info
+    email: str | None = Field(
+        default=None,
+        max_length=255,
+        unique=True,
+        index=True,
+        description="Primary email (may be null if unavailable)",
+    )
+    name: str = Field(default="", max_length=255, description="Display name")
+    avatar_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Profile avatar URL",
+    )
+
+    def __repr__(self) -> str:
+        return f"<User github_id={self.github_id} email={self.email!r}>"
+
+
+# =============================================================================
+# Organization - Tenant boundary for auth
+# =============================================================================
+
+
+class Organization(TimestampMixin, table=True):
+    """An organization/tenant."""
+
+    __tablename__ = "organizations"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    name: str = Field(max_length=255, description="Organization display name")
+    slug: str = Field(max_length=64, unique=True, index=True, description="URL-safe unique slug")
+    is_personal: bool = Field(default=False, description="Personal org owned by one user")
+
+    settings: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        description="Arbitrary org settings",
+    )
+
+    graph_name: str = Field(
+        default="conventions",
+        max_length=255,
+        description="FalkorDB graph name for this org",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Organization slug={self.slug!r} personal={self.is_personal}>"
+
+
+class OrganizationRole(StrEnum):
+    """Role of a user within an organization."""
+
+    OWNER = "owner"
+    ADMIN = "admin"
+    MEMBER = "member"
+    VIEWER = "viewer"
+
+
+class OrganizationMember(TimestampMixin, table=True):
+    """Membership record linking a user to an organization."""
+
+    __tablename__ = "organization_members"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(foreign_key="organizations.id", index=True)
+    user_id: UUID = Field(foreign_key="users.id", index=True)
+    role: OrganizationRole = Field(
+        default=OrganizationRole.MEMBER,
+        sa_column=Column(
+            Enum(
+                OrganizationRole,
+                name="organizationrole",
+                values_callable=lambda enum: [e.value for e in enum],
+            ),
+            nullable=False,
+            server_default=text("'member'"),
+        ),
+        description="Membership role",
+    )
+
+    organization: Organization = Relationship()
+    user: User = Relationship()
+
+    __table_args__ = (
+        Index(
+            "ix_organization_members_org_user_unique",
+            "organization_id",
+            "user_id",
+            unique=True,
+        ),
+    )
+
+
+# =============================================================================
+# API Keys - Long-lived credentials for CLI + automation
+# =============================================================================
+
+
+class ApiKey(TimestampMixin, table=True):
+    """Long-lived API key (store only hash + salt, never raw key)."""
+
+    __tablename__ = "api_keys"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(foreign_key="organizations.id", index=True)
+    user_id: UUID = Field(foreign_key="users.id", index=True)
+
+    name: str = Field(default="", max_length=255, description="Display name for this key")
+    key_prefix: str = Field(
+        max_length=32,
+        index=True,
+        description="Non-secret prefix for lookup (e.g. sk_live_abc123...)",
+    )
+    key_salt: str = Field(max_length=64, description="Hex-encoded salt")
+    key_hash: str = Field(max_length=128, description="Hex-encoded derived key hash")
+
+    revoked_at: datetime | None = Field(default=None, description="Revocation timestamp")
+    last_used_at: datetime | None = Field(default=None, description="Last usage timestamp")
 
 
 # =============================================================================
