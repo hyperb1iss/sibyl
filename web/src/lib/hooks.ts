@@ -67,7 +67,10 @@ export const queryKeys = {
     list: (params?: { project?: string; status?: TaskStatus }) => {
       const normalized =
         params && (params.project || params.status)
-          ? { ...(params.project ? { project: params.project } : {}), ...(params.status ? { status: params.status } : {}) }
+          ? {
+              ...(params.project ? { project: params.project } : {}),
+              ...(params.status ? { status: params.status } : {}),
+            }
           : undefined;
       return ['tasks', 'list', normalized] as const;
     },
@@ -519,7 +522,10 @@ export function useConnectionStatus(): ConnectionStatus {
 export function useTasks(params?: { project?: string; status?: TaskStatus }) {
   const normalized =
     params && (params.project || params.status)
-      ? { ...(params.project ? { project: params.project } : {}), ...(params.status ? { status: params.status } : {}) }
+      ? {
+          ...(params.project ? { project: params.project } : {}),
+          ...(params.status ? { status: params.status } : {}),
+        }
       : undefined;
 
   return useQuery({

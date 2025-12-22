@@ -337,22 +337,10 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 <span>Progress</span>
                 <span>{Math.round((taskStats.done / taskStats.total) * 100)}% complete</span>
               </div>
-              <div className="h-1.5 sm:h-2 bg-sc-bg-dark rounded-full overflow-hidden flex">
+              <div className="h-1.5 sm:h-2 bg-sc-bg-dark rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-sc-green transition-all duration-500"
+                  className="h-full bg-sc-green rounded-full transition-all duration-500"
                   style={{ width: `${(taskStats.done / taskStats.total) * 100}%` }}
-                />
-                <div
-                  className="h-full bg-sc-yellow transition-all duration-500"
-                  style={{ width: `${(taskStats.review / taskStats.total) * 100}%` }}
-                />
-                <div
-                  className="h-full bg-sc-purple transition-all duration-500"
-                  style={{ width: `${(taskStats.doing / taskStats.total) * 100}%` }}
-                />
-                <div
-                  className="h-full bg-sc-cyan transition-all duration-500"
-                  style={{ width: `${(taskStats.todo / taskStats.total) * 100}%` }}
                 />
               </div>
             </div>

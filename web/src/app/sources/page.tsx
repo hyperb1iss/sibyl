@@ -17,7 +17,6 @@ import {
   Globe,
   Grid3X3,
   LayoutList,
-  Plus,
   RefreshCw,
   Search,
 } from '@/components/ui/icons';

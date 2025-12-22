@@ -140,7 +140,9 @@ interface EntityBreadcrumbProps {
 }
 
 export function EntityBreadcrumb({ entityType, entityName, parentProject }: EntityBreadcrumbProps) {
-  const items: BreadcrumbItem[] = [{ label: ROUTE_CONFIG[''].label, href: '/', icon: ROUTE_CONFIG[''].icon }];
+  const items: BreadcrumbItem[] = [
+    { label: ROUTE_CONFIG[''].label, href: '/', icon: ROUTE_CONFIG[''].icon },
+  ];
 
   // Add parent context based on entity type
   if (entityType === 'task') {

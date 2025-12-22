@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useMemo } from 'react';
+import { toast } from 'sonner';
+import { EditableTags, EditableText } from '@/components/editable';
 import { Breadcrumb, ROUTE_CONFIG } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { ProjectsEmptyState } from '@/components/ui/empty-state';
@@ -19,7 +21,7 @@ import {
 import { ErrorState } from '@/components/ui/tooltip';
 import type { TaskListResponse, TaskStatus, TaskSummary } from '@/lib/api';
 import { TASK_STATUS_CONFIG } from '@/lib/constants';
-import { useProjects, useTasks } from '@/lib/hooks';
+import { useProjects, useTasks, useUpdateEntity } from '@/lib/hooks';
 
 interface ProjectsContentProps {
   initialProjects: TaskListResponse;
@@ -396,6 +398,7 @@ interface ProjectDetailProps {
 }
 
 function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
+  const updateEntity = useUpdateEntity();
   const progress = stats && stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
 
   // Get tech stack from metadata
@@ -403,6 +406,81 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
     (project.metadata.technologies as string[]) ?? (project.metadata.tech_stack as string[]) ?? [];
   const repoUrl = project.metadata.repository_url as string | undefined;
   const features = (project.metadata.features as string[]) ?? [];
+
+  // Update handlers
+  const handleNameSave = useCallback(
+    async (value: string) => {
+      try {
+        await updateEntity.mutateAsync({ id: project.id, updates: { name: value } });
+        toast.success('Project name updated');
+      } catch {
+        toast.error('Failed to update project name');
+        throw new Error('Update failed');
+      }
+    },
+    [project.id, updateEntity]
+  );
+
+  const handleDescriptionSave = useCallback(
+    async (value: string) => {
+      try {
+        await updateEntity.mutateAsync({ id: project.id, updates: { description: value } });
+        toast.success('Description updated');
+      } catch {
+        toast.error('Failed to update description');
+        throw new Error('Update failed');
+      }
+    },
+    [project.id, updateEntity]
+  );
+
+  const handleTechStackSave = useCallback(
+    async (values: string[]) => {
+      try {
+        await updateEntity.mutateAsync({
+          id: project.id,
+          updates: { metadata: { ...project.metadata, technologies: values } },
+        });
+        toast.success('Tech stack updated');
+      } catch {
+        toast.error('Failed to update tech stack');
+        throw new Error('Update failed');
+      }
+    },
+    [project.id, project.metadata, updateEntity]
+  );
+
+  const handleFeaturesSave = useCallback(
+    async (values: string[]) => {
+      try {
+        await updateEntity.mutateAsync({
+          id: project.id,
+          updates: { metadata: { ...project.metadata, features: values } },
+        });
+        toast.success('Features updated');
+      } catch {
+        toast.error('Failed to update features');
+        throw new Error('Update failed');
+      }
+    },
+    [project.id, project.metadata, updateEntity]
+  );
+
+  const handleRepoSave = useCallback(
+    async (value: string) => {
+      try {
+        await updateEntity.mutateAsync({
+          id: project.id,
+          updates: { metadata: { ...project.metadata, repository_url: value || undefined } },
+        });
+        toast.success('Repository URL updated');
+      } catch {
+        toast.error('Failed to update repository URL');
+        throw new Error('Update failed');
+      }
+    },
+    [project.id, project.metadata, updateEntity]
+  );
 
   // Sort tasks: blocked first, then doing, then by priority
   const priorityOrder: Record<string, number> = {
@@ -436,13 +514,28 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header with Inline Editing */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-bold text-sc-fg-primary">{project.name}</h1>
-          {project.description && (
-            <p className="text-sc-fg-muted mt-2 line-clamp-2">{project.description}</p>
-          )}
+          <div className="group/name">
+            <EditableText
+              value={project.name}
+              onSave={handleNameSave}
+              placeholder="Project name"
+              required
+              className="text-2xl font-bold text-sc-fg-primary"
+            />
+          </div>
+          <div className="mt-2 group/desc">
+            <EditableText
+              value={project.description ?? ''}
+              onSave={handleDescriptionSave}
+              placeholder="Add a description..."
+              multiline
+              rows={2}
+              className="text-sc-fg-muted"
+            />
+          </div>
         </div>
 
         {/* Quick Actions */}
@@ -577,39 +670,43 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
         </div>
       )}
 
-      {/* Tech & Features Grid */}
+      {/* Tech & Features Grid - Always show for editing */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {techStack.length > 0 && (
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
-            <h2 className="font-semibold text-sc-fg-primary mb-3">Tech Stack</h2>
-            <div className="flex flex-wrap gap-2">
-              {techStack.map(tech => (
-                <span
-                  key={tech}
-                  className="text-xs px-2 py-1 rounded-md bg-sc-cyan/10 text-sc-cyan border border-sc-cyan/20"
-                >
-                  {tech}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+          <h2 className="font-semibold text-sc-fg-primary mb-3">Tech Stack</h2>
+          <EditableTags
+            values={techStack}
+            onSave={handleTechStackSave}
+            placeholder="Add technology..."
+            addPlaceholder="e.g., React, Python"
+            tagClassName="bg-sc-cyan/10 text-sc-cyan border-sc-cyan/20"
+          />
+        </div>
 
-        {features.length > 0 && (
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
-            <h2 className="font-semibold text-sc-fg-primary mb-3">Features</h2>
-            <div className="flex flex-wrap gap-2">
-              {features.map(feature => (
-                <span
-                  key={feature}
-                  className="text-xs px-2 py-1 rounded-md bg-sc-purple/10 text-sc-purple border border-sc-purple/20"
-                >
-                  {feature}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+          <h2 className="font-semibold text-sc-fg-primary mb-3">Features</h2>
+          <EditableTags
+            values={features}
+            onSave={handleFeaturesSave}
+            placeholder="Add feature..."
+            addPlaceholder="e.g., Auth, API"
+            tagClassName="bg-sc-purple/10 text-sc-purple border-sc-purple/20"
+          />
+        </div>
+      </div>
+
+      {/* Repository URL */}
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+        <h2 className="font-semibold text-sc-fg-primary mb-3 flex items-center gap-2">
+          <GitBranch width={16} height={16} className="text-sc-coral" />
+          Repository
+        </h2>
+        <EditableText
+          value={repoUrl ?? ''}
+          onSave={handleRepoSave}
+          placeholder="Add repository URL..."
+          className="text-sm text-sc-cyan"
+        />
       </div>
 
       {/* Empty state for no tasks */}
