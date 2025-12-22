@@ -28,6 +28,9 @@ from sibyl.api.schemas import (
     CrawlSourceListResponse,
     CrawlSourceResponse,
     CrawlStatsResponse,
+    LinkGraphRequest,
+    LinkGraphResponse,
+    LinkGraphStatusResponse,
 )
 from sibyl.api.websocket import broadcast_event
 from sibyl.db import (
@@ -582,6 +585,205 @@ async def sync_source(source_id: str) -> dict[str, Any]:
             "chunk_count": f"{old_chunk_count} -> {actual_chunk_count}" if old_chunk_count != actual_chunk_count else None,
         },
     }
+
+
+# =============================================================================
+# Graph Integration
+# =============================================================================
+
+
+@router.get("/link-graph/status", response_model=LinkGraphStatusResponse)
+async def get_link_graph_status() -> LinkGraphStatusResponse:
+    """Get status of pending graph linking work.
+
+    Shows how many chunks still need entity extraction per source.
+    """
+    async with get_session() as session:
+        # Total chunks
+        total_result = await session.execute(select(func.count(DocumentChunk.id)))
+        total_chunks = total_result.scalar() or 0
+
+        # Chunks with entities
+        linked_result = await session.execute(
+            select(func.count(DocumentChunk.id)).where(
+                col(DocumentChunk.has_entities) == True  # noqa: E712
+            )
+        )
+        chunks_with_entities = linked_result.scalar() or 0
+
+        # Pending per source
+        pending_query = (
+            select(
+                CrawlSource.name,
+                func.count(DocumentChunk.id).label("pending"),
+            )
+            .join(CrawledDocument, CrawledDocument.source_id == CrawlSource.id)
+            .join(DocumentChunk, DocumentChunk.document_id == CrawledDocument.id)
+            .where(col(DocumentChunk.has_entities) == False)  # noqa: E712
+            .group_by(CrawlSource.name)
+        )
+        pending_result = await session.execute(pending_query)
+        sources = [
+            {"name": row.name, "pending": row.pending}
+            for row in pending_result.all()
+        ]
+
+    return LinkGraphStatusResponse(
+        total_chunks=total_chunks,
+        chunks_with_entities=chunks_with_entities,
+        chunks_pending=total_chunks - chunks_with_entities,
+        sources=sources,
+    )
+
+
+@router.post("/link-graph", response_model=LinkGraphResponse)
+async def link_all_sources_to_graph(
+    request: LinkGraphRequest,
+) -> LinkGraphResponse:
+    """Extract entities from all source chunks and link to knowledge graph.
+
+    Processes chunks that haven't been entity-linked yet (has_entities=False).
+    Uses LLM to extract entities and matches them to existing graph entities.
+    """
+    return await _process_graph_linking(source_id=None, request=request)
+
+
+@router.post("/{source_id}/link-graph", response_model=LinkGraphResponse)
+async def link_source_to_graph(
+    source_id: str,
+    request: LinkGraphRequest,
+) -> LinkGraphResponse:
+    """Extract entities from source chunks and link to knowledge graph.
+
+    Processes chunks that haven't been entity-linked yet (has_entities=False).
+    Uses LLM to extract entities and matches them to existing graph entities.
+    """
+    return await _process_graph_linking(source_id=source_id, request=request)
+
+
+async def _process_graph_linking(
+    source_id: str | None,
+    request: LinkGraphRequest,
+) -> LinkGraphResponse:
+    """Internal function to process graph linking for one or all sources."""
+    from sibyl.crawler.graph_integration import GraphIntegrationService
+    from sibyl.graph.client import get_graph_client
+
+    # Connect to graph
+    try:
+        graph_client = await get_graph_client()
+    except Exception as e:
+        log.warning("Failed to connect to graph", error=str(e))
+        raise HTTPException(status_code=503, detail=f"Graph unavailable: {e}") from e
+
+    # Initialize integration service
+    try:
+        integration = GraphIntegrationService(
+            graph_client,
+            extract_entities=True,
+            create_new_entities=False,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Entity extraction not configured: {e}",
+        ) from e
+
+    # Get sources to process
+    async with get_session() as session:
+        if source_id:
+            source = await session.get(CrawlSource, UUID(source_id))
+            if not source:
+                raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+            sources = [source]
+        else:
+            result = await session.execute(select(CrawlSource))
+            sources = list(result.scalars().all())
+
+        if not sources:
+            return LinkGraphResponse(
+                source_id=source_id,
+                status="no_sources",
+                message="No sources found to process",
+            )
+
+        total_chunks = 0
+        total_extracted = 0
+        total_linked = 0
+        sources_processed = []
+
+        for source in sources:
+            # Get unprocessed chunks for this source
+            chunk_query = (
+                select(DocumentChunk)
+                .join(CrawledDocument)
+                .where(col(CrawledDocument.source_id) == source.id)
+                .where(col(DocumentChunk.has_entities) == False)  # noqa: E712
+                .limit(request.batch_size * 10)
+            )
+            result = await session.execute(chunk_query)
+            chunks = list(result.scalars().all())
+
+            if not chunks:
+                continue
+
+            sources_processed.append(source.name)
+
+            if request.dry_run:
+                total_chunks += len(chunks)
+                continue
+
+            # Process in batches
+            for i in range(0, len(chunks), request.batch_size):
+                batch = chunks[i : i + request.batch_size]
+                stats = await integration.process_chunks(batch, source.name)
+                total_chunks += len(batch)
+                total_extracted += stats.entities_extracted
+                total_linked += stats.entities_linked
+
+    # Count remaining unprocessed chunks
+    async with get_session() as session:
+        remaining_query = select(func.count(DocumentChunk.id)).where(
+            col(DocumentChunk.has_entities) == False  # noqa: E712
+        )
+        if source_id:
+            remaining_query = (
+                remaining_query.join(CrawledDocument)
+                .where(col(CrawledDocument.source_id) == UUID(source_id))
+            )
+        remaining_result = await session.execute(remaining_query)
+        chunks_remaining = remaining_result.scalar() or 0
+
+    if request.dry_run:
+        return LinkGraphResponse(
+            source_id=source_id,
+            status="dry_run",
+            chunks_processed=total_chunks,
+            chunks_remaining=chunks_remaining,
+            sources_processed=sources_processed,
+            message=f"Would process {total_chunks} chunks from {len(sources_processed)} source(s)",
+        )
+
+    if total_chunks == 0:
+        return LinkGraphResponse(
+            source_id=source_id,
+            status="no_chunks",
+            chunks_remaining=chunks_remaining,
+            message="No unprocessed chunks found",
+        )
+
+    await broadcast_event("graph_updated", {"chunks_processed": total_chunks})
+
+    return LinkGraphResponse(
+        source_id=source_id,
+        status="completed",
+        chunks_processed=total_chunks,
+        chunks_remaining=chunks_remaining,
+        entities_extracted=total_extracted,
+        entities_linked=total_linked,
+        sources_processed=sources_processed,
+        message=f"Processed {total_chunks} chunks, extracted {total_extracted} entities",
+    )
 
 
 @router.get("/{source_id}/documents", response_model=CrawlDocumentListResponse)

@@ -348,6 +348,62 @@ def list_documents(
     _docs()
 
 
+@app.command("link-status")
+def link_status(
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    ] = False,
+) -> None:
+    """Show pending graph linking work per source.
+
+    Displays how many chunks still need entity extraction.
+    """
+    from sibyl.cli.common import CORAL
+
+    @run_async
+    async def _status() -> None:
+        client = get_client()
+
+        try:
+            if table_out:
+                with spinner("Checking link status...") as progress:
+                    progress.add_task("Checking...", total=None)
+                    response = await client.link_graph_status()
+            else:
+                response = await client.link_graph_status()
+        except SibylClientError as e:
+            _handle_client_error(e)
+            return
+
+        # JSON output (default)
+        if not table_out:
+            print_json(response)
+            return
+
+        # Table output
+        total = response.get("total_chunks", 0)
+        linked = response.get("chunks_with_entities", 0)
+        pending = response.get("chunks_pending", 0)
+
+        console.print(f"\n[{ELECTRIC_PURPLE}]Graph Link Status[/{ELECTRIC_PURPLE}]\n")
+        console.print(f"  Total chunks:  [{NEON_CYAN}]{total}[/{NEON_CYAN}]")
+        console.print(f"  With entities: [{NEON_CYAN}]{linked}[/{NEON_CYAN}]")
+        console.print(f"  Pending:       [{CORAL}]{pending}[/{CORAL}]")
+
+        sources = response.get("sources", [])
+        if sources:
+            console.print(f"\n[{ELECTRIC_PURPLE}]Pending by Source[/{ELECTRIC_PURPLE}]\n")
+            table = create_table("Source", "Source Name", "Pending Chunks")
+            for src in sources:
+                table.add_row(
+                    src.get("name", ""),
+                    str(src.get("pending", 0)),
+                )
+            console.print(table)
+
+    _status()
+
+
 @app.command("link-graph")
 def link_graph(
     source_id: Annotated[
@@ -356,6 +412,9 @@ def link_graph(
     batch_size: Annotated[int, typer.Option("--batch", "-b", help="Batch size")] = 50,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", "-n", help="Show what would be processed")
+    ] = False,
+    table_out: Annotated[
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
     ] = False,
 ) -> None:
     """Re-process existing chunks through graph integration.
@@ -367,81 +426,66 @@ def link_graph(
 
     @run_async
     async def _link() -> None:
-        from sqlalchemy import select
+        client = get_client()
 
-        from sibyl.crawler.graph_integration import GraphIntegrationService
-        from sibyl.db import CrawlSource, DocumentChunk, get_session
-        from sibyl.graph.client import get_graph_client
+        # Use None for all sources, specific ID otherwise
+        sid = None if source_id == "all" else source_id
 
         try:
-            graph_client = await get_graph_client()
-        except Exception as e:
-            error(f"Failed to connect to graph: {e}")
+            if table_out and not dry_run:
+                with spinner("Linking documents to graph...") as progress:
+                    progress.add_task("Processing...", total=None)
+                    response = await client.link_graph(
+                        source_id=sid,
+                        batch_size=batch_size,
+                        dry_run=dry_run,
+                    )
+            else:
+                response = await client.link_graph(
+                    source_id=sid,
+                    batch_size=batch_size,
+                    dry_run=dry_run,
+                )
+        except SibylClientError as e:
+            _handle_client_error(e)
             return
 
-        integration = GraphIntegrationService(
-            graph_client,
-            extract_entities=True,
-            create_new_entities=False,
-        )
+        # JSON output (default)
+        if not table_out:
+            print_json(response)
+            return
 
-        async with get_session() as session:
-            # Get sources to process
-            if source_id and source_id != "all":
-                sources = [await session.get(CrawlSource, source_id)]
-                sources = [s for s in sources if s]
-            else:
-                result = await session.execute(select(CrawlSource))
-                sources = list(result.scalars().all())
+        # Table output
+        status = response.get("status", "unknown")
 
-            if not sources:
-                error("No sources found")
-                return
-
-            total_extracted = 0
-            total_linked = 0
-            total_chunks = 0
-
-            for source in sources:
-                # Get chunks for this source's documents
-                chunk_query = (
-                    select(DocumentChunk)
-                    .join(DocumentChunk.document)
-                    .where(DocumentChunk.document.has(source_id=source.id))
-                    .where(DocumentChunk.has_entities == False)  # noqa: E712
-                    .limit(batch_size * 10)
+        if status == "dry_run":
+            sources_processed = response.get("sources_processed", [])
+            chunks = response.get("chunks_processed", 0)
+            for src in sources_processed:
+                console.print(
+                    f"Would process chunks from [{NEON_CYAN}]{src}[/{NEON_CYAN}]"
                 )
-                result = await session.execute(chunk_query)
-                chunks = list(result.scalars().all())
+            console.print(f"\nTotal: [{CORAL}]{chunks}[/{CORAL}] chunks")
+            return
 
-                if not chunks:
-                    info(f"No unprocessed chunks for source: {source.name}")
-                    continue
+        if status == "no_chunks":
+            info("No unprocessed chunks found")
+            return
 
-                if dry_run:
-                    console.print(
-                        f"Would process [{CORAL}]{len(chunks)}[/{CORAL}] chunks "
-                        f"from [{NEON_CYAN}]{source.name}[/{NEON_CYAN}]"
-                    )
-                    continue
+        if status == "error":
+            error(response.get("error", "Unknown error"))
+            return
 
-                with spinner(f"Processing {len(chunks)} chunks from {source.name}..."):
-                    # Process in batches
-                    for i in range(0, len(chunks), batch_size):
-                        batch = chunks[i : i + batch_size]
-                        stats = await integration.process_chunks(batch, source.name)
-                        total_extracted += stats.entities_extracted
-                        total_linked += stats.entities_linked
-                        total_chunks += len(batch)
+        # Success
+        console.print(
+            f"\n[{SUCCESS_GREEN}]✓[/{SUCCESS_GREEN}] Graph integration complete\n"
+        )
+        console.print(f"  Chunks processed: [{CORAL}]{response.get('chunks_processed', 0)}[/{CORAL}]")
+        console.print(f"  Entities extracted: [{CORAL}]{response.get('entities_extracted', 0)}[/{CORAL}]")
+        console.print(f"  Entities linked: [{CORAL}]{response.get('entities_linked', 0)}[/{CORAL}]")
 
-            if dry_run:
-                return
-
-            console.print(
-                f"\n[{SUCCESS_GREEN}]✓[/{SUCCESS_GREEN}] Graph integration complete\n"
-            )
-            console.print(f"  Chunks processed: [{CORAL}]{total_chunks}[/{CORAL}]")
-            console.print(f"  Entities extracted: [{CORAL}]{total_extracted}[/{CORAL}]")
-            console.print(f"  Entities linked: [{CORAL}]{total_linked}[/{CORAL}]")
+        remaining = response.get("chunks_remaining", 0)
+        if remaining > 0:
+            console.print(f"\n  Remaining: [{NEON_CYAN}]{remaining}[/{NEON_CYAN}] chunks still pending")
 
     _link()

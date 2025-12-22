@@ -527,10 +527,8 @@ class TaskWorkflowEngine:
         """
 
         result = await self._graph_client.client.driver.execute_query(query, project_id=project_id)
-
-        # Result is (rows, columns, metadata) - get first row from rows list
-        rows = result[0] if result else []
-        if rows and len(rows) > 0:
+        rows = self._graph_client.normalize_result(result)
+        if rows:
             record = rows[0]
             total = record.get("total", 0)
             done = record.get("done", 0)

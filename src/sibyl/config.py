@@ -1,9 +1,10 @@
 """Configuration management for Sibyl MCP Server."""
 
+import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -60,16 +61,33 @@ class Settings(BaseSettings):
         description="LLM model for entity extraction",
     )
 
-    # Anthropic configuration
+    # Anthropic configuration (SIBYL_ANTHROPIC_API_KEY or ANTHROPIC_API_KEY)
     anthropic_api_key: SecretStr = Field(
         default=SecretStr(""),
-        description="Anthropic API key (defaults to ANTHROPIC_API_KEY env var)",
+        description="Anthropic API key",
     )
 
-    # OpenAI configuration (for embeddings, or LLM if provider=openai)
+    # OpenAI configuration (SIBYL_OPENAI_API_KEY or OPENAI_API_KEY)
     openai_api_key: SecretStr = Field(
         default=SecretStr(""), description="OpenAI API key for embeddings"
     )
+
+    @model_validator(mode="after")
+    def check_api_key_fallbacks(self) -> "Settings":
+        """Fall back to non-prefixed env vars for API keys."""
+        # Anthropic: check ANTHROPIC_API_KEY if SIBYL_ANTHROPIC_API_KEY not set
+        if not self.anthropic_api_key.get_secret_value():
+            fallback = os.environ.get("ANTHROPIC_API_KEY", "")
+            if fallback:
+                object.__setattr__(self, "anthropic_api_key", SecretStr(fallback))
+
+        # OpenAI: check OPENAI_API_KEY if SIBYL_OPENAI_API_KEY not set
+        if not self.openai_api_key.get_secret_value():
+            fallback = os.environ.get("OPENAI_API_KEY", "")
+            if fallback:
+                object.__setattr__(self, "openai_api_key", SecretStr(fallback))
+
+        return self
     embedding_model: str = Field(
         default="text-embedding-3-small",
         description="OpenAI embedding model",

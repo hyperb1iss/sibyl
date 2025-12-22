@@ -84,6 +84,8 @@ class EntityExtractor:
     our knowledge graph schema.
     """
 
+    _api_key_validated: bool = False
+
     EXTRACTION_PROMPT = '''Extract entities from this documentation chunk.
 
 Chunk Content:
@@ -119,6 +121,21 @@ Do not infer entities that aren't explicitly present.'''
         self.model = model or "claude-haiku-4-5"
         self._client = None
 
+        # Validate API key on init (fail fast)
+        if not EntityExtractor._api_key_validated:
+            api_key = settings.anthropic_api_key.get_secret_value()
+            if not api_key:
+                log.error(
+                    "Anthropic API key not configured",
+                    hint="Set ANTHROPIC_API_KEY or SIBYL_ANTHROPIC_API_KEY environment variable",
+                )
+                raise ValueError(
+                    "Anthropic API key not configured. "
+                    "Set ANTHROPIC_API_KEY or SIBYL_ANTHROPIC_API_KEY."
+                )
+            EntityExtractor._api_key_validated = True
+            log.info("Entity extractor initialized", model=self.model)
+
     async def _get_client(self):
         """Lazily initialize Anthropic client."""
         if self._client is None:
@@ -150,14 +167,14 @@ Do not infer entities that aren't explicitly present.'''
         """
         import json
 
-        client = await self._get_client()
-
-        prompt = self.EXTRACTION_PROMPT.format(
-            content=content[:4000],  # Limit to avoid token overflow
-            context=context or "No additional context",
-        )
-
         try:
+            client = await self._get_client()
+
+            prompt = self.EXTRACTION_PROMPT.format(
+                content=content[:4000],  # Limit to avoid token overflow
+                context=context or "No additional context",
+            )
+
             response = await client.messages.create(
                 model=self.model,
                 max_tokens=1000,
@@ -213,6 +230,11 @@ Do not infer entities that aren't explicitly present.'''
         Returns:
             All extracted entities
         """
+        if not chunks:
+            return []
+
+        log.info("Starting entity extraction", chunk_count=len(chunks), concurrency=max_concurrent)
+
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def extract_with_limit(content, context, url):
@@ -227,9 +249,29 @@ Do not infer entities that aren't explicitly present.'''
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_entities = []
+        failures = 0
         for result in results:
             if isinstance(result, list):
                 all_entities.extend(result)
+            elif isinstance(result, Exception):
+                failures += 1
+                # Log first few failures with details
+                if failures <= 3:
+                    log.warning("Extraction task failed", error=str(result))
+
+        if failures > 0:
+            log.warning(
+                "Batch extraction completed with failures",
+                total=len(chunks),
+                failures=failures,
+                entities_extracted=len(all_entities),
+            )
+        else:
+            log.info(
+                "Batch extraction complete",
+                chunks=len(chunks),
+                entities=len(all_entities),
+            )
 
         return all_entities
 
@@ -533,14 +575,14 @@ class GraphIntegrationService:
 
 
 async def integrate_document_with_graph(
-    document_id: UUID,
+    _document_id: UUID,
     chunks: list[DocumentChunk],
     source_name: str,
 ) -> IntegrationStats:
     """Convenience function to integrate a document with the knowledge graph.
 
     Args:
-        document_id: Document UUID
+        _document_id: Document UUID (reserved for future use)
         chunks: Document chunks
         source_name: Source name for logging
 

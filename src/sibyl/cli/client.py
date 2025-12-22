@@ -466,6 +466,35 @@ class SibylClient:
         """Get crawler health status."""
         return await self._request("GET", "/sources/health")
 
+    async def link_graph(
+        self,
+        source_id: str | None = None,
+        batch_size: int = 50,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Link document chunks to knowledge graph via entity extraction.
+
+        Args:
+            source_id: Specific source ID, or None for all sources
+            batch_size: Chunks per batch
+            dry_run: Preview without processing
+
+        Returns:
+            LinkGraphResponse with stats
+        """
+        data = {"batch_size": batch_size, "dry_run": dry_run}
+        if source_id:
+            return await self._request("POST", f"/sources/{source_id}/link-graph", json=data)
+        return await self._request("POST", "/sources/link-graph", json=data)
+
+    async def link_graph_status(self) -> dict[str, Any]:
+        """Get status of pending graph linking work.
+
+        Returns:
+            LinkGraphStatusResponse with pending chunk counts per source
+        """
+        return await self._request("GET", "/sources/link-graph/status")
+
 
 # Singleton client instance
 _client: SibylClient | None = None

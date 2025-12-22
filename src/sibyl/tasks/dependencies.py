@@ -5,10 +5,11 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from sibyl.graph.client import GraphClient
 from sibyl.models.tasks import TaskStatus
 
 if TYPE_CHECKING:
-    from sibyl.graph.client import GraphClient
+    pass  # GraphClient imported above for runtime use
 
 log = structlog.get_logger()
 
@@ -81,7 +82,7 @@ async def get_task_dependencies(
             """
 
         result = await client.client.driver.execute_query(query, task_id=task_id)
-        rows = result[0] if result else []
+        rows = GraphClient.normalize_result(result)
 
         dependencies: list[str] = []
         blockers: list[str] = []
@@ -152,7 +153,7 @@ async def get_blocking_tasks(
         """
 
         result = await client.client.driver.execute_query(query, task_id=task_id)
-        rows = result[0] if result else []
+        rows = GraphClient.normalize_result(result)
 
         blocked_tasks: list[str] = []
         incomplete: list[str] = []
@@ -228,8 +229,8 @@ async def detect_dependency_cycles(
             """
             result = await client.client.driver.execute_query(query)
 
-        # Build adjacency list - extract rows from (rows, cols, meta) tuple
-        rows = result[0] if result else []
+        # Build adjacency list
+        rows = GraphClient.normalize_result(result)
         graph: dict[str, list[str]] = {}
         for record in rows:
             if isinstance(record, (list, tuple)):
@@ -335,8 +336,8 @@ async def suggest_task_order(  # noqa: PLR0915
             """
             task_result = await client.client.driver.execute_query(task_query)
 
-        # Build task set with priorities - extract rows from tuple
-        task_rows = task_result[0] if task_result else []
+        # Build task set with priorities
+        task_rows = GraphClient.normalize_result(task_result)
         tasks: dict[str, int] = {}  # task_id -> priority
         for record in task_rows:
             if isinstance(record, (list, tuple)):
@@ -374,8 +375,8 @@ async def suggest_task_order(  # noqa: PLR0915
             """
             dep_result = await client.client.driver.execute_query(dep_query)
 
-        # Build adjacency list and in-degree count - extract rows from tuple
-        dep_rows = dep_result[0] if dep_result else []
+        # Build adjacency list and in-degree count
+        dep_rows = GraphClient.normalize_result(dep_result)
         graph: dict[str, list[str]] = {task_id: [] for task_id in tasks}
         in_degree: dict[str, int] = dict.fromkeys(tasks, 0)
 

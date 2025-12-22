@@ -393,6 +393,36 @@ class CrawlHealthResponse(BaseModel):
     error: str | None = None
 
 
+class LinkGraphRequest(BaseModel):
+    """Request to link document chunks to the knowledge graph."""
+
+    batch_size: int = Field(default=50, ge=1, le=200, description="Chunks per batch")
+    dry_run: bool = Field(default=False, description="Preview without processing")
+
+
+class LinkGraphResponse(BaseModel):
+    """Response from graph linking operation."""
+
+    source_id: str | None = None  # None if processing all sources
+    status: str  # completed, dry_run, error, no_chunks
+    chunks_processed: int = 0
+    chunks_remaining: int = 0  # Unprocessed chunks still pending
+    entities_extracted: int = 0
+    entities_linked: int = 0
+    sources_processed: list[str] = Field(default_factory=list)
+    message: str | None = None
+    error: str | None = None
+
+
+class LinkGraphStatusResponse(BaseModel):
+    """Status of pending graph linking work."""
+
+    total_chunks: int = 0
+    chunks_with_entities: int = 0
+    chunks_pending: int = 0
+    sources: list[dict[str, int | str]] = Field(default_factory=list)  # [{name, pending}]
+
+
 # =============================================================================
 # RAG Search Schemas
 # =============================================================================

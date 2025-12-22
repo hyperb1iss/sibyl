@@ -225,6 +225,42 @@ class GraphClient:
             GraphClient._write_semaphore = asyncio.Semaphore(self._MAX_CONCURRENT_WRITES)
         return GraphClient._write_semaphore
 
+    @staticmethod
+    def normalize_result(result: object) -> list[dict]:  # type: ignore[type-arg]
+        """Normalize FalkorDB query results to a consistent list of dicts.
+
+        FalkorDB driver returns (records, header, metadata) tuple, but some
+        code paths expect just a list. This helper ensures consistent handling.
+
+        Args:
+            result: Raw result from execute_query
+
+        Returns:
+            List of result records (possibly empty)
+        """
+        if result is None:
+            return []
+        if isinstance(result, tuple):
+            # FalkorDB returns (records, header, metadata)
+            records = result[0] if len(result) > 0 else []
+            return records if records else []  # type: ignore[return-value]
+        if isinstance(result, list):
+            return result  # type: ignore[return-value]
+        return []
+
+    async def execute_read(self, query: str, **params: object) -> list[dict]:  # type: ignore[type-arg]
+        """Execute a read query and normalize results.
+
+        Args:
+            query: Cypher query to execute
+            **params: Query parameters
+
+        Returns:
+            List of result records as dicts
+        """
+        result = await self.client.driver.execute_query(query, **params)
+        return self.normalize_result(result)
+
     async def execute_write(self, query: str, **params: object) -> list[dict]:  # type: ignore[type-arg]
         """Execute a write query with serialization and result verification.
 
@@ -243,11 +279,7 @@ class GraphClient:
         """
         async with self.write_lock:
             result = await self.client.driver.execute_query(query, **params)
-            # FalkorDB driver returns (records, header, None)
-            if isinstance(result, tuple):
-                records, _, _ = result
-                return records if records else []  # type: ignore[return-value]
-            return result if result else []  # type: ignore[return-value]
+            return self.normalize_result(result)
 
     async def __aenter__(self) -> "GraphClient":
         """Async context manager entry."""
