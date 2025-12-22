@@ -264,13 +264,14 @@ async def get_full_graph(
             )
 
         # === EDGES: Direct Cypher query ===
+        # Use r.name for semantic type (BELONGS_TO, etc), not type(r) which returns graph label
         edge_query = f"""
             MATCH (source)-[r]->(target)
             WHERE r.group_id = 'conventions'
             RETURN r.uuid as id,
                    source.uuid as source_id,
                    target.uuid as target_id,
-                   type(r) as rel_type
+                   COALESCE(r.name, type(r)) as rel_type
             LIMIT {max_edges}
         """
         edge_result = await client.driver.execute_query(edge_query)

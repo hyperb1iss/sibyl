@@ -250,6 +250,9 @@ filterwarnings = [
     "error",
     "ignore::DeprecationWarning",
     "ignore:Remove `format_exc_info`:UserWarning",
+    # Suppress async cleanup warnings that occur during test teardown
+    "ignore:unclosed.*:ResourceWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
 ]
 markers = [
     "slow: marks tests as slow",
