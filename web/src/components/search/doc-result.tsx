@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import type { RAGChunkResult, RAGPageResult } from '@/lib/api';
 
 interface DocChunkResultProps {
@@ -28,9 +27,7 @@ export function DocChunkResult({ result }: DocChunkResultProps) {
             <span className="shrink-0 px-2 py-0.5 text-xs font-medium rounded bg-sc-cyan/10 text-sc-cyan border border-sc-cyan/20">
               {result.source_name}
             </span>
-            <span className="text-xs text-sc-fg-subtle shrink-0">
-              {result.chunk_type}
-            </span>
+            <span className="text-xs text-sc-fg-subtle shrink-0">{result.chunk_type}</span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <div className="w-16 h-1.5 bg-sc-bg-elevated rounded-full overflow-hidden">
@@ -56,20 +53,14 @@ export function DocChunkResult({ result }: DocChunkResultProps) {
         )}
 
         {/* Title */}
-        <h3 className="text-base font-semibold text-sc-fg-primary line-clamp-1">
-          {result.title}
-        </h3>
+        <h3 className="text-base font-semibold text-sc-fg-primary line-clamp-1">{result.title}</h3>
 
         {/* Content Preview */}
-        <p className="text-sc-fg-muted text-sm line-clamp-3 leading-relaxed">
-          {result.content}
-        </p>
+        <p className="text-sc-fg-muted text-sm line-clamp-3 leading-relaxed">{result.content}</p>
 
         {/* Footer: URL */}
         <div className="pt-1">
-          <span className="text-xs text-sc-fg-subtle truncate block">
-            {result.url}
-          </span>
+          <span className="text-xs text-sc-fg-subtle truncate block">{result.url}</span>
         </div>
       </div>
     </a>
@@ -119,9 +110,7 @@ export function DocPageResult({ result }: DocPageResultProps) {
         </div>
 
         {/* Title */}
-        <h3 className="text-base font-semibold text-sc-fg-primary line-clamp-1">
-          {result.title}
-        </h3>
+        <h3 className="text-base font-semibold text-sc-fg-primary line-clamp-1">{result.title}</h3>
 
         {/* Headings Preview */}
         {result.headings.length > 0 && (
@@ -151,9 +140,7 @@ export function DocPageResult({ result }: DocPageResultProps) {
         <div className="flex items-center justify-between pt-1">
           <div className="flex items-center gap-3 text-xs text-sc-fg-subtle">
             <span>{result.word_count.toLocaleString()} words</span>
-            {result.code_languages.length > 0 && (
-              <span>{result.code_languages.join(', ')}</span>
-            )}
+            {result.code_languages.length > 0 && <span>{result.code_languages.join(', ')}</span>}
           </div>
           <span className="text-xs text-sc-fg-subtle truncate max-w-[200px]">
             {new URL(result.url).hostname}
@@ -167,9 +154,7 @@ export function DocPageResult({ result }: DocPageResultProps) {
 /**
  * Determine if a result is a chunk or page result.
  */
-export function isChunkResult(
-  result: RAGChunkResult | RAGPageResult
-): result is RAGChunkResult {
+export function isChunkResult(result: RAGChunkResult | RAGPageResult): result is RAGChunkResult {
   return 'chunk_id' in result;
 }
 

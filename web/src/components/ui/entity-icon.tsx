@@ -4,15 +4,14 @@ import {
   Combine,
   Cube,
   EditPencil,
+  Flare,
   Flash,
   Folder,
   Globe,
   Hashtag,
   Journal,
-  LightBulb,
   List,
   Settings,
-  Flare,
   Terminal,
 } from 'iconoir-react';
 import type { ComponentType, SVGProps } from 'react';

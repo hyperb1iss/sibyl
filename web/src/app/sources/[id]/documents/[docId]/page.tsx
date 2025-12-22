@@ -1,11 +1,14 @@
 'use client';
 
+import Link from 'next/link';
+import { use, useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { Breadcrumb } from '@/components/layout/breadcrumb';
 import {
   ArrowLeft,
   Calendar,
   Check,
   ChevronRight,
-  Clock,
   ExternalLink,
   FileText,
   Hash,
@@ -15,11 +18,6 @@ import {
   X,
 } from '@/components/ui/icons';
 import { Markdown } from '@/components/ui/markdown';
-import Link from 'next/link';
-import { use, useCallback, useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
-
-import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { ENTITY_STYLES, formatDateTime } from '@/lib/constants';
 import { useDocumentEntities, useFullPage, useUpdateDocument } from '@/lib/hooks';
 
@@ -464,15 +462,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
   );
 }
 
-function StatRow({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
+function StatRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">

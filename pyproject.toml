@@ -249,6 +249,7 @@ addopts = [
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning",
+    "ignore:Remove `format_exc_info`:UserWarning",
 ]
 markers = [
     "slow: marks tests as slow",

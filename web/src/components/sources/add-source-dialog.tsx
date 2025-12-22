@@ -1,9 +1,9 @@
 'use client';
 
 import * as Dialog from '@radix-ui/react-dialog';
-import { FileText, Globe, Loader2, Plus, Upload, X } from '@/components/ui/icons';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { FileText, Globe, Loader2, Plus, Upload, X } from '@/components/ui/icons';
 import { api } from '@/lib/api';
 
 interface AddSourceDialogProps {
@@ -360,7 +360,11 @@ export function AddSourceDialog({
                             Display Name
                             {isFetchingTitle && (
                               <span className="ml-2 text-sc-purple text-xs">
-                                <Loader2 width={12} height={12} className="inline animate-spin mr-1" />
+                                <Loader2
+                                  width={12}
+                                  height={12}
+                                  className="inline animate-spin mr-1"
+                                />
                                 Fetching title...
                               </span>
                             )}
@@ -370,7 +374,11 @@ export function AddSourceDialog({
                             type="text"
                             value={urlName}
                             onChange={e => handleNameChange(e.target.value)}
-                            placeholder={isFetchingTitle ? 'Fetching from website...' : 'Auto-generated from page title'}
+                            placeholder={
+                              isFetchingTitle
+                                ? 'Fetching from website...'
+                                : 'Auto-generated from page title'
+                            }
                             className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-1 focus:ring-sc-purple/30 transition-colors"
                           />
                         </div>
@@ -604,7 +612,11 @@ export function AddSourceDialog({
                             </div>
                           ) : (
                             <div className="space-y-2">
-                              <Upload width={40} height={40} className="mx-auto text-sc-fg-subtle" />
+                              <Upload
+                                width={40}
+                                height={40}
+                                className="mx-auto text-sc-fg-subtle"
+                              />
                               <p className="text-sm text-sc-fg-muted">
                                 Drop a file here or click to browse
                               </p>

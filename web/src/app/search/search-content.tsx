@@ -12,13 +12,7 @@ import { SearchInput } from '@/components/ui/input';
 import { LoadingState } from '@/components/ui/spinner';
 import { FilterChip } from '@/components/ui/toggle';
 import { EmptyState, ErrorState } from '@/components/ui/tooltip';
-import type {
-  CodeExampleResponse,
-  RAGSearchResponse,
-  SearchResponse,
-  SearchResult,
-  StatsResponse,
-} from '@/lib/api';
+import type { SearchResponse, SearchResult, StatsResponse } from '@/lib/api';
 import { TASK_STATUS_CONFIG, TASK_STATUSES } from '@/lib/constants';
 import { useCodeExamples, useRAGHybridSearch, useSearch, useSources, useStats } from '@/lib/hooks';
 
@@ -100,7 +94,8 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
     },
     {
       enabled: mode === 'knowledge' && submittedQuery.length > 0,
-      initialData: submittedQuery === initialQuery && mode === 'knowledge' ? initialResults : undefined,
+      initialData:
+        submittedQuery === initialQuery && mode === 'knowledge' ? initialResults : undefined,
     }
   );
 
@@ -140,7 +135,8 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
   );
 
   // Get current mode's state
-  const isLoading = mode === 'knowledge' ? knowledgeLoading : mode === 'docs' ? docsLoading : codeLoading;
+  const isLoading =
+    mode === 'knowledge' ? knowledgeLoading : mode === 'docs' ? docsLoading : codeLoading;
   const error = mode === 'knowledge' ? knowledgeError : mode === 'docs' ? docsError : codeError;
 
   useEffect(() => {
@@ -273,7 +269,9 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
                         onClick={() => toggleType(type)}
                       >
                         {type.replace(/_/g, ' ')}
-                        {count > 0 && <span className="ml-1 text-[10px] opacity-70">({count})</span>}
+                        {count > 0 && (
+                          <span className="ml-1 text-[10px] opacity-70">({count})</span>
+                        )}
                       </FilterChip>
                     );
                   })}
@@ -338,7 +336,8 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
                       setSinceDate(d.toISOString().split('T')[0]);
                     }}
                     className={`text-xs px-2 py-1 rounded border transition-colors ${
-                      sinceDate && new Date(sinceDate) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+                      sinceDate &&
+                      new Date(sinceDate) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
                         ? 'bg-sc-purple/20 border-sc-purple/40 text-sc-purple'
                         : 'border-sc-fg-subtle/20 text-sc-fg-muted hover:border-sc-fg-subtle/40'
                     }`}
@@ -376,51 +375,51 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
           {/* Docs Mode Filters */}
           {mode === 'docs' && (
             <div className="flex flex-wrap gap-4">
-                {/* Source Filter */}
-                <div className="space-y-2 flex-1 min-w-[200px]">
-                  <span className="text-sc-fg-muted text-sm font-medium block">Source</span>
-                  <select
-                    value={selectedSource}
-                    onChange={e => setSelectedSource(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-elevated text-sc-fg-primary focus:outline-none focus:border-sc-purple/40"
-                  >
-                    <option value="">All sources</option>
-                    {sources.map(source => (
-                      <option key={source.id} value={source.id}>
-                        {source.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              {/* Source Filter */}
+              <div className="space-y-2 flex-1 min-w-[200px]">
+                <span className="text-sc-fg-muted text-sm font-medium block">Source</span>
+                <select
+                  value={selectedSource}
+                  onChange={e => setSelectedSource(e.target.value)}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-elevated text-sc-fg-primary focus:outline-none focus:border-sc-purple/40"
+                >
+                  <option value="">All sources</option>
+                  {sources.map(source => (
+                    <option key={source.id} value={source.id}>
+                      {source.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-                {/* Return Mode */}
-                <div className="space-y-2">
-                  <span className="text-sc-fg-muted text-sm font-medium block">Results as</span>
-                  <div className="flex gap-1 p-1 bg-sc-bg-elevated rounded-lg">
-                    <button
-                      type="button"
-                      onClick={() => setReturnMode('chunks')}
-                      className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                        returnMode === 'chunks'
-                          ? 'bg-sc-cyan text-sc-bg-dark'
-                          : 'text-sc-fg-muted hover:text-sc-fg-primary'
-                      }`}
-                    >
-                      Chunks
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setReturnMode('pages')}
-                      className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                        returnMode === 'pages'
-                          ? 'bg-sc-cyan text-sc-bg-dark'
-                          : 'text-sc-fg-muted hover:text-sc-fg-primary'
-                      }`}
-                    >
-                      Pages
-                    </button>
-                  </div>
+              {/* Return Mode */}
+              <div className="space-y-2">
+                <span className="text-sc-fg-muted text-sm font-medium block">Results as</span>
+                <div className="flex gap-1 p-1 bg-sc-bg-elevated rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setReturnMode('chunks')}
+                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                      returnMode === 'chunks'
+                        ? 'bg-sc-cyan text-sc-bg-dark'
+                        : 'text-sc-fg-muted hover:text-sc-fg-primary'
+                    }`}
+                  >
+                    Chunks
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReturnMode('pages')}
+                    className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                      returnMode === 'pages'
+                        ? 'bg-sc-cyan text-sc-bg-dark'
+                        : 'text-sc-fg-muted hover:text-sc-fg-primary'
+                    }`}
+                  >
+                    Pages
+                  </button>
                 </div>
+              </div>
             </div>
           )}
 
@@ -495,7 +494,10 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
                   <span className="font-medium">{filteredKnowledgeResults.length}</span> results
                   <span className="hidden xs:inline"> for "{submittedQuery}"</span>
                   {selectedTypes.length > 0 && (
-                    <span className="text-sc-fg-subtle hidden sm:inline"> in {selectedTypes.join(', ')}</span>
+                    <span className="text-sc-fg-subtle hidden sm:inline">
+                      {' '}
+                      in {selectedTypes.join(', ')}
+                    </span>
                   )}
                 </div>
                 <div className="space-y-2 sm:space-y-3">
@@ -527,7 +529,10 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
                 </div>
                 <div className="space-y-3">
                   {docsResults.results.map(result => (
-                    <DocResult key={'chunk_id' in result ? result.chunk_id : result.document_id} result={result} />
+                    <DocResult
+                      key={'chunk_id' in result ? result.chunk_id : result.document_id}
+                      result={result}
+                    />
                   ))}
                 </div>
               </>
@@ -538,33 +543,31 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
                 description="Try different keywords or check if sources have been crawled"
               />
             )
+          ) : // Code Results
+          codeResults && codeResults.examples.length > 0 ? (
+            <>
+              <div className="text-sc-fg-muted text-xs sm:text-sm">
+                <span className="font-medium">{codeResults.total}</span> code examples
+                <span className="hidden xs:inline"> for "{submittedQuery}"</span>
+                {codeResults.language_filter && (
+                  <span className="text-sc-fg-subtle hidden sm:inline">
+                    {' '}
+                    in {codeResults.language_filter}
+                  </span>
+                )}
+              </div>
+              <div className="space-y-3">
+                {codeResults.examples.map(result => (
+                  <CodeResult key={result.chunk_id} result={result} />
+                ))}
+              </div>
+            </>
           ) : (
-            // Code Results
-            codeResults && codeResults.examples.length > 0 ? (
-              <>
-                <div className="text-sc-fg-muted text-xs sm:text-sm">
-                  <span className="font-medium">{codeResults.total}</span> code examples
-                  <span className="hidden xs:inline"> for "{submittedQuery}"</span>
-                  {codeResults.language_filter && (
-                    <span className="text-sc-fg-subtle hidden sm:inline">
-                      {' '}
-                      in {codeResults.language_filter}
-                    </span>
-                  )}
-                </div>
-                <div className="space-y-3">
-                  {codeResults.examples.map(result => (
-                    <CodeResult key={result.chunk_id} result={result} />
-                  ))}
-                </div>
-              </>
-            ) : (
-              <EmptyState
-                icon=":"
-                title="No code examples found"
-                description="Try different keywords or check if sources contain code"
-              />
-            )
+            <EmptyState
+              icon=":"
+              title="No code examples found"
+              description="Try different keywords or check if sources contain code"
+            />
           )}
         </div>
       ) : (

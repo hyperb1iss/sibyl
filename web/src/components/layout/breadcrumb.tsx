@@ -91,7 +91,12 @@ export function Breadcrumb({ items, custom, className = '' }: BreadcrumbProps) {
         return (
           <Fragment key={crumb.href ?? crumb.label}>
             {index > 0 && (
-              <ChevronRight width={14} height={14} className="text-sc-fg-subtle/50 shrink-0" aria-hidden="true" />
+              <ChevronRight
+                width={14}
+                height={14}
+                className="text-sc-fg-subtle/50 shrink-0"
+                aria-hidden="true"
+              />
             )}
             {crumb.href && !isLast ? (
               <Link
@@ -102,7 +107,9 @@ export function Breadcrumb({ items, custom, className = '' }: BreadcrumbProps) {
                 <span className="hidden xs:inline">{crumb.label}</span>
               </Link>
             ) : (
-              <span className={`flex items-center gap-1.5 text-sc-fg-primary font-medium ${isLast ? 'min-w-0 truncate' : 'shrink-0'}`}>
+              <span
+                className={`flex items-center gap-1.5 text-sc-fg-primary font-medium ${isLast ? 'min-w-0 truncate' : 'shrink-0'}`}
+              >
                 {Icon && <Icon width={14} height={14} className="shrink-0" />}
                 <span className={isLast ? 'truncate' : ''}>{crumb.label}</span>
               </span>

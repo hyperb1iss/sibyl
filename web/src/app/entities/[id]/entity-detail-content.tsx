@@ -7,10 +7,10 @@ import { EntityBreadcrumb } from '@/components/layout/breadcrumb';
 import { EntityBadge } from '@/components/ui/badge';
 import { Button, ColorButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { EntityIcon } from '@/components/ui/entity-icon';
 import { Input, Textarea } from '@/components/ui/input';
 import type { Entity } from '@/lib/api';
-import { EntityIcon } from '@/components/ui/entity-icon';
-import { ENTITY_COLORS, formatDateTime, type EntityType } from '@/lib/constants';
+import { ENTITY_COLORS, type EntityType, formatDateTime } from '@/lib/constants';
 import { useDeleteEntity, useEntity, useUpdateEntity } from '@/lib/hooks';
 
 interface EntityDetailContentProps {
@@ -78,10 +78,7 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
         }}
       >
         {/* Accent bar */}
-        <div
-          className="absolute left-0 top-0 bottom-0 w-1.5"
-          style={{ backgroundColor: color }}
-        />
+        <div className="absolute left-0 top-0 bottom-0 w-1.5" style={{ backgroundColor: color }} />
 
         <div className="pl-5 pr-4 py-5">
           <div className="flex items-start justify-between gap-4">

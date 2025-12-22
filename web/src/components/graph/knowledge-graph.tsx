@@ -88,7 +88,6 @@ interface KnowledgeGraphProps {
 
 export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>(
   function KnowledgeGraph({ data, onNodeClick, selectedNodeId, searchTerm }, ref) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const graphRef = useRef<any>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -181,40 +180,44 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     }, [data, searchTerm, selectedNodeId]);
 
     // Custom node rendering with glow effect
-    const paintNode = useCallback((node: ForceNode, ctx: CanvasRenderingContext2D) => {
-      const size = node.size || 6;
-      const x = node.x || 0;
-      const y = node.y || 0;
-      const isSelected = node.id === selectedNodeId;
-      const isHighlighted = searchTerm && node.label?.toLowerCase().includes(searchTerm.toLowerCase());
+    const paintNode = useCallback(
+      (node: ForceNode, ctx: CanvasRenderingContext2D) => {
+        const size = node.size || 6;
+        const x = node.x || 0;
+        const y = node.y || 0;
+        const isSelected = node.id === selectedNodeId;
+        const isHighlighted =
+          searchTerm && node.label?.toLowerCase().includes(searchTerm.toLowerCase());
 
-      // Glow effect for selected/highlighted
-      if (isSelected || isHighlighted) {
+        // Glow effect for selected/highlighted
+        if (isSelected || isHighlighted) {
+          ctx.beginPath();
+          ctx.arc(x, y, size + 4, 0, 2 * Math.PI);
+          ctx.fillStyle = isSelected ? 'rgba(225, 53, 255, 0.4)' : 'rgba(128, 255, 234, 0.3)';
+          ctx.fill();
+        }
+
+        // Main node circle
         ctx.beginPath();
-        ctx.arc(x, y, size + 4, 0, 2 * Math.PI);
-        ctx.fillStyle = isSelected ? 'rgba(225, 53, 255, 0.4)' : 'rgba(128, 255, 234, 0.3)';
+        ctx.arc(x, y, size, 0, 2 * Math.PI);
+        ctx.fillStyle = node.color;
         ctx.fill();
-      }
 
-      // Main node circle
-      ctx.beginPath();
-      ctx.arc(x, y, size, 0, 2 * Math.PI);
-      ctx.fillStyle = node.color;
-      ctx.fill();
+        // Border
+        ctx.strokeStyle = isSelected ? '#e135ff' : 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = isSelected ? 2 : 0.5;
+        ctx.stroke();
 
-      // Border
-      ctx.strokeStyle = isSelected ? '#e135ff' : 'rgba(255, 255, 255, 0.2)';
-      ctx.lineWidth = isSelected ? 2 : 0.5;
-      ctx.stroke();
-
-      // Label
-      const fontSize = Math.max(3, size * 0.5);
-      ctx.font = `${fontSize}px "Space Grotesk", sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = '#a8a3b8';
-      ctx.fillText(node.label, x, y + size + 2);
-    }, [selectedNodeId, searchTerm]);
+        // Label
+        const fontSize = Math.max(3, size * 0.5);
+        ctx.font = `${fontSize}px "Space Grotesk", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = '#a8a3b8';
+        ctx.fillText(node.label, x, y + size + 2);
+      },
+      [selectedNodeId, searchTerm]
+    );
 
     // Custom link rendering with arrows
     const paintLink = useCallback((link: ForceLink, ctx: CanvasRenderingContext2D) => {
@@ -255,9 +258,12 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
       ctx.globalAlpha = 1;
     }, []);
 
-    const handleNodeClick = useCallback((node: ForceNode) => {
-      onNodeClick?.(node.id);
-    }, [onNodeClick]);
+    const handleNodeClick = useCallback(
+      (node: ForceNode) => {
+        onNodeClick?.(node.id);
+      },
+      [onNodeClick]
+    );
 
     const handleNodeDragEnd = useCallback((node: ForceNode) => {
       // Fix node position after drag
@@ -278,9 +284,13 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     }
 
     return (
-      <div ref={containerRef} className="relative w-full h-full bg-[#0a0812]" style={{ minHeight: '400px' }}>
+      <div
+        ref={containerRef}
+        className="relative w-full h-full bg-[#0a0812]"
+        style={{ minHeight: '400px' }}
+      >
         <ForceGraph2D
-          ref={graphRef as any}
+          ref={graphRef}
           graphData={graphData as any}
           nodeCanvasObject={paintNode as any}
           nodeCanvasObjectMode={() => 'replace'}

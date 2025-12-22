@@ -1,5 +1,11 @@
 'use client';
 
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useCallback, useState } from 'react';
+import { toast } from 'sonner';
+import { EditableDate, EditableSelect, EditableTags, EditableText } from '@/components/editable';
+import { EntityBadge } from '@/components/ui/badge';
 import {
   AlertCircle,
   Calendar,
@@ -22,13 +28,6 @@ import {
   Users,
   Zap,
 } from '@/components/ui/icons';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useCallback, useState } from 'react';
-import { toast } from 'sonner';
-
-import { EditableDate, EditableSelect, EditableTags, EditableText } from '@/components/editable';
-import { EntityBadge } from '@/components/ui/badge';
 import { Markdown } from '@/components/ui/markdown';
 import type { Entity, TaskStatus } from '@/lib/api';
 import {

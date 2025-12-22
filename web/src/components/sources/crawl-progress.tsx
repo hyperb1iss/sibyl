@@ -1,5 +1,7 @@
 'use client';
 
+import { AnimatePresence, motion } from 'motion/react';
+import { memo, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -11,8 +13,6 @@ import {
   Square,
   X,
 } from '@/components/ui/icons';
-import { AnimatePresence, motion } from 'motion/react';
-import { memo, useState } from 'react';
 
 export interface ActiveCrawlOperation {
   id: string;
@@ -200,7 +200,11 @@ const CrawlOperationCard = memo(function CrawlOperationCard({
               className="w-full flex items-center justify-between text-xs text-sc-fg-subtle hover:text-sc-fg-muted transition-colors"
             >
               <span>{operation.discoveredUrls.length} discovered URLs</span>
-              {isExpanded ? <ChevronUp width={14} height={14} /> : <ChevronDown width={14} height={14} />}
+              {isExpanded ? (
+                <ChevronUp width={14} height={14} />
+              ) : (
+                <ChevronDown width={14} height={14} />
+              )}
             </button>
 
             <AnimatePresence>
@@ -278,7 +282,11 @@ export const CrawlProgressPanel = memo(function CrawlProgressPanel({
           onClick={() => setIsCollapsed(!isCollapsed)}
           className="p-1 text-sc-fg-subtle hover:text-sc-fg-primary transition-colors"
         >
-          {isCollapsed ? <ChevronUp width={16} height={16} /> : <ChevronDown width={16} height={16} />}
+          {isCollapsed ? (
+            <ChevronUp width={16} height={16} />
+          ) : (
+            <ChevronDown width={16} height={16} />
+          )}
         </button>
       </div>
 

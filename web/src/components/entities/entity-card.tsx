@@ -45,10 +45,7 @@ export const EntityCard = memo(function EntityCard({
       }}
     >
       {/* Accent bar - entity type color */}
-      <div
-        className="absolute left-0 top-0 bottom-0 w-1"
-        style={{ backgroundColor: color }}
-      />
+      <div className="absolute left-0 top-0 bottom-0 w-1" style={{ backgroundColor: color }} />
 
       <div className="pl-4 pr-3 py-4">
         <div className="flex items-start justify-between gap-3">

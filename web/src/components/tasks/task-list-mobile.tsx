@@ -51,7 +51,10 @@ function sortTasks(tasks: TaskSummary[], sortBy: SortOption): TaskSummary[] {
         if (aDue && bDue) return new Date(aDue).getTime() - new Date(bDue).getTime();
         if (aDue) return -1;
         if (bDue) return 1;
-        return PRIORITY_ORDER[a.metadata.priority as string] ?? 2 - (PRIORITY_ORDER[b.metadata.priority as string] ?? 2);
+        return (
+          PRIORITY_ORDER[a.metadata.priority as string] ??
+          2 - (PRIORITY_ORDER[b.metadata.priority as string] ?? 2)
+        );
       });
 
     case 'created':
@@ -82,10 +85,11 @@ export const TaskListMobile = memo(function TaskListMobile({
   tasks,
   projects,
   currentProjectId,
-  onStatusChange,
+  onStatusChange: _onStatusChange,
   onTaskClick,
   onProjectFilter,
 }: TaskListMobileProps) {
+  void _onStatusChange; // Reserved for future use
   const [activeStatus, setActiveStatus] = useState<TaskStatusType>('todo');
   const [sortBy, setSortBy] = useState<SortOption>('priority');
   const [showSortMenu, setShowSortMenu] = useState(false);
@@ -181,6 +185,10 @@ export const TaskListMobile = memo(function TaskListMobile({
               <div
                 className="fixed inset-0 z-10"
                 onClick={() => setShowSortMenu(false)}
+                onKeyDown={e => e.key === 'Escape' && setShowSortMenu(false)}
+                role="button"
+                tabIndex={0}
+                aria-label="Close menu"
               />
               <div className="absolute right-0 top-full mt-1 z-20 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg shadow-lg py-1 min-w-[120px]">
                 {SORT_OPTIONS.map(option => (
@@ -193,9 +201,10 @@ export const TaskListMobile = memo(function TaskListMobile({
                     }}
                     className={`
                       w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors
-                      ${sortBy === option.value
-                        ? 'text-sc-purple bg-sc-purple/10'
-                        : 'text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight'
+                      ${
+                        sortBy === option.value
+                          ? 'text-sc-purple bg-sc-purple/10'
+                          : 'text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight'
                       }
                     `}
                   >
@@ -219,9 +228,7 @@ export const TaskListMobile = memo(function TaskListMobile({
               exit={{ opacity: 0 }}
               className="flex flex-col items-center justify-center py-12 text-center"
             >
-              <span className="text-2xl mb-2">
-                {TASK_STATUS_CONFIG[activeStatus].icon}
-              </span>
+              <span className="text-2xl mb-2">{TASK_STATUS_CONFIG[activeStatus].icon}</span>
               <span className="text-sc-fg-muted text-sm">
                 No {TASK_STATUS_CONFIG[activeStatus].label.toLowerCase()} tasks
               </span>

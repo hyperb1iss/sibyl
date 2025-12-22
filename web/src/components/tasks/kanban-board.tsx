@@ -3,7 +3,15 @@
 import * as Popover from '@radix-ui/react-popover';
 import { AnimatePresence, motion } from 'motion/react';
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
-import { ArrowDownAZ, ArrowUpDown, Calendar, Check, Flame, Sparkles, Zap } from '@/components/ui/icons';
+import {
+  ArrowDownAZ,
+  ArrowUpDown,
+  Calendar,
+  Check,
+  Flame,
+  Sparkles,
+  Zap,
+} from '@/components/ui/icons';
 import type { TaskStatus, TaskSummary } from '@/lib/api';
 import { TASK_STATUS_CONFIG, TASK_STATUSES } from '@/lib/constants';
 import { TaskCard, TaskCardSkeleton } from './task-card';
@@ -162,7 +170,9 @@ const SortDropdown = memo(function SortDropdown({
                   >
                     <span className="opacity-70">{option.icon}</span>
                     <span className="flex-1 text-left">{option.label}</span>
-                    {value === option.value && <Check width={12} height={12} className="text-sc-purple" />}
+                    {value === option.value && (
+                      <Check width={12} height={12} className="text-sc-purple" />
+                    )}
                   </button>
                 ))}
               </motion.div>
@@ -396,7 +406,10 @@ export function KanbanBoard({
     return (
       <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 -mx-3 px-3 sm:mx-0 sm:px-0">
         {TASK_STATUSES.map(status => (
-          <div key={status} className="flex-1 min-w-[260px] sm:min-w-[300px] max-w-[320px] sm:max-w-[380px]">
+          <div
+            key={status}
+            className="flex-1 min-w-[260px] sm:min-w-[300px] max-w-[320px] sm:max-w-[380px]"
+          >
             <div className="flex items-center gap-2 mb-3 px-1">
               <div className="w-5 h-5 bg-sc-bg-elevated rounded animate-pulse" />
               <div className="w-16 h-4 bg-sc-bg-elevated rounded animate-pulse" />

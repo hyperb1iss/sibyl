@@ -13,7 +13,9 @@ export function PageHeader({ title, description, action, meta }: PageHeaderProps
       <div className="min-w-0">
         <h1 className="text-lg sm:text-2xl font-bold text-sc-fg-primary truncate">{title}</h1>
         {description && (
-          <p className="text-xs sm:text-base text-sc-fg-muted mt-0.5 sm:mt-1 line-clamp-1 sm:line-clamp-2">{description}</p>
+          <p className="text-xs sm:text-base text-sc-fg-muted mt-0.5 sm:mt-1 line-clamp-1 sm:line-clamp-2">
+            {description}
+          </p>
         )}
       </div>
       <div className="flex items-center gap-2 sm:gap-3 shrink-0">

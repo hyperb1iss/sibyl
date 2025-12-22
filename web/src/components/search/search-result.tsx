@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { EntityBadge } from '@/components/ui/badge';
-import { ENTITY_ICONS, getEntityStyles, type EntityType } from '@/lib/constants';
+import { ENTITY_ICONS, type EntityType, getEntityStyles } from '@/lib/constants';
 
 interface SearchResult {
   id: string;

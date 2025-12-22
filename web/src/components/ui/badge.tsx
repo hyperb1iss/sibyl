@@ -17,7 +17,12 @@ interface EntityBadgeProps {
   className?: string;
 }
 
-export function EntityBadge({ type, size = 'sm', showIcon = false, className = '' }: EntityBadgeProps) {
+export function EntityBadge({
+  type,
+  size = 'sm',
+  showIcon = false,
+  className = '',
+}: EntityBadgeProps) {
   const color = ENTITY_COLORS[type as EntityType] ?? '#8b85a0';
   const sizeConfig = sizes[size];
 

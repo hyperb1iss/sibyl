@@ -277,10 +277,7 @@ export function EntityTypeChip({
       }}
     >
       <span className="relative flex items-center gap-1.5">
-        <span
-          className="transition-transform duration-200 group-hover:scale-110"
-          style={{ color }}
-        >
+        <span className="transition-transform duration-200 group-hover:scale-110" style={{ color }}>
           <EntityIcon type={entityType} size={14} />
         </span>
         <span style={{ color: active ? color : 'var(--sc-fg-muted)' }}>

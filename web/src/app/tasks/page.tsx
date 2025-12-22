@@ -1,7 +1,6 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { FolderKanban, Hash, LayoutDashboard, ListTodo, X } from '@/components/ui/icons';
 import { Suspense, useCallback, useMemo, useState } from 'react';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { KanbanBoard } from '@/components/tasks/kanban-board';
@@ -9,6 +8,7 @@ import { type QuickTaskData, QuickTaskModal } from '@/components/tasks/quick-tas
 import { TaskListMobile } from '@/components/tasks/task-list-mobile';
 import { CommandPalette, useKeyboardShortcuts } from '@/components/ui/command-palette';
 import { TasksEmptyState } from '@/components/ui/empty-state';
+import { FolderKanban, Hash, LayoutDashboard, ListTodo, X } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
 import { FilterChip, TagChip } from '@/components/ui/toggle';
 import { ErrorState } from '@/components/ui/tooltip';

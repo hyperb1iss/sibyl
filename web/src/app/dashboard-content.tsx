@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useMemo } from 'react';
 import {
   Activity,
   ArrowRight,
@@ -20,7 +21,6 @@ import {
   Target,
   Zap,
 } from '@/components/ui/icons';
-import { useMemo } from 'react';
 import type { StatsResponse } from '@/lib/api';
 import { ENTITY_COLORS, formatUptime } from '@/lib/constants';
 import { useHealth, useProjects, useStats, useTasks } from '@/lib/hooks';
@@ -209,7 +209,11 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <FolderKanban width={14} height={14} className="text-sc-purple shrink-0 sm:w-4 sm:h-4" />
+                <FolderKanban
+                  width={14}
+                  height={14}
+                  className="text-sc-purple shrink-0 sm:w-4 sm:h-4"
+                />
                 <span className="text-xs sm:text-sm text-sc-fg-muted">
                   <span className="text-sc-fg-primary font-medium">{projectCount}</span> Projects
                 </span>
@@ -381,7 +385,8 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 </div>
               </div>
               <ArrowRight
-                width={14} height={14}
+                width={14}
+                height={14}
                 className="text-sc-fg-subtle group-hover:text-sc-cyan transition-colors shrink-0 sm:w-4 sm:h-4"
               />
             </Link>
@@ -391,7 +396,11 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-purple/30 hover:bg-sc-bg-highlight transition-all group"
             >
               <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-purple/10 flex items-center justify-center shrink-0">
-                <Network width={16} height={16} className="text-sc-purple sm:w-[18px] sm:h-[18px]" />
+                <Network
+                  width={16}
+                  height={16}
+                  className="text-sc-purple sm:w-[18px] sm:h-[18px]"
+                />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-purple transition-colors truncate">
@@ -402,7 +411,8 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 </div>
               </div>
               <ArrowRight
-                width={14} height={14}
+                width={14}
+                height={14}
                 className="text-sc-fg-subtle group-hover:text-sc-purple transition-colors shrink-0 sm:w-4 sm:h-4"
               />
             </Link>
@@ -423,7 +433,8 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 </div>
               </div>
               <ArrowRight
-                width={14} height={14}
+                width={14}
+                height={14}
                 className="text-sc-fg-subtle group-hover:text-sc-coral transition-colors shrink-0 sm:w-4 sm:h-4"
               />
             </Link>
@@ -433,7 +444,11 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-green/30 hover:bg-sc-bg-highlight transition-all group"
             >
               <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-green/10 flex items-center justify-center shrink-0">
-                <RefreshCw width={16} height={16} className="text-sc-green sm:w-[18px] sm:h-[18px]" />
+                <RefreshCw
+                  width={16}
+                  height={16}
+                  className="text-sc-green sm:w-[18px] sm:h-[18px]"
+                />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-green transition-colors truncate">
@@ -444,7 +459,8 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 </div>
               </div>
               <ArrowRight
-                width={14} height={14}
+                width={14}
+                height={14}
                 className="text-sc-fg-subtle group-hover:text-sc-green transition-colors shrink-0 sm:w-4 sm:h-4"
               />
             </Link>

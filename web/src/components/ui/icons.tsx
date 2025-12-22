@@ -32,8 +32,8 @@ import {
   Flash,
   Folder,
   GitBranch,
-  GitPullRequest,
   Github,
+  GitPullRequest,
   Globe,
   Group,
   Hashtag,
@@ -175,7 +175,7 @@ export {
   Collapse as Minimize2,
   PlusCircle,
   MinusCircle,
-  ZoomIn as Focus,  // Using ZoomIn for focus/fit-to-view
+  ZoomIn as Focus, // Using ZoomIn for focus/fit-to-view
   // Direct exports (same name in both)
   Sparks,
   Flash,

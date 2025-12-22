@@ -113,7 +113,9 @@ export function EditableSelect({
                         >
                           {option.label}
                         </span>
-                        {isSelected && <Check width={14} height={14} className="ml-auto text-sc-green" />}
+                        {isSelected && (
+                          <Check width={14} height={14} className="ml-auto text-sc-green" />
+                        )}
                       </button>
                     );
                   })}

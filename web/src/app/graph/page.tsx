@@ -75,19 +75,17 @@ function TypeChip({
 }
 
 // Mobile bottom sheet for entity details
-function MobileEntitySheet({
-  entityId,
-  onClose,
-}: {
-  entityId: string;
-  onClose: () => void;
-}) {
+function MobileEntitySheet({ entityId, onClose }: { entityId: string; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 md:hidden">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onClose}
+        onKeyDown={e => e.key === 'Escape' && onClose()}
+        role="button"
+        tabIndex={0}
+        aria-label="Close panel"
       />
       {/* Sheet */}
       <div className="absolute bottom-0 left-0 right-0 max-h-[70vh] bg-sc-bg-base rounded-t-2xl overflow-hidden animate-slide-up">
@@ -141,9 +139,7 @@ function GraphToolbar({
   }, []);
 
   const entityCounts = stats?.entity_counts || {};
-  const availableTypes = ENTITY_TYPES.filter(
-    type => (entityCounts[type] || 0) > 0
-  );
+  const availableTypes = ENTITY_TYPES.filter(type => (entityCounts[type] || 0) > 0);
 
   const toggleType = (type: string) => {
     const newTypes = filters.types.includes(type)
@@ -160,9 +156,8 @@ function GraphToolbar({
     onFilterChange({ ...filters, types: ['__none__'] });
   };
 
-  const activeFilterCount = filters.types.length > 0 && filters.types[0] !== '__none__'
-    ? filters.types.length
-    : 0;
+  const activeFilterCount =
+    filters.types.length > 0 && filters.types[0] !== '__none__' ? filters.types.length : 0;
 
   return (
     <>
@@ -237,7 +232,6 @@ function GraphToolbar({
                 value={filters.search}
                 onChange={e => onFilterChange({ ...filters, search: e.target.value })}
                 className="flex-1 bg-transparent text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:outline-none"
-                autoFocus
               />
               {filters.search && (
                 <button
@@ -255,7 +249,9 @@ function GraphToolbar({
 
       {/* Mobile filter chips (expandable) */}
       {showFilters && (
-        <div className={`absolute ${showSearch ? 'top-28' : 'top-14'} left-2 right-2 z-10 md:hidden animate-fade-in`}>
+        <div
+          className={`absolute ${showSearch ? 'top-28' : 'top-14'} left-2 right-2 z-10 md:hidden animate-fade-in`}
+        >
           <Card className="!p-2 overflow-hidden">
             <div className="flex items-center gap-2 mb-2 text-xs">
               <span className="text-sc-fg-muted">Filter:</span>
@@ -486,16 +482,12 @@ function GraphPageContent() {
 
     const searchLower = filters.search.toLowerCase();
     const matchingNodeIds = new Set(
-      data.nodes
-        .filter(n => n.label?.toLowerCase().includes(searchLower))
-        .map(n => n.id)
+      data.nodes.filter(n => n.label?.toLowerCase().includes(searchLower)).map(n => n.id)
     );
 
     return {
       nodes: data.nodes.filter(n => matchingNodeIds.has(n.id)),
-      edges: data.edges.filter(
-        e => matchingNodeIds.has(e.source) && matchingNodeIds.has(e.target)
-      ),
+      edges: data.edges.filter(e => matchingNodeIds.has(e.source) && matchingNodeIds.has(e.target)),
     };
   }, [data, filters.search]);
 
@@ -588,9 +580,7 @@ function GraphPageContent() {
                     className="w-2 h-2 rounded-full"
                     style={{ backgroundColor: ENTITY_COLORS[type] }}
                   />
-                  <span className="text-sc-fg-subtle capitalize">
-                    {type.replace(/_/g, ' ')}
-                  </span>
+                  <span className="text-sc-fg-subtle capitalize">{type.replace(/_/g, ' ')}</span>
                 </div>
               ))}
             </Card>
@@ -618,9 +608,7 @@ function GraphPageContent() {
       </div>
 
       {/* Entity detail panel - mobile bottom sheet */}
-      {selectedNodeId && (
-        <MobileEntitySheet entityId={selectedNodeId} onClose={handleClosePanel} />
-      )}
+      {selectedNodeId && <MobileEntitySheet entityId={selectedNodeId} onClose={handleClosePanel} />}
     </div>
   );
 }

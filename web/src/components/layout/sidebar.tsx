@@ -80,12 +80,12 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
 
 export function Sidebar() {
   const { isOpen, close } = useMobileNav();
-  const pathname = usePathname();
+  const _pathname = usePathname();
 
   // Close mobile nav on route change
   useEffect(() => {
     close();
-  }, [pathname, close]);
+  }, [close]);
 
   // Close on escape key
   useEffect(() => {

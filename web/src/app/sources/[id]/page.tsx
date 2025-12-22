@@ -1,5 +1,9 @@
 'use client';
 
+import Link from 'next/link';
+import { use, useCallback, useState } from 'react';
+import { toast } from 'sonner';
+import { Breadcrumb } from '@/components/layout/breadcrumb';
 import {
   ArrowLeft,
   Calendar,
@@ -14,15 +18,14 @@ import {
   RefreshCw,
   StopCircle,
 } from '@/components/ui/icons';
-import Link from 'next/link';
-import { use, useCallback, useState } from 'react';
-import { toast } from 'sonner';
-
-import { Breadcrumb } from '@/components/layout/breadcrumb';
-import { PageHeader } from '@/components/layout/page-header';
-import type { CrawlSource } from '@/lib/api';
-import { formatDateTime, SOURCE_TYPE_CONFIG, CRAWL_STATUS_CONFIG } from '@/lib/constants';
-import { useCancelCrawl, useCrawlSource, useSource, useSourcePages, useSyncSource } from '@/lib/hooks';
+import { CRAWL_STATUS_CONFIG, formatDateTime, SOURCE_TYPE_CONFIG } from '@/lib/constants';
+import {
+  useCancelCrawl,
+  useCrawlSource,
+  useSource,
+  useSourcePages,
+  useSyncSource,
+} from '@/lib/hooks';
 
 interface SourceDetailPageProps {
   params: Promise<{ id: string }>;
@@ -141,9 +144,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
                 {statusConfig.label}
               </span>
             </div>
-            {source.description && (
-              <p className="text-sc-fg-muted mt-2">{source.description}</p>
-            )}
+            {source.description && <p className="text-sc-fg-muted mt-2">{source.description}</p>}
             <a
               href={source.url}
               target="_blank"
@@ -298,7 +299,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
           </div>
         ) : (
           <div className="space-y-2">
-            {pages.map((page) => (
+            {pages.map(page => (
               <Link
                 key={page.id}
                 href={`/sources/${id}/documents/${page.id}`}
@@ -326,7 +327,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
                   </span>
                   <button
                     type="button"
-                    onClick={(e) => {
+                    onClick={e => {
                       e.preventDefault();
                       e.stopPropagation();
                       window.open(page.url, '_blank', 'noopener,noreferrer');

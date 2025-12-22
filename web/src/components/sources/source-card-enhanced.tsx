@@ -1,6 +1,8 @@
 'use client';
 
 import { AnimatePresence, motion } from 'motion/react';
+import Link from 'next/link';
+import { memo, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -15,8 +17,6 @@ import {
   StopCircle,
   Trash2,
 } from '@/components/ui/icons';
-import Link from 'next/link';
-import { memo, useState } from 'react';
 import type { SourceSummary } from '@/lib/api';
 import {
   CRAWL_STATUS_CONFIG,

@@ -51,14 +51,10 @@ export function CodeResult({ result }: CodeResultProps) {
       {/* Header */}
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-sc-fg-subtle/10">
         <div className="flex items-center gap-2 min-w-0">
-          <span
-            className={`shrink-0 px-2 py-0.5 text-xs font-medium rounded border ${langColor}`}
-          >
+          <span className={`shrink-0 px-2 py-0.5 text-xs font-medium rounded border ${langColor}`}>
             {result.language || 'code'}
           </span>
-          <span className="text-xs text-sc-fg-subtle truncate">
-            {result.source_name}
-          </span>
+          <span className="text-xs text-sc-fg-subtle truncate">{result.source_name}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <div className="w-16 h-1.5 bg-sc-bg-elevated rounded-full overflow-hidden">
@@ -108,12 +104,8 @@ export function CodeResult({ result }: CodeResultProps) {
 
       {/* Footer */}
       <div className="flex items-center justify-between px-4 py-2 border-t border-sc-fg-subtle/10">
-        <span className="text-sm font-medium text-sc-fg-primary truncate">
-          {result.title}
-        </span>
-        <span className="text-xs text-sc-fg-subtle shrink-0">
-          {new URL(result.url).hostname}
-        </span>
+        <span className="text-sm font-medium text-sc-fg-primary truncate">{result.title}</span>
+        <span className="text-xs text-sc-fg-subtle shrink-0">{new URL(result.url).hostname}</span>
       </div>
     </a>
   );

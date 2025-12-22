@@ -1,6 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useCallback, useMemo } from 'react';
+import { Breadcrumb } from '@/components/layout/breadcrumb';
+import { PageHeader } from '@/components/layout/page-header';
+import { ProjectsEmptyState } from '@/components/ui/empty-state';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -12,11 +17,6 @@ import {
   Plus,
   Zap,
 } from '@/components/ui/icons';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useMemo } from 'react';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
-import { PageHeader } from '@/components/layout/page-header';
-import { ProjectsEmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/ui/tooltip';
 import type { TaskListResponse, TaskStatus, TaskSummary } from '@/lib/api';
 import { TASK_STATUS_CONFIG } from '@/lib/constants';
@@ -521,7 +521,11 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
               (stats?.blocked ?? 0) > 0 ? 'text-sc-yellow' : 'text-sc-coral'
             }`}
           >
-            {(stats?.blocked ?? 0) > 0 ? <Pause width={16} height={16} /> : <AlertTriangle width={16} height={16} />}
+            {(stats?.blocked ?? 0) > 0 ? (
+              <Pause width={16} height={16} />
+            ) : (
+              <AlertTriangle width={16} height={16} />
+            )}
             <span className="text-sm font-medium">
               {(stats?.blocked ?? 0) > 0 ? 'Blocked' : 'Urgent'}
             </span>
