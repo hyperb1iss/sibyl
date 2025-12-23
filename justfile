@@ -25,3 +25,13 @@ test *args:
 # Run the server
 serve:
     uv run sibyl serve
+
+# Install sibyl skills globally (Claude + Codex)
+install-skills:
+    @echo "Installing Sibyl skills..."
+    @mkdir -p ~/.claude/skills ~/.codex/skills
+    @ln -sfn "$(pwd)/.claude/skills/sibyl-knowledge" ~/.claude/skills/sibyl-knowledge
+    @ln -sfn "$(pwd)/.claude/skills/sibyl-project-manager" ~/.claude/skills/sibyl-project-manager
+    @ln -sfn "$(pwd)/.claude/skills/sibyl-knowledge" ~/.codex/skills/sibyl-knowledge
+    @ln -sfn "$(pwd)/.claude/skills/sibyl-project-manager" ~/.codex/skills/sibyl-project-manager
+    @echo "✓ Installed to ~/.claude/skills and ~/.codex/skills"
