@@ -276,6 +276,59 @@ class OrganizationInvitation(TimestampMixin, table=True):
 
 
 # =============================================================================
+# Device Authorization - CLI login without local callback server
+# =============================================================================
+
+
+class DeviceAuthorizationRequest(TimestampMixin, table=True):
+    """Short-lived device authorization request (RFC 8628-style)."""
+
+    __tablename__ = "device_authorization_requests"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+
+    # Store only a hash of the device code (never the raw device_code)
+    device_code_hash: str = Field(
+        max_length=64,
+        unique=True,
+        index=True,
+        description="SHA256 hex digest of device_code",
+    )
+    # Short code shown to the user; stored normalized (e.g. ABCD-EFGH)
+    user_code: str = Field(
+        max_length=16,
+        unique=True,
+        index=True,
+        description="Human-friendly user code",
+    )
+
+    client_name: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional client display name",
+    )
+    scope: str = Field(default="mcp", max_length=255, description="Requested scope(s)")
+
+    status: str = Field(
+        default="pending",
+        max_length=16,
+        index=True,
+        description="pending|approved|denied|consumed",
+    )
+
+    poll_interval_seconds: int = Field(default=5, description="Recommended polling interval")
+    last_polled_at: datetime | None = Field(default=None, description="Last polling timestamp")
+
+    expires_at: datetime = Field(description="Expiry timestamp")
+    approved_at: datetime | None = Field(default=None, description="Approval timestamp")
+    denied_at: datetime | None = Field(default=None, description="Denial timestamp")
+    consumed_at: datetime | None = Field(default=None, description="Token issuance timestamp")
+
+    user_id: UUID | None = Field(default=None, foreign_key="users.id", index=True)
+    organization_id: UUID | None = Field(default=None, foreign_key="organizations.id", index=True)
+
+
+# =============================================================================
 # CrawlSource - Documentation sources to crawl
 # =============================================================================
 

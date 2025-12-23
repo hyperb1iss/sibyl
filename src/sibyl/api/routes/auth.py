@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from urllib.parse import quote, urlencode, urlparse
 from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -21,6 +21,11 @@ from sibyl.auth.dependencies import (
     get_current_user,
     require_org_admin,
     resolve_claims,
+)
+from sibyl.auth.device_authorization import (
+    DeviceAuthorizationManager,
+    DeviceTokenError,
+    normalize_user_code,
 )
 from sibyl.auth.jwt import create_access_token
 from sibyl.auth.memberships import OrganizationMembershipManager
@@ -124,6 +129,18 @@ class LocalLoginRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
     password: str = Field(..., min_length=1, max_length=1024)
     redirect: str | None = None
+
+
+class DeviceStartRequest(BaseModel):
+    client_name: str | None = Field(default=None, max_length=255)
+    scope: str = Field(default="mcp", max_length=255)
+    interval: int = Field(default=5, ge=1, le=60, description="Polling interval seconds")
+    expires_in: int = Field(default=600, ge=60, le=3600, description="Expiry seconds")
+
+
+class DeviceTokenRequest(BaseModel):
+    device_code: str = Field(..., min_length=10, max_length=512)
+    grant_type: str | None = Field(default=None, description="Optional, OAuth-style")
 
 
 async def _github_exchange_code(*, code: str, redirect_uri: str) -> str:
@@ -389,6 +406,309 @@ async def local_login(
         "organization": {"id": str(org.id), "slug": org.slug, "name": org.name},
         "access_token": token,
     }
+
+
+@router.post("/device", response_model=None)
+async def device_start(
+    request: Request,
+    session: AsyncSession = Depends(get_session_dependency),
+) -> dict[str, object]:
+    """Start a device authorization request (for CLI login)."""
+    _ = _require_jwt_secret()
+    data = await _read_auth_payload(request)
+    body = DeviceStartRequest.model_validate(data)
+
+    mgr = DeviceAuthorizationManager(session)
+    req, device_code = await mgr.start(
+        client_name=body.client_name,
+        scope=body.scope,
+        expires_in=timedelta(seconds=body.expires_in),
+        poll_interval_seconds=body.interval,
+    )
+
+    verify_url = f"{config_module.settings.server_url.rstrip('/')}/api/auth/device/verify"
+    return {
+        "device_code": device_code,
+        "user_code": req.user_code,
+        "verification_uri": verify_url,
+        "verification_uri_complete": f"{verify_url}?user_code={req.user_code}",
+        "expires_in": int(body.expires_in),
+        "interval": int(body.interval),
+    }
+
+
+@router.post("/device/token", response_model=None)
+async def device_token(
+    request: Request,
+    session: AsyncSession = Depends(get_session_dependency),
+) -> Response:
+    """Poll the device token endpoint until approved."""
+    _ = _require_jwt_secret()
+    data = await _read_auth_payload(request)
+    body = DeviceTokenRequest.model_validate(data)
+    if body.grant_type and body.grant_type != "urn:ietf:params:oauth:grant-type:device_code":
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"error": "unsupported_grant_type"},
+        )
+
+    mgr = DeviceAuthorizationManager(session)
+    try:
+        tok = await mgr.exchange_device_code(device_code=body.device_code)
+    except DeviceTokenError as e:
+        content: dict[str, object] = {"error": e.error}
+        if e.error_description:
+            content["error_description"] = e.error_description
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content=content)
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content=tok)
+
+
+def _render_device_verify_page(
+    *,
+    user_code: str | None,
+    error_code: str | None = None,
+    authed_user: User | None = None,
+    pending: dict[str, object] | None = None,
+) -> HTMLResponse:
+    safe_code = user_code or ""
+    err = error_code or ""
+    is_authed = authed_user is not None
+    title = "Approve Device Login"
+
+    client_name = ""
+    scope = ""
+    expires_at = ""
+    if pending:
+        client_name = str(pending.get("client_name") or "")
+        scope = str(pending.get("scope") or "")
+        expires_at = str(pending.get("expires_at") or "")
+
+    authed_banner = (
+        f"<div class='sub'>Signed in as <strong>{authed_user.email or authed_user.name}</strong></div>"
+        if is_authed
+        else "<div class='sub'>Sign in to approve this device.</div>"
+    )
+
+    error_html = f"<div class='err'>Error: <code>{err}</code></div>" if err else ""
+
+    pending_html = ""
+    if pending:
+        pending_html = (
+            "<div class='card'>"
+            f"<div><strong>Client</strong>: {client_name or 'sibyl-cli'}</div>"
+            f"<div><strong>Scope</strong>: <code>{scope or 'mcp'}</code></div>"
+            f"<div><strong>Expires</strong>: {expires_at}</div>"
+            "</div>"
+        )
+
+    login_form = f"""
+    <form method="post" action="/api/auth/device/verify">
+      <input type="hidden" name="action" value="login" />
+      <input type="hidden" name="user_code" value="{safe_code}" />
+      <label>Email</label>
+      <input name="email" type="email" autocomplete="username" required />
+      <label>Password</label>
+      <input name="password" type="password" autocomplete="current-password" required />
+      <button type="submit">Sign in</button>
+    </form>
+    """
+
+    approve_form = f"""
+    <form method="post" action="/api/auth/device/verify">
+      <input type="hidden" name="action" value="approve" />
+      <input type="hidden" name="user_code" value="{safe_code}" />
+      <button type="submit">Approve</button>
+    </form>
+    <form method="post" action="/api/auth/device/verify" style="margin-top: 10px">
+      <input type="hidden" name="action" value="deny" />
+      <input type="hidden" name="user_code" value="{safe_code}" />
+      <button type="submit" class="secondary">Deny</button>
+    </form>
+    """
+
+    code_form = f"""
+    <form method="get" action="/api/auth/device/verify">
+      <label>Device code</label>
+      <input name="user_code" value="{safe_code}" placeholder="ABCD-EFGH" />
+      <button type="submit">Continue</button>
+    </form>
+    """
+
+    body_html = code_form if not safe_code else (login_form if not is_authed else approve_form)
+
+    html = f"""
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title}</title>
+  <style>
+    :root {{ color-scheme: dark; }}
+    body {{ font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: #0b0b10; color: #e8e8f0; margin: 0; }}
+    .wrap {{ max-width: 560px; margin: 8vh auto; padding: 24px; background: #12121a; border: 1px solid #2a2a3a; border-radius: 14px; }}
+    h1 {{ margin: 0 0 8px; font-size: 22px; }}
+    .sub {{ color: #a7a7c7; margin-bottom: 18px; }}
+    label {{ display: block; margin: 12px 0 6px; color: #cfcfe9; }}
+    input {{ width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #2a2a3a; background: #0f0f16; color: #fff; }}
+    button {{ margin-top: 16px; width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #3a2a6a; background: #5b2bff; color: #fff; font-weight: 600; cursor: pointer; }}
+    button.secondary {{ background: #1a1a24; border-color: #2a2a3a; }}
+    .card {{ margin: 16px 0; padding: 12px; border-radius: 12px; border: 1px solid #2a2a3a; background: #0f0f16; color: #cfcfe9; }}
+    .err {{ margin: 12px 0; padding: 10px 12px; border-radius: 12px; border: 1px solid #5a2a2a; background: #1a0f12; color: #ffb4b4; }}
+    code {{ color: #80ffea; }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>{title}</h1>
+    {authed_banner}
+    {error_html}
+    {pending_html}
+    {body_html}
+  </div>
+</body>
+</html>
+"""
+    return HTMLResponse(html, status_code=200)
+
+
+@router.get("/device/verify", response_model=None)
+async def device_verify_get(
+    request: Request,
+    session: AsyncSession = Depends(get_session_dependency),
+) -> Response:
+    """User-facing approval page for device login."""
+    _ = _require_jwt_secret()
+    raw_code = request.query_params.get("user_code")
+    user_code = normalize_user_code(raw_code)
+    error_code = (request.query_params.get("error") or "").strip() or None
+
+    claims = await resolve_claims(request, session)
+    user: User | None = None
+    if claims:
+        try:
+            user_id = UUID(str(claims.get("sub", "")))
+        except ValueError:
+            user_id = None
+        if user_id:
+            user = await session.get(User, user_id)
+
+    pending: dict[str, object] | None = None
+    if user_code:
+        req = await DeviceAuthorizationManager(session).get_by_user_code(user_code)
+        if req is None:
+            return _render_device_verify_page(
+                user_code=user_code,
+                error_code="invalid_user_code",
+                authed_user=user,
+            )
+        now = datetime.now(UTC).replace(tzinfo=None)
+        if req.expires_at <= now:
+            return _render_device_verify_page(
+                user_code=user_code,
+                error_code="expired_token",
+                authed_user=user,
+            )
+        pending = {
+            "client_name": req.client_name,
+            "scope": req.scope,
+            "expires_at": req.expires_at.isoformat(),
+        }
+
+    return _render_device_verify_page(
+        user_code=user_code,
+        error_code=error_code,
+        authed_user=user,
+        pending=pending,
+    )
+
+
+@router.post("/device/verify", response_model=None)
+async def device_verify_post(
+    request: Request,
+    session: AsyncSession = Depends(get_session_dependency),
+) -> Response:
+    _ = _require_jwt_secret()
+    form = await request.form()
+    action = str(form.get("action") or "").strip()
+    user_code = normalize_user_code(str(form.get("user_code") or "").strip())
+    if not user_code:
+        return RedirectResponse(url="/api/auth/device/verify?error=missing_user_code", status_code=302)
+
+    verify_url = f"/api/auth/device/verify?user_code={user_code}"
+
+    if action == "login":
+        email = str(form.get("email") or "").strip()
+        password = str(form.get("password") or "").strip()
+        user = await UserManager(session).authenticate_local(email=email, password=password)
+        if user is None:
+            return RedirectResponse(url=verify_url + "&error=invalid_credentials", status_code=302)
+
+        org = await OrganizationManager(session).create_personal_for_user(user)
+        await OrganizationMembershipManager(session).add_member(
+            organization_id=org.id,
+            user_id=user.id,
+            role=OrganizationRole.OWNER,
+        )
+        token = create_access_token(user_id=user.id, organization_id=org.id)
+
+        response = RedirectResponse(url=verify_url, status_code=302)
+        response.set_cookie(
+            ACCESS_TOKEN_COOKIE,
+            token,
+            httponly=True,
+            secure=_cookie_secure(),
+            samesite="lax",
+            max_age=int(timedelta(hours=config_module.settings.jwt_expiry_hours).total_seconds()),
+            domain=config_module.settings.cookie_domain,
+            path="/",
+        )
+        return response
+
+    claims = await resolve_claims(request, session)
+    if not claims:
+        return RedirectResponse(url=verify_url + "&error=not_authenticated", status_code=302)
+
+    try:
+        user_id = UUID(str(claims.get("sub", "")))
+    except ValueError:
+        return RedirectResponse(url=verify_url + "&error=invalid_token", status_code=302)
+
+    user = await session.get(User, user_id)
+    if user is None:
+        return RedirectResponse(url=verify_url + "&error=user_not_found", status_code=302)
+
+    mgr = DeviceAuthorizationManager(session)
+    req = await mgr.get_by_user_code(user_code)
+    if req is None:
+        return RedirectResponse(url=verify_url + "&error=invalid_user_code", status_code=302)
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    if req.expires_at <= now:
+        return RedirectResponse(url=verify_url + "&error=expired_token", status_code=302)
+
+    if action == "deny":
+        await mgr.deny(req)
+        return HTMLResponse(
+            "<h1>Denied</h1><p>You can close this tab and return to your terminal.</p>",
+            status_code=200,
+        )
+
+    if action != "approve":
+        return RedirectResponse(url=verify_url + "&error=invalid_action", status_code=302)
+
+    org = await OrganizationManager(session).create_personal_for_user(user)
+    await OrganizationMembershipManager(session).add_member(
+        organization_id=org.id,
+        user_id=user.id,
+        role=OrganizationRole.OWNER,
+    )
+    await mgr.approve(req, user_id=user.id, organization_id=org.id)
+    return HTMLResponse(
+        "<h1>Approved</h1><p>Device login approved. You can close this tab and return to your terminal.</p>",
+        status_code=200,
+    )
 
 
 @router.post("/logout")

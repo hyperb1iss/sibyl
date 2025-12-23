@@ -35,19 +35,25 @@ def create_mcp_server(
     auth_enabled = auth_mode == "on" or (auth_mode == "auto" and jwt_secret_set)
 
     auth_settings = None
+    auth_server_provider = None
     token_verifier = None
     if auth_enabled:
-        from mcp.server.auth.settings import AuthSettings
-
-        from sibyl.auth.mcp_auth import SibylMcpTokenVerifier
+        from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 
         server_url = settings.server_url.rstrip("/")
         auth_settings = AuthSettings(
             issuer_url=server_url,
             resource_server_url=f"{server_url}/mcp",
-            required_scopes=None,
+            required_scopes=["mcp"],
+            client_registration_options=ClientRegistrationOptions(
+                enabled=True,
+                valid_scopes=["mcp"],
+                default_scopes=["mcp"],
+            ),
         )
-        token_verifier = SibylMcpTokenVerifier()
+        from sibyl.auth.mcp_oauth import SibylMcpOAuthProvider
+
+        auth_server_provider = SibylMcpOAuthProvider()
 
     mcp = FastMCP(
         settings.server_name,
@@ -55,8 +61,19 @@ def create_mcp_server(
         port=port,
         stateless_http=False,  # Maintain session state
         auth=auth_settings,
+        auth_server_provider=auth_server_provider,
         token_verifier=token_verifier,
     )
+
+    if auth_server_provider is not None:
+
+        @mcp.custom_route("/_oauth/login", methods=["GET"])
+        async def _oauth_login_get(request):  # type: ignore[no-untyped-def]
+            return await auth_server_provider.ui_login_get(request)
+
+        @mcp.custom_route("/_oauth/login", methods=["POST"])
+        async def _oauth_login_post(request):  # type: ignore[no-untyped-def]
+            return await auth_server_provider.ui_login_post(request)
 
     _register_tools(mcp)
     _register_resources(mcp)

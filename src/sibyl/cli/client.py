@@ -11,10 +11,37 @@ from typing import Any
 
 import httpx
 
+from sibyl.cli.auth_store import normalize_api_url, read_server_credentials
 from sibyl.config import settings
 
 
-def _load_default_auth_token() -> str | None:
+def _get_default_api_url() -> str:
+    """Get API URL from config file, env var, or default.
+
+    Priority:
+    1. Config file (~/.sibyl/config.toml)
+    2. Environment variable (SIBYL_API_URL)
+    3. Default (http://localhost:3334/api)
+    """
+    # Lazy import to avoid circular dependency
+    from sibyl.cli import config_store
+
+    # 1. Try config file
+    if config_store.config_exists():
+        url = config_store.get_server_url()
+        if url:
+            return f"{url}/api"
+
+    # 2. Try env var
+    env_url = os.environ.get("SIBYL_API_URL", "").strip()
+    if env_url:
+        return env_url
+
+    # 3. Default
+    return f"http://localhost:{settings.server_port}/api"
+
+
+def _load_default_auth_token(api_base_url: str) -> str | None:
     env_token = os.environ.get("SIBYL_AUTH_TOKEN", "").strip()
     if env_token:
         return env_token
@@ -28,6 +55,28 @@ def _load_default_auth_token() -> str | None:
     except Exception:
         return None
 
+    # Per-server credentials (preferred)
+    server_creds = read_server_credentials(api_base_url, auth_path)
+    token = str(server_creds.get("access_token", "")).strip()
+    if token:
+        return token
+    token = str(server_creds.get("api_key", "")).strip()
+    if token:
+        return token
+
+    # If exactly one server profile exists, use it
+    servers = data.get("servers")
+    if isinstance(servers, dict) and len(servers) == 1:
+        only = next(iter(servers.values()))
+        if isinstance(only, dict):
+            token = str(only.get("access_token", "")).strip()
+            if token:
+                return token
+            token = str(only.get("api_key", "")).strip()
+            if token:
+                return token
+
+    # Legacy flat fields
     token = str(data.get("access_token", "")).strip()
     if token:
         return token
@@ -64,13 +113,13 @@ class SibylClient:
         """Initialize the client.
 
         Args:
-            base_url: API base URL. Defaults to http://localhost:{server_port}/api
+            base_url: API base URL. Defaults to config file, then env var, then localhost.
             timeout: Request timeout in seconds.
             auth_token: Optional bearer token or API key to send as Authorization header.
         """
-        self.base_url = base_url or f"http://localhost:{settings.server_port}/api"
+        self.base_url = normalize_api_url(base_url or _get_default_api_url())
         self.timeout = timeout
-        self.auth_token = auth_token or _load_default_auth_token()
+        self.auth_token = auth_token or _load_default_auth_token(self.base_url)
         self._client: httpx.AsyncClient | None = None
 
     def _default_headers(self) -> dict[str, str]:

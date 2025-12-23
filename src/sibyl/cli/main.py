@@ -30,6 +30,7 @@ from sibyl.cli.common import (
 )
 
 # Import subcommand apps
+from sibyl.cli.config_cmd import app as config_app
 from sibyl.cli.crawl import app as crawl_app
 from sibyl.cli.db import app as db_app
 from sibyl.cli.entity import app as entity_app
@@ -40,6 +41,7 @@ from sibyl.cli.org import app as org_app
 from sibyl.cli.project import app as project_app
 from sibyl.cli.source import app as source_app
 from sibyl.cli.task import app as task_app
+from sibyl.cli.up_cmd import down, status as up_status, up
 
 # Main app
 app = typer.Typer(
@@ -61,6 +63,12 @@ app.add_typer(db_app, name="db")
 app.add_typer(generate_app, name="generate")
 app.add_typer(auth_app, name="auth")
 app.add_typer(org_app, name="org")
+app.add_typer(config_app, name="config")
+
+# Register top-level commands from up_cmd
+app.command("up")(up)
+app.command("down")(down)
+app.command("status")(up_status)
 
 
 def _handle_client_error(e: SibylClientError) -> None:
@@ -476,22 +484,7 @@ def stats(
     get_stats()
 
 
-@app.command("config")
-def show_config() -> None:
-    """Show current configuration."""
-    from sibyl.config import settings
-
-    console.print(create_panel(f"[{ELECTRIC_PURPLE}]Configuration[/{ELECTRIC_PURPLE}]"))
-
-    table = create_table(None, "Setting", "Value")
-    table.add_row("Server Name", settings.server_name)
-    table.add_row("Repo Path", str(settings.conventions_repo_path))
-    table.add_row("Log Level", settings.log_level)
-    table.add_row("FalkorDB Host", settings.falkordb_host)
-    table.add_row("FalkorDB Port", str(settings.falkordb_port))
-    table.add_row("Graph Name", settings.falkordb_graph_name)
-    table.add_row("Embedding Model", settings.embedding_model)
-    console.print(table)
+# Note: `sibyl config` command group is now in config_cmd.py
 
 
 @app.command()
