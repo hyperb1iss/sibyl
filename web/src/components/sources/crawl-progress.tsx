@@ -216,8 +216,8 @@ const CrawlOperationCard = memo(function CrawlOperationCard({
                   className="overflow-hidden"
                 >
                   <div className="mt-2 max-h-32 overflow-y-auto space-y-1">
-                    {operation.discoveredUrls.map((url, i) => (
-                      <p key={i} className="text-xs text-sc-fg-subtle font-mono truncate">
+                    {operation.discoveredUrls.map(url => (
+                      <p key={url} className="text-xs text-sc-fg-subtle font-mono truncate">
                         {url}
                       </p>
                     ))}

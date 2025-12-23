@@ -171,7 +171,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
                         value={editedTitle}
                         onChange={e => setEditedTitle(e.target.value)}
                         onKeyDown={e => {
-                          if (e.key === 'Enter') handleSaveTitle();
+                          if (e.key === 'Enter') void handleSaveTitle();
                           if (e.key === 'Escape') handleCancelTitle();
                         }}
                         className="flex-1 bg-sc-bg-dark border border-sc-purple/50 rounded-lg px-3 py-1.5 text-xl font-bold text-sc-fg-primary focus:outline-none focus:border-sc-purple"
@@ -351,7 +351,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
               <nav className="space-y-1.5">
                 {document.headings.slice(0, 15).map((heading, i) => (
                   <div
-                    key={i}
+                    key={`heading-${i}-${heading.slice(0, 20)}`}
                     className="flex items-center gap-2 text-sm text-sc-fg-muted hover:text-sc-cyan transition-colors cursor-pointer truncate"
                   >
                     <ChevronRight width={12} height={12} className="text-sc-fg-subtle shrink-0" />
@@ -374,9 +374,9 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
                 Links ({document.links.length})
               </h3>
               <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                {document.links.slice(0, 10).map((link, i) => (
+                {document.links.slice(0, 10).map(link => (
                   <a
-                    key={i}
+                    key={link}
                     href={link}
                     target="_blank"
                     rel="noopener noreferrer"

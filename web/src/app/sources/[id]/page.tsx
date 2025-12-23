@@ -113,7 +113,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
             <div className="h-4 bg-sc-bg-highlight rounded w-2/3" />
             <div className="grid grid-cols-4 gap-4 mt-6">
               {[...Array(4)].map((_, i) => (
-                <div key={i} className="h-20 bg-sc-bg-highlight rounded-xl" />
+                <div key={`skeleton-${i}`} className="h-20 bg-sc-bg-highlight rounded-xl" />
               ))}
             </div>
           </div>
@@ -249,9 +249,9 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
               <div>
                 <h3 className="text-xs font-medium text-sc-fg-subtle mb-2">Include Patterns</h3>
                 <div className="flex flex-wrap gap-1.5">
-                  {source.include_patterns.map((p, i) => (
+                  {source.include_patterns.map(p => (
                     <span
-                      key={i}
+                      key={p}
                       className="px-2 py-0.5 text-xs font-mono bg-sc-green/10 text-sc-green rounded"
                     >
                       {p}
@@ -264,9 +264,9 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
               <div>
                 <h3 className="text-xs font-medium text-sc-fg-subtle mb-2">Exclude Patterns</h3>
                 <div className="flex flex-wrap gap-1.5">
-                  {source.exclude_patterns.map((p, i) => (
+                  {source.exclude_patterns.map(p => (
                     <span
-                      key={i}
+                      key={p}
                       className="px-2 py-0.5 text-xs font-mono bg-sc-red/10 text-sc-red rounded"
                     >
                       {p}

@@ -445,7 +445,7 @@ export default function SourcesPage() {
           }
         >
           {[...Array(6)].map((_, i) => (
-            <SourceCardSkeleton key={i} />
+            <SourceCardSkeleton key={`skeleton-${i}`} />
           ))}
         </div>
       ) : filteredSources.length === 0 ? (

@@ -114,10 +114,14 @@ export function QuickTaskModal({
     <div
       className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh]"
       role="presentation"
-      onClick={onClose}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-sc-bg-dark/80 backdrop-blur-sm" aria-hidden="true" />
+      <button
+        type="button"
+        className="absolute inset-0 bg-sc-bg-dark/80 backdrop-blur-sm cursor-default"
+        onClick={onClose}
+        aria-label="Close modal"
+      />
 
       {/* Modal */}
       <div
@@ -125,7 +129,6 @@ export function QuickTaskModal({
         aria-modal="true"
         aria-labelledby="quick-task-title"
         className="relative w-full max-w-lg bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl shadow-2xl overflow-hidden"
-        onClick={e => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
         {/* Header */}

@@ -182,12 +182,11 @@ export const TaskListMobile = memo(function TaskListMobile({
 
           {showSortMenu && (
             <>
-              <div
-                className="fixed inset-0 z-10"
+              <button
+                type="button"
+                className="fixed inset-0 z-10 cursor-default"
                 onClick={() => setShowSortMenu(false)}
                 onKeyDown={e => e.key === 'Escape' && setShowSortMenu(false)}
-                role="button"
-                tabIndex={0}
                 aria-label="Close menu"
               />
               <div className="absolute right-0 top-full mt-1 z-20 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg shadow-lg py-1 min-w-[120px]">

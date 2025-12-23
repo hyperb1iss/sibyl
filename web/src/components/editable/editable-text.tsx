@@ -80,11 +80,11 @@ export function EditableText({
       }
       if (e.key === 'Enter' && !multiline) {
         e.preventDefault();
-        handleSave();
+        void handleSave();
       }
       if (e.key === 'Enter' && e.metaKey && multiline) {
         e.preventDefault();
-        handleSave();
+        void handleSave();
       }
     },
     [handleCancel, handleSave, multiline]
@@ -148,11 +148,10 @@ export function EditableText({
   }
 
   return (
-    <span
+    <button
+      type="button"
       onClick={handleClick}
-      onKeyDown={e => e.key === 'Enter' && handleClick()}
-      tabIndex={disabled ? -1 : 0}
-      role="button"
+      disabled={disabled}
       className={`
         ${className}
         ${disabled ? 'cursor-default' : 'cursor-text hover:bg-sc-bg-highlight/50'}
@@ -160,9 +159,10 @@ export function EditableText({
         transition-colors duration-150
         focus:outline-none focus:ring-2 focus:ring-sc-purple/30
         ${!value && placeholder ? 'text-sc-fg-subtle italic' : ''}
+        text-left
       `}
     >
       {value || placeholder}
-    </span>
+    </button>
   );
 }

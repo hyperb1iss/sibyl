@@ -64,13 +64,13 @@ export function EditableTags({
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        handleAdd(inputValue);
+        void handleAdd(inputValue);
       }
       if (e.key === 'Escape') {
         setIsOpen(false);
       }
       if (e.key === 'Backspace' && !inputValue && values.length > 0) {
-        handleRemove(values[values.length - 1]);
+        void handleRemove(values[values.length - 1]);
       }
     },
     [inputValue, values, handleAdd, handleRemove]
@@ -101,7 +101,7 @@ export function EditableTags({
             {!disabled && (
               <button
                 type="button"
-                onClick={() => handleRemove(tag)}
+                onClick={() => void handleRemove(tag)}
                 disabled={isSaving}
                 className="opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity"
               >
@@ -167,7 +167,7 @@ export function EditableTags({
                           <button
                             key={suggestion}
                             type="button"
-                            onClick={() => handleAdd(suggestion)}
+                            onClick={() => void handleAdd(suggestion)}
                             className="w-full px-3 py-1.5 text-sm text-left text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight/50 transition-colors"
                           >
                             {suggestion}

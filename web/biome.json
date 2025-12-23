@@ -4,52 +4,91 @@
     "includes": ["src/**", "next.config.ts", "*.json"],
     "ignoreUnknown": true
   },
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
-  "overrides": [
-    {
-      "includes": ["src/components/graph/knowledge-graph.tsx"],
-      "linter": {
-        "rules": {
-          "suspicious": {
-            "noExplicitAny": "off"
-          }
-        }
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
       }
     }
-  ],
+  },
   "linter": {
     "enabled": true,
     "rules": {
       "recommended": true,
       "a11y": {
         "noStaticElementInteractions": "off",
-        "useSemanticElements": "off"
+        "useSemanticElements": "off",
+        "useKeyWithClickEvents": "off"
       },
       "performance": {
+        "noAccumulatingSpread": "error",
+        "noBarrelFile": "off",
+        "noReExportAll": "off",
         "noImgElement": "off"
       },
       "complexity": {
         "noBannedTypes": "error",
-        "noUselessTypeConstraint": "error"
+        "noUselessTypeConstraint": "error",
+        "noExcessiveCognitiveComplexity": "off"
       },
       "correctness": {
         "noUnusedVariables": "error",
         "noUnusedImports": "error",
-        "noUnknownTypeSelector": "off",
-        "useExhaustiveDependencies": "warn"
+        "noUnusedFunctionParameters": "warn",
+        "noUnusedPrivateClassMembers": "error",
+        "useExhaustiveDependencies": "warn",
+        "noUndeclaredDependencies": "error",
+        "noUndeclaredVariables": "error",
+        "noUnknownTypeSelector": "off"
       },
       "style": {
-        "noNonNullAssertion": "warn",
+        "noNonNullAssertion": "error",
         "useConst": "error",
-        "useImportType": "error"
+        "useImportType": "error",
+        "useExportType": "error",
+        "useEnumInitializers": "error",
+        "noInferrableTypes": "error",
+        "useShorthandFunctionType": "error",
+        "useConsistentArrayType": {
+          "level": "error",
+          "options": { "syntax": "shorthand" }
+        },
+        "useNamingConvention": "off"
       },
       "suspicious": {
-        "noExplicitAny": "warn",
+        "noExplicitAny": "error",
         "noConfusingVoidType": "error",
-        "noArrayIndexKey": "off"
+        "noArrayIndexKey": "off",
+        "noAssignInExpressions": "error",
+        "noAsyncPromiseExecutor": "error",
+        "noDoubleEquals": "error",
+        "noEmptyBlockStatements": "warn",
+        "noMisleadingInstantiator": "error",
+        "noUnsafeDeclarationMerging": "error",
+        "useAwait": "off"
+      },
+      "security": {
+        "noDangerouslySetInnerHtml": "error"
+      },
+      "nursery": {
+        "noFloatingPromises": "error",
+        "noMisusedPromises": "error",
+        "noShadow": "off"
       }
     }
   },
+  "overrides": [
+    {
+      "includes": ["*.config.ts", "*.config.js"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "off"
+          }
+        }
+      }
+    }
+  ],
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -60,6 +99,9 @@
     "parser": {
       "cssModules": true,
       "tailwindDirectives": true
+    },
+    "linter": {
+      "enabled": true
     }
   },
   "javascript": {

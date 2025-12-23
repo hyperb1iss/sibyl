@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef } from 'react';
+import type { ForceGraphMethods, LinkObject, NodeObject } from 'react-force-graph-2d';
 import { EmptyState } from '@/components/ui/tooltip';
 import { ENTITY_COLORS } from '@/lib/constants';
 
@@ -50,26 +51,24 @@ interface GraphData {
   }>;
 }
 
-// Force graph node/link types
-interface ForceNode {
-  id: string;
+// Our custom node properties
+interface CustomNodeData {
   label: string;
   color: string;
   size: number;
   type?: string;
-  x?: number;
-  y?: number;
-  fx?: number | null;
-  fy?: number | null;
 }
 
-interface ForceLink {
-  source: string | ForceNode;
-  target: string | ForceNode;
+// Our custom link properties
+interface CustomLinkData {
   label?: string;
   color: string;
   width: number;
 }
+
+// Full node type combining library type with our custom data
+type GraphNode = NodeObject<CustomNodeData>;
+type GraphLink = LinkObject<CustomNodeData, CustomLinkData>;
 
 export interface KnowledgeGraphRef {
   zoomIn: () => void;
@@ -88,7 +87,9 @@ interface KnowledgeGraphProps {
 
 export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>(
   function KnowledgeGraph({ data, onNodeClick, selectedNodeId, searchTerm }, ref) {
-    const graphRef = useRef<any>(null);
+    const graphRef = useRef<ForceGraphMethods<CustomNodeData, CustomLinkData> | undefined>(
+      undefined
+    );
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Expose control methods to parent
@@ -113,23 +114,37 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         graphRef.current?.centerAt(0, 0, 300);
       },
       centerOnNode: (nodeId: string) => {
-        const gd = graphRef.current?.graphData();
-        const node = gd?.nodes.find((n: ForceNode) => n.id === nodeId);
-        if (node && node.x !== undefined && node.y !== undefined) {
-          graphRef.current?.centerAt(node.x, node.y, 500);
-          graphRef.current?.zoom(2, 500);
+        // Access graph data through the d3 force simulation
+        const linkForce = graphRef.current?.d3Force('link');
+        if (!linkForce) return;
+
+        // The links contain references to nodes after simulation
+        const links = (linkForce as { links?: () => GraphLink[] }).links?.();
+        if (!links || links.length === 0) return;
+
+        // Find node in the source/target of any link
+        for (const link of links) {
+          const source = link.source as GraphNode;
+          const target = link.target as GraphNode;
+
+          const node = source.id === nodeId ? source : target.id === nodeId ? target : null;
+          if (node && node.x !== undefined && node.y !== undefined) {
+            graphRef.current?.centerAt(node.x, node.y, 500);
+            graphRef.current?.zoom(2, 500);
+            return;
+          }
         }
       },
     }));
 
     // Transform data for force-graph format
     const graphData = useMemo(() => {
-      if (!data) return { nodes: [] as ForceNode[], links: [] as ForceLink[] };
+      if (!data) return { nodes: [] as GraphNode[], links: [] as GraphLink[] };
 
       const searchLower = searchTerm?.toLowerCase() || '';
       const seenNodeIds = new Set<string>();
 
-      const nodes: ForceNode[] = data.nodes
+      const nodes: GraphNode[] = data.nodes
         .filter(node => {
           if (!node.id) return false;
           if (seenNodeIds.has(node.id)) return false;
@@ -160,7 +175,7 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         });
 
       const seenEdgeIds = new Set<string>();
-      const links: ForceLink[] = data.edges
+      const links: GraphLink[] = data.edges
         .filter(edge => {
           if (!edge.id || !edge.source || !edge.target) return false;
           if (!seenNodeIds.has(edge.source) || !seenNodeIds.has(edge.target)) return false;
@@ -181,7 +196,7 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
 
     // Custom node rendering with glow effect
     const paintNode = useCallback(
-      (node: ForceNode, ctx: CanvasRenderingContext2D) => {
+      (node: GraphNode, ctx: CanvasRenderingContext2D) => {
         const size = node.size || 6;
         const x = node.x || 0;
         const y = node.y || 0;
@@ -220,9 +235,9 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     );
 
     // Custom link rendering with arrows
-    const paintLink = useCallback((link: ForceLink, ctx: CanvasRenderingContext2D) => {
-      const source = link.source as ForceNode;
-      const target = link.target as ForceNode;
+    const paintLink = useCallback((link: GraphLink, ctx: CanvasRenderingContext2D) => {
+      const source = link.source as GraphNode;
+      const target = link.target as GraphNode;
       if (!source.x || !source.y || !target.x || !target.y) return;
 
       ctx.beginPath();
@@ -259,17 +274,29 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     }, []);
 
     const handleNodeClick = useCallback(
-      (node: ForceNode) => {
-        onNodeClick?.(node.id);
+      (node: GraphNode) => {
+        if (node.id) {
+          onNodeClick?.(String(node.id));
+        }
       },
       [onNodeClick]
     );
 
-    const handleNodeDragEnd = useCallback((node: ForceNode) => {
+    const handleNodeDragEnd = useCallback((node: GraphNode) => {
       // Fix node position after drag
       node.fx = node.x;
       node.fy = node.y;
     }, []);
+
+    const paintPointerArea = useCallback(
+      (node: GraphNode, color: string, ctx: CanvasRenderingContext2D) => {
+        ctx.beginPath();
+        ctx.arc(node.x || 0, node.y || 0, (node.size || 6) + 4, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+      },
+      []
+    );
 
     if (!data || data.nodes.length === 0) {
       return (
@@ -291,19 +318,14 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
       >
         <ForceGraph2D
           ref={graphRef}
-          graphData={graphData as any}
-          nodeCanvasObject={paintNode as any}
+          graphData={graphData}
+          nodeCanvasObject={paintNode}
           nodeCanvasObjectMode={() => 'replace'}
-          linkCanvasObject={paintLink as any}
+          linkCanvasObject={paintLink}
           linkCanvasObjectMode={() => 'replace'}
-          nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
-            ctx.beginPath();
-            ctx.arc(node.x || 0, node.y || 0, (node.size || 6) + 4, 0, 2 * Math.PI);
-            ctx.fillStyle = color;
-            ctx.fill();
-          }}
-          onNodeClick={handleNodeClick as any}
-          onNodeDragEnd={handleNodeDragEnd as any}
+          nodePointerAreaPaint={paintPointerArea}
+          onNodeClick={handleNodeClick}
+          onNodeDragEnd={handleNodeDragEnd}
           cooldownTicks={100}
           warmupTicks={50}
           backgroundColor="#0a0812"

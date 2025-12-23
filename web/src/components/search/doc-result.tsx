@@ -44,7 +44,10 @@ export function DocChunkResult({ result }: DocChunkResultProps) {
         {result.heading_path.length > 0 && (
           <div className="flex items-center gap-1 text-xs text-sc-fg-muted overflow-x-auto">
             {result.heading_path.map((heading, i) => (
-              <span key={i} className="flex items-center gap-1 shrink-0">
+              <span
+                key={`path-${i}-${heading.slice(0, 20)}`}
+                className="flex items-center gap-1 shrink-0"
+              >
                 {i > 0 && <span className="text-sc-fg-subtle">/</span>}
                 <span className="truncate max-w-[150px]">{heading}</span>
               </span>
@@ -117,7 +120,7 @@ export function DocPageResult({ result }: DocPageResultProps) {
           <div className="flex flex-wrap gap-1.5">
             {result.headings.slice(0, 5).map((heading, i) => (
               <span
-                key={i}
+                key={`heading-${i}-${heading.slice(0, 20)}`}
                 className="px-1.5 py-0.5 text-xs bg-sc-bg-elevated text-sc-fg-muted rounded"
               >
                 {heading}

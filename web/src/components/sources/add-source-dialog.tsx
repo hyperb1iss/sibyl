@@ -581,6 +581,7 @@ export function AddSourceDialog({
                           }}
                           onDragLeave={() => setIsDragging(false)}
                           onDrop={handleDrop}
+                          role="presentation"
                           className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
                             isDragging
                               ? 'border-sc-cyan bg-sc-cyan/10'

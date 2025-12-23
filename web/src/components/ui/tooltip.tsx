@@ -46,6 +46,7 @@ export function Tooltip({ content, children, position = 'top', delay = 200 }: To
       onMouseLeave={hideTooltip}
       onFocus={showTooltip}
       onBlur={hideTooltip}
+      role="presentation"
     >
       {children}
       {visible && (

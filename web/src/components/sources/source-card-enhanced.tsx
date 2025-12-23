@@ -314,11 +314,10 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
               {showMenu && (
                 <>
                   {/* Backdrop */}
-                  <div
-                    role="button"
-                    tabIndex={0}
+                  <button
+                    type="button"
                     aria-label="Close menu"
-                    className="fixed inset-0 z-10"
+                    className="fixed inset-0 z-10 cursor-default"
                     onClick={() => setShowMenu(false)}
                     onKeyDown={e => e.key === 'Escape' && setShowMenu(false)}
                   />

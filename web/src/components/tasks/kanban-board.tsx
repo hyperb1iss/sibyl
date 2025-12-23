@@ -246,11 +246,12 @@ const KanbanColumn = memo(function KanbanColumn({
   };
 
   return (
-    <div
+    <section
       className="flex-1 min-w-[260px] sm:min-w-[300px] max-w-[320px] sm:max-w-[380px] snap-start sm:snap-align-none"
       onDragOver={handleDragOver}
       onDragLeave={onDragLeave}
       onDrop={handleDrop}
+      aria-label={`${config?.label} column`}
     >
       {/* Column header */}
       <div className="flex items-center justify-between mb-3 px-1">
@@ -308,7 +309,7 @@ const KanbanColumn = memo(function KanbanColumn({
                 <AnimatePresence>
                   {/* Show drop indicator after this card if dropping at next index */}
                   {isDragOver && dropIndex === index + 1 && (
-                    <DropIndicator key={`drop-indicator-${index}`} />
+                    <DropIndicator key={`drop-indicator-${task.id}`} />
                   )}
                 </AnimatePresence>
               </div>
@@ -328,7 +329,7 @@ const KanbanColumn = memo(function KanbanColumn({
           {isDragOver && tasks.length === 0 && <DropIndicator key="drop-indicator-empty" />}
         </AnimatePresence>
       </div>
-    </div>
+    </section>
   );
 });
 

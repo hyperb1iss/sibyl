@@ -88,15 +88,13 @@ export function EditableDate({
           {showIcon && <Calendar width={14} height={14} className="opacity-60" />}
           <span className={!value ? 'italic' : ''}>{date ? formatDisplay(date) : placeholder}</span>
           {value && !disabled && (
-            <span
+            <button
+              type="button"
               onClick={handleClear}
-              onKeyDown={e => e.key === 'Enter' && handleClear(e as unknown as React.MouseEvent)}
-              role="button"
-              tabIndex={0}
               className="opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity"
             >
               <X width={12} height={12} />
-            </span>
+            </button>
           )}
           {isSaving && (
             <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
@@ -128,7 +126,7 @@ export function EditableDate({
                   ref={inputRef}
                   type="date"
                   value={value || ''}
-                  onChange={e => handleChange(e.target.value)}
+                  onChange={e => void handleChange(e.target.value)}
                   className="bg-sc-bg-highlight border border-sc-fg-subtle/30 rounded-lg px-3 py-2 text-sc-fg-primary focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/20"
                 />
                 <div className="flex gap-2 mt-2">
@@ -136,7 +134,7 @@ export function EditableDate({
                     type="button"
                     onClick={() => {
                       const today = new Date().toISOString().split('T')[0];
-                      handleChange(today);
+                      void handleChange(today);
                     }}
                     className="flex-1 px-2 py-1 text-xs text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight rounded transition-colors"
                   >
@@ -147,7 +145,7 @@ export function EditableDate({
                     onClick={() => {
                       const tomorrow = new Date();
                       tomorrow.setDate(tomorrow.getDate() + 1);
-                      handleChange(tomorrow.toISOString().split('T')[0]);
+                      void handleChange(tomorrow.toISOString().split('T')[0]);
                     }}
                     className="flex-1 px-2 py-1 text-xs text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight rounded transition-colors"
                   >
@@ -158,7 +156,7 @@ export function EditableDate({
                     onClick={() => {
                       const nextWeek = new Date();
                       nextWeek.setDate(nextWeek.getDate() + 7);
-                      handleChange(nextWeek.toISOString().split('T')[0]);
+                      void handleChange(nextWeek.toISOString().split('T')[0]);
                     }}
                     className="flex-1 px-2 py-1 text-xs text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight rounded transition-colors"
                   >

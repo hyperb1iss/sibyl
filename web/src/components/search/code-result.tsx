@@ -71,7 +71,10 @@ export function CodeResult({ result }: CodeResultProps) {
       {result.heading_path.length > 0 && (
         <div className="flex items-center gap-1 px-4 py-2 text-xs text-sc-fg-muted bg-sc-bg-elevated/50 overflow-x-auto">
           {result.heading_path.map((heading, i) => (
-            <span key={i} className="flex items-center gap-1 shrink-0">
+            <span
+              key={`path-${i}-${heading.slice(0, 20)}`}
+              className="flex items-center gap-1 shrink-0"
+            >
               {i > 0 && <span className="text-sc-fg-subtle">/</span>}
               <span className="truncate max-w-[150px]">{heading}</span>
             </span>

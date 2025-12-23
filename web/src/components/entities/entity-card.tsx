@@ -28,7 +28,7 @@ export const EntityCard = memo(function EntityCard({
   const color = ENTITY_COLORS[entity.entity_type as EntityType] ?? '#8b85a0';
 
   return (
-    <div
+    <article
       className="relative overflow-hidden rounded-xl transition-all duration-200 group hover:-translate-y-0.5 border"
       style={{
         background: `linear-gradient(135deg, ${color}18 0%, var(--sc-bg-base) 50%, var(--sc-bg-base) 100%)`,
@@ -107,7 +107,7 @@ export const EntityCard = memo(function EntityCard({
           )}
         </div>
       </div>
-    </div>
+    </article>
   );
 });
 
