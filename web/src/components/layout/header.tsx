@@ -3,15 +3,12 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { Command, Loader2, Menu, Search, Sparkles, Wifi, WifiOff } from '@/components/ui/icons';
-import { useConnectionStatus, useHealth } from '@/lib/hooks';
+import { Command, Menu, Search, Sparkles } from '@/components/ui/icons';
 import { useMobileNav } from './mobile-nav-context';
-import { OrgSwitcher } from './org-switcher';
+import { UserMenu } from './user-menu';
 
 export function Header() {
   const router = useRouter();
-  const { data: health } = useHealth();
-  const wsStatus = useConnectionStatus();
   const { toggle } = useMobileNav();
   const [searchQuery, setSearchQuery] = useState('');
   const [isFocused, setIsFocused] = useState(false);
@@ -34,17 +31,6 @@ export function Header() {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
-
-  // Determine overall connection state
-  const isConnected = health?.status === 'healthy' && wsStatus === 'connected';
-  const isReconnecting = wsStatus === 'reconnecting' || wsStatus === 'connecting';
-
-  // Status config
-  const statusConfig = isConnected
-    ? { icon: Wifi, label: 'Live', color: 'sc-green' }
-    : isReconnecting
-      ? { icon: Loader2, label: 'Syncing', color: 'sc-yellow' }
-      : { icon: WifiOff, label: 'Offline', color: 'sc-red' };
 
   return (
     <header className="h-14 bg-sc-bg-base border-b border-sc-fg-subtle/10 flex items-center justify-between px-3 md:px-6 gap-3">
@@ -136,30 +122,8 @@ export function Header() {
         <Search width={20} height={20} />
       </button>
 
-      <OrgSwitcher />
-
-      {/* Connection Status */}
-      <div
-        className={`
-          flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-full
-          text-[10px] sm:text-xs font-medium tracking-wide uppercase
-          border transition-all duration-500
-          ${
-            isConnected
-              ? 'bg-sc-green/5 border-sc-green/20 text-sc-green'
-              : isReconnecting
-                ? 'bg-sc-yellow/5 border-sc-yellow/20 text-sc-yellow'
-                : 'bg-sc-red/5 border-sc-red/20 text-sc-red'
-          }
-        `}
-      >
-        <statusConfig.icon
-          width={14}
-          height={14}
-          className={isReconnecting ? 'animate-spin' : ''}
-        />
-        <span className="hidden sm:inline">{statusConfig.label}</span>
-      </div>
+      {/* User Menu */}
+      <UserMenu />
     </header>
   );
 }

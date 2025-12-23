@@ -68,8 +68,8 @@ def _start_callback_server() -> tuple[HTTPServer, str, threading.Event, dict[str
     done = threading.Event()
 
     class CallbackHandler(BaseHTTPRequestHandler):
-        def log_message(self, _format: str, *_args) -> None:
-            return
+        def log_message(self, format: str, *args: object) -> None:
+            _ = format, args  # Suppress logging
 
         def do_GET(self) -> None:
             parts = urlsplit(self.path)

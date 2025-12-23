@@ -30,10 +30,9 @@ from mcp.server.auth.provider import (
     AuthorizationCode,
     AuthorizationParams,
     OAuthAuthorizationServerProvider,
-    OAuthToken,
     RefreshToken,
 )
-from mcp.shared.auth import OAuthClientInformationFull
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 

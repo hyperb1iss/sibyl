@@ -8,12 +8,18 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+from sqlalchemy import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from sibyl.auth.passwords import hash_password
 from sibyl.db.models import LoginHistory, PasswordResetToken, User
 from sibyl.email import EmailClient, PasswordResetEmail
+
+
+def _is_none(column: ColumnElement) -> ColumnElement:  # type: ignore[type-arg]
+    """Create an IS NULL comparison for a column."""
+    return column.is_(None)  # type: ignore[union-attr]
 
 
 @dataclass
@@ -85,7 +91,7 @@ class PasswordResetManager:
             select(PasswordResetToken)
             .where(PasswordResetToken.user_id == user.id)
             .where(PasswordResetToken.created_at > rate_limit_cutoff)
-            .where(PasswordResetToken.revoked_at.is_(None))
+            .where(_is_none(PasswordResetToken.revoked_at))
         )
         recent_token = result.scalar_one_or_none()
 
@@ -104,8 +110,8 @@ class PasswordResetManager:
         result = await self._session.execute(
             select(PasswordResetToken)
             .where(PasswordResetToken.user_id == user.id)
-            .where(PasswordResetToken.used_at.is_(None))
-            .where(PasswordResetToken.revoked_at.is_(None))
+            .where(_is_none(PasswordResetToken.used_at))
+            .where(_is_none(PasswordResetToken.revoked_at))
         )
         for old_token in result.scalars():
             old_token.revoked_at = now

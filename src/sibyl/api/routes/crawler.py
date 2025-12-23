@@ -642,7 +642,7 @@ async def get_link_graph_status() -> LinkGraphStatusResponse:
 
         # Pending per source
         pending_query = (
-            select(
+            select(  # type: ignore[call-overload]
                 CrawlSource.name,
                 func.count(DocumentChunk.id).label("pending"),
             )

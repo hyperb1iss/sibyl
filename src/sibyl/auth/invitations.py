@@ -7,11 +7,22 @@ from datetime import UTC, datetime, timedelta
 from typing import Self
 from uuid import UUID
 
+from sqlalchemy import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from sibyl.auth.memberships import OrganizationMembershipManager
 from sibyl.db.models import OrganizationInvitation, OrganizationRole, User
+
+
+def _is_none(column: ColumnElement) -> ColumnElement:  # type: ignore[type-arg]
+    """Create an IS NULL comparison for a column."""
+    return column.is_(None)  # type: ignore[union-attr]
+
+
+def _desc(column: ColumnElement) -> ColumnElement:  # type: ignore[type-arg]
+    """Create a DESC order for a column."""
+    return column.desc()  # type: ignore[union-attr]
 
 
 class InvitationError(ValueError):
@@ -41,8 +52,8 @@ class InvitationManager:
             OrganizationInvitation.organization_id == organization_id
         )
         if not include_accepted:
-            stmt = stmt.where(OrganizationInvitation.accepted_at.is_(None))
-        stmt = stmt.order_by(OrganizationInvitation.created_at.desc())
+            stmt = stmt.where(_is_none(OrganizationInvitation.accepted_at))
+        stmt = stmt.order_by(_desc(OrganizationInvitation.created_at))
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 

@@ -56,6 +56,7 @@ dependencies = [
     "crawl4ai>=0.7.8",
     "arq>=0.26.3",
     "tomli-w>=1.2.0",
+    "email-validator>=2.3.0",
 ]
 
 [project.optional-dependencies]

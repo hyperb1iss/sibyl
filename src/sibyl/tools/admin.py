@@ -613,7 +613,7 @@ async def migrate_backfill_graph_group_id(
 
             async with get_session() as session:
                 result = await session.execute(
-                    select(Organization.id).order_by(Organization.created_at).limit(1)
+                    select(Organization.id).order_by(Organization.created_at).limit(1)  # type: ignore[call-overload]
                 )
                 org_uuid = result.scalar_one_or_none()
                 if org_uuid is not None:

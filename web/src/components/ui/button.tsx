@@ -208,6 +208,7 @@ export function GradientButton({
   disabled,
   children,
   className = '',
+  spark: _spark,
   ...props
 }: GradientButtonProps) {
   return (

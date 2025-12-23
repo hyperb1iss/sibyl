@@ -389,7 +389,7 @@ async def get_subgraph(
             related = await relationship_manager.get_related_entities(
                 entity_id=entity_id,
                 relationship_types=payload.relationship_types,
-                depth=1,
+                max_depth=1,
                 limit=50,
             )
 

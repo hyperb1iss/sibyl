@@ -11,13 +11,17 @@ import {
   type IconComponent,
   LayoutDashboard,
   ListTodo,
+  Loader2,
   Network,
   RefreshCw,
   Search,
   Sparkles,
+  Wifi,
+  WifiOff,
   X,
 } from '@/components/ui/icons';
 import { APP_CONFIG } from '@/lib/constants';
+import { useConnectionStatus, useHealth } from '@/lib/hooks';
 import { useMobileNav } from './mobile-nav-context';
 import { NavLink } from './nav-link';
 
@@ -33,7 +37,17 @@ const NAVIGATION: Array<{ name: string; href: string; icon: IconComponent }> = [
   { name: 'Ingest', href: '/ingest', icon: RefreshCw },
 ];
 
-function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
+interface SidebarContentProps {
+  onNavClick?: () => void;
+  isConnected: boolean;
+  isReconnecting: boolean;
+}
+
+function SidebarContent({ onNavClick, isConnected, isReconnecting }: SidebarContentProps) {
+  const StatusIcon = isConnected ? Wifi : isReconnecting ? Loader2 : WifiOff;
+  const statusLabel = isConnected ? 'Live' : isReconnecting ? 'Syncing' : 'Offline';
+  const statusColor = isConnected ? 'sc-green' : isReconnecting ? 'sc-yellow' : 'sc-red';
+
   return (
     <>
       {/* Logo */}
@@ -67,11 +81,18 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
 
       {/* Footer */}
       <div className="p-3 md:p-4 border-t border-sc-fg-subtle/10">
-        <div className="flex items-center gap-2 text-[10px] text-sc-fg-subtle">
-          <div className="w-1.5 h-1.5 rounded-full bg-sc-green animate-pulse shadow-[0_0_6px_rgba(80,250,123,0.6)]" />
-          <span className="uppercase tracking-wider">
-            {APP_CONFIG.NAME} v{APP_CONFIG.VERSION}
-          </span>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-[10px] text-sc-fg-subtle">
+            <span className="uppercase tracking-wider">
+              {APP_CONFIG.NAME} v{APP_CONFIG.VERSION}
+            </span>
+          </div>
+          <div
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium uppercase tracking-wide text-${statusColor}`}
+          >
+            <StatusIcon width={12} height={12} className={isReconnecting ? 'animate-spin' : ''} />
+            <span>{statusLabel}</span>
+          </div>
         </div>
       </div>
     </>
@@ -81,6 +102,12 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
 export function Sidebar() {
   const { isOpen, close } = useMobileNav();
   const _pathname = usePathname();
+  const { data: health } = useHealth();
+  const wsStatus = useConnectionStatus();
+
+  // Determine overall connection state
+  const isConnected = health?.status === 'healthy' && wsStatus === 'connected';
+  const isReconnecting = wsStatus === 'reconnecting' || wsStatus === 'connecting';
 
   // Close mobile nav on route change
   useEffect(() => {
@@ -102,7 +129,7 @@ export function Sidebar() {
     <>
       {/* Desktop Sidebar - hidden on mobile */}
       <aside className="hidden md:flex w-64 bg-sc-bg-base border-r border-sc-fg-subtle/10 flex-col">
-        <SidebarContent />
+        <SidebarContent isConnected={isConnected} isReconnecting={isReconnecting} />
       </aside>
 
       {/* Mobile Drawer */}
@@ -138,7 +165,11 @@ export function Sidebar() {
                 <X width={20} height={20} />
               </button>
 
-              <SidebarContent onNavClick={close} />
+              <SidebarContent
+                onNavClick={close}
+                isConnected={isConnected}
+                isReconnecting={isReconnecting}
+              />
             </motion.aside>
           </>
         )}

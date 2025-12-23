@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
 from pydantic import field_validator
-from sqlalchemy import ARRAY, Column, Enum, Index, String, Text, text
+from sqlalchemy import ARRAY, Column, DateTime, Enum, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -113,10 +113,25 @@ class User(TimestampMixin, table=True):
         description="Primary email (may be null if unavailable)",
     )
     name: str = Field(default="", max_length=255, description="Display name")
+    bio: str | None = Field(default=None, description="User bio")  # TEXT in DB
+    timezone: str = Field(default="UTC", max_length=64, description="User timezone")
     avatar_url: str | None = Field(
         default=None,
         max_length=2048,
         description="Profile avatar URL",
+    )
+    email_verified_at: datetime | None = Field(
+        default=None,
+        description="When email was verified",
+    )
+    last_login_at: datetime | None = Field(
+        default=None,
+        description="Last login timestamp",
+    )
+    preferences: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False, server_default="'{}'"),
+        description="User preferences JSON",
     )
 
     # Local auth (PBKDF2 hash)
@@ -137,6 +152,57 @@ class User(TimestampMixin, table=True):
 
     def __repr__(self) -> str:
         return f"<User github_id={self.github_id!r} email={self.email!r}>"
+
+
+# =============================================================================
+# Login History - Track login events
+# =============================================================================
+
+
+class LoginHistory(SQLModel, table=True):
+    """Login event history for security auditing."""
+
+    __tablename__ = "login_history"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID | None = Field(default=None, foreign_key="users.id", index=True)
+    event_type: str = Field(max_length=50, index=True)
+    auth_method: str | None = Field(default=None, max_length=50)
+    success: bool = Field(default=False)
+    failure_reason: str | None = Field(default=None, max_length=255)
+    ip_address: str | None = Field(default=None, max_length=64)
+    user_agent: str | None = Field(default=None, max_length=512)
+    device_info: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB))
+    email_attempted: str | None = Field(default=None, max_length=255)
+    session_id: UUID | None = Field(default=None)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
+        sa_column=Column(DateTime, nullable=False, server_default=text("now()"), index=True),
+    )
+
+
+# =============================================================================
+# Password Reset Tokens
+# =============================================================================
+
+
+class PasswordResetToken(SQLModel, table=True):
+    """Password reset token for email-based password recovery."""
+
+    __tablename__ = "password_reset_tokens"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="users.id", index=True)
+    token_hash: str = Field(max_length=64, unique=True, index=True)
+    expires_at: datetime = Field(index=True)
+    used_at: datetime | None = Field(default=None)
+    revoked_at: datetime | None = Field(default=None)
+    ip_address: str | None = Field(default=None, max_length=64)
+    user_agent: str | None = Field(default=None, max_length=512)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
+        sa_column=Column(DateTime, nullable=False, server_default=text("now()")),
+    )
 
 
 # =============================================================================
@@ -239,6 +305,53 @@ class ApiKey(TimestampMixin, table=True):
 
     revoked_at: datetime | None = Field(default=None, description="Revocation timestamp")
     last_used_at: datetime | None = Field(default=None, description="Last usage timestamp")
+
+
+# =============================================================================
+# User Sessions - Track active login sessions
+# =============================================================================
+
+
+class UserSession(TimestampMixin, table=True):
+    """User login session for session tracking and revocation."""
+
+    __tablename__ = "user_sessions"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(foreign_key="users.id", index=True)
+    organization_id: UUID | None = Field(
+        default=None,
+        foreign_key="organizations.id",
+        index=True,
+        description="Org context for this session",
+    )
+
+    token_hash: str = Field(
+        max_length=128,
+        index=True,
+        description="SHA256 hash of the session token",
+    )
+
+    # Device info
+    device_name: str | None = Field(default=None, max_length=255)
+    device_type: str | None = Field(default=None, max_length=64)
+    browser: str | None = Field(default=None, max_length=128)
+    os: str | None = Field(default=None, max_length=128)
+    ip_address: str | None = Field(default=None, max_length=64)
+    user_agent: str | None = Field(default=None, max_length=512)
+    location: str | None = Field(default=None, max_length=255)
+
+    # Session state
+    is_current: bool = Field(default=False, description="Mark as current active session")
+    last_active_at: datetime | None = Field(
+        default=None,
+        description="Last activity timestamp",
+    )
+    expires_at: datetime = Field(description="Session expiry time")
+    revoked_at: datetime | None = Field(
+        default=None,
+        description="Revocation timestamp (null if active)",
+    )
 
 
 # =============================================================================

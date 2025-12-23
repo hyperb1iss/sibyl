@@ -3,22 +3,21 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sibyl.auth.dependencies import require_user
+from sibyl.auth.context import AuthContext
+from sibyl.auth.dependencies import get_auth_context
+from sibyl.auth.http import select_access_token
 from sibyl.auth.passwords import hash_password, verify_password
 from sibyl.auth.sessions import SessionManager
-from sibyl.db.connection import get_session
+from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import OAuthConnection, User
-
-if TYPE_CHECKING:
-    from sibyl.auth.context import AuthContext
 
 log = structlog.get_logger()
 
@@ -113,11 +112,11 @@ class OAuthConnectionResponse(BaseModel):
 
 @router.get("/me/profile", response_model=UserProfileResponse)
 async def get_profile(
-    auth: AuthContext = Depends(require_user),
-    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> UserProfileResponse:
     """Get current user's profile."""
-    user = await session.get(User, auth.user_id)
+    user = await session.get(User, auth.user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -136,11 +135,11 @@ async def get_profile(
 @router.patch("/me/profile", response_model=UserProfileResponse)
 async def update_profile(
     data: ProfileUpdateRequest,
-    auth: AuthContext = Depends(require_user),
-    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> UserProfileResponse:
     """Update current user's profile."""
-    user = await session.get(User, auth.user_id)
+    user = await session.get(User, auth.user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -172,11 +171,11 @@ async def update_profile(
 
 @router.get("/me/preferences", response_model=PreferencesResponse)
 async def get_preferences(
-    auth: AuthContext = Depends(require_user),
-    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> PreferencesResponse:
     """Get current user's preferences."""
-    user = await session.get(User, auth.user_id)
+    user = await session.get(User, auth.user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -186,11 +185,11 @@ async def get_preferences(
 @router.patch("/me/preferences", response_model=PreferencesResponse)
 async def update_preferences(
     data: PreferencesUpdateRequest,
-    auth: AuthContext = Depends(require_user),
-    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> PreferencesResponse:
     """Update current user's preferences (merge)."""
-    user = await session.get(User, auth.user_id)
+    user = await session.get(User, auth.user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -214,11 +213,11 @@ async def update_preferences(
 @router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
     data: PasswordChangeRequest,
-    auth: AuthContext = Depends(require_user),
-    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> None:
     """Change current user's password."""
-    user = await session.get(User, auth.user_id)
+    user = await session.get(User, auth.user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -248,7 +247,7 @@ async def change_password(
 @router.post("/password/reset", status_code=status.HTTP_202_ACCEPTED)
 async def request_password_reset(
     data: PasswordResetRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> dict[str, str]:
     """Request a password reset email."""
     from sibyl.auth.password_reset import PasswordResetManager
@@ -263,7 +262,7 @@ async def request_password_reset(
 @router.post("/password/reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
 async def confirm_password_reset(
     data: PasswordResetConfirmRequest,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> None:
     """Confirm password reset with token."""
     from sibyl.auth.password_reset import PasswordResetError, PasswordResetManager
@@ -283,18 +282,23 @@ async def confirm_password_reset(
 
 @router.get("/me/sessions", response_model=list[SessionResponse])
 async def list_sessions(
-    auth: AuthContext = Depends(require_user),
-    session: AsyncSession = Depends(get_session),
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> list[SessionResponse]:
     """List current user's active sessions."""
     manager = SessionManager(session)
-    sessions = await manager.list_user_sessions(auth.user_id)
+    sessions = await manager.list_user_sessions(auth.user.id)
 
     current_token_hash = None
-    if auth.token:
+    token = select_access_token(
+        authorization=request.headers.get("authorization"),
+        cookie_token=request.cookies.get("access_token"),
+    )
+    if token:
         import hashlib
 
-        current_token_hash = hashlib.sha256(auth.token.encode()).hexdigest()
+        current_token_hash = hashlib.sha256(token.encode()).hexdigest()
 
     return [
         SessionResponse(
@@ -303,7 +307,7 @@ async def list_sessions(
             ip_address=s.ip_address,
             created_at=s.created_at,
             expires_at=s.expires_at,
-            last_used_at=s.last_used_at,
+            last_used_at=s.last_active_at,
             is_current=s.token_hash == current_token_hash,
         )
         for s in sessions
@@ -312,30 +316,35 @@ async def list_sessions(
 
 @router.delete("/me/sessions", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_all_sessions(
-    auth: AuthContext = Depends(require_user),
-    session: AsyncSession = Depends(get_session),
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> None:
     """Revoke all sessions except current."""
     current_token_hash = None
-    if auth.token:
+    token = select_access_token(
+        authorization=request.headers.get("authorization"),
+        cookie_token=request.cookies.get("access_token"),
+    )
+    if token:
         import hashlib
 
-        current_token_hash = hashlib.sha256(auth.token.encode()).hexdigest()
+        current_token_hash = hashlib.sha256(token.encode()).hexdigest()
 
     manager = SessionManager(session)
-    count = await manager.revoke_all_sessions(auth.user_id, exclude_token_hash=current_token_hash)
-    log.info("sessions_revoked", user_id=str(auth.user_id), count=count)
+    count = await manager.revoke_all_sessions(auth.user.id, exclude_token_hash=current_token_hash)
+    log.info("sessions_revoked", user_id=str(auth.user.id), count=count)
 
 
 @router.delete("/me/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_session(
     session_id: UUID,
-    auth: AuthContext = Depends(require_user),
-    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> None:
     """Revoke a specific session."""
     manager = SessionManager(session)
-    revoked = await manager.revoke_session(session_id, auth.user_id)
+    revoked = await manager.revoke_session(session_id, auth.user.id)
     if not revoked:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -347,14 +356,14 @@ async def revoke_session(
 
 @router.get("/me/connections", response_model=list[OAuthConnectionResponse])
 async def list_connections(
-    auth: AuthContext = Depends(require_user),
-    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> list[OAuthConnectionResponse]:
     """List OAuth connections for current user."""
     from sqlmodel import select
 
     result = await session.execute(
-        select(OAuthConnection).where(OAuthConnection.user_id == auth.user_id)
+        select(OAuthConnection).where(OAuthConnection.user_id == auth.user.id)
     )
     connections = result.scalars().all()
 
@@ -373,8 +382,8 @@ async def list_connections(
 @router.delete("/me/connections/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_connection(
     connection_id: UUID,
-    auth: AuthContext = Depends(require_user),
-    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> None:
     """Remove an OAuth connection."""
     from sqlmodel import select
@@ -382,18 +391,18 @@ async def remove_connection(
     result = await session.execute(
         select(OAuthConnection)
         .where(OAuthConnection.id == connection_id)
-        .where(OAuthConnection.user_id == auth.user_id)
+        .where(OAuthConnection.user_id == auth.user.id)
     )
     connection = result.scalar_one_or_none()
 
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    user = await session.get(User, auth.user_id)
+    user = await session.get(User, auth.user.id)
 
     remaining = await session.execute(
         select(OAuthConnection)
-        .where(OAuthConnection.user_id == auth.user_id)
+        .where(OAuthConnection.user_id == auth.user.id)
         .where(OAuthConnection.id != connection_id)
     )
     has_other_connections = remaining.scalar_one_or_none() is not None
@@ -410,6 +419,6 @@ async def remove_connection(
 
     log.info(
         "oauth_connection_removed",
-        user_id=str(auth.user_id),
+        user_id=str(auth.user.id),
         provider=connection.provider,
     )

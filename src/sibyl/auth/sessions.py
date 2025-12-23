@@ -6,10 +6,26 @@ import hashlib
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
+from sqlalchemy import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from sibyl.db.models import UserSession
+
+
+def _is_none(column: ColumnElement) -> ColumnElement:  # type: ignore[type-arg]
+    """Create an IS NULL comparison for a column."""
+    return column.is_(None)  # type: ignore[union-attr]
+
+
+def _is_true(column: ColumnElement) -> ColumnElement:  # type: ignore[type-arg]
+    """Create an IS TRUE comparison for a column."""
+    return column.is_(True)  # type: ignore[union-attr]
+
+
+def _desc(column: ColumnElement) -> ColumnElement:  # type: ignore[type-arg]
+    """Create a DESC order for a column."""
+    return column.desc()  # type: ignore[union-attr]
 
 
 class SessionManager:
@@ -67,7 +83,7 @@ class SessionManager:
         result = await self._session.execute(
             select(UserSession)
             .where(UserSession.token_hash == token_hash)
-            .where(UserSession.revoked_at.is_(None))
+            .where(_is_none(UserSession.revoked_at))
         )
         return result.scalar_one_or_none()
 
@@ -81,8 +97,8 @@ class SessionManager:
         query = (
             select(UserSession)
             .where(UserSession.user_id == user_id)
-            .where(UserSession.revoked_at.is_(None))
-            .order_by(UserSession.last_active_at.desc())
+            .where(_is_none(UserSession.revoked_at))
+            .order_by(_desc(UserSession.last_active_at))
         )
 
         if not include_expired:
@@ -110,7 +126,7 @@ class SessionManager:
         result = await self._session.execute(
             select(UserSession)
             .where(UserSession.user_id == session.user_id)
-            .where(UserSession.is_current.is_(True))
+            .where(_is_true(UserSession.is_current))
         )
         for s in result.scalars():
             s.is_current = False
@@ -124,7 +140,7 @@ class SessionManager:
             select(UserSession)
             .where(UserSession.id == session_id)
             .where(UserSession.user_id == user_id)
-            .where(UserSession.revoked_at.is_(None))
+            .where(_is_none(UserSession.revoked_at))
         )
         session = result.scalar_one_or_none()
 
@@ -145,7 +161,7 @@ class SessionManager:
         query = (
             select(UserSession)
             .where(UserSession.user_id == user_id)
-            .where(UserSession.revoked_at.is_(None))
+            .where(_is_none(UserSession.revoked_at))
         )
 
         if exclude_token_hash:

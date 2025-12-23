@@ -1210,7 +1210,7 @@ async def _explore_dependencies(
         deps = await relationship_manager.get_related_entities(
             entity_id=task_id,
             relationship_types=[RelationshipType.DEPENDS_ON],
-            depth=1,
+            max_depth=1,
             limit=100,
         )
 
@@ -1316,7 +1316,7 @@ async def _explore_related(
     raw_results = await relationship_manager.get_related_entities(
         entity_id=entity_id,
         relationship_types=rel_types,
-        depth=depth,
+        max_depth=depth,
         limit=limit,
     )
 
