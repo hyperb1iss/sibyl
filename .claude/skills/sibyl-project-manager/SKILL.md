@@ -52,45 +52,45 @@ Any transition is allowed for flexibility with historical/bulk data.
 
 ```bash
 # All tasks (raw JSON)
-uv run sibyl task list 2>&1
+sibyl task list 2>&1
 
 # Filter by status (ALWAYS prefer filtered lists)
-uv run sibyl task list --status todo 2>&1
-uv run sibyl task list --status doing 2>&1
+sibyl task list --status todo 2>&1
+sibyl task list --status doing 2>&1
 
 # Filter by project
-uv run sibyl task list --project proj_abc 2>&1
+sibyl task list --project proj_abc 2>&1
 
 # Parse with jq
-uv run sibyl task list --status todo 2>&1 | jq -r '.[] | "\(.metadata.priority)\t\(.id[-12:])\t\(.name[:50])"'
+sibyl task list --status todo 2>&1 | jq -r '.[] | "\(.metadata.priority)\t\(.id[-12:])\t\(.name[:50])"'
 ```
 
 ### Show Task Details
 
 ```bash
-uv run sibyl task show task_xyz 2>&1
+sibyl task show task_xyz 2>&1
 ```
 
 ### Archive Task
 
 ```bash
-uv run sibyl task archive task_xyz --reason "Completed: feature implemented at path/file.py:123" 2>&1
+sibyl task archive task_xyz --reason "Completed: feature implemented at path/file.py:123" 2>&1
 ```
 
 ### Update Task
 
 ```bash
 # Update priority
-uv run sibyl task update task_xyz --priority high 2>&1
+sibyl task update task_xyz --priority high 2>&1
 
 # Update status directly
-uv run sibyl task update task_xyz --status done 2>&1
+sibyl task update task_xyz --status done 2>&1
 ```
 
 ### Complete Task (with learnings)
 
 ```bash
-uv run sibyl task complete task_xyz --learnings "Key insight about implementation" 2>&1
+sibyl task complete task_xyz --learnings "Key insight about implementation" 2>&1
 ```
 
 ---
@@ -102,7 +102,7 @@ When auditing tasks, follow this process:
 ### 1. Get All Open Tasks
 
 ```bash
-uv run sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.feature != "auth") | "\(.id)\t\(.name)"'
+sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.feature != "auth") | "\(.id)\t\(.name)"'
 ```
 
 ### 2. For Each Task, Verify Against Code
@@ -130,8 +130,8 @@ rg "function_name" --type py
 ### 4. Batch Archive Completed Tasks
 
 ```bash
-uv run sibyl task archive task_xxx --reason "Completed: [evidence]" 2>&1
-uv run sibyl task archive task_yyy --reason "Irrelevant: [reason]" 2>&1
+sibyl task archive task_xxx --reason "Completed: [evidence]" 2>&1
+sibyl task archive task_yyy --reason "Irrelevant: [reason]" 2>&1
 ```
 
 ---
@@ -177,28 +177,28 @@ grep -r "new_pattern" src/
 
 ```bash
 # Tasks with invalid project_id
-uv run sibyl task list 2>&1 | jq -r '.[] | select(.metadata.project_id == null or .metadata.project_id == "") | .id'
+sibyl task list 2>&1 | jq -r '.[] | select(.metadata.project_id == null or .metadata.project_id == "") | .id'
 ```
 
 ### Find Suspicious Task Names
 
 ```bash
 # Tasks that look like test data
-uv run sibyl task list 2>&1 | jq -r '.[] | select(.name | test("^(Batch|Test|Perf|Sample)")) | "\(.id)\t\(.name)"'
+sibyl task list 2>&1 | jq -r '.[] | select(.name | test("^(Batch|Test|Perf|Sample)")) | "\(.id)\t\(.name)"'
 ```
 
 ### Archive Garbage Tasks
 
 ```bash
 # Archive test/garbage tasks (verify first!)
-uv run sibyl task archive task_xxx --reason "Test data cleanup"
+sibyl task archive task_xxx --reason "Test data cleanup"
 ```
 
 ### Find Duplicate Task Names
 
 ```bash
 # Look for potential duplicates
-uv run sibyl task list 2>&1 | jq -r '.[].name' | sort | uniq -d
+sibyl task list 2>&1 | jq -r '.[].name' | sort | uniq -d
 ```
 
 ---
@@ -232,29 +232,29 @@ When setting priorities, use this matrix:
 
 ```bash
 echo "=== Task Status Summary ==="
-echo "TODO:    $(uv run sibyl task list --status todo 2>&1 | jq 'length')"
-echo "DOING:   $(uv run sibyl task list --status doing 2>&1 | jq 'length')"
-echo "BLOCKED: $(uv run sibyl task list --status blocked 2>&1 | jq 'length')"
-echo "REVIEW:  $(uv run sibyl task list --status review 2>&1 | jq 'length')"
-echo "DONE:    $(uv run sibyl task list --status done 2>&1 | jq 'length')"
+echo "TODO:    $(sibyl task list --status todo 2>&1 | jq 'length')"
+echo "DOING:   $(sibyl task list --status doing 2>&1 | jq 'length')"
+echo "BLOCKED: $(sibyl task list --status blocked 2>&1 | jq 'length')"
+echo "REVIEW:  $(sibyl task list --status review 2>&1 | jq 'length')"
+echo "DONE:    $(sibyl task list --status done 2>&1 | jq 'length')"
 ```
 
 ### Tasks by Priority
 
 ```bash
-uv run sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.priority) | .[] | "\(.[0].metadata.priority): \(length) tasks"'
+sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.priority) | .[] | "\(.[0].metadata.priority): \(length) tasks"'
 ```
 
 ### High Priority Tasks
 
 ```bash
-uv run sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "critical" or .metadata.priority == "high") | "[\(.metadata.priority)] \(.name)"'
+sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "critical" or .metadata.priority == "high") | "[\(.metadata.priority)] \(.name)"'
 ```
 
 ### Tasks by Feature Area
 
 ```bash
-uv run sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.feature) | .[] | "\(.[0].metadata.feature // "untagged"):", (.[].name | "  - \(.)")'
+sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.feature) | .[] | "\(.[0].metadata.feature // "untagged"):", (.[].name | "  - \(.)")'
 ```
 
 ---
@@ -327,7 +327,7 @@ When auditing, typically EXCLUDE:
 
 Filter command:
 ```bash
-uv run sibyl task list --status todo 2>&1 | jq '[.[] | select(.metadata.feature != "auth")]'
+sibyl task list --status todo 2>&1 | jq '[.[] | select(.metadata.feature != "auth")]'
 ```
 
 ---

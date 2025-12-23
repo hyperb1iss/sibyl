@@ -10,14 +10,14 @@ When asked to audit tasks:
 # Count by status
 echo "=== Status Counts ==="
 for s in todo doing blocked review done; do
-  echo "$s: $(uv run sibyl task list --status $s 2>&1 | jq 'length')"
+  echo "$s: $(sibyl task list --status $s 2>&1 | jq 'length')"
 done
 ```
 
 ### Step 2: List all open non-auth tasks
 
 ```bash
-uv run sibyl task list --status todo 2>&1 | python3 -c "
+sibyl task list --status todo 2>&1 | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 for task in sorted(data, key=lambda t: t.get('metadata', {}).get('priority', 'z')):
@@ -46,7 +46,7 @@ ls web/src/components/
 ### Step 4: Archive completed tasks
 
 ```bash
-uv run sibyl task archive task_xxx --reason "Completed: [evidence with file:line]"
+sibyl task archive task_xxx --reason "Completed: [evidence with file:line]"
 ```
 
 ---
@@ -58,13 +58,13 @@ When planning a sprint:
 ### Step 1: Review high priority items
 
 ```bash
-uv run sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "critical" or .metadata.priority == "high") | "[\(.metadata.priority)] \(.id[-12:]): \(.name)"'
+sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "critical" or .metadata.priority == "high") | "[\(.metadata.priority)] \(.id[-12:]): \(.name)"'
 ```
 
 ### Step 2: Check for blockers
 
 ```bash
-uv run sibyl task list --status blocked 2>&1 | jq -r '.[] | "\(.id[-12:]): \(.name) - \(.metadata.blocked_reason // "no reason")"'
+sibyl task list --status blocked 2>&1 | jq -r '.[] | "\(.id[-12:]): \(.name) - \(.metadata.blocked_reason // "no reason")"'
 ```
 
 ### Step 3: Identify dependencies
@@ -87,7 +87,7 @@ When priorities seem off:
 ### Step 1: Get current priority distribution
 
 ```bash
-uv run sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.priority) | .[] | "\(.[0].metadata.priority): \(length)"'
+sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.priority) | .[] | "\(.[0].metadata.priority): \(length)"'
 ```
 
 ### Step 2: Identify misclassified tasks
@@ -103,7 +103,7 @@ uv run sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.priority) 
 ### Step 3: Update priorities
 
 ```bash
-uv run sibyl task update task_xxx --priority medium
+sibyl task update task_xxx --priority medium
 ```
 
 ---
@@ -116,25 +116,25 @@ When data quality issues arise:
 
 ```bash
 # Tasks with test-like names
-uv run sibyl task list 2>&1 | jq -r '.[] | select(.name | test("^(Batch|Test|Perf|Sample)")) | "\(.id)\t\(.name)"'
+sibyl task list 2>&1 | jq -r '.[] | select(.name | test("^(Batch|Test|Perf|Sample)")) | "\(.id)\t\(.name)"'
 ```
 
 ### Step 2: Find duplicates
 
 ```bash
-uv run sibyl task list 2>&1 | jq -r '.[].name' | sort | uniq -d
+sibyl task list 2>&1 | jq -r '.[].name' | sort | uniq -d
 ```
 
 ### Step 3: Find orphaned tasks
 
 ```bash
-uv run sibyl task list 2>&1 | jq -r '.[] | select(.metadata.project_id == null) | "\(.id)\t\(.name)"'
+sibyl task list 2>&1 | jq -r '.[] | select(.metadata.project_id == null) | "\(.id)\t\(.name)"'
 ```
 
 ### Step 4: Archive garbage (verify first!)
 
 ```bash
-uv run sibyl task archive task_xxx --reason "Cleanup: test data"
+sibyl task archive task_xxx --reason "Cleanup: test data"
 ```
 
 ---
@@ -147,16 +147,16 @@ Generate a quick status for standup:
 echo "=== PROJECT STATUS ==="
 echo ""
 echo "In Progress:"
-uv run sibyl task list --status doing 2>&1 | jq -r '.[] | "  - \(.name)"'
+sibyl task list --status doing 2>&1 | jq -r '.[] | "  - \(.name)"'
 echo ""
 echo "Blocked:"
-uv run sibyl task list --status blocked 2>&1 | jq -r '.[] | "  - \(.name): \(.metadata.blocked_reason // "?")"'
+sibyl task list --status blocked 2>&1 | jq -r '.[] | "  - \(.name): \(.metadata.blocked_reason // "?")"'
 echo ""
 echo "Ready for Review:"
-uv run sibyl task list --status review 2>&1 | jq -r '.[] | "  - \(.name)"'
+sibyl task list --status review 2>&1 | jq -r '.[] | "  - \(.name)"'
 echo ""
 echo "Up Next (High Priority):"
-uv run sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "high" or .metadata.priority == "critical") | "  - [\(.metadata.priority)] \(.name)"'
+sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "high" or .metadata.priority == "critical") | "  - [\(.metadata.priority)] \(.name)"'
 ```
 
 ---
@@ -203,16 +203,16 @@ grep "@app.command" src/sibyl/cli/ | grep "command_name"
 
 ```bash
 # After verification, archive in sequence
-uv run sibyl task archive task_aaa --reason "Done: X" 2>&1
-uv run sibyl task archive task_bbb --reason "Done: Y" 2>&1
-uv run sibyl task archive task_ccc --reason "Irrelevant: Z" 2>&1
+sibyl task archive task_aaa --reason "Done: X" 2>&1
+sibyl task archive task_bbb --reason "Done: Y" 2>&1
+sibyl task archive task_ccc --reason "Irrelevant: Z" 2>&1
 ```
 
 ### Update multiple priorities
 
 ```bash
-uv run sibyl task update task_aaa --priority high 2>&1
-uv run sibyl task update task_bbb --priority medium 2>&1
+sibyl task update task_aaa --priority high 2>&1
+sibyl task update task_bbb --priority medium 2>&1
 ```
 
 ---
@@ -223,20 +223,20 @@ Run weekly:
 
 1. **Check for stale "doing" tasks** (stuck in progress)
 ```bash
-uv run sibyl task list --status doing 2>&1 | jq 'length'
+sibyl task list --status doing 2>&1 | jq 'length'
 ```
 
 2. **Review blocked tasks** (may need escalation)
 ```bash
-uv run sibyl task list --status blocked 2>&1 | jq -r '.[] | .name'
+sibyl task list --status blocked 2>&1 | jq -r '.[] | .name'
 ```
 
 3. **Clean up completed work** (done but not archived)
 ```bash
-uv run sibyl task list --status done 2>&1 | jq -r '.[] | "\(.id[-12:])\t\(.name)"'
+sibyl task list --status done 2>&1 | jq -r '.[] | "\(.id[-12:])\t\(.name)"'
 ```
 
 4. **Priority sanity check**
 ```bash
-uv run sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.priority) | .[] | "\(.[0].metadata.priority): \(length)"'
+sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.priority) | .[] | "\(.[0].metadata.priority): \(length)"'
 ```

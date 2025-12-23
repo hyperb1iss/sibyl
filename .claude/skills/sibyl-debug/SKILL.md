@@ -56,10 +56,10 @@ RETURN n
 **Fix:**
 ```bash
 # Restart Sibyl server
-uv run sibyl serve
+sibyl serve
 
 # Or for development with reload
-uv run sibyl dev
+sibyl dev
 ```
 
 ### Debug Queries
@@ -110,10 +110,10 @@ await client.client.driver.execute_query("CREATE ...")
 
 ```bash
 # Quick health check
-uv run sibyl health
+sibyl health
 
 # Detailed stats
-uv run sibyl stats
+sibyl stats
 
 # Check Docker
 docker ps | grep sibyl
@@ -126,7 +126,7 @@ Before debugging from scratch, search Sibyl for known solutions:
 
 ```bash
 # Via CLI
-uv run sibyl search "your error message"
+sibyl search "your error message"
 
 # Via MCP (if available)
 search("connection error FalkorDB", types=["episode", "error_pattern"])

@@ -21,17 +21,17 @@
 
 ```bash
 # Search for knowledge
-uv run sibyl search "authentication patterns"
+sibyl search "authentication patterns"
 
 # List tasks (JSON by default)
-uv run sibyl task list --status todo
+sibyl task list --status todo
 
 # Quick knowledge capture
-uv run sibyl add "Title" "What you learned..."
+sibyl add "Title" "What you learned..."
 
 # Task lifecycle
-uv run sibyl task start <id>
-uv run sibyl task complete <id> --learnings "..."
+sibyl task start <id>
+sibyl task complete <id> --learnings "..."
 ```
 
 The MCP server (`mcp__sibyl`) is also available but the CLI is preferred for:
@@ -54,10 +54,10 @@ The MCP server (`mcp__sibyl`) is also available but the CLI is preferred for:
 
 ### Sibyl Workflow (Complex Work)
 
-1. **Search first:** `uv run sibyl search "topic"` - find patterns, gotchas, past solutions
-2. **Check tasks:** `uv run sibyl task list --status todo` - see what's tracked
+1. **Search first:** `sibyl search "topic"` - find patterns, gotchas, past solutions
+2. **Check tasks:** `sibyl task list --status todo` - see what's tracked
 3. **Work in context:** Start a task if one exists, or create one for significant work
-4. **Capture learnings:** `uv run sibyl add "Title" "Learning..."` for discoveries
+4. **Capture learnings:** `sibyl add "Title" "Learning..."` for discoveries
 
 ---
 
@@ -269,9 +269,9 @@ just fix           # ruff fix + format
 just test          # pytest
 just serve         # Start server on :3334
 
-uv run sibyl stats          # Graph statistics
-uv run sibyl task list      # List tasks
-uv run sibyl db backup      # Backup graph
+sibyl stats          # Graph statistics
+sibyl task list      # List tasks
+sibyl db backup      # Backup graph
 ```
 
 ### Frontend
@@ -393,11 +393,11 @@ just test -m integration            # Integration tests only
 
 When working on Sibyl itself:
 
-1. **Check current tasks:** `uv run sibyl task list --doing`
-2. **Start a task:** `uv run sibyl task start <id>`
+1. **Check current tasks:** `sibyl task list --doing`
+2. **Start a task:** `sibyl task start <id>`
 3. **Search for context:** Query Sibyl for relevant patterns
 4. **Implement** following patterns in this guide
-5. **Complete with learnings:** `uv run sibyl task complete <id> --learnings "..."`
+5. **Complete with learnings:** `sibyl task complete <id> --learnings "..."`
 6. **Capture new knowledge:** Add episodes for gotchas discovered
 
 ---
@@ -406,17 +406,17 @@ When working on Sibyl itself:
 
 ```bash
 # Start everything
-docker compose up -d && uv run sibyl serve &
+sibyl up &              # Starts FalkorDB + API server
 cd web && pnpm dev
 
 # Check status
-uv run sibyl stats
-uv run sibyl health
+sibyl stats
+sibyl health
 
 # Common operations
-uv run sibyl search "authentication"
-uv run sibyl task list --todo
-uv run sibyl entity list --type pattern
+sibyl search "authentication"
+sibyl task list --todo
+sibyl entity list --type pattern
 
 # Debug FalkorDB
 docker exec sibyl-falkordb redis-cli -a conventions GRAPH.QUERY conventions "MATCH (n) RETURN labels(n), count(*)"

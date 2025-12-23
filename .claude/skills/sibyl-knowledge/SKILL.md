@@ -1,6 +1,6 @@
 ---
 name: sibyl-knowledge
-description: Graph-RAG knowledge oracle with CLI interface. Use `uv run sibyl` for semantic search, task management, knowledge capture, and graph exploration. Invoke when you need persistent memory across sessions, pattern/learning lookup, or task tracking. Requires FalkorDB running.
+description: Graph-RAG knowledge oracle with CLI interface. Use `sibyl` for semantic search, task management, knowledge capture, and graph exploration. Invoke when you need persistent memory across sessions, pattern/learning lookup, or task tracking. Requires FalkorDB running.
 allowed-tools: Bash
 ---
 
@@ -12,26 +12,26 @@ Sibyl gives you persistent memory across coding sessions. Search patterns, track
 
 ```bash
 # Search for knowledge
-uv run sibyl search "authentication patterns"
+sibyl search "authentication patterns"
 
 # Quickly add a learning
-uv run sibyl add "Redis insight" "Connection pool must be >= concurrent requests"
+sibyl add "Redis insight" "Connection pool must be >= concurrent requests"
 
 # List tasks (always filter with --status to reduce noise)
-uv run sibyl task list --status todo
-uv run sibyl task list --status done
+sibyl task list --status todo
+sibyl task list --status done
 
 # List projects
-uv run sibyl project list
+sibyl project list
 
 # Create a task in a project
-uv run sibyl task create --title "Implement OAuth" --project proj_abc --priority high
+sibyl task create --title "Implement OAuth" --project proj_abc --priority high
 
 # Start a task
-uv run sibyl task start task_xyz --assignee alice
+sibyl task start task_xyz --assignee alice
 
 # Complete with learnings
-uv run sibyl task complete task_xyz --learnings "OAuth tokens expire..."
+sibyl task complete task_xyz --learnings "OAuth tokens expire..."
 ```
 
 **Pro tips:**
@@ -45,10 +45,10 @@ uv run sibyl task complete task_xyz --learnings "OAuth tokens expire..."
 ## The Agent Feedback Loop
 
 ```
-1. SEARCH FIRST     → uv run sibyl search "topic"
-2. CHECK TASKS      → uv run sibyl task list --status doing
-3. WORK & CAPTURE   → uv run sibyl entity create (for learnings)
-4. COMPLETE         → uv run sibyl task complete --learnings "..."
+1. SEARCH FIRST     → sibyl search "topic"
+2. CHECK TASKS      → sibyl task list --status doing
+3. WORK & CAPTURE   → sibyl entity create (for learnings)
+4. COMPLETE         → sibyl task complete --learnings "..."
 ```
 
 ---
@@ -59,13 +59,13 @@ uv run sibyl task complete task_xyz --learnings "OAuth tokens expire..."
 
 ```bash
 # Semantic search across all types
-uv run sibyl search "error handling patterns"
+sibyl search "error handling patterns"
 
 # Filter by entity type
-uv run sibyl search "OAuth" --type pattern
+sibyl search "OAuth" --type pattern
 
 # Limit results
-uv run sibyl search "debugging redis" --limit 5
+sibyl search "debugging redis" --limit 5
 ```
 
 **When to use:** Before implementing anything. Find existing patterns, past solutions, gotchas.
@@ -76,16 +76,16 @@ uv run sibyl search "debugging redis" --limit 5
 
 ```bash
 # Basic: title and content
-uv run sibyl add "Title" "What you learned..."
+sibyl add "Title" "What you learned..."
 
 # With metadata
-uv run sibyl add "OAuth insight" "Token refresh timing..." -c authentication -l python
+sibyl add "OAuth insight" "Token refresh timing..." -c authentication -l python
 
 # Auto-link to related entities
-uv run sibyl add "Redis pattern" "Connection pooling..." --auto-link
+sibyl add "Redis pattern" "Connection pooling..." --auto-link
 
 # Create a pattern instead of episode
-uv run sibyl add "Retry pattern" "Exponential backoff..." --type pattern
+sibyl add "Retry pattern" "Exponential backoff..." --type pattern
 ```
 
 **When to use:** After discovering something non-obvious. Quick way to capture learnings.
@@ -96,42 +96,42 @@ uv run sibyl add "Retry pattern" "Exponential backoff..." --type pattern
 
 ```bash
 # CREATE a task (requires project)
-uv run sibyl task create --title "Implement OAuth" --project proj_abc
-uv run sibyl task create -t "Add rate limiting" -p proj_api --priority high
-uv run sibyl task create -t "Fix bug" -p proj_web --assignee alice --tech python,redis
+sibyl task create --title "Implement OAuth" --project proj_abc
+sibyl task create -t "Add rate limiting" -p proj_api --priority high
+sibyl task create -t "Fix bug" -p proj_web --assignee alice --tech python,redis
 ```
 
 ```bash
 # List tasks (ALWAYS filter by project or status)
-uv run sibyl task list --project proj_abc
-uv run sibyl task list --status todo
-uv run sibyl task list --status doing
-uv run sibyl task list --assignee alice
+sibyl task list --project proj_abc
+sibyl task list --status todo
+sibyl task list --status doing
+sibyl task list --assignee alice
 
 # Show task details
-uv run sibyl task show task_xyz
+sibyl task show task_xyz
 
 # Start working (generates branch name)
-uv run sibyl task start task_xyz --assignee alice
+sibyl task start task_xyz --assignee alice
 
 # Block with reason
-uv run sibyl task block task_xyz --reason "Waiting on API keys"
+sibyl task block task_xyz --reason "Waiting on API keys"
 
 # Resume blocked task
-uv run sibyl task unblock task_xyz
+sibyl task unblock task_xyz
 
 # Submit for review
-uv run sibyl task review task_xyz --pr "github.com/.../pull/42"
+sibyl task review task_xyz --pr "github.com/.../pull/42"
 
 # Complete with learnings (IMPORTANT: capture what you learned!)
-uv run sibyl task complete task_xyz --hours 4.5 --learnings "Token refresh needs..."
+sibyl task complete task_xyz --hours 4.5 --learnings "Token refresh needs..."
 
 # Archive
-uv run sibyl task archive task_xyz --yes
+sibyl task archive task_xyz --yes
 
 # Direct update (bulk/historical updates)
-uv run sibyl task update task_xyz --status done --priority high
-uv run sibyl task update task_xyz -s todo -p medium
+sibyl task update task_xyz --status done --priority high
+sibyl task update task_xyz -s todo -p medium
 ```
 
 **Task States:** `backlog ↔ todo ↔ doing ↔ blocked ↔ review ↔ done ↔ archived`
@@ -144,13 +144,13 @@ uv run sibyl task update task_xyz -s todo -p medium
 
 ```bash
 # List all projects
-uv run sibyl project list
+sibyl project list
 
 # Show project details
-uv run sibyl project show proj_abc
+sibyl project show proj_abc
 
 # Create a project
-uv run sibyl project create --name "Auth System" --description "OAuth and JWT implementation"
+sibyl project create --name "Auth System" --description "OAuth and JWT implementation"
 ```
 
 ---
@@ -159,21 +159,21 @@ uv run sibyl project create --name "Auth System" --description "OAuth and JWT im
 
 ```bash
 # List entities by type
-uv run sibyl entity list --type pattern
-uv run sibyl entity list --type episode
-uv run sibyl entity list --type rule --language python
+sibyl entity list --type pattern
+sibyl entity list --type episode
+sibyl entity list --type rule --language python
 
 # Show entity details
-uv run sibyl entity show entity_xyz
+sibyl entity show entity_xyz
 
 # Create an entity (for capturing learnings)
-uv run sibyl entity create --type episode --name "Redis insight" --content "Discovered that..."
+sibyl entity create --type episode --name "Redis insight" --content "Discovered that..."
 
 # Find related entities
-uv run sibyl entity related entity_xyz
+sibyl entity related entity_xyz
 
 # Delete (with confirmation)
-uv run sibyl entity delete entity_xyz
+sibyl entity delete entity_xyz
 ```
 
 **Entity Types:** pattern, rule, template, tool, topic, episode, task, project, source, document
@@ -184,16 +184,16 @@ uv run sibyl entity delete entity_xyz
 
 ```bash
 # Find related entities (1-hop)
-uv run sibyl explore related entity_xyz
+sibyl explore related entity_xyz
 
 # Multi-hop traversal
-uv run sibyl explore traverse entity_xyz --depth 2
+sibyl explore traverse entity_xyz --depth 2
 
 # Task dependency chain
-uv run sibyl explore dependencies task_xyz
+sibyl explore dependencies task_xyz
 
 # Find path between entities
-uv run sibyl explore path from_id to_id
+sibyl explore path from_id to_id
 ```
 
 ---
@@ -202,13 +202,13 @@ uv run sibyl explore path from_id to_id
 
 ```bash
 # Check system health
-uv run sibyl health
+sibyl health
 
 # Show statistics
-uv run sibyl stats
+sibyl stats
 
 # Show config
-uv run sibyl config
+sibyl config
 ```
 
 ---
@@ -219,43 +219,43 @@ uv run sibyl config
 
 ```bash
 # 1. Check for in-progress work
-uv run sibyl task list --status doing
+sibyl task list --status doing
 
 # 2. Or find todo tasks in your project
-uv run sibyl task list --project proj_abc --status todo
+sibyl task list --project proj_abc --status todo
 
 # 3. Start working
-uv run sibyl task start task_xyz --assignee you
+sibyl task start task_xyz --assignee you
 ```
 
 ### Research Before Implementation
 
 ```bash
 # Find patterns
-uv run sibyl search "what you're implementing" --type pattern
+sibyl search "what you're implementing" --type pattern
 
 # Find past learnings
-uv run sibyl search "related topic" --type episode
+sibyl search "related topic" --type episode
 
 # Check for gotchas
-uv run sibyl search "common mistakes" --type episode
+sibyl search "common mistakes" --type episode
 ```
 
 ### Capture a Learning
 
 ```bash
 # Quick capture
-uv run sibyl add "Descriptive title" "What you learned and why it matters"
+sibyl add "Descriptive title" "What you learned and why it matters"
 
 # With metadata
-uv run sibyl add "Descriptive title" "What you learned..." -c debugging -l python --auto-link
+sibyl add "Descriptive title" "What you learned..." -c debugging -l python --auto-link
 ```
 
 ### Complete Task with Learnings
 
 ```bash
 # Capture insights when completing
-uv run sibyl task complete task_xyz \
+sibyl task complete task_xyz \
   --hours 4.5 \
   --learnings "Key insight: The OAuth flow requires..."
 ```
@@ -270,22 +270,22 @@ uv run sibyl task complete task_xyz \
 
 ```bash
 # Extract just task names
-uv run sibyl task list --status todo 2>&1 | jq -r '.[].name'
+sibyl task list --status todo 2>&1 | jq -r '.[].name'
 
 # Count tasks by status
-uv run sibyl task list --status todo 2>&1 | jq 'length'
+sibyl task list --status todo 2>&1 | jq 'length'
 
 # Get names and priorities
-uv run sibyl task list --status todo 2>&1 | jq -r '.[] | "\(.metadata.priority)\t\(.name)"'
+sibyl task list --status todo 2>&1 | jq -r '.[] | "\(.metadata.priority)\t\(.name)"'
 
 # Filter by priority
-uv run sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "high") | .name'
+sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "high") | .name'
 
 # Get tasks grouped by feature
-uv run sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.feature) | .[] | "\(.[0].metadata.feature // "none"):\n\(.[].name | "  - \(.)")"'
+sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.feature) | .[] | "\(.[0].metadata.feature // "none"):\n\(.[].name | "  - \(.)")"'
 
 # Sorted by priority (critical first)
-uv run sibyl task list --status todo 2>&1 | jq -r 'sort_by(.metadata.priority) | .[].name'
+sibyl task list --status todo 2>&1 | jq -r 'sort_by(.metadata.priority) | .[].name'
 ```
 
 ### JSON Output Notes
@@ -296,8 +296,8 @@ uv run sibyl task list --status todo 2>&1 | jq -r 'sort_by(.metadata.priority) |
 ### CSV Export (Alternative)
 
 ```bash
-uv run sibyl task list --csv
-uv run sibyl entity list --type pattern --csv
+sibyl task list --csv
+sibyl entity list --type pattern --csv
 ```
 
 ---
@@ -320,7 +320,7 @@ uv run sibyl entity list --type pattern --csv
 
 **Prefer CLI over MCP tools** (`mcp__sibyl__*`):
 
-| Aspect | CLI (`uv run sibyl`) | MCP Tools |
+| Aspect | CLI (`sibyl`) | MCP Tools |
 |--------|---------------------|-----------|
 | Reliability | Always works | May have session issues |
 | Output control | `--table`, `--csv`, JSON | JSON only |
@@ -336,7 +336,7 @@ The MCP tools (`mcp__sibyl__search`, `mcp__sibyl__add`, etc.) are available but 
 ### "No valid session ID" from MCP tools
 The Sibyl MCP server isn't running. Use CLI instead:
 ```bash
-uv run sibyl search "query"  # Instead of mcp__sibyl__search
+sibyl search "query"  # Instead of mcp__sibyl__search
 ```
 
 ### FalkorDB connection errors
@@ -348,14 +348,14 @@ docker ps | grep falkordb
 docker compose up -d
 
 # Verify
-uv run sibyl health
+sibyl health
 ```
 
 ### Task list shows old/test data
 Filter by status or project to focus:
 ```bash
-uv run sibyl task list --status todo      # Active work only
-uv run sibyl task list --project my-proj  # Specific project
+sibyl task list --status todo      # Active work only
+sibyl task list --project my-proj  # Specific project
 ```
 
 ---
@@ -364,37 +364,37 @@ uv run sibyl task list --project my-proj  # Specific project
 
 ### Get task counts by status
 ```bash
-echo "TODO: $(uv run sibyl task list --status todo 2>&1 | jq 'length')"
-echo "DOING: $(uv run sibyl task list --status doing 2>&1 | jq 'length')"
-echo "DONE: $(uv run sibyl task list --status done 2>&1 | jq 'length')"
+echo "TODO: $(sibyl task list --status todo 2>&1 | jq 'length')"
+echo "DOING: $(sibyl task list --status doing 2>&1 | jq 'length')"
+echo "DONE: $(sibyl task list --status done 2>&1 | jq 'length')"
 ```
 
 ### List task names by status
 ```bash
-uv run sibyl task list --status todo 2>&1 | jq -r '.[].name'
+sibyl task list --status todo 2>&1 | jq -r '.[].name'
 ```
 
 ### List tasks with priority and feature (sorted)
 ```bash
 # Priority + feature + name, sorted
-uv run sibyl task list --status todo 2>&1 | jq -r '.[] | "\(.metadata.priority)\t\(.metadata.feature // "-")\t\(.name)"' | sort
+sibyl task list --status todo 2>&1 | jq -r '.[] | "\(.metadata.priority)\t\(.metadata.feature // "-")\t\(.name)"' | sort
 ```
 
 ### Filter by priority
 ```bash
 # Only critical/high priority
-uv run sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "critical" or .metadata.priority == "high") | .name'
+sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "critical" or .metadata.priority == "high") | .name'
 ```
 
 ### Group by feature
 ```bash
-uv run sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.feature) | .[] | "\(.[0].metadata.feature // "other"):", (.[].name | "  - \(.)")'
+sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.feature) | .[] | "\(.[0].metadata.feature // "other"):", (.[].name | "  - \(.)")'
 ```
 
 ### Export for external tools
 ```bash
 # CSV export for spreadsheets
-uv run sibyl task list --status todo --csv > tasks.csv
+sibyl task list --status todo --csv > tasks.csv
 ```
 
 ---
@@ -406,8 +406,8 @@ uv run sibyl task list --status todo --csv > tasks.csv
 docker compose up -d
 
 # Check health
-uv run sibyl health
+sibyl health
 
 # If fresh install, run setup
-uv run sibyl setup
+sibyl setup
 ```
