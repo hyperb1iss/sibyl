@@ -112,7 +112,7 @@ include = ["/src", "/tests", "/README.md", "/LICENSE"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+# target-version inferred from requires-python = ">=3.11"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -122,7 +122,7 @@ select = [
     "W",      # pycodestyle warnings
     "F",      # Pyflakes
     "I",      # isort
-    "C",      # flake8-comprehensions
+    "C4",     # flake8-comprehensions
     "B",      # flake8-bugbear
     "N",      # pep8-naming
     "UP",     # pyupgrade
@@ -148,36 +148,62 @@ select = [
     "ERA",    # eradicate (commented code)
     "T20",    # flake8-print
     "ARG",    # flake8-unused-arguments
+    # Modern Python & Performance
+    "FURB",   # refurb - modern Python idioms
+    "PERF",   # perflint - performance anti-patterns
+    "LOG",    # flake8-logging - logging best practices
+    "FLY",    # flynt - f-string improvements
+    # Type Safety
+    "TCH",    # flake8-type-checking - optimize type imports
+    "FA",     # flake8-future-annotations
+    # Code Hygiene
+    "A",      # flake8-builtins - avoid shadowing builtins
+    "TID",    # flake8-tidy-imports - import restrictions
+    "SLOT",   # flake8-slots - enforce __slots__ where beneficial
 ]
 
 ignore = [
+    # Formatter conflicts
     "E501",    # Line too long (handled by formatter)
     "COM812",  # Missing trailing comma (conflicts with formatter)
     "ISC001",  # Single line implicit string concatenation
+    # Complexity (tracked, not enforced)
     "PLR0913", # Too many arguments
     "PLR2004", # Magic value in comparison
-    "S101",    # Use of assert (needed for tests)
-    "TRY003",  # Long exception messages
-    "G004",    # Logging f-string (we use structlog which handles this)
-    "PLW2901", # Loop variable overwritten (intentional in some cases)
-    "B005",    # Strip with multiple chars (edge case)
-    "S112",    # try-except-continue (acceptable for file parsing)
-    "C901",    # Too complex (will refactor later)
-    "PLR0912", # Too many branches (will refactor later)
-    "RUF012",  # ClassVar annotations (not critical for dataclasses)
+    "C901",    # Too complex
+    "PLR0912", # Too many branches
+    "PLR0911", # Too many returns
+    # Intentional patterns
+    "S101",    # Use of assert (needed for tests and contracts)
+    "TRY003",  # Long exception messages (prefer readable errors)
+    "G004",    # Logging f-string (structlog handles this efficiently)
+    "PLW2901", # Loop variable overwritten (intentional rebinding)
+    "B005",    # Strip with multiple chars
+    "S112",    # try-except-continue (acceptable for parsing)
+    # Style preferences
+    "RUF012",  # ClassVar annotations (Pydantic models)
     "RUF022",  # __all__ sorting (comments make this awkward)
     "PLC0415", # Import not at top level (lazy imports for optional deps)
     "PIE810",  # Startswith tuple (readability preference)
-    "DTZ003",  # datetime.utcnow() (will fix later)
-    "ARG002",  # Unused arguments (placeholder for future impl)
-    "BLE001",  # Blind except (acceptable for graceful error handling in tools)
-    "E741",    # Ambiguous variable name `l` (clear in context)
-    "SIM102",  # Nested if (more readable for filter chains)
-    "SIM108",  # Ternary operator (explicit if/else clearer)
-    "TRY300",  # Return in try (acceptable pattern for tool handlers)
-    "TRY301",  # Abstract raise to inner function (style preference)
-    "B007",    # Unused loop variable (score from results tuple)
-    "PLR0911", # Too many returns (dispatch function by design)
+    "SIM102",  # Nested if (clearer for filter chains)
+    "SIM108",  # Ternary operator (explicit if/else preferred)
+    "TRY300",  # Return in try (acceptable pattern)
+    "TRY301",  # Abstract raise to inner function
+    "B007",    # Unused loop variable
+    "E741",    # Ambiguous variable name
+    # Defer for later cleanup
+    "DTZ003",  # datetime.utcnow() deprecation
+    "ARG002",  # Unused method arguments (future impl)
+    "BLE001",  # Blind except (graceful degradation in tools)
+    # New rules - relax where overly strict
+    "FURB101", # open().read() vs Path().read_text() (context-dependent)
+    "FURB103", # open().write() vs Path().write_text()
+    "PERF203", # try-except in loop (sometimes necessary)
+    "TCH001",  # Move import into TYPE_CHECKING (first-party ok at runtime)
+    "TCH002",  # Move import into TYPE_CHECKING (third-party - be selective)
+    "FA100",   # Missing from __future__ import annotations (3.11+ not needed)
+    "SLOT000", # __slots__ in subclass of str/tuple/etc (special cases)
+    "A005",    # Module shadowing builtin (common: types.py, logging.py)
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -191,12 +217,20 @@ ignore = [
     "B017",    # Blind exception assertion sometimes needed
     "PT011",   # Broad pytest.raises sometimes needed
     "ERA001",  # Commented code OK for documentation in tests
+    "PERF401", # List comprehension vs manual append (clarity in tests)
 ]
 "examples/**/*.py" = [
     "T201",    # Print statements OK in examples
     "TRY002",  # Simple Exception OK in examples
     "BLE001",  # Blind except OK in examples
     "PLR0915", # Long functions OK in examples
+]
+"src/sibyl/cli/**/*.py" = [
+    "T201",    # Print statements OK in CLI (user-facing output)
+]
+"alembic/**/*.py" = [
+    "ERA001",  # Commented code OK in migrations (documentation)
+    "INP001",  # Implicit namespace OK for alembic
 ]
 
 [tool.ruff.lint.isort]
@@ -205,7 +239,32 @@ force-single-line = false
 combine-as-imports = true
 
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "fastapi.Path"]
+
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic and FastAPI need runtime access to annotations
+runtime-evaluated-base-classes = [
+    "pydantic.BaseModel",
+    "pydantic_settings.BaseSettings",
+    "sqlmodel.SQLModel",
+]
+runtime-evaluated-decorators = [
+    "pydantic.validate_call",
+    "pydantic.dataclasses.dataclass",
+]
+# Only flag third-party imports when safe to move
+strict = false
+
+[tool.ruff.lint.flake8-tidy-imports]
+# Ban relative imports from parent modules (cleaner imports)
+ban-relative-imports = "parents"
+
+[tool.ruff.lint.pylint]
+# Raise thresholds slightly for complex async code
+max-args = 8
+max-branches = 15
+max-returns = 8
+max-statements = 60
 
 # ============================================================================
 # MyPy Configuration - Strict Type Checking
