@@ -1,14 +1,38 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { NAVIGATION } from '@/lib/constants';
+import {
+  BookOpen,
+  Boxes,
+  FolderKanban,
+  KanbanBoard,
+  LayoutDashboard,
+  List,
+  ListTodo,
+  Network,
+  RefreshCw,
+  Search,
+} from '@/components/ui/icons';
+
+// Navigation items with Iconoir icons
+const COMMAND_NAV: Array<{ name: string; href: string; icon: ReactNode }> = [
+  { name: 'Dashboard', href: '/', icon: <LayoutDashboard width={18} height={18} /> },
+  { name: 'Projects', href: '/projects', icon: <FolderKanban width={18} height={18} /> },
+  { name: 'Tasks', href: '/tasks', icon: <ListTodo width={18} height={18} /> },
+  { name: 'Sources', href: '/sources', icon: <BookOpen width={18} height={18} /> },
+  { name: 'Graph', href: '/graph', icon: <Network width={18} height={18} /> },
+  { name: 'Entities', href: '/entities', icon: <Boxes width={18} height={18} /> },
+  { name: 'Search', href: '/search', icon: <Search width={18} height={18} /> },
+  { name: 'Ingest', href: '/ingest', icon: <RefreshCw width={18} height={18} /> },
+];
 
 interface CommandItem {
   id: string;
   label: string;
   description?: string;
-  icon?: string;
+  icon?: ReactNode;
   shortcut?: string;
   action: () => void;
   category: 'navigation' | 'action' | 'create';
@@ -41,7 +65,7 @@ export function CommandPalette({
             id: 'create-task',
             label: 'Create Task',
             description: 'Add a new task',
-            icon: '☰',
+            icon: <List width={18} height={18} />,
             shortcut: 'C',
             action: () => {
               onClose();
@@ -57,7 +81,7 @@ export function CommandPalette({
             id: 'create-project',
             label: 'Create Project',
             description: 'Start a new project',
-            icon: '◇',
+            icon: <KanbanBoard width={18} height={18} />,
             action: () => {
               onClose();
               onCreateProject();
@@ -67,7 +91,7 @@ export function CommandPalette({
         ]
       : []),
     // Navigation
-    ...NAVIGATION.map(item => ({
+    ...COMMAND_NAV.map(item => ({
       id: `nav-${item.href}`,
       label: item.name,
       description: `Go to ${item.name}`,
@@ -83,7 +107,7 @@ export function CommandPalette({
       id: 'search',
       label: 'Search Knowledge',
       description: 'Search across all entities',
-      icon: '⌕',
+      icon: <Search width={18} height={18} />,
       shortcut: '/',
       action: () => {
         onClose();
@@ -230,7 +254,7 @@ export function CommandPalette({
                         }
                       `}
                     >
-                      <span className="text-lg w-6 text-center">{cmd.icon}</span>
+                      <span className="w-6 flex justify-center text-sc-fg-muted">{cmd.icon}</span>
                       <div className="flex-1 min-w-0">
                         <div className="font-medium truncate">{cmd.label}</div>
                         {cmd.description && (

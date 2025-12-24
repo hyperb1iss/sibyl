@@ -2,6 +2,7 @@
 
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
+import { AlertTriangle } from '@/components/ui/icons';
 
 // =============================================================================
 // Error Boundary Types
@@ -108,9 +109,15 @@ export function ErrorFallback({ error, reset, level = 'section' }: ErrorFallback
   // Friendly error messages for common scenarios
   const friendlyMessage = getFriendlyErrorMessage(error);
 
+  // Icon sizes based on level
+  const iconSizes = { page: 56, section: 40, component: 28 };
+  const iconSize = iconSizes[level];
+
   return (
     <div className={`text-center animate-fade-in ${styles.container}`}>
-      <div className={`${styles.icon} mb-4 animate-wiggle`}>⚠️</div>
+      <div className="mb-4 flex justify-center animate-wiggle">
+        <AlertTriangle width={iconSize} height={iconSize} className="text-sc-red" />
+      </div>
       <h2 className={`font-semibold text-sc-red ${styles.title}`}>Something went wrong</h2>
       <p className={`text-sc-fg-muted mt-2 mx-auto ${styles.message}`}>{friendlyMessage}</p>
 

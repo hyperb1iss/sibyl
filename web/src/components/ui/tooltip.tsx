@@ -1,6 +1,16 @@
 'use client';
 
 import { type ReactNode, useState } from 'react';
+import {
+  AlertTriangle,
+  BarChart3,
+  Cube,
+  Flash,
+  InfoCircle,
+  Search,
+  Sparkles,
+  WifiOff,
+} from '@/components/ui/icons';
 
 interface TooltipProps {
   content: ReactNode;
@@ -78,19 +88,19 @@ interface EmptyStateProps {
 
 const EMPTY_STATE_DEFAULTS = {
   search: {
-    icon: '🔍',
+    icon: <Search width={48} height={48} className="text-sc-cyan" />,
     floatingClass: 'animate-float',
   },
   data: {
-    icon: '📊',
+    icon: <BarChart3 width={48} height={48} className="text-sc-purple" />,
     floatingClass: 'animate-wiggle',
   },
   create: {
-    icon: '✨',
+    icon: <Sparkles width={48} height={48} className="text-sc-yellow" />,
     floatingClass: 'animate-bounce-in',
   },
   default: {
-    icon: '🌌',
+    icon: <Cube width={48} height={48} className="text-sc-coral" />,
     floatingClass: 'animate-float',
   },
 };
@@ -129,19 +139,19 @@ interface ErrorStateProps {
 
 const ERROR_VARIANTS = {
   error: {
-    icon: '⚠️',
+    icon: <AlertTriangle width={32} height={32} className="text-sc-red" />,
     title: 'Oops, something went sideways',
     color: 'text-sc-red',
     iconClass: 'animate-wiggle',
   },
   warning: {
-    icon: '⚡',
+    icon: <Flash width={32} height={32} className="text-sc-yellow" />,
     title: 'Heads up',
     color: 'text-sc-yellow',
     iconClass: 'animate-pulse',
   },
   offline: {
-    icon: '📡',
+    icon: <WifiOff width={32} height={32} className="text-sc-coral" />,
     title: 'Connection lost',
     color: 'text-sc-coral',
     iconClass: 'animate-float',
@@ -173,7 +183,9 @@ interface SuccessStateProps {
 export function SuccessState({ title, message, action, celebratory = true }: SuccessStateProps) {
   return (
     <div className="text-center py-12 animate-bounce-in">
-      <div className={`text-6xl mb-4 ${celebratory ? 'success-sparkle' : ''}`}>✨</div>
+      <div className={`mb-4 flex justify-center ${celebratory ? 'success-sparkle' : ''}`}>
+        <Sparkles width={48} height={48} className="text-sc-green" />
+      </div>
       <p className="text-sc-green text-xl font-semibold gradient-text">{title}</p>
       {message && <p className="text-sc-fg-muted text-sm mt-2 max-w-md mx-auto">{message}</p>}
       {action && <div className="mt-6 animate-slide-up">{action}</div>}
@@ -229,19 +241,19 @@ interface HintProps {
 
 const HINT_VARIANTS = {
   info: {
-    icon: '💡',
+    icon: <InfoCircle width={20} height={20} className="text-sc-cyan" />,
     bg: 'bg-sc-cyan/10',
     border: 'border-sc-cyan/30',
     text: 'text-sc-cyan',
   },
   tip: {
-    icon: '✨',
+    icon: <Sparkles width={20} height={20} className="text-sc-purple" />,
     bg: 'bg-sc-purple/10',
     border: 'border-sc-purple/30',
     text: 'text-sc-purple',
   },
   warning: {
-    icon: '⚡',
+    icon: <Flash width={20} height={20} className="text-sc-yellow" />,
     bg: 'bg-sc-yellow/10',
     border: 'border-sc-yellow/30',
     text: 'text-sc-yellow',
@@ -273,9 +285,7 @@ export function Hint({
         ${variantConfig.bg} ${variantConfig.border}
       `}
     >
-      {displayIcon && (
-        <span className="text-xl flex-shrink-0 animate-glow-pulse">{displayIcon}</span>
-      )}
+      {displayIcon && <span className="flex-shrink-0 animate-glow-pulse">{displayIcon}</span>}
       <div className="flex-1 text-sm text-sc-fg-primary">{children}</div>
       {dismissible && (
         <button

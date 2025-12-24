@@ -27,6 +27,7 @@ from sibyl.api.routes import (
     invitations_router,
     jobs_router,
     manage_router,
+    metrics_router,
     org_invitations_router,
     org_members_router,
     orgs_router,
@@ -157,6 +158,7 @@ def create_api_app() -> FastAPI:
     app.include_router(rag_router)
     app.include_router(jobs_router)
     app.include_router(manage_router)
+    app.include_router(metrics_router)
     app.include_router(users_router)
 
     # WebSocket route for realtime updates

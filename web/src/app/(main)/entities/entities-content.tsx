@@ -1,5 +1,6 @@
 'use client';
 
+import { AnimatePresence, motion } from 'motion/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
@@ -153,9 +154,24 @@ export function EntitiesContent({
         <>
           {/* Entity Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
-            {filteredEntities.map(entity => (
-              <EntityCard key={entity.id} entity={entity} onDelete={handleDelete} />
-            ))}
+            <AnimatePresence mode="popLayout">
+              {filteredEntities.map((entity, index) => (
+                <motion.div
+                  key={entity.id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{
+                    layout: { type: 'spring', stiffness: 350, damping: 30 },
+                    opacity: { duration: 0.2, delay: index * 0.02 },
+                    scale: { duration: 0.2, delay: index * 0.02 },
+                  }}
+                >
+                  <EntityCard entity={entity} onDelete={handleDelete} />
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
 
           {/* Pagination */}

@@ -3,14 +3,22 @@
 import Link from 'next/link';
 import { memo } from 'react';
 import { Button } from '@/components/ui/button';
+import { Book, Clock, Folder, Github, Globe, Page, X } from '@/components/ui/icons';
 import type { SourceSummary } from '@/lib/api';
 import {
   CRAWL_STATUS_CONFIG,
   type CrawlStatusType,
   formatDateTime,
-  SOURCE_TYPE_CONFIG,
   type SourceTypeValue,
 } from '@/lib/constants';
+
+// Iconoir icons for source types
+const SOURCE_TYPE_ICONS = {
+  website: <Globe width={18} height={18} className="text-sc-cyan" />,
+  github: <Github width={18} height={18} className="text-sc-purple" />,
+  local: <Folder width={18} height={18} className="text-sc-yellow" />,
+  api_docs: <Book width={18} height={18} className="text-sc-coral" />,
+} as const;
 
 interface SourceCardProps {
   source: SourceSummary;
@@ -32,7 +40,7 @@ export const SourceCard = memo(function SourceCard({
   const url = source.metadata.url || '';
 
   const statusConfig = CRAWL_STATUS_CONFIG[crawlStatus];
-  const typeConfig = SOURCE_TYPE_CONFIG[sourceType];
+  const typeIcon = SOURCE_TYPE_ICONS[sourceType] || SOURCE_TYPE_ICONS.website;
 
   // Extract domain from URL for display
   const getDomain = (urlString: string) => {
@@ -49,7 +57,7 @@ export const SourceCard = memo(function SourceCard({
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-lg">{typeConfig.icon}</span>
+            {typeIcon}
             <h3 className="text-base font-semibold text-sc-fg-primary truncate">{source.name}</h3>
           </div>
           <p className="text-xs text-sc-fg-subtle truncate" title={url}>
@@ -73,13 +81,13 @@ export const SourceCard = memo(function SourceCard({
 
       {/* Stats Row */}
       <div className="flex items-center gap-4 text-xs text-sc-fg-subtle mb-4">
-        <div className="flex items-center gap-1">
-          <span>📄</span>
+        <div className="flex items-center gap-1.5">
+          <Page width={12} height={12} />
           <span>{documentCount} documents</span>
         </div>
         {lastCrawled && (
-          <div className="flex items-center gap-1">
-            <span>🕐</span>
+          <div className="flex items-center gap-1.5">
+            <Clock width={12} height={12} />
             <span>Last crawled {formatDateTime(lastCrawled)}</span>
           </div>
         )}
@@ -106,10 +114,10 @@ export const SourceCard = memo(function SourceCard({
           <button
             type="button"
             onClick={() => onDelete(source.id)}
-            className="px-3 py-1.5 text-sm rounded border border-sc-fg-subtle/20 text-sc-fg-subtle hover:border-[#ff6363]/30 hover:text-[#ff6363] transition-colors"
+            className="px-2 py-1.5 rounded border border-sc-fg-subtle/20 text-sc-fg-subtle hover:border-[#ff6363]/30 hover:text-[#ff6363] transition-colors"
             title="Delete source"
           >
-            ✕
+            <X width={14} height={14} />
           </button>
         )}
       </div>

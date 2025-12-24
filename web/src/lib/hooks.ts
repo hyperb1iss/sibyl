@@ -97,6 +97,10 @@ export const queryKeys = {
     list: ['sources', 'list'] as const,
     detail: (id: string) => ['sources', 'detail', id] as const,
   },
+  metrics: {
+    org: ['metrics', 'org'] as const,
+    project: (id: string) => ['metrics', 'project', id] as const,
+  },
 };
 
 // =============================================================================
@@ -1030,4 +1034,36 @@ export function useAllCrawlProgress(): Map<string, CrawlProgressData> {
   }, [queryClient]);
 
   return progressMap;
+}
+
+// =============================================================================
+// Metrics Hooks
+// =============================================================================
+
+/**
+ * Fetch org-level metrics (aggregated across all projects).
+ */
+export function useOrgMetrics(initialData?: import('./api').OrgMetricsResponse) {
+  return useQuery({
+    queryKey: queryKeys.metrics.org,
+    queryFn: api.metrics.org,
+    initialData,
+    staleTime: TIMING.STALE_TIME,
+  });
+}
+
+/**
+ * Fetch project-level metrics.
+ */
+export function useProjectMetrics(
+  projectId: string,
+  initialData?: import('./api').ProjectMetricsResponse
+) {
+  return useQuery({
+    queryKey: queryKeys.metrics.project(projectId),
+    queryFn: () => api.metrics.project(projectId),
+    initialData,
+    enabled: Boolean(projectId),
+    staleTime: TIMING.STALE_TIME,
+  });
 }

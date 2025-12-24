@@ -14,6 +14,7 @@ export const TIMING = {
   REFETCH_DELAY: 2000,
   HEALTH_CHECK_INTERVAL: 30000,
   STATS_REFRESH_INTERVAL: 30000,
+  STALE_TIME: 60000, // 1 minute stale time for React Query
 } as const;
 
 // Graph visualization defaults
@@ -396,18 +397,18 @@ export const SOURCE_TYPES = ['website', 'github', 'local', 'api_docs'] as const;
 export type SourceTypeValue = (typeof SOURCE_TYPES)[number];
 
 export const SOURCE_TYPE_CONFIG: Record<SourceTypeValue, { label: string; icon: string }> = {
-  website: { label: 'Website', icon: '🌐' },
-  github: { label: 'GitHub', icon: '⌥' },
-  local: { label: 'Local', icon: '📁' },
+  website: { label: 'Website', icon: '⊕' },
+  github: { label: 'GitHub', icon: '◈' },
+  local: { label: 'Local', icon: '◇' },
   api_docs: { label: 'API Docs', icon: '⚙' },
 };
 
-// Navigation items for sidebar
+// Navigation items for sidebar (legacy - use COMMAND_NAV in command-palette.tsx)
 export const NAVIGATION = [
   { name: 'Dashboard', href: '/', icon: '◆' },
   { name: 'Projects', href: '/projects', icon: '◇' },
   { name: 'Tasks', href: '/tasks', icon: '☰' },
-  { name: 'Sources', href: '/sources', icon: '📚' },
+  { name: 'Sources', href: '/sources', icon: '▤' },
   { name: 'Graph', href: '/graph', icon: '⬡' },
   { name: 'Entities', href: '/entities', icon: '▣' },
   { name: 'Search', href: '/search', icon: '⌕' },

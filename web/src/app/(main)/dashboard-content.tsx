@@ -2,9 +2,11 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { VelocityLineChart } from '@/components/metrics/charts';
 import {
   Activity,
   ArrowRight,
+  BarChart3,
   Boxes,
   CheckCircle2,
   Clock,
@@ -19,11 +21,12 @@ import {
   Search,
   Sparkles,
   Target,
+  TrendingUp,
   Zap,
 } from '@/components/ui/icons';
 import type { StatsResponse } from '@/lib/api';
 import { ENTITY_COLORS, formatUptime } from '@/lib/constants';
-import { useHealth, useProjects, useStats, useTasks } from '@/lib/hooks';
+import { useHealth, useOrgMetrics, useProjects, useStats, useTasks } from '@/lib/hooks';
 
 interface DashboardContentProps {
   initialStats: StatsResponse;
@@ -103,33 +106,13 @@ function EntityRingChart({ counts }: { counts: Record<string, number> }) {
   );
 }
 
-// Status indicator component
-function StatusIndicator({ status }: { status: 'healthy' | 'unhealthy' | 'unknown' }) {
-  const config = {
-    healthy: {
-      color: 'bg-sc-green',
-      glow: 'shadow-[0_0_12px_rgba(80,250,123,0.6)]',
-      text: 'Online',
-    },
-    unhealthy: { color: 'bg-sc-red', glow: 'shadow-[0_0_12px_rgba(255,99,99,0.6)]', text: 'Error' },
-    unknown: { color: 'bg-sc-yellow', glow: '', text: 'Loading' },
-  };
-  const { color, glow, text } = config[status];
-
-  return (
-    <div className="flex items-center gap-2">
-      <div className={`w-2.5 h-2.5 rounded-full ${color} ${glow} animate-pulse`} />
-      <span className="text-sm font-medium text-sc-fg-primary">{text}</span>
-    </div>
-  );
-}
-
 export function DashboardContent({ initialStats }: DashboardContentProps) {
   const [mounted, setMounted] = useState(false);
   const { data: health, isLoading: healthLoading } = useHealth();
   const { data: stats } = useStats(initialStats);
   const { data: tasksData } = useTasks();
   const { data: projectsData } = useProjects();
+  const { data: orgMetrics } = useOrgMetrics();
 
   // Avoid hydration mismatch - only show real status after mount
   useEffect(() => {
@@ -150,8 +133,6 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
   }, [tasksData]);
 
   const projectCount = projectsData?.entities?.length ?? 0;
-  const serverStatus =
-    !mounted || healthLoading ? 'unknown' : health?.status === 'healthy' ? 'healthy' : 'unhealthy';
 
   // Top entity types for quick stats
   const topEntities = useMemo(() => {
@@ -190,11 +171,18 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                   Knowledge Oracle
                 </h1>
                 <div className="flex items-center gap-3 sm:gap-4 mt-1 flex-wrap">
-                  <StatusIndicator status={serverStatus} />
                   {mounted && health?.graph_connected && (
                     <div className="flex items-center gap-1.5 text-xs sm:text-sm text-sc-fg-muted">
+                      <div className="w-2 h-2 rounded-full bg-sc-green shadow-[0_0_8px_rgba(80,250,123,0.6)] animate-pulse" />
                       <Database width={12} height={12} className="text-sc-cyan shrink-0" />
                       <span>Graph Connected</span>
+                    </div>
+                  )}
+                  {mounted && !healthLoading && !health?.graph_connected && (
+                    <div className="flex items-center gap-1.5 text-xs sm:text-sm text-sc-fg-muted">
+                      <div className="w-2 h-2 rounded-full bg-sc-red shadow-[0_0_8px_rgba(255,99,99,0.6)]" />
+                      <Database width={12} height={12} className="text-sc-red shrink-0" />
+                      <span>Graph Disconnected</span>
                     </div>
                   )}
                 </div>
@@ -459,6 +447,73 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
           </div>
         </div>
       </div>
+
+      {/* Velocity & Metrics Section */}
+      {orgMetrics && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+          {/* Velocity Chart */}
+          <div className="lg:col-span-2 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-green/10 border border-sc-green/20 flex items-center justify-center shrink-0">
+                  <TrendingUp width={16} height={16} className="text-sc-green sm:w-5 sm:h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">
+                    Completion Velocity
+                  </h2>
+                  <p className="text-xs text-sc-fg-muted">Tasks completed per day (14-day trend)</p>
+                </div>
+              </div>
+            </div>
+            <VelocityLineChart data={orgMetrics.velocity_trend} />
+          </div>
+
+          {/* Summary Stats */}
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">
+            <div className="flex items-center gap-2 sm:gap-3 mb-3">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
+                <BarChart3 width={16} height={16} className="text-sc-purple sm:w-5 sm:h-5" />
+              </div>
+              <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">This Week</h2>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 bg-sc-bg-elevated rounded-lg">
+                <span className="text-sm text-sc-fg-muted">Completion Rate</span>
+                <span className="text-lg font-bold text-sc-green">
+                  {orgMetrics.completion_rate}%
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-sc-bg-elevated rounded-lg">
+                <span className="text-sm text-sc-fg-muted">Tasks Created</span>
+                <span className="text-lg font-bold text-sc-fg-primary">
+                  {orgMetrics.tasks_created_last_7d}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-sc-bg-elevated rounded-lg">
+                <span className="text-sm text-sc-fg-muted">Tasks Completed</span>
+                <span className="text-lg font-bold text-sc-green">
+                  {orgMetrics.tasks_completed_last_7d}
+                </span>
+              </div>
+              {orgMetrics.top_assignees.length > 0 && (
+                <div className="pt-2 border-t border-sc-fg-subtle/10">
+                  <p className="text-xs text-sc-fg-subtle mb-2">Top Contributors</p>
+                  <div className="space-y-1">
+                    {orgMetrics.top_assignees.slice(0, 3).map(a => (
+                      <div key={a.name} className="flex items-center justify-between text-sm">
+                        <span className="text-sc-fg-muted truncate">{a.name}</span>
+                        <span className="text-sc-green font-medium">{a.completed}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Entity Breakdown - Full Width Bar Chart Style */}
       <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">

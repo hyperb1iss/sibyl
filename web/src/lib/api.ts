@@ -113,6 +113,77 @@ export interface StatsResponse {
 }
 
 // =============================================================================
+// Metrics Types
+// =============================================================================
+
+export interface TaskStatusDistribution {
+  backlog: number;
+  todo: number;
+  doing: number;
+  blocked: number;
+  review: number;
+  done: number;
+}
+
+export interface TaskPriorityDistribution {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  someday: number;
+}
+
+export interface AssigneeStats {
+  name: string;
+  total: number;
+  completed: number;
+  in_progress: number;
+}
+
+export interface TimeSeriesPoint {
+  date: string;
+  value: number;
+}
+
+export interface ProjectMetrics {
+  project_id: string;
+  project_name: string;
+  total_tasks: number;
+  status_distribution: TaskStatusDistribution;
+  priority_distribution: TaskPriorityDistribution;
+  completion_rate: number;
+  assignees: AssigneeStats[];
+  tasks_created_last_7d: number;
+  tasks_completed_last_7d: number;
+  velocity_trend: TimeSeriesPoint[];
+}
+
+export interface ProjectMetricsResponse {
+  metrics: ProjectMetrics;
+}
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  total: number;
+  completed: number;
+  completion_rate: number;
+}
+
+export interface OrgMetricsResponse {
+  total_projects: number;
+  total_tasks: number;
+  status_distribution: TaskStatusDistribution;
+  priority_distribution: TaskPriorityDistribution;
+  completion_rate: number;
+  top_assignees: AssigneeStats[];
+  tasks_created_last_7d: number;
+  tasks_completed_last_7d: number;
+  velocity_trend: TimeSeriesPoint[];
+  projects_summary: ProjectSummary[];
+}
+
+// =============================================================================
 // Auth + Orgs
 // =============================================================================
 
@@ -1082,5 +1153,15 @@ export const api = {
         has_more: boolean;
       }>(`/rag/sources/${sourceId}/pages${query ? `?${query}` : ''}`);
     },
+  },
+
+  // Metrics
+  metrics: {
+    // Get org-level metrics
+    org: () => fetchApi<OrgMetricsResponse>('/metrics'),
+
+    // Get project-level metrics
+    project: (projectId: string) =>
+      fetchApi<ProjectMetricsResponse>(`/metrics/projects/${projectId}`),
   },
 };

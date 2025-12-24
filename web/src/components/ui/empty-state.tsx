@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Check, KanbanBoard, List, Search } from '@/components/ui/icons';
 
 interface EmptyStateAction {
   label: string;
@@ -10,7 +11,7 @@ interface EmptyStateAction {
 }
 
 interface EnhancedEmptyStateProps {
-  icon: string;
+  icon: React.ReactNode;
   title: string;
   description: string;
   actions?: EmptyStateAction[];
@@ -95,7 +96,7 @@ export function TasksEmptyState({
   if (projectName) {
     return (
       <EnhancedEmptyState
-        icon="☰"
+        icon={<List width={40} height={40} className="text-sc-yellow" />}
         title={`No tasks in ${projectName}`}
         description="This project doesn't have any tasks yet. Create one to start tracking work."
         variant="filtered"
@@ -111,7 +112,7 @@ export function TasksEmptyState({
 
   return (
     <EnhancedEmptyState
-      icon="☰"
+      icon={<List width={40} height={40} className="text-sc-fg-subtle" />}
       title="No tasks yet"
       description="Tasks help you track work across your projects. Press C or use the button below to create your first task."
       actions={[
@@ -125,7 +126,7 @@ export function TasksEmptyState({
 export function ProjectsEmptyState({ onCreateProject }: { onCreateProject?: () => void }) {
   return (
     <EnhancedEmptyState
-      icon="◇"
+      icon={<KanbanBoard width={40} height={40} className="text-sc-cyan" />}
       title="No projects yet"
       description="Projects help you organize related tasks and track progress. Start by creating your first project."
       actions={[
@@ -138,7 +139,7 @@ export function ProjectsEmptyState({ onCreateProject }: { onCreateProject?: () =
 export function AllCaughtUpState() {
   return (
     <EnhancedEmptyState
-      icon="✓"
+      icon={<Check width={40} height={40} className="text-sc-green" />}
       title="You're all caught up!"
       description="All tasks are complete. Great work! Take a break or start something new."
       variant="success"
@@ -151,7 +152,7 @@ export function SearchEmptyState({ query, onClear }: { query?: string; onClear?:
   if (query) {
     return (
       <EnhancedEmptyState
-        icon="⌕"
+        icon={<Search width={40} height={40} className="text-sc-yellow" />}
         title="No results found"
         description={`No matches for "${query}". Try a different search term or browse entities.`}
         variant="filtered"
@@ -165,7 +166,7 @@ export function SearchEmptyState({ query, onClear }: { query?: string; onClear?:
 
   return (
     <EnhancedEmptyState
-      icon="⌕"
+      icon={<Search width={40} height={40} className="text-sc-cyan" />}
       title="Search your knowledge"
       description="Enter a query to search across all entities, projects, and tasks."
     />

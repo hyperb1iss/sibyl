@@ -292,7 +292,17 @@ const KanbanColumn = memo(function KanbanColumn({
             const projectName = projectId ? projectMap.get(projectId) : undefined;
 
             return (
-              <div key={task.id}>
+              <motion.div
+                key={task.id}
+                layout
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{
+                  layout: { type: 'spring', stiffness: 350, damping: 30 },
+                  opacity: { duration: 0.2 },
+                }}
+              >
                 <div data-task-card>
                   <TaskCard
                     task={task}
@@ -312,7 +322,7 @@ const KanbanColumn = memo(function KanbanColumn({
                     <DropIndicator key={`drop-indicator-${task.id}`} />
                   )}
                 </AnimatePresence>
-              </div>
+              </motion.div>
             );
           })}
         </div>

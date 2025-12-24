@@ -255,6 +255,30 @@ export async function fetchRelatedEntities(
 }
 
 // =============================================================================
+// Metrics
+// =============================================================================
+
+export async function fetchOrgMetrics(): Promise<import('./api').OrgMetricsResponse> {
+  return serverFetch<import('./api').OrgMetricsResponse>('/metrics', {
+    ...CACHE_CONFIG.dynamic,
+    next: { ...CACHE_CONFIG.dynamic.next, revalidate: 60, tags: ['metrics'] },
+  });
+}
+
+export async function fetchProjectMetrics(
+  projectId: string
+): Promise<import('./api').ProjectMetricsResponse> {
+  return serverFetch<import('./api').ProjectMetricsResponse>(`/metrics/projects/${projectId}`, {
+    ...CACHE_CONFIG.dynamic,
+    next: {
+      ...CACHE_CONFIG.dynamic.next,
+      revalidate: 60,
+      tags: ['metrics', `project-${projectId}`],
+    },
+  });
+}
+
+// =============================================================================
 // Cache Revalidation Helpers
 // =============================================================================
 

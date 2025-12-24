@@ -1,31 +1,52 @@
 'use client';
 
+import { AnimatePresence, motion } from 'motion/react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { EditableTags, EditableText } from '@/components/editable';
 import { Breadcrumb, ROUTE_CONFIG } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
+import { VelocityLineChart } from '@/components/metrics/charts';
 import { ProjectsEmptyState } from '@/components/ui/empty-state';
 import {
   AlertTriangle,
+  ArrowDownAZ,
+  BarChart3,
   CheckCircle2,
   Clock,
   FolderKanban,
   GitBranch,
   Pause,
   Plus,
+  Sparkles,
+  TrendingUp,
   Zap,
 } from '@/components/ui/icons';
 import { ErrorState } from '@/components/ui/tooltip';
 import type { TaskListResponse, TaskStatus, TaskSummary } from '@/lib/api';
 import { TASK_STATUS_CONFIG } from '@/lib/constants';
-import { useProjects, useTasks, useUpdateEntity } from '@/lib/hooks';
+import { useProjectMetrics, useProjects, useTasks, useUpdateEntity } from '@/lib/hooks';
 
 interface ProjectsContentProps {
   initialProjects: TaskListResponse;
 }
+
+// Project sort options
+type ProjectSortOption = 'active' | 'name' | 'tasks' | 'completion' | 'urgent';
+
+const PROJECT_SORT_OPTIONS: Array<{
+  value: ProjectSortOption;
+  label: string;
+  icon: React.ReactNode;
+}> = [
+  { value: 'active', label: 'Most Active', icon: <TrendingUp width={14} height={14} /> },
+  { value: 'urgent', label: 'Urgent First', icon: <Zap width={14} height={14} /> },
+  { value: 'tasks', label: 'Most Tasks', icon: <BarChart3 width={14} height={14} /> },
+  { value: 'completion', label: 'Completion %', icon: <CheckCircle2 width={14} height={14} /> },
+  { value: 'name', label: 'Name', icon: <ArrowDownAZ width={14} height={14} /> },
+];
 
 interface ProjectStats {
   total: number;
@@ -70,9 +91,10 @@ function calculateProjectStats(tasks: TaskSummary[]): ProjectStats {
     else if (status === 'todo') stats.todo++;
     else if (status === 'backlog') stats.backlog++;
 
-    // Count urgent priorities
-    if (priority === 'critical') stats.critical++;
-    if (priority === 'high') stats.high++;
+    // Count urgent priorities (only for open tasks)
+    const isOpen = status && !['done', 'archived'].includes(status);
+    if (isOpen && priority === 'critical') stats.critical++;
+    if (isOpen && priority === 'high') stats.high++;
 
     // Count overdue (not done, has due date in past)
     if (dueDate && status !== 'done' && new Date(dueDate) < now) {
@@ -86,6 +108,7 @@ function calculateProjectStats(tasks: TaskSummary[]): ProjectStats {
 export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [sortBy, setSortBy] = useState<ProjectSortOption>('active');
 
   const selectedProjectId = searchParams.get('id');
 
@@ -126,15 +149,51 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
     return map;
   }, [projects, allTasks]);
 
+  // Sort projects based on selected sort option
+  const sortedProjects = useMemo(() => {
+    const sorted = [...projects];
+    sorted.sort((a, b) => {
+      const statsA = projectStatsMap.get(a.id);
+      const statsB = projectStatsMap.get(b.id);
+
+      switch (sortBy) {
+        case 'active': {
+          // Most active = doing + blocked + review
+          const activeA = (statsA?.doing ?? 0) + (statsA?.blocked ?? 0) + (statsA?.review ?? 0);
+          const activeB = (statsB?.doing ?? 0) + (statsB?.blocked ?? 0) + (statsB?.review ?? 0);
+          return activeB - activeA;
+        }
+        case 'urgent': {
+          // Urgent first = critical + high + overdue
+          const urgentA = (statsA?.critical ?? 0) + (statsA?.high ?? 0) + (statsA?.overdue ?? 0);
+          const urgentB = (statsB?.critical ?? 0) + (statsB?.high ?? 0) + (statsB?.overdue ?? 0);
+          return urgentB - urgentA;
+        }
+        case 'tasks':
+          return (statsB?.total ?? 0) - (statsA?.total ?? 0);
+        case 'completion': {
+          const completionA = statsA?.total ? (statsA.done / statsA.total) * 100 : 0;
+          const completionB = statsB?.total ? (statsB.done / statsB.total) * 100 : 0;
+          return completionB - completionA;
+        }
+        case 'name':
+          return a.name.localeCompare(b.name);
+        default:
+          return 0;
+      }
+    });
+    return sorted;
+  }, [projects, projectStatsMap, sortBy]);
+
   // Get tasks for selected project
   const selectedProjectTasks = useMemo(() => {
     if (!selectedProjectId) return [];
     return allTasks.filter(t => t.metadata.project_id === selectedProjectId);
   }, [allTasks, selectedProjectId]);
 
-  // Auto-select first project if none selected
-  const effectiveSelectedId = selectedProjectId ?? projects[0]?.id ?? null;
-  const selectedProject = projects.find(p => p.id === effectiveSelectedId);
+  // Auto-select first project if none selected (use sorted order)
+  const effectiveSelectedId = selectedProjectId ?? sortedProjects[0]?.id ?? null;
+  const selectedProject = sortedProjects.find(p => p.id === effectiveSelectedId);
   const selectedStats = effectiveSelectedId ? projectStatsMap.get(effectiveSelectedId) : null;
 
   const handleSelectProject = useCallback(
@@ -214,7 +273,28 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
         {/* Sidebar - Project List */}
         <div className="w-80 shrink-0">
           <div className="sticky top-4 space-y-2">
-            <h2 className="text-sm font-semibold text-sc-fg-muted px-1 mb-3">All Projects</h2>
+            {/* Header with sort options */}
+            <div className="flex items-center justify-between px-1 mb-3">
+              <h2 className="text-sm font-semibold text-sc-fg-muted">All Projects</h2>
+              {/* Sort dropdown */}
+              <div className="flex items-center gap-1">
+                {PROJECT_SORT_OPTIONS.map(option => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setSortBy(option.value)}
+                    title={option.label}
+                    className={`p-1.5 rounded transition-colors ${
+                      sortBy === option.value
+                        ? 'bg-sc-purple/20 text-sc-purple'
+                        : 'text-sc-fg-subtle hover:text-sc-fg-muted hover:bg-sc-bg-highlight/50'
+                    }`}
+                  >
+                    {option.icon}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {isLoading ? (
               <div className="space-y-2">
@@ -224,18 +304,32 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
               </div>
             ) : (
               <div className="space-y-2">
-                {projects.map(project => {
-                  const stats = projectStatsMap.get(project.id);
-                  return (
-                    <ProjectCard
-                      key={project.id}
-                      project={project}
-                      stats={stats}
-                      isSelected={project.id === effectiveSelectedId}
-                      onClick={() => handleSelectProject(project.id)}
-                    />
-                  );
-                })}
+                <AnimatePresence mode="popLayout">
+                  {sortedProjects.map((project, index) => {
+                    const stats = projectStatsMap.get(project.id);
+                    return (
+                      <motion.div
+                        key={project.id}
+                        layout
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        transition={{
+                          layout: { type: 'spring', stiffness: 350, damping: 30 },
+                          opacity: { duration: 0.2, delay: index * 0.03 },
+                          x: { duration: 0.2, delay: index * 0.03 },
+                        }}
+                      >
+                        <ProjectCard
+                          project={project}
+                          stats={stats}
+                          isSelected={project.id === effectiveSelectedId}
+                          onClick={() => handleSelectProject(project.id)}
+                        />
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
               </div>
             )}
           </div>
@@ -399,6 +493,7 @@ interface ProjectDetailProps {
 
 function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
   const updateEntity = useUpdateEntity();
+  const { data: projectMetrics } = useProjectMetrics(project.id);
   const progress = stats && stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
 
   // Get tech stack from metadata
@@ -630,6 +725,28 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
         </div>
       </div>
 
+      {/* Velocity Chart - Show if we have trend data */}
+      {projectMetrics?.metrics?.velocity_trend &&
+        projectMetrics.metrics.velocity_trend.length > 0 && (
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <TrendingUp width={16} height={16} className="text-sc-green" />
+                <h2 className="font-semibold text-sc-fg-primary">Completion Velocity</h2>
+              </div>
+              <div className="flex items-center gap-4 text-sm">
+                <span className="text-sc-fg-muted">
+                  <span className="text-sc-fg-primary font-medium">
+                    {projectMetrics.metrics.tasks_completed_last_7d}
+                  </span>{' '}
+                  completed this week
+                </span>
+              </div>
+            </div>
+            <VelocityLineChart data={projectMetrics.metrics.velocity_trend} />
+          </div>
+        )}
+
       {/* Active Work Section */}
       {activeTasks.length > 0 && (
         <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
@@ -712,7 +829,9 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
       {/* Empty state for no tasks */}
       {(!stats || stats.total === 0) && (
         <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-8 text-center">
-          <div className="text-4xl mb-4">✨</div>
+          <div className="mb-4 flex justify-center">
+            <Sparkles width={40} height={40} className="text-sc-yellow" />
+          </div>
           <h3 className="text-lg font-semibold text-sc-fg-primary mb-2">No tasks yet</h3>
           <p className="text-sc-fg-muted mb-4">Create your first task to get started</p>
           <Link

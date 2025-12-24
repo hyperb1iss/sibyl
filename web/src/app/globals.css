@@ -471,7 +471,7 @@ pre {
 
 .success-sparkle::before,
 .success-sparkle::after {
-  content: "✨";
+  content: "✦";
   position: absolute;
   font-size: 1.5rem;
   opacity: 0;

@@ -144,8 +144,11 @@ class RelationshipManager:
                 MERGE (source)-[r:{rel_type} {{uuid: $edge_uuid}}]->(target)
                 SET r.name = $name,
                     r.group_id = $group_id,
+                    r.source_node_uuid = $source_uuid,
+                    r.target_node_uuid = $target_uuid,
                     r.created_at = $created_at,
-                    r.weight = $weight
+                    r.weight = $weight,
+                    r.fact = $fact
                 RETURN r.uuid as uuid
             """
 
@@ -159,6 +162,7 @@ class RelationshipManager:
                     group_id=self._group_id,
                     created_at=edge.created_at.isoformat(),
                     weight=relationship.weight,
+                    fact=edge.fact,
                 )
 
             log.info("Created relationship", relationship_id=edge.uuid)
@@ -224,34 +228,66 @@ class RelationshipManager:
         )
 
         try:
-            # Get all edges connected to this node (use org-scoped driver)
-            edges = await EntityEdge.get_by_node_uuid(
-                self._driver,
-                entity_id,
-            )
+            # Build direction-aware query
+            if direction == "outgoing":
+                match_clause = "MATCH (n {uuid: $entity_id})-[r]->(m)"
+            elif direction == "incoming":
+                match_clause = "MATCH (n {uuid: $entity_id})<-[r]-(m)"
+            else:  # both
+                match_clause = "MATCH (n {uuid: $entity_id})-[r]-(m)"
 
-            # Defensive: ensure edges is iterable (FalkorDB can return Query object on connection issues)
-            if not isinstance(edges, list):
-                log.warning("get_by_node_uuid returned non-list", type=type(edges).__name__)
-                return []
+            query = f"""
+                {match_clause}
+                WHERE r.group_id = $group_id
+                RETURN r.uuid as uuid,
+                       r.name as name,
+                       r.source_node_uuid as source_id,
+                       r.target_node_uuid as target_id,
+                       r.weight as weight
+            """
+
+            result = await self._driver.execute_query(
+                query,
+                entity_id=entity_id,
+                group_id=self._group_id,
+            )
+            rows = self._client.normalize_result(result)
 
             relationships = []
-            for edge in edges:
-                if edge.group_id != self._group_id:
-                    continue
-                # Filter by direction
-                if direction == "outgoing" and edge.source_node_uuid != entity_id:
-                    continue
-                if direction == "incoming" and edge.target_node_uuid != entity_id:
+            type_values = [t.value for t in relationship_types] if relationship_types else None
+
+            for row in rows:
+                # Handle both dict (FalkorDB) and list results
+                if isinstance(row, dict):
+                    rel_name = row.get("name")
+                    rel_uuid = row.get("uuid")
+                    source_id = row.get("source_id")
+                    target_id = row.get("target_id")
+                    weight = row.get("weight", 1.0)
+                else:
+                    rel_name = row[1]
+                    rel_uuid = row[0]
+                    source_id = row[2]
+                    target_id = row[3]
+                    weight = row[4] if len(row) > 4 else 1.0
+
+                # Filter by type if specified
+                if type_values and rel_name not in type_values:
                     continue
 
-                # Filter by relationship type
-                if relationship_types:
-                    type_values = [t.value for t in relationship_types]
-                    if edge.name not in type_values:
-                        continue
+                try:
+                    rel_type = RelationshipType(rel_name) if rel_name else RelationshipType.RELATED_TO
+                except ValueError:
+                    rel_type = RelationshipType.RELATED_TO
 
-                relationships.append(self._from_graphiti_edge(edge))
+                relationships.append(Relationship(
+                    id=rel_uuid,
+                    relationship_type=rel_type,
+                    source_id=source_id,
+                    target_id=target_id,
+                    weight=float(weight) if weight else 1.0,
+                    metadata={},
+                ))
 
             log.debug(
                 "Retrieved relationships",
@@ -383,11 +419,25 @@ class RelationshipManager:
         log.info("Deleting relationship", relationship_id=relationship_id)
 
         try:
-            edge = await EntityEdge.get_by_uuid(self._client.driver, relationship_id)
-            if edge:
-                # Use write lock to prevent FalkorDB connection corruption
-                async with self._client.write_lock:
-                    await edge.delete(self._client.driver)
+            # Use direct Cypher to delete by UUID (consistent with create/get)
+            query = """
+                MATCH ()-[r {uuid: $relationship_id}]-()
+                WHERE r.group_id = $group_id
+                DELETE r
+                RETURN count(r) as deleted
+            """
+
+            async with self._client.write_lock:
+                result = await self._driver.execute_query(
+                    query,
+                    relationship_id=relationship_id,
+                    group_id=self._group_id,
+                )
+
+            rows = self._client.normalize_result(result)
+            deleted = rows[0]["deleted"] if rows and isinstance(rows[0], dict) else (rows[0][0] if rows else 0)
+
+            if deleted > 0:
                 log.info("Deleted relationship", relationship_id=relationship_id)
                 return True
             log.warning("Relationship not found", relationship_id=relationship_id)
@@ -412,25 +462,23 @@ class RelationshipManager:
         log.info("Deleting all relationships for entity", entity_id=entity_id)
 
         try:
-            edges = await EntityEdge.get_by_node_uuid(self._client.driver, entity_id)
+            # Use direct Cypher to delete all relationships for entity
+            query = """
+                MATCH (n {uuid: $entity_id})-[r]-()
+                WHERE r.group_id = $group_id
+                DELETE r
+                RETURN count(r) as deleted
+            """
 
-            # Defensive: ensure edges is iterable (FalkorDB can return Query object on connection issues)
-            if not isinstance(edges, list):
-                log.warning(
-                    "get_by_node_uuid returned non-list for delete", type=type(edges).__name__
-                )
-                return 0
-
-            deleted = 0
-
-            # Use write lock to prevent FalkorDB connection corruption
             async with self._client.write_lock:
-                for edge in edges:
-                    try:
-                        await edge.delete(self._client.driver)
-                        deleted += 1
-                    except Exception as e:
-                        log.warning("Failed to delete edge", edge_uuid=edge.uuid, error=str(e))
+                result = await self._driver.execute_query(
+                    query,
+                    entity_id=entity_id,
+                    group_id=self._group_id,
+                )
+
+            rows = self._client.normalize_result(result)
+            deleted = rows[0]["deleted"] if rows and isinstance(rows[0], dict) else (rows[0][0] if rows else 0)
 
             log.info("Deleted relationships for entity", entity_id=entity_id, count=deleted)
             return deleted

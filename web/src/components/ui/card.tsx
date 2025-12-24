@@ -1,4 +1,5 @@
 import type { HTMLAttributes, ReactNode } from 'react';
+import { AlertTriangle, Flash, InfoCircle, Sparkles } from '@/components/ui/icons';
 
 type CardVariant = 'default' | 'elevated' | 'interactive' | 'bordered';
 
@@ -250,25 +251,25 @@ interface NotificationCardProps {
 
 const notificationStyles = {
   info: {
-    icon: '💡',
+    icon: <InfoCircle width={20} height={20} className="text-sc-cyan" />,
     bg: 'bg-sc-cyan/10',
     border: 'border-sc-cyan/30',
     text: 'text-sc-cyan',
   },
   success: {
-    icon: '✨',
+    icon: <Sparkles width={20} height={20} className="text-sc-green" />,
     bg: 'bg-sc-green/10',
     border: 'border-sc-green/30',
     text: 'text-sc-green',
   },
   warning: {
-    icon: '⚡',
+    icon: <Flash width={20} height={20} className="text-sc-yellow" />,
     bg: 'bg-sc-yellow/10',
     border: 'border-sc-yellow/30',
     text: 'text-sc-yellow',
   },
   error: {
-    icon: '⚠️',
+    icon: <AlertTriangle width={20} height={20} className="text-sc-red" />,
     bg: 'bg-sc-red/10',
     border: 'border-sc-red/30',
     text: 'text-sc-red',

@@ -15,6 +15,7 @@ export function createMockEntity(overrides: Partial<Entity> = {}): Entity {
     languages: ['typescript'],
     tags: ['test'],
     metadata: {},
+    source_file: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     ...overrides,
