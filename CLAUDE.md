@@ -104,17 +104,17 @@ web/src/
 
 ## Key Patterns
 
-### FalkorDB Write Serialization
+### FalkorDB Write Concurrency
 
-**Critical:** FalkorDB crashes with concurrent writes on a single connection.
+GraphClient uses a semaphore to limit concurrent writes (default: 20) to prevent connection contention:
 
 ```python
-# GraphClient uses semaphore for all writes
-async with self._write_semaphore:
-    await self.client.driver.execute_query(...)
+# GraphClient limits concurrent writes
+async with self._client.write_lock:
+    await self._driver.execute_query(...)
 
-# Environment variable controls Graphiti concurrency
-SEMAPHORE_LIMIT=10  # Default was 20, reduced for stability
+# SEMAPHORE_LIMIT controls Graphiti's LLM concurrency (separate from DB writes)
+SEMAPHORE_LIMIT=10  # Controls parallel LLM calls to avoid rate limits
 ```
 
 ### Entity Creation Dual Path

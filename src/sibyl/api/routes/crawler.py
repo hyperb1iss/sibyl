@@ -275,7 +275,7 @@ async def preview_url(url: str) -> dict[str, str | None]:
             "title": None,
             "suggested_name": urlparse(url).netloc,
             "domain": urlparse(url).netloc,
-            "error": str(e),
+            "error": "Failed to preview URL",
         }
 
 
@@ -458,10 +458,10 @@ async def ingest_source(
         )
 
     except Exception as e:
-        log.exception("Failed to enqueue crawl job", source_id=source_id)
+        log.exception("Failed to enqueue crawl job", source_id=source_id, error=str(e))
         raise HTTPException(
             status_code=503,
-            detail=f"Failed to enqueue job. Is the job queue available? Error: {e}",
+            detail="Failed to enqueue job. Is the job queue available?",
         ) from e
 
 
@@ -714,7 +714,7 @@ async def _process_graph_linking(
         graph_client = await get_graph_client()
     except Exception as e:
         log.warning("Failed to connect to graph", error=str(e))
-        raise HTTPException(status_code=503, detail=f"Graph unavailable: {e}") from e
+        raise HTTPException(status_code=503, detail="Graph service unavailable") from e
 
     # Initialize integration service
     try:
@@ -725,9 +725,10 @@ async def _process_graph_linking(
             create_new_entities=False,
         )
     except ValueError as e:
+        log.warning("Entity extraction configuration error", error=str(e))
         raise HTTPException(
             status_code=503,
-            detail=f"Entity extraction not configured: {e}",
+            detail="Entity extraction not configured",
         ) from e
 
     # Get sources to process

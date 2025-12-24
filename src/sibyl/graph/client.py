@@ -46,9 +46,9 @@ class GraphClient:
     """
 
     # Limit concurrent DB operations to prevent connection contention
-    # FalkorDB uses a single connection, so concurrent writes can corrupt it
+    # Higher values improve bulk performance; lower values reduce contention risk
     _write_semaphore: asyncio.Semaphore | None = None
-    _MAX_CONCURRENT_WRITES = 1  # Serialize all writes for safety
+    _MAX_CONCURRENT_WRITES = 20  # High parallelism for bulk operations
 
     def __init__(self) -> None:
         """Initialize the graph client."""

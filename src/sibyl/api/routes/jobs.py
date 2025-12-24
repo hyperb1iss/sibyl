@@ -46,9 +46,10 @@ async def jobs_health() -> dict[str, Any]:
             "used_memory_human": info.get("used_memory_human", "unknown"),
         }
     except Exception as e:
+        log.warning("Job queue health check failed", error=str(e))
         return {
             "status": "unhealthy",
-            "error": str(e),
+            "error": "Health check failed",
         }
 
 
@@ -79,7 +80,7 @@ async def list_jobs(
         }
     except Exception as e:
         log.warning("Failed to list jobs", error=str(e))
-        return {"jobs": [], "total": 0, "error": str(e)}
+        return {"jobs": [], "total": 0, "error": "Failed to list jobs"}
 
 
 @router.get("/{job_id}")
@@ -106,9 +107,10 @@ async def get_job(job_id: str) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
+        log.warning("Failed to get job status", job_id=job_id, error=str(e))
         raise HTTPException(
             status_code=503,
-            detail=f"Failed to get job status. Is Redis available? Error: {e}",
+            detail="Failed to get job status. Is Redis available?",
         ) from e
 
 
@@ -127,7 +129,8 @@ async def cancel_job(job_id: str) -> dict[str, Any]:
             "message": "Job not found or already running",
         }
     except Exception as e:
+        log.warning("Failed to cancel job", job_id=job_id, error=str(e))
         raise HTTPException(
             status_code=503,
-            detail=f"Failed to cancel job: {e}",
+            detail="Failed to cancel job",
         ) from e

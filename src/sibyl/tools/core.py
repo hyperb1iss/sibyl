@@ -513,6 +513,7 @@ class AddResponse:
 
 async def _search_documents(
     query: str,
+    organization_id: str,
     source_id: str | None = None,
     source_name: str | None = None,
     language: str | None = None,
@@ -552,6 +553,9 @@ async def _search_documents(
                 .join(CrawlSource, CrawledDocument.source_id == CrawlSource.id)
                 .where(col(DocumentChunk.embedding).is_not(None))
             )
+
+            # Filter by organization (required for multi-tenancy)
+            doc_query = doc_query.where(col(CrawlSource.organization_id) == UUID(organization_id))
 
             # Apply source filters
             if source_id:
@@ -884,10 +888,11 @@ async def search(  # noqa: PLR0915
     # =========================================================================
     # DOCUMENT SEARCH - Search crawled documentation
     # =========================================================================
-    if search_documents and query:
+    if search_documents and query and organization_id:
         try:
             doc_results = await _search_documents(
                 query=query,
+                organization_id=organization_id,
                 source_id=source_id,
                 source_name=source_name,
                 language=language,
