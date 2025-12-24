@@ -160,8 +160,13 @@ def run_server(
 
 
 def create_dev_app() -> Starlette:
-    """Factory for dev mode with embedded worker."""
-    return create_combined_app(embed_worker=True)
+    """Factory for dev mode.
+
+    Note: We don't embed the worker when uvicorn --reload is active because
+    the arq Worker doesn't handle cancellation gracefully, causing reloads to hang.
+    Run the worker separately with: uv run arq sibyl.jobs.WorkerSettings
+    """
+    return create_combined_app(embed_worker=False)
 
 
 def main() -> None:
