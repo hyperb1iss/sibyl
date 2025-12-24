@@ -390,6 +390,7 @@ async def create_source(
     name: str,
     url: str,
     *,
+    organization_id: str,
     source_type: SourceType = SourceType.WEBSITE,
     description: str | None = None,
     crawl_depth: int = 2,
@@ -401,6 +402,7 @@ async def create_source(
     Args:
         name: Human-readable name
         url: Base URL to crawl
+        organization_id: Organization UUID for multi-tenant isolation.
         source_type: Type of source
         description: Optional description
         crawl_depth: Maximum depth to follow links
@@ -414,6 +416,7 @@ async def create_source(
         source = CrawlSource(
             name=name,
             url=url.rstrip("/"),
+            organization_id=organization_id,
             source_type=source_type,
             description=description,
             crawl_depth=crawl_depth,

@@ -10,8 +10,8 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from sibyl.auth.dependencies import require_org_role
-from sibyl.db.models import OrganizationRole
+from sibyl.auth.dependencies import get_current_organization, require_org_role
+from sibyl.db.models import Organization, OrganizationRole
 
 log = structlog.get_logger()
 router = APIRouter(
@@ -48,7 +48,10 @@ class ManageResponseSchema(BaseModel):
 
 
 @router.post("", response_model=ManageResponseSchema)
-async def manage(request: ManageRequest) -> ManageResponseSchema:
+async def manage(
+    request: ManageRequest,
+    org: Organization = Depends(get_current_organization),
+) -> ManageResponseSchema:
     """Execute a manage action.
 
     Supports task workflow, source operations, analysis, and admin actions.
@@ -85,10 +88,11 @@ async def manage(request: ManageRequest) -> ManageResponseSchema:
             action=request.action,
             entity_id=request.entity_id,
             data=request.data,
+            organization_id=str(org.id),
         )
 
         return ManageResponseSchema(**asdict(result))
 
     except Exception as e:
         log.exception("manage_endpoint_failed", action=request.action, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Operation failed. Please try again.") from e

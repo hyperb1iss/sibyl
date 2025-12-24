@@ -73,7 +73,7 @@ async def search(
 
     except Exception as e:
         log.exception("search_failed", query=request.query, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Search failed. Please try again.") from e
 
 
 @router.post("/explore", response_model=ExploreResponse)
@@ -117,4 +117,4 @@ async def explore(
 
     except Exception as e:
         log.exception("explore_failed", mode=request.mode, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Explore failed. Please try again.") from e

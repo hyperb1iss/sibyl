@@ -4,15 +4,20 @@ Creates the REST API app that gets mounted alongside MCP.
 """
 
 import time
+import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.routing import WebSocketRoute
 
+from sibyl.api.rate_limit import limiter
 from sibyl.api.routes import (
     admin_router,
     auth_router,
@@ -86,6 +91,37 @@ def create_api_app() -> FastAPI:
         openapi_url="/openapi.json",
         lifespan=lifespan,
     )
+
+    # Rate limiting
+    if settings.rate_limit_enabled:
+        app.state.limiter = limiter
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+    # Global exception handler - sanitize all unhandled exceptions
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        """Catch unhandled exceptions and return safe error messages.
+
+        Never expose internal exception details to clients. Log full
+        details for debugging, return generic message to client.
+        """
+        error_id = str(uuid.uuid4())[:8]
+
+        log.error(
+            "unhandled_exception",
+            error_id=error_id,
+            path=request.url.path,
+            method=request.method,
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+        )
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": f"An internal error occurred. Please try again later. (ref: {error_id})"
+            },
+        )
 
     # CORS for frontend (localhost:3337)
     app.add_middleware(

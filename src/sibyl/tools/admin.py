@@ -70,13 +70,17 @@ def mark_server_started() -> None:
     _state.start_time = time.time()
 
 
-async def health_check() -> HealthStatus:
+async def health_check(*, organization_id: str | None = None) -> HealthStatus:
     """Check server health and return status.
 
     Performs health checks on:
     - Graph database connectivity
-    - Entity counts by type
-    - Search latency
+    - Entity counts by type (if organization_id provided)
+    - Search latency (if organization_id provided)
+
+    Args:
+        organization_id: Organization ID for graph operations. If None, only basic
+                        connectivity is checked.
 
     Returns:
         HealthStatus with current server state.
@@ -97,22 +101,25 @@ async def health_check() -> HealthStatus:
         client = await get_graph_client()
         graph_connected = True
 
-        # Get entity counts
-        entity_manager = EntityManager(client)
-        for entity_type in EntityType:
-            try:
-                entities = await entity_manager.list_by_type(entity_type, limit=1000)
-                entity_counts[entity_type.value] = len(entities)
-            except Exception:
-                entity_counts[entity_type.value] = -1  # Unknown
+        # Entity counts and search latency require org context
+        if organization_id:
+            entity_manager = EntityManager(client, group_id=organization_id)
 
-        # Test search latency
-        try:
-            start = time.time()
-            await entity_manager.search(query="test", entity_types=[EntityType.PATTERN], limit=1)
-            search_latency_ms = (time.time() - start) * 1000
-        except Exception as e:
-            errors.append(f"Search latency test failed: {e}")
+            # Get entity counts
+            for entity_type in EntityType:
+                try:
+                    entities = await entity_manager.list_by_type(entity_type, limit=1000)
+                    entity_counts[entity_type.value] = len(entities)
+                except Exception:
+                    entity_counts[entity_type.value] = -1  # Unknown
+
+            # Test search latency
+            try:
+                start = time.time()
+                await entity_manager.search(query="test", entity_types=[EntityType.PATTERN], limit=1)
+                search_latency_ms = (time.time() - start) * 1000
+            except Exception as e:
+                errors.append(f"Search latency test failed: {e}")
 
     except Exception as e:
         errors.append(f"Graph connection failed: {e}")
@@ -140,12 +147,15 @@ async def health_check() -> HealthStatus:
 async def sync_wisdom_docs(
     path: str | None = None,
     force: bool = False,
+    *,
+    group_id: str,
 ) -> SyncResult:
     """Re-ingest wisdom documentation from files.
 
     Args:
         path: Specific path to sync. If None, syncs all wisdom docs.
         force: If True, re-process all files even if unchanged.
+        group_id: Organization ID for multi-tenant graph operations.
 
     Returns:
         SyncResult with sync statistics.
@@ -201,7 +211,7 @@ async def sync_wisdom_docs(
             wisdom_patterns = None  # Use default patterns
 
         # Create pipeline with appropriate patterns
-        pipeline = IngestionPipeline(repo_root, wisdom_patterns=wisdom_patterns)
+        pipeline = IngestionPipeline(repo_root, wisdom_patterns=wisdom_patterns, group_id=group_id)
 
         # Run ingestion
         result = await pipeline.run()
@@ -285,24 +295,30 @@ async def rebuild_indices(
         )
 
 
-async def get_stats() -> dict[str, object]:
+async def get_stats(*, organization_id: str | None = None) -> dict[str, object]:
     """Get detailed statistics about the knowledge graph.
+
+    Args:
+        organization_id: Organization ID for graph operations. If None, returns minimal stats.
 
     Returns:
         Dictionary with graph statistics.
     """
     log.info("Getting graph stats")
 
+    stats: dict[str, object] = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "entities": {},
+        "relationships": {},
+        "storage": {},
+    }
+
+    if not organization_id:
+        return stats
+
     try:
         client = await get_graph_client()
-        entity_manager = EntityManager(client)
-
-        stats: dict[str, object] = {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "entities": {},
-            "relationships": {},
-            "storage": {},
-        }
+        entity_manager = EntityManager(client, group_id=organization_id)
 
         # Count entities by type
         entity_stats: dict[str, int] = {}

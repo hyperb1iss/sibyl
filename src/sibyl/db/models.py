@@ -623,6 +623,11 @@ class CrawlSource(TimestampMixin, table=True):
     __tablename__ = "crawl_sources"  # type: ignore[assignment]
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(
+        foreign_key="organizations.id",
+        index=True,
+        description="Organization that owns this source",
+    )
     name: str = Field(max_length=255, index=True, description="Human-readable source name")
     url: str = Field(max_length=2048, unique=True, description="Base URL or path")
     source_type: SourceType = Field(default=SourceType.WEBSITE, description="Type of source")

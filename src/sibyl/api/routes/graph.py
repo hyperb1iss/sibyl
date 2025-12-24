@@ -186,7 +186,10 @@ async def get_all_nodes(
 
     except Exception as e:
         log.exception("get_nodes_failed", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve graph nodes. Please try again.",
+        ) from e
 
 
 @router.get("/edges", response_model=list[GraphEdge])
@@ -223,7 +226,10 @@ async def get_all_edges(
 
     except Exception as e:
         log.exception("get_edges_failed", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve graph edges. Please try again.",
+        ) from e
 
 
 @router.get("/full", response_model=GraphData)
@@ -333,7 +339,10 @@ async def get_full_graph(
 
     except Exception as e:
         log.exception("get_full_graph_failed", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve full graph. Please try again.",
+        ) from e
 
 
 @router.post("/subgraph", response_model=GraphData)
@@ -429,4 +438,7 @@ async def get_subgraph(
         raise
     except Exception as e:
         log.exception("get_subgraph_failed", entity_id=payload.entity_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve subgraph. Please try again.",
+        ) from e

@@ -33,7 +33,7 @@ from sibyl.api.schemas import (
     LinkGraphStatusResponse,
 )
 from sibyl.api.websocket import broadcast_event
-from sibyl.auth.dependencies import require_org_role
+from sibyl.auth.dependencies import get_current_organization, require_org_role
 from sibyl.db import (
     CrawledDocument,
     CrawlSource,
@@ -43,7 +43,7 @@ from sibyl.db import (
     check_postgres_health,
     get_session,
 )
-from sibyl.db.models import OrganizationRole, utcnow_naive
+from sibyl.db.models import Organization, OrganizationRole, utcnow_naive
 
 log = structlog.get_logger()
 router = APIRouter(
@@ -285,12 +285,18 @@ async def preview_url(url: str) -> dict[str, str | None]:
 
 
 @router.post("", response_model=CrawlSourceResponse)
-async def create_source(request: CrawlSourceCreate) -> CrawlSourceResponse:
+async def create_source(
+    request: CrawlSourceCreate,
+    org: Organization = Depends(get_current_organization),
+) -> CrawlSourceResponse:
     """Create a new crawl source."""
     async with get_session() as session:
-        # Check for existing source with same URL
+        # Check for existing source with same URL (within org)
         existing = await session.execute(
-            select(CrawlSource).where(col(CrawlSource.url) == request.url.rstrip("/"))
+            select(CrawlSource).where(
+                col(CrawlSource.url) == request.url.rstrip("/"),
+                col(CrawlSource.organization_id) == org.id,
+            )
         )
         if existing.scalar_one_or_none():
             raise HTTPException(
@@ -305,6 +311,7 @@ async def create_source(request: CrawlSourceCreate) -> CrawlSourceResponse:
             crawl_depth=request.crawl_depth,
             include_patterns=request.include_patterns,
             exclude_patterns=request.exclude_patterns,
+            organization_id=org.id,
         )
         session.add(source)
         await session.flush()

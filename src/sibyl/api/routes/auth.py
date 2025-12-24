@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from sibyl import config as config_module
+from sibyl.api.rate_limit import limiter
 from sibyl.auth.api_keys import ApiKeyManager
 from sibyl.auth.audit import AuditLogger
 from sibyl.auth.context import AuthContext
@@ -379,6 +380,7 @@ async def local_signup(
 
 
 @router.post("/local/login", response_model=None)
+@limiter.limit("5/minute")  # Strict limit to prevent brute force
 async def local_login(
     request: Request,
     session: AsyncSession = Depends(get_session_dependency),
@@ -439,6 +441,7 @@ async def local_login(
 
 
 @router.post("/device", response_model=None)
+@limiter.limit("10/minute")  # Limit device code generation
 async def device_start(
     request: Request,
     session: AsyncSession = Depends(get_session_dependency),
@@ -468,6 +471,7 @@ async def device_start(
 
 
 @router.post("/device/token", response_model=None)
+@limiter.limit("60/minute")  # Allow frequent polling but prevent abuse
 async def device_token(
     request: Request,
     session: AsyncSession = Depends(get_session_dependency),
@@ -604,6 +608,7 @@ def _render_device_verify_page(
 
 
 @router.get("/device/verify", response_model=None)
+@limiter.limit("30/minute")  # Limit code verification attempts
 async def device_verify_get(
     request: Request,
     session: AsyncSession = Depends(get_session_dependency),
@@ -627,24 +632,21 @@ async def device_verify_get(
     pending: dict[str, object] | None = None
     if user_code:
         req = await DeviceAuthorizationManager(session).get_by_user_code(user_code)
-        if req is None:
-            return _render_device_verify_page(
-                user_code=user_code,
-                error_code="invalid_user_code",
-                authed_user=user,
-            )
         now = datetime.now(UTC).replace(tzinfo=None)
-        if req.expires_at <= now:
+        # Security: Use same error for invalid and expired to prevent code enumeration
+        if req is None or req.expires_at <= now or req.status != "pending":
             return _render_device_verify_page(
                 user_code=user_code,
-                error_code="expired_token",
+                error_code="invalid_or_expired",
                 authed_user=user,
             )
-        pending = {
-            "client_name": req.client_name,
-            "scope": req.scope,
-            "expires_at": req.expires_at.isoformat(),
-        }
+        # Only show pending details if user is authenticated (prevents info leak)
+        if user:
+            pending = {
+                "client_name": req.client_name,
+                "scope": req.scope,
+                "expires_at": req.expires_at.isoformat(),
+            }
 
     return _render_device_verify_page(
         user_code=user_code,
@@ -655,6 +657,7 @@ async def device_verify_get(
 
 
 @router.post("/device/verify", response_model=None)
+@limiter.limit("10/minute")  # Stricter limit on form submissions
 async def device_verify_post(
     request: Request,
     session: AsyncSession = Depends(get_session_dependency),
@@ -720,12 +723,10 @@ async def device_verify_post(
 
     mgr = DeviceAuthorizationManager(session)
     req = await mgr.get_by_user_code(user_code)
-    if req is None:
-        return RedirectResponse(url=verify_url + "&error=invalid_user_code", status_code=302)
-
     now = datetime.now(UTC).replace(tzinfo=None)
-    if req.expires_at <= now:
-        return RedirectResponse(url=verify_url + "&error=expired_token", status_code=302)
+    # Security: Use same error for invalid/expired/consumed to prevent code enumeration
+    if req is None or req.expires_at <= now or req.status != "pending":
+        return RedirectResponse(url=verify_url + "&error=invalid_or_expired", status_code=302)
 
     if action == "deny":
         await mgr.deny(req)

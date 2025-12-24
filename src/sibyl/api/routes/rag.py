@@ -5,6 +5,8 @@ Provides semantic search over crawled documentation:
 - Source-filtered search
 - Code example search
 - Full page retrieval
+
+All queries are scoped to the user's organization for multi-tenant security.
 """
 
 import hashlib
@@ -31,7 +33,8 @@ from sibyl.api.schemas import (
     RAGSearchResponse,
     SourcePagesResponse,
 )
-from sibyl.auth.dependencies import require_org_role
+from sibyl.auth.context import AuthContext
+from sibyl.auth.dependencies import get_auth_context, require_org_role
 from sibyl.crawler.embedder import embed_text
 from sibyl.db import (
     CrawledDocument,
@@ -64,18 +67,25 @@ router = APIRouter(
 
 
 @router.post("/search", response_model=RAGSearchResponse)
-async def rag_search(request: RAGSearchRequest) -> RAGSearchResponse:
+async def rag_search(
+    request: RAGSearchRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> RAGSearchResponse:
     """Semantic search over document chunks.
 
     Uses pgvector for similarity search with optional source filtering.
     Supports returning chunks or grouping by page.
+    Results are scoped to the user's organization.
     """
+    if not auth.organization_id:
+        raise HTTPException(status_code=403, detail="Organization context required")
+
     # Generate query embedding
     try:
         query_embedding = await embed_text(request.query)
     except Exception as e:
         log.exception("Failed to generate query embedding", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Embedding error: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to generate query embedding") from e
 
     async with get_session() as session:
         # Build base query with cosine similarity
@@ -93,6 +103,8 @@ async def rag_search(request: RAGSearchRequest) -> RAGSearchResponse:
             .join(CrawledDocument, DocumentChunk.document_id == CrawledDocument.id)
             .join(CrawlSource, CrawledDocument.source_id == CrawlSource.id)
             .where(col(DocumentChunk.embedding).is_not(None))
+            # Filter by organization for multi-tenant security
+            .where(col(CrawlSource.organization_id) == auth.organization_id)
         )
 
         # Apply source filters
@@ -182,17 +194,24 @@ async def rag_search(request: RAGSearchRequest) -> RAGSearchResponse:
 
 
 @router.post("/code-examples", response_model=CodeExampleResponse)
-async def search_code_examples(request: CodeExampleRequest) -> CodeExampleResponse:
+async def search_code_examples(
+    request: CodeExampleRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> CodeExampleResponse:
     """Search for code examples with optional language filtering.
 
     Only searches chunks with chunk_type = 'code'.
+    Results are scoped to the user's organization.
     """
+    if not auth.organization_id:
+        raise HTTPException(status_code=403, detail="Organization context required")
+
     # Generate query embedding
     try:
         query_embedding = await embed_text(request.query)
     except Exception as e:
         log.exception("Failed to generate query embedding", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Embedding error: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to generate query embedding") from e
 
     async with get_session() as session:
         similarity_expr = 1 - DocumentChunk.embedding.cosine_distance(query_embedding)
@@ -208,6 +227,8 @@ async def search_code_examples(request: CodeExampleRequest) -> CodeExampleRespon
             .join(CrawlSource, CrawledDocument.source_id == CrawlSource.id)
             .where(col(DocumentChunk.embedding).is_not(None))
             .where(col(DocumentChunk.chunk_type) == ChunkType.CODE)
+            # Filter by organization for multi-tenant security
+            .where(col(CrawlSource.organization_id) == auth.organization_id)
         )
 
         # Apply filters
@@ -265,8 +286,15 @@ async def list_source_pages(
     offset: int = 0,
     has_code: bool | None = None,
     is_index: bool | None = None,
+    auth: AuthContext = Depends(get_auth_context),
 ) -> SourcePagesResponse:
-    """List all pages for a source with optional filtering."""
+    """List all pages for a source with optional filtering.
+
+    Source must belong to the user's organization.
+    """
+    if not auth.organization_id:
+        raise HTTPException(status_code=403, detail="Organization context required")
+
     try:
         source_uuid = UUID(source_id)
     except ValueError:
@@ -275,9 +303,11 @@ async def list_source_pages(
         ) from None
 
     async with get_session() as session:
-        # Get source info
+        # Get source info and verify org ownership
         source = await session.get(CrawlSource, source_uuid)
         if not source:
+            raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+        if source.organization_id != auth.organization_id:
             raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
 
         # Build query
@@ -326,8 +356,17 @@ async def list_source_pages(
 
 
 @router.get("/pages/{document_id}", response_model=FullPageResponse)
-async def get_full_page(document_id: str) -> FullPageResponse:
-    """Get full page content by document ID."""
+async def get_full_page(
+    document_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> FullPageResponse:
+    """Get full page content by document ID.
+
+    Document's source must belong to the user's organization.
+    """
+    if not auth.organization_id:
+        raise HTTPException(status_code=403, detail="Organization context required")
+
     try:
         doc_uuid = UUID(document_id)
     except ValueError:
@@ -340,9 +379,11 @@ async def get_full_page(document_id: str) -> FullPageResponse:
         if not doc:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
-        # Get source name
+        # Get source and verify org ownership
         source = await session.get(CrawlSource, doc.source_id)
-        source_name = source.name if source else "Unknown"
+        if not source or source.organization_id != auth.organization_id:
+            raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
+        source_name = source.name
 
     return FullPageResponse(
         document_id=str(doc.id),
@@ -363,11 +404,24 @@ async def get_full_page(document_id: str) -> FullPageResponse:
 
 
 @router.get("/pages/by-url")
-async def get_page_by_url(url: str) -> FullPageResponse:
-    """Get full page content by URL."""
+async def get_page_by_url(
+    url: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> FullPageResponse:
+    """Get full page content by URL.
+
+    Document's source must belong to the user's organization.
+    """
+    if not auth.organization_id:
+        raise HTTPException(status_code=403, detail="Organization context required")
+
     async with get_session() as session:
+        # Join with source to filter by organization
         result = await session.execute(
-            select(CrawledDocument).where(col(CrawledDocument.url) == url)
+            select(CrawledDocument)
+            .join(CrawlSource, CrawledDocument.source_id == CrawlSource.id)
+            .where(col(CrawledDocument.url) == url)
+            .where(col(CrawlSource.organization_id) == auth.organization_id)
         )
         doc = result.scalar_one_or_none()
 
@@ -402,19 +456,27 @@ async def get_page_by_url(url: str) -> FullPageResponse:
 
 
 @router.post("/hybrid-search", response_model=RAGSearchResponse)
-async def hybrid_search(request: RAGSearchRequest) -> RAGSearchResponse:
+async def hybrid_search(
+    request: RAGSearchRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> RAGSearchResponse:
     """Hybrid search combining vector similarity and full-text search.
 
     Uses RRF (Reciprocal Rank Fusion) to combine results from:
     - Vector similarity (pgvector cosine distance)
     - Full-text search (PostgreSQL tsvector)
+
+    Results are scoped to the user's organization.
     """
+    if not auth.organization_id:
+        raise HTTPException(status_code=403, detail="Organization context required")
+
     # Generate query embedding
     try:
         query_embedding = await embed_text(request.query)
     except Exception as e:
         log.exception("Failed to generate query embedding", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Embedding error: {e}") from e
+        raise HTTPException(status_code=500, detail="Failed to generate query embedding") from e
 
     async with get_session() as session:
         # Build hybrid query with RRF
@@ -440,6 +502,8 @@ async def hybrid_search(request: RAGSearchRequest) -> RAGSearchResponse:
             .join(CrawledDocument, DocumentChunk.document_id == CrawledDocument.id)
             .join(CrawlSource, CrawledDocument.source_id == CrawlSource.id)
             .where(col(DocumentChunk.embedding).is_not(None))
+            # Filter by organization for multi-tenant security
+            .where(col(CrawlSource.organization_id) == auth.organization_id)
         )
 
         # Apply source filters
@@ -526,13 +590,22 @@ def _estimate_token_count(content: str) -> int:
 
 
 @router.patch("/pages/{document_id}", response_model=FullPageResponse)
-async def update_document(document_id: str, request: DocumentUpdateRequest) -> FullPageResponse:
+async def update_document(
+    document_id: str,
+    request: DocumentUpdateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> FullPageResponse:
     """Update a document's title and/or content.
 
     When content is updated, recalculates derived fields:
     - word_count, token_count, content_hash
     - has_code, headings
+
+    Document's source must belong to the user's organization.
     """
+    if not auth.organization_id:
+        raise HTTPException(status_code=403, detail="Organization context required")
+
     if request.title is None and request.content is None:
         raise HTTPException(
             status_code=400, detail="At least one of title or content must be provided"
@@ -548,6 +621,11 @@ async def update_document(document_id: str, request: DocumentUpdateRequest) -> F
     async with get_session() as session:
         doc = await session.get(CrawledDocument, doc_uuid)
         if not doc:
+            raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
+
+        # Verify organization ownership
+        source = await session.get(CrawlSource, doc.source_id)
+        if not source or source.organization_id != auth.organization_id:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
         # Update title if provided
@@ -567,9 +645,8 @@ async def update_document(document_id: str, request: DocumentUpdateRequest) -> F
         await session.commit()
         await session.refresh(doc)
 
-        # Get source name
-        source = await session.get(CrawlSource, doc.source_id)
-        source_name = source.name if source else "Unknown"
+        # Reuse source from ownership check
+        source_name = source.name
 
     log.info(
         "Document updated",
@@ -602,12 +679,19 @@ async def update_document(document_id: str, request: DocumentUpdateRequest) -> F
 
 
 @router.get("/pages/{document_id}/entities", response_model=DocumentRelatedEntitiesResponse)
-async def get_document_related_entities(document_id: str) -> DocumentRelatedEntitiesResponse:
+async def get_document_related_entities(
+    document_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> DocumentRelatedEntitiesResponse:
     """Get knowledge graph entities related to a document.
 
     Uses semantic search to find entities (tasks, patterns, episodes, etc.)
     that are relevant to this document's content based on its title.
+    Document's source must belong to the user's organization.
     """
+    if not auth.organization_id:
+        raise HTTPException(status_code=403, detail="Organization context required")
+
     try:
         doc_uuid = UUID(document_id)
     except ValueError:
@@ -616,9 +700,13 @@ async def get_document_related_entities(document_id: str) -> DocumentRelatedEnti
         ) from None
 
     async with get_session() as session:
-        # Get the document
+        # Get the document and verify org ownership
         doc = await session.get(CrawledDocument, doc_uuid)
         if not doc:
+            raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
+
+        source = await session.get(CrawlSource, doc.source_id)
+        if not source or source.organization_id != auth.organization_id:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
         doc_title = doc.title
@@ -630,7 +718,7 @@ async def get_document_related_entities(document_id: str) -> DocumentRelatedEnti
         from sibyl.graph.entities import EntityManager
 
         client = await get_graph_client()
-        entity_manager = EntityManager(client)
+        entity_manager = EntityManager(client, group_id=auth.organization_id)
 
         # Semantic search using document title
         search_results = await entity_manager.search(

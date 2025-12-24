@@ -50,9 +50,7 @@ class ConnectionManager:
             ]
         log.info("websocket_disconnected", total_connections=len(self.active_connections))
 
-    async def broadcast(
-        self, event: str, data: dict[str, Any], org_id: str | None = None
-    ) -> None:
+    async def broadcast(self, event: str, data: dict[str, Any], org_id: str | None = None) -> None:
         """Broadcast an event to clients in the same organization.
 
         Args:
@@ -121,9 +119,7 @@ def get_manager() -> ConnectionManager:
     return _manager
 
 
-async def broadcast_event(
-    event: str, data: dict[str, Any], *, org_id: str | None = None
-) -> None:
+async def broadcast_event(event: str, data: dict[str, Any], *, org_id: str | None = None) -> None:
     """Broadcast an event to connected WebSocket clients.
 
     This is the main interface for other modules to send realtime updates.

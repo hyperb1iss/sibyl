@@ -68,7 +68,9 @@ async def stats(
 
     except Exception as e:
         log.exception("stats_failed", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to retrieve stats. Please try again."
+        ) from e
 
 
 # Background ingestion state
@@ -82,7 +84,7 @@ _ingestion_status: dict[str, Any] = {
 }
 
 
-async def _run_ingestion(path: str | None, force: bool) -> None:
+async def _run_ingestion(path: str | None, force: bool, group_id: str) -> None:
     """Run ingestion in background with progress updates."""
     global _ingestion_status  # noqa: PLW0603
     from sibyl.tools.admin import sync_wisdom_docs
@@ -101,7 +103,7 @@ async def _run_ingestion(path: str | None, force: bool) -> None:
         await broadcast_event("ingest_progress", _ingestion_status)
 
         # Run ingestion
-        result = await sync_wisdom_docs(path=path, force=force)
+        result = await sync_wisdom_docs(path=path, force=force, group_id=group_id)
 
         # Update final status
         _ingestion_status = {
@@ -129,7 +131,11 @@ async def _run_ingestion(path: str | None, force: bool) -> None:
 
 
 @router.post("/ingest", response_model=IngestResponse)
-async def ingest(request: IngestRequest, background_tasks: BackgroundTasks) -> IngestResponse:
+async def ingest(
+    request: IngestRequest,
+    background_tasks: BackgroundTasks,
+    org: Organization = Depends(get_current_organization),
+) -> IngestResponse:
     """Trigger document ingestion.
 
     Runs in background and sends progress via WebSocket.
@@ -138,7 +144,7 @@ async def ingest(request: IngestRequest, background_tasks: BackgroundTasks) -> I
         raise HTTPException(status_code=409, detail="Ingestion already in progress")
 
     # Start background ingestion
-    background_tasks.add_task(_run_ingestion, request.path, request.force)
+    background_tasks.add_task(_run_ingestion, request.path, request.force, str(org.id))
 
     # Wait a moment for it to start
     await asyncio.sleep(0.1)

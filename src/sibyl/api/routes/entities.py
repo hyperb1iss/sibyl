@@ -130,7 +130,9 @@ async def list_entities(
 
     except Exception as e:
         log.exception("list_entities_failed", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to list entities. Please try again."
+        ) from e
 
 
 @router.get("/{entity_id}", response_model=EntityResponse)
@@ -169,7 +171,9 @@ async def get_entity(
         raise
     except Exception as e:
         log.exception("get_entity_failed", entity_id=entity_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to get entity. Please try again."
+        ) from e
 
 
 # =============================================================================
@@ -271,7 +275,9 @@ async def create_entity(
         raise
     except Exception as e:
         log.exception("create_entity_failed", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to create entity. Please try again."
+        ) from e
 
 
 # =============================================================================
@@ -367,7 +373,9 @@ async def update_entity(
         raise
     except Exception as e:
         log.exception("update_entity_failed", entity_id=entity_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to update entity. Please try again."
+        ) from e
 
 
 # =============================================================================
@@ -423,4 +431,6 @@ async def delete_entity(
         raise
     except Exception as e:
         log.exception("delete_entity_failed", entity_id=entity_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to delete entity. Please try again."
+        ) from e

@@ -85,6 +85,8 @@ async def manage(
     action: str,
     entity_id: str | None = None,
     data: dict[str, Any] | None = None,
+    *,
+    organization_id: str | None = None,
 ) -> ManageResponse:
     """Manage operations that modify state in the knowledge graph.
 
@@ -119,6 +121,7 @@ async def manage(
         action: The action to perform (see categories above).
         entity_id: Target entity ID (required for most actions).
         data: Action-specific data dict.
+        organization_id: Organization ID for graph operations (required for non-admin actions).
 
     Returns:
         ManageResponse with success status, message, and action-specific data.
@@ -135,16 +138,24 @@ async def manage(
             message=f"Unknown action: {action}. Valid actions: {sorted(ALL_ACTIONS)}",
         )
 
+    # Admin actions don't require org context
+    if action not in ADMIN_ACTIONS and not organization_id:
+        return ManageResponse(
+            success=False,
+            action=action,
+            message="organization_id required for this action",
+        )
+
     try:
         # Route to appropriate handler
         if action in TASK_ACTIONS:
-            return await _handle_task_action(action, entity_id, data)
+            return await _handle_task_action(action, entity_id, data, organization_id=organization_id)
         if action in SOURCE_ACTIONS:
-            return await _handle_source_action(action, entity_id, data)
+            return await _handle_source_action(action, entity_id, data, organization_id=organization_id)
         if action in ANALYSIS_ACTIONS:
-            return await _handle_analysis_action(action, entity_id, data)
+            return await _handle_analysis_action(action, entity_id, data, organization_id=organization_id)
         # ADMIN_ACTIONS
-        return await _handle_admin_action(action, entity_id, data)
+        return await _handle_admin_action(action, entity_id, data, organization_id=organization_id)
 
     except Exception as e:
         log.exception("manage_failed", action=action, error=str(e))
@@ -165,6 +176,8 @@ async def _handle_task_action(
     action: str,
     entity_id: str | None,
     data: dict[str, Any],
+    *,
+    organization_id: str | None,
 ) -> ManageResponse:
     """Handle task workflow actions.
 
@@ -177,9 +190,16 @@ async def _handle_task_action(
             message="entity_id required for task actions",
         )
 
+    if not organization_id:
+        return ManageResponse(
+            success=False,
+            action=action,
+            message="organization_id required for task actions",
+        )
+
     client = await get_graph_client()
-    entity_manager = EntityManager(client)
-    relationship_manager = RelationshipManager(client)
+    entity_manager = EntityManager(client, group_id=organization_id)
+    relationship_manager = RelationshipManager(client, group_id=organization_id)
 
     # Use workflow engine for state-validated transitions
     from sibyl.errors import InvalidTransitionError
@@ -341,6 +361,8 @@ async def _handle_source_action(
     action: str,
     entity_id: str | None,
     data: dict[str, Any],
+    *,
+    organization_id: str | None,
 ) -> ManageResponse:
     """Handle source operations (crawl, sync, refresh)."""
     # Validate inputs BEFORE connecting to database
@@ -360,9 +382,16 @@ async def _handle_source_action(
             message="entity_id (source ID) required for sync action",
         )
 
+    if not organization_id:
+        return ManageResponse(
+            success=False,
+            action=action,
+            message="organization_id required for source actions",
+        )
+
     # Now connect after validation passes
     client = await get_graph_client()
-    entity_manager = EntityManager(client)
+    entity_manager = EntityManager(client, group_id=organization_id)
 
     if action == "crawl":
         url = data.get("url")  # Already validated above
@@ -486,6 +515,8 @@ async def _handle_analysis_action(
     action: str,
     entity_id: str | None,
     _data: dict[str, Any],
+    *,
+    organization_id: str | None,
 ) -> ManageResponse:
     """Handle analysis actions."""
     if not entity_id:
@@ -495,12 +526,19 @@ async def _handle_analysis_action(
             message=f"entity_id required for {action} action",
         )
 
+    if not organization_id:
+        return ManageResponse(
+            success=False,
+            action=action,
+            message="organization_id required for analysis actions",
+        )
+
     client = await get_graph_client()
-    entity_manager = EntityManager(client)
-    relationship_manager = RelationshipManager(client)
+    entity_manager = EntityManager(client, group_id=organization_id)
+    relationship_manager = RelationshipManager(client, group_id=organization_id)
 
     if action == "estimate":
-        return await _estimate_effort(entity_manager, entity_id)
+        return await _estimate_effort(entity_manager, relationship_manager, entity_id)
 
     if action == "prioritize":
         return await _prioritize_tasks(entity_manager, relationship_manager, entity_id)
@@ -509,20 +547,19 @@ async def _handle_analysis_action(
         return await _detect_cycles(relationship_manager, entity_id)
 
     if action == "suggest":
-        return await _suggest_knowledge(entity_manager, entity_id)
+        return await _suggest_knowledge(entity_manager, relationship_manager, entity_id)
 
     return ManageResponse(success=False, action=action, message="Unknown analysis action")
 
 
 async def _estimate_effort(
     entity_manager: EntityManager,
+    relationship_manager: RelationshipManager,
     task_id: str,
 ) -> ManageResponse:
     """Estimate task effort based on similar completed tasks."""
     from sibyl.tasks.manager import TaskManager
 
-    client = await get_graph_client()
-    relationship_manager = RelationshipManager(client)
     task_manager = TaskManager(entity_manager, relationship_manager)
 
     # Get the task
@@ -636,13 +673,12 @@ async def _detect_cycles(
 
 async def _suggest_knowledge(
     entity_manager: EntityManager,
+    relationship_manager: RelationshipManager,
     task_id: str,
 ) -> ManageResponse:
     """Suggest relevant knowledge for a task."""
     from sibyl.tasks.manager import TaskManager
 
-    client = await get_graph_client()
-    relationship_manager = RelationshipManager(client)
     task_manager = TaskManager(entity_manager, relationship_manager)
 
     # Get the task
@@ -689,6 +725,8 @@ async def _handle_admin_action(
     action: str,
     _entity_id: str | None,
     _data: dict[str, Any],
+    *,
+    organization_id: str | None,  # noqa: ARG001 - Admin actions don't require org context
 ) -> ManageResponse:
     """Handle admin actions."""
     if action == "health":

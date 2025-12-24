@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     )
 
     # Server configuration
+    environment: Literal["development", "staging", "production"] = Field(
+        default="development",
+        description="Runtime environment (development, staging, production)",
+    )
     server_name: str = Field(default="sibyl", description="MCP server name")
     server_host: str = Field(default="localhost", description="Server bind host")
     server_port: int = Field(default=3334, description="Server bind port")
@@ -32,6 +36,17 @@ class Settings(BaseSettings):
         default=False,
         description="Disable auth enforcement (dev mode only)",
     )
+
+    @model_validator(mode="after")
+    def validate_security_settings(self) -> "Settings":
+        """Prevent insecure settings in production."""
+        if self.environment == "production" and self.disable_auth:
+            raise ValueError(
+                "CRITICAL: disable_auth=True is forbidden in production environment. "
+                "Set SIBYL_ENVIRONMENT=development to use disable_auth for testing."
+            )
+        return self
+
     jwt_secret: SecretStr = Field(
         default=SecretStr(""),
         description="JWT signing secret (required for auth)",
@@ -76,6 +91,20 @@ class Settings(BaseSettings):
     mcp_auth_mode: Literal["auto", "on", "off"] = Field(
         default="auto",
         description=("Require Bearer auth for MCP endpoints. auto=enforce when JWT secret is set."),
+    )
+
+    # Rate limiting configuration
+    rate_limit_enabled: bool = Field(
+        default=True,
+        description="Enable rate limiting on API endpoints",
+    )
+    rate_limit_default: str = Field(
+        default="100/minute",
+        description="Default rate limit for API endpoints (e.g., '100/minute', '1000/hour')",
+    )
+    rate_limit_storage: str = Field(
+        default="memory://",
+        description="Rate limit storage backend (memory://, redis://host:port)",
     )
 
     # Email configuration (Resend)

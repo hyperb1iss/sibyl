@@ -34,8 +34,15 @@ def backup_db(
     output: Annotated[Path, typer.Option("--output", "-o", help="Backup file path")] = Path(
         "sibyl_backup.json"
     ),
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID (required for multi-tenant graph)"),
+    ] = "",
 ) -> None:
     """Backup the graph database to a JSON file."""
+    if not org_id:
+        error("--org-id is required for graph operations")
+        raise typer.Exit(code=1)
 
     @run_async
     async def _backup() -> None:
@@ -49,8 +56,8 @@ def backup_db(
                 from sibyl.graph.client import get_graph_client
 
                 client = await get_graph_client()
-                entity_mgr = EntityManager(client)
-                rel_mgr = RelationshipManager(client)
+                entity_mgr = EntityManager(client, group_id=org_id)
+                rel_mgr = RelationshipManager(client, group_id=org_id)
 
                 # Get all entity types
                 progress.update(task, description="Backing up entities...")
@@ -107,8 +114,16 @@ def backup_db(
 def restore_db(
     backup_file: Annotated[Path, typer.Argument(help="Backup file to restore")],
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID (required for multi-tenant graph)"),
+    ] = "",
 ) -> None:
     """Restore the database from a backup file."""
+    if not org_id:
+        error("--org-id is required for graph operations")
+        raise typer.Exit(code=1)
+
     if not backup_file.exists():
         error(f"Backup file not found: {backup_file}")
         return
@@ -142,8 +157,8 @@ def restore_db(
                 from sibyl.graph.client import get_graph_client
 
                 client = await get_graph_client()
-                entity_mgr = EntityManager(client)
-                rel_mgr = RelationshipManager(client)
+                entity_mgr = EntityManager(client, group_id=org_id)
+                rel_mgr = RelationshipManager(client, group_id=org_id)
 
                 # Restore entities
                 progress.update(task, description="Restoring entities...")

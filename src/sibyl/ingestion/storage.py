@@ -179,17 +179,20 @@ def convert_extracted_relationship(
 
 async def store_entities(
     entities: list[ExtractedEntity],
+    *,
+    group_id: str,
 ) -> tuple[dict[str, str], list[str]]:
     """Store extracted entities to the graph.
 
     Args:
         entities: List of extracted entities.
+        group_id: Organization ID for multi-tenant graph operations.
 
     Returns:
         Tuple of (entity_name_to_id_map, errors).
     """
     client = await get_graph_client()
-    entity_manager = EntityManager(client)
+    entity_manager = EntityManager(client, group_id=group_id)
 
     entity_id_map: dict[str, str] = {}
     errors: list[str] = []
@@ -220,18 +223,21 @@ async def store_entities(
 async def store_relationships(
     relationships: list[ExtractedRelationship],
     entity_id_map: dict[str, str],
+    *,
+    group_id: str,
 ) -> tuple[int, int, list[str]]:
     """Store extracted relationships to the graph.
 
     Args:
         relationships: List of extracted relationships.
         entity_id_map: Mapping from entity names to IDs.
+        group_id: Organization ID for multi-tenant graph operations.
 
     Returns:
         Tuple of (stored_count, skipped_count, errors).
     """
     client = await get_graph_client()
-    relationship_manager = RelationshipManager(client)
+    relationship_manager = RelationshipManager(client, group_id=group_id)
 
     stored = 0
     skipped = 0
@@ -267,12 +273,15 @@ async def store_relationships(
 async def store_ingestion_results(
     entities: list[ExtractedEntity],
     relationships: list[ExtractedRelationship],
+    *,
+    group_id: str,
 ) -> StorageResult:
     """Store all ingestion results to the knowledge graph.
 
     Args:
         entities: Extracted entities to store.
         relationships: Extracted relationships to store.
+        group_id: Organization ID for multi-tenant graph operations.
 
     Returns:
         StorageResult with counts and errors.
@@ -286,11 +295,13 @@ async def store_ingestion_results(
     all_errors: list[str] = []
 
     # Store entities first to build ID map
-    entity_id_map, entity_errors = await store_entities(entities)
+    entity_id_map, entity_errors = await store_entities(entities, group_id=group_id)
     all_errors.extend(entity_errors)
 
     # Store relationships using the ID map
-    rels_stored, rels_skipped, rel_errors = await store_relationships(relationships, entity_id_map)
+    rels_stored, rels_skipped, rel_errors = await store_relationships(
+        relationships, entity_id_map, group_id=group_id
+    )
     all_errors.extend(rel_errors)
 
     result = StorageResult(

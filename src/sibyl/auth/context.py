@@ -21,3 +21,13 @@ class AuthContext:
     @property
     def is_org_scoped(self) -> bool:
         return self.organization is not None
+
+    @property
+    def user_id(self) -> str | None:
+        """Get user ID as string for convenience."""
+        return str(self.user.id) if self.user else None
+
+    @property
+    def organization_id(self) -> str | None:
+        """Get organization ID as string for convenience."""
+        return str(self.organization.id) if self.organization else None

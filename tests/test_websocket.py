@@ -67,9 +67,7 @@ class TestConnectionManagerOrgScoping:
         assert not ws2.send_json.called
 
     @pytest.mark.asyncio
-    async def test_broadcast_without_org_reaches_all(
-        self, manager: ConnectionManager
-    ) -> None:
+    async def test_broadcast_without_org_reaches_all(self, manager: ConnectionManager) -> None:
         """Broadcast without org_id should reach all connections."""
         ws1 = MagicMock()
         ws1.send_json = AsyncMock()

@@ -50,6 +50,10 @@ def generate_realistic(  # noqa: PLR0915 - complex CLI command
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Show what would be generated")
     ] = False,
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID (required for multi-tenant graph)"),
+    ] = "",
 ) -> None:
     """Generate a realistic development scenario with interconnected data.
 
@@ -79,6 +83,10 @@ def generate_realistic(  # noqa: PLR0915 - complex CLI command
         console.print(f"  Seed: [{NEON_CYAN}]{seed or 'random'}[/{NEON_CYAN}]")
         console.print("\n[dim]Run without --dry-run to generate data[/dim]")
         return
+
+    if not org_id:
+        error("--org-id is required for graph operations")
+        raise typer.Exit(code=1)
 
     @run_async
     async def _generate() -> None:
@@ -144,8 +152,8 @@ def generate_realistic(  # noqa: PLR0915 - complex CLI command
                     from sibyl.graph.client import get_graph_client
 
                     client = await get_graph_client()
-                    entity_mgr = EntityManager(client)
-                    rel_mgr = RelationshipManager(client)
+                    entity_mgr = EntityManager(client, group_id=org_id)
+                    rel_mgr = RelationshipManager(client, group_id=org_id)
 
                     # Use bulk_create_direct for speed (bypasses Graphiti LLM)
                     stored_entities, _ = await entity_mgr.bulk_create_direct(
@@ -184,6 +192,10 @@ def generate_stress(
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Show what would be generated")
     ] = False,
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID (required for multi-tenant graph)"),
+    ] = "",
 ) -> None:
     """Generate maximum-scale data for stress testing.
 
@@ -203,6 +215,10 @@ def generate_stress(
         console.print(f"  Seed: [{NEON_CYAN}]{seed or 'random'}[/{NEON_CYAN}]")
         console.print("\n[dim]Run without --dry-run to generate data[/dim]")
         return
+
+    if not org_id:
+        error("--org-id is required for graph operations")
+        raise typer.Exit(code=1)
 
     @run_async
     async def _stress() -> None:
@@ -252,8 +268,8 @@ def generate_stress(
                     from sibyl.graph.client import get_graph_client
 
                     client = await get_graph_client()
-                    entity_mgr = EntityManager(client)
-                    rel_mgr = RelationshipManager(client)
+                    entity_mgr = EntityManager(client, group_id=org_id)
+                    rel_mgr = RelationshipManager(client, group_id=org_id)
 
                     # Use bulk_create_direct for speed (bypasses Graphiti LLM)
                     progress.update(task, description="Storing entities...")
@@ -286,6 +302,10 @@ def generate_scenario(  # noqa: PLR0915 - complex CLI command
     no_llm: Annotated[bool, typer.Option("--no-llm", help="Use templates only")] = False,
     seed: Annotated[int | None, typer.Option("--seed", "-s", help="Random seed")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Show scenario details only")] = False,
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID (required for multi-tenant graph)"),
+    ] = "",
 ) -> None:
     """Generate data from a predefined scenario.
 
@@ -342,6 +362,10 @@ def generate_scenario(  # noqa: PLR0915 - complex CLI command
         console.print("\n[dim]Run without --dry-run to generate data[/dim]")
         return
 
+    if not org_id:
+        error("--org-id is required for graph operations")
+        raise typer.Exit(code=1)
+
     @run_async
     async def _scenario() -> None:
         from sibyl.generator.config import ModelType
@@ -388,8 +412,8 @@ def generate_scenario(  # noqa: PLR0915 - complex CLI command
                     from sibyl.graph.client import get_graph_client
 
                     client = await get_graph_client()
-                    entity_mgr = EntityManager(client)
-                    rel_mgr = RelationshipManager(client)
+                    entity_mgr = EntityManager(client, group_id=org_id)
+                    rel_mgr = RelationshipManager(client, group_id=org_id)
 
                     # Use bulk_create_direct for speed (bypasses Graphiti LLM)
                     stored_entities, _ = await entity_mgr.bulk_create_direct(

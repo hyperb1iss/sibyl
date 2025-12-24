@@ -368,6 +368,7 @@ async def ingest_documentation(
     name: str,
     url: str,
     *,
+    organization_id: str,
     max_pages: int = 100,
     max_depth: int = 3,
     include_patterns: list[str] | None = None,
@@ -379,6 +380,7 @@ async def ingest_documentation(
     Args:
         name: Human-readable name for the source
         url: Base URL to crawl
+        organization_id: Organization UUID for multi-tenant isolation.
         max_pages: Maximum pages to crawl
         max_depth: Maximum link depth
         include_patterns: URL patterns to include
@@ -394,6 +396,7 @@ async def ingest_documentation(
         source = await create_source(
             name=name,
             url=url,
+            organization_id=organization_id,
             include_patterns=include_patterns,
         )
 

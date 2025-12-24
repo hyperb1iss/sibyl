@@ -1826,8 +1826,13 @@ async def _auto_discover_links(
 _server_start_time: float | None = None
 
 
-async def get_health() -> dict[str, Any]:
-    """Get server health status."""
+async def get_health(*, organization_id: str | None = None) -> dict[str, Any]:
+    """Get server health status.
+
+    Args:
+        organization_id: Organization ID for graph operations. If None, only basic
+                        connectivity is checked.
+    """
     import time
 
     from sibyl.config import settings
@@ -1836,7 +1841,7 @@ async def get_health() -> dict[str, Any]:
     if _server_start_time is None:
         _server_start_time = time.time()
 
-    health = {
+    health: dict[str, Any] = {
         "status": "unknown",
         "server_name": settings.server_name,
         "uptime_seconds": int(time.time() - _server_start_time),
@@ -1847,18 +1852,21 @@ async def get_health() -> dict[str, Any]:
 
     try:
         client = await get_graph_client()
-        entity_manager = EntityManager(client)
 
         # Test connectivity
         health["graph_connected"] = True
 
-        # Get entity counts
-        for entity_type in [EntityType.PATTERN, EntityType.RULE, EntityType.EPISODE]:
-            try:
-                entities = await entity_manager.list_by_type(entity_type, limit=1000)
-                health["entity_counts"][entity_type.value] = len(entities)
-            except Exception:
-                health["entity_counts"][entity_type.value] = -1
+        # Entity counts require org context
+        if organization_id:
+            entity_manager = EntityManager(client, group_id=organization_id)
+
+            # Get entity counts
+            for entity_type in [EntityType.PATTERN, EntityType.RULE, EntityType.EPISODE]:
+                try:
+                    entities = await entity_manager.list_by_type(entity_type, limit=1000)
+                    health["entity_counts"][entity_type.value] = len(entities)
+                except Exception:
+                    health["entity_counts"][entity_type.value] = -1
 
         health["status"] = "healthy"
 

@@ -84,15 +84,19 @@ class IngestionPipeline:
         self,
         repo_root: Path,
         wisdom_patterns: list[str] | None = None,
+        *,
+        group_id: str,
     ) -> None:
         """Initialize the pipeline.
 
         Args:
             repo_root: Root path of the conventions repository.
             wisdom_patterns: Glob patterns for wisdom docs (default: docs/wisdom/**/*.md).
+            group_id: Organization ID for multi-tenant graph operations.
         """
         self.repo_root = repo_root
         self.wisdom_patterns = wisdom_patterns or ["docs/wisdom/**/*.md"]
+        self.group_id = group_id
 
         self.parser = MarkdownParser()
         self.chunker = SemanticChunker()
@@ -336,7 +340,9 @@ class IngestionPipeline:
             StorageResult with storage statistics.
         """
         try:
-            result = await store_ingestion_results(entities, relationships)
+            result = await store_ingestion_results(
+                entities, relationships, group_id=self.group_id
+            )
             log.info(
                 "Graph storage complete",
                 entities_stored=result.entities_stored,
@@ -356,14 +362,15 @@ class IngestionPipeline:
             )
 
 
-async def run_ingestion(repo_root: Path) -> IngestionResult:
+async def run_ingestion(repo_root: Path, *, group_id: str) -> IngestionResult:
     """Convenience function to run the full ingestion pipeline.
 
     Args:
         repo_root: Root path of the conventions repository.
+        group_id: Organization ID for multi-tenant graph operations.
 
     Returns:
         Ingestion result.
     """
-    pipeline = IngestionPipeline(repo_root)
+    pipeline = IngestionPipeline(repo_root, group_id=group_id)
     return await pipeline.run()

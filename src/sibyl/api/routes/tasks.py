@@ -147,7 +147,9 @@ async def start_task(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         log.exception("start_task_failed", task_id=task_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to start task. Please try again."
+        ) from e
 
 
 @router.post("/{task_id}/block", response_model=TaskActionResponse)
@@ -185,7 +187,9 @@ async def block_task(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         log.exception("block_task_failed", task_id=task_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to block task. Please try again."
+        ) from e
 
 
 @router.post("/{task_id}/unblock", response_model=TaskActionResponse)
@@ -222,7 +226,9 @@ async def unblock_task(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         log.exception("unblock_task_failed", task_id=task_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to unblock task. Please try again."
+        ) from e
 
 
 @router.post("/{task_id}/review", response_model=TaskActionResponse)
@@ -262,7 +268,9 @@ async def submit_review(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         log.exception("submit_review_failed", task_id=task_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to submit review. Please try again."
+        ) from e
 
 
 @router.post("/{task_id}/complete", response_model=TaskActionResponse)
@@ -302,7 +310,9 @@ async def complete_task(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         log.exception("complete_task_failed", task_id=task_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to complete task. Please try again."
+        ) from e
 
 
 @router.post("/{task_id}/archive", response_model=TaskActionResponse)
@@ -341,7 +351,9 @@ async def archive_task(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         log.exception("archive_task_failed", task_id=task_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to archive task. Please try again."
+        ) from e
 
 
 @router.patch("/{task_id}", response_model=TaskActionResponse)
@@ -403,4 +415,6 @@ async def update_task(
         raise
     except Exception as e:
         log.exception("update_task_failed", task_id=task_id, error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to update task. Please try again."
+        ) from e

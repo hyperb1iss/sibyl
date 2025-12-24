@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
@@ -15,6 +16,16 @@ from sibyl.auth.jwt import JwtError, verify_access_token
 from sibyl.config import settings
 from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import Organization, OrganizationMember, OrganizationRole, User
+
+_logger = logging.getLogger(__name__)
+
+# Security warning at startup if auth is disabled
+if settings.disable_auth:
+    _logger.warning(
+        "SECURITY WARNING: Authentication is DISABLED (SIBYL_DISABLE_AUTH=true). "
+        "This should only be used for local development. Environment: %s",
+        settings.environment,
+    )
 
 
 async def resolve_claims(request: Request, session: AsyncSession | None = None) -> dict | None:

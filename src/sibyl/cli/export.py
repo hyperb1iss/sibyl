@@ -30,8 +30,15 @@ def export_graph(
     output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path(
         "sibyl_graph.json"
     ),
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID (required for multi-tenant graph)"),
+    ] = "",
 ) -> None:
     """Export the full graph to JSON."""
+    if not org_id:
+        error("--org-id is required for graph operations")
+        raise typer.Exit(code=1)
 
     @run_async
     async def _export() -> None:
@@ -44,8 +51,8 @@ def export_graph(
                 task = progress.add_task("Exporting graph...", total=None)
 
                 client = await get_graph_client()
-                entity_mgr = EntityManager(client)
-                rel_mgr = RelationshipManager(client)
+                entity_mgr = EntityManager(client, group_id=org_id)
+                rel_mgr = RelationshipManager(client, group_id=org_id)
 
                 # Get all entities
                 progress.update(task, description="Loading entities...")

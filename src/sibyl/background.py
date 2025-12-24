@@ -246,6 +246,7 @@ async def _handle_enrich_entity(payload: dict[str, Any]) -> None:
         entity_id: ID of the entity to enrich
         content: Text content to generate embeddings from
         find_related: Whether to find and link related knowledge
+        group_id: Organization ID for graph operations (required)
     """
     from sibyl.graph.client import get_graph_client
     from sibyl.graph.entities import EntityManager
@@ -254,11 +255,16 @@ async def _handle_enrich_entity(payload: dict[str, Any]) -> None:
     content = payload.get("content", "")
     title = payload.get("title", "")
     find_related = payload.get("find_related", True)
+    group_id = payload.get("group_id")
+
+    if not group_id:
+        log.warning("enrich_entity_missing_group_id", entity_id=entity_id)
+        return
 
     log.info("Enriching entity", entity_id=entity_id, find_related=find_related)
 
     client = await get_graph_client()
-    entity_manager = EntityManager(client)
+    entity_manager = EntityManager(client, group_id=group_id)
 
     # Generate embedding for the entity
     combined_text = f"{title}\n{content}" if title else content
@@ -280,17 +286,23 @@ async def _handle_generate_embeddings(payload: dict[str, Any]) -> None:
     Payload:
         entity_id: ID of the entity
         text: Text to embed
+        group_id: Organization ID for graph operations (required)
     """
     from sibyl.graph.client import get_graph_client
     from sibyl.graph.entities import EntityManager
 
     entity_id = payload["entity_id"]
     text = payload["text"]
+    group_id = payload.get("group_id")
+
+    if not group_id:
+        log.warning("generate_embeddings_missing_group_id", entity_id=entity_id)
+        return
 
     embedding = await _generate_embedding(text)
     if embedding:
         client = await get_graph_client()
-        entity_manager = EntityManager(client)
+        entity_manager = EntityManager(client, group_id=group_id)
         await entity_manager.update(entity_id, {"embedding": embedding})
         log.debug("Generated embedding", entity_id=entity_id)
 
