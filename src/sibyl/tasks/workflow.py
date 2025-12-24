@@ -474,8 +474,8 @@ class TaskWorkflowEngine:
             valid_from=task.completed_at,
         )
 
-        # Use create_direct to bypass LLM - episode is already structured data
-        episode_id = await self._entity_manager.create_direct(episode)
+        # Use Graphiti create for proper relationship discovery from learnings
+        episode_id = await self._entity_manager.create(episode)
 
         # Link episode back to task
         await self._relationship_manager.create(

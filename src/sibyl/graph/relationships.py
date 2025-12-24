@@ -133,11 +133,33 @@ class RelationshipManager:
                     )
                     return edge.uuid
 
-            # Create new edge with write lock to prevent FalkorDB connection corruption
-            # IMPORTANT: Use self._driver (cloned for org's graph) not self._client.driver
+            # Create edge via direct Cypher (more reliable than Graphiti's EntityEdge.save)
+            # EntityEdge.save() has issues finding Episodic nodes by UUID
             edge = self._to_graphiti_edge(relationship)
+            rel_type = relationship.relationship_type.value
+
+            query = f"""
+                MATCH (source {{uuid: $source_uuid}})
+                MATCH (target {{uuid: $target_uuid}})
+                MERGE (source)-[r:{rel_type} {{uuid: $edge_uuid}}]->(target)
+                SET r.name = $name,
+                    r.group_id = $group_id,
+                    r.created_at = $created_at,
+                    r.weight = $weight
+                RETURN r.uuid as uuid
+            """
+
             async with self._client.write_lock:
-                await edge.save(self._driver)
+                await self._driver.execute_query(
+                    query,
+                    source_uuid=relationship.source_id,
+                    target_uuid=relationship.target_id,
+                    edge_uuid=edge.uuid,
+                    name=rel_type,
+                    group_id=self._group_id,
+                    created_at=edge.created_at.isoformat(),
+                    weight=relationship.weight,
+                )
 
             log.info("Created relationship", relationship_id=edge.uuid)
             return edge.uuid

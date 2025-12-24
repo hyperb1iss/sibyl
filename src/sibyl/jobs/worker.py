@@ -52,8 +52,8 @@ def get_redis_settings() -> RedisSettings:
 async def startup(ctx: dict[str, Any]) -> None:
     """Worker startup - initialize resources."""
     log.info(
-        "Job worker online - ready to process crawl jobs",
-        functions=["crawl_source", "sync_source", "sync_all_sources"],
+        "Job worker online - ready to process jobs",
+        functions=["crawl_source", "sync_source", "sync_all_sources", "create_entity"],
     )
     ctx["start_time"] = datetime.now(UTC)
 
@@ -251,6 +251,183 @@ async def sync_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:  #
     return result
 
 
+async def create_entity(
+    ctx: dict[str, Any],  # noqa: ARG001
+    entity_data: dict[str, Any],
+    entity_type: str,
+    group_id: str,
+    relationships: list[dict[str, Any]] | None = None,
+    auto_link: bool = False,
+    auto_link_params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create entity asynchronously via Graphiti.
+
+    This job runs in the background so callers get fast responses while
+    Graphiti handles LLM-powered entity extraction and relationship discovery.
+
+    Args:
+        ctx: arq context
+        entity_data: Serialized entity dict (from entity.model_dump())
+        entity_type: Type string (episode, pattern, task, project)
+        group_id: Organization ID
+        relationships: Optional list of explicit relationships to create
+        auto_link: Whether to auto-discover related entities
+        auto_link_params: Parameters for auto-link discovery
+
+    Returns:
+        Dict with creation results
+    """
+    from sibyl.graph.client import get_graph_client
+    from sibyl.graph.entities import EntityManager
+    from sibyl.graph.relationships import RelationshipManager
+    from sibyl.models.entities import (
+        Entity,
+        Episode,
+        Pattern,
+        Relationship,
+        RelationshipType,
+    )
+    from sibyl.models.tasks import Project, Task
+
+    relationships = relationships or []
+
+    log.info(
+        "create_entity_started",
+        entity_id=entity_data.get("id"),
+        entity_type=entity_type,
+        relationships_count=len(relationships),
+    )
+
+    try:
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=group_id)
+
+        # Reconstruct the entity from serialized data
+        entity: Entity
+        if entity_type == "task":
+            entity = Task.model_validate(entity_data)
+        elif entity_type == "project":
+            entity = Project.model_validate(entity_data)
+        elif entity_type == "pattern":
+            entity = Pattern.model_validate(entity_data)
+        else:
+            entity = Episode.model_validate(entity_data)
+
+        # Create via Graphiti's add_episode (LLM-powered relationship discovery)
+        created_id = await entity_manager.create(entity)
+
+        log.info(
+            "create_entity_graph_created",
+            entity_id=created_id,
+            entity_type=entity_type,
+        )
+
+        # Relationship manager for explicit and auto-discovered relationships
+        relationship_manager = RelationshipManager(client, group_id=group_id)
+
+        # Create explicit relationships (BELONGS_TO, DEPENDS_ON, etc.)
+        relationships_created = 0
+        for rel_data in relationships:
+            try:
+                rel_type = RelationshipType(rel_data.get("type", "RELATED_TO"))
+                rel = Relationship(
+                    id=rel_data.get("id"),
+                    source_id=rel_data.get("source_id"),
+                    target_id=rel_data.get("target_id"),
+                    relationship_type=rel_type,
+                    metadata=rel_data.get("metadata", {}),
+                )
+                await relationship_manager.create(rel)
+                relationships_created += 1
+                log.debug(
+                    "create_entity_relationship_created",
+                    rel_type=rel_type.value,
+                    source=rel_data.get("source_id"),
+                    target=rel_data.get("target_id"),
+                )
+            except Exception as e:
+                log.warning(
+                    "create_entity_relationship_failed",
+                    error=str(e),
+                    rel_data=rel_data,
+                )
+
+        # Auto-link: discover related entities via similarity search
+        auto_links_created = 0
+        if auto_link and auto_link_params:
+            try:
+                from sibyl.tools.core import _auto_discover_links
+
+                auto_link_results = await _auto_discover_links(
+                    entity_manager=entity_manager,
+                    title=auto_link_params.get("title", ""),
+                    content=auto_link_params.get("content", ""),
+                    technologies=auto_link_params.get("technologies", []),
+                    category=auto_link_params.get("category"),
+                    exclude_id=created_id,
+                    threshold=0.75,
+                    limit=5,
+                )
+
+                for linked_id, score in auto_link_results:
+                    try:
+                        rel = Relationship(
+                            id=f"rel_{created_id}_references_{linked_id}",
+                            source_id=created_id,
+                            target_id=linked_id,
+                            relationship_type=RelationshipType.RELATED_TO,
+                            metadata={
+                                "auto_linked": True,
+                                "similarity_score": score,
+                            },
+                        )
+                        await relationship_manager.create(rel)
+                        auto_links_created += 1
+                        log.debug(
+                            "create_entity_auto_link_created",
+                            target=linked_id,
+                            score=score,
+                        )
+                    except Exception as e:
+                        log.warning("create_entity_auto_link_failed", error=str(e))
+
+                log.info(
+                    "create_entity_auto_link_complete",
+                    entity_id=created_id,
+                    links_found=len(auto_link_results),
+                )
+            except Exception as e:
+                log.warning("create_entity_auto_link_search_failed", error=str(e))
+
+        result = {
+            "entity_id": created_id,
+            "entity_type": entity_type,
+            "relationships_created": relationships_created,
+            "auto_links_created": auto_links_created,
+        }
+
+        # Broadcast entity creation event
+        await _safe_broadcast(
+            "entity_created",
+            {
+                "id": created_id,
+                "entity_type": entity_type,
+                "name": entity_data.get("name"),
+            },
+        )
+
+        log.info("create_entity_completed", **result)
+        return result
+
+    except Exception as e:
+        log.exception(
+            "create_entity_failed",
+            error=str(e),
+            entity_id=entity_data.get("id"),
+        )
+        raise
+
+
 # Optional: Scheduled job to sync all sources
 async def sync_all_sources(ctx: dict[str, Any]) -> dict[str, Any]:
     """Sync all sources - can be run as a cron job."""
@@ -276,7 +453,7 @@ class WorkerSettings:
     redis_settings = get_redis_settings()
 
     # Job functions
-    functions = [crawl_source, sync_source, sync_all_sources]
+    functions = [crawl_source, sync_source, sync_all_sources, create_entity]
 
     # Lifecycle hooks
     on_startup = startup

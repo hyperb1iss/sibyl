@@ -57,11 +57,9 @@ def create_combined_app(
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> "AsyncGenerator[None]":
-        """Combined lifespan that initializes MCP session manager and background queue."""
+        """Combined lifespan that initializes MCP session manager."""
         import asyncio
         import contextlib
-
-        from sibyl.background import init_background_queue, shutdown_background_queue
 
         log = structlog.get_logger()
 
@@ -103,9 +101,6 @@ def create_combined_app(
         except Exception as e:
             log.warning("FalkorDB unavailable at startup", error=str(e))
 
-        # Start background task queue for async enrichment
-        await init_background_queue()
-
         # Optionally start embedded arq worker (dev mode only)
         worker_task = None
         if embed_worker:
@@ -122,9 +117,6 @@ def create_combined_app(
             worker_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await worker_task
-
-        # Shutdown background queue
-        await shutdown_background_queue()
 
     # Create combined app with both mounted
     # Note: streamable_http_app() already routes to /mcp internally

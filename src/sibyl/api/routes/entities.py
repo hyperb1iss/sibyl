@@ -211,6 +211,10 @@ async def create_entity(
 
         merged_metadata: dict[str, Any] = {**(entity.metadata or {}), "organization_id": group_id}
 
+        # Projects are sync (foundational - tasks depend on them existing)
+        # Tasks and other entities are async (processed in background)
+        is_sync = entity.entity_type.value == "project"
+
         result = await add(
             title=entity.name,
             content=content,
@@ -225,12 +229,37 @@ async def create_entity(
             assignees=assignees,
             # Auto-link
             auto_link=auto_link,
+            # Sync for projects, async for everything else
+            sync=is_sync,
         )
 
         if not result.success or not result.id:
             raise HTTPException(status_code=400, detail=result.message)
 
-        # Fetch the created entity
+        # For async creation, return immediately with pending response
+        # Entity will be created in background via Graphiti
+        if not is_sync:
+            response = EntityResponse(
+                id=result.id,
+                entity_type=entity.entity_type,
+                name=entity.name,
+                description=entity.description or "",
+                content=content,
+                category=entity.category,
+                languages=entity.languages or [],
+                tags=entity.tags or [],
+                metadata=merged_metadata,
+                source_file=None,
+                created_at=None,
+                updated_at=None,
+            )
+            # Broadcast pending creation event
+            await broadcast_event(
+                "entity_pending", response.model_dump(mode="json"), org_id=str(org.id)
+            )
+            return response
+
+        # Sync creation - fetch the created entity
         client = await get_graph_client()
         entity_manager = EntityManager(client, group_id=group_id)
         created = await entity_manager.get(result.id)

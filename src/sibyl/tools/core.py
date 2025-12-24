@@ -1374,6 +1374,8 @@ async def add(  # noqa: PLR0915
     repository_url: str | None = None,
     # Auto-linking
     auto_link: bool = False,
+    # Sync mode - wait for Graphiti processing instead of returning immediately
+    sync: bool = False,
 ) -> AddResponse:
     """Add new knowledge to the Sibyl knowledge graph.
 
@@ -1413,6 +1415,8 @@ async def add(  # noqa: PLR0915
         depends_on: Task IDs this depends on (creates DEPENDS_ON edges).
         repository_url: Repository URL for projects.
         auto_link: Auto-discover related patterns/rules/templates (similarity > 0.75).
+        sync: If True, wait for Graphiti processing (slower but entity exists immediately).
+              If False (default), return immediately and process in background.
 
     Returns:
         AddResponse with created entity ID, auto-discovered links, and timestamp.
@@ -1584,142 +1588,156 @@ async def add(  # noqa: PLR0915
                 metadata=full_metadata,
             )
 
-        # Store in graph
-        # Use fast path (direct insert) for structured entities (tasks, projects)
-        # Use full Graphiti flow for knowledge entities (episodes, patterns)
-        use_fast_path = entity_type in ("task", "project")
-
-        if use_fast_path:
-            # Fast path: direct insert (~50ms) + background enrichment
-            created_id = await entity_manager.create_direct(entity)
-
-            # Queue background enrichment for embeddings
-            try:
-                from sibyl.background import get_background_queue
-
-                queue = get_background_queue()
-                await queue.enqueue(
-                    "enrich_entity",
-                    {
-                        "entity_id": created_id,
-                        "title": title,
-                        "content": content,
-                        "find_related": False,  # Skip for now, can enable later
-                    },
-                )
-            except Exception as e:
-                # Don't fail the request if background queue isn't running
-                log.debug("Background enrichment skipped", error=str(e))
-        else:
-            # Full Graphiti flow for knowledge entities (~5s)
-            created_id = await entity_manager.create(entity)
-
-        # Create relationships
-        relationships_created = []
+        # Build list of explicit relationships to create
+        relationships_to_create: list[dict[str, Any]] = []
 
         # Task -> Project (BELONGS_TO)
         if entity_type == "task" and project:
-            try:
-                rel = Relationship(
-                    id=f"rel_{created_id}_belongs_to_{project}",
-                    source_id=created_id,
-                    target_id=project,
-                    relationship_type=RelationshipType.BELONGS_TO,
-                    metadata={"created_at": datetime.now(UTC).isoformat()},
-                )
-                await relationship_manager.create(rel)
-                relationships_created.append(f"BELONGS_TO:{project}")
-            except Exception as e:
-                log.warning("relationship_creation_failed", error=str(e), type="BELONGS_TO")
+            relationships_to_create.append({
+                "id": f"rel_{entity_id}_belongs_to_{project}",
+                "source_id": entity_id,
+                "target_id": project,
+                "type": "BELONGS_TO",
+                "metadata": {"created_at": datetime.now(UTC).isoformat()},
+            })
 
         # Task -> Task (DEPENDS_ON)
         if entity_type == "task" and depends_on:
-            for dep_id in depends_on:
-                try:
-                    rel = Relationship(
-                        id=f"rel_{created_id}_depends_on_{dep_id}",
-                        source_id=created_id,
-                        target_id=dep_id,
-                        relationship_type=RelationshipType.DEPENDS_ON,
-                        metadata={"created_at": datetime.now(UTC).isoformat()},
-                    )
-                    await relationship_manager.create(rel)
-                    relationships_created.append(f"DEPENDS_ON:{dep_id}")
-                except Exception as e:
-                    log.warning(
-                        "relationship_creation_failed",
-                        error=str(e),
-                        type="DEPENDS_ON",
-                        target=dep_id,
-                    )
+            relationships_to_create.extend([
+                {
+                    "id": f"rel_{entity_id}_depends_on_{dep_id}",
+                    "source_id": entity_id,
+                    "target_id": dep_id,
+                    "type": "DEPENDS_ON",
+                    "metadata": {"created_at": datetime.now(UTC).isoformat()},
+                }
+                for dep_id in depends_on
+            ])
 
         # Generic RELATED_TO relationships
         if related_to:
-            for related_id in related_to:
+            relationships_to_create.extend([
+                {
+                    "id": f"rel_{entity_id}_related_to_{related_id}",
+                    "source_id": entity_id,
+                    "target_id": related_id,
+                    "type": "RELATED_TO",
+                    "metadata": {"created_at": datetime.now(UTC).isoformat()},
+                }
+                for related_id in related_to
+            ])
+
+        # Sync mode: create entity + relationships immediately via Graphiti
+        if sync:
+            created_id = await entity_manager.create(entity)
+
+            # Create explicit relationships
+            for rel_data in relationships_to_create:
                 try:
                     rel = Relationship(
-                        id=f"rel_{created_id}_related_to_{related_id}",
-                        source_id=created_id,
-                        target_id=related_id,
-                        relationship_type=RelationshipType.RELATED_TO,
-                        metadata={"created_at": datetime.now(UTC).isoformat()},
+                        id=rel_data["id"],
+                        source_id=rel_data["source_id"],
+                        target_id=rel_data["target_id"],
+                        relationship_type=RelationshipType(rel_data["type"]),
+                        metadata=rel_data.get("metadata", {}),
                     )
                     await relationship_manager.create(rel)
-                    relationships_created.append(f"RELATED_TO:{related_id}")
                 except Exception as e:
-                    log.warning(
-                        "relationship_creation_failed",
-                        error=str(e),
-                        type="RELATED_TO",
-                        target=related_id,
+                    log.warning("relationship_creation_failed", error=str(e), rel=rel_data)
+
+            # Auto-link in sync mode
+            if auto_link:
+                try:
+                    auto_link_results = await _auto_discover_links(
+                        entity_manager=entity_manager,
+                        title=title,
+                        content=content,
+                        technologies=technologies or languages or [],
+                        category=category,
+                        exclude_id=created_id,
+                        threshold=0.75,
+                        limit=5,
                     )
+                    for linked_id, score in auto_link_results:
+                        try:
+                            rel = Relationship(
+                                id=f"rel_{created_id}_references_{linked_id}",
+                                source_id=created_id,
+                                target_id=linked_id,
+                                relationship_type=RelationshipType.RELATED_TO,
+                                metadata={
+                                    "created_at": datetime.now(UTC).isoformat(),
+                                    "auto_linked": True,
+                                    "similarity_score": score,
+                                },
+                            )
+                            await relationship_manager.create(rel)
+                        except Exception as e:
+                            log.warning("auto_link_failed", error=str(e), target=linked_id)
+                except Exception as e:
+                    log.warning("auto_link_search_failed", error=str(e))
 
-        # Auto-link: discover and create REFERENCES relationships
-        if auto_link:
-            try:
-                auto_link_results = await _auto_discover_links(
-                    entity_manager=entity_manager,
-                    title=title,
-                    content=content,
-                    technologies=technologies or languages or [],
-                    category=category,
-                    exclude_id=created_id,
-                    threshold=0.75,
-                    limit=5,
-                )
+            message = f"Added: {title}"
+            if relationships_to_create:
+                message += f" (linked: {len(relationships_to_create)})"
 
-                for linked_id, score in auto_link_results:
-                    try:
-                        rel = Relationship(
-                            id=f"rel_{created_id}_references_{linked_id}",
-                            source_id=created_id,
-                            target_id=linked_id,
-                            relationship_type=RelationshipType.RELATED_TO,  # Use RELATED_TO for auto-links
-                            metadata={
-                                "created_at": datetime.now(UTC).isoformat(),
-                                "auto_linked": True,
-                                "similarity_score": score,
-                            },
-                        )
-                        await relationship_manager.create(rel)
-                        relationships_created.append(f"AUTO:{linked_id[:8]}...")
-                    except Exception as e:
-                        log.warning("auto_link_failed", error=str(e), target=linked_id)
+            return AddResponse(
+                success=True,
+                id=created_id,
+                message=message,
+                timestamp=datetime.now(UTC),
+            )
 
-                log.info(
-                    "auto_link_complete", entity_id=created_id, links_found=len(auto_link_results)
-                )
-            except Exception as e:
-                log.warning("auto_link_search_failed", error=str(e))
+        # Async mode (default): queue arq job, return immediately
+        try:
+            from sibyl.jobs.queue import enqueue_create_entity
 
-        message = f"Added: {title}"
-        if relationships_created:
-            message += f" (linked: {len(relationships_created)})"
+            await enqueue_create_entity(
+                entity_id=entity_id,
+                entity_data=entity.model_dump(mode="json"),
+                entity_type=entity_type,
+                group_id=org_id,
+                relationships=relationships_to_create if relationships_to_create else None,
+                auto_link=auto_link,
+                auto_link_params={
+                    "title": title,
+                    "content": content,
+                    "technologies": technologies or languages or [],
+                    "category": category,
+                } if auto_link else None,
+            )
+            log.info("add_queued_for_arq", entity_id=entity_id, entity_type=entity_type)
 
+        except Exception as e:
+            # If arq queue fails, fall back to sync creation
+            log.warning("arq_queue_failed_falling_back_to_sync", error=str(e))
+            created_id = await entity_manager.create(entity)
+
+            for rel_data in relationships_to_create:
+                try:
+                    rel = Relationship(
+                        id=rel_data["id"],
+                        source_id=rel_data["source_id"],
+                        target_id=rel_data["target_id"],
+                        relationship_type=RelationshipType(rel_data["type"]),
+                        metadata=rel_data.get("metadata", {}),
+                    )
+                    await relationship_manager.create(rel)
+                except Exception as rel_e:
+                    log.warning("relationship_creation_failed", error=str(rel_e))
+
+            return AddResponse(
+                success=True,
+                id=created_id,
+                message=f"Added (sync fallback): {title}",
+                timestamp=datetime.now(UTC),
+            )
+
+        # Return immediately with the entity ID - entity will be created in background
         return AddResponse(
             success=True,
-            id=created_id,
-            message=message,
+            id=entity_id,
+            message=f"Queued: {title} (processing in background)",
             timestamp=datetime.now(UTC),
         )
 

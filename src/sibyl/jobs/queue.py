@@ -157,6 +157,62 @@ async def enqueue_sync(source_id: str | UUID) -> str:
     return job.job_id
 
 
+async def enqueue_create_entity(
+    entity_id: str,
+    entity_data: dict[str, Any],
+    entity_type: str,
+    group_id: str,
+    relationships: list[dict[str, Any]] | None = None,
+    auto_link: bool = False,
+    auto_link_params: dict[str, Any] | None = None,
+) -> str:
+    """Enqueue an entity creation job.
+
+    Creates entity asynchronously via Graphiti for LLM-powered
+    relationship discovery.
+
+    Args:
+        entity_id: Pre-generated entity ID
+        entity_data: Serialized entity dict
+        entity_type: Type string (episode, pattern, task, project)
+        group_id: Organization ID
+        relationships: Optional explicit relationships to create
+        auto_link: Whether to auto-discover related entities
+        auto_link_params: Parameters for auto-link discovery
+
+    Returns:
+        Job ID for tracking
+    """
+    pool = await get_pool()
+
+    # Deterministic job ID based on entity ID
+    job_id = f"create_entity:{entity_id}"
+
+    job = await pool.enqueue_job(
+        "create_entity",
+        entity_data,
+        entity_type,
+        group_id,
+        relationships=relationships,
+        auto_link=auto_link,
+        auto_link_params=auto_link_params,
+        _job_id=job_id,
+    )
+
+    if job is None:
+        log.info("Create entity job already exists", job_id=job_id, entity_id=entity_id)
+        return job_id
+
+    log.info(
+        "Enqueued create_entity job",
+        job_id=job.job_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+    )
+
+    return job.job_id
+
+
 async def get_job_status(job_id: str) -> JobInfo:
     """Get the status of a job.
 
