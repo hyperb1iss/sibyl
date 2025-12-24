@@ -578,7 +578,7 @@ def archive_task(
 
 @app.command("create")
 def create_task(
-    title: Annotated[str, typer.Option("--title", "-T", help="Task title", prompt=True)],
+    title: Annotated[str, typer.Option("--title", help="Task title", prompt=True)],
     project: Annotated[
         str, typer.Option("--project", "-p", help="Project ID (required)", prompt=True)
     ],
@@ -666,7 +666,7 @@ def update_task(
         str | None,
         typer.Option("-p", "--priority", help="Priority: critical|high|medium|low|someday"),
     ] = None,
-    title: Annotated[str | None, typer.Option("-T", "--title", help="Task title")] = None,
+    title: Annotated[str | None, typer.Option("--title", help="Task title")] = None,
     assignee: Annotated[str | None, typer.Option("-a", "--assignee", help="Assignee")] = None,
     feature: Annotated[str | None, typer.Option("-f", "--feature", help="Feature area")] = None,
     table_out: Annotated[

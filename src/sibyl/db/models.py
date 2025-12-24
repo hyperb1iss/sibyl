@@ -114,8 +114,8 @@ class User(TimestampMixin, table=True):
     timezone: str = Field(default="UTC", max_length=64, description="User timezone")
     avatar_url: str | None = Field(
         default=None,
-        max_length=2048,
-        description="Profile avatar URL",
+        sa_type=Text,
+        description="Profile avatar URL (supports data URLs)",
     )
     email_verified_at: datetime | None = Field(
         default=None,

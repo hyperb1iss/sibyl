@@ -8,11 +8,15 @@ import {
   Flash,
   Folder,
   Globe,
+  Group,
   Hashtag,
   Journal,
+  Label,
   List,
   Settings,
+  Star,
   Terminal,
+  WarningTriangle,
 } from 'iconoir-react';
 import type { ComponentType, SVGProps } from 'react';
 import type { EntityType } from '@/lib/constants';
@@ -24,6 +28,7 @@ const ENTITY_ICON_MAP: Record<EntityType, IconComponent> = {
   pattern: Combine,
   rule: Flash,
   template: EditPencil,
+  convention: Label,
   tool: Settings,
   language: Code,
   topic: Hashtag,
@@ -33,6 +38,9 @@ const ENTITY_ICON_MAP: Record<EntityType, IconComponent> = {
   slash_command: Terminal,
   task: List,
   project: Folder,
+  team: Group,
+  error_pattern: WarningTriangle,
+  milestone: Star,
   source: Globe,
   document: Journal,
 };

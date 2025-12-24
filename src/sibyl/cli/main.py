@@ -299,9 +299,9 @@ def ingest(
 def search(
     query: str = typer.Argument(..., help="Search query"),
     limit: int = typer.Option(10, "--limit", "-n", help="Max results"),
-    entity_type: str = typer.Option(None, "--type", "-t", help="Filter by entity type"),
+    entity_type: str = typer.Option(None, "--type", "-T", help="Filter by entity type"),
     table_out: Annotated[
-        bool, typer.Option("--table", help="Table output (human-readable)")
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
     ] = False,
 ) -> None:
     """Search the knowledge graph. Default: JSON output."""

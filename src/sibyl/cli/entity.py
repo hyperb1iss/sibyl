@@ -70,7 +70,7 @@ def _handle_client_error(e: SibylClientError) -> None:
 @app.command("list")
 def list_entities(
     entity_type: Annotated[
-        str, typer.Option("--type", "-t", help="Entity type to list")
+        str, typer.Option("--type", "-T", help="Entity type to list")
     ] = "pattern",
     language: Annotated[
         str | None, typer.Option("--language", "-l", help="Filter by language")
@@ -80,7 +80,7 @@ def list_entities(
     ] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 50,
     table_out: Annotated[
-        bool, typer.Option("--table", help="Table output (human-readable)")
+        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
     ] = False,
     csv_out: Annotated[bool, typer.Option("--csv", help="CSV output")] = False,
 ) -> None:

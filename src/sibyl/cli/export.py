@@ -180,7 +180,7 @@ def export_tasks(
 
 @app.command("entities")
 def export_entities(
-    entity_type: Annotated[str, typer.Option("--type", "-t", help="Entity type to export")],
+    entity_type: Annotated[str, typer.Option("--type", "-T", help="Entity type to export")],
     output: Annotated[Path, typer.Option("--output", "-o", help="Output file path")] = Path(
         "entities.json"
     ),
