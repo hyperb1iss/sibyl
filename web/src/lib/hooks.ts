@@ -395,11 +395,16 @@ export function useIngestStatus() {
 // WebSocket Hook
 // =============================================================================
 
-export function useRealtimeUpdates() {
+export function useRealtimeUpdates(isAuthenticated = false) {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    // Connect on mount
+    // Only connect when authenticated
+    if (!isAuthenticated) {
+      wsClient.disconnect();
+      return;
+    }
+
     wsClient.connect();
 
     // Helper to invalidate all entity-related queries
@@ -492,7 +497,7 @@ export function useRealtimeUpdates() {
       unsubCrawlProgress();
       wsClient.disconnect();
     };
-  }, [queryClient]);
+  }, [queryClient, isAuthenticated]);
 }
 
 /**

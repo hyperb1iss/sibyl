@@ -3,10 +3,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type ReactNode, useState } from 'react';
 
-import { useRealtimeUpdates } from '@/lib/hooks';
+import { useMe, useRealtimeUpdates } from '@/lib/hooks';
 
 function RealtimeProvider({ children }: { children: ReactNode }) {
-  useRealtimeUpdates();
+  const { data: me, isSuccess } = useMe();
+  const isAuthenticated = isSuccess && !!me?.user;
+  useRealtimeUpdates(isAuthenticated);
   return <>{children}</>;
 }
 

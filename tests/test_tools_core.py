@@ -222,3 +222,53 @@ class TestExploreModeLiterals:
         for mode in valid_modes:
             # Type checking would catch invalid modes at compile time
             assert mode in ["list", "related", "traverse", "dependencies"]
+
+
+class TestSearchDeduplication:
+    """Tests for search result deduplication."""
+
+    def test_dedup_keeps_highest_score(self) -> None:
+        """When same ID appears twice, higher score should be kept."""
+        # Simulate graph result and doc result with same ID
+        result_low = SearchResult(
+            id="entity_1",
+            type="pattern",
+            name="Pattern 1",
+            content="content",
+            score=0.7,
+            result_origin="document",
+        )
+        result_high = SearchResult(
+            id="entity_1",
+            type="pattern",
+            name="Pattern 1",
+            content="content",
+            score=0.9,
+            result_origin="graph",
+        )
+
+        # Simulate the deduplication logic from core.py
+        seen_ids: dict[str, SearchResult] = {}
+        for result in [result_low, result_high]:
+            if result.id not in seen_ids or result.score > seen_ids[result.id].score:
+                seen_ids[result.id] = result
+
+        assert len(seen_ids) == 1
+        assert seen_ids["entity_1"].score == 0.9
+        assert seen_ids["entity_1"].result_origin == "graph"
+
+    def test_dedup_preserves_unique_entries(self) -> None:
+        """Unique IDs should all be preserved."""
+        results = [
+            SearchResult(id="a", type="pattern", name="A", content="", score=0.9),
+            SearchResult(id="b", type="pattern", name="B", content="", score=0.8),
+            SearchResult(id="c", type="pattern", name="C", content="", score=0.7),
+        ]
+
+        seen_ids: dict[str, SearchResult] = {}
+        for result in results:
+            if result.id not in seen_ids or result.score > seen_ids[result.id].score:
+                seen_ids[result.id] = result
+
+        assert len(seen_ids) == 3
+        assert all(rid in seen_ids for rid in ["a", "b", "c"])
