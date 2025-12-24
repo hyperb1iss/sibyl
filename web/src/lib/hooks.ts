@@ -100,6 +100,55 @@ export const queryKeys = {
 };
 
 // =============================================================================
+// Smart Cache Invalidation Helpers
+// =============================================================================
+
+/**
+ * Invalidate queries based on entity type.
+ * Avoids over-invalidation by only targeting relevant query keys.
+ */
+function invalidateByEntityType(
+  queryClient: ReturnType<typeof useQueryClient>,
+  entityType: string | undefined,
+  entityId?: string
+) {
+  // Always invalidate stats on create/delete
+  queryClient.invalidateQueries({ queryKey: queryKeys.admin.stats });
+
+  switch (entityType) {
+    case 'task':
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
+      if (entityId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.detail(entityId) });
+      }
+      break;
+
+    case 'project':
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+      if (entityId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(entityId) });
+      }
+      break;
+
+    case 'source':
+      queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
+      if (entityId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.sources.detail(entityId) });
+      }
+      break;
+
+    default:
+      // For knowledge entities (pattern, episode, rule, etc.) - invalidate graph + entities
+      queryClient.invalidateQueries({ queryKey: queryKeys.entities.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.graph.all });
+      if (entityId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.entities.detail(entityId) });
+      }
+      break;
+  }
+}
+
+// =============================================================================
 // Auth + Orgs Hooks
 // =============================================================================
 
@@ -374,12 +423,10 @@ export function useCreateEntity() {
 
   return useMutation({
     mutationFn: (entity: EntityCreate) => api.entities.create(entity),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.entities.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.admin.stats });
-      queryClient.invalidateQueries({ queryKey: queryKeys.graph.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+    onSuccess: (data, variables) => {
+      // Use entity type from response (most accurate) or input
+      const entityType = data.entity_type || variables.entity_type;
+      invalidateByEntityType(queryClient, entityType, data.id);
     },
   });
 }
@@ -390,12 +437,9 @@ export function useUpdateEntity() {
   return useMutation({
     mutationFn: ({ id, updates }: { id: string; updates: EntityUpdate }) =>
       api.entities.update(id, updates),
-    onSuccess: (_data, { id }) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.entities.detail(id) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.entities.list() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.graph.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+    onSuccess: (data, { id }) => {
+      // Use entity type from response
+      invalidateByEntityType(queryClient, data.entity_type, id);
     },
   });
 }
@@ -405,12 +449,13 @@ export function useDeleteEntity() {
 
   return useMutation({
     mutationFn: (id: string) => api.entities.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.entities.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.admin.stats });
-      queryClient.invalidateQueries({ queryKey: queryKeys.graph.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+    onSuccess: (_data, id) => {
+      // Check cache for entity type before it's removed
+      const cachedEntity = queryClient.getQueryData(queryKeys.entities.detail(id)) as
+        | { entity_type?: string }
+        | undefined;
+      const entityType = cachedEntity?.entity_type;
+      invalidateByEntityType(queryClient, entityType, id);
     },
   });
 }
@@ -615,53 +660,39 @@ export function useRealtimeUpdates(isAuthenticated = false) {
 
     wsClient.connect();
 
-    // Helper to invalidate all entity-related queries
-    const invalidateAllEntities = () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.entities.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.graph.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.admin.stats });
-    };
-
-    // Entity created - invalidate lists and stats
+    // Entity created - smart invalidation based on entity type
     const unsubCreate = wsClient.on('entity_created', data => {
-      invalidateAllEntities();
-      console.log('[WS] Entity created:', data.id);
+      const entityId = data.id as string;
+      const entityType = (data.entity_type || data.type) as string | undefined;
+      invalidateByEntityType(queryClient, entityType, entityId);
+      console.log('[WS] Entity created:', entityId, entityType);
     });
 
-    // Entity updated - targeted + list invalidation
+    // Entity updated - smart invalidation based on entity type
     const unsubUpdate = wsClient.on('entity_updated', data => {
       const entityId = data.id as string;
+      const entityType = (data.entity_type || data.type) as string | undefined;
+      // Also invalidate related entities explorer
       if (entityId) {
-        // Targeted invalidation for the specific entity
-        queryClient.invalidateQueries({ queryKey: queryKeys.entities.detail(entityId) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.detail(entityId) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(entityId) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.sources.detail(entityId) });
         queryClient.invalidateQueries({ queryKey: queryKeys.explore.related(entityId) });
       }
-      // Also invalidate lists as the entity might affect sorting/filtering
-      queryClient.invalidateQueries({ queryKey: queryKeys.entities.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
-      queryClient.invalidateQueries({ queryKey: queryKeys.graph.all });
-      console.log('[WS] Entity updated:', entityId);
+      invalidateByEntityType(queryClient, entityType, entityId);
+      console.log('[WS] Entity updated:', entityId, entityType);
     });
 
-    // Entity deleted - remove from cache + invalidate lists
+    // Entity deleted - remove from cache + smart invalidation
     const unsubDelete = wsClient.on('entity_deleted', data => {
       const entityId = data.id as string;
+      const entityType = (data.entity_type || data.type) as string | undefined;
+      // Remove from cache before invalidation
       if (entityId) {
-        // Remove deleted entity from cache entirely
         queryClient.removeQueries({ queryKey: queryKeys.entities.detail(entityId) });
         queryClient.removeQueries({ queryKey: queryKeys.tasks.detail(entityId) });
         queryClient.removeQueries({ queryKey: queryKeys.projects.detail(entityId) });
         queryClient.removeQueries({ queryKey: queryKeys.sources.detail(entityId) });
       }
-      invalidateAllEntities();
-      console.log('[WS] Entity deleted:', entityId);
+      invalidateByEntityType(queryClient, entityType, entityId);
+      console.log('[WS] Entity deleted:', entityId, entityType);
     });
 
     // Ingest progress - update status in real-time
@@ -669,10 +700,15 @@ export function useRealtimeUpdates(isAuthenticated = false) {
       queryClient.setQueryData(queryKeys.admin.ingestStatus, data);
     });
 
-    // Ingest complete - refresh everything
+    // Ingest complete - refresh everything (ingest creates many entities of unknown types)
     const unsubIngestComplete = wsClient.on('ingest_complete', () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.admin.ingestStatus });
-      invalidateAllEntities();
+      queryClient.invalidateQueries({ queryKey: queryKeys.entities.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.graph.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.stats });
       console.log('[WS] Ingest complete');
     });
 
