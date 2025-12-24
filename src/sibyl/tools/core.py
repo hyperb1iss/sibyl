@@ -1635,7 +1635,12 @@ async def add(  # noqa: PLR0915
 
         # Sync mode: create entity + relationships immediately via Graphiti
         if sync:
-            created_id = await entity_manager.create(entity)
+            # Use create_direct() for structured entities (faster, generates embeddings)
+            # Use create() for episodes (LLM extraction may add value)
+            if entity_type in ("task", "project", "pattern"):
+                created_id = await entity_manager.create_direct(entity)
+            else:
+                created_id = await entity_manager.create(entity)
 
             # Create explicit relationships
             for rel_data in relationships_to_create:
@@ -1717,7 +1722,11 @@ async def add(  # noqa: PLR0915
         except Exception as e:
             # If arq queue fails, fall back to sync creation
             log.warning("arq_queue_failed_falling_back_to_sync", error=str(e))
-            created_id = await entity_manager.create(entity)
+            # Use create_direct() for structured entities (faster, generates embeddings)
+            if entity_type in ("task", "project", "pattern"):
+                created_id = await entity_manager.create_direct(entity)
+            else:
+                created_id = await entity_manager.create(entity)
 
             for rel_data in relationships_to_create:
                 try:

@@ -313,8 +313,12 @@ async def create_entity(
         else:
             entity = Episode.model_validate(entity_data)
 
-        # Create via Graphiti's add_episode (LLM-powered relationship discovery)
-        created_id = await entity_manager.create(entity)
+        # Use create_direct() for structured entities (faster, generates embeddings)
+        # Use create() for episodes (LLM extraction may add value)
+        if entity_type in ("task", "project", "pattern"):
+            created_id = await entity_manager.create_direct(entity)
+        else:
+            created_id = await entity_manager.create(entity)
 
         log.info(
             "create_entity_graph_created",

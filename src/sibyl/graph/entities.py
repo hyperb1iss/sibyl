@@ -125,17 +125,20 @@ class EntityManager:
             log.exception("Failed to create entity", entity_id=entity.id, error=str(e))
             raise
 
-    async def create_direct(self, entity: Entity) -> str:
+    async def create_direct(self, entity: Entity, *, generate_embedding: bool = True) -> str:
         """Create an entity directly using Graphiti's EntityNode, bypassing LLM.
 
         This is faster than create() as it skips LLM-based entity extraction.
         Use this for structured entities (tasks, projects) where LLM extraction
-        isn't needed. Embeddings can be generated asynchronously via background queue.
+        isn't needed. Generates embeddings inline for semantic search support.
 
         Uses EntityNode.save() which handles idempotent creation (MERGE pattern).
 
         Args:
             entity: The entity to create.
+            generate_embedding: If True (default), generate and store a name_embedding
+                for semantic search. Set to False for bulk inserts where embeddings
+                will be generated separately.
 
         Returns:
             The ID of the created entity.
@@ -181,6 +184,28 @@ class EntityManager:
             # Save using Graphiti's serialized write
             async with self._client.write_lock:
                 await node.save(self._driver)
+
+            # Generate embedding for semantic search (name + summary combined)
+            if generate_embedding:
+                try:
+                    embed_text = f"{entity.name}. {entity.description or ''}"[:2000]
+                    embedding = await self._client.client.embedder.create(embed_text)
+
+                    # Store embedding on node using vecf32() for FalkorDB vector ops
+                    async with self._client.write_lock:
+                        await self._driver.execute_query(
+                            "MATCH (n {uuid: $entity_id}) SET n.name_embedding = vecf32($embedding)",
+                            entity_id=entity.id,
+                            embedding=embedding,
+                        )
+                    log.debug("Generated embedding for entity", entity_id=entity.id)
+                except Exception as e:
+                    # Don't fail entity creation if embedding fails - search will still work via BM25
+                    log.warning(
+                        "Failed to generate embedding, entity still created",
+                        entity_id=entity.id,
+                        error=str(e),
+                    )
 
             log.info(
                 "Entity created via EntityNode.save",
@@ -971,8 +996,24 @@ class EntityManager:
         Returns:
             Converted Entity.
         """
-        # Extract entity type from attributes or labels
-        entity_type_str = node.attributes.get("entity_type", "topic")
+        # Extract entity type from attributes first, then fall back to node labels
+        entity_type_str = node.attributes.get("entity_type") or ""
+
+        # If no entity_type attribute, check node labels (e.g., ["Entity", "task"])
+        if not entity_type_str and node.labels:
+            for label in node.labels:
+                label_lower = label.lower()
+                if label_lower != "entity":  # Skip the generic "Entity" label
+                    try:
+                        EntityType(label_lower)
+                        entity_type_str = label_lower
+                        break
+                    except ValueError:
+                        continue
+
+        # Default to topic if still not found
+        entity_type_str = entity_type_str or "topic"
+
         try:
             entity_type = EntityType(entity_type_str)
         except ValueError:
