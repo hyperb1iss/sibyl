@@ -63,6 +63,46 @@ def create_combined_app(
 
         from sibyl.background import init_background_queue, shutdown_background_queue
 
+        log = structlog.get_logger()
+
+        # === Startup Validation ===
+        # Check JWT secret when auth is enabled
+        jwt_set = bool(settings.jwt_secret.get_secret_value())
+        auth_required = settings.mcp_auth_mode == "on" or (
+            settings.mcp_auth_mode == "auto" and jwt_set
+        )
+        if auth_required and not jwt_set:
+            log.warning(
+                "JWT secret not configured but auth is required",
+                hint="Set SIBYL_JWT_SECRET or JWT_SECRET env var",
+            )
+        elif not jwt_set and not settings.disable_auth:
+            log.info(
+                "Running without JWT secret - MCP auth disabled",
+                hint="Set SIBYL_JWT_SECRET for authenticated access",
+            )
+
+        # Test database connectivity (warn-only, don't hard fail)
+        try:
+            from sqlalchemy import text
+
+            from sibyl.db.session import get_session
+
+            async with get_session() as session:
+                await session.execute(text("SELECT 1"))
+            log.info("PostgreSQL connected", host=settings.postgres_host)
+        except Exception as e:
+            log.warning("PostgreSQL unavailable at startup", error=str(e))
+
+        try:
+            from sibyl.graph.client import get_graph_client
+
+            client = await get_graph_client()
+            if client.is_connected:
+                log.info("FalkorDB connected", host=settings.falkordb_host)
+        except Exception as e:
+            log.warning("FalkorDB unavailable at startup", error=str(e))
+
         # Start background task queue for async enrichment
         await init_background_queue()
 

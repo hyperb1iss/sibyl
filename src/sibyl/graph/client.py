@@ -16,9 +16,9 @@ _env_path = Path(__file__).parent.parent.parent.parent / ".env"
 if _env_path.exists():
     load_dotenv(_env_path)
 
-# Set SEMAPHORE_LIMIT to 1 if not already set (prevents FalkorDB concurrent write crashes)
+# Set SEMAPHORE_LIMIT from settings if not already set (controls Graphiti LLM concurrency)
 if not os.getenv("SEMAPHORE_LIMIT"):
-    os.environ["SEMAPHORE_LIMIT"] = "1"
+    os.environ["SEMAPHORE_LIMIT"] = str(settings.graphiti_semaphore_limit)
 
 # Graphiti's OpenAI embedder reads EMBEDDING_DIM at import time. If unset, Graphiti
 # defaults to 1024, but we pin it explicitly to avoid "mixed-dimension" graphs when

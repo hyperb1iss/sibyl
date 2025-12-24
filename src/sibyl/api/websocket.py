@@ -21,21 +21,32 @@ class Connection:
 
     websocket: WebSocket
     org_id: str | None = None
+    last_activity: datetime | None = None
+    pending_pong: bool = False
 
 
 class ConnectionManager:
     """Manages WebSocket connections and broadcasts events by organization."""
 
+    # Heartbeat interval in seconds
+    HEARTBEAT_INTERVAL = 30
+    # How long to wait for pong before considering connection dead
+    PONG_TIMEOUT = 10
+
     def __init__(self) -> None:
         self.active_connections: list[Connection] = []
         self._lock = asyncio.Lock()
+        self._heartbeat_task: asyncio.Task[None] | None = None
 
     async def connect(self, websocket: WebSocket, org_id: str | None = None) -> None:
         """Accept and register a new WebSocket connection with org context."""
         await websocket.accept()
-        conn = Connection(websocket=websocket, org_id=org_id)
+        conn = Connection(websocket=websocket, org_id=org_id, last_activity=datetime.now(UTC))
         async with self._lock:
             self.active_connections.append(conn)
+            # Start heartbeat task if not running
+            if self._heartbeat_task is None or self._heartbeat_task.done():
+                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         log.info(
             "websocket_connected",
             total_connections=len(self.active_connections),
@@ -106,6 +117,50 @@ class ConnectionManager:
         except Exception:
             await self.disconnect(websocket)
 
+    def mark_activity(self, websocket: WebSocket) -> None:
+        """Mark activity for a connection (e.g., when pong received)."""
+        for conn in self.active_connections:
+            if conn.websocket == websocket:
+                conn.last_activity = datetime.now(UTC)
+                conn.pending_pong = False
+                break
+
+    async def _heartbeat_loop(self) -> None:
+        """Background task that sends heartbeat pings and cleans up dead connections."""
+        while True:
+            await asyncio.sleep(self.HEARTBEAT_INTERVAL)
+
+            if not self.active_connections:
+                log.debug("heartbeat_stopped", reason="no_connections")
+                break
+
+            dead_connections: list[WebSocket] = []
+            now = datetime.now(UTC)
+
+            async with self._lock:
+                for conn in self.active_connections:
+                    # Check if previous ping was answered
+                    if conn.pending_pong:
+                        # No pong received - connection is dead
+                        dead_connections.append(conn.websocket)
+                        continue
+
+                    # Send heartbeat ping
+                    try:
+                        await conn.websocket.send_json({
+                            "event": "heartbeat",
+                            "data": {"server_time": now.isoformat()},
+                            "timestamp": now.isoformat(),
+                        })
+                        conn.pending_pong = True
+                    except Exception:
+                        dead_connections.append(conn.websocket)
+
+            # Clean up dead connections
+            for ws in dead_connections:
+                log.info("heartbeat_timeout", reason="no_pong")
+                await self.disconnect(ws)
+
 
 # Global connection manager instance
 _manager: ConnectionManager | None = None
@@ -169,12 +224,15 @@ async def websocket_handler(websocket: WebSocket) -> None:
     """Handle WebSocket connections.
 
     Extracts org context from auth cookie for scoped broadcasts.
+    Server sends heartbeat pings every 30s; clients must respond with pong.
 
     Clients can send:
         - {"type": "ping"} - Receive pong response
+        - {"type": "pong"} or {"type": "heartbeat_ack"} - Acknowledge server heartbeat
         - {"type": "subscribe", "topics": [...]} - Subscribe to specific event types
 
     Server sends:
+        - {"event": "heartbeat", ...} - Keepalive ping (every 30s)
         - Broadcast events scoped to the client's organization
         - Personal responses to client messages
     """
@@ -190,6 +248,10 @@ async def websocket_handler(websocket: WebSocket) -> None:
 
                 if msg_type == "ping":
                     await manager.send_personal(websocket, "pong", {})
+                    manager.mark_activity(websocket)
+                elif msg_type in {"pong", "heartbeat_ack"}:
+                    # Client responding to server heartbeat
+                    manager.mark_activity(websocket)
                 elif msg_type == "subscribe":
                     # For now, all clients receive all events
                     # Future: implement topic-based filtering

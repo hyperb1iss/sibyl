@@ -201,6 +201,12 @@ class Settings(BaseSettings):
         default=1024,
         description="Graph (Graphiti) embedding dimensions; sets EMBEDDING_DIM for vector search",
     )
+    graphiti_semaphore_limit: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Graphiti concurrent LLM operations limit (controls SEMAPHORE_LIMIT)",
+    )
 
     # Conventions repository configuration
     conventions_repo_path: Path = Field(

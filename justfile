@@ -26,6 +26,10 @@ test *args:
 serve:
     uv run sibyl serve
 
+# Dev mode with hot reload (backend only, run frontend separately with: cd web && pnpm dev)
+dev:
+    uv run uvicorn sibyl.main:create_dev_app --factory --reload --host localhost --port 3334
+
 # Install sibyl skills globally (Claude + Codex)
 install-skills:
     @echo "Installing Sibyl skills..."
