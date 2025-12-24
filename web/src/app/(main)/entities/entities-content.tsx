@@ -43,7 +43,7 @@ export function EntitiesContent({
   const { data: stats } = useStats(initialStats);
   const deleteEntity = useDeleteEntity();
 
-  const entityTypes = stats ? Object.keys(stats.entity_counts) : [];
+  const entityTypes = stats ? Object.keys(stats.entity_counts).sort() : [];
 
   const handleTypeFilter = useCallback(
     (type: string | null) => {

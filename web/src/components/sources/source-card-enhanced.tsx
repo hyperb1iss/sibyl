@@ -97,7 +97,7 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      className={`group relative bg-gradient-to-br from-sc-bg-base to-sc-bg-elevated border rounded-2xl overflow-hidden transition-all duration-300 ${
+      className={`group relative bg-gradient-to-br from-sc-bg-base to-sc-bg-elevated border rounded-2xl transition-all duration-300 ${
         isActive
           ? 'border-sc-purple/50 shadow-lg shadow-sc-purple/20'
           : crawlStatus === 'failed'

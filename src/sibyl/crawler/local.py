@@ -39,7 +39,12 @@ class LocalFileCrawler:
         # Handle file:// URLs
         if url.startswith("file://"):
             parsed = urlparse(url)
-            path = Path(parsed.path)
+            # urlparse treats ~ as netloc in file://~/path
+            # Reconstruct path with netloc if it's ~
+            if parsed.netloc == "~":
+                path = Path("~") / parsed.path.lstrip("/")
+            else:
+                path = Path(parsed.path)
         else:
             path = Path(url)
 

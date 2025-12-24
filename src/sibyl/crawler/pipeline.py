@@ -34,6 +34,8 @@ from sibyl.db import (
     SourceType,
     get_session,
 )
+from sibyl.graph.entities import EntityManager
+from sibyl.models.entities import Entity, EntityType
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -103,6 +105,7 @@ class IngestionPipeline:
         self._crawler: CrawlerService | None = None
         self._embedder: EmbeddingService | None = None
         self._graph_integration: GraphIntegrationService | None = None
+        self._entity_manager: EntityManager | None = None
         self._chunker = DocumentChunker()
 
     async def start(self) -> None:
@@ -124,10 +127,16 @@ class IngestionPipeline:
                     extract_entities=True,
                     create_new_entities=False,  # Only link to existing entities for now
                 )
-                log.info("Graph integration enabled")
+                self._entity_manager = EntityManager(graph_client, group_id=self.organization_id)
+                log.info(
+                    "Graph integration enabled",
+                    extract_entities=True,
+                    entity_manager=bool(self._entity_manager),
+                )
             except Exception as e:
-                log.warning("Graph integration unavailable", error=str(e))
+                log.warning("Graph integration unavailable", error=str(e), exc_info=True)
                 self._graph_integration = None
+                self._entity_manager = None
 
         log.info("Ingestion pipeline started")
 
@@ -203,7 +212,7 @@ class IngestionPipeline:
 
                 try:
                     # Store document and create chunks
-                    await self._process_document(doc, stats)
+                    await self._process_document(doc, stats, source.source_type)
                     stats.documents_stored += 1
 
                 except Exception as e:
@@ -228,16 +237,71 @@ class IngestionPipeline:
 
         return stats
 
+    async def _create_convention_entity(
+        self,
+        document: CrawledDocument,
+    ) -> str | None:
+        """Create a convention entity in the knowledge graph for a local file.
+
+        Args:
+            document: The crawled document from a local directory
+
+        Returns:
+            Entity ID if created, None otherwise
+        """
+        if not self._entity_manager:
+            log.debug("Skipping convention entity - entity manager not available")
+            return None
+
+        try:
+            # Extract filename from file:// URL for the entity name
+            file_path = document.url.replace("file://", "")
+            file_name = file_path.split("/")[-1].replace(".md", "").replace("-", " ").title()
+
+            # Create a summary from the first ~500 chars of content
+            description = document.content[:500] if document.content else document.title
+            if len(description) > 500:
+                description = description[:497] + "..."
+
+            entity = Entity(
+                id=f"convention:{document.id!s}",
+                name=file_name,
+                entity_type=EntityType.CONVENTION,
+                description=description,
+                content=document.content,
+                source_file=file_path,
+                metadata={
+                    "source_id": str(document.source_id),
+                    "url": document.url,
+                    "word_count": document.word_count,
+                    "headings": document.headings[:10] if document.headings else [],
+                },
+            )
+
+            entity_id = await self._entity_manager.create_direct(entity)
+            log.debug("Created convention entity", entity_id=entity_id, name=file_name)
+            return entity_id
+
+        except Exception as e:
+            log.warning(
+                "Failed to create convention entity",
+                url=document.url,
+                error=str(e),
+            )
+            return None
+
     async def _process_document(
         self,
         document: CrawledDocument,
         stats: IngestionStats,
+        source_type: SourceType | None = None,
     ) -> None:
         """Process a single document - store, chunk, embed, integrate with graph.
 
         Args:
             document: Document to process
             stats: Stats to update
+            source_type: Type of source (LOCAL for convention entities)
         """
         db_chunks: list[DocumentChunk] = []
 
@@ -338,6 +402,10 @@ class IngestionPipeline:
                     error=str(e),
                 )
 
+        # Create convention entity for local sources
+        if source_type == SourceType.LOCAL:
+            await self._create_convention_entity(document)
+
         log.debug(
             "Processed document",
             url=document.url,
@@ -373,7 +441,7 @@ class IngestionPipeline:
 
         # Store and process
         stats = IngestionStats(source_id=source.id, source_name=source.name)
-        await self._process_document(doc, stats)
+        await self._process_document(doc, stats, source.source_type)
 
         return doc
 
