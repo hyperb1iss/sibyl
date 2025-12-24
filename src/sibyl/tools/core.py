@@ -1608,39 +1608,45 @@ async def add(  # noqa: PLR0915
 
         # Task -> Project (BELONGS_TO)
         if entity_type == "task" and project:
-            relationships_to_create.append({
-                "id": f"rel_{entity_id}_belongs_to_{project}",
-                "source_id": entity_id,
-                "target_id": project,
-                "type": "BELONGS_TO",
-                "metadata": {"created_at": datetime.now(UTC).isoformat()},
-            })
+            relationships_to_create.append(
+                {
+                    "id": f"rel_{entity_id}_belongs_to_{project}",
+                    "source_id": entity_id,
+                    "target_id": project,
+                    "type": "BELONGS_TO",
+                    "metadata": {"created_at": datetime.now(UTC).isoformat()},
+                }
+            )
 
         # Task -> Task (DEPENDS_ON)
         if entity_type == "task" and depends_on:
-            relationships_to_create.extend([
-                {
-                    "id": f"rel_{entity_id}_depends_on_{dep_id}",
-                    "source_id": entity_id,
-                    "target_id": dep_id,
-                    "type": "DEPENDS_ON",
-                    "metadata": {"created_at": datetime.now(UTC).isoformat()},
-                }
-                for dep_id in depends_on
-            ])
+            relationships_to_create.extend(
+                [
+                    {
+                        "id": f"rel_{entity_id}_depends_on_{dep_id}",
+                        "source_id": entity_id,
+                        "target_id": dep_id,
+                        "type": "DEPENDS_ON",
+                        "metadata": {"created_at": datetime.now(UTC).isoformat()},
+                    }
+                    for dep_id in depends_on
+                ]
+            )
 
         # Generic RELATED_TO relationships
         if related_to:
-            relationships_to_create.extend([
-                {
-                    "id": f"rel_{entity_id}_related_to_{related_id}",
-                    "source_id": entity_id,
-                    "target_id": related_id,
-                    "type": "RELATED_TO",
-                    "metadata": {"created_at": datetime.now(UTC).isoformat()},
-                }
-                for related_id in related_to
-            ])
+            relationships_to_create.extend(
+                [
+                    {
+                        "id": f"rel_{entity_id}_related_to_{related_id}",
+                        "source_id": entity_id,
+                        "target_id": related_id,
+                        "type": "RELATED_TO",
+                        "metadata": {"created_at": datetime.now(UTC).isoformat()},
+                    }
+                    for related_id in related_to
+                ]
+            )
 
         # Sync mode: create entity + relationships immediately via Graphiti
         if sync:
@@ -1724,7 +1730,9 @@ async def add(  # noqa: PLR0915
                     "content": content,
                     "technologies": technologies or languages or [],
                     "category": category,
-                } if auto_link else None,
+                }
+                if auto_link
+                else None,
             )
             log.info("add_queued_for_arq", entity_id=entity_id, entity_type=entity_type)
 

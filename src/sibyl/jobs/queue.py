@@ -213,6 +213,55 @@ async def enqueue_create_entity(
     return job.job_id
 
 
+async def enqueue_update_entity(
+    entity_id: str,
+    updates: dict[str, Any],
+    entity_type: str,
+    group_id: str,
+) -> str:
+    """Enqueue an entity update job.
+
+    Updates entity fields asynchronously. Useful for bulk updates or
+    when caller doesn't need to wait for completion.
+
+    Args:
+        entity_id: The entity ID to update
+        updates: Dict of field names to new values
+        entity_type: Type string (episode, pattern, task, project, etc.)
+        group_id: Organization ID
+
+    Returns:
+        Job ID for tracking
+    """
+    pool = await get_pool()
+
+    # Deterministic job ID based on entity ID
+    job_id = f"update_entity:{entity_id}"
+
+    job = await pool.enqueue_job(
+        "update_entity",
+        entity_id,
+        updates,
+        entity_type,
+        group_id,
+        _job_id=job_id,
+    )
+
+    if job is None:
+        log.info("Update entity job already exists", job_id=job_id, entity_id=entity_id)
+        return job_id
+
+    log.info(
+        "Enqueued update_entity job",
+        job_id=job.job_id,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        fields=list(updates.keys()),
+    )
+
+    return job.job_id
+
+
 async def enqueue_update_task(
     task_id: str,
     updates: dict[str, Any],
@@ -220,8 +269,7 @@ async def enqueue_update_task(
 ) -> str:
     """Enqueue a task update job.
 
-    Updates task fields asynchronously. Useful for bulk updates or
-    when caller doesn't need to wait for completion.
+    Convenience wrapper around enqueue_update_entity for tasks.
 
     Args:
         task_id: The task entity ID to update
@@ -231,31 +279,7 @@ async def enqueue_update_task(
     Returns:
         Job ID for tracking
     """
-    pool = await get_pool()
-
-    # Deterministic job ID based on task ID
-    job_id = f"update_task:{task_id}"
-
-    job = await pool.enqueue_job(
-        "update_task",
-        task_id,
-        updates,
-        group_id,
-        _job_id=job_id,
-    )
-
-    if job is None:
-        log.info("Update task job already exists", job_id=job_id, task_id=task_id)
-        return job_id
-
-    log.info(
-        "Enqueued update_task job",
-        job_id=job.job_id,
-        task_id=task_id,
-        fields=list(updates.keys()),
-    )
-
-    return job.job_id
+    return await enqueue_update_entity(task_id, updates, "task", group_id)
 
 
 async def get_job_status(job_id: str) -> JobInfo:

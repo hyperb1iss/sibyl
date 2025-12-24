@@ -124,7 +124,10 @@ class TestProjectWorkflowE2E:
                 title="E-Commerce Platform",
                 content="Rebuild with modern stack",
                 entity_type="project",
-                metadata={"repository_url": "github.com/test/ecommerce", "organization_id": TEST_ORG_ID},
+                metadata={
+                    "repository_url": "github.com/test/ecommerce",
+                    "organization_id": TEST_ORG_ID,
+                },
             )
             assert project_result.success
 

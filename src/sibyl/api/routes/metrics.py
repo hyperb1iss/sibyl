@@ -26,7 +26,13 @@ log = structlog.get_logger()
 router = APIRouter(
     prefix="/metrics",
     tags=["metrics"],
-    dependencies=[Depends(require_org_role(OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.MEMBER))],
+    dependencies=[
+        Depends(
+            require_org_role(
+                OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.MEMBER
+            )
+        )
+    ],
 )
 
 
@@ -115,10 +121,7 @@ def _compute_velocity_trend(tasks: list[dict], days: int = 14) -> list[TimeSerie
                 daily_counts[date_str] += 1
 
     # Return sorted by date ascending
-    return [
-        TimeSeriesPoint(date=date, value=count)
-        for date, count in sorted(daily_counts.items())
-    ]
+    return [TimeSeriesPoint(date=date, value=count) for date, count in sorted(daily_counts.items())]
 
 
 def _count_recent_tasks(tasks: list[dict], days: int, field: str = "created_at") -> int:
@@ -155,10 +158,7 @@ async def get_project_metrics(
         # Get all tasks for this project
         all_tasks = await entity_manager.list_by_type(EntityType.TASK, limit=1000)
         # Filter to this project
-        tasks = [
-            t.model_dump() for t in all_tasks
-            if t.metadata.get("project_id") == project_id
-        ]
+        tasks = [t.model_dump() for t in all_tasks if t.metadata.get("project_id") == project_id]
 
         # Compute metrics
         status_dist = _compute_status_distribution(tasks)
@@ -174,7 +174,11 @@ async def get_project_metrics(
         tasks_created_7d = _count_recent_tasks(tasks, 7, "created_at")
         tasks_completed_7d = sum(1 for t in tasks if t.get("metadata", {}).get("status") == "done")
         # Re-count completed in last 7d using velocity
-        tasks_completed_7d = sum(p.value for p in velocity[-7:]) if len(velocity) >= 7 else sum(p.value for p in velocity)
+        tasks_completed_7d = (
+            sum(p.value for p in velocity[-7:])
+            if len(velocity) >= 7
+            else sum(p.value for p in velocity)
+        )
 
         metrics = ProjectMetrics(
             project_id=project_id,
@@ -228,7 +232,11 @@ async def get_org_metrics(
         completion_rate = (completed / total_tasks * 100) if total_tasks > 0 else 0.0
 
         tasks_created_7d = _count_recent_tasks(tasks, 7, "created_at")
-        tasks_completed_7d = sum(p.value for p in velocity[-7:]) if len(velocity) >= 7 else sum(p.value for p in velocity)
+        tasks_completed_7d = (
+            sum(p.value for p in velocity[-7:])
+            if len(velocity) >= 7
+            else sum(p.value for p in velocity)
+        )
 
         # Build project summaries
         project_task_counts: dict[str, dict] = defaultdict(lambda: {"total": 0, "completed": 0})
@@ -243,13 +251,15 @@ async def get_org_metrics(
         for project in projects:
             counts = project_task_counts.get(project.id, {"total": 0, "completed": 0})
             rate = (counts["completed"] / counts["total"] * 100) if counts["total"] > 0 else 0.0
-            projects_summary.append({
-                "id": project.id,
-                "name": project.name,
-                "total": counts["total"],
-                "completed": counts["completed"],
-                "completion_rate": round(rate, 1),
-            })
+            projects_summary.append(
+                {
+                    "id": project.id,
+                    "name": project.name,
+                    "total": counts["total"],
+                    "completed": counts["completed"],
+                    "completion_rate": round(rate, 1),
+                }
+            )
 
         # Sort by total tasks descending
         projects_summary.sort(key=lambda x: x["total"], reverse=True)

@@ -358,8 +358,6 @@ class MigrationResult:
     duration_seconds: float
 
 
-
-
 async def _cast_name_embeddings_to_vecf32(
     client: object,
     *,
@@ -848,9 +846,7 @@ async def backfill_task_project_relationships(
                 continue
 
             # Check if BELONGS_TO relationship already exists
-            existing_rels = await relationship_manager.get_for_entity(
-                task_id, direction="outgoing"
-            )
+            existing_rels = await relationship_manager.get_for_entity(task_id, direction="outgoing")
             has_belongs_to = any(
                 r.target_id == project_id and r.relationship_type == RelationshipType.BELONGS_TO
                 for r in existing_rels

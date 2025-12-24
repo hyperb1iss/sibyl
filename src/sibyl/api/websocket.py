@@ -147,11 +147,13 @@ class ConnectionManager:
 
                     # Send heartbeat ping
                     try:
-                        await conn.websocket.send_json({
-                            "event": "heartbeat",
-                            "data": {"server_time": now.isoformat()},
-                            "timestamp": now.isoformat(),
-                        })
+                        await conn.websocket.send_json(
+                            {
+                                "event": "heartbeat",
+                                "data": {"server_time": now.isoformat()},
+                                "timestamp": now.isoformat(),
+                            }
+                        )
                         conn.pending_pong = True
                     except Exception:
                         dead_connections.append(conn.websocket)

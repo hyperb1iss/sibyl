@@ -15,14 +15,7 @@ from sibyl.api.routes.metrics import (
     _count_recent_tasks,
     _parse_iso_date,
 )
-from sibyl.api.schemas import (
-    AssigneeStats,
-    TaskPriorityDistribution,
-    TaskStatusDistribution,
-    TimeSeriesPoint,
-)
-from sibyl.models.entities import Entity, EntityType
-
+from sibyl.models.entities import Entity
 
 # =============================================================================
 # Helper Function Tests
@@ -365,9 +358,7 @@ class TestGetProjectMetrics:
         mock_entity_manager.get.return_value = None
 
         with (
-            patch(
-                "sibyl.api.routes.metrics.get_graph_client", return_value=mock_client
-            ),
+            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
             patch(
                 "sibyl.api.routes.metrics.EntityManager",
                 return_value=mock_entity_manager,
@@ -435,9 +426,7 @@ class TestGetProjectMetrics:
         mock_entity_manager.list_by_type.return_value = mock_tasks
 
         with (
-            patch(
-                "sibyl.api.routes.metrics.get_graph_client", return_value=mock_client
-            ),
+            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
             patch(
                 "sibyl.api.routes.metrics.EntityManager",
                 return_value=mock_entity_manager,
@@ -472,9 +461,7 @@ class TestGetProjectMetrics:
         mock_entity_manager.list_by_type.return_value = []
 
         with (
-            patch(
-                "sibyl.api.routes.metrics.get_graph_client", return_value=mock_client
-            ),
+            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
             patch(
                 "sibyl.api.routes.metrics.EntityManager",
                 return_value=mock_entity_manager,
@@ -500,12 +487,8 @@ class TestGetOrgMetrics:
 
         # Create mock projects
         mock_projects = [
-            create_mock_entity(
-                entity_type="project", name="Project A", entity_id="proj_a"
-            ),
-            create_mock_entity(
-                entity_type="project", name="Project B", entity_id="proj_b"
-            ),
+            create_mock_entity(entity_type="project", name="Project A", entity_id="proj_a"),
+            create_mock_entity(entity_type="project", name="Project B", entity_id="proj_b"),
         ]
 
         # Create mock tasks
@@ -549,9 +532,7 @@ class TestGetOrgMetrics:
         )
 
         with (
-            patch(
-                "sibyl.api.routes.metrics.get_graph_client", return_value=mock_client
-            ),
+            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
             patch(
                 "sibyl.api.routes.metrics.EntityManager",
                 return_value=mock_entity_manager,
@@ -583,9 +564,7 @@ class TestGetOrgMetrics:
         mock_entity_manager.list_by_type.return_value = []
 
         with (
-            patch(
-                "sibyl.api.routes.metrics.get_graph_client", return_value=mock_client
-            ),
+            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
             patch(
                 "sibyl.api.routes.metrics.EntityManager",
                 return_value=mock_entity_manager,
@@ -632,9 +611,7 @@ class TestGetOrgMetrics:
         )
 
         with (
-            patch(
-                "sibyl.api.routes.metrics.get_graph_client", return_value=mock_client
-            ),
+            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
             patch(
                 "sibyl.api.routes.metrics.EntityManager",
                 return_value=mock_entity_manager,

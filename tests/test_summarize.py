@@ -298,9 +298,7 @@ class TestGenerateCommunitySummaries:
     @pytest.mark.asyncio
     async def test_empty_communities(self, mock_client: MagicMock) -> None:
         """Returns empty list for no communities."""
-        summaries = await generate_community_summaries(
-            mock_client, TEST_ORG_ID, community_ids=[]
-        )
+        summaries = await generate_community_summaries(mock_client, TEST_ORG_ID, community_ids=[])
         assert summaries == []
 
 

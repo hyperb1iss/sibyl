@@ -60,8 +60,8 @@ export function QuickTaskModal({
   }, [isOpen, defaultProjectId]);
 
   const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
+    (e?: React.FormEvent) => {
+      e?.preventDefault();
       if (!title.trim()) return;
 
       const assignees = assigneesInput
@@ -102,7 +102,7 @@ export function QuickTaskModal({
       // Cmd/Ctrl+Enter to submit
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
-        handleSubmit(e as unknown as React.FormEvent);
+        handleSubmit();
       }
     },
     [onClose, handleSubmit]

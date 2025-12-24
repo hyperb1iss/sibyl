@@ -124,7 +124,9 @@ def restore_db(
                 relationships=backup_dict.get("relationships", []),
             )
 
-            info(f"Restoring {backup_data.entity_count} entities and {backup_data.relationship_count} relationships...")
+            info(
+                f"Restoring {backup_data.entity_count} entities and {backup_data.relationship_count} relationships..."
+            )
 
             with spinner("Restoring...") as progress:
                 progress.add_task("Restoring...", total=None)
@@ -139,9 +141,13 @@ def restore_db(
             else:
                 warn("Restore completed with errors")
 
-            info(f"Restored: {result.entities_restored} entities, {result.relationships_restored} relationships")
+            info(
+                f"Restored: {result.entities_restored} entities, {result.relationships_restored} relationships"
+            )
             if result.entities_skipped or result.relationships_skipped:
-                info(f"Skipped: {result.entities_skipped} entities, {result.relationships_skipped} relationships")
+                info(
+                    f"Skipped: {result.entities_skipped} entities, {result.relationships_skipped} relationships"
+                )
             info(f"Duration: {result.duration_seconds:.2f}s")
 
             if result.errors:
@@ -241,8 +247,6 @@ def db_stats() -> None:
             print_db_hint()
 
     _stats()
-
-
 
 
 @app.command("fix-embeddings")
@@ -362,5 +366,3 @@ def backfill_task_relationships(
             print_db_hint()
 
     _backfill()
-
-

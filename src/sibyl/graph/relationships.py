@@ -276,18 +276,22 @@ class RelationshipManager:
                     continue
 
                 try:
-                    rel_type = RelationshipType(rel_name) if rel_name else RelationshipType.RELATED_TO
+                    rel_type = (
+                        RelationshipType(rel_name) if rel_name else RelationshipType.RELATED_TO
+                    )
                 except ValueError:
                     rel_type = RelationshipType.RELATED_TO
 
-                relationships.append(Relationship(
-                    id=rel_uuid,
-                    relationship_type=rel_type,
-                    source_id=source_id,
-                    target_id=target_id,
-                    weight=float(weight) if weight else 1.0,
-                    metadata={},
-                ))
+                relationships.append(
+                    Relationship(
+                        id=rel_uuid,
+                        relationship_type=rel_type,
+                        source_id=source_id,
+                        target_id=target_id,
+                        weight=float(weight) if weight else 1.0,
+                        metadata={},
+                    )
+                )
 
             log.debug(
                 "Retrieved relationships",
@@ -378,8 +382,18 @@ class RelationshipManager:
                             name_embedding=props.get("name_embedding"),
                             summary=props.get("summary", ""),
                             attributes={
-                                k: v for k, v in props.items()
-                                if k not in ("uuid", "name", "group_id", "labels", "created_at", "name_embedding", "summary")
+                                k: v
+                                for k, v in props.items()
+                                if k
+                                not in (
+                                    "uuid",
+                                    "name",
+                                    "group_id",
+                                    "labels",
+                                    "created_at",
+                                    "name_embedding",
+                                    "summary",
+                                )
                             },
                         )
                         entity = entity_manager.node_to_entity(node)
@@ -435,7 +449,11 @@ class RelationshipManager:
                 )
 
             rows = self._client.normalize_result(result)
-            deleted = rows[0]["deleted"] if rows and isinstance(rows[0], dict) else (rows[0][0] if rows else 0)
+            deleted = (
+                rows[0]["deleted"]
+                if rows and isinstance(rows[0], dict)
+                else (rows[0][0] if rows else 0)
+            )
 
             if deleted > 0:
                 log.info("Deleted relationship", relationship_id=relationship_id)
@@ -478,7 +496,11 @@ class RelationshipManager:
                 )
 
             rows = self._client.normalize_result(result)
-            deleted = rows[0]["deleted"] if rows and isinstance(rows[0], dict) else (rows[0][0] if rows else 0)
+            deleted = (
+                rows[0]["deleted"]
+                if rows and isinstance(rows[0], dict)
+                else (rows[0][0] if rows else 0)
+            )
 
             log.info("Deleted relationships for entity", entity_id=entity_id, count=deleted)
             return deleted

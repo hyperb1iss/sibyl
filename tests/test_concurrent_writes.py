@@ -59,9 +59,7 @@ def _create_test_pattern(index: int, group_id: str) -> Pattern:
 @pytest.mark.asyncio
 @pytest.mark.integration
 @pytest.mark.stress
-async def test_concurrent_entity_creates(
-    graph_client: GraphClient, test_group_id: str
-) -> None:
+async def test_concurrent_entity_creates(graph_client: GraphClient, test_group_id: str) -> None:
     """Test many concurrent entity creations don't corrupt the connection.
 
     Creates 20 entities concurrently - this would crash FalkorDB without
@@ -150,9 +148,7 @@ async def test_concurrent_updates(graph_client: GraphClient, test_group_id: str)
 @pytest.mark.asyncio
 @pytest.mark.integration
 @pytest.mark.stress
-async def test_mixed_concurrent_operations(
-    graph_client: GraphClient, test_group_id: str
-) -> None:
+async def test_mixed_concurrent_operations(graph_client: GraphClient, test_group_id: str) -> None:
     """Test mixed creates, updates, and deletes running concurrently.
 
     This simulates real-world load with different operation types.
@@ -217,9 +213,7 @@ async def test_mixed_concurrent_operations(
 @pytest.mark.asyncio
 @pytest.mark.integration
 @pytest.mark.stress
-async def test_rapid_sequential_writes(
-    graph_client: GraphClient, test_group_id: str
-) -> None:
+async def test_rapid_sequential_writes(graph_client: GraphClient, test_group_id: str) -> None:
     """Test rapid sequential writes don't exhaust connections.
 
     Even without concurrency, rapid writes can cause issues if connections

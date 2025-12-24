@@ -219,9 +219,7 @@ async def create_backup(
         raise
     except Exception as e:
         log.exception("backup_failed", error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Backup failed. Please try again."
-        ) from e
+        raise HTTPException(status_code=500, detail="Backup failed. Please try again.") from e
 
 
 @router.post("/restore", response_model=RestoreResponse)
@@ -266,9 +264,7 @@ async def restore_backup_endpoint(
 
     except Exception as e:
         log.exception("restore_failed", error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Restore failed. Please try again."
-        ) from e
+        raise HTTPException(status_code=500, detail="Restore failed. Please try again.") from e
 
 
 # === Backfill Endpoint ===
@@ -306,6 +302,4 @@ async def backfill_task_relationships(
 
     except Exception as e:
         log.exception("backfill_failed", error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Backfill failed. Please try again."
-        ) from e
+        raise HTTPException(status_code=500, detail="Backfill failed. Please try again.") from e

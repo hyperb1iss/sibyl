@@ -24,7 +24,7 @@ import {
   TrendingUp,
   Zap,
 } from '@/components/ui/icons';
-import { ErrorState } from '@/components/ui/tooltip';
+import { ErrorState, Tooltip } from '@/components/ui/tooltip';
 import type { TaskListResponse, TaskStatus, TaskSummary } from '@/lib/api';
 import { TASK_STATUS_CONFIG } from '@/lib/constants';
 import { useProjectMetrics, useProjects, useTasks, useUpdateEntity } from '@/lib/hooks';
@@ -156,25 +156,31 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
       const statsA = projectStatsMap.get(a.id);
       const statsB = projectStatsMap.get(b.id);
 
+      // Helper for secondary sort: by total tasks, then name
+      const secondarySort = () => {
+        const totalDiff = (statsB?.total ?? 0) - (statsA?.total ?? 0);
+        return totalDiff !== 0 ? totalDiff : a.name.localeCompare(b.name);
+      };
+
       switch (sortBy) {
         case 'active': {
           // Most active = doing + blocked + review
           const activeA = (statsA?.doing ?? 0) + (statsA?.blocked ?? 0) + (statsA?.review ?? 0);
           const activeB = (statsB?.doing ?? 0) + (statsB?.blocked ?? 0) + (statsB?.review ?? 0);
-          return activeB - activeA;
+          return activeB !== activeA ? activeB - activeA : secondarySort();
         }
         case 'urgent': {
           // Urgent first = critical + high + overdue
           const urgentA = (statsA?.critical ?? 0) + (statsA?.high ?? 0) + (statsA?.overdue ?? 0);
           const urgentB = (statsB?.critical ?? 0) + (statsB?.high ?? 0) + (statsB?.overdue ?? 0);
-          return urgentB - urgentA;
+          return urgentB !== urgentA ? urgentB - urgentA : secondarySort();
         }
         case 'tasks':
-          return (statsB?.total ?? 0) - (statsA?.total ?? 0);
+          return (statsB?.total ?? 0) - (statsA?.total ?? 0) || a.name.localeCompare(b.name);
         case 'completion': {
           const completionA = statsA?.total ? (statsA.done / statsA.total) * 100 : 0;
           const completionB = statsB?.total ? (statsB.done / statsB.total) * 100 : 0;
-          return completionB - completionA;
+          return completionB !== completionA ? completionB - completionA : secondarySort();
         }
         case 'name':
           return a.name.localeCompare(b.name);
@@ -279,19 +285,19 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
               {/* Sort dropdown */}
               <div className="flex items-center gap-1">
                 {PROJECT_SORT_OPTIONS.map(option => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setSortBy(option.value)}
-                    title={option.label}
-                    className={`p-1.5 rounded transition-colors ${
-                      sortBy === option.value
-                        ? 'bg-sc-purple/20 text-sc-purple'
-                        : 'text-sc-fg-subtle hover:text-sc-fg-muted hover:bg-sc-bg-highlight/50'
-                    }`}
-                  >
-                    {option.icon}
-                  </button>
+                  <Tooltip key={option.value} content={option.label} position="bottom">
+                    <button
+                      type="button"
+                      onClick={() => setSortBy(option.value)}
+                      className={`p-1.5 rounded transition-colors ${
+                        sortBy === option.value
+                          ? 'bg-sc-purple/20 text-sc-purple'
+                          : 'text-sc-fg-subtle hover:text-sc-fg-muted hover:bg-sc-bg-highlight/50'
+                      }`}
+                    >
+                      {option.icon}
+                    </button>
+                  </Tooltip>
                 ))}
               </div>
             </div>
