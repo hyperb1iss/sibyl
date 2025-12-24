@@ -7,7 +7,6 @@ import { EntityBreadcrumb } from '@/components/layout/breadcrumb';
 import { EntityBadge } from '@/components/ui/badge';
 import { Button, ColorButton } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { EntityIcon } from '@/components/ui/entity-icon';
 import { Input, Textarea } from '@/components/ui/input';
 import type { Entity } from '@/lib/api';
 import { ENTITY_COLORS, type EntityType, formatDateTime } from '@/lib/constants';
@@ -83,11 +82,8 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
         <div className="pl-5 pr-4 py-5">
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
-              {/* Icon + Badge */}
+              {/* Type Badge */}
               <div className="flex items-center gap-3 mb-3">
-                <span style={{ color }}>
-                  <EntityIcon type={currentEntity.entity_type} size={28} />
-                </span>
                 <EntityBadge type={currentEntity.entity_type} size="md" showIcon />
               </div>
 

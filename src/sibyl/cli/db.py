@@ -46,62 +46,27 @@ def backup_db(
 
     @run_async
     async def _backup() -> None:
-        from sibyl.graph.entities import EntityManager
-        from sibyl.graph.relationships import RelationshipManager
+        from dataclasses import asdict
+
+        from sibyl.tools.admin import create_backup
 
         try:
             with spinner("Creating backup...") as progress:
-                task = progress.add_task("Creating backup...", total=None)
+                progress.add_task("Creating backup...", total=None)
+                result = await create_backup(organization_id=org_id)
 
-                from sibyl.graph.client import get_graph_client
+            if not result.success or result.backup_data is None:
+                error(f"Backup failed: {result.message}")
+                return
 
-                client = await get_graph_client()
-                entity_mgr = EntityManager(client, group_id=org_id)
-                rel_mgr = RelationshipManager(client, group_id=org_id)
-
-                # Get all entity types
-                progress.update(task, description="Backing up entities...")
-                all_entities = []
-                entity_types = [
-                    "pattern",
-                    "rule",
-                    "template",
-                    "tool",
-                    "language",
-                    "topic",
-                    "episode",
-                    "task",
-                    "project",
-                    "team",
-                    "source",
-                    "document",
-                ]
-                for etype in entity_types:
-                    entities = await entity_mgr.list_by_type(etype, limit=5000)
-                    all_entities.extend(entities)
-
-                # Get all relationships
-                progress.update(task, description="Backing up relationships...")
-                relationships = await rel_mgr.list_all(limit=10000)
-
-                # Build backup data
-                backup_data = {
-                    "version": "1.0",
-                    "created_at": str(
-                        __import__("datetime").datetime.now(tz=__import__("datetime").timezone.utc)
-                    ),
-                    "entity_count": len(all_entities),
-                    "relationship_count": len(relationships),
-                    "entities": [e.model_dump() for e in all_entities],
-                    "relationships": [r.model_dump() for r in relationships],
-                }
-
-            # Write backup (sync I/O after async work is done)
+            # Write backup to file (sync I/O after async work is done)
+            backup_dict = asdict(result.backup_data)
             with open(output, "w") as f:  # noqa: ASYNC230
-                json.dump(backup_data, f, indent=2, default=str)
+                json.dump(backup_dict, f, indent=2, default=str)
 
             success(f"Backup created: {output}")
-            info(f"Entities: {len(all_entities)}, Relationships: {len(relationships)}")
+            info(f"Entities: {result.entity_count}, Relationships: {result.relationship_count}")
+            info(f"Duration: {result.duration_seconds:.2f}s")
 
         except Exception as e:
             error(f"Backup failed: {e}")
@@ -118,6 +83,10 @@ def restore_db(
         str,
         typer.Option("--org-id", help="Organization UUID (required for multi-tenant graph)"),
     ] = "",
+    skip_existing: Annotated[
+        bool,
+        typer.Option("--skip-existing/--overwrite", help="Skip entities that already exist"),
+    ] = True,
 ) -> None:
     """Restore the database from a backup file."""
     if not org_id:
@@ -126,7 +95,7 @@ def restore_db(
 
     if not backup_file.exists():
         error(f"Backup file not found: {backup_file}")
-        return
+        raise typer.Exit(code=1)
 
     if not yes:
         warn("This will add entities from the backup to the database.")
@@ -137,53 +106,50 @@ def restore_db(
 
     @run_async
     async def _restore() -> None:
-        from sibyl.graph.entities import EntityManager
-        from sibyl.graph.relationships import RelationshipManager
-        from sibyl.models.entities import Entity, Relationship
+        from sibyl.tools.admin import BackupData, restore_backup
 
         try:
-            # Load backup (sync I/O before async work)
+            # Load backup file (sync I/O before async work)
             with open(backup_file) as f:  # noqa: ASYNC230
-                backup_data = json.load(f)
+                backup_dict = json.load(f)
 
-            entity_count = backup_data.get("entity_count", 0)
-            rel_count = backup_data.get("relationship_count", 0)
+            # Convert dict to BackupData
+            backup_data = BackupData(
+                version=backup_dict.get("version", "1.0"),
+                created_at=backup_dict.get("created_at", ""),
+                organization_id=backup_dict.get("organization_id", org_id),
+                entity_count=backup_dict.get("entity_count", 0),
+                relationship_count=backup_dict.get("relationship_count", 0),
+                entities=backup_dict.get("entities", []),
+                relationships=backup_dict.get("relationships", []),
+            )
 
-            info(f"Restoring {entity_count} entities and {rel_count} relationships...")
+            info(f"Restoring {backup_data.entity_count} entities and {backup_data.relationship_count} relationships...")
 
             with spinner("Restoring...") as progress:
-                task = progress.add_task("Restoring...", total=None)
+                progress.add_task("Restoring...", total=None)
+                result = await restore_backup(
+                    backup_data,
+                    organization_id=org_id,
+                    skip_existing=skip_existing,
+                )
 
-                from sibyl.graph.client import get_graph_client
+            if result.success:
+                success("Restore complete!")
+            else:
+                warn("Restore completed with errors")
 
-                client = await get_graph_client()
-                entity_mgr = EntityManager(client, group_id=org_id)
-                rel_mgr = RelationshipManager(client, group_id=org_id)
+            info(f"Restored: {result.entities_restored} entities, {result.relationships_restored} relationships")
+            if result.entities_skipped or result.relationships_skipped:
+                info(f"Skipped: {result.entities_skipped} entities, {result.relationships_skipped} relationships")
+            info(f"Duration: {result.duration_seconds:.2f}s")
 
-                # Restore entities
-                progress.update(task, description="Restoring entities...")
-                restored_entities = 0
-                for e_data in backup_data.get("entities", []):
-                    try:
-                        entity = Entity.model_validate(e_data)
-                        await entity_mgr.create(entity)
-                        restored_entities += 1
-                    except Exception:  # noqa: S110
-                        pass  # Skip duplicates or invalid entities
-
-                # Restore relationships
-                progress.update(task, description="Restoring relationships...")
-                restored_rels = 0
-                for r_data in backup_data.get("relationships", []):
-                    try:
-                        rel = Relationship.model_validate(r_data)
-                        await rel_mgr.create(rel)
-                        restored_rels += 1
-                    except Exception:  # noqa: S110
-                        pass  # Skip duplicates
-
-            success("Restore complete!")
-            info(f"Restored {restored_entities} entities, {restored_rels} relationships")
+            if result.errors:
+                warn(f"Errors: {len(result.errors)}")
+                for err in result.errors[:5]:
+                    console.print(f"  [dim]{err}[/dim]")
+                if len(result.errors) > 5:
+                    console.print(f"  [dim]...and {len(result.errors) - 5} more[/dim]")
 
         except Exception as e:
             error(f"Restore failed: {e}")
@@ -333,5 +299,68 @@ def db_fix_embeddings(
             print_db_hint()
 
     _fix()
+
+
+@app.command("backfill-task-relationships")
+def backfill_task_relationships(
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID (required for multi-tenant graph)"),
+    ] = "",
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Preview what would be done without making changes"),
+    ] = False,
+) -> None:
+    """Backfill missing BELONGS_TO relationships between tasks and projects.
+
+    Finds tasks with project_id in metadata but no BELONGS_TO edge to that project,
+    and creates the missing relationship edges.
+
+    Use --dry-run to preview what would be created without making changes.
+    """
+    if not org_id:
+        error("--org-id is required for graph operations")
+        raise typer.Exit(code=1)
+
+    @run_async
+    async def _backfill() -> None:
+        from sibyl.tools.admin import backfill_task_project_relationships
+
+        try:
+            if dry_run:
+                warn("DRY RUN - no changes will be made")
+
+            with spinner("Backfilling task relationships...") as progress:
+                progress.add_task("Processing tasks...", total=None)
+                result = await backfill_task_project_relationships(
+                    organization_id=org_id,
+                    dry_run=dry_run,
+                )
+
+            if result.success:
+                if dry_run:
+                    info(f"Would create {result.relationships_created} BELONGS_TO relationships")
+                else:
+                    success(f"Created {result.relationships_created} BELONGS_TO relationships")
+            else:
+                warn("Backfill completed with errors")
+
+            info(f"Tasks without project_id: {result.tasks_without_project}")
+            info(f"Tasks already linked: {result.tasks_already_linked}")
+            info(f"Duration: {result.duration_seconds:.2f}s")
+
+            if result.errors:
+                warn(f"Errors: {len(result.errors)}")
+                for err in result.errors[:5]:
+                    console.print(f"  [dim]{err}[/dim]")
+                if len(result.errors) > 5:
+                    console.print(f"  [dim]...and {len(result.errors) - 5} more[/dim]")
+
+        except Exception as e:
+            error(f"Backfill failed: {e}")
+            print_db_hint()
+
+    _backfill()
 
 

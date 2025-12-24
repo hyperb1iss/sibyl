@@ -599,3 +599,68 @@ class DocumentRelatedEntitiesResponse(BaseModel):
     document_id: str
     entities: list[DocumentRelatedEntity]
     total: int
+
+
+# === Backup/Restore Schemas ===
+
+
+class BackupDataSchema(BaseModel):
+    """Graph backup data structure."""
+
+    version: str
+    created_at: str
+    organization_id: str
+    entity_count: int
+    relationship_count: int
+    entities: list[dict]
+    relationships: list[dict]
+
+
+class BackupResponse(BaseModel):
+    """Response from backup operation."""
+
+    success: bool
+    entity_count: int
+    relationship_count: int
+    message: str
+    duration_seconds: float
+    backup_data: BackupDataSchema | None = None
+
+
+class RestoreRequest(BaseModel):
+    """Request to restore from backup."""
+
+    backup_data: BackupDataSchema
+    skip_existing: bool = True
+
+
+class RestoreResponse(BaseModel):
+    """Response from restore operation."""
+
+    success: bool
+    entities_restored: int
+    relationships_restored: int
+    entities_skipped: int
+    relationships_skipped: int
+    errors: list[str]
+    duration_seconds: float
+
+
+class BackfillRequest(BaseModel):
+    """Request to backfill missing relationships."""
+
+    dry_run: bool = Field(
+        default=False, description="If true, report what would be done without making changes"
+    )
+
+
+class BackfillResponse(BaseModel):
+    """Response from relationship backfill operation."""
+
+    success: bool
+    relationships_created: int
+    tasks_without_project: int
+    tasks_already_linked: int
+    errors: list[str]
+    duration_seconds: float
+    dry_run: bool

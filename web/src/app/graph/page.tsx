@@ -490,6 +490,14 @@ function GraphPageContent() {
     };
   }, [data, filters.search]);
 
+  // Get unique types present in the filtered data for the legend
+  const visibleTypes = useMemo(() => {
+    if (!filteredData?.nodes) return [];
+    const types = new Set(filteredData.nodes.map(n => n.type).filter(Boolean));
+    // Sort by ENTITY_TYPES order for consistency
+    return ENTITY_TYPES.filter(t => types.has(t));
+  }, [filteredData]);
+
   const handleNodeClick = useCallback((nodeId: string) => {
     setSelectedNodeId(prev => (prev === nodeId ? null : nodeId));
   }, []);
@@ -570,20 +578,22 @@ function GraphPageContent() {
             searchTerm={filters.search}
           />
 
-          {/* Legend - desktop only */}
-          <div className="absolute bottom-4 left-4 z-10 hidden md:block">
-            <Card className="!p-2 flex flex-wrap gap-x-3 gap-y-1 max-w-sm">
-              {ENTITY_TYPES.slice(0, 8).map(type => (
-                <div key={type} className="flex items-center gap-1.5 text-xs">
-                  <div
-                    className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: ENTITY_COLORS[type] }}
-                  />
-                  <span className="text-sc-fg-subtle capitalize">{type.replace(/_/g, ' ')}</span>
-                </div>
-              ))}
-            </Card>
-          </div>
+          {/* Legend - desktop only, shows types actually in the data */}
+          {visibleTypes.length > 0 && (
+            <div className="absolute bottom-4 left-4 z-10 hidden md:block">
+              <Card className="!p-2 flex flex-wrap gap-x-3 gap-y-1 max-w-sm">
+                {visibleTypes.map(type => (
+                  <div key={type} className="flex items-center gap-1.5 text-xs">
+                    <div
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: ENTITY_COLORS[type] }}
+                    />
+                    <span className="text-sc-fg-subtle capitalize">{type.replace(/_/g, ' ')}</span>
+                  </div>
+                ))}
+              </Card>
+            </div>
+          )}
 
           {/* Keyboard hints - desktop only */}
           <div className="absolute bottom-4 right-4 z-10 text-xs text-sc-fg-subtle/50 hidden md:block">

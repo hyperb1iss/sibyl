@@ -6,7 +6,18 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
-from sibyl.api.schemas import HealthResponse, IngestRequest, IngestResponse, StatsResponse
+from sibyl.api.schemas import (
+    BackfillRequest,
+    BackfillResponse,
+    BackupDataSchema,
+    BackupResponse,
+    HealthResponse,
+    IngestRequest,
+    IngestResponse,
+    RestoreRequest,
+    RestoreResponse,
+    StatsResponse,
+)
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.dependencies import get_current_organization, require_org_role
 from sibyl.db.models import Organization, OrganizationRole
@@ -163,3 +174,138 @@ async def ingest(
 async def ingest_status() -> dict[str, Any]:
     """Get current ingestion status."""
     return _ingestion_status
+
+
+# === Backup/Restore Endpoints ===
+
+
+@router.post("/backup", response_model=BackupResponse)
+async def create_backup(
+    org: Organization = Depends(get_current_organization),
+) -> BackupResponse:
+    """Create a backup of all graph data for the organization.
+
+    Returns JSON backup data that can be saved to a file or stored.
+    """
+    try:
+        from sibyl.tools.admin import create_backup as do_backup
+
+        result = await do_backup(organization_id=str(org.id))
+
+        if not result.success or result.backup_data is None:
+            raise HTTPException(status_code=500, detail=result.message)
+
+        # Convert dataclass to schema
+        backup_schema = BackupDataSchema(
+            version=result.backup_data.version,
+            created_at=result.backup_data.created_at,
+            organization_id=result.backup_data.organization_id,
+            entity_count=result.backup_data.entity_count,
+            relationship_count=result.backup_data.relationship_count,
+            entities=result.backup_data.entities,
+            relationships=result.backup_data.relationships,
+        )
+
+        return BackupResponse(
+            success=True,
+            entity_count=result.entity_count,
+            relationship_count=result.relationship_count,
+            message=result.message,
+            duration_seconds=result.duration_seconds,
+            backup_data=backup_schema,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("backup_failed", error=str(e))
+        raise HTTPException(
+            status_code=500, detail="Backup failed. Please try again."
+        ) from e
+
+
+@router.post("/restore", response_model=RestoreResponse)
+async def restore_backup_endpoint(
+    request: RestoreRequest,
+    org: Organization = Depends(get_current_organization),
+) -> RestoreResponse:
+    """Restore graph data from a backup.
+
+    Restores entities and relationships from backup JSON.
+    By default, skips entities that already exist.
+    """
+    try:
+        from sibyl.tools.admin import BackupData, restore_backup as do_restore
+
+        # Convert schema to dataclass
+        backup_data = BackupData(
+            version=request.backup_data.version,
+            created_at=request.backup_data.created_at,
+            organization_id=request.backup_data.organization_id,
+            entity_count=request.backup_data.entity_count,
+            relationship_count=request.backup_data.relationship_count,
+            entities=request.backup_data.entities,
+            relationships=request.backup_data.relationships,
+        )
+
+        result = await do_restore(
+            backup_data,
+            organization_id=str(org.id),
+            skip_existing=request.skip_existing,
+        )
+
+        return RestoreResponse(
+            success=result.success,
+            entities_restored=result.entities_restored,
+            relationships_restored=result.relationships_restored,
+            entities_skipped=result.entities_skipped,
+            relationships_skipped=result.relationships_skipped,
+            errors=result.errors,
+            duration_seconds=result.duration_seconds,
+        )
+
+    except Exception as e:
+        log.exception("restore_failed", error=str(e))
+        raise HTTPException(
+            status_code=500, detail="Restore failed. Please try again."
+        ) from e
+
+
+# === Backfill Endpoint ===
+
+
+@router.post("/backfill/task-project-relationships", response_model=BackfillResponse)
+async def backfill_task_relationships(
+    request: BackfillRequest,
+    org: Organization = Depends(get_current_organization),
+) -> BackfillResponse:
+    """Backfill missing BELONGS_TO relationships between tasks and projects.
+
+    Finds tasks that have a project_id in metadata but no corresponding
+    BELONGS_TO relationship edge, and creates the missing edges.
+
+    Use dry_run=true to preview what would be created.
+    """
+    try:
+        from sibyl.tools.admin import backfill_task_project_relationships
+
+        result = await backfill_task_project_relationships(
+            organization_id=str(org.id),
+            dry_run=request.dry_run,
+        )
+
+        return BackfillResponse(
+            success=result.success,
+            relationships_created=result.relationships_created,
+            tasks_without_project=result.tasks_without_project,
+            tasks_already_linked=result.tasks_already_linked,
+            errors=result.errors,
+            duration_seconds=result.duration_seconds,
+            dry_run=request.dry_run,
+        )
+
+    except Exception as e:
+        log.exception("backfill_failed", error=str(e))
+        raise HTTPException(
+            status_code=500, detail="Backfill failed. Please try again."
+        ) from e

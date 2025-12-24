@@ -134,9 +134,10 @@ class RelationshipManager:
                     return edge.uuid
 
             # Create new edge with write lock to prevent FalkorDB connection corruption
+            # IMPORTANT: Use self._driver (cloned for org's graph) not self._client.driver
             edge = self._to_graphiti_edge(relationship)
             async with self._client.write_lock:
-                await edge.save(self._client.driver)
+                await edge.save(self._driver)
 
             log.info("Created relationship", relationship_id=edge.uuid)
             return edge.uuid
