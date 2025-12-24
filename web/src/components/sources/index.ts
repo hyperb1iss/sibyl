@@ -1,5 +1,5 @@
 // Dialog
-export type { FileMetadata, UrlSourceData } from './add-source-dialog';
+export type { FileMetadata, LocalSourceData, UrlSourceData } from './add-source-dialog';
 export { AddSourceDialog } from './add-source-dialog';
 
 // Progress tracking

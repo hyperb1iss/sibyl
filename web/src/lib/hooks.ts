@@ -86,7 +86,7 @@ export const queryKeys = {
   },
   projects: {
     all: ['projects'] as const,
-    list: ['projects', 'list'] as const,
+    list: (includeArchived = false) => ['projects', 'list', { includeArchived }] as const,
     detail: (id: string) => ['projects', 'detail', id] as const,
   },
   explore: {
@@ -855,10 +855,14 @@ export function useTaskUpdateStatus() {
 // Project Hooks
 // =============================================================================
 
-export function useProjects(initialData?: import('./api').TaskListResponse) {
+export function useProjects(
+  options?: { includeArchived?: boolean },
+  initialData?: import('./api').TaskListResponse
+) {
+  const includeArchived = options?.includeArchived ?? false;
   return useQuery({
-    queryKey: queryKeys.projects.list,
-    queryFn: () => api.projects.list(),
+    queryKey: queryKeys.projects.list(includeArchived),
+    queryFn: () => api.projects.list({ includeArchived }),
     initialData,
   });
 }

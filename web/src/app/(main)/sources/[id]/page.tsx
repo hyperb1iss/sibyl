@@ -11,6 +11,7 @@ import {
   Clock,
   ExternalLink,
   FileText,
+  Folder,
   Globe,
   Hash,
   Loader2,
@@ -136,7 +137,11 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2">
-              <Globe width={24} height={24} className="text-sc-purple shrink-0" />
+              {source.source_type === 'local' ? (
+                <Folder width={24} height={24} className="text-sc-yellow shrink-0" />
+              ) : (
+                <Globe width={24} height={24} className="text-sc-purple shrink-0" />
+              )}
               <h1 className="text-2xl font-bold text-sc-fg-primary truncate">{source.name}</h1>
               <span
                 className={`px-2.5 py-1 text-xs font-medium rounded-full ${statusConfig.bgClass} ${statusConfig.textClass}`}
@@ -145,15 +150,22 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
               </span>
             </div>
             {source.description && <p className="text-sc-fg-muted mt-2">{source.description}</p>}
-            <a
-              href={source.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 mt-3 text-sc-cyan hover:text-sc-purple transition-colors text-sm"
-            >
-              <ExternalLink width={14} height={14} />
-              {source.url}
-            </a>
+            {source.source_type === 'local' ? (
+              <div className="inline-flex items-center gap-1.5 mt-3 text-sc-fg-muted text-sm">
+                <Folder width={14} height={14} className="text-sc-yellow" />
+                <span className="font-mono">{source.url.replace('file://', '')}</span>
+              </div>
+            ) : (
+              <a
+                href={source.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 mt-3 text-sc-cyan hover:text-sc-purple transition-colors text-sm"
+              >
+                <ExternalLink width={14} height={14} />
+                {source.url}
+              </a>
+            )}
           </div>
 
           {/* Actions */}
@@ -165,23 +177,27 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-red/20 text-sc-red hover:bg-sc-red/30 border border-sc-red/30 transition-all"
               >
                 <StopCircle width={16} height={16} />
-                Cancel Crawl
+                Cancel {source.source_type === 'local' ? 'Sync' : 'Crawl'}
               </button>
             ) : (
               <button
                 type="button"
                 onClick={handleCrawl}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-purple hover:bg-sc-purple/80 text-white transition-all"
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                  source.source_type === 'local'
+                    ? 'bg-sc-yellow hover:bg-sc-yellow/80 text-sc-bg-dark'
+                    : 'bg-sc-purple hover:bg-sc-purple/80 text-white'
+                }`}
               >
                 {source.crawl_status === 'completed' ? (
                   <>
                     <RefreshCw width={16} height={16} />
-                    Re-crawl
+                    {source.source_type === 'local' ? 'Re-sync' : 'Re-crawl'}
                   </>
                 ) : (
                   <>
                     <Play width={16} height={16} />
-                    Start Crawl
+                    {source.source_type === 'local' ? 'Sync' : 'Start Crawl'}
                   </>
                 )}
               </button>
@@ -201,7 +217,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6">
           <StatCard
             icon={<FileText width={18} height={18} className="text-sc-cyan" />}
-            label="Documents"
+            label={source.source_type === 'local' ? 'Files' : 'Documents'}
             value={source.document_count}
           />
           <StatCard
@@ -210,15 +226,23 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
             value={source.chunk_count}
           />
           <StatCard
-            icon={<Globe width={18} height={18} className="text-sc-purple" />}
+            icon={
+              source.source_type === 'local' ? (
+                <Folder width={18} height={18} className="text-sc-yellow" />
+              ) : (
+                <Globe width={18} height={18} className="text-sc-purple" />
+              )
+            }
             label="Type"
             value={typeConfig.label}
           />
-          <StatCard
-            icon={<Clock width={18} height={18} className="text-sc-yellow" />}
-            label="Crawl Depth"
-            value={source.crawl_depth}
-          />
+          {source.source_type !== 'local' && (
+            <StatCard
+              icon={<Clock width={18} height={18} className="text-sc-yellow" />}
+              label="Crawl Depth"
+              value={source.crawl_depth}
+            />
+          )}
         </div>
 
         {/* Timestamps */}
@@ -230,7 +254,10 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
           {source.last_crawled_at && (
             <div className="flex items-center gap-1.5">
               <Clock width={12} height={12} />
-              <span>Last crawled {formatDateTime(source.last_crawled_at)}</span>
+              <span>
+                Last {source.source_type === 'local' ? 'synced' : 'crawled'}{' '}
+                {formatDateTime(source.last_crawled_at)}
+              </span>
             </div>
           )}
         </div>
@@ -283,7 +310,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
       <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-6">
         <h2 className="text-lg font-semibold text-sc-fg-primary mb-4 flex items-center gap-2">
           <FileText width={20} height={20} className="text-sc-cyan" />
-          Documents
+          {source.source_type === 'local' ? 'Files' : 'Documents'}
           <span className="text-sc-fg-subtle font-normal">({pages.length})</span>
         </h2>
 
@@ -294,8 +321,12 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
         ) : pages.length === 0 ? (
           <div className="text-center py-8 text-sc-fg-subtle">
             <FileText width={32} height={32} className="mx-auto mb-2 opacity-50" />
-            <p>No documents crawled yet</p>
-            <p className="text-sm mt-1">Start a crawl to fetch documents from this source</p>
+            <p>No {source.source_type === 'local' ? 'files indexed' : 'documents crawled'} yet</p>
+            <p className="text-sm mt-1">
+              {source.source_type === 'local'
+                ? 'Sync the directory to index files'
+                : 'Start a crawl to fetch documents from this source'}
+            </p>
           </div>
         ) : (
           <div className="space-y-2">

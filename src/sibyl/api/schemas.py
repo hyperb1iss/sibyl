@@ -156,6 +156,9 @@ class ExploreRequest(BaseModel):
     category: str | None = None
     project: str | None = Field(default=None, description="Filter by project ID (for tasks)")
     status: str | None = Field(default=None, description="Filter by status (for tasks)")
+    include_archived: bool = Field(
+        default=False, description="Include archived projects in results"
+    )
     limit: int = Field(default=50, ge=1, le=200)
     offset: int = Field(default=0, ge=0, description="Offset for pagination")
 
@@ -310,7 +313,7 @@ class CrawlSourceCreate(BaseModel):
 
     name: str = Field(..., description="Human-readable name")
     url: str = Field(..., description="Base URL to crawl")
-    source_type: Literal["website", "github", "api_docs"] = Field(
+    source_type: Literal["website", "github", "local", "api_docs"] = Field(
         default="website", description="Type of documentation source"
     )
     description: str | None = Field(default=None, description="Optional description")

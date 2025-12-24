@@ -29,6 +29,7 @@ from sibyl.crawler.embedder import (
     embed_text,
     get_embedding_service,
 )
+from sibyl.crawler.local import LocalFileCrawler
 from sibyl.crawler.pipeline import (
     IngestionPipeline,
     IngestionStats,
@@ -50,6 +51,7 @@ __all__ = [
     "reingest_source",
     # Crawler
     "CrawlerService",
+    "LocalFileCrawler",
     "create_source",
     "get_source_by_url",
     "list_sources",

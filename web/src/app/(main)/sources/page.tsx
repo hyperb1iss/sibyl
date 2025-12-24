@@ -7,6 +7,7 @@ import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import {
   AddSourceDialog,
+  type LocalSourceData,
   SourceCardEnhanced,
   SourceCardSkeleton,
   type UrlSourceData,
@@ -14,6 +15,7 @@ import {
 import {
   Database,
   Filter,
+  Folder,
   Globe,
   Grid3X3,
   LayoutList,
@@ -35,6 +37,7 @@ import {
 type ViewMode = 'grid' | 'list';
 type SortBy = 'name' | 'updated' | 'documents';
 type FilterStatus = 'all' | CrawlStatusType;
+type FilterType = 'all' | SourceTypeValue;
 
 export default function SourcesPage() {
   const { data: sourcesData, isLoading, error, refetch } = useSources();
@@ -50,6 +53,7 @@ export default function SourcesPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
+  const [filterType, setFilterType] = useState<FilterType>('all');
   const [sortBy, setSortBy] = useState<SortBy>('updated');
   const [showFilters, setShowFilters] = useState(false);
 
@@ -78,6 +82,11 @@ export default function SourcesPage() {
       result = result.filter(s => s.metadata.crawl_status === filterStatus);
     }
 
+    // Type filter
+    if (filterType !== 'all') {
+      result = result.filter(s => s.metadata.source_type === filterType);
+    }
+
     // Sort
     result.sort((a, b) => {
       if (sortBy === 'name') {
@@ -96,7 +105,7 @@ export default function SourcesPage() {
     });
 
     return result;
-  }, [sources, searchQuery, filterStatus, sortBy]);
+  }, [sources, searchQuery, filterStatus, filterType, sortBy]);
 
   // Stats
   const stats = useMemo(() => {
@@ -136,6 +145,36 @@ export default function SourcesPage() {
       } catch (err) {
         console.error('Failed to create source:', err);
         toast.error('Failed to create source');
+        throw err;
+      }
+    },
+    [createSource, crawlSource]
+  );
+
+  const handleAddLocalSource = useCallback(
+    async (data: LocalSourceData) => {
+      try {
+        // Convert path to file:// URL
+        const fileUrl = data.path.startsWith('file://') ? data.path : `file://${data.path}`;
+
+        const result = await createSource.mutateAsync({
+          name: data.name,
+          url: fileUrl,
+          description: data.description,
+          source_type: 'local' as SourceTypeValue,
+        });
+
+        toast.success(`Local source "${data.name}" created`);
+
+        // Auto-start indexing for local sources
+        if (result?.id) {
+          setCrawlingSourceIds(prev => new Set(prev).add(result.id));
+          await crawlSource.mutateAsync(result.id);
+          toast.info('Started indexing local files...');
+        }
+      } catch (err) {
+        console.error('Failed to create local source:', err);
+        toast.error('Failed to create local source');
         throw err;
       }
     },
@@ -315,14 +354,16 @@ export default function SourcesPage() {
             type="button"
             onClick={() => setShowFilters(!showFilters)}
             className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-2 sm:py-2.5 rounded-lg sm:rounded-xl border transition-colors ${
-              showFilters || filterStatus !== 'all'
+              showFilters || filterStatus !== 'all' || filterType !== 'all'
                 ? 'bg-sc-purple/20 border-sc-purple/40 text-sc-purple'
                 : 'bg-sc-bg-base border-sc-fg-subtle/20 text-sc-fg-muted hover:border-sc-fg-subtle/40'
             }`}
           >
             <Filter width={16} height={16} />
             <span className="hidden xs:inline text-sm">Filters</span>
-            {filterStatus !== 'all' && <span className="w-2 h-2 bg-sc-purple rounded-full" />}
+            {(filterStatus !== 'all' || filterType !== 'all') && (
+              <span className="w-2 h-2 bg-sc-purple rounded-full" />
+            )}
           </button>
 
           {/* View Mode Toggle - Desktop only */}
@@ -404,6 +445,39 @@ export default function SourcesPage() {
                 </div>
               </div>
 
+              {/* Type Filter */}
+              <div className="flex-1 min-w-0">
+                <span className="block text-xs text-sc-fg-subtle mb-2">Type</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      { value: 'all', label: 'All', icon: null },
+                      { value: 'website', label: 'Website', icon: Globe },
+                      { value: 'local', label: 'Local', icon: Folder },
+                    ] as const
+                  ).map(type => {
+                    const Icon = type.icon;
+                    return (
+                      <button
+                        key={type.value}
+                        type="button"
+                        onClick={() => setFilterType(type.value)}
+                        className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                          filterType === type.value
+                            ? type.value === 'local'
+                              ? 'bg-sc-yellow text-sc-bg-dark'
+                              : 'bg-sc-purple text-white'
+                            : 'bg-sc-bg-highlight text-sc-fg-muted hover:text-sc-fg-primary'
+                        }`}
+                      >
+                        {Icon && <Icon width={12} height={12} />}
+                        {type.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Sort By */}
               <div className="flex-1 min-w-0">
                 <span className="block text-xs text-sc-fg-subtle mb-2">Sort by</span>
@@ -476,6 +550,7 @@ export default function SourcesPage() {
                 onClick={() => {
                   setSearchQuery('');
                   setFilterStatus('all');
+                  setFilterType('all');
                 }}
                 className="text-sc-purple hover:underline"
               >
@@ -531,6 +606,7 @@ export default function SourcesPage() {
         isOpen={showAddDialog}
         onClose={() => setShowAddDialog(false)}
         onSubmitUrl={handleAddSource}
+        onSubmitLocal={handleAddLocalSource}
         isSubmitting={createSource.isPending}
       />
     </div>

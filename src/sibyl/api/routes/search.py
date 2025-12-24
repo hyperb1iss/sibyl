@@ -97,6 +97,7 @@ async def explore(
             category=request.category,
             project=request.project,
             status=request.status,
+            include_archived=request.include_archived,
             limit=request.limit,
             offset=request.offset,
             organization_id=group_id,

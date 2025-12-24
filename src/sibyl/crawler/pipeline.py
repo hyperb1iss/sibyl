@@ -25,11 +25,13 @@ from sqlmodel import col
 from sibyl.crawler.chunker import ChunkStrategy, DocumentChunker
 from sibyl.crawler.embedder import EmbeddingService
 from sibyl.crawler.graph_integration import GraphIntegrationService
+from sibyl.crawler.local import LocalFileCrawler
 from sibyl.crawler.service import CrawlerService
 from sibyl.db import (
     CrawledDocument,
     CrawlSource,
     DocumentChunk,
+    SourceType,
     get_session,
 )
 
@@ -183,8 +185,16 @@ class IngestionPipeline:
         )
 
         try:
+            # Select crawler based on source type
+            if source.source_type == SourceType.LOCAL:
+                crawler: CrawlerService | LocalFileCrawler = LocalFileCrawler()
+            else:
+                if not self._crawler:
+                    raise RuntimeError("Web crawler not started")
+                crawler = self._crawler
+
             # Crawl and process documents
-            async for doc in self._crawler.crawl_source(
+            async for doc in crawler.crawl_source(
                 source,
                 max_pages=max_pages,
                 max_depth=max_depth,

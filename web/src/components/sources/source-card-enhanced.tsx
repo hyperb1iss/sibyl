@@ -9,6 +9,7 @@ import {
   Clock,
   ExternalLink,
   FileText,
+  Folder,
   Globe,
   Loader2,
   MoreVertical,
@@ -46,7 +47,7 @@ export interface CrawlProgress {
 const SOURCE_TYPE_ICONS: Record<SourceTypeValue, React.ReactNode> = {
   website: <Globe width={18} height={18} className="text-sc-purple" />,
   github: <Globe width={18} height={18} className="text-sc-cyan" />,
-  local: <FileText width={18} height={18} className="text-sc-coral" />,
+  local: <Folder width={18} height={18} className="text-sc-yellow" />,
   api_docs: <FileText width={18} height={18} className="text-sc-green" />,
 };
 
@@ -140,16 +141,23 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
               <h3 className="text-base font-semibold text-sc-fg-primary truncate group-hover:text-sc-purple transition-colors">
                 {source.name}
               </h3>
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-sc-fg-subtle hover:text-sc-cyan transition-colors truncate max-w-full"
-                onClick={e => e.stopPropagation()}
-              >
-                {getDomain(url)}
-                <ExternalLink width={10} height={10} />
-              </a>
+              {sourceType === 'local' ? (
+                <span className="inline-flex items-center gap-1.5 text-xs text-sc-fg-subtle truncate max-w-full">
+                  <Folder width={12} height={12} className="text-sc-yellow shrink-0" />
+                  <span className="font-mono truncate">{url.replace('file://', '')}</span>
+                </span>
+              ) : (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-sc-fg-subtle hover:text-sc-cyan transition-colors truncate max-w-full"
+                  onClick={e => e.stopPropagation()}
+                >
+                  {getDomain(url)}
+                  <ExternalLink width={10} height={10} />
+                </a>
+              )}
             </div>
           </div>
 
@@ -166,7 +174,11 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
             ) : (
               <Clock width={12} height={12} />
             )}
-            {isActive ? 'Crawling...' : statusConfig.label}
+            {isActive
+              ? sourceType === 'local'
+                ? 'Syncing...'
+                : 'Crawling...'
+              : statusConfig.label}
           </div>
         </div>
 
@@ -281,12 +293,12 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
               {crawlStatus === 'completed' ? (
                 <>
                   <RefreshCw width={14} height={14} />
-                  Re-crawl
+                  {sourceType === 'local' ? 'Re-sync' : 'Re-crawl'}
                 </>
               ) : (
                 <>
                   <Play width={14} height={14} />
-                  Start Crawl
+                  {sourceType === 'local' ? 'Sync' : 'Start Crawl'}
                 </>
               )}
             </button>

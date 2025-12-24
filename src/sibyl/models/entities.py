@@ -13,6 +13,7 @@ class EntityType(StrEnum):
     PATTERN = "pattern"
     RULE = "rule"
     TEMPLATE = "template"
+    CONVENTION = "convention"  # Coding conventions, style guides, best practices
     TOOL = "tool"
     LANGUAGE = "language"
     TOPIC = "topic"

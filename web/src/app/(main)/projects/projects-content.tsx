@@ -12,6 +12,7 @@ import { VelocityLineChart } from '@/components/metrics/charts';
 import { ProjectsEmptyState } from '@/components/ui/empty-state';
 import {
   AlertTriangle,
+  Archive,
   ArrowDownAZ,
   BarChart3,
   CheckCircle2,
@@ -116,6 +117,7 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [sortBy, setSortBy] = useState<ProjectSortOption>('active');
+  const [showArchived, setShowArchived] = useState(false);
 
   const selectedProjectId = searchParams.get('id');
 
@@ -124,7 +126,7 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
     data: projectsData,
     isLoading: projectsLoading,
     error: projectsError,
-  } = useProjects(initialProjects);
+  } = useProjects({ includeArchived: showArchived }, initialProjects);
 
   // Fetch ALL tasks (not filtered) to calculate counts per project
   const { data: allTasksData, isLoading: tasksLoading } = useTasks();
@@ -289,8 +291,27 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
             {/* Header with sort options */}
             <div className="flex items-center justify-between px-1 mb-3">
               <h2 className="text-sm font-semibold text-sc-fg-muted">All Projects</h2>
-              {/* Sort dropdown */}
-              <div className="flex items-center gap-1">
+              {/* Sort + filter options */}
+              <div className="flex items-center gap-2">
+                {/* Archive toggle */}
+                <Tooltip
+                  content={showArchived ? 'Hide archived' : 'Show archived'}
+                  position="bottom"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setShowArchived(!showArchived)}
+                    className={`p-1.5 rounded transition-colors ${
+                      showArchived
+                        ? 'bg-sc-yellow/20 text-sc-yellow'
+                        : 'text-sc-fg-subtle hover:text-sc-fg-muted hover:bg-sc-bg-highlight/50'
+                    }`}
+                  >
+                    <Archive width={14} height={14} />
+                  </button>
+                </Tooltip>
+                <span className="w-px h-4 bg-sc-fg-subtle/20" />
+                {/* Sort options */}
                 {PROJECT_SORT_OPTIONS.map(option => (
                   <Tooltip key={option.value} content={option.label} position="bottom">
                     <button
@@ -386,6 +407,7 @@ interface ProjectCardProps {
 function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) {
   const progress = stats && stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
   const hasActive = stats && stats.doing > 0;
+  const isArchived = project.metadata.status === 'archived';
 
   return (
     <button
@@ -395,34 +417,49 @@ function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) 
         w-full text-left p-4 rounded-xl transition-all duration-150
         border group relative overflow-hidden
         ${
-          isSelected
-            ? 'bg-gradient-to-br from-sc-purple/15 via-sc-bg-base to-sc-bg-base border-sc-purple/50 shadow-lg shadow-sc-purple/10'
-            : 'bg-sc-bg-base border-sc-fg-subtle/20 hover:border-sc-fg-subtle/40 hover:bg-sc-bg-highlight/30'
+          isArchived
+            ? 'bg-sc-bg-base/50 border-sc-fg-subtle/10 opacity-75'
+            : isSelected
+              ? 'bg-gradient-to-br from-sc-purple/15 via-sc-bg-base to-sc-bg-base border-sc-purple/50 shadow-lg shadow-sc-purple/10'
+              : 'bg-sc-bg-base border-sc-fg-subtle/20 hover:border-sc-fg-subtle/40 hover:bg-sc-bg-highlight/30'
         }
       `}
     >
       {/* Active indicator bar */}
-      {hasActive && !isSelected && (
+      {hasActive && !isSelected && !isArchived && (
         <div className="absolute left-0 top-0 bottom-0 w-1 bg-sc-purple" />
       )}
+      {/* Archived indicator bar */}
+      {isArchived && <div className="absolute left-0 top-0 bottom-0 w-1 bg-sc-yellow/50" />}
 
       {/* Header with name and badges */}
       <div className="flex items-start justify-between gap-2 mb-2">
         <h3
-          className={`font-semibold truncate ${isSelected ? 'text-sc-purple' : 'text-sc-fg-primary group-hover:text-white'}`}
+          className={`font-semibold truncate ${
+            isArchived
+              ? 'text-sc-fg-muted'
+              : isSelected
+                ? 'text-sc-purple'
+                : 'text-sc-fg-primary group-hover:text-white'
+          }`}
         >
           {project.name}
         </h3>
 
         {/* Status badges */}
         <div className="flex items-center gap-1 shrink-0">
-          {(stats?.blocked ?? 0) > 0 && (
+          {isArchived && (
+            <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-sc-yellow/20 text-sc-yellow">
+              <Archive width={10} height={10} />
+            </span>
+          )}
+          {!isArchived && (stats?.blocked ?? 0) > 0 && (
             <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-sc-yellow/20 text-sc-yellow">
               <Pause width={10} height={10} />
               {stats?.blocked}
             </span>
           )}
-          {(stats?.critical ?? 0) > 0 && (
+          {!isArchived && (stats?.critical ?? 0) > 0 && (
             <span className="flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-sc-red/20 text-sc-red">
               <Zap width={10} height={10} />
               {stats?.critical}
@@ -606,6 +643,21 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
     }
   }, [project.id, deleteEntity, onDeleted, router]);
 
+  const isArchived = project.metadata.status === 'archived';
+
+  const handleArchiveToggle = useCallback(async () => {
+    const newStatus = isArchived ? 'active' : 'archived';
+    try {
+      await updateEntity.mutateAsync({
+        id: project.id,
+        updates: { metadata: { ...project.metadata, status: newStatus } },
+      });
+      toast.success(isArchived ? 'Project restored' : 'Project archived');
+    } catch {
+      toast.error('Failed to update project status');
+    }
+  }, [project.id, project.metadata, updateEntity, isArchived]);
+
   // Sort tasks: blocked first, then doing, then by priority
   const priorityOrder: Record<string, number> = {
     critical: 0,
@@ -682,6 +734,19 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
             <FolderKanban width={14} height={14} />
             <span>Tasks</span>
           </Link>
+          <Tooltip content={isArchived ? 'Restore project' : 'Archive project'} position="bottom">
+            <button
+              type="button"
+              onClick={handleArchiveToggle}
+              className={`p-2 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg transition-colors ${
+                isArchived
+                  ? 'hover:bg-sc-green/20 hover:border-sc-green/30 text-sc-yellow hover:text-sc-green'
+                  : 'hover:bg-sc-yellow/20 hover:border-sc-yellow/30 text-sc-fg-muted hover:text-sc-yellow'
+              }`}
+            >
+              <Archive width={18} height={18} />
+            </button>
+          </Tooltip>
           <button
             type="button"
             onClick={() => setShowDeleteConfirm(true)}

@@ -138,8 +138,9 @@ class WebSocketClient {
       this.attemptReconnect();
     };
 
-    this.ws.onerror = error => {
-      console.error('[Sibyl WS] Error:', error);
+    this.ws.onerror = () => {
+      // WebSocket errors don't expose details (browser security).
+      // onclose handles reconnection - no need to log here.
     };
   }
 
@@ -152,7 +153,7 @@ class WebSocketClient {
 
   private attemptReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[Sibyl WS] Max reconnect attempts reached');
+      // Not an error - just stop trying. UI shows offline state.
       return;
     }
 

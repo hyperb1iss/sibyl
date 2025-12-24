@@ -3,7 +3,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FileText, Globe, Loader2, Plus, Upload, X } from '@/components/ui/icons';
+import { FileText, Folder, Globe, Loader2, Plus, Upload, X } from '@/components/ui/icons';
 import { api } from '@/lib/api';
 
 interface AddSourceDialogProps {
@@ -11,6 +11,7 @@ interface AddSourceDialogProps {
   onClose: () => void;
   onSubmitUrl: (data: UrlSourceData) => Promise<void>;
   onSubmitFile?: (file: File, metadata: FileMetadata) => Promise<void>;
+  onSubmitLocal?: (data: LocalSourceData) => Promise<void>;
   isSubmitting?: boolean;
 }
 
@@ -30,7 +31,14 @@ export interface FileMetadata {
   tags: string[];
 }
 
-type TabType = 'url' | 'file';
+export interface LocalSourceData {
+  path: string;
+  name: string;
+  description: string;
+  tags: string[];
+}
+
+type TabType = 'url' | 'file' | 'local';
 
 const SUGGESTED_TAGS = [
   'documentation',
@@ -48,6 +56,7 @@ export function AddSourceDialog({
   onClose,
   onSubmitUrl,
   onSubmitFile,
+  onSubmitLocal,
   isSubmitting = false,
 }: AddSourceDialogProps) {
   const [activeTab, setActiveTab] = useState<TabType>('url');
@@ -73,6 +82,13 @@ export function AddSourceDialog({
   const [fileTags, setFileTags] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Local form state
+  const [localPath, setLocalPath] = useState('');
+  const [localName, setLocalName] = useState('');
+  const [localDescription, setLocalDescription] = useState('');
+  const [localTags, setLocalTags] = useState<string[]>([]);
+  const [localTagInput, setLocalTagInput] = useState('');
+
   const resetForm = useCallback(() => {
     setUrl('');
     setUrlName('');
@@ -90,6 +106,11 @@ export function AddSourceDialog({
     setFileName('');
     setFileDescription('');
     setFileTags([]);
+    setLocalPath('');
+    setLocalName('');
+    setLocalDescription('');
+    setLocalTags([]);
+    setLocalTagInput('');
   }, []);
 
   const handleClose = useCallback(() => {
@@ -98,14 +119,19 @@ export function AddSourceDialog({
   }, [onClose, resetForm]);
 
   const handleAddTag = useCallback(
-    (tag: string, isFile = false) => {
+    (tag: string, target: 'url' | 'file' | 'local' = 'url') => {
       const trimmed = tag.trim().toLowerCase();
       if (!trimmed) return;
 
-      if (isFile) {
+      if (target === 'file') {
         if (!fileTags.includes(trimmed)) {
           setFileTags([...fileTags, trimmed]);
         }
+      } else if (target === 'local') {
+        if (!localTags.includes(trimmed)) {
+          setLocalTags([...localTags, trimmed]);
+        }
+        setLocalTagInput('');
       } else {
         if (!urlTags.includes(trimmed)) {
           setUrlTags([...urlTags, trimmed]);
@@ -113,18 +139,20 @@ export function AddSourceDialog({
       }
       setTagInput('');
     },
-    [urlTags, fileTags]
+    [urlTags, fileTags, localTags]
   );
 
   const handleRemoveTag = useCallback(
-    (tag: string, isFile = false) => {
-      if (isFile) {
+    (tag: string, target: 'url' | 'file' | 'local' = 'url') => {
+      if (target === 'file') {
         setFileTags(fileTags.filter(t => t !== tag));
+      } else if (target === 'local') {
+        setLocalTags(localTags.filter(t => t !== tag));
       } else {
         setUrlTags(urlTags.filter(t => t !== tag));
       }
     },
-    [urlTags, fileTags]
+    [urlTags, fileTags, localTags]
   );
 
   const handleUrlSubmit = async (e: React.FormEvent) => {
@@ -162,6 +190,24 @@ export function AddSourceDialog({
       name,
       description: fileDescription.trim(),
       tags: fileTags,
+    });
+
+    handleClose();
+  };
+
+  const handleLocalSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!localPath.trim() || !onSubmitLocal) return;
+
+    // Derive name from path if not provided
+    const pathName = localPath.split('/').filter(Boolean).pop() || 'Local Source';
+    const name = localName.trim() || pathName;
+
+    await onSubmitLocal({
+      path: localPath.trim(),
+      name,
+      description: localDescription.trim(),
+      tags: localTags,
     });
 
     handleClose();
@@ -309,11 +355,30 @@ export function AddSourceDialog({
                     } ${!onSubmitFile ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <Upload width={16} height={16} />
-                    Upload Document
+                    Upload
                     {activeTab === 'file' && (
                       <motion.div
                         layoutId="activeTab"
                         className="absolute bottom-0 left-0 right-0 h-0.5 bg-sc-cyan"
+                      />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('local')}
+                    disabled={!onSubmitLocal}
+                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors relative ${
+                      activeTab === 'local'
+                        ? 'text-sc-yellow'
+                        : 'text-sc-fg-muted hover:text-sc-fg-primary'
+                    } ${!onSubmitLocal ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <Folder width={16} height={16} />
+                    Local
+                    {activeTab === 'local' && (
+                      <motion.div
+                        layoutId="activeTab"
+                        className="absolute bottom-0 left-0 right-0 h-0.5 bg-sc-yellow"
                       />
                     )}
                   </button>
@@ -322,7 +387,7 @@ export function AddSourceDialog({
                 {/* Content */}
                 <div className="p-5 overflow-y-auto max-h-[calc(85vh-140px)]">
                   <AnimatePresence mode="wait">
-                    {activeTab === 'url' ? (
+                    {activeTab === 'url' && (
                       <motion.form
                         key="url"
                         initial={{ opacity: 0, x: -20 }}
@@ -563,7 +628,8 @@ export function AddSourceDialog({
                           </button>
                         </div>
                       </motion.form>
-                    ) : (
+                    )}
+                    {activeTab === 'file' && (
                       <motion.form
                         key="file"
                         initial={{ opacity: 0, x: 20 }}
@@ -681,7 +747,7 @@ export function AddSourceDialog({
                                 {tag}
                                 <button
                                   type="button"
-                                  onClick={() => handleRemoveTag(tag, true)}
+                                  onClick={() => handleRemoveTag(tag, 'file')}
                                   className="hover:text-white transition-colors"
                                 >
                                   <X width={12} height={12} />
@@ -696,7 +762,7 @@ export function AddSourceDialog({
                             onKeyDown={e => {
                               if (e.key === 'Enter') {
                                 e.preventDefault();
-                                handleAddTag(e.currentTarget.value, true);
+                                handleAddTag(e.currentTarget.value, 'file');
                                 e.currentTarget.value = '';
                               }
                             }}
@@ -727,6 +793,168 @@ export function AddSourceDialog({
                               <>
                                 <Upload width={16} height={16} />
                                 Upload Document
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </motion.form>
+                    )}
+                    {activeTab === 'local' && (
+                      <motion.form
+                        key="local"
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        transition={{ duration: 0.15 }}
+                        onSubmit={handleLocalSubmit}
+                        className="space-y-4"
+                      >
+                        {/* Path Input */}
+                        <div>
+                          <label
+                            htmlFor="local-path"
+                            className="block text-sm font-medium text-sc-fg-muted mb-2"
+                          >
+                            Directory Path <span className="text-sc-coral">*</span>
+                          </label>
+                          <div className="relative">
+                            <Folder
+                              width={18}
+                              height={18}
+                              className="absolute left-3 top-1/2 -translate-y-1/2 text-sc-fg-subtle"
+                            />
+                            <input
+                              id="local-path"
+                              type="text"
+                              value={localPath}
+                              onChange={e => setLocalPath(e.target.value)}
+                              placeholder="~/dev/conventions or /absolute/path"
+                              required
+                              className="w-full pl-10 pr-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary font-mono text-sm placeholder:text-sc-fg-subtle focus:border-sc-yellow focus:outline-none focus:ring-1 focus:ring-sc-yellow/30 transition-colors"
+                            />
+                          </div>
+                          <p className="text-xs text-sc-fg-subtle mt-1.5">
+                            Enter a local directory path. Sibyl will index all markdown files.
+                          </p>
+                        </div>
+
+                        {/* Name */}
+                        <div>
+                          <label
+                            htmlFor="local-name"
+                            className="block text-sm font-medium text-sc-fg-muted mb-2"
+                          >
+                            Display Name
+                          </label>
+                          <input
+                            id="local-name"
+                            type="text"
+                            value={localName}
+                            onChange={e => setLocalName(e.target.value)}
+                            placeholder="Auto-generated from directory name"
+                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-yellow focus:outline-none focus:ring-1 focus:ring-sc-yellow/30 transition-colors"
+                          />
+                        </div>
+
+                        {/* Description */}
+                        <div>
+                          <label
+                            htmlFor="local-description"
+                            className="block text-sm font-medium text-sc-fg-muted mb-2"
+                          >
+                            Description
+                          </label>
+                          <textarea
+                            id="local-description"
+                            value={localDescription}
+                            onChange={e => setLocalDescription(e.target.value)}
+                            placeholder="What's in this directory?"
+                            rows={2}
+                            className="w-full px-4 py-2.5 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-xl text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-yellow focus:outline-none focus:ring-1 focus:ring-sc-yellow/30 transition-colors resize-none"
+                          />
+                        </div>
+
+                        {/* Tags */}
+                        <div>
+                          <label
+                            htmlFor="local-tags"
+                            className="block text-sm font-medium text-sc-fg-muted mb-2"
+                          >
+                            Tags
+                          </label>
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {localTags.map(tag => (
+                              <span
+                                key={tag}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-sc-yellow/15 text-sc-yellow text-xs rounded-full border border-sc-yellow/30"
+                              >
+                                {tag}
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveTag(tag, 'local')}
+                                  className="hover:text-white transition-colors"
+                                >
+                                  <X width={12} height={12} />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                          <div className="flex gap-2">
+                            <input
+                              id="local-tags"
+                              type="text"
+                              value={localTagInput}
+                              onChange={e => setLocalTagInput(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleAddTag(localTagInput, 'local');
+                                }
+                              }}
+                              placeholder="Add a tag..."
+                              className="flex-1 px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-yellow focus:outline-none"
+                            />
+                          </div>
+                          {/* Suggested tags for local */}
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {['conventions', 'patterns', 'local', 'notes']
+                              .filter(t => !localTags.includes(t))
+                              .map(tag => (
+                                <button
+                                  key={tag}
+                                  type="button"
+                                  onClick={() => handleAddTag(tag, 'local')}
+                                  className="px-2 py-0.5 text-xs text-sc-fg-subtle border border-sc-fg-subtle/20 rounded-full hover:border-sc-yellow/30 hover:text-sc-yellow transition-colors"
+                                >
+                                  + {tag}
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+
+                        {/* Submit */}
+                        <div className="flex justify-end gap-3 pt-2">
+                          <button
+                            type="button"
+                            onClick={handleClose}
+                            className="px-4 py-2 text-sm text-sc-fg-muted hover:text-sc-fg-primary transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={!localPath.trim() || isSubmitting}
+                            className="flex items-center gap-2 px-5 py-2.5 bg-sc-yellow hover:bg-sc-yellow/80 text-sc-bg-dark rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-sc-yellow/25"
+                          >
+                            {isSubmitting ? (
+                              <>
+                                <Loader2 width={16} height={16} className="animate-spin" />
+                                Adding...
+                              </>
+                            ) : (
+                              <>
+                                <Folder width={16} height={16} />
+                                Add Local Source
                               </>
                             )}
                           </button>

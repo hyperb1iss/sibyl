@@ -409,6 +409,13 @@ export interface ManageResponse {
 export type SourceType = 'website' | 'github' | 'local' | 'api_docs';
 export type CrawlStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'partial';
 
+export interface LocalSourceData {
+  path: string;
+  name: string;
+  description: string;
+  tags: string[];
+}
+
 export interface Source {
   id: string;
   name: string;
@@ -990,13 +997,14 @@ export const api = {
 
   // Projects (via explore endpoint)
   projects: {
-    list: () =>
+    list: (options?: { includeArchived?: boolean }) =>
       fetchApi<TaskListResponse>('/search/explore', {
         method: 'POST',
         body: JSON.stringify({
           mode: 'list',
           types: ['project'],
           limit: 100,
+          include_archived: options?.includeArchived ?? false,
         }),
       }),
 

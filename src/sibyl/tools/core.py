@@ -961,6 +961,7 @@ async def explore(
     category: str | None = None,
     project: str | None = None,
     status: str | None = None,
+    include_archived: bool = False,
     limit: int = 50,
     offset: int = 0,
     organization_id: str | None = None,
@@ -1074,6 +1075,7 @@ async def explore(
             category=category,
             project=project,
             status=status,
+            include_archived=include_archived,
             limit=limit,
             offset=offset,
             filters=filters,
@@ -1091,6 +1093,7 @@ async def _explore_list(
     category: str | None,
     project: str | None,
     status: str | None,
+    include_archived: bool,
     limit: int,
     offset: int,
     filters: dict[str, Any],
@@ -1148,6 +1151,16 @@ async def _explore_list(
             status_val = _serialize_enum(entity_status)
             if status.lower() != str(status_val).lower():
                 continue
+
+        # Archive filter (for projects) - hide archived unless explicitly included
+        if not include_archived:
+            entity_type = _get_field(entity, "entity_type")
+            if entity_type and str(entity_type).lower() == "project":
+                entity_status = _get_field(entity, "status")
+                if entity_status:
+                    status_val = _serialize_enum(entity_status)
+                    if str(status_val).lower() == "archived":
+                        continue
 
         filtered_entities.append(entity)
 
@@ -1854,6 +1867,7 @@ async def _auto_discover_links(
         EntityType.PATTERN,
         EntityType.RULE,
         EntityType.TEMPLATE,
+        EntityType.CONVENTION,
         EntityType.TOPIC,
     ]
 
