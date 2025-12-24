@@ -76,6 +76,7 @@ class IngestionPipeline:
 
     def __init__(
         self,
+        organization_id: str,
         *,
         chunk_strategy: ChunkStrategy = ChunkStrategy.SEMANTIC,
         generate_embeddings: bool = True,
@@ -85,11 +86,13 @@ class IngestionPipeline:
         """Initialize the ingestion pipeline.
 
         Args:
+            organization_id: Organization ID for graph operations
             chunk_strategy: Strategy for chunking documents
             generate_embeddings: Whether to generate embeddings
             embedding_batch_size: Batch size for embedding generation
             integrate_with_graph: Whether to extract entities and link to graph
         """
+        self.organization_id = organization_id
         self.chunk_strategy = chunk_strategy
         self.generate_embeddings = generate_embeddings
         self.embedding_batch_size = embedding_batch_size
@@ -115,6 +118,7 @@ class IngestionPipeline:
                 graph_client = await get_graph_client()
                 self._graph_integration = GraphIntegrationService(
                     graph_client,
+                    self.organization_id,
                     extract_entities=True,
                     create_new_entities=False,  # Only link to existing entities for now
                 )
@@ -401,7 +405,7 @@ async def ingest_documentation(
         )
 
     # Run ingestion
-    async with IngestionPipeline() as pipeline:
+    async with IngestionPipeline(organization_id) as pipeline:
         return await pipeline.ingest_source(
             source,
             max_pages=max_pages,
@@ -409,13 +413,14 @@ async def ingest_documentation(
         )
 
 
-async def reingest_source(source_id: UUID) -> IngestionStats:
+async def reingest_source(source_id: UUID, organization_id: str) -> IngestionStats:
     """Re-ingest an existing source.
 
     Useful for refreshing stale documentation.
 
     Args:
         source_id: UUID of source to re-ingest
+        organization_id: Organization ID for graph operations
 
     Returns:
         IngestionStats with results
@@ -425,5 +430,5 @@ async def reingest_source(source_id: UUID) -> IngestionStats:
         if source is None:
             raise ValueError(f"Source not found: {source_id}")
 
-    async with IngestionPipeline() as pipeline:
+    async with IngestionPipeline(organization_id) as pipeline:
         return await pipeline.ingest_source(source)

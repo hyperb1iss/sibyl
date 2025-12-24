@@ -672,31 +672,38 @@ async def get_link_graph_status() -> LinkGraphStatusResponse:
 @router.post("/link-graph", response_model=LinkGraphResponse)
 async def link_all_sources_to_graph(
     request: LinkGraphRequest,
+    org: Organization = Depends(get_current_organization),
 ) -> LinkGraphResponse:
     """Extract entities from all source chunks and link to knowledge graph.
 
     Processes chunks that haven't been entity-linked yet (has_entities=False).
     Uses LLM to extract entities and matches them to existing graph entities.
     """
-    return await _process_graph_linking(source_id=None, request=request)
+    return await _process_graph_linking(
+        source_id=None, request=request, organization_id=str(org.id)
+    )
 
 
 @router.post("/{source_id}/link-graph", response_model=LinkGraphResponse)
 async def link_source_to_graph(
     source_id: str,
     request: LinkGraphRequest,
+    org: Organization = Depends(get_current_organization),
 ) -> LinkGraphResponse:
     """Extract entities from source chunks and link to knowledge graph.
 
     Processes chunks that haven't been entity-linked yet (has_entities=False).
     Uses LLM to extract entities and matches them to existing graph entities.
     """
-    return await _process_graph_linking(source_id=source_id, request=request)
+    return await _process_graph_linking(
+        source_id=source_id, request=request, organization_id=str(org.id)
+    )
 
 
 async def _process_graph_linking(
     source_id: str | None,
     request: LinkGraphRequest,
+    organization_id: str,
 ) -> LinkGraphResponse:
     """Internal function to process graph linking for one or all sources."""
     from sibyl.crawler.graph_integration import GraphIntegrationService
@@ -713,6 +720,7 @@ async def _process_graph_linking(
     try:
         integration = GraphIntegrationService(
             graph_client,
+            organization_id,
             extract_entities=True,
             create_new_entities=False,
         )

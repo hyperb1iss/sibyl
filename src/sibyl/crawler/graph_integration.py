@@ -284,14 +284,21 @@ class EntityLinker:
     to name-based fuzzy matching.
     """
 
-    def __init__(self, graph_client: GraphClient, similarity_threshold: float = 0.75):
+    def __init__(
+        self,
+        graph_client: GraphClient,
+        organization_id: str,
+        similarity_threshold: float = 0.75,
+    ):
         """Initialize the linker.
 
         Args:
             graph_client: Connected GraphClient
+            organization_id: Organization ID for graph operations
             similarity_threshold: Minimum similarity for linking
         """
         self.graph_client = graph_client
+        self.organization_id = organization_id
         self.similarity_threshold = similarity_threshold
         self._entity_cache: dict[str, list[dict]] = {}
 
@@ -321,8 +328,7 @@ class EntityLinker:
                 " RETURN n.uuid AS uuid, n.name AS name, n.entity_type AS entity_type LIMIT 1000"
             )
 
-            result = await self.graph_client.client.driver.execute_query(query)
-            records = GraphClient.normalize_result(result)
+            records = await self.graph_client.execute_read_org(query, self.organization_id)
 
             self._entity_cache[cache_key] = [
                 {"uuid": r["uuid"], "name": r["name"], "entity_type": r["entity_type"]}
@@ -434,6 +440,7 @@ class GraphIntegrationService:
     def __init__(
         self,
         graph_client: GraphClient,
+        organization_id: str,
         *,
         extract_entities: bool = True,
         create_new_entities: bool = False,
@@ -442,15 +449,17 @@ class GraphIntegrationService:
 
         Args:
             graph_client: Connected GraphClient
+            organization_id: Organization ID for graph operations
             extract_entities: Whether to extract entities from chunks
             create_new_entities: Whether to create new graph entities for unlinked
         """
         self.graph_client = graph_client
+        self.organization_id = organization_id
         self.extract_entities = extract_entities
         self.create_new_entities = create_new_entities
 
         self.extractor = EntityExtractor() if extract_entities else None
-        self.linker = EntityLinker(graph_client)
+        self.linker = EntityLinker(graph_client, organization_id)
 
     async def process_chunks(
         self,
@@ -547,8 +556,9 @@ class GraphIntegrationService:
                 RETURN count(r) as count
                 """
 
-                await self.graph_client.execute_write(
+                await self.graph_client.execute_write_org(
                     query,
+                    self.organization_id,
                     entity_uuid=entity_uuid,
                     doc_uuid=str(document_id),
                 )
@@ -574,6 +584,7 @@ async def integrate_document_with_graph(
     _document_id: UUID,
     chunks: list[DocumentChunk],
     source_name: str,
+    organization_id: str,
 ) -> IntegrationStats:
     """Convenience function to integrate a document with the knowledge graph.
 
@@ -581,6 +592,7 @@ async def integrate_document_with_graph(
         _document_id: Document UUID (reserved for future use)
         chunks: Document chunks
         source_name: Source name for logging
+        organization_id: Organization ID for graph operations
 
     Returns:
         IntegrationStats
@@ -593,5 +605,5 @@ async def integrate_document_with_graph(
         log.warning("Graph not available for integration", error=str(e))
         return IntegrationStats()
 
-    service = GraphIntegrationService(graph_client)
+    service = GraphIntegrationService(graph_client, organization_id)
     return await service.process_chunks(chunks, source_name)

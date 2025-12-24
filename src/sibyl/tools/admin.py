@@ -116,7 +116,9 @@ async def health_check(*, organization_id: str | None = None) -> HealthStatus:
             # Test search latency
             try:
                 start = time.time()
-                await entity_manager.search(query="test", entity_types=[EntityType.PATTERN], limit=1)
+                await entity_manager.search(
+                    query="test", entity_types=[EntityType.PATTERN], limit=1
+                )
                 search_latency_ms = (time.time() - start) * 1000
             except Exception as e:
                 errors.append(f"Search latency test failed: {e}")

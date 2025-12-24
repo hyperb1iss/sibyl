@@ -340,9 +340,7 @@ class IngestionPipeline:
             StorageResult with storage statistics.
         """
         try:
-            result = await store_ingestion_results(
-                entities, relationships, group_id=self.group_id
-            )
+            result = await store_ingestion_results(entities, relationships, group_id=self.group_id)
             log.info(
                 "Graph storage complete",
                 entities_stored=result.entities_stored,

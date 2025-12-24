@@ -98,6 +98,7 @@ def format_entity_for_prompt(entity: dict[str, Any], max_chars: int = 500) -> st
 
 async def get_community_content(
     client: GraphClient,
+    organization_id: str,
     community_id: str,
     max_members: int = 20,
 ) -> list[dict[str, Any]]:
@@ -125,8 +126,9 @@ async def get_community_content(
     members: list[dict[str, Any]] = []
 
     try:
-        result = await client.client.driver.execute_query(
+        result = await client.execute_read_org(
             query,
+            organization_id,
             community_id=community_id,
             limit=max_members,
         )
@@ -225,6 +227,7 @@ async def summarize_with_openai(
 
 async def generate_community_summary(
     client: GraphClient,
+    organization_id: str,
     community_id: str,
     config: SummaryConfig | None = None,
 ) -> CommunitySummary | None:
@@ -246,6 +249,7 @@ async def generate_community_summary(
     # Fetch member content
     members = await get_community_content(
         client,
+        organization_id,
         community_id,
         max_members=config.max_members_per_summary,
     )
@@ -265,6 +269,7 @@ async def generate_community_summary(
 
 async def store_community_summary(
     client: GraphClient,
+    organization_id: str,
     summary: CommunitySummary,
 ) -> bool:
     """Store summary in community entity.
@@ -292,8 +297,9 @@ async def store_community_summary(
         name = summary.summary[:50] + "..." if len(summary.summary) > 50 else summary.summary
 
     try:
-        result = await client.client.driver.execute_query(
+        result = await client.execute_write_org(
             query,
+            organization_id,
             community_id=summary.community_id,
             summary=summary.summary,
             key_concepts=summary.key_concepts,
@@ -315,6 +321,7 @@ async def store_community_summary(
 
 async def generate_community_summaries(
     client: GraphClient,
+    organization_id: str,
     community_ids: list[str] | None = None,
     config: SummaryConfig | None = None,
     store: bool = True,
@@ -345,7 +352,7 @@ async def generate_community_summaries(
         """
 
         try:
-            result = await client.client.driver.execute_query(query)
+            result = await client.execute_read_org(query, organization_id)
             community_ids = []
             for record in result:
                 if isinstance(record, (list, tuple)):
@@ -362,11 +369,11 @@ async def generate_community_summaries(
     summaries: list[CommunitySummary] = []
 
     for community_id in community_ids:
-        summary = await generate_community_summary(client, community_id, config)
+        summary = await generate_community_summary(client, organization_id, community_id, config)
 
         if summary:
             if store:
-                await store_community_summary(client, summary)
+                await store_community_summary(client, organization_id, summary)
             summaries.append(summary)
 
     log.info(
@@ -380,6 +387,7 @@ async def generate_community_summaries(
 
 async def update_stale_summaries(
     client: GraphClient,
+    organization_id: str,
     config: SummaryConfig | None = None,
 ) -> int:
     """Update summaries for communities with changed members.
@@ -407,7 +415,7 @@ async def update_stale_summaries(
     stale_ids: list[str] = []
 
     try:
-        result = await client.client.driver.execute_query(query)
+        result = await client.execute_read_org(query, organization_id)
         for record in result:
             if isinstance(record, (list, tuple)):
                 cid = record[0] if len(record) > 0 else None
@@ -428,6 +436,7 @@ async def update_stale_summaries(
     # Regenerate summaries
     summaries = await generate_community_summaries(
         client,
+        organization_id,
         community_ids=stale_ids,
         config=config,
         store=True,

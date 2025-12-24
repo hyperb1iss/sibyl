@@ -123,7 +123,7 @@ async def start_task(
         client = await get_graph_client()
         entity_manager = EntityManager(client, group_id=group_id)
         relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client)
+        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
         assignee = request.assignee if request else None
         task = await workflow.start_task(task_id, assignee or "system")
@@ -164,7 +164,7 @@ async def block_task(
         client = await get_graph_client()
         entity_manager = EntityManager(client, group_id=group_id)
         relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client)
+        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
         task = await workflow.block_task(task_id, request.reason)
 
@@ -203,7 +203,7 @@ async def unblock_task(
         client = await get_graph_client()
         entity_manager = EntityManager(client, group_id=group_id)
         relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client)
+        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
         task = await workflow.unblock_task(task_id)
 
@@ -243,7 +243,7 @@ async def submit_review(
         client = await get_graph_client()
         entity_manager = EntityManager(client, group_id=group_id)
         relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client)
+        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
         pr_url = request.pr_url if request else None
         commit_shas = request.commit_shas if request else []
@@ -285,7 +285,7 @@ async def complete_task(
         client = await get_graph_client()
         entity_manager = EntityManager(client, group_id=group_id)
         relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client)
+        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
         actual_hours = request.actual_hours if request else None
         learnings = request.learnings if request else None
@@ -327,7 +327,7 @@ async def archive_task(
         client = await get_graph_client()
         entity_manager = EntityManager(client, group_id=group_id)
         relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client)
+        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
         reason = request.reason if request else ""
         task = await workflow.archive_task(task_id, reason)

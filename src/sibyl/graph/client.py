@@ -254,8 +254,30 @@ class GraphClient:
             return result  # type: ignore[return-value]
         return []
 
+    def get_org_driver(self, organization_id: str) -> object:
+        """Get a driver cloned for a specific organization's graph.
+
+        Each organization has its own isolated graph in FalkorDB.
+        The organization_id becomes the graph/database name.
+
+        Args:
+            organization_id: The organization UUID to scope the driver to.
+
+        Returns:
+            A FalkorDB driver instance scoped to the org's graph.
+
+        Raises:
+            ValueError: If organization_id is empty.
+        """
+        if not organization_id:
+            raise ValueError("organization_id is required for org-scoped operations")
+        return self.client.driver.clone(organization_id)
+
     async def execute_read(self, query: str, **params: object) -> list[dict]:  # type: ignore[type-arg]
-        """Execute a read query and normalize results.
+        """Execute a read query on the default graph. DEPRECATED for multi-tenant ops.
+
+        WARNING: This uses the default graph, not org-scoped. Use execute_read_org()
+        for multi-tenant operations.
 
         Args:
             query: Cypher query to execute
@@ -268,7 +290,10 @@ class GraphClient:
         return self.normalize_result(result)
 
     async def execute_write(self, query: str, **params: object) -> list[dict]:  # type: ignore[type-arg]
-        """Execute a write query with serialization and result verification.
+        """Execute a write query on the default graph. DEPRECATED for multi-tenant ops.
+
+        WARNING: This uses the default graph, not org-scoped. Use execute_write_org()
+        for multi-tenant operations.
 
         Uses a semaphore to prevent concurrent writes from corrupting the
         FalkorDB connection. Returns the query results for verification.
@@ -285,6 +310,50 @@ class GraphClient:
         """
         async with self.write_lock:
             result = await self.client.driver.execute_query(query, **params)
+            return self.normalize_result(result)
+
+    async def execute_read_org(
+        self, query: str, organization_id: str, **params: object
+    ) -> list[dict]:  # type: ignore[type-arg]
+        """Execute a read query on an organization's graph.
+
+        This is the preferred method for multi-tenant read operations.
+
+        Args:
+            query: Cypher query to execute
+            organization_id: The organization UUID to scope the query to.
+            **params: Query parameters
+
+        Returns:
+            List of result records as dicts
+        """
+        driver = self.get_org_driver(organization_id)
+        result = await driver.execute_query(query, **params)
+        return self.normalize_result(result)
+
+    async def execute_write_org(
+        self, query: str, organization_id: str, **params: object
+    ) -> list[dict]:  # type: ignore[type-arg]
+        """Execute a write query on an organization's graph.
+
+        This is the preferred method for multi-tenant write operations.
+        Uses a semaphore to prevent concurrent writes from corrupting the
+        FalkorDB connection.
+
+        Args:
+            query: Cypher query to execute
+            organization_id: The organization UUID to scope the query to.
+            **params: Query parameters
+
+        Returns:
+            List of result records as dicts
+
+        Raises:
+            Exception: If query execution fails
+        """
+        async with self.write_lock:
+            driver = self.get_org_driver(organization_id)
+            result = await driver.execute_query(query, **params)
             return self.normalize_result(result)
 
     async def __aenter__(self) -> "GraphClient":

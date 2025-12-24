@@ -41,6 +41,7 @@ class TaskOrderResult:
 async def get_task_dependencies(
     client: "GraphClient",
     task_id: str,
+    organization_id: str,
     depth: int = 1,
     include_transitive: bool = False,
 ) -> DependencyResult:
@@ -77,8 +78,7 @@ async def get_task_dependencies(
             RETURN dep.uuid as dep_id, dep.status as dep_status
             """
 
-        result = await client.client.driver.execute_query(query, task_id=task_id)
-        rows = GraphClient.normalize_result(result)
+        rows = await client.execute_read_org(query, organization_id, task_id=task_id)
 
         dependencies: list[str] = []
         blockers: list[str] = []
@@ -123,6 +123,7 @@ async def get_task_dependencies(
 async def get_blocking_tasks(
     client: "GraphClient",
     task_id: str,
+    organization_id: str,
     depth: int = 1,
 ) -> DependencyResult:
     """Get tasks that are blocked by a given task.
@@ -148,8 +149,7 @@ async def get_blocking_tasks(
         RETURN dependent.uuid as dep_id, dependent.status as dep_status
         """
 
-        result = await client.client.driver.execute_query(query, task_id=task_id)
-        rows = GraphClient.normalize_result(result)
+        rows = await client.execute_read_org(query, organization_id, task_id=task_id)
 
         blocked_tasks: list[str] = []
         incomplete: list[str] = []
@@ -191,6 +191,7 @@ async def get_blocking_tasks(
 
 async def detect_dependency_cycles(
     client: "GraphClient",
+    organization_id: str,
     project_id: str | None = None,
     max_depth: int = 10,
 ) -> CycleResult:
@@ -217,16 +218,15 @@ async def detect_dependency_cycles(
             MATCH (task)-[r:RELATIONSHIP {relationship_type: 'DEPENDS_ON'}]->(dep)
             RETURN task.uuid as from_id, dep.uuid as to_id
             """
-            result = await client.client.driver.execute_query(query, project_id=project_id)
+            rows = await client.execute_read_org(query, organization_id, project_id=project_id)
         else:
             query = """
             MATCH (task)-[r:RELATIONSHIP {relationship_type: 'DEPENDS_ON'}]->(dep)
             RETURN task.uuid as from_id, dep.uuid as to_id
             """
-            result = await client.client.driver.execute_query(query)
+            rows = await client.execute_read_org(query, organization_id)
 
         # Build adjacency list
-        rows = GraphClient.normalize_result(result)
         graph: dict[str, list[str]] = {}
         for record in rows:
             if isinstance(record, (list, tuple)):
@@ -294,8 +294,9 @@ async def detect_dependency_cycles(
         )
 
 
-async def suggest_task_order(  # noqa: PLR0915
+async def suggest_task_order(
     client: "GraphClient",
+    organization_id: str,
     project_id: str | None = None,
     status_filter: list[TaskStatus] | None = None,
 ) -> TaskOrderResult:
@@ -321,8 +322,8 @@ async def suggest_task_order(  # noqa: PLR0915
             MATCH (task)-[r:RELATIONSHIP {relationship_type: 'BELONGS_TO'}]->(project {uuid: $project_id})
             RETURN task.uuid as task_id, task.status as status, task.task_order as priority
             """
-            task_result = await client.client.driver.execute_query(
-                task_query, project_id=project_id
+            task_rows = await client.execute_read_org(
+                task_query, organization_id, project_id=project_id
             )
         else:
             task_query = """
@@ -330,10 +331,9 @@ async def suggest_task_order(  # noqa: PLR0915
             WHERE task.entity_type = 'task'
             RETURN task.uuid as task_id, task.status as status, task.task_order as priority
             """
-            task_result = await client.client.driver.execute_query(task_query)
+            task_rows = await client.execute_read_org(task_query, organization_id)
 
         # Build task set with priorities
-        task_rows = GraphClient.normalize_result(task_result)
         tasks: dict[str, int] = {}  # task_id -> priority
         for record in task_rows:
             if isinstance(record, (list, tuple)):
@@ -362,17 +362,18 @@ async def suggest_task_order(  # noqa: PLR0915
             MATCH (task)-[r:RELATIONSHIP {relationship_type: 'DEPENDS_ON'}]->(dep)
             RETURN task.uuid as from_id, dep.uuid as to_id
             """
-            dep_result = await client.client.driver.execute_query(dep_query, project_id=project_id)
+            dep_rows = await client.execute_read_org(
+                dep_query, organization_id, project_id=project_id
+            )
         else:
             dep_query = """
             MATCH (task)-[r:RELATIONSHIP {relationship_type: 'DEPENDS_ON'}]->(dep)
             WHERE task.entity_type = 'task'
             RETURN task.uuid as from_id, dep.uuid as to_id
             """
-            dep_result = await client.client.driver.execute_query(dep_query)
+            dep_rows = await client.execute_read_org(dep_query, organization_id)
 
         # Build adjacency list and in-degree count
-        dep_rows = GraphClient.normalize_result(dep_result)
         graph: dict[str, list[str]] = {task_id: [] for task_id in tasks}
         in_degree: dict[str, int] = dict.fromkeys(tasks, 0)
 

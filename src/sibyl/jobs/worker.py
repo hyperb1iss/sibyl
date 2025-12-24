@@ -110,6 +110,7 @@ async def crawl_source(
 
         # Detach for background processing
         source_name = source.name
+        organization_id = str(source.organization_id)
         session.expunge(source)
 
     # Broadcast start event
@@ -124,7 +125,9 @@ async def crawl_source(
 
     # Run ingestion
     try:
-        async with IngestionPipeline(generate_embeddings=generate_embeddings) as pipeline:
+        async with IngestionPipeline(
+            organization_id, generate_embeddings=generate_embeddings
+        ) as pipeline:
             stats = await pipeline.ingest_source(
                 source,
                 max_pages=max_pages,

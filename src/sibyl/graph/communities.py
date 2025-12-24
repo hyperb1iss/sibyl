@@ -64,7 +64,7 @@ class DetectedCommunity:
         return len(self.member_ids)
 
 
-async def export_to_networkx(client: GraphClient) -> Any:
+async def export_to_networkx(client: GraphClient, organization_id: str) -> Any:
     """Export knowledge graph to NetworkX format.
 
     Args:
@@ -95,7 +95,7 @@ async def export_to_networkx(client: GraphClient) -> Any:
     """
 
     try:
-        node_result = await client.client.driver.execute_query(node_query)
+        node_result = await client.execute_read_org(node_query, organization_id)
 
         for record in node_result:
             if isinstance(record, (list, tuple)):
@@ -120,7 +120,7 @@ async def export_to_networkx(client: GraphClient) -> Any:
     """
 
     try:
-        edge_result = await client.client.driver.execute_query(edge_query)
+        edge_result = await client.execute_read_org(edge_query, organization_id)
 
         for record in edge_result:
             if isinstance(record, (list, tuple)):
@@ -314,6 +314,7 @@ def link_hierarchy(
 
 async def detect_communities(
     client: GraphClient,
+    organization_id: str,
     config: CommunityConfig | None = None,
     algorithm: str = "louvain",
 ) -> list[DetectedCommunity]:
@@ -338,7 +339,7 @@ async def detect_communities(
     )
 
     # Export graph to NetworkX
-    G = await export_to_networkx(client)  # noqa: N806
+    G = await export_to_networkx(client, organization_id)  # noqa: N806
 
     if G.number_of_nodes() < config.min_community_size:
         log.info("detect_communities_too_few_nodes", nodes=G.number_of_nodes())
@@ -396,6 +397,7 @@ async def detect_communities(
 
 async def store_communities(
     client: GraphClient,
+    organization_id: str,
     communities: list[DetectedCommunity],
     clear_existing: bool = True,
 ) -> int:
@@ -421,7 +423,7 @@ async def store_communities(
         DETACH DELETE c
         """
         try:
-            await client.client.driver.execute_query(clear_query)
+            await client.execute_write_org(clear_query, organization_id)
         except Exception as e:
             log.warning("clear_communities_failed", error=str(e))
 
@@ -451,8 +453,9 @@ async def store_communities(
         name = f"Community L{community.level} ({community.member_count} members)"
 
         try:
-            await client.client.driver.execute_query(
+            await client.execute_write_org(
                 create_query,
+                organization_id,
                 id=community.id,
                 name=name,
                 member_ids=community.member_ids,
@@ -476,8 +479,9 @@ async def store_communities(
             MERGE (e)-[:BELONGS_TO]->(c)
             """
             with contextlib.suppress(Exception):
-                await client.client.driver.execute_query(
+                await client.execute_write_org(
                     link_query,
+                    organization_id,
                     entity_id=member_id,
                     community_id=community.id,
                 )
@@ -488,6 +492,7 @@ async def store_communities(
 
 async def get_entity_communities(
     client: GraphClient,
+    organization_id: str,
     entity_id: str,
 ) -> list[dict[str, Any]]:
     """Get communities that an entity belongs to.
@@ -512,7 +517,7 @@ async def get_entity_communities(
     communities: list[dict[str, Any]] = []
 
     try:
-        result = await client.client.driver.execute_query(query, entity_id=entity_id)
+        result = await client.execute_read_org(query, organization_id, entity_id=entity_id)
 
         for record in result:
             if isinstance(record, (list, tuple)):
@@ -542,6 +547,7 @@ async def get_entity_communities(
 
 async def get_community_members(
     client: GraphClient,
+    organization_id: str,
     community_id: str,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
@@ -567,8 +573,9 @@ async def get_community_members(
     members: list[dict[str, Any]] = []
 
     try:
-        result = await client.client.driver.execute_query(
+        result = await client.execute_read_org(
             query,
+            organization_id,
             community_id=community_id,
             limit=limit,
         )

@@ -149,11 +149,17 @@ async def manage(
     try:
         # Route to appropriate handler
         if action in TASK_ACTIONS:
-            return await _handle_task_action(action, entity_id, data, organization_id=organization_id)
+            return await _handle_task_action(
+                action, entity_id, data, organization_id=organization_id
+            )
         if action in SOURCE_ACTIONS:
-            return await _handle_source_action(action, entity_id, data, organization_id=organization_id)
+            return await _handle_source_action(
+                action, entity_id, data, organization_id=organization_id
+            )
         if action in ANALYSIS_ACTIONS:
-            return await _handle_analysis_action(action, entity_id, data, organization_id=organization_id)
+            return await _handle_analysis_action(
+                action, entity_id, data, organization_id=organization_id
+            )
         # ADMIN_ACTIONS
         return await _handle_admin_action(action, entity_id, data, organization_id=organization_id)
 
@@ -205,7 +211,7 @@ async def _handle_task_action(
     from sibyl.errors import InvalidTransitionError
     from sibyl.tasks.workflow import TaskWorkflowEngine
 
-    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client)
+    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, organization_id)
 
     try:
         if action == "start_task":

@@ -72,11 +72,13 @@ class TaskWorkflowEngine:
         entity_manager: "EntityManager",
         relationship_manager: "RelationshipManager",
         graph_client: "GraphClient",
+        organization_id: str,
     ) -> None:
         """Initialize workflow engine with graph managers."""
         self._entity_manager = entity_manager
         self._relationship_manager = relationship_manager
         self._graph_client = graph_client
+        self._organization_id = organization_id
 
     def _validate_transition(
         self,
@@ -527,8 +529,9 @@ class TaskWorkflowEngine:
         RETURN total, done, doing
         """
 
-        result = await self._graph_client.client.driver.execute_query(query, project_id=project_id)
-        rows = self._graph_client.normalize_result(result)
+        rows = await self._graph_client.execute_read_org(
+            query, self._organization_id, project_id=project_id
+        )
         if rows:
             record = rows[0]
             total = record.get("total", 0)
