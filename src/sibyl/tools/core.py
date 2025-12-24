@@ -395,6 +395,8 @@ async def get_project_tags(client: "GraphClient", project_id: str) -> list[str]:
     """
     import json
 
+    from sibyl.graph.client import GraphClient as GC
+
     try:
         # Query existing tasks in this project for their tags
         result = await client.driver.execute_query(
@@ -409,9 +411,13 @@ async def get_project_tags(client: "GraphClient", project_id: str) -> list[str]:
             project_id=project_id,
         )
 
+        # Normalize FalkorDB result (returns tuple, not object with result_set)
+        rows = GC.normalize_result(result)
+
         all_tags: set[str] = set()
-        for row in result.result_set:
-            tags = row[0]
+        for row in rows:
+            # Row is a list, tags is first element
+            tags = row[0] if isinstance(row, list | tuple) else row.get("tags")
             if isinstance(tags, list):
                 all_tags.update(t.lower() for t in tags if isinstance(t, str))
             elif isinstance(tags, str):

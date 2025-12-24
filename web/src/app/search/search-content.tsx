@@ -1,7 +1,7 @@
 'use client';
 
-import { useSearchParams } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { CodeResult } from '@/components/search/code-result';
@@ -20,9 +20,9 @@ import { useCodeExamples, useRAGHybridSearch, useSearch, useSources, useStats } 
 type SearchMode = 'knowledge' | 'docs' | 'code';
 
 const SEARCH_MODES: { id: SearchMode; label: string; icon: string; description: string }[] = [
-  { id: 'knowledge', label: 'Knowledge', icon: ':', description: 'Patterns, rules, tasks' },
-  { id: 'docs', label: 'Docs', icon: ':', description: 'Crawled documentation' },
-  { id: 'code', label: 'Code', icon: ':', description: 'Code examples' },
+  { id: 'knowledge', label: 'Knowledge', icon: '◇', description: 'Patterns, rules, tasks' },
+  { id: 'docs', label: 'Docs', icon: '▤', description: 'Crawled documentation' },
+  { id: 'code', label: 'Code', icon: '⟨⟩', description: 'Code examples' },
 ];
 
 // Curated searchable entity types for knowledge mode
@@ -56,6 +56,7 @@ interface SearchContentProps {
 }
 
 export function SearchContent({ initialQuery, initialResults, initialStats }: SearchContentProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get('q') || '';
   const urlMode = (searchParams.get('mode') as SearchMode) || 'knowledge';
@@ -64,6 +65,34 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
   const [query, setQuery] = useState(initialQuery || urlQuery);
   const [submittedQuery, setSubmittedQuery] = useState(initialQuery || urlQuery);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Update URL when search params change
+  const updateUrl = useCallback(
+    (newParams: { q?: string; mode?: string; types?: string[]; status?: string }) => {
+      const params = new URLSearchParams(searchParams.toString());
+
+      if (newParams.q !== undefined) {
+        if (newParams.q) params.set('q', newParams.q);
+        else params.delete('q');
+      }
+      if (newParams.mode !== undefined) {
+        if (newParams.mode !== 'knowledge') params.set('mode', newParams.mode);
+        else params.delete('mode');
+      }
+      if (newParams.types !== undefined) {
+        params.delete('types');
+        for (const t of newParams.types) params.append('types', t);
+      }
+      if (newParams.status !== undefined) {
+        if (newParams.status) params.set('status', newParams.status);
+        else params.delete('status');
+      }
+
+      const newUrl = params.toString() ? `/search?${params.toString()}` : '/search';
+      router.replace(newUrl, { scroll: false });
+    },
+    [router, searchParams]
+  );
 
   // Knowledge mode filters
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
@@ -90,7 +119,10 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
     {
       query: submittedQuery,
       types: selectedTypes.length > 0 ? selectedTypes : undefined,
+      status: selectedStatus || undefined,
+      since: sinceDate || undefined,
       limit: 50,
+      include_documents: false, // Knowledge mode searches only the graph
     },
     {
       enabled: mode === 'knowledge' && submittedQuery.length > 0,
@@ -146,6 +178,12 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setSubmittedQuery(query);
+    updateUrl({ q: query });
+  };
+
+  const handleModeChange = (newMode: SearchMode) => {
+    setMode(newMode);
+    updateUrl({ mode: newMode });
   };
 
   const toggleType = (type: string) => {
@@ -162,14 +200,8 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
     setSelectedStatus(prev => (prev === status ? null : status));
   };
 
-  // Filter knowledge results by status if selected
-  const filteredKnowledgeResults = knowledgeResults?.results.filter((result: SearchResult) => {
-    if (selectedStatus && result.type === 'task') {
-      const taskStatus = (result.metadata as Record<string, unknown>)?.status;
-      return taskStatus === selectedStatus;
-    }
-    return true;
-  });
+  // Knowledge results are now filtered server-side
+  const filteredKnowledgeResults = knowledgeResults?.results;
 
   // Get type counts from stats
   const getTypeCount = (type: string) => stats?.entity_counts[type] ?? 0;
@@ -200,13 +232,14 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
           <button
             key={m.id}
             type="button"
-            onClick={() => setMode(m.id)}
+            onClick={() => handleModeChange(m.id)}
             className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
               mode === m.id
                 ? 'bg-sc-purple text-white'
                 : 'text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-elevated'
             }`}
           >
+            <span className="mr-1.5">{m.icon}</span>
             <span className="hidden sm:inline">{m.label}</span>
             <span className="sm:hidden">{m.label.slice(0, 4)}</span>
           </button>

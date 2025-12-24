@@ -622,8 +622,16 @@ export const api = {
       types?: string[];
       language?: string;
       category?: string;
+      status?: string;
+      project?: string;
+      assignee?: string;
+      since?: string;
       limit?: number;
       include_content?: boolean;
+      include_documents?: boolean;
+      include_graph?: boolean;
+      use_enhanced?: boolean;
+      boost_recent?: boolean;
     }) =>
       fetchApi<SearchResponse>('/search', {
         method: 'POST',

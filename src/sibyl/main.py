@@ -194,11 +194,15 @@ def run_server(
 def create_dev_app() -> Starlette:
     """Factory for dev mode.
 
-    Note: We don't embed the worker when uvicorn --reload is active because
-    the arq Worker doesn't handle cancellation gracefully, causing reloads to hang.
-    Run the worker separately with: uv run arq sibyl.jobs.WorkerSettings
+    Set SIBYL_RUN_WORKER=true to embed the arq worker in-process.
+    Note: arq Worker doesn't handle cancellation gracefully, so avoid using
+    with --reload. For dev with hot-reload, run worker separately:
+        uv run arq sibyl.jobs.WorkerSettings
     """
-    return create_combined_app(embed_worker=False)
+    import os
+
+    embed_worker = os.getenv("SIBYL_RUN_WORKER", "").lower() in ("true", "1", "yes")
+    return create_combined_app(embed_worker=embed_worker)
 
 
 def main() -> None:
