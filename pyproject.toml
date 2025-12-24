@@ -302,6 +302,7 @@ filterwarnings = [
 markers = [
     "integration: marks tests as integration tests",
     "slow: marks tests as slow",
+    "stress: marks tests as stress/load tests",
 ]
 
 # =============================================================================

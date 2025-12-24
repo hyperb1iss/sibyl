@@ -1506,6 +1506,15 @@ async def add(  # noqa: PLR0915
         relationship_manager = RelationshipManager(client, group_id=org_id)
 
         if entity_type == "task":
+            # Validate project_id is provided for tasks
+            if not project:
+                return AddResponse(
+                    success=False,
+                    id=None,
+                    message="Tasks require a project. Use explore(types=['project']) to find projects.",
+                    timestamp=datetime.now(UTC),
+                )
+
             # Parse due date if provided
             parsed_due_date = None
             if due_date:

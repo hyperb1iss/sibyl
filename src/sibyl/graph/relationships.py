@@ -224,9 +224,9 @@ class RelationshipManager:
         )
 
         try:
-            # Get all edges connected to this node
+            # Get all edges connected to this node (use org-scoped driver)
             edges = await EntityEdge.get_by_node_uuid(
-                self._client.driver,
+                self._driver,
                 entity_id,
             )
 
@@ -302,21 +302,62 @@ class RelationshipManager:
                 entity_id, relationship_types, direction="both"
             )
 
-            # Get the other entity for each relationship
+            # Collect all related entity IDs (avoiding N+1 query problem)
+            relationships = relationships[:limit]
+            other_ids = [
+                rel.target_id if rel.source_id == entity_id else rel.source_id
+                for rel in relationships
+            ]
+
+            if not other_ids:
+                return []
+
+            # Batch fetch all related entities in a single query
+            from graphiti_core.nodes import EntityNode
+
             entity_manager = EntityManager(self._client, group_id=self._group_id)
+            query = """
+                MATCH (n)
+                WHERE n.uuid IN $ids
+                RETURN n
+            """
+            rows = await self._client.execute_read_org(
+                query, organization_id=self._group_id, ids=other_ids
+            )
+
+            # Build entity lookup map - convert FalkorDB nodes to EntityNode then to Entity
+            entities_by_id: dict[str, Entity] = {}
+            for row in rows:
+                fdb_node = row.get("n")
+                if fdb_node and hasattr(fdb_node, "properties"):
+                    try:
+                        props = fdb_node.properties
+                        # Convert FalkorDB node to Graphiti EntityNode
+                        node = EntityNode(
+                            uuid=props.get("uuid", ""),
+                            name=props.get("name", ""),
+                            group_id=props.get("group_id", self._group_id),
+                            labels=list(fdb_node.labels) if hasattr(fdb_node, "labels") else [],
+                            created_at=props.get("created_at"),
+                            name_embedding=props.get("name_embedding"),
+                            summary=props.get("summary", ""),
+                            attributes={
+                                k: v for k, v in props.items()
+                                if k not in ("uuid", "name", "group_id", "labels", "created_at", "name_embedding", "summary")
+                            },
+                        )
+                        entity = entity_manager._node_to_entity(node)
+                        entities_by_id[entity.id] = entity
+                    except Exception:
+                        continue
+
+            # Match entities back to relationships
             results: list[tuple[Entity, Relationship]] = []
+            for rel, other_id in zip(relationships, other_ids):
+                if other_id in entities_by_id:
+                    results.append((entities_by_id[other_id], rel))
 
-            for rel in relationships[:limit]:
-                other_id = rel.target_id if rel.source_id == entity_id else rel.source_id
-                try:
-                    entity = await entity_manager.get(other_id)
-                    if entity:
-                        results.append((entity, rel))
-                except Exception:
-                    # Skip entities that can't be fetched
-                    continue
-
-            log.debug("Retrieved related entities", count=len(results))
+            log.debug("Retrieved related entities", count=len(results), batch_size=len(other_ids))
             return results
 
         except Exception as e:

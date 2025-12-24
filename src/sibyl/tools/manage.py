@@ -282,7 +282,9 @@ async def _handle_task_action(
             )
 
         if action == "update_task":
-            return await _update_task(entity_manager, entity_id, data)
+            return await _update_task(
+                entity_manager, entity_id, data, organization_id=organization_id
+            )
 
     except InvalidTransitionError as e:
         return ManageResponse(
@@ -300,14 +302,28 @@ async def _update_task(
     entity_manager: EntityManager,
     entity_id: str | None,
     data: dict[str, Any],
+    *,
+    organization_id: str | None = None,
 ) -> ManageResponse:
-    """Update task fields."""
+    """Update task fields.
+
+    Args:
+        entity_manager: EntityManager instance
+        entity_id: Task ID to update
+        data: Dict containing fields to update plus optional control flags:
+            - sync: If False, queue update via arq worker (default: True)
+            - All other fields are update values
+        organization_id: Organization ID (required for async mode)
+    """
     if not entity_id:
         return ManageResponse(
             success=False,
             action="update_task",
             message="entity_id required for update_task",
         )
+
+    # Extract control flag
+    sync = data.pop("sync", True)
 
     # Filter allowed update fields
     # Note: status is included for historical/bulk updates that need to bypass workflow
@@ -340,6 +356,28 @@ async def _update_task(
             message=f"No valid fields to update. Allowed: {sorted(allowed_fields)}",
         )
 
+    # Async mode: queue via arq worker
+    if not sync:
+        if not organization_id:
+            return ManageResponse(
+                success=False,
+                action="update_task",
+                entity_id=entity_id,
+                message="organization_id required for async update",
+            )
+
+        from sibyl.jobs.queue import enqueue_update_task
+
+        job_id = await enqueue_update_task(entity_id, updates, organization_id)
+        return ManageResponse(
+            success=True,
+            action="update_task",
+            entity_id=entity_id,
+            message=f"Task update queued: {', '.join(updates.keys())}",
+            data={"job_id": job_id, "queued_fields": list(updates.keys())},
+        )
+
+    # Sync mode: update directly
     result = await entity_manager.update(entity_id, updates)
     if result:
         return ManageResponse(

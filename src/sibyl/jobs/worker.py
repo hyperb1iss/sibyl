@@ -53,7 +53,7 @@ async def startup(ctx: dict[str, Any]) -> None:
     """Worker startup - initialize resources."""
     log.info(
         "Job worker online - ready to process jobs",
-        functions=["crawl_source", "sync_source", "sync_all_sources", "create_entity"],
+        functions=["crawl_source", "sync_source", "sync_all_sources", "create_entity", "update_task"],
     )
     ctx["start_time"] = datetime.now(UTC)
 
@@ -432,6 +432,77 @@ async def create_entity(
         raise
 
 
+async def update_task(
+    ctx: dict[str, Any],  # noqa: ARG001
+    task_id: str,
+    updates: dict[str, Any],
+    group_id: str,
+) -> dict[str, Any]:
+    """Update task fields asynchronously.
+
+    This job runs in the background so callers get fast responses.
+    Handles field validation and broadcasts update events.
+
+    Args:
+        ctx: arq context
+        task_id: The task entity ID to update
+        updates: Dict of field names to new values
+        group_id: Organization ID
+
+    Returns:
+        Dict with update results
+    """
+    from sibyl.graph.client import get_graph_client
+    from sibyl.graph.entities import EntityManager
+
+    log.info(
+        "update_task_started",
+        task_id=task_id,
+        fields=list(updates.keys()),
+    )
+
+    try:
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=group_id)
+
+        # Perform the update
+        result = await entity_manager.update(task_id, updates)
+
+        if result:
+            # Broadcast update event
+            await _safe_broadcast(
+                "task_updated",
+                {
+                    "id": task_id,
+                    "fields": list(updates.keys()),
+                },
+            )
+
+            log.info(
+                "update_task_completed",
+                task_id=task_id,
+                fields=list(updates.keys()),
+            )
+
+            return {
+                "task_id": task_id,
+                "updated_fields": list(updates.keys()),
+                "success": True,
+            }
+
+        log.warning("update_task_no_changes", task_id=task_id)
+        return {
+            "task_id": task_id,
+            "updated_fields": [],
+            "success": False,
+            "message": "No changes made",
+        }
+
+    except Exception as e:
+        log.exception("update_task_failed", task_id=task_id, error=str(e))
+        raise
+
+
 # Optional: Scheduled job to sync all sources
 async def sync_all_sources(ctx: dict[str, Any]) -> dict[str, Any]:
     """Sync all sources - can be run as a cron job."""
@@ -457,7 +528,7 @@ class WorkerSettings:
     redis_settings = get_redis_settings()
 
     # Job functions
-    functions = [crawl_source, sync_source, sync_all_sources, create_entity]
+    functions = [crawl_source, sync_source, sync_all_sources, create_entity, update_task]
 
     # Lifecycle hooks
     on_startup = startup
