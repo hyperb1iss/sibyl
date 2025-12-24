@@ -513,17 +513,19 @@ class RelationshipManager:
         self,
         relationship_types: list[RelationshipType] | None = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[Relationship]:
         """List all relationships in the graph.
 
         Args:
             relationship_types: Optional list of relationship types to filter by.
             limit: Maximum number to return.
+            offset: Offset for pagination.
 
         Returns:
             List of relationships.
         """
-        log.debug("Listing all relationships", limit=limit, types=relationship_types)
+        log.debug("Listing all relationships", limit=limit, offset=offset, types=relationship_types)
 
         try:
             # Direct Cypher query to get edges (Graphiti's EntityEdge.get_by_group_ids
@@ -542,6 +544,7 @@ class RelationshipManager:
                        target.uuid as target_id,
                        type(r) as rel_type,
                        r.created_at as created_at
+                SKIP {offset}
                 LIMIT {limit}
             """
 

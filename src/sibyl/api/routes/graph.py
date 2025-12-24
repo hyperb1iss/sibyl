@@ -108,6 +108,7 @@ async def get_all_nodes(
     org: Organization = Depends(get_current_organization),
     types: list[EntityType] | None = Query(default=None, description="Filter by entity types"),
     limit: int = Query(default=500, ge=1, le=2000, description="Maximum nodes"),
+    offset: int = Query(default=0, ge=0, description="Offset for pagination"),
 ) -> list[GraphNode]:
     """Get all nodes for graph visualization.
 
@@ -133,6 +134,7 @@ async def get_all_nodes(
                    n.name as name,
                    n.entity_type as entity_type,
                    n.summary as summary
+            SKIP {offset}
             LIMIT {limit}
         """
 
@@ -204,6 +206,7 @@ async def get_all_edges(
         default=None, description="Filter by relationship types"
     ),
     limit: int = Query(default=1000, ge=1, le=5000, description="Maximum edges"),
+    offset: int = Query(default=0, ge=0, description="Offset for pagination"),
 ) -> list[GraphEdge]:
     """Get all edges for graph visualization."""
     try:
@@ -211,10 +214,11 @@ async def get_all_edges(
         client = await get_graph_client()
         relationship_manager = RelationshipManager(client, group_id=group_id)
 
-        # Get all relationships
+        # Get all relationships with pagination
         all_relationships = await relationship_manager.list_all(
             relationship_types=relationship_types,
             limit=limit,
+            offset=offset,
         )
 
         return [

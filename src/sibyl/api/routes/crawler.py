@@ -27,6 +27,7 @@ from sibyl.api.schemas import (
     CrawlSourceCreate,
     CrawlSourceListResponse,
     CrawlSourceResponse,
+    CrawlSourceUpdate,
     CrawlStatsResponse,
     LinkGraphRequest,
     LinkGraphResponse,
@@ -214,6 +215,44 @@ async def get_document(document_id: str) -> CrawlDocumentResponse:
         return _document_to_response(doc)
 
 
+@router.delete("/documents/{document_id}")
+async def delete_document(document_id: str) -> dict[str, Any]:
+    """Delete a crawled document and its chunks."""
+    async with get_session() as session:
+        doc = await session.get(CrawledDocument, UUID(document_id))
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
+
+        source_id = str(doc.source_id)
+
+        # Delete chunks first
+        chunks = await session.execute(
+            select(DocumentChunk).where(col(DocumentChunk.document_id) == UUID(document_id))
+        )
+        chunks_deleted = 0
+        for chunk in chunks.scalars():
+            await session.delete(chunk)
+            chunks_deleted += 1
+
+        # Delete document
+        await session.delete(doc)
+
+        # Update source stats
+        source = await session.get(CrawlSource, UUID(source_id))
+        if source:
+            source.document_count = max(0, source.document_count - 1)
+            source.chunk_count = max(0, source.chunk_count - chunks_deleted)
+
+        log.info(
+            "Deleted document",
+            document_id=document_id,
+            chunks_deleted=chunks_deleted,
+        )
+
+    await broadcast_event("entity_deleted", {"type": "crawled_document", "id": document_id})
+    return {"deleted": document_id, "chunks_deleted": chunks_deleted}
+
+
 # =============================================================================
 # URL Preview
 # =============================================================================
@@ -359,6 +398,33 @@ async def get_source(source_id: str) -> CrawlSourceResponse:
             raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
 
         return _source_to_response(source)
+
+
+@router.patch("/{source_id}", response_model=CrawlSourceResponse)
+async def update_source(
+    source_id: str,
+    request: CrawlSourceUpdate,
+) -> CrawlSourceResponse:
+    """Update a crawl source."""
+    async with get_session() as session:
+        source = await session.get(CrawlSource, UUID(source_id))
+        if not source:
+            raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+
+        # Update fields if provided
+        update_data = request.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(source, field, value)
+
+        await session.flush()
+        await session.refresh(source)
+
+        log.info("Updated crawl source", id=str(source.id), fields=list(update_data.keys()))
+
+        response = _source_to_response(source)
+
+    await broadcast_event("entity_updated", {"type": "crawl_source", "id": str(source.id)})
+    return response
 
 
 @router.delete("/{source_id}")

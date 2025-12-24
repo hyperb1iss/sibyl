@@ -9,7 +9,7 @@ import { type QuickTaskData, QuickTaskModal } from '@/components/tasks/quick-tas
 import { TaskListMobile } from '@/components/tasks/task-list-mobile';
 import { CommandPalette, useKeyboardShortcuts } from '@/components/ui/command-palette';
 import { TasksEmptyState } from '@/components/ui/empty-state';
-import { Hash, X } from '@/components/ui/icons';
+import { Hash, Search, X } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
 import { FilterChip, TagChip } from '@/components/ui/toggle';
 import { ErrorState } from '@/components/ui/tooltip';
@@ -23,9 +23,10 @@ function TasksPageContent() {
   const projectFilter = searchParams.get('project') || undefined;
   const tagFilter = searchParams.get('tag') || undefined;
 
-  // State for modals
+  // State for modals and search
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isQuickTaskOpen, setIsQuickTaskOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const { data: tasksData, isLoading, error } = useTasks({ project: projectFilter });
   const { data: projectsData } = useProjects();
@@ -47,14 +48,31 @@ function TasksPageContent() {
     return Array.from(tagSet).sort();
   }, [allTasks]);
 
-  // Filter tasks by tag if filter is active
+  // Filter tasks by tag and search query
   const tasks = useMemo(() => {
-    if (!tagFilter) return allTasks;
-    return allTasks.filter(task => {
-      const tags = (task.metadata.tags as string[]) ?? [];
-      return tags.includes(tagFilter);
-    });
-  }, [allTasks, tagFilter]);
+    let filtered = allTasks;
+
+    // Filter by tag
+    if (tagFilter) {
+      filtered = filtered.filter(task => {
+        const tags = (task.metadata.tags as string[]) ?? [];
+        return tags.includes(tagFilter);
+      });
+    }
+
+    // Filter by search query (name, description, feature)
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(task => {
+        const name = task.name?.toLowerCase() ?? '';
+        const description = task.description?.toLowerCase() ?? '';
+        const feature = ((task.metadata.feature as string) ?? '').toLowerCase();
+        return name.includes(query) || description.includes(query) || feature.includes(query);
+      });
+    }
+
+    return filtered;
+  }, [allTasks, tagFilter, searchQuery]);
 
   // Find current project name for filtered view
   const currentProjectName = projectFilter
@@ -150,8 +168,33 @@ function TasksPageContent() {
     <div className="space-y-4 animate-fade-in">
       <Breadcrumb items={breadcrumbItems} />
 
-      {/* Filters - Mobile: inline row, Desktop: chips */}
+      {/* Search + Filters */}
       <div className="space-y-2 sm:space-y-3">
+        {/* Search Input - Full width on all sizes */}
+        <div className="relative">
+          <Search
+            width={16}
+            height={16}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-sc-fg-subtle"
+          />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search tasks by name, description, or feature..."
+            className="w-full pl-9 pr-3 py-2 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-purple focus:outline-none focus:ring-2 focus:ring-sc-purple/10 transition-all"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-sc-fg-subtle hover:text-sc-fg-primary"
+            >
+              <X width={14} height={14} />
+            </button>
+          )}
+        </div>
+
         {/* Mobile: Project Dropdown + New Button in row */}
         <div className="flex sm:hidden items-center gap-2">
           <select

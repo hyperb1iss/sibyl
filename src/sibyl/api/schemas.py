@@ -97,6 +97,7 @@ class SearchRequest(BaseModel):
         default=None, description="Filter by creation date (ISO: 2024-03-15 or relative: 7d, 2w)"
     )
     limit: int = Field(default=10, ge=1, le=50, description="Maximum results")
+    offset: int = Field(default=0, ge=0, description="Offset for pagination")
     include_content: bool = Field(default=True, description="Include full content in results")
     include_documents: bool = Field(
         default=True, description="Include crawled documentation in search"
@@ -131,6 +132,9 @@ class SearchResponse(BaseModel):
     filters: dict[str, Any]
     graph_count: int = Field(default=0, description="Number of results from knowledge graph")
     document_count: int = Field(default=0, description="Number of results from documents")
+    limit: int = Field(default=10, description="Results per page")
+    offset: int = Field(default=0, description="Current offset")
+    has_more: bool = Field(default=False, description="Whether more results exist")
 
 
 # =============================================================================
@@ -153,6 +157,7 @@ class ExploreRequest(BaseModel):
     project: str | None = Field(default=None, description="Filter by project ID (for tasks)")
     status: str | None = Field(default=None, description="Filter by status (for tasks)")
     limit: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0, description="Offset for pagination")
 
 
 class RelatedEntity(BaseModel):
@@ -173,6 +178,10 @@ class ExploreResponse(BaseModel):
     entities: list[dict[str, Any]]  # Can be EntitySummary or RelatedEntity
     total: int
     filters: dict[str, Any]
+    limit: int = Field(default=50, description="Results per page")
+    offset: int = Field(default=0, description="Current offset")
+    has_more: bool = Field(default=False, description="Whether more results exist")
+    actual_total: int | None = Field(default=None, description="Total matching before pagination")
 
 
 # =============================================================================
@@ -312,6 +321,16 @@ class CrawlSourceCreate(BaseModel):
     exclude_patterns: list[str] = Field(
         default_factory=list, description="URL patterns to exclude (regex)"
     )
+
+
+class CrawlSourceUpdate(BaseModel):
+    """Update a crawl source."""
+
+    name: str | None = Field(default=None, description="Human-readable name")
+    description: str | None = Field(default=None, description="Optional description")
+    crawl_depth: int | None = Field(default=None, ge=1, le=5, description="Maximum link depth")
+    include_patterns: list[str] | None = Field(default=None, description="URL patterns to include")
+    exclude_patterns: list[str] | None = Field(default=None, description="URL patterns to exclude")
 
 
 class CrawlSourceResponse(BaseModel):

@@ -90,6 +90,99 @@ class UpdateTaskRequest(BaseModel):
     feature: str | None = None
 
 
+class CreateTaskRequest(BaseModel):
+    """Request to create a new task."""
+
+    title: str
+    description: str | None = None
+    project_id: str
+    priority: str = "medium"
+    status: str = "todo"
+    assignees: list[str] = []
+    feature: str | None = None
+    technologies: list[str] = []
+    depends_on: list[str] = []
+
+
+# =============================================================================
+# Task CRUD
+# =============================================================================
+
+
+@router.post("", response_model=TaskActionResponse)
+async def create_task(
+    request: CreateTaskRequest,
+    org: Organization = Depends(get_current_organization),
+) -> TaskActionResponse:
+    """Create a new task."""
+    from sibyl.models.entities import Relationship, RelationshipType
+    from sibyl.models.tasks import Task, TaskPriority, TaskStatus
+
+    try:
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=str(org.id))
+        relationship_manager = RelationshipManager(client, group_id=str(org.id))
+
+        # Create task entity
+        task = Task(
+            name=request.title,
+            content=request.description or "",
+            description=request.description,
+            status=TaskStatus(request.status),
+            priority=TaskPriority(request.priority),
+            project_id=request.project_id,
+            assignees=request.assignees,
+            feature=request.feature,
+            technologies=request.technologies,
+        )
+
+        # Create in graph
+        task_id = await entity_manager.create_direct(task)
+
+        # Create BELONGS_TO relationship with project
+        belongs_to = Relationship(
+            id=f"rel_{task_id}_belongs_to_{request.project_id}",
+            source_id=task_id,
+            target_id=request.project_id,
+            relationship_type=RelationshipType.BELONGS_TO,
+        )
+        await relationship_manager.create(belongs_to)
+
+        # Create DEPENDS_ON relationships
+        for dep_id in request.depends_on:
+            depends_on = Relationship(
+                id=f"rel_{task_id}_depends_on_{dep_id}",
+                source_id=task_id,
+                target_id=dep_id,
+                relationship_type=RelationshipType.DEPENDS_ON,
+            )
+            await relationship_manager.create(depends_on)
+
+        log.info(
+            "create_task_success",
+            task_id=task_id,
+            project_id=request.project_id,
+        )
+
+        await broadcast_event(
+            "entity_created",
+            {"id": task_id, "entity_type": "task", "name": request.title},
+            org_id=str(org.id),
+        )
+
+        return TaskActionResponse(
+            success=True,
+            action="create",
+            task_id=task_id,
+            message="Task created successfully",
+            data={"project_id": request.project_id},
+        )
+
+    except Exception as e:
+        log.exception("create_task_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 # =============================================================================
 # Workflow Endpoints
 # =============================================================================

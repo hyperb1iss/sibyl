@@ -61,6 +61,7 @@ async def search(
             assignee=request.assignee,
             since=request.since,
             limit=request.limit,
+            offset=request.offset,
             include_content=request.include_content,
             include_documents=request.include_documents,
             include_graph=request.include_graph,
@@ -97,6 +98,7 @@ async def explore(
             project=request.project,
             status=request.status,
             limit=request.limit,
+            offset=request.offset,
             organization_id=group_id,
         )
 
@@ -113,6 +115,10 @@ async def explore(
             entities=entities_list,
             total=result.total,
             filters=result.filters,
+            limit=getattr(result, "limit", request.limit),
+            offset=getattr(result, "offset", request.offset),
+            has_more=getattr(result, "has_more", False),
+            actual_total=getattr(result, "actual_total", None),
         )
 
     except Exception as e:

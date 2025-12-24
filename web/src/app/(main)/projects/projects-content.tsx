@@ -21,13 +21,20 @@ import {
   Pause,
   Plus,
   Sparkles,
+  Trash,
   TrendingUp,
   Zap,
 } from '@/components/ui/icons';
 import { ErrorState, Tooltip } from '@/components/ui/tooltip';
 import type { TaskListResponse, TaskStatus, TaskSummary } from '@/lib/api';
 import { TASK_STATUS_CONFIG } from '@/lib/constants';
-import { useProjectMetrics, useProjects, useTasks, useUpdateEntity } from '@/lib/hooks';
+import {
+  useDeleteEntity,
+  useProjectMetrics,
+  useProjects,
+  useTasks,
+  useUpdateEntity,
+} from '@/lib/hooks';
 
 interface ProjectsContentProps {
   initialProjects: TaskListResponse;
@@ -495,11 +502,15 @@ interface ProjectDetailProps {
   project: TaskSummary;
   stats?: ProjectStats | null;
   tasks: TaskSummary[];
+  onDeleted?: () => void;
 }
 
-function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
+function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps) {
+  const router = useRouter();
   const updateEntity = useUpdateEntity();
+  const deleteEntity = useDeleteEntity();
   const { data: projectMetrics } = useProjectMetrics(project.id);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const progress = stats && stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
 
   // Get tech stack from metadata
@@ -583,6 +594,18 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
     [project.id, project.metadata, updateEntity]
   );
 
+  const handleDelete = useCallback(async () => {
+    try {
+      await deleteEntity.mutateAsync(project.id);
+      toast.success('Project deleted');
+      setShowDeleteConfirm(false);
+      onDeleted?.();
+      router.push('/projects');
+    } catch {
+      toast.error('Failed to delete project');
+    }
+  }, [project.id, deleteEntity, onDeleted, router]);
+
   // Sort tasks: blocked first, then doing, then by priority
   const priorityOrder: Record<string, number> = {
     critical: 0,
@@ -659,8 +682,64 @@ function ProjectDetail({ project, stats, tasks }: ProjectDetailProps) {
             <FolderKanban width={14} height={14} />
             <span>Tasks</span>
           </Link>
+          <button
+            type="button"
+            onClick={() => setShowDeleteConfirm(true)}
+            className="p-2 bg-sc-bg-elevated hover:bg-sc-red/20 border border-sc-fg-subtle/20 hover:border-sc-red/30 rounded-lg text-sc-fg-muted hover:text-sc-red transition-colors"
+            title="Delete Project"
+          >
+            <Trash width={18} height={18} />
+          </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <button
+            type="button"
+            className="absolute inset-0 bg-sc-bg-dark/80 backdrop-blur-sm cursor-default"
+            onClick={() => setShowDeleteConfirm(false)}
+            aria-label="Close"
+          />
+          <div className="relative bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-sc-red/20 rounded-full">
+                <AlertTriangle width={24} height={24} className="text-sc-red" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-sc-fg-primary mb-2">Delete Project?</h3>
+                <p className="text-sm text-sc-fg-muted mb-1">
+                  Are you sure you want to delete <strong>{project.name}</strong>?
+                </p>
+                {stats && stats.total > 0 && (
+                  <p className="text-sm text-sc-yellow">
+                    This project has {stats.total} task{stats.total !== 1 ? 's' : ''} that will be
+                    orphaned.
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 text-sc-fg-muted hover:text-sc-fg-primary transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleteEntity.isPending}
+                className="px-4 py-2 bg-sc-red hover:bg-sc-red/80 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
+              >
+                {deleteEntity.isPending ? 'Deleting...' : 'Delete Project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats Overview */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

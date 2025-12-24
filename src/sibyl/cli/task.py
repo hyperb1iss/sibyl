@@ -113,6 +113,9 @@ async def _resolve_task_id(client: "SibylClient", task_id: str) -> str:
 
 @app.command("list")
 def list_tasks(
+    query: Annotated[
+        str | None, typer.Option("-q", "--query", help="Search query (name/description)")
+    ] = None,
     status: Annotated[
         str | None, typer.Option("-s", "--status", help="todo|doing|blocked|review|done")
     ] = None,
@@ -124,7 +127,7 @@ def list_tasks(
     ] = False,
     csv_out: Annotated[bool, typer.Option("--csv", help="CSV output")] = False,
 ) -> None:
-    """List tasks with optional filters. Default: JSON output."""
+    """List tasks with optional filters. Use -q for semantic search. Default: JSON output."""
     fmt = "table" if table_out else ("csv" if csv_out else "json")
 
     @run_async
@@ -132,17 +135,26 @@ def list_tasks(
         client = get_client()
 
         try:
-            if fmt in ("json", "csv"):
-                response = await client.explore(
-                    mode="list",
-                    types=["task"],
-                    status=status,
-                    project=project,
-                    limit=limit,
-                )
+            # Use semantic search if query provided, otherwise use explore
+            if query:
+                if fmt in ("json", "csv"):
+                    response = await client.search(
+                        query=query,
+                        types=["task"],
+                        limit=limit,
+                    )
+                else:
+                    with spinner(f"Searching tasks for '{query}'...") as progress:
+                        progress.add_task("Searching...", total=None)
+                        response = await client.search(
+                            query=query,
+                            types=["task"],
+                            limit=limit,
+                        )
+                # Search returns results directly
+                entities = response.get("results", [])
             else:
-                with spinner("Loading tasks...") as progress:
-                    progress.add_task("Loading tasks...", total=None)
+                if fmt in ("json", "csv"):
                     response = await client.explore(
                         mode="list",
                         types=["task"],
@@ -150,10 +162,25 @@ def list_tasks(
                         project=project,
                         limit=limit,
                     )
+                else:
+                    with spinner("Loading tasks...") as progress:
+                        progress.add_task("Loading tasks...", total=None)
+                        response = await client.explore(
+                            mode="list",
+                            types=["task"],
+                            status=status,
+                            project=project,
+                            limit=limit,
+                        )
+                entities = response.get("entities", [])
 
-            entities = response.get("entities", [])
-
-            # Filter by assignee if specified (done client-side)
+            # Client-side filters (needed for search, or when API doesn't filter)
+            if status:
+                entities = [e for e in entities if e.get("metadata", {}).get("status") == status]
+            if project:
+                entities = [
+                    e for e in entities if e.get("metadata", {}).get("project_id") == project
+                ]
             if assignee:
                 entities = [
                     e

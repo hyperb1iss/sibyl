@@ -498,6 +498,8 @@ class ExploreResponse:
     entities: list[EntitySummary] | list[RelatedEntity]
     total: int  # Count of entities returned in this response
     filters: dict[str, Any]
+    limit: int = 50  # Results per page
+    offset: int = 0  # Current offset
     has_more: bool = False  # True if more results exist beyond the limit
     actual_total: int | None = None  # Actual total count in DB (if available)
 
@@ -633,6 +635,7 @@ async def search(  # noqa: PLR0915
     assignee: str | None = None,
     since: str | None = None,
     limit: int = 10,
+    offset: int = 0,
     include_content: bool = True,
     include_documents: bool = True,
     include_graph: bool = True,
@@ -673,6 +676,7 @@ async def search(  # noqa: PLR0915
         assignee: Filter tasks by assignee name.
         since: Temporal filter - only return entities created after this ISO date.
         limit: Maximum results to return (1-50, default 10).
+        offset: Offset for pagination (default 0).
         include_content: Include full content in results (default True).
         include_documents: Include crawled documentation in search (default True).
         include_graph: Include knowledge graph entities in search (default True).
@@ -688,8 +692,9 @@ async def search(  # noqa: PLR0915
         search("Next.js routing", source_name="next-dynenv")
         search("", types=["task"], status="todo", project="proj_auth")
     """
-    # Clamp limit
+    # Clamp limit and offset
     limit = max(1, min(limit, 50))
+    offset = max(0, offset)
 
     log.info(
         "unified_search",
@@ -923,16 +928,21 @@ async def search(  # noqa: PLR0915
     # Sort by score descending
     all_results.sort(key=lambda r: r.score, reverse=True)
 
-    # Limit to requested count
-    final_results = all_results[:limit]
+    # Apply pagination
+    total_count = len(all_results)
+    paginated_results = all_results[offset : offset + limit]
+    has_more = offset + len(paginated_results) < total_count
 
     return SearchResponse(
-        results=final_results,
-        total=len(final_results),
+        results=paginated_results,
+        total=total_count,
         query=query,
         filters=filters,
-        graph_count=len([r for r in final_results if r.result_origin == "graph"]),
-        document_count=len([r for r in final_results if r.result_origin == "document"]),
+        graph_count=len([r for r in paginated_results if r.result_origin == "graph"]),
+        document_count=len([r for r in paginated_results if r.result_origin == "document"]),
+        limit=limit,
+        offset=offset,
+        has_more=has_more,
     )
 
 
@@ -952,6 +962,7 @@ async def explore(
     project: str | None = None,
     status: str | None = None,
     limit: int = 50,
+    offset: int = 0,
     organization_id: str | None = None,
 ) -> ExploreResponse:
     """Navigate and browse the Sibyl knowledge graph structure.
@@ -990,6 +1001,7 @@ async def explore(
         project: Optional project filter (recommended for task listing).
         status: Filter tasks by workflow status (backlog, todo, doing, blocked, review, done).
         limit: Maximum results (1-200, default 50).
+        offset: Offset for pagination (default 0).
 
     Returns:
         ExploreResponse with:
@@ -1007,6 +1019,7 @@ async def explore(
     """
     # Clamp values
     limit = max(1, min(limit, 200))
+    offset = max(0, offset)
     depth = max(1, min(depth, 3))
 
     log.info(
@@ -1062,6 +1075,7 @@ async def explore(
             project=project,
             status=status,
             limit=limit,
+            offset=offset,
             filters=filters,
             group_id=organization_id,
         )
@@ -1078,6 +1092,7 @@ async def _explore_list(
     project: str | None,
     status: str | None,
     limit: int,
+    offset: int,
     filters: dict[str, Any],
     group_id: str,
 ) -> ExploreResponse:
@@ -1136,11 +1151,12 @@ async def _explore_list(
 
         filtered_entities.append(entity)
 
-    # Determine pagination
+    # Apply pagination
     actual_total = len(filtered_entities)
-    has_more = actual_total > limit
+    paginated_entities = filtered_entities[offset : offset + limit]
+    has_more = offset + len(paginated_entities) < actual_total
 
-    # Build result summaries (limited)
+    # Build result summaries
     results = [
         EntitySummary(
             id=entity.id,
@@ -1149,7 +1165,7 @@ async def _explore_list(
             description=entity.description[:200] if entity.description else "",
             metadata=_build_entity_metadata(entity),
         )
-        for entity in filtered_entities[:limit]
+        for entity in paginated_entities
     ]
 
     return ExploreResponse(
@@ -1157,6 +1173,8 @@ async def _explore_list(
         entities=results,
         total=len(results),
         filters=filters,
+        limit=limit,
+        offset=offset,
         has_more=has_more,
         actual_total=actual_total,
     )
