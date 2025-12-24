@@ -145,6 +145,120 @@ export interface OrgSwitchResponse {
   access_token: string;
 }
 
+export interface OrgCreateRequest {
+  name: string;
+  slug?: string;
+}
+
+export interface OrgUpdateRequest {
+  name?: string;
+  slug?: string;
+}
+
+export interface OrgCreateResponse {
+  organization: { id: string; slug: string; name: string };
+  access_token: string;
+}
+
+export interface OrgGetResponse {
+  organization: { id: string; slug: string; name: string };
+  role: string;
+}
+
+export interface OrgMember {
+  user: {
+    id: string;
+    github_id: number | null;
+    email: string | null;
+    name: string | null;
+    avatar_url: string | null;
+  };
+  role: string;
+  created_at: string;
+}
+
+export interface OrgMembersResponse {
+  members: OrgMember[];
+}
+
+// =============================================================================
+// Security Types (Sessions, API Keys, OAuth)
+// =============================================================================
+
+export interface Session {
+  id: string;
+  user_agent: string | null;
+  ip_address: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  is_current: boolean;
+}
+
+export interface SessionsResponse {
+  sessions: Session[];
+}
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  last_used_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface ApiKeysResponse {
+  api_keys: ApiKey[];
+}
+
+export interface ApiKeyCreateRequest {
+  name: string;
+  scopes?: string[];
+  expires_in_days?: number;
+}
+
+export interface ApiKeyCreateResponse {
+  api_key: ApiKey;
+  key: string; // Full key, only shown once
+}
+
+export interface OAuthConnection {
+  id: string;
+  provider: string;
+  provider_user_id: string;
+  email: string | null;
+  name: string | null;
+  avatar_url: string | null;
+  created_at: string;
+}
+
+export interface OAuthConnectionsResponse {
+  connections: OAuthConnection[];
+}
+
+export interface PasswordChangeRequest {
+  current_password: string;
+  new_password: string;
+}
+
+// User Preferences (flexible dict stored on user)
+export interface UserPreferences {
+  theme?: 'light' | 'dark' | 'system';
+  locale?: string;
+  timezone?: string;
+  graphShowLabels?: boolean;
+  graphDefaultZoom?: number;
+  dashboardDefaultView?: 'grid' | 'list';
+  notifyOnTaskAssigned?: boolean;
+  notifyOnMention?: boolean;
+  [key: string]: unknown; // Allow additional preferences
+}
+
+export interface PreferencesResponse {
+  preferences: UserPreferences;
+}
+
 // =============================================================================
 // Task Types
 // =============================================================================
@@ -590,12 +704,107 @@ export const api = {
       }),
   },
 
+  // Security (sessions, API keys, OAuth connections, password)
+  security: {
+    // Sessions
+    sessions: {
+      list: () => fetchApi<SessionsResponse>('/me/sessions'),
+      revoke: (sessionId: string) =>
+        fetchApi<{ success: boolean }>(`/me/sessions/${sessionId}`, {
+          method: 'DELETE',
+        }),
+      revokeAll: () =>
+        fetchApi<{ revoked: number }>('/me/sessions', {
+          method: 'DELETE',
+        }),
+    },
+
+    // API Keys
+    apiKeys: {
+      list: () => fetchApi<ApiKeysResponse>('/api-keys'),
+      create: (data: ApiKeyCreateRequest) =>
+        fetchApi<ApiKeyCreateResponse>('/api-keys', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+      revoke: (keyId: string) =>
+        fetchApi<{ success: boolean }>(`/api-keys/${keyId}/revoke`, {
+          method: 'POST',
+        }),
+    },
+
+    // OAuth Connections
+    connections: {
+      list: () => fetchApi<OAuthConnectionsResponse>('/me/connections'),
+      remove: (connectionId: string) =>
+        fetchApi<{ success: boolean }>(`/me/connections/${connectionId}`, {
+          method: 'DELETE',
+        }),
+    },
+
+    // Password
+    changePassword: (data: PasswordChangeRequest) =>
+      fetchApi<{ success: boolean }>('/me/password', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
+
+  // User Preferences
+  preferences: {
+    get: () => fetchApi<PreferencesResponse>('/me/preferences'),
+    update: (preferences: Partial<UserPreferences>) =>
+      fetchApi<PreferencesResponse>('/me/preferences', {
+        method: 'PATCH',
+        body: JSON.stringify({ preferences }),
+      }),
+  },
+
   orgs: {
     list: () => fetchApi<OrgListResponse>('/orgs'),
+    get: (slug: string) => fetchApi<OrgGetResponse>(`/orgs/${encodeURIComponent(slug)}`),
+    create: (data: OrgCreateRequest) =>
+      fetchApi<OrgCreateResponse>('/orgs', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (slug: string, data: OrgUpdateRequest) =>
+      fetchApi<{ organization: { id: string; slug: string; name: string } }>(
+        `/orgs/${encodeURIComponent(slug)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(data),
+        }
+      ),
+    delete: (slug: string) =>
+      fetchApi<void>(`/orgs/${encodeURIComponent(slug)}`, {
+        method: 'DELETE',
+      }),
     switch: (slug: string) =>
       fetchApi<OrgSwitchResponse>(`/orgs/${encodeURIComponent(slug)}/switch`, {
         method: 'POST',
       }),
+    members: {
+      list: (slug: string) =>
+        fetchApi<OrgMembersResponse>(`/orgs/${encodeURIComponent(slug)}/members`),
+      add: (slug: string, userId: string, role: string) =>
+        fetchApi<{ user_id: string; role: string }>(`/orgs/${encodeURIComponent(slug)}/members`, {
+          method: 'POST',
+          body: JSON.stringify({ user_id: userId, role }),
+        }),
+      updateRole: (slug: string, userId: string, role: string) =>
+        fetchApi<{ user_id: string; role: string }>(
+          `/orgs/${encodeURIComponent(slug)}/members/${userId}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({ role }),
+          }
+        ),
+      remove: (slug: string, userId: string) =>
+        fetchApi<{ success: boolean }>(`/orgs/${encodeURIComponent(slug)}/members/${userId}`, {
+          method: 'DELETE',
+        }),
+    },
   },
 
   // Tasks (via explore/manage endpoints)

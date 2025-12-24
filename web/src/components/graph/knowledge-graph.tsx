@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef } from 'react';
-import type { ForceGraphMethods, LinkObject, NodeObject } from 'react-force-graph-2d';
+import type { ForceGraphMethods } from 'react-force-graph-2d';
 import { EmptyState } from '@/components/ui/tooltip';
 import { ENTITY_COLORS } from '@/lib/constants';
 
@@ -51,24 +51,27 @@ interface GraphData {
   }>;
 }
 
-// Our custom node properties
-interface CustomNodeData {
+// Graph node with our custom properties
+interface GraphNode {
+  id: string;
   label: string;
   color: string;
   size: number;
   type?: string;
+  x?: number;
+  y?: number;
+  fx?: number;
+  fy?: number;
 }
 
-// Our custom link properties
-interface CustomLinkData {
+// Graph link with our custom properties
+interface GraphLink {
+  source: string | GraphNode;
+  target: string | GraphNode;
   label?: string;
   color: string;
   width: number;
 }
-
-// Full node type combining library type with our custom data
-type GraphNode = NodeObject<CustomNodeData>;
-type GraphLink = LinkObject<CustomNodeData, CustomLinkData>;
 
 export interface KnowledgeGraphRef {
   zoomIn: () => void;
@@ -87,9 +90,8 @@ interface KnowledgeGraphProps {
 
 export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>(
   function KnowledgeGraph({ data, onNodeClick, selectedNodeId, searchTerm }, ref) {
-    const graphRef = useRef<ForceGraphMethods<CustomNodeData, CustomLinkData> | undefined>(
-      undefined
-    );
+    // Using ForceGraphMethods with default generics since library types don't properly support custom types
+    const graphRef = useRef<ForceGraphMethods | undefined>(undefined);
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Expose control methods to parent
@@ -316,16 +318,25 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         className="relative w-full h-full bg-[#0a0812]"
         style={{ minHeight: '400px' }}
       >
+        {/* Cast callbacks to any since react-force-graph-2d types don't properly support custom node/link types */}
         <ForceGraph2D
-          ref={graphRef}
-          graphData={graphData}
-          nodeCanvasObject={paintNode}
+          ref={graphRef as React.MutableRefObject<ForceGraphMethods | undefined>}
+          graphData={graphData as { nodes: object[]; links: object[] }}
+          nodeCanvasObject={
+            paintNode as (node: object, ctx: CanvasRenderingContext2D, globalScale: number) => void
+          }
           nodeCanvasObjectMode={() => 'replace'}
-          linkCanvasObject={paintLink}
+          linkCanvasObject={
+            paintLink as (link: object, ctx: CanvasRenderingContext2D, globalScale: number) => void
+          }
           linkCanvasObjectMode={() => 'replace'}
-          nodePointerAreaPaint={paintPointerArea}
-          onNodeClick={handleNodeClick}
-          onNodeDragEnd={handleNodeDragEnd}
+          nodePointerAreaPaint={
+            paintPointerArea as (node: object, color: string, ctx: CanvasRenderingContext2D) => void
+          }
+          onNodeClick={handleNodeClick as (node: object, event: MouseEvent) => void}
+          onNodeDragEnd={
+            handleNodeDragEnd as (node: object, translate: { x: number; y: number }) => void
+          }
           cooldownTicks={100}
           warmupTicks={50}
           backgroundColor="#0a0812"

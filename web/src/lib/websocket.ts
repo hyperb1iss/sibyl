@@ -11,6 +11,7 @@ export type WebSocketEventType =
   | 'ingest_complete'
   | 'crawl_progress'
   | 'health_update'
+  | 'heartbeat'
   | 'connection_status';
 
 export interface WebSocketMessage {
@@ -30,6 +31,9 @@ class WebSocketClient {
   private maxReconnectAttempts = 10;
   private reconnectDelay = 1000;
   private _status: ConnectionStatus = 'disconnected';
+  private statusDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingStatus: ConnectionStatus | null = null;
+  private readonly STATUS_DEBOUNCE_MS = 100;
 
   get status(): ConnectionStatus {
     return this._status;
@@ -62,8 +66,33 @@ class WebSocketClient {
   }
 
   private setStatus(status: ConnectionStatus): void {
+    // Skip if status hasn't changed
+    if (this._status === status) return;
+
     this._status = status;
-    this.dispatch('connection_status', { status });
+
+    // Debounce status dispatches to prevent UI flickering
+    // "connected" is dispatched immediately; others are debounced
+    if (status === 'connected') {
+      // Clear any pending debounce and dispatch immediately
+      if (this.statusDebounceTimer) {
+        clearTimeout(this.statusDebounceTimer);
+        this.statusDebounceTimer = null;
+        this.pendingStatus = null;
+      }
+      this.dispatch('connection_status', { status });
+    } else {
+      this.pendingStatus = status;
+      if (!this.statusDebounceTimer) {
+        this.statusDebounceTimer = setTimeout(() => {
+          if (this.pendingStatus) {
+            this.dispatch('connection_status', { status: this.pendingStatus });
+          }
+          this.statusDebounceTimer = null;
+          this.pendingStatus = null;
+        }, this.STATUS_DEBOUNCE_MS);
+      }
+    }
   }
 
   connect(): void {
@@ -88,6 +117,13 @@ class WebSocketClient {
     this.ws.onmessage = event => {
       try {
         const message = JSON.parse(event.data) as WebSocketMessage;
+
+        // Respond to server heartbeat to keep connection alive
+        if (message.event === 'heartbeat') {
+          this.send('pong');
+          return;
+        }
+
         this.dispatch(message.event, message.data);
       } catch (e) {
         console.error('[Sibyl WS] Failed to parse message:', e);

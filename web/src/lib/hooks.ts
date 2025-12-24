@@ -30,7 +30,15 @@ export const queryKeys = {
   },
   orgs: {
     list: ['orgs', 'list'] as const,
+    detail: (slug: string) => ['orgs', 'detail', slug] as const,
+    members: (slug: string) => ['orgs', 'members', slug] as const,
   },
+  security: {
+    sessions: ['security', 'sessions'] as const,
+    apiKeys: ['security', 'apiKeys'] as const,
+    connections: ['security', 'connections'] as const,
+  },
+  preferences: ['preferences'] as const,
   entities: {
     all: ['entities'] as const,
     list: (params?: Parameters<typeof api.entities.list>[0]) =>
@@ -133,6 +141,206 @@ export function useSwitchOrg() {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.graph.all });
+    },
+  });
+}
+
+export function useOrg(slug: string, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.orgs.detail(slug),
+    queryFn: () => api.orgs.get(slug),
+    enabled: options?.enabled ?? !!slug,
+    retry: false,
+  });
+}
+
+export function useCreateOrg() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: import('./api').OrgCreateRequest) => api.orgs.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.orgs.list });
+      queryClient.invalidateQueries({ queryKey: queryKeys.auth.me });
+    },
+  });
+}
+
+export function useUpdateOrg() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ slug, data }: { slug: string; data: import('./api').OrgUpdateRequest }) =>
+      api.orgs.update(slug, data),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.orgs.list });
+      queryClient.invalidateQueries({ queryKey: queryKeys.orgs.detail(variables.slug) });
+    },
+  });
+}
+
+export function useDeleteOrg() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (slug: string) => api.orgs.delete(slug),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.orgs.list });
+      queryClient.invalidateQueries({ queryKey: queryKeys.auth.me });
+    },
+  });
+}
+
+export function useOrgMembers(slug: string, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.orgs.members(slug),
+    queryFn: () => api.orgs.members.list(slug),
+    enabled: options?.enabled ?? !!slug,
+    retry: false,
+  });
+}
+
+export function useAddOrgMember() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ slug, userId, role }: { slug: string; userId: string; role: string }) =>
+      api.orgs.members.add(slug, userId, role),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.orgs.members(variables.slug) });
+    },
+  });
+}
+
+export function useUpdateOrgMemberRole() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ slug, userId, role }: { slug: string; userId: string; role: string }) =>
+      api.orgs.members.updateRole(slug, userId, role),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.orgs.members(variables.slug) });
+    },
+  });
+}
+
+export function useRemoveOrgMember() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ slug, userId }: { slug: string; userId: string }) =>
+      api.orgs.members.remove(slug, userId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.orgs.members(variables.slug) });
+    },
+  });
+}
+
+// =============================================================================
+// Security Hooks (Sessions, API Keys, OAuth, Password)
+// =============================================================================
+
+export function useSessions() {
+  return useQuery({
+    queryKey: queryKeys.security.sessions,
+    queryFn: () => api.security.sessions.list(),
+  });
+}
+
+export function useRevokeSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (sessionId: string) => api.security.sessions.revoke(sessionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.security.sessions });
+    },
+  });
+}
+
+export function useRevokeAllSessions() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.security.sessions.revokeAll(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.security.sessions });
+    },
+  });
+}
+
+export function useApiKeys() {
+  return useQuery({
+    queryKey: queryKeys.security.apiKeys,
+    queryFn: () => api.security.apiKeys.list(),
+  });
+}
+
+export function useCreateApiKey() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: import('./api').ApiKeyCreateRequest) => api.security.apiKeys.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.security.apiKeys });
+    },
+  });
+}
+
+export function useRevokeApiKey() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (keyId: string) => api.security.apiKeys.revoke(keyId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.security.apiKeys });
+    },
+  });
+}
+
+export function useOAuthConnections() {
+  return useQuery({
+    queryKey: queryKeys.security.connections,
+    queryFn: () => api.security.connections.list(),
+  });
+}
+
+export function useRemoveOAuthConnection() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (connectionId: string) => api.security.connections.remove(connectionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.security.connections });
+    },
+  });
+}
+
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (data: import('./api').PasswordChangeRequest) => api.security.changePassword(data),
+  });
+}
+
+// =============================================================================
+// Preferences Hooks
+// =============================================================================
+
+export function usePreferences() {
+  return useQuery({
+    queryKey: queryKeys.preferences,
+    queryFn: () => api.preferences.get(),
+  });
+}
+
+export function useUpdatePreferences() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (preferences: Partial<import('./api').UserPreferences>) =>
+      api.preferences.update(preferences),
+    onSuccess: data => {
+      queryClient.setQueryData(queryKeys.preferences, data);
     },
   });
 }
