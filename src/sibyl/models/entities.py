@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 class EntityType(StrEnum):
@@ -79,13 +79,9 @@ class Entity(BaseModel):
     name: str = Field(description="Human-readable name")
     description: str = Field(default="", description="Detailed description")
     content: str = Field(default="", description="Full content/body")
-    workspace_id: str | None = Field(
-        default=None,
-        description="Workspace id for scoping (alias of organization_id in current model)",
-    )
     organization_id: str | None = Field(
         default=None,
-        description="Organization/tenant id for scoping (typically UUID as string)",
+        description="Organization/tenant id for scoping (UUID as string)",
     )
     created_by: str | None = Field(
         default=None,
@@ -100,15 +96,6 @@ class Entity(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     source_file: str | None = Field(default=None, description="Source file path")
     embedding: list[float] | None = Field(default=None, description="Vector embedding")
-
-    @model_validator(mode="after")
-    def _sync_workspace_org(self) -> "Entity":
-        # Keep legacy workspace_id and organization_id aligned.
-        if self.workspace_id is None and self.organization_id is not None:
-            self.workspace_id = self.organization_id
-        if self.organization_id is None and self.workspace_id is not None:
-            self.organization_id = self.workspace_id
-        return self
 
 
 class Pattern(Entity):

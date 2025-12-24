@@ -69,9 +69,10 @@ function EntityRingChart({ counts }: { counts: Record<string, number> }) {
 
   const polarToCartesian = (cx: number, cy: number, r: number, angle: number) => {
     const rad = ((angle - 90) * Math.PI) / 180;
+    // Round to 2 decimal places to prevent SSR/client hydration mismatch
     return {
-      x: cx + r * Math.cos(rad),
-      y: cy + r * Math.sin(rad),
+      x: Math.round((cx + r * Math.cos(rad)) * 100) / 100,
+      y: Math.round((cy + r * Math.sin(rad)) * 100) / 100,
     };
   };
 

@@ -6,15 +6,25 @@ claim as the canonical group id for graph operations.
 
 from __future__ import annotations
 
-DEFAULT_GRAPH_GROUP_ID = "conventions"
+
+class MissingOrganizationError(Exception):
+    """Raised when org context is required but not provided."""
 
 
 def resolve_group_id(claims: dict | None) -> str:
     """Resolve the graph group_id for a request.
 
-    - If JWT claims include an `org` id, use it (stringified).
-    - Otherwise fall back to a shared default group.
+    Args:
+        claims: JWT claims dict containing 'org' key.
+
+    Returns:
+        The organization ID as string.
+
+    Raises:
+        MissingOrganizationError: If no org claim is present.
     """
     if claims and claims.get("org"):
         return str(claims["org"])
-    return DEFAULT_GRAPH_GROUP_ID
+    raise MissingOrganizationError(
+        "Organization context required - cannot access graph without org claim in JWT"
+    )

@@ -36,10 +36,26 @@ def sanitize_search_query(query: str) -> str:
 class EntityManager:
     """Manages entity CRUD operations in the knowledge graph."""
 
-    def __init__(self, client: "GraphClient", *, group_id: str = "conventions") -> None:
-        """Initialize entity manager with graph client."""
+    def __init__(self, client: "GraphClient", *, group_id: str) -> None:
+        """Initialize entity manager with graph client.
+
+        Creates a cloned driver targeting the org-specific graph for multi-tenancy.
+        FalkorDB supports multiple isolated graphs within a single database instance.
+
+        Args:
+            client: The GraphClient instance.
+            group_id: Organization ID (required). No default - callers must provide org context.
+
+        Raises:
+            ValueError: If group_id is empty.
+        """
+        if not group_id:
+            raise ValueError("group_id is required - cannot access graph without org context")
         self._client = client
         self._group_id = group_id
+        # Clone the driver to use the org-specific graph (group_id as database name)
+        # This enables multi-tenancy: each org has its own isolated graph
+        self._driver = client.client.driver.clone(group_id)
 
     async def create(self, entity: Entity) -> str:
         """Create a new entity in the graph.
@@ -82,7 +98,7 @@ class EntityManager:
             desired_id = entity.id or created_uuid
 
             # Force deterministic UUID when caller provides one
-            await self._client.client.driver.execute_query(
+            await self._driver.execute_query(
                 """
                 MATCH (n {uuid: $created_uuid})
                 SET n.uuid = $desired_id
@@ -394,7 +410,7 @@ class EntityManager:
                 # FalkorDB expects Vectorf32 for vector ops. Casting via vecf32() avoids
                 # "expected Null or Vectorf32 but was List" type mismatches.
                 if embedding and isinstance(embedding, list):
-                    await self._client.client.driver.execute_query(
+                    await self._driver.execute_query(
                         "MATCH (n {uuid: $entity_id}) SET n.name_embedding = vecf32($embedding)",
                         entity_id=entity_id,
                         embedding=embedding,
@@ -402,7 +418,7 @@ class EntityManager:
                     log.debug("Stored embedding on node", entity_id=entity_id)
                 else:
                     # Allow clearing embeddings by passing null/empty.
-                    await self._client.client.driver.execute_query(
+                    await self._driver.execute_query(
                         "MATCH (n {uuid: $entity_id}) SET n.name_embedding = NULL",
                         entity_id=entity_id,
                     )
@@ -488,7 +504,7 @@ class EntityManager:
             # Direct Cypher query to get entities with all their properties
             # This is more reliable than Graphiti's get_by_group_ids which doesn't
             # return custom properties like entity_type
-            result = await self._client.client.driver.execute_query(
+            result = await self._driver.execute_query(
                 """
                 MATCH (n)
                 WHERE n.entity_type = $entity_type AND n.group_id = $group_id
@@ -577,9 +593,6 @@ class EntityManager:
             entity_type=entity_type,
             description=node_data.get("description") or node_data.get("summary", ""),
             content=node_data.get("content", ""),
-            workspace_id=node_data.get("group_id")
-            or metadata.get("workspace_id")
-            or metadata.get("organization_id"),
             organization_id=node_data.get("group_id") or metadata.get("organization_id"),
             created_by=metadata.get("created_by"),
             modified_by=metadata.get("modified_by"),
@@ -618,7 +631,7 @@ class EntityManager:
 
         metadata_json = json.dumps(metadata) if metadata else "{}"
 
-        await self._client.client.driver.execute_query(
+        await self._driver.execute_query(
             """
             MATCH (n {uuid: $entity_id})
             SET n += $props,
@@ -645,7 +658,6 @@ class EntityManager:
             "category",
             "languages",
             "tags",
-            "workspace_id",
             "organization_id",
             "created_by",
             "modified_by",

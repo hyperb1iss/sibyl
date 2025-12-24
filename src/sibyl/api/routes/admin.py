@@ -8,8 +8,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from sibyl.api.schemas import HealthResponse, IngestRequest, IngestResponse, StatsResponse
 from sibyl.api.websocket import broadcast_event
-from sibyl.auth.dependencies import require_org_role
-from sibyl.db.models import OrganizationRole
+from sibyl.auth.dependencies import get_current_organization, require_org_role
+from sibyl.db.models import Organization, OrganizationRole
 
 log = structlog.get_logger()
 
@@ -52,12 +52,14 @@ async def health() -> HealthResponse:
 
 
 @router.get("/stats", response_model=StatsResponse)
-async def stats() -> StatsResponse:
+async def stats(
+    org: Organization = Depends(get_current_organization),
+) -> StatsResponse:
     """Get knowledge graph statistics."""
     try:
         from sibyl.tools.core import get_stats
 
-        stats_data = await get_stats()
+        stats_data = await get_stats(organization_id=str(org.id))
 
         return StatsResponse(
             entity_counts=stats_data.get("entity_counts", {}),

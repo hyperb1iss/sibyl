@@ -22,10 +22,24 @@ log = structlog.get_logger()
 class RelationshipManager:
     """Manages relationship operations using Graphiti's EntityEdge API."""
 
-    def __init__(self, client: GraphClient, *, group_id: str = "conventions") -> None:
-        """Initialize relationship manager with graph client."""
+    def __init__(self, client: GraphClient, *, group_id: str) -> None:
+        """Initialize relationship manager with graph client.
+
+        Creates a cloned driver targeting the org-specific graph for multi-tenancy.
+
+        Args:
+            client: The GraphClient instance.
+            group_id: Organization ID (required). No default - callers must provide org context.
+
+        Raises:
+            ValueError: If group_id is empty.
+        """
+        if not group_id:
+            raise ValueError("group_id is required - cannot access graph without org context")
         self._client = client
         self._group_id = group_id
+        # Clone the driver to use the org-specific graph
+        self._driver = client.client.driver.clone(group_id)
 
     def _to_graphiti_edge(self, relationship: Relationship) -> EntityEdge:
         """Convert our Relationship model to Graphiti's EntityEdge.
@@ -392,7 +406,7 @@ class RelationshipManager:
                 LIMIT {limit}
             """
 
-            result = await self._client.driver.execute_query(query, group_id=self._group_id)
+            result = await self._driver.execute_query(query, group_id=self._group_id)
             rows = GraphClient.normalize_result(result)
 
             relationships = []

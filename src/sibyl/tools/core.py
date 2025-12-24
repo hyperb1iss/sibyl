@@ -628,7 +628,6 @@ async def search(  # noqa: PLR0915
     include_graph: bool = True,
     use_enhanced: bool = True,
     boost_recent: bool = True,
-    workspace_id: str | None = None,
     organization_id: str | None = None,
 ) -> SearchResponse:
     """Unified semantic search across knowledge graph AND documentation.
@@ -746,8 +745,11 @@ async def search(  # noqa: PLR0915
     if search_graph and query:
         try:
             client = await get_graph_client()
-            group_id = workspace_id or organization_id or "conventions"
-            entity_manager = EntityManager(client, group_id=group_id)
+            if not organization_id:
+                raise ValueError(
+                    "organization_id is required - cannot access graph without org context"
+                )
+            entity_manager = EntityManager(client, group_id=organization_id)
 
             # Determine entity types to search (exclude 'document' - that's for doc search)
             entity_types = None
@@ -784,7 +786,7 @@ async def search(  # noqa: PLR0915
                             entity_types=entity_types,
                             limit=limit * 3,
                             config=hybrid_config,
-                            group_id=group_id,
+                            group_id=organization_id,
                         ),
                         timeout_seconds=TIMEOUTS["search"],
                         operation_name="hybrid_search",
@@ -933,7 +935,6 @@ async def explore(
     project: str | None = None,
     status: str | None = None,
     limit: int = 50,
-    workspace_id: str | None = None,
     organization_id: str | None = None,
 ) -> ExploreResponse:
     """Navigate and browse the Sibyl knowledge graph structure.
@@ -1015,7 +1016,8 @@ async def explore(
     if status:
         filters["status"] = status
 
-    group_id = workspace_id or organization_id or "conventions"
+    if not organization_id:
+        raise ValueError("organization_id is required - cannot access graph without org context")
 
     try:
         if mode == "dependencies":
@@ -1024,7 +1026,7 @@ async def explore(
                 project=project,
                 limit=limit,
                 filters=filters,
-                group_id=group_id,
+                group_id=organization_id,
             )
         if mode in ("related", "traverse"):
             return await _explore_related(
@@ -1034,7 +1036,7 @@ async def explore(
                 limit=limit,
                 filters=filters,
                 mode=mode,
-                group_id=group_id,
+                group_id=organization_id,
             )
         return await _explore_list(
             types=types,
@@ -1044,7 +1046,7 @@ async def explore(
             status=status,
             limit=limit,
             filters=filters,
-            group_id=group_id,
+            group_id=organization_id,
         )
 
     except Exception as e:
@@ -1457,13 +1459,13 @@ async def add(  # noqa: PLR0915
 
     try:
         client = await get_graph_client()
-        group_id = str(
-            (metadata or {}).get("workspace_id")
-            or (metadata or {}).get("organization_id")
-            or (metadata or {}).get("group_id")
-            or "conventions"
-        )
-        entity_manager = EntityManager(client, group_id=group_id)
+        org_id = (metadata or {}).get("organization_id") or (metadata or {}).get("group_id")
+        if not org_id:
+            raise ValueError(
+                "organization_id is required in metadata - cannot create entity without org context"
+            )
+        org_id = str(org_id)
+        entity_manager = EntityManager(client, group_id=org_id)
 
         # Generate deterministic ID
         entity_id = _generate_id(entity_type, title, category or "general")
@@ -1474,14 +1476,13 @@ async def add(  # noqa: PLR0915
             "languages": languages or [],
             "tags": tags or [],
             "added_at": datetime.now(UTC).isoformat(),
-            "workspace_id": group_id,
-            "organization_id": group_id,
+            "organization_id": org_id,
             **(metadata or {}),
         }
 
         # Create appropriate entity type
         entity: Episode | Pattern | Task | Project
-        relationship_manager = RelationshipManager(client, group_id=group_id)
+        relationship_manager = RelationshipManager(client, group_id=org_id)
 
         if entity_type == "task":
             # Parse due date if provided
@@ -1862,16 +1863,28 @@ async def get_health() -> dict[str, Any]:
     return health
 
 
-async def get_stats() -> dict[str, Any]:
+async def get_stats(organization_id: str | None = None) -> dict[str, Any]:
     """Get knowledge graph statistics.
 
     Uses a single aggregation query for performance instead of N separate queries.
+
+    Args:
+        organization_id: Organization ID to scope stats to (required).
+
+    Raises:
+        ValueError: If organization_id is not provided.
     """
+    if not organization_id:
+        raise ValueError("organization_id is required - cannot get stats without org context")
+
     try:
         client = await get_graph_client()
 
+        # Clone driver for org-specific graph (multi-tenancy)
+        driver = client.client.driver.clone(organization_id)
+
         # Single aggregation query - much faster than N separate list queries
-        result = await client.client.driver.execute_query(
+        result = await driver.execute_query(
             """
             MATCH (n)
             WHERE n.entity_type IS NOT NULL

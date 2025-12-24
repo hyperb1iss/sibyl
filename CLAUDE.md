@@ -15,29 +15,39 @@
 
 **This project uses Sibyl as its own knowledge repository.**
 
-### Preferred: Use the `sibyl-knowledge` Skill
+### ALWAYS Use Skills
 
-**Invoke `/sibyl-knowledge` or use the CLI directly.** The skill provides full access to Sibyl's 4-tool API via CLI commands with JSON output optimized for LLM consumption.
+**Use `/sibyl-knowledge` and `/sibyl-project-manager` skills** for ALL Sibyl operations. These skills know the correct patterns and handle authentication properly.
 
-```bash
-# Search for knowledge
-sibyl search "authentication patterns"
+- `/sibyl-knowledge` - Search, explore, add knowledge, manage tasks
+- `/sibyl-project-manager` - Project audits, task triage, sprint planning
 
-# List tasks (JSON by default)
-sibyl task list --status todo
+**Never call Sibyl MCP tools or CLI directly** without going through a skill first. The skills ensure proper org context and prevent the "wrong graph" problem.
 
-# Quick knowledge capture
-sibyl add "Title" "What you learned..."
+### Research → Do → Reflect Cycle
 
-# Task lifecycle
-sibyl task start <id>
-sibyl task complete <id> --learnings "..."
+Every significant task follows this cycle:
+
+**1. RESEARCH** (before coding)
 ```
+/sibyl-knowledge search "topic"
+/sibyl-knowledge explore patterns
+```
+Find existing patterns, gotchas, past solutions. Don't reinvent wheels.
 
-The MCP server (`mcp__sibyl`) is also available but the CLI is preferred for:
-- Clean JSON output (no spinner noise)
-- Bulk operations and scripting
-- Direct task updates with `--status` and `--priority` flags
+**2. DO** (while coding)
+```
+/sibyl-knowledge task start <id>
+# ... implement with task context ...
+```
+Work is tracked. Status updates flow through skills.
+
+**3. REFLECT** (after completing)
+```
+/sibyl-knowledge task complete <id> --learnings "What I learned"
+/sibyl-knowledge add "Pattern Title" "What, why, how, caveats"
+```
+Capture insights. The graph gets smarter every session.
 
 ### When to Use Sibyl
 
@@ -50,14 +60,7 @@ The MCP server (`mcp__sibyl`) is also available but the CLI is preferred for:
 **Skip for:**
 - Quick fixes, typos, simple tweaks
 - Single-file changes with clear scope
-- Tasks you can complete in < 5 minutes
-
-### Sibyl Workflow (Complex Work)
-
-1. **Search first:** `sibyl search "topic"` - find patterns, gotchas, past solutions
-2. **Check tasks:** `sibyl task list --status todo` - see what's tracked
-3. **Work in context:** Start a task if one exists, or create one for significant work
-4. **Capture learnings:** `sibyl add "Title" "Learning..."` for discoveries
+- Tasks completable in < 5 minutes
 
 ---
 
@@ -298,7 +301,12 @@ mcp__next-devtools__init({ project_path: "/Users/bliss/dev/sibyl/web" })
 
 ```bash
 docker compose up -d                    # Start FalkorDB
-docker exec sibyl-falkordb redis-cli -a conventions GRAPH.QUERY conventions "MATCH (n) RETURN count(n)"
+
+# List available graphs (each org has its own graph, named by org UUID)
+docker exec sibyl-falkordb redis-cli -a conventions GRAPH.LIST
+
+# Query a specific org's graph (replace <org-uuid> with actual org ID)
+docker exec sibyl-falkordb redis-cli -a conventions GRAPH.QUERY <org-uuid> "MATCH (n) RETURN count(n)"
 ```
 
 ---
@@ -339,8 +347,10 @@ just test -m integration            # Integration tests only
 ### FalkorDB
 
 - **Port 6380** (not 6379) to avoid Redis conflicts
-- **Graph corruption** can cause crashes - nuke with `GRAPH.DELETE conventions`
+- **Multi-tenant graphs**: Each org has its own graph, named by org UUID
+- **Graph corruption** can cause crashes - nuke with `GRAPH.DELETE <org-uuid>`
 - **Connection drops** under load - ensure SEMAPHORE_LIMIT is set
+- **Organization required**: All graph operations require org context - no defaults
 
 ### Graphiti
 
@@ -419,6 +429,7 @@ sibyl search "authentication"
 sibyl task list --todo
 sibyl entity list --type pattern
 
-# Debug FalkorDB
-docker exec sibyl-falkordb redis-cli -a conventions GRAPH.QUERY conventions "MATCH (n) RETURN labels(n), count(*)"
+# Debug FalkorDB (list graphs, then query by org UUID)
+docker exec sibyl-falkordb redis-cli -a conventions GRAPH.LIST
+docker exec sibyl-falkordb redis-cli -a conventions GRAPH.QUERY <org-uuid> "MATCH (n) RETURN labels(n), count(*)"
 ```
