@@ -30,6 +30,16 @@ serve:
 dev:
     uv run uvicorn sibyl.main:create_dev_app --factory --reload --host localhost --port 3334
 
+# Install sibyl CLI globally (available as `sibyl` command anywhere)
+install:
+    uv tool install . --force
+    @echo "✓ sibyl installed globally at $(which sibyl)"
+
+# Install sibyl CLI in editable mode (dev changes auto-apply)
+install-editable:
+    uv tool install . --editable --force
+    @echo "✓ sibyl installed in editable mode at $(which sibyl)"
+
 # Install sibyl skills globally (Claude + Codex)
 install-skills:
     @echo "Installing Sibyl skills..."

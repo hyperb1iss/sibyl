@@ -49,7 +49,7 @@ app = typer.Typer(
     name="sibyl",
     help="Sibyl - Oracle of Development Wisdom",
     add_completion=False,
-    no_args_is_help=True,
+    no_args_is_help=False,  # We handle no-args ourselves for first-run UX
 )
 
 # Register subcommand groups
@@ -683,6 +683,54 @@ def worker(
         info("Worker stopped")
     finally:
         loop.close()
+
+
+@app.callback(invoke_without_command=True)
+def main_callback(ctx: typer.Context) -> None:
+    """Handle no-args case with welcome message."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # No subcommand - show welcome or help
+    from sibyl.cli import config_store
+    from sibyl.cli.onboarding import needs_onboarding, show_first_run_message
+
+    if needs_onboarding():
+        # First-time user - show friendly welcome
+        show_first_run_message()
+    else:
+        # Configured user - show quick status and help
+        _show_quick_start()
+
+
+def _show_quick_start() -> None:
+    """Show quick start tips for configured users."""
+    from rich.text import Text
+
+    from sibyl.cli.common import create_panel
+
+    text = Text()
+    text.append("Sibyl", style=f"bold {ELECTRIC_PURPLE}")
+    text.append(" - Oracle of Development Wisdom\n\n", style="white")
+    text.append("Quick commands:\n", style="dim")
+    text.append("  sibyl search ", style=NEON_CYAN)
+    text.append('"query"', style="white")
+    text.append("      Search knowledge\n", style="dim")
+    text.append("  sibyl task list", style=NEON_CYAN)
+    text.append("         Active tasks\n", style="dim")
+    text.append("  sibyl add ", style=NEON_CYAN)
+    text.append('"title" "..."', style="white")
+    text.append("   Capture learning\n", style="dim")
+    text.append("  sibyl up", style=NEON_CYAN)
+    text.append("                Start services\n", style="dim")
+    text.append("\n")
+    text.append("Run ", style="dim")
+    text.append("sibyl --help", style=f"bold {NEON_CYAN}")
+    text.append(" for all commands", style="dim")
+
+    console.print()
+    console.print(create_panel(text, title=None))
+    console.print()
 
 
 def main() -> None:

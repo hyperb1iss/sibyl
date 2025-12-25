@@ -323,6 +323,7 @@ export interface UserPreferences {
   dashboardDefaultView?: 'grid' | 'list';
   notifyOnTaskAssigned?: boolean;
   notifyOnMention?: boolean;
+  is_onboarded?: boolean; // Has user completed onboarding wizard
   [key: string]: unknown; // Allow additional preferences
 }
 
@@ -893,9 +894,9 @@ export const api = {
 
   // User Preferences
   preferences: {
-    get: () => fetchApi<PreferencesResponse>('/me/preferences'),
+    get: () => fetchApi<PreferencesResponse>('/users/me/preferences'),
     update: (preferences: Partial<UserPreferences>) =>
-      fetchApi<PreferencesResponse>('/me/preferences', {
+      fetchApi<PreferencesResponse>('/users/me/preferences', {
         method: 'PATCH',
         body: JSON.stringify({ preferences }),
       }),
