@@ -47,6 +47,36 @@ from sibyl.db import (
 from sibyl.db.models import Organization, OrganizationRole, utcnow_naive
 
 log = structlog.get_logger()
+
+
+async def _get_org_source(
+    session: Any, source_id: str, org: Organization
+) -> CrawlSource:
+    """Get a source and verify it belongs to the organization.
+
+    Args:
+        session: Database session
+        source_id: Source UUID string
+        org: Current organization
+
+    Returns:
+        The CrawlSource if found and owned by org
+
+    Raises:
+        HTTPException: 404 if not found or not owned by org
+    """
+    result = await session.execute(
+        select(CrawlSource).where(
+            col(CrawlSource.id) == UUID(source_id),
+            col(CrawlSource.organization_id) == org.id,
+        )
+    )
+    source = result.scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+    return source
+
+
 router = APIRouter(
     prefix="/sources",
     tags=["sources"],
@@ -109,32 +139,53 @@ def _document_to_response(doc: CrawledDocument) -> CrawlDocumentResponse:
 
 
 @router.get("/stats", response_model=CrawlStatsResponse)
-async def get_stats() -> CrawlStatsResponse:
-    """Get crawler statistics."""
+async def get_stats(
+    org: Organization = Depends(get_current_organization),
+) -> CrawlStatsResponse:
+    """Get crawler statistics for the current organization."""
     async with get_session() as session:
-        # Count sources
-        sources_result = await session.execute(select(func.count(CrawlSource.id)))
+        # Count sources (org-scoped)
+        sources_result = await session.execute(
+            select(func.count(CrawlSource.id)).where(
+                col(CrawlSource.organization_id) == org.id
+            )
+        )
         total_sources = sources_result.scalar() or 0
 
-        # Count documents
-        docs_result = await session.execute(select(func.count(CrawledDocument.id)))
+        # Count documents (via org-scoped sources)
+        docs_result = await session.execute(
+            select(func.count(CrawledDocument.id))
+            .join(CrawlSource)
+            .where(col(CrawlSource.organization_id) == org.id)
+        )
         total_documents = docs_result.scalar() or 0
 
-        # Count chunks
-        chunks_result = await session.execute(select(func.count(DocumentChunk.id)))
+        # Count chunks (via org-scoped sources)
+        chunks_result = await session.execute(
+            select(func.count(DocumentChunk.id))
+            .join(CrawledDocument)
+            .join(CrawlSource)
+            .where(col(CrawlSource.organization_id) == org.id)
+        )
         total_chunks = chunks_result.scalar() or 0
 
-        # Count chunks with embeddings
+        # Count chunks with embeddings (via org-scoped sources)
         embedded_result = await session.execute(
-            select(func.count(DocumentChunk.id)).where(col(DocumentChunk.embedding).is_not(None))
+            select(func.count(DocumentChunk.id))
+            .join(CrawledDocument)
+            .join(CrawlSource)
+            .where(
+                col(CrawlSource.organization_id) == org.id,
+                col(DocumentChunk.embedding).is_not(None),
+            )
         )
         chunks_with_embeddings = embedded_result.scalar() or 0
 
-        # Count sources by status
+        # Count sources by status (org-scoped)
         status_result = await session.execute(
-            select(CrawlSource.crawl_status, func.count(CrawlSource.id)).group_by(  # type: ignore[call-overload]
-                CrawlSource.crawl_status
-            )
+            select(CrawlSource.crawl_status, func.count(CrawlSource.id))
+            .where(col(CrawlSource.organization_id) == org.id)
+            .group_by(CrawlSource.crawl_status)  # type: ignore[call-overload]
         )
         sources_by_status = {
             str(status.value) if hasattr(status, "value") else str(status): count
@@ -182,11 +233,15 @@ async def get_health() -> CrawlHealthResponse:
 async def list_documents(
     limit: int = 50,
     offset: int = 0,
+    org: Organization = Depends(get_current_organization),
 ) -> CrawlDocumentListResponse:
-    """List all crawled documents."""
+    """List crawled documents for the current organization."""
     async with get_session() as session:
+        # Filter documents by org-owned sources
         query = (
             select(CrawledDocument)
+            .join(CrawlSource)
+            .where(col(CrawlSource.organization_id) == org.id)
             .order_by(col(CrawledDocument.crawled_at).desc())
             .offset(offset)
             .limit(limit)
@@ -194,8 +249,12 @@ async def list_documents(
         result = await session.execute(query)
         documents = list(result.scalars().all())
 
-        # Get total count
-        count_result = await session.execute(select(func.count(CrawledDocument.id)))
+        # Get total count (org-scoped)
+        count_result = await session.execute(
+            select(func.count(CrawledDocument.id))
+            .join(CrawlSource)
+            .where(col(CrawlSource.organization_id) == org.id)
+        )
         total = count_result.scalar() or 0
 
     return CrawlDocumentListResponse(
@@ -205,10 +264,22 @@ async def list_documents(
 
 
 @router.get("/documents/{document_id}", response_model=CrawlDocumentResponse)
-async def get_document(document_id: str) -> CrawlDocumentResponse:
-    """Get a crawled document by ID."""
+async def get_document(
+    document_id: str,
+    org: Organization = Depends(get_current_organization),
+) -> CrawlDocumentResponse:
+    """Get a crawled document by ID (org-scoped)."""
     async with get_session() as session:
-        doc = await session.get(CrawledDocument, UUID(document_id))
+        # Query with org check via source join
+        result = await session.execute(
+            select(CrawledDocument)
+            .join(CrawlSource)
+            .where(
+                col(CrawledDocument.id) == UUID(document_id),
+                col(CrawlSource.organization_id) == org.id,
+            )
+        )
+        doc = result.scalar_one_or_none()
         if not doc:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
@@ -216,10 +287,22 @@ async def get_document(document_id: str) -> CrawlDocumentResponse:
 
 
 @router.delete("/documents/{document_id}")
-async def delete_document(document_id: str) -> dict[str, Any]:
-    """Delete a crawled document and its chunks."""
+async def delete_document(
+    document_id: str,
+    org: Organization = Depends(get_current_organization),
+) -> dict[str, Any]:
+    """Delete a crawled document and its chunks (org-scoped)."""
     async with get_session() as session:
-        doc = await session.get(CrawledDocument, UUID(document_id))
+        # Query with org check via source join
+        result = await session.execute(
+            select(CrawledDocument)
+            .join(CrawlSource)
+            .where(
+                col(CrawledDocument.id) == UUID(document_id),
+                col(CrawlSource.organization_id) == org.id,
+            )
+        )
+        doc = result.scalar_one_or_none()
         if not doc:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
@@ -368,10 +451,11 @@ async def create_source(
 async def list_sources(
     status: str | None = None,
     limit: int = 50,
+    org: Organization = Depends(get_current_organization),
 ) -> CrawlSourceListResponse:
-    """List all crawl sources."""
+    """List crawl sources for the current organization."""
     async with get_session() as session:
-        query = select(CrawlSource)
+        query = select(CrawlSource).where(col(CrawlSource.organization_id) == org.id)
         if status:
             query = query.where(col(CrawlSource.crawl_status) == CrawlStatus(status))
         query = query.order_by(col(CrawlSource.created_at).desc()).limit(limit)
@@ -379,8 +463,12 @@ async def list_sources(
         result = await session.execute(query)
         sources = list(result.scalars().all())
 
-        # Get total count
-        count_result = await session.execute(select(func.count(CrawlSource.id)))
+        # Get total count (org-scoped)
+        count_result = await session.execute(
+            select(func.count(CrawlSource.id)).where(
+                col(CrawlSource.organization_id) == org.id
+            )
+        )
         total = count_result.scalar() or 0
 
     return CrawlSourceListResponse(
@@ -390,13 +478,13 @@ async def list_sources(
 
 
 @router.get("/{source_id}", response_model=CrawlSourceResponse)
-async def get_source(source_id: str) -> CrawlSourceResponse:
-    """Get a crawl source by ID."""
+async def get_source(
+    source_id: str,
+    org: Organization = Depends(get_current_organization),
+) -> CrawlSourceResponse:
+    """Get a crawl source by ID (org-scoped)."""
     async with get_session() as session:
-        source = await session.get(CrawlSource, UUID(source_id))
-        if not source:
-            raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
-
+        source = await _get_org_source(session, source_id, org)
         return _source_to_response(source)
 
 
@@ -404,12 +492,11 @@ async def get_source(source_id: str) -> CrawlSourceResponse:
 async def update_source(
     source_id: str,
     request: CrawlSourceUpdate,
+    org: Organization = Depends(get_current_organization),
 ) -> CrawlSourceResponse:
-    """Update a crawl source."""
+    """Update a crawl source (org-scoped)."""
     async with get_session() as session:
-        source = await session.get(CrawlSource, UUID(source_id))
-        if not source:
-            raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+        source = await _get_org_source(session, source_id, org)
 
         # Update fields if provided
         update_data = request.model_dump(exclude_unset=True)
@@ -428,12 +515,13 @@ async def update_source(
 
 
 @router.delete("/{source_id}")
-async def delete_source(source_id: str) -> dict[str, Any]:
-    """Delete a crawl source and all its documents."""
+async def delete_source(
+    source_id: str,
+    org: Organization = Depends(get_current_organization),
+) -> dict[str, Any]:
+    """Delete a crawl source and all its documents (org-scoped)."""
     async with get_session() as session:
-        source = await session.get(CrawlSource, UUID(source_id))
-        if not source:
-            raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+        source = await _get_org_source(session, source_id, org)
 
         # Delete chunks first (foreign key constraint)
         chunks_deleted = await session.execute(
@@ -469,19 +557,18 @@ async def delete_source(source_id: str) -> dict[str, Any]:
 async def ingest_source(
     source_id: str,
     request: CrawlIngestRequest,
+    org: Organization = Depends(get_current_organization),
 ) -> CrawlIngestResponse:
-    """Start crawling a source via job queue.
+    """Start crawling a source via job queue (org-scoped).
 
     Jobs are processed by the arq worker for reliability and persistence.
     Run the worker with: uv run arq sibyl.jobs.WorkerSettings
     """
     from sibyl.jobs import enqueue_crawl
 
-    # Verify source exists and check current status
+    # Verify source exists and belongs to org
     async with get_session() as session:
-        source = await session.get(CrawlSource, UUID(source_id))
-        if not source:
-            raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+        source = await _get_org_source(session, source_id, org)
 
         # Check if already crawling
         if source.crawl_status == CrawlStatus.IN_PROGRESS:
@@ -532,16 +619,17 @@ async def ingest_source(
 
 
 @router.get("/{source_id}/status")
-async def get_ingestion_status(source_id: str) -> dict[str, Any]:
-    """Get crawl status for a source.
+async def get_ingestion_status(
+    source_id: str,
+    org: Organization = Depends(get_current_organization),
+) -> dict[str, Any]:
+    """Get crawl status for a source (org-scoped).
 
     Returns both the source's crawl_status and any active job status.
     """
-    # Get source status from DB
+    # Get source status from DB (org-scoped)
     async with get_session() as session:
-        source = await session.get(CrawlSource, UUID(source_id))
-        if not source:
-            raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+        source = await _get_org_source(session, source_id, org)
 
         return {
             "source_id": source_id,
@@ -557,17 +645,18 @@ async def get_ingestion_status(source_id: str) -> dict[str, Any]:
 
 
 @router.post("/{source_id}/cancel", response_model=CrawlIngestResponse)
-async def cancel_crawl(source_id: str) -> CrawlIngestResponse:
-    """Cancel an in-progress crawl for a source.
+async def cancel_crawl(
+    source_id: str,
+    org: Organization = Depends(get_current_organization),
+) -> CrawlIngestResponse:
+    """Cancel an in-progress crawl for a source (org-scoped).
 
     Cancels the job if running and resets the source status.
     """
     from sibyl.jobs.queue import cancel_job
 
     async with get_session() as session:
-        source = await session.get(CrawlSource, UUID(source_id))
-        if not source:
-            raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
+        source = await _get_org_source(session, source_id, org)
 
         # Check if there's a job to cancel
         job_id = source.current_job_id

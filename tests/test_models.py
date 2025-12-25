@@ -59,3 +59,71 @@ class TestRelationshipModels:
             weight=0.5,
         )
         assert rel.weight == 0.5
+
+
+class TestCypherInjectionPrevention:
+    """Tests for Cypher injection prevention in relationship queries."""
+
+    def test_validate_relationship_type_valid(self) -> None:
+        """Test that valid relationship types pass validation."""
+        from sibyl.graph.relationships import _validate_relationship_type
+
+        # All enum values should be valid
+        for rel_type in RelationshipType:
+            result = _validate_relationship_type(rel_type.value)
+            assert result == rel_type.value
+
+    def test_validate_relationship_type_injection_attempt(self) -> None:
+        """Test that injection attempts are rejected."""
+        import pytest
+
+        from sibyl.graph.relationships import _validate_relationship_type
+
+        # Common injection patterns
+        injection_attempts = [
+            "RELATES_TO]->(x) DELETE x//",
+            "RELATES_TO}]->(x)//",
+            "'; DROP DATABASE;--",
+            "UNION SELECT * FROM users",
+            "RELATED_TO` DETACH DELETE n //",
+        ]
+
+        for attempt in injection_attempts:
+            with pytest.raises(ValueError, match="Invalid relationship type"):
+                _validate_relationship_type(attempt)
+
+    def test_sanitize_pagination_valid(self) -> None:
+        """Test that valid pagination values are passed through."""
+        from sibyl.graph.relationships import _sanitize_pagination
+
+        assert _sanitize_pagination(0) == 0
+        assert _sanitize_pagination(10) == 10
+        assert _sanitize_pagination(100) == 100
+
+    def test_sanitize_pagination_negative(self) -> None:
+        """Test that negative values are clamped to 0."""
+        from sibyl.graph.relationships import _sanitize_pagination
+
+        assert _sanitize_pagination(-1) == 0
+        assert _sanitize_pagination(-100) == 0
+
+    def test_sanitize_pagination_exceeds_max(self) -> None:
+        """Test that values exceeding max are clamped."""
+        from sibyl.graph.relationships import _sanitize_pagination
+
+        # Default max is 10000
+        assert _sanitize_pagination(50000) == 10000
+        # Custom max
+        assert _sanitize_pagination(500, max_value=100) == 100
+
+    def test_sanitize_pagination_type_error(self) -> None:
+        """Test that non-integer values raise TypeError."""
+        import pytest
+
+        from sibyl.graph.relationships import _sanitize_pagination
+
+        with pytest.raises(TypeError, match="must be int"):
+            _sanitize_pagination("10")  # type: ignore[arg-type]
+
+        with pytest.raises(TypeError, match="must be int"):
+            _sanitize_pagination(10.5)  # type: ignore[arg-type]

@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+.next/
+out/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+
+# Testing
+coverage/
+.vitest/
+
+# Development
+.env
+.env.*
+*.log
+*.tmp
+.DS_Store
+
+# Documentation
+*.md
+!README.md
+
+# TypeScript
+*.tsbuildinfo
+
+# Misc
+.turbo/
+.vercel/

@@ -465,6 +465,9 @@ class SearchResponse:
     filters: dict[str, Any]
     graph_count: int = 0
     document_count: int = 0
+    limit: int = 10
+    offset: int = 0
+    has_more: bool = False
 
 
 @dataclass

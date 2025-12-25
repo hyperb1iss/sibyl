@@ -180,7 +180,9 @@ async def create_task(
 
     except Exception as e:
         log.exception("create_task_failed", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(
+            status_code=500, detail="Failed to create task. Please try again."
+        ) from e
 
 
 # =============================================================================

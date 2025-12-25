@@ -18,6 +18,48 @@ from sibyl.models.entities import Entity, Relationship, RelationshipType
 
 log = structlog.get_logger()
 
+# Whitelist of valid relationship types for Cypher queries
+# Cypher doesn't support parameterized relationship types, so we validate against this
+VALID_RELATIONSHIP_TYPES = frozenset(rt.value for rt in RelationshipType)
+
+
+def _validate_relationship_type(rel_type: str) -> str:
+    """Validate relationship type is in the allowed whitelist.
+
+    Cypher doesn't support parameterized relationship types, so we must
+    validate against a strict whitelist to prevent injection.
+
+    Args:
+        rel_type: The relationship type string to validate.
+
+    Returns:
+        The validated relationship type.
+
+    Raises:
+        ValueError: If the relationship type is not in the whitelist.
+    """
+    if rel_type not in VALID_RELATIONSHIP_TYPES:
+        raise ValueError(
+            f"Invalid relationship type: {rel_type!r}. "
+            f"Must be one of: {sorted(VALID_RELATIONSHIP_TYPES)}"
+        )
+    return rel_type
+
+
+def _sanitize_pagination(value: int, max_value: int = 10000) -> int:
+    """Sanitize pagination parameters to prevent injection.
+
+    Args:
+        value: The pagination value (offset or limit).
+        max_value: Maximum allowed value.
+
+    Returns:
+        Sanitized integer within bounds.
+    """
+    if not isinstance(value, int):
+        raise TypeError(f"Pagination value must be int, got {type(value).__name__}")
+    return max(0, min(value, max_value))
+
 
 class RelationshipManager:
     """Manages relationship operations using Graphiti's EntityEdge API."""
@@ -136,7 +178,10 @@ class RelationshipManager:
             # Create edge via direct Cypher (more reliable than Graphiti's EntityEdge.save)
             # EntityEdge.save() has issues finding Episodic nodes by UUID
             edge = self._to_graphiti_edge(relationship)
-            rel_type = relationship.relationship_type.value
+
+            # Validate relationship type against whitelist to prevent Cypher injection
+            # (Cypher doesn't support parameterized relationship types)
+            rel_type = _validate_relationship_type(relationship.relationship_type.value)
 
             query = f"""
                 MATCH (source {{uuid: $source_uuid}})
@@ -528,12 +573,21 @@ class RelationshipManager:
         log.debug("Listing all relationships", limit=limit, offset=offset, types=relationship_types)
 
         try:
+            # Sanitize pagination to prevent injection
+            safe_offset = _sanitize_pagination(offset, max_value=100000)
+            safe_limit = _sanitize_pagination(limit, max_value=1000)
+
             # Direct Cypher query to get edges (Graphiti's EntityEdge.get_by_group_ids
             # expects ENTITY_EDGE label but our edges have RELATES_TO, MENTIONS, etc.)
             type_filter = ""
             if relationship_types:
-                type_names = [rt.value for rt in relationship_types]
-                type_filter = f"AND type(r) IN {type_names}"
+                # Validate each type against whitelist to prevent Cypher injection
+                validated_types = [
+                    _validate_relationship_type(rt.value) for rt in relationship_types
+                ]
+                # Build safe IN clause with quoted strings
+                quoted_types = ", ".join(f"'{t}'" for t in validated_types)
+                type_filter = f"AND type(r) IN [{quoted_types}]"
 
             query = f"""
                 MATCH (source)-[r]->(target)
@@ -544,8 +598,8 @@ class RelationshipManager:
                        target.uuid as target_id,
                        type(r) as rel_type,
                        r.created_at as created_at
-                SKIP {offset}
-                LIMIT {limit}
+                SKIP {safe_offset}
+                LIMIT {safe_limit}
             """
 
             result = await self._driver.execute_query(query, group_id=self._group_id)
