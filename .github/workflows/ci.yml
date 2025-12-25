@@ -10,76 +10,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  PYTHON_VERSION: "3.13"
-  NODE_VERSION: "22"
-  PNPM_VERSION: "10"
-
 jobs:
-  # =============================================================================
-  # Backend Jobs
-  # =============================================================================
-
-  backend-lint:
-    name: Backend Lint
+  build-and-test:
+    name: Build & Test
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxml2-dev libxslt-dev
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      - name: Run Ruff linter
-        run: uv run ruff check src tests
-
-      - name: Run Ruff formatter check
-        run: uv run ruff format --check src tests
-
-  backend-typecheck:
-    name: Backend Type Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxml2-dev libxslt-dev
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      - name: Run Pyright
-        run: uv run pyright src
-
-  backend-test:
-    name: Backend Test
-    runs-on: ubuntu-latest
     services:
       falkordb:
         image: falkordb/falkordb:latest
@@ -106,7 +41,6 @@ jobs:
           --health-retries 5
 
     env:
-      # Sibyl configuration for tests
       SIBYL_ENVIRONMENT: development
       SIBYL_DISABLE_AUTH: "true"
       SIBYL_JWT_SECRET: test-secret-for-ci
@@ -118,13 +52,23 @@ jobs:
       SIBYL_POSTGRES_USER: sibyl
       SIBYL_POSTGRES_PASSWORD: sibyl_dev
       SIBYL_POSTGRES_DB: sibyl
-      # Skip LLM calls in tests
       SIBYL_OPENAI_API_KEY: sk-test-key
       SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
 
     steps:
       - uses: actions/checkout@v4
 
+      # =========================================================================
+      # System Dependencies
+      # =========================================================================
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      # =========================================================================
+      # Backend
+      # =========================================================================
       - name: Set up uv
         uses: astral-sh/setup-uv@v4
         with:
@@ -133,139 +77,64 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "3.13"
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxml2-dev libxslt-dev
-
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: uv sync --all-extras
 
-      - name: Run tests with coverage
+      - name: Backend lint
+        run: |
+          uv run ruff check src tests
+          uv run ruff format --check src tests
+
+      - name: Backend typecheck
+        run: uv run pyright src
+
+      - name: Backend build
+        run: uv build
+
+      # =========================================================================
+      # Frontend
+      # =========================================================================
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "10"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: web
+
+      - name: Frontend lint
+        run: pnpm lint
+        working-directory: web
+
+      - name: Frontend typecheck
+        run: pnpm typecheck
+        working-directory: web
+
+      - name: Frontend build
+        run: pnpm build
+        working-directory: web
+
+      # =========================================================================
+      # Tests
+      # =========================================================================
+      - name: Run tests
         run: uv run pytest --cov=src --cov-report=xml --cov-report=term -v
 
-      - name: Upload coverage to Codecov
+      - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
-
-  # =============================================================================
-  # Frontend Jobs
-  # =============================================================================
-
-  frontend-lint:
-    name: Frontend Lint
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: "pnpm"
-          cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run Biome lint
-        run: pnpm lint
-
-  frontend-typecheck:
-    name: Frontend Type Check
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: "pnpm"
-          cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run TypeScript type check
-        run: pnpm typecheck
-
-  frontend-build:
-    name: Frontend Build
-    runs-on: ubuntu-latest
-    needs: [frontend-lint, frontend-typecheck]
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: "pnpm"
-          cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm build
-
-  # =============================================================================
-  # Build & Package
-  # =============================================================================
-
-  backend-build:
-    name: Backend Build
-    runs-on: ubuntu-latest
-    needs: [backend-lint, backend-typecheck, backend-test]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxml2-dev libxslt-dev
-
-      - name: Build package
-        run: uv build
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
