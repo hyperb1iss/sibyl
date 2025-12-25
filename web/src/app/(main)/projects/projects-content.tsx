@@ -294,10 +294,7 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
               {/* Sort + filter options */}
               <div className="flex items-center gap-2">
                 {/* Archive toggle */}
-                <Tooltip
-                  content={showArchived ? 'Hide archived' : 'Show archived'}
-                  position="bottom"
-                >
+                <Tooltip content={showArchived ? 'Hide archived' : 'Show archived'} side="bottom">
                   <button
                     type="button"
                     onClick={() => setShowArchived(!showArchived)}
@@ -313,7 +310,7 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
                 <span className="w-px h-4 bg-sc-fg-subtle/20" />
                 {/* Sort options */}
                 {PROJECT_SORT_OPTIONS.map(option => (
-                  <Tooltip key={option.value} content={option.label} position="bottom">
+                  <Tooltip key={option.value} content={option.label} side="bottom">
                     <button
                       type="button"
                       onClick={() => setSortBy(option.value)}
@@ -734,7 +731,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
             <FolderKanban width={14} height={14} />
             <span>Tasks</span>
           </Link>
-          <Tooltip content={isArchived ? 'Restore project' : 'Archive project'} position="bottom">
+          <Tooltip content={isArchived ? 'Restore project' : 'Archive project'} side="bottom">
             <button
               type="button"
               onClick={handleArchiveToggle}

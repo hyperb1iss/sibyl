@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { Spinner } from './spinner';
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline' | 'link';
 type ButtonSize = 'sm' | 'md' | 'lg';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -21,6 +21,9 @@ const variants: Record<ButtonVariant, string> = {
   ghost: 'bg-transparent text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight',
   danger:
     'bg-sc-red/20 text-sc-red border border-sc-red/30 hover:bg-sc-red/30 hover:border-sc-red/50 hover:shadow-lg hover:shadow-sc-red/20',
+  outline:
+    'bg-transparent border border-sc-purple/50 text-sc-purple hover:bg-sc-purple/10 hover:border-sc-purple active:bg-sc-purple/20',
+  link: 'bg-transparent text-sc-cyan hover:text-sc-cyan/80 underline underline-offset-4 hover:no-underline',
 };
 
 const sizes: Record<ButtonSize, string> = {
@@ -49,9 +52,9 @@ export function Button({
         inline-flex items-center justify-center font-medium
         transition-all duration-200 ease-out
         disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none
-        focus-visible:outline focus-visible:outline-2 focus-visible:outline-sc-cyan focus-visible:outline-offset-2
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
         ${variants[variant]}
-        ${sizes[size]}
+        ${variant === 'link' ? 'py-0 gap-1' : sizes[size]}
         ${spark && !disabled && !loading ? 'hover-spark' : ''}
         ${className}
       `}
@@ -111,7 +114,7 @@ export function ColorButton({
         transition-all duration-200 ease-out
         disabled:opacity-50 disabled:cursor-not-allowed
         active:scale-[0.98]
-        focus-visible:outline focus-visible:outline-2 focus-visible:outline-sc-cyan focus-visible:outline-offset-2
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
         ${colorStyles[color]}
         ${sizes[size]}
         ${spark && !disabled && !loading ? 'hover-spark' : ''}
@@ -172,7 +175,7 @@ export function IconButton({
         transition-all duration-200 ease-out
         active:scale-95
         disabled:opacity-50 disabled:cursor-not-allowed
-        focus-visible:outline focus-visible:outline-2 focus-visible:outline-sc-cyan focus-visible:outline-offset-2
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
         ${sizeClasses[size]}
         ${variantClasses[variant]}
         ${className}
@@ -221,7 +224,7 @@ export function GradientButton({
         transition-all duration-200 ease-out
         active:scale-[0.98]
         disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none
-        focus-visible:outline focus-visible:outline-2 focus-visible:outline-sc-cyan focus-visible:outline-offset-2
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
         hover:shadow-xl hover-spark
         ${gradients[gradient]}
         ${sizes[size]}

@@ -1,7 +1,17 @@
-import type { HTMLAttributes, ReactNode } from 'react';
-import { AlertTriangle, Flash, InfoCircle, Sparkles } from '@/components/ui/icons';
+'use client';
 
-type CardVariant = 'default' | 'elevated' | 'interactive' | 'bordered';
+import { AnimatePresence, motion } from 'motion/react';
+import { type HTMLAttributes, type ReactNode, useState } from 'react';
+import { AlertTriangle, Flash, InfoCircle, NavArrowDown, Sparkles } from '@/components/ui/icons';
+
+type CardVariant =
+  | 'default'
+  | 'elevated'
+  | 'interactive'
+  | 'bordered'
+  | 'error'
+  | 'warning'
+  | 'success';
 
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
   variant?: CardVariant;
@@ -16,6 +26,9 @@ const variants: Record<CardVariant, string> = {
   interactive:
     'bg-sc-bg-base border border-sc-fg-subtle/20 hover:border-sc-purple/30 transition-all duration-200 cursor-pointer hover:shadow-lg hover:shadow-sc-purple/5 active:scale-[0.99]',
   bordered: 'bg-transparent border-2 border-sc-fg-subtle/30',
+  error: 'bg-sc-red/5 border border-sc-red/30 shadow-sm shadow-sc-red/10',
+  warning: 'bg-sc-yellow/5 border border-sc-yellow/30 shadow-sm shadow-sc-yellow/10',
+  success: 'bg-sc-green/5 border border-sc-green/30 shadow-sm shadow-sc-green/10',
 };
 
 export function Card({
@@ -311,5 +324,69 @@ export function NotificationCard({
         )}
       </div>
     </div>
+  );
+}
+
+// Collapsible card with expand/collapse animation
+interface CollapsibleCardProps {
+  title: string;
+  description?: string;
+  icon?: ReactNode;
+  children: ReactNode;
+  defaultOpen?: boolean;
+  variant?: CardVariant;
+}
+
+export function CollapsibleCard({
+  title,
+  description,
+  icon,
+  children,
+  defaultOpen = false,
+  variant = 'default',
+}: CollapsibleCardProps) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  return (
+    <Card variant={variant} className="overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className={`
+          w-full flex items-center justify-between gap-4 text-left
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
+          rounded-lg -m-2 p-2
+        `}
+      >
+        <div className="flex items-center gap-3">
+          {icon && <span className="text-sc-purple">{icon}</span>}
+          <div>
+            <h3 className="text-lg font-semibold text-sc-fg-primary">{title}</h3>
+            {description && <p className="text-sm text-sc-fg-muted">{description}</p>}
+          </div>
+        </div>
+        <motion.span
+          animate={{ rotate: isOpen ? 180 : 0 }}
+          transition={{ duration: 0.2 }}
+          className="text-sc-fg-muted"
+        >
+          <NavArrowDown width={20} height={20} />
+        </motion.span>
+      </button>
+
+      <AnimatePresence initial={false}>
+        {isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            className="overflow-hidden"
+          >
+            <div className="pt-4 mt-4 border-t border-sc-fg-subtle/20">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </Card>
   );
 }

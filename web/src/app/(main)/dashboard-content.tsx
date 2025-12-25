@@ -242,7 +242,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
         </div>
       </div>
 
-      {/* Main Grid */}
+      {/* Main Grid - Single grid for all dashboard cards */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* Task Overview - Takes 2 cols */}
         <div className="lg:col-span-2 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">
@@ -446,12 +446,9 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
             </Link>
           </div>
         </div>
-      </div>
 
-      {/* Velocity & Metrics Section */}
-      {orgMetrics && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-          {/* Velocity Chart */}
+        {/* Velocity Chart - in same grid, flows under Task Overview */}
+        {orgMetrics && (
           <div className="lg:col-span-2 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2 sm:gap-3">
@@ -468,8 +465,10 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
             </div>
             <VelocityLineChart data={orgMetrics.velocity_trend} />
           </div>
+        )}
 
-          {/* Summary Stats */}
+        {/* This Week Stats - in same grid */}
+        {orgMetrics && (
           <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">
             <div className="flex items-center gap-2 sm:gap-3 mb-3">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
@@ -512,8 +511,8 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               )}
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Entity Breakdown - Full Width Bar Chart Style */}
       <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">

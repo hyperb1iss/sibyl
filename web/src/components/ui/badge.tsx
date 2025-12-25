@@ -1,3 +1,7 @@
+'use client';
+
+import { AnimatePresence, motion } from 'motion/react';
+import { Xmark } from '@/components/ui/icons';
 import { ENTITY_COLORS, type EntityType } from '@/lib/constants';
 import { EntityIcon } from './entity-icon';
 
@@ -77,5 +81,119 @@ export function StatusBadge({ status, label, pulse = false }: StatusBadgeProps) 
       />
       {displayLabel}
     </span>
+  );
+}
+
+// Removable badge with dismiss button
+type BadgeColor = 'purple' | 'cyan' | 'coral' | 'yellow' | 'green' | 'red' | 'gray';
+
+interface RemovableBadgeProps {
+  children: React.ReactNode;
+  onRemove: () => void;
+  color?: BadgeColor;
+  size?: BadgeSize;
+  disabled?: boolean;
+}
+
+const badgeColors: Record<BadgeColor, { bg: string; text: string; border: string; hover: string }> =
+  {
+    purple: {
+      bg: 'bg-sc-purple/20',
+      text: 'text-sc-purple',
+      border: 'border-sc-purple/30',
+      hover: 'hover:bg-sc-purple/30',
+    },
+    cyan: {
+      bg: 'bg-sc-cyan/20',
+      text: 'text-sc-cyan',
+      border: 'border-sc-cyan/30',
+      hover: 'hover:bg-sc-cyan/30',
+    },
+    coral: {
+      bg: 'bg-sc-coral/20',
+      text: 'text-sc-coral',
+      border: 'border-sc-coral/30',
+      hover: 'hover:bg-sc-coral/30',
+    },
+    yellow: {
+      bg: 'bg-sc-yellow/20',
+      text: 'text-sc-yellow',
+      border: 'border-sc-yellow/30',
+      hover: 'hover:bg-sc-yellow/30',
+    },
+    green: {
+      bg: 'bg-sc-green/20',
+      text: 'text-sc-green',
+      border: 'border-sc-green/30',
+      hover: 'hover:bg-sc-green/30',
+    },
+    red: {
+      bg: 'bg-sc-red/20',
+      text: 'text-sc-red',
+      border: 'border-sc-red/30',
+      hover: 'hover:bg-sc-red/30',
+    },
+    gray: {
+      bg: 'bg-sc-fg-subtle/10',
+      text: 'text-sc-fg-muted',
+      border: 'border-sc-fg-subtle/20',
+      hover: 'hover:bg-sc-fg-subtle/20',
+    },
+  };
+
+export function RemovableBadge({
+  children,
+  onRemove,
+  color = 'gray',
+  size = 'md',
+  disabled = false,
+}: RemovableBadgeProps) {
+  const colorConfig = badgeColors[color];
+  const sizeConfig = sizes[size];
+
+  return (
+    <motion.span
+      initial={{ opacity: 0, scale: 0.8 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.8 }}
+      transition={{ duration: 0.15 }}
+      className={`
+        inline-flex items-center rounded-full font-medium border
+        ${sizeConfig.classes}
+        ${colorConfig.bg} ${colorConfig.text} ${colorConfig.border}
+        ${disabled ? 'opacity-50' : ''}
+      `}
+    >
+      <span className="truncate max-w-[200px]">{children}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        disabled={disabled}
+        className={`
+          -mr-1 ml-1 p-0.5 rounded-full
+          transition-colors duration-150
+          ${colorConfig.hover}
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan
+          disabled:cursor-not-allowed disabled:opacity-50
+        `}
+        aria-label="Remove"
+      >
+        <Xmark className="w-3 h-3" />
+      </button>
+    </motion.span>
+  );
+}
+
+// Wrapper component for animated badge lists
+interface BadgeListProps {
+  children: React.ReactNode;
+  className?: string;
+}
+
+export function BadgeList({ children, className = '' }: BadgeListProps) {
+  return (
+    <div className={`flex flex-wrap gap-2 ${className}`}>
+      <AnimatePresence mode="popLayout">{children}</AnimatePresence>
+    </div>
   );
 }

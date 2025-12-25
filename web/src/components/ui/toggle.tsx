@@ -38,7 +38,7 @@ export function Toggle({
         onClick={() => onChange(!checked)}
         className={`
           relative inline-flex flex-shrink-0 rounded-full transition-colors duration-200 ease-in-out
-          focus:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-dark
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
           ${sizeStyles.track}
           ${checked ? 'bg-sc-purple' : 'bg-sc-bg-highlight'}
           ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
@@ -85,6 +85,7 @@ export function FilterChip({ active, onClick, children, disabled }: FilterChipPr
       className={`
         px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-all duration-150
         border
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
         ${
           active
             ? 'bg-sc-purple/20 text-sc-purple border-sc-purple/30 shadow-sm shadow-sc-purple/10'
@@ -212,6 +213,7 @@ export function TagChip({ tag, active, onClick, disabled }: TagChipProps) {
       className={`
         px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-150
         border
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
         ${active ? style.activeBg : style.bg}
         ${style.text}
         ${active ? `${style.border} ring-1 ring-current/30` : style.border}
@@ -251,6 +253,7 @@ export function EntityTypeChip({
       className={`
         group relative px-3 py-1.5 rounded-lg text-sm font-medium capitalize
         transition-all duration-200 border overflow-hidden
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
         ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
       `}
       style={{

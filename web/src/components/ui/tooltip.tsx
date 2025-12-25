@@ -1,6 +1,13 @@
 'use client';
 
-import { type ReactNode, useState } from 'react';
+import * as TooltipPrimitive from '@radix-ui/react-tooltip';
+import {
+  type ComponentPropsWithoutRef,
+  type ElementRef,
+  forwardRef,
+  type ReactNode,
+  useState,
+} from 'react';
 import {
   AlertTriangle,
   BarChart3,
@@ -12,70 +19,57 @@ import {
   WifiOff,
 } from '@/components/ui/icons';
 
+// Radix Tooltip primitives with SilkCircuit styling
+const TooltipProvider = TooltipPrimitive.Provider;
+const TooltipRoot = TooltipPrimitive.Root;
+const TooltipTrigger = TooltipPrimitive.Trigger;
+
+const TooltipContent = forwardRef<
+  ElementRef<typeof TooltipPrimitive.Content>,
+  ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
+>(({ className = '', sideOffset = 4, ...props }, ref) => (
+  <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Content
+      ref={ref}
+      sideOffset={sideOffset}
+      className={`
+        z-50 overflow-hidden
+        px-3 py-1.5
+        text-xs text-sc-fg-primary
+        bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg shadow-xl
+        animate-in fade-in-0 zoom-in-95
+        data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95
+        data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2
+        data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2
+        ${className}
+      `}
+      {...props}
+    />
+  </TooltipPrimitive.Portal>
+));
+TooltipContent.displayName = TooltipPrimitive.Content.displayName;
+
+// Simple Tooltip wrapper for common use cases
 interface TooltipProps {
   content: ReactNode;
   children: ReactNode;
-  position?: 'top' | 'bottom' | 'left' | 'right';
+  side?: 'top' | 'bottom' | 'left' | 'right';
   delay?: number;
 }
 
-const positions = {
-  top: 'bottom-full left-1/2 -translate-x-1/2 mb-2',
-  bottom: 'top-full left-1/2 -translate-x-1/2 mt-2',
-  left: 'right-full top-1/2 -translate-y-1/2 mr-2',
-  right: 'left-full top-1/2 -translate-y-1/2 ml-2',
-};
-
-const arrows = {
-  top: 'top-full left-1/2 -translate-x-1/2 border-l-transparent border-r-transparent border-b-transparent border-t-sc-bg-elevated',
-  bottom:
-    'bottom-full left-1/2 -translate-x-1/2 border-l-transparent border-r-transparent border-t-transparent border-b-sc-bg-elevated',
-  left: 'left-full top-1/2 -translate-y-1/2 border-t-transparent border-b-transparent border-r-transparent border-l-sc-bg-elevated',
-  right:
-    'right-full top-1/2 -translate-y-1/2 border-t-transparent border-b-transparent border-l-transparent border-r-sc-bg-elevated',
-};
-
-export function Tooltip({ content, children, position = 'top', delay = 200 }: TooltipProps) {
-  const [visible, setVisible] = useState(false);
-  const [timeoutId, setTimeoutId] = useState<NodeJS.Timeout | null>(null);
-
-  const showTooltip = () => {
-    const id = setTimeout(() => setVisible(true), delay);
-    setTimeoutId(id);
-  };
-
-  const hideTooltip = () => {
-    if (timeoutId) clearTimeout(timeoutId);
-    setVisible(false);
-  };
-
+export function Tooltip({ content, children, side = 'top', delay = 200 }: TooltipProps) {
   return (
-    <div
-      className="relative inline-flex"
-      onMouseEnter={showTooltip}
-      onMouseLeave={hideTooltip}
-      onFocus={showTooltip}
-      onBlur={hideTooltip}
-      role="presentation"
-    >
-      {children}
-      {visible && (
-        <div
-          className={`
-            absolute z-50 px-2 py-1 text-xs text-sc-fg-primary
-            bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg shadow-lg
-            whitespace-nowrap animate-fade-in
-            ${positions[position]}
-          `}
-          role="tooltip"
-        >
-          {content}
-          <span className={`absolute w-0 h-0 border-4 ${arrows[position]}`} />
-        </div>
-      )}
-    </div>
+    <TooltipProvider delayDuration={delay}>
+      <TooltipRoot>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipContent side={side}>{content}</TooltipContent>
+      </TooltipRoot>
+    </TooltipProvider>
   );
 }
+
+// Export primitives for advanced usage
+export { TooltipProvider, TooltipRoot, TooltipTrigger, TooltipContent };
 
 // Empty state component for when there's no data - with personality
 interface EmptyStateProps {
@@ -206,7 +200,7 @@ export function InfoTooltip({ content, size = 'sm' }: InfoTooltipProps) {
   };
 
   return (
-    <Tooltip content={content} position="top">
+    <Tooltip content={content} side="top">
       <button
         type="button"
         className={`
