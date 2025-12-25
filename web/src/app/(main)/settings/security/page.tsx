@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Button, IconButton } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Check,
   Clock,
@@ -150,18 +151,11 @@ function PasswordSection() {
               placeholder="Confirm new password"
             />
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="show-passwords"
-              checked={showPasswords}
-              onChange={e => setShowPasswords(e.target.checked)}
-              className="rounded border-sc-fg-subtle/30"
-            />
-            <label htmlFor="show-passwords" className="text-xs text-sc-fg-muted">
-              Show passwords
-            </label>
-          </div>
+          <Checkbox
+            checked={showPasswords}
+            onCheckedChange={checked => setShowPasswords(checked === true)}
+            label="Show passwords"
+          />
           <div className="flex gap-2 justify-end">
             <Button variant="ghost" onClick={handleCancel} type="button">
               Cancel

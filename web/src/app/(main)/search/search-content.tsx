@@ -10,6 +10,7 @@ import { SearchResultCard } from '@/components/search/search-result';
 import { Button } from '@/components/ui/button';
 import { SearchInput } from '@/components/ui/input';
 import { LoadingState } from '@/components/ui/spinner';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FilterChip } from '@/components/ui/toggle';
 import { EmptyState, ErrorState } from '@/components/ui/tooltip';
 import type { SearchResponse, SearchResult, StatsResponse } from '@/lib/api';
@@ -227,24 +228,17 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
       />
 
       {/* Mode Tabs */}
-      <div className="flex gap-1 p-1 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-lg w-fit">
-        {SEARCH_MODES.map(m => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => handleModeChange(m.id)}
-            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-              mode === m.id
-                ? 'bg-sc-purple text-white'
-                : 'text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-elevated'
-            }`}
-          >
-            <span className="mr-1.5">{m.icon}</span>
-            <span className="hidden sm:inline">{m.label}</span>
-            <span className="sm:hidden">{m.label.slice(0, 4)}</span>
-          </button>
-        ))}
-      </div>
+      <Tabs value={mode} onValueChange={v => handleModeChange(v as SearchMode)} variant="pills">
+        <TabsList>
+          {SEARCH_MODES.map(m => (
+            <TabsTrigger key={m.id} value={m.id}>
+              <span className="mr-1.5">{m.icon}</span>
+              <span className="hidden sm:inline">{m.label}</span>
+              <span className="sm:hidden">{m.label.slice(0, 4)}</span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {/* Search Form */}
       <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">

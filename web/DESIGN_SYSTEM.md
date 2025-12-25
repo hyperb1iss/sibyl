@@ -284,6 +284,70 @@ import { Input } from '@/components/ui';
 <Input error="Invalid value" />
 ```
 
+### Tabs
+
+```tsx
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
+
+<Tabs defaultValue="tab1" variant="underline">
+  <TabsList>
+    <TabsTrigger value="tab1">Account</TabsTrigger>
+    <TabsTrigger value="tab2">Settings</TabsTrigger>
+  </TabsList>
+  <TabsContent value="tab1">Account content</TabsContent>
+  <TabsContent value="tab2">Settings content</TabsContent>
+</Tabs>
+
+// Variants: underline, pills, enclosed
+```
+
+### Accordion
+
+```tsx
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent, AccordionCard } from '@/components/ui';
+
+// Basic accordion
+<Accordion type="single" collapsible>
+  <AccordionItem value="item-1">
+    <AccordionTrigger icon={<Icon />}>Title</AccordionTrigger>
+    <AccordionContent>Content</AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+// Card-style accordion
+<AccordionCard defaultValue="item-1">
+  <AccordionCardItem value="item-1">
+    <AccordionCardTrigger>Title</AccordionCardTrigger>
+    <AccordionCardContent>Content</AccordionCardContent>
+  </AccordionCardItem>
+</AccordionCard>
+```
+
+### Pagination
+
+```tsx
+import { Pagination, SimplePagination, PageSizeSelector } from '@/components/ui';
+
+// Full pagination
+<Pagination
+  currentPage={page}
+  totalPages={10}
+  onPageChange={setPage}
+  size="md"
+/>
+
+// Simple prev/next
+<SimplePagination
+  hasNext={hasMore}
+  hasPrev={page > 1}
+  onNext={nextPage}
+  onPrev={prevPage}
+/>
+
+// Page size selector
+<PageSizeSelector value={25} onChange={setPageSize} />
+```
+
 ## Animations
 
 Built-in animation classes:

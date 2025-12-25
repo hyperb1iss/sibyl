@@ -49,9 +49,7 @@ from sibyl.db.models import Organization, OrganizationRole, utcnow_naive
 log = structlog.get_logger()
 
 
-async def _get_org_source(
-    session: Any, source_id: str, org: Organization
-) -> CrawlSource:
+async def _get_org_source(session: Any, source_id: str, org: Organization) -> CrawlSource:
     """Get a source and verify it belongs to the organization.
 
     Args:
@@ -146,9 +144,7 @@ async def get_stats(
     async with get_session() as session:
         # Count sources (org-scoped)
         sources_result = await session.execute(
-            select(func.count(CrawlSource.id)).where(
-                col(CrawlSource.organization_id) == org.id
-            )
+            select(func.count(CrawlSource.id)).where(col(CrawlSource.organization_id) == org.id)
         )
         total_sources = sources_result.scalar() or 0
 
@@ -183,9 +179,9 @@ async def get_stats(
 
         # Count sources by status (org-scoped)
         status_result = await session.execute(
-            select(CrawlSource.crawl_status, func.count(CrawlSource.id))
+            select(CrawlSource.crawl_status, func.count(CrawlSource.id))  # type: ignore[call-overload]
             .where(col(CrawlSource.organization_id) == org.id)
-            .group_by(CrawlSource.crawl_status)  # type: ignore[call-overload]
+            .group_by(CrawlSource.crawl_status)
         )
         sources_by_status = {
             str(status.value) if hasattr(status, "value") else str(status): count
@@ -465,9 +461,7 @@ async def list_sources(
 
         # Get total count (org-scoped)
         count_result = await session.execute(
-            select(func.count(CrawlSource.id)).where(
-                col(CrawlSource.organization_id) == org.id
-            )
+            select(func.count(CrawlSource.id)).where(col(CrawlSource.organization_id) == org.id)
         )
         total = count_result.scalar() or 0
 

@@ -1,6 +1,11 @@
 'use client';
 
-import { type HTMLAttributes, type TdHTMLAttributes, type ThHTMLAttributes, forwardRef } from 'react';
+import {
+  forwardRef,
+  type HTMLAttributes,
+  type TdHTMLAttributes,
+  type ThHTMLAttributes,
+} from 'react';
 import { NavArrowDown, NavArrowUp } from '@/components/ui/icons';
 
 // Table container with horizontal scroll
@@ -165,11 +170,7 @@ TableCell.displayName = 'TableCell';
 // Table caption
 const TableCaption = forwardRef<HTMLTableCaptionElement, HTMLAttributes<HTMLTableCaptionElement>>(
   ({ className = '', ...props }, ref) => (
-    <caption
-      ref={ref}
-      className={`mt-4 text-sm text-sc-fg-muted ${className}`}
-      {...props}
-    />
+    <caption ref={ref} className={`mt-4 text-sm text-sc-fg-muted ${className}`} {...props} />
   )
 );
 TableCaption.displayName = 'TableCaption';

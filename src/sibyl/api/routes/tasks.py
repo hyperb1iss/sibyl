@@ -3,6 +3,7 @@
 Dedicated endpoints for task lifecycle operations with proper event broadcasting.
 """
 
+import uuid
 from typing import Any
 
 import structlog
@@ -124,10 +125,10 @@ async def create_task(
         relationship_manager = RelationshipManager(client, group_id=str(org.id))
 
         # Create task entity
-        task = Task(
-            name=request.title,
-            content=request.description or "",
-            description=request.description,
+        task = Task(  # type: ignore[call-arg]  # model_validator sets name from title
+            id=str(uuid.uuid4()),
+            title=request.title,
+            description=request.description or "",
             status=TaskStatus(request.status),
             priority=TaskPriority(request.priority),
             project_id=request.project_id,

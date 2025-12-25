@@ -57,15 +57,14 @@ const RadioGroupItem = forwardRef<ElementRef<typeof RadioGroupPrimitive.Item>, R
     }
 
     return (
-      <div className="flex items-start gap-3">
+      // biome-ignore lint/a11y/noLabelWithoutControl: Radio input is inside the label
+      <label className="flex items-start gap-3 cursor-pointer">
         {radio}
         <div className="grid gap-0.5 leading-none">
-          {label && (
-            <label className="text-sm font-medium text-sc-fg-primary cursor-pointer">{label}</label>
-          )}
+          {label && <span className="text-sm font-medium text-sc-fg-primary">{label}</span>}
           {description && <p className="text-xs text-sc-fg-muted">{description}</p>}
         </div>
-      </div>
+      </label>
     );
   }
 );

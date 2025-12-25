@@ -78,15 +78,23 @@ def _handle_client_error(e: SibylClientError) -> None:
         console.print()
         console.print(f"  [{CORAL}]×[/{CORAL}] [bold]Cannot connect to Sibyl server[/bold]")
         console.print()
-        console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl up[/bold {NEON_CYAN}]      [dim]Start services[/dim]")
-        console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl status[/bold {NEON_CYAN}]  [dim]Check status[/dim]")
+        console.print(
+            f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl up[/bold {NEON_CYAN}]      [dim]Start services[/dim]"
+        )
+        console.print(
+            f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl status[/bold {NEON_CYAN}]  [dim]Check status[/dim]"
+        )
         console.print()
     elif e.status_code in {401, 403}:
         console.print()
         console.print(f"  [{CORAL}]×[/{CORAL}] [bold]Authentication required[/bold]")
         console.print()
-        console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl auth login[/bold {NEON_CYAN}]   [dim]Log in[/dim]")
-        console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl auth signup[/bold {NEON_CYAN}]  [dim]Create account[/dim]")
+        console.print(
+            f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl auth login[/bold {NEON_CYAN}]   [dim]Log in[/dim]"
+        )
+        console.print(
+            f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl auth signup[/bold {NEON_CYAN}]  [dim]Create account[/dim]"
+        )
         console.print()
     elif e.status_code == 404:
         error(f"Not found: {e.detail}")
@@ -716,14 +724,26 @@ def main_callback(ctx: typer.Context) -> None:
 def _show_quick_start() -> None:
     """Show quick start tips for configured users."""
     console.print()
-    console.print(f"  [{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] [bold {ELECTRIC_PURPLE}]Sibyl[/bold {ELECTRIC_PURPLE}] [dim]─ Oracle of Development Wisdom[/dim]")
+    console.print(
+        f"  [{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] [bold {ELECTRIC_PURPLE}]Sibyl[/bold {ELECTRIC_PURPLE}] [dim]─ Oracle of Development Wisdom[/dim]"
+    )
     console.print()
-    console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl search[/bold {NEON_CYAN}] [white]\"query\"[/white]   [dim]Search knowledge[/dim]")
-    console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl task list[/bold {NEON_CYAN}]        [dim]View tasks[/dim]")
-    console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl add[/bold {NEON_CYAN}] [white]\"title\" \"...\"[/white] [dim]Capture learning[/dim]")
-    console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl up[/bold {NEON_CYAN}]               [dim]Start services[/dim]")
+    console.print(
+        f'    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl search[/bold {NEON_CYAN}] [white]"query"[/white]   [dim]Search knowledge[/dim]'
+    )
+    console.print(
+        f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl task list[/bold {NEON_CYAN}]        [dim]View tasks[/dim]"
+    )
+    console.print(
+        f'    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl add[/bold {NEON_CYAN}] [white]"title" "..."[/white] [dim]Capture learning[/dim]'
+    )
+    console.print(
+        f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl up[/bold {NEON_CYAN}]               [dim]Start services[/dim]"
+    )
     console.print()
-    console.print(f"    [dim]Run[/dim] [bold {NEON_CYAN}]sibyl --help[/bold {NEON_CYAN}] [dim]for all commands[/dim]")
+    console.print(
+        f"    [dim]Run[/dim] [bold {NEON_CYAN}]sibyl --help[/bold {NEON_CYAN}] [dim]for all commands[/dim]"
+    )
     console.print()
 
 

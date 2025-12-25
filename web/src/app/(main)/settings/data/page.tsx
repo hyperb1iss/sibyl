@@ -2,6 +2,8 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { AlertCircle, Archive, Check, Clock, Download, Upload } from '@/components/ui/icons';
 import { api, type BackupData, type BackupResponse } from '@/lib/api';
 
@@ -81,28 +83,14 @@ export default function DataSettingsPage() {
               restore your data or migrate to another organization.
             </p>
 
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               onClick={() => backupMutation.mutate()}
-              disabled={backupMutation.isPending}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg
-                       bg-sc-cyan/10 text-sc-cyan border border-sc-cyan/30
-                       hover:bg-sc-cyan/20 hover:border-sc-cyan/50
-                       disabled:opacity-50 disabled:cursor-not-allowed
-                       transition-all duration-200"
+              loading={backupMutation.isPending}
+              icon={<Download className="w-4 h-4" />}
             >
-              {backupMutation.isPending ? (
-                <>
-                  <Clock className="w-4 h-4 animate-spin" />
-                  Creating backup...
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4" />
-                  Download Backup
-                </>
-              )}
-            </button>
+              {backupMutation.isPending ? 'Creating backup...' : 'Download Backup'}
+            </Button>
 
             {backupMutation.isSuccess && (
               <div className="mt-4 flex items-center gap-2 text-sc-green text-sm">
@@ -146,17 +134,13 @@ export default function DataSettingsPage() {
             />
 
             {!restoreFile ? (
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg
-                         bg-sc-bg-highlight text-sc-fg-primary border border-sc-fg-subtle/20
-                         hover:bg-sc-bg-elevated hover:border-sc-fg-subtle/40
-                         transition-all duration-200"
+                icon={<Archive className="w-4 h-4" />}
               >
-                <Archive className="w-4 h-4" />
                 Select Backup File
-              </button>
+              </Button>
             ) : (
               <div className="space-y-4">
                 {/* Selected File Info */}
@@ -171,53 +155,32 @@ export default function DataSettingsPage() {
                       relationships
                     </p>
                   </div>
-                  <button
-                    type="button"
+                  <Button
+                    variant="link"
                     onClick={() => {
                       setRestoreFile(null);
                       setRestoreFileName('');
                     }}
-                    className="text-sc-fg-muted hover:text-sc-fg-primary text-sm"
                   >
                     Change
-                  </button>
+                  </Button>
                 </div>
 
                 {/* Options */}
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={skipExisting}
-                    onChange={e => setSkipExisting(e.target.checked)}
-                    className="rounded border-sc-fg-subtle/30 bg-sc-bg-highlight
-                             text-sc-purple focus:ring-sc-purple/50"
-                  />
-                  <span className="text-sc-fg-muted">Skip existing entities (recommended)</span>
-                </label>
+                <Checkbox
+                  checked={skipExisting}
+                  onCheckedChange={checked => setSkipExisting(checked === true)}
+                  label="Skip existing entities (recommended)"
+                />
 
                 {/* Restore Button */}
-                <button
-                  type="button"
+                <Button
                   onClick={() => restoreMutation.mutate(restoreFile)}
-                  disabled={restoreMutation.isPending}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg
-                           bg-sc-purple/10 text-sc-purple border border-sc-purple/30
-                           hover:bg-sc-purple/20 hover:border-sc-purple/50
-                           disabled:opacity-50 disabled:cursor-not-allowed
-                           transition-all duration-200"
+                  loading={restoreMutation.isPending}
+                  icon={<Upload className="w-4 h-4" />}
                 >
-                  {restoreMutation.isPending ? (
-                    <>
-                      <Clock className="w-4 h-4 animate-spin" />
-                      Restoring...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-4 h-4" />
-                      Restore Backup
-                    </>
-                  )}
-                </button>
+                  {restoreMutation.isPending ? 'Restoring...' : 'Restore Backup'}
+                </Button>
               </div>
             )}
 

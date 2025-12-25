@@ -9,8 +9,8 @@ from dataclasses import asdict
 from typing import Any, Literal
 
 import structlog
-from mcp.server.fastmcp import FastMCP
 from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.fastmcp import FastMCP
 
 from sibyl.config import settings
 
@@ -48,10 +48,9 @@ def _require_org_id() -> str:
     """
     org_id = _get_org_id_from_context()
     if not org_id:
-        raise ValueError(
-            "Organization context required. Authenticate with an org-scoped token."
-        )
+        raise ValueError("Organization context required. Authenticate with an org-scoped token.")
     return org_id
+
 
 # Module-level server instance (created lazily)
 _mcp: FastMCP | None = None

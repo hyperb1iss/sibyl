@@ -12,17 +12,16 @@ Strategy:
 - SET NULL: Preserve record but null FK (audit logs, history, optional refs)
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 from sqlalchemy import text
 
-
 # revision identifiers, used by Alembic.
 revision: str = "6bca5ea1bf2a"
-down_revision: Union[str, Sequence[str], None] = "442de3d5fb43"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "442de3d5fb43"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 # Define FK changes: (table, column, ref_table, ref_column, ondelete)
