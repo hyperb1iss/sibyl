@@ -125,6 +125,8 @@ line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
+# Allow intentional unicode characters for CLI styling (SilkCircuit design)
+allowed-confusables = ["›", "×"]
 select = [
     # Core
     "A",      # flake8-builtins

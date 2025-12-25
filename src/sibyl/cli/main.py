@@ -75,8 +75,19 @@ app.command("status")(up_status)
 def _handle_client_error(e: SibylClientError) -> None:
     """Handle client errors with helpful messages."""
     if "Cannot connect" in str(e):
-        error(str(e))
-        info("Start the server with: sibyl serve")
+        console.print()
+        console.print(f"  [{CORAL}]×[/{CORAL}] [bold]Cannot connect to Sibyl server[/bold]")
+        console.print()
+        console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl up[/bold {NEON_CYAN}]      [dim]Start services[/dim]")
+        console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl status[/bold {NEON_CYAN}]  [dim]Check status[/dim]")
+        console.print()
+    elif e.status_code in {401, 403}:
+        console.print()
+        console.print(f"  [{CORAL}]×[/{CORAL}] [bold]Authentication required[/bold]")
+        console.print()
+        console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl auth login[/bold {NEON_CYAN}]   [dim]Log in[/dim]")
+        console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl auth signup[/bold {NEON_CYAN}]  [dim]Create account[/dim]")
+        console.print()
     elif e.status_code == 404:
         error(f"Not found: {e.detail}")
     elif e.status_code == 400:
@@ -692,7 +703,6 @@ def main_callback(ctx: typer.Context) -> None:
         return
 
     # No subcommand - show welcome or help
-    from sibyl.cli import config_store
     from sibyl.cli.onboarding import needs_onboarding, show_first_run_message
 
     if needs_onboarding():
@@ -705,31 +715,15 @@ def main_callback(ctx: typer.Context) -> None:
 
 def _show_quick_start() -> None:
     """Show quick start tips for configured users."""
-    from rich.text import Text
-
-    from sibyl.cli.common import create_panel
-
-    text = Text()
-    text.append("Sibyl", style=f"bold {ELECTRIC_PURPLE}")
-    text.append(" - Oracle of Development Wisdom\n\n", style="white")
-    text.append("Quick commands:\n", style="dim")
-    text.append("  sibyl search ", style=NEON_CYAN)
-    text.append('"query"', style="white")
-    text.append("      Search knowledge\n", style="dim")
-    text.append("  sibyl task list", style=NEON_CYAN)
-    text.append("         Active tasks\n", style="dim")
-    text.append("  sibyl add ", style=NEON_CYAN)
-    text.append('"title" "..."', style="white")
-    text.append("   Capture learning\n", style="dim")
-    text.append("  sibyl up", style=NEON_CYAN)
-    text.append("                Start services\n", style="dim")
-    text.append("\n")
-    text.append("Run ", style="dim")
-    text.append("sibyl --help", style=f"bold {NEON_CYAN}")
-    text.append(" for all commands", style="dim")
-
     console.print()
-    console.print(create_panel(text, title=None))
+    console.print(f"  [{ELECTRIC_PURPLE}]◈[/{ELECTRIC_PURPLE}] [bold {ELECTRIC_PURPLE}]Sibyl[/bold {ELECTRIC_PURPLE}] [dim]─ Oracle of Development Wisdom[/dim]")
+    console.print()
+    console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl search[/bold {NEON_CYAN}] [white]\"query\"[/white]   [dim]Search knowledge[/dim]")
+    console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl task list[/bold {NEON_CYAN}]        [dim]View tasks[/dim]")
+    console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl add[/bold {NEON_CYAN}] [white]\"title\" \"...\"[/white] [dim]Capture learning[/dim]")
+    console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl up[/bold {NEON_CYAN}]               [dim]Start services[/dim]")
+    console.print()
+    console.print(f"    [dim]Run[/dim] [bold {NEON_CYAN}]sibyl --help[/bold {NEON_CYAN}] [dim]for all commands[/dim]")
     console.print()
 
 
