@@ -55,7 +55,7 @@ jobs:
       SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # =========================================================================
       # System Dependencies
@@ -69,12 +69,10 @@ jobs:
       # Backend
       # =========================================================================
       - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
+        uses: astral-sh/setup-uv@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -101,7 +99,7 @@ jobs:
           version: "10"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: "pnpm"
@@ -155,13 +153,13 @@ jobs:
         run: uv run pytest tests/e2e -v
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dist
           path: dist/
