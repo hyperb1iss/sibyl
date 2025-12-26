@@ -130,6 +130,10 @@ jobs:
         run: pnpm build
         working-directory: web
 
+      - name: Storybook build
+        run: pnpm build-storybook
+        working-directory: web
+
       # =========================================================================
       # Database Setup
       # =========================================================================
