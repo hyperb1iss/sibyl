@@ -260,60 +260,63 @@ def upgrade() -> None:  # noqa: PLR0915
         server_default=None,
         existing_nullable=False,
     )
-    op.alter_column(
-        "user_sessions",
-        "created_at",
-        existing_type=postgresql.TIMESTAMP(),
-        server_default=None,
-        existing_nullable=False,
-    )
-    op.alter_column(
-        "user_sessions",
-        "updated_at",
-        existing_type=postgresql.TIMESTAMP(),
-        server_default=None,
-        existing_nullable=False,
-    )
-    op.alter_column(
-        "user_sessions",
-        "token_hash",
-        existing_type=sa.VARCHAR(length=64),
-        type_=sqlmodel.sql.sqltypes.AutoString(length=128),
-        existing_nullable=False,
-    )
-    op.alter_column(
-        "user_sessions",
-        "device_type",
-        existing_type=sa.VARCHAR(length=50),
-        type_=sqlmodel.sql.sqltypes.AutoString(length=64),
-        existing_nullable=True,
-    )
-    op.alter_column(
-        "user_sessions",
-        "browser",
-        existing_type=sa.VARCHAR(length=100),
-        type_=sqlmodel.sql.sqltypes.AutoString(length=128),
-        existing_nullable=True,
-    )
-    op.alter_column(
-        "user_sessions",
-        "os",
-        existing_type=sa.VARCHAR(length=100),
-        type_=sqlmodel.sql.sqltypes.AutoString(length=128),
-        existing_nullable=True,
-    )
-    op.alter_column(
-        "user_sessions",
-        "is_current",
-        existing_type=sa.BOOLEAN(),
-        server_default=None,
-        existing_nullable=False,
-    )
-    op.drop_index(op.f("ix_user_sessions_expires_at"), table_name="user_sessions")
-    op.drop_constraint(op.f("user_sessions_token_hash_key"), "user_sessions", type_="unique")
-    op.create_index(
-        op.f("ix_user_sessions_organization_id"), "user_sessions", ["organization_id"], unique=False
-    )
+    # user_sessions table may not exist on fresh installs (created by later migration)
+    conn = op.get_bind()
+    if _table_exists(conn, "user_sessions"):
+        op.alter_column(
+            "user_sessions",
+            "created_at",
+            existing_type=postgresql.TIMESTAMP(),
+            server_default=None,
+            existing_nullable=False,
+        )
+        op.alter_column(
+            "user_sessions",
+            "updated_at",
+            existing_type=postgresql.TIMESTAMP(),
+            server_default=None,
+            existing_nullable=False,
+        )
+        op.alter_column(
+            "user_sessions",
+            "token_hash",
+            existing_type=sa.VARCHAR(length=64),
+            type_=sqlmodel.sql.sqltypes.AutoString(length=128),
+            existing_nullable=False,
+        )
+        op.alter_column(
+            "user_sessions",
+            "device_type",
+            existing_type=sa.VARCHAR(length=50),
+            type_=sqlmodel.sql.sqltypes.AutoString(length=64),
+            existing_nullable=True,
+        )
+        op.alter_column(
+            "user_sessions",
+            "browser",
+            existing_type=sa.VARCHAR(length=100),
+            type_=sqlmodel.sql.sqltypes.AutoString(length=128),
+            existing_nullable=True,
+        )
+        op.alter_column(
+            "user_sessions",
+            "os",
+            existing_type=sa.VARCHAR(length=100),
+            type_=sqlmodel.sql.sqltypes.AutoString(length=128),
+            existing_nullable=True,
+        )
+        op.alter_column(
+            "user_sessions",
+            "is_current",
+            existing_type=sa.BOOLEAN(),
+            server_default=None,
+            existing_nullable=False,
+        )
+        op.drop_index(op.f("ix_user_sessions_expires_at"), table_name="user_sessions")
+        op.drop_constraint(op.f("user_sessions_token_hash_key"), "user_sessions", type_="unique")
+        op.create_index(
+            op.f("ix_user_sessions_organization_id"), "user_sessions", ["organization_id"], unique=False
+        )
     op.alter_column(
         "users",
         "bio",
@@ -364,65 +367,68 @@ def downgrade() -> None:  # noqa: PLR0915
         type_=sa.TEXT(),
         existing_nullable=True,
     )
-    op.drop_index(op.f("ix_user_sessions_organization_id"), table_name="user_sessions")
-    op.create_unique_constraint(
-        op.f("user_sessions_token_hash_key"),
-        "user_sessions",
-        ["token_hash"],
-        postgresql_nulls_not_distinct=False,
-    )
-    op.create_index(
-        op.f("ix_user_sessions_expires_at"), "user_sessions", ["expires_at"], unique=False
-    )
-    op.alter_column(
-        "user_sessions",
-        "is_current",
-        existing_type=sa.BOOLEAN(),
-        server_default=sa.text("false"),
-        existing_nullable=False,
-    )
-    op.alter_column(
-        "user_sessions",
-        "os",
-        existing_type=sqlmodel.sql.sqltypes.AutoString(length=128),
-        type_=sa.VARCHAR(length=100),
-        existing_nullable=True,
-    )
-    op.alter_column(
-        "user_sessions",
-        "browser",
-        existing_type=sqlmodel.sql.sqltypes.AutoString(length=128),
-        type_=sa.VARCHAR(length=100),
-        existing_nullable=True,
-    )
-    op.alter_column(
-        "user_sessions",
-        "device_type",
-        existing_type=sqlmodel.sql.sqltypes.AutoString(length=64),
-        type_=sa.VARCHAR(length=50),
-        existing_nullable=True,
-    )
-    op.alter_column(
-        "user_sessions",
-        "token_hash",
-        existing_type=sqlmodel.sql.sqltypes.AutoString(length=128),
-        type_=sa.VARCHAR(length=64),
-        existing_nullable=False,
-    )
-    op.alter_column(
-        "user_sessions",
-        "updated_at",
-        existing_type=postgresql.TIMESTAMP(),
-        server_default=sa.text("now()"),
-        existing_nullable=False,
-    )
-    op.alter_column(
-        "user_sessions",
-        "created_at",
-        existing_type=postgresql.TIMESTAMP(),
-        server_default=sa.text("now()"),
-        existing_nullable=False,
-    )
+    # user_sessions table may not exist on fresh installs
+    conn = op.get_bind()
+    if _table_exists(conn, "user_sessions"):
+        op.drop_index(op.f("ix_user_sessions_organization_id"), table_name="user_sessions")
+        op.create_unique_constraint(
+            op.f("user_sessions_token_hash_key"),
+            "user_sessions",
+            ["token_hash"],
+            postgresql_nulls_not_distinct=False,
+        )
+        op.create_index(
+            op.f("ix_user_sessions_expires_at"), "user_sessions", ["expires_at"], unique=False
+        )
+        op.alter_column(
+            "user_sessions",
+            "is_current",
+            existing_type=sa.BOOLEAN(),
+            server_default=sa.text("false"),
+            existing_nullable=False,
+        )
+        op.alter_column(
+            "user_sessions",
+            "os",
+            existing_type=sqlmodel.sql.sqltypes.AutoString(length=128),
+            type_=sa.VARCHAR(length=100),
+            existing_nullable=True,
+        )
+        op.alter_column(
+            "user_sessions",
+            "browser",
+            existing_type=sqlmodel.sql.sqltypes.AutoString(length=128),
+            type_=sa.VARCHAR(length=100),
+            existing_nullable=True,
+        )
+        op.alter_column(
+            "user_sessions",
+            "device_type",
+            existing_type=sqlmodel.sql.sqltypes.AutoString(length=64),
+            type_=sa.VARCHAR(length=50),
+            existing_nullable=True,
+        )
+        op.alter_column(
+            "user_sessions",
+            "token_hash",
+            existing_type=sqlmodel.sql.sqltypes.AutoString(length=128),
+            type_=sa.VARCHAR(length=64),
+            existing_nullable=False,
+        )
+        op.alter_column(
+            "user_sessions",
+            "updated_at",
+            existing_type=postgresql.TIMESTAMP(),
+            server_default=sa.text("now()"),
+            existing_nullable=False,
+        )
+        op.alter_column(
+            "user_sessions",
+            "created_at",
+            existing_type=postgresql.TIMESTAMP(),
+            server_default=sa.text("now()"),
+            existing_nullable=False,
+        )
     op.alter_column(
         "teams",
         "is_default",
