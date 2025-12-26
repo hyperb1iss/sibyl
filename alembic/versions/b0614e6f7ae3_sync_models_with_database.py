@@ -24,6 +24,48 @@ def _table_exists(conn, table_name: str) -> bool:
     return bool(result.scalar())
 
 
+def _column_exists(conn, table_name: str, column_name: str) -> bool:
+    """Check if a column exists in a table."""
+    result = conn.execute(
+        text("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = :table AND column_name = :column
+            )
+        """),
+        {"table": table_name, "column": column_name},
+    )
+    return bool(result.scalar())
+
+
+def _constraint_exists(conn, constraint_name: str) -> bool:
+    """Check if a constraint exists."""
+    result = conn.execute(
+        text("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.table_constraints
+                WHERE constraint_name = :name
+            )
+        """),
+        {"name": constraint_name},
+    )
+    return bool(result.scalar())
+
+
+def _index_exists(conn, index_name: str) -> bool:
+    """Check if an index exists."""
+    result = conn.execute(
+        text("""
+            SELECT EXISTS (
+                SELECT 1 FROM pg_indexes
+                WHERE indexname = :name
+            )
+        """),
+        {"name": index_name},
+    )
+    return bool(result.scalar())
+
+
 # revision identifiers, used by Alembic.
 revision: str = "b0614e6f7ae3"
 down_revision: str | Sequence[str] | None = "a1b2c3d4e5f6"
@@ -315,28 +357,65 @@ def upgrade() -> None:  # noqa: PLR0915
         op.drop_index(op.f("ix_user_sessions_expires_at"), table_name="user_sessions")
         op.drop_constraint(op.f("user_sessions_token_hash_key"), "user_sessions", type_="unique")
         op.create_index(
-            op.f("ix_user_sessions_organization_id"), "user_sessions", ["organization_id"], unique=False
+            op.f("ix_user_sessions_organization_id"),
+            "user_sessions",
+            ["organization_id"],
+            unique=False,
         )
-    op.alter_column(
-        "users",
-        "bio",
-        existing_type=sa.TEXT(),
-        type_=sqlmodel.sql.sqltypes.AutoString(),
-        existing_nullable=True,
-    )
-    op.alter_column(
-        "users",
-        "timezone",
-        existing_type=sa.VARCHAR(length=64),
-        server_default=None,
-        existing_nullable=False,
-    )
-    op.drop_constraint(op.f("users_email_key"), "users", type_="unique")
-    op.drop_constraint(op.f("users_github_id_key"), "users", type_="unique")
-    op.drop_index(op.f("ix_users_email"), table_name="users")
-    op.create_index(op.f("ix_users_email"), "users", ["email"], unique=True)
-    op.drop_index(op.f("ix_users_github_id"), table_name="users")
-    op.create_index(op.f("ix_users_github_id"), "users", ["github_id"], unique=True)
+    # Add missing columns to users table (may not exist on fresh DBs)
+    conn = op.get_bind()
+    if not _column_exists(conn, "users", "bio"):
+        op.add_column("users", sa.Column("bio", sa.Text(), nullable=True))
+    if not _column_exists(conn, "users", "timezone"):
+        op.add_column(
+            "users",
+            sa.Column("timezone", sa.String(length=64), nullable=False, server_default="UTC"),
+        )
+    if not _column_exists(conn, "users", "email_verified_at"):
+        op.add_column("users", sa.Column("email_verified_at", sa.DateTime(), nullable=True))
+    if not _column_exists(conn, "users", "last_login_at"):
+        op.add_column("users", sa.Column("last_login_at", sa.DateTime(), nullable=True))
+    if not _column_exists(conn, "users", "preferences"):
+        op.add_column(
+            "users",
+            sa.Column(
+                "preferences",
+                postgresql.JSONB(astext_type=sa.Text()),
+                nullable=False,
+                server_default=text("'{}'::jsonb"),
+            ),
+        )
+
+    # Now alter existing columns (only if they existed before)
+    if _column_exists(conn, "users", "bio"):
+        op.alter_column(
+            "users",
+            "bio",
+            existing_type=sa.TEXT(),
+            type_=sqlmodel.sql.sqltypes.AutoString(),
+            existing_nullable=True,
+        )
+    if _column_exists(conn, "users", "timezone"):
+        op.alter_column(
+            "users",
+            "timezone",
+            existing_type=sa.VARCHAR(length=64),
+            server_default=None,
+            existing_nullable=False,
+        )
+    # Handle constraints conditionally (may not exist on fresh DBs)
+    if _constraint_exists(conn, "users_email_key"):
+        op.drop_constraint(op.f("users_email_key"), "users", type_="unique")
+    if _constraint_exists(conn, "users_github_id_key"):
+        op.drop_constraint(op.f("users_github_id_key"), "users", type_="unique")
+    if _index_exists(conn, "ix_users_email"):
+        op.drop_index(op.f("ix_users_email"), table_name="users")
+    if not _index_exists(conn, "ix_users_email"):
+        op.create_index(op.f("ix_users_email"), "users", ["email"], unique=True)
+    if _index_exists(conn, "ix_users_github_id"):
+        op.drop_index(op.f("ix_users_github_id"), table_name="users")
+    if not _index_exists(conn, "ix_users_github_id"):
+        op.create_index(op.f("ix_users_github_id"), "users", ["github_id"], unique=True)
     # ### end Alembic commands ###
 
 

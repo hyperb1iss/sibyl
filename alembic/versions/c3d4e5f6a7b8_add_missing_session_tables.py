@@ -58,16 +58,39 @@ def upgrade() -> None:
             sa.Column("revoked_at", sa.DateTime(), nullable=True),
             sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
             sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
-            sa.ForeignKeyConstraint(["user_id"], ["users.id"], name="fk_user_sessions_user_id", ondelete="CASCADE"),
-            sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], name="fk_user_sessions_organization_id", ondelete="SET NULL"),
+            sa.ForeignKeyConstraint(
+                ["user_id"], ["users.id"], name="fk_user_sessions_user_id", ondelete="CASCADE"
+            ),
+            sa.ForeignKeyConstraint(
+                ["organization_id"],
+                ["organizations.id"],
+                name="fk_user_sessions_organization_id",
+                ondelete="SET NULL",
+            ),
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("token_hash", name="user_sessions_token_hash_key"),
         )
-        op.create_index(op.f("ix_user_sessions_user_id"), "user_sessions", ["user_id"], unique=False)
-        op.create_index(op.f("ix_user_sessions_organization_id"), "user_sessions", ["organization_id"], unique=False)
-        op.create_index(op.f("ix_user_sessions_token_hash"), "user_sessions", ["token_hash"], unique=False)
-        op.create_index(op.f("ix_user_sessions_refresh_token_hash"), "user_sessions", ["refresh_token_hash"], unique=False)
-        op.create_index(op.f("ix_user_sessions_expires_at"), "user_sessions", ["expires_at"], unique=False)
+        op.create_index(
+            op.f("ix_user_sessions_user_id"), "user_sessions", ["user_id"], unique=False
+        )
+        op.create_index(
+            op.f("ix_user_sessions_organization_id"),
+            "user_sessions",
+            ["organization_id"],
+            unique=False,
+        )
+        op.create_index(
+            op.f("ix_user_sessions_token_hash"), "user_sessions", ["token_hash"], unique=False
+        )
+        op.create_index(
+            op.f("ix_user_sessions_refresh_token_hash"),
+            "user_sessions",
+            ["refresh_token_hash"],
+            unique=False,
+        )
+        op.create_index(
+            op.f("ix_user_sessions_expires_at"), "user_sessions", ["expires_at"], unique=False
+        )
 
     # Create password_reset_tokens table
     if not _table_exists(conn, "password_reset_tokens"):
@@ -79,13 +102,33 @@ def upgrade() -> None:
             sa.Column("expires_at", sa.DateTime(), nullable=False),
             sa.Column("used_at", sa.DateTime(), nullable=True),
             sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
-            sa.ForeignKeyConstraint(["user_id"], ["users.id"], name="fk_password_reset_tokens_user_id", ondelete="CASCADE"),
+            sa.ForeignKeyConstraint(
+                ["user_id"],
+                ["users.id"],
+                name="fk_password_reset_tokens_user_id",
+                ondelete="CASCADE",
+            ),
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("token_hash", name="password_reset_tokens_token_hash_key"),
         )
-        op.create_index(op.f("ix_password_reset_tokens_user_id"), "password_reset_tokens", ["user_id"], unique=False)
-        op.create_index(op.f("ix_password_reset_tokens_token_hash"), "password_reset_tokens", ["token_hash"], unique=False)
-        op.create_index(op.f("ix_password_reset_tokens_expires_at"), "password_reset_tokens", ["expires_at"], unique=False)
+        op.create_index(
+            op.f("ix_password_reset_tokens_user_id"),
+            "password_reset_tokens",
+            ["user_id"],
+            unique=False,
+        )
+        op.create_index(
+            op.f("ix_password_reset_tokens_token_hash"),
+            "password_reset_tokens",
+            ["token_hash"],
+            unique=False,
+        )
+        op.create_index(
+            op.f("ix_password_reset_tokens_expires_at"),
+            "password_reset_tokens",
+            ["expires_at"],
+            unique=False,
+        )
 
 
 def downgrade() -> None:
@@ -93,8 +136,12 @@ def downgrade() -> None:
     conn = op.get_bind()
 
     if _table_exists(conn, "password_reset_tokens"):
-        op.drop_index(op.f("ix_password_reset_tokens_expires_at"), table_name="password_reset_tokens")
-        op.drop_index(op.f("ix_password_reset_tokens_token_hash"), table_name="password_reset_tokens")
+        op.drop_index(
+            op.f("ix_password_reset_tokens_expires_at"), table_name="password_reset_tokens"
+        )
+        op.drop_index(
+            op.f("ix_password_reset_tokens_token_hash"), table_name="password_reset_tokens"
+        )
         op.drop_index(op.f("ix_password_reset_tokens_user_id"), table_name="password_reset_tokens")
         op.drop_table("password_reset_tokens")
 
