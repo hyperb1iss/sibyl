@@ -29,10 +29,11 @@ from sibyl.auth.device_authorization import (
     DeviceTokenError,
     normalize_user_code,
 )
-from sibyl.auth.jwt import create_access_token
+from sibyl.auth.jwt import JwtError, create_access_token, create_refresh_token, verify_refresh_token
 from sibyl.auth.memberships import OrganizationMembershipManager
 from sibyl.auth.oauth_state import OAuthStateError, issue_state, verify_state
 from sibyl.auth.organizations import OrganizationManager
+from sibyl.auth.sessions import SessionManager
 from sibyl.auth.users import GitHubUserIdentity, UserManager
 from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import ApiKey, Organization, OrganizationMember, OrganizationRole, User
@@ -151,6 +152,10 @@ class DeviceStartRequest(BaseModel):
 class DeviceTokenRequest(BaseModel):
     device_code: str = Field(..., min_length=10, max_length=512)
     grant_type: str | None = Field(default=None, description="Optional, OAuth-style")
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=10, max_length=4096)
 
 
 async def _github_exchange_code(*, code: str, redirect_uri: str) -> str:
@@ -277,8 +282,8 @@ async def github_callback(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing code")
 
     redirect_uri = f"{config_module.settings.server_url}/api/auth/github/callback"
-    access_token = await _github_exchange_code(code=code, redirect_uri=redirect_uri)
-    identity = await _github_fetch_identity(access_token)
+    github_token = await _github_exchange_code(code=code, redirect_uri=redirect_uri)
+    identity = await _github_fetch_identity(github_token)
 
     user = await UserManager(session).upsert_from_github(identity)
     org = await OrganizationManager(session).create_personal_for_user(user)
@@ -288,7 +293,25 @@ async def github_callback(
         role=OrganizationRole.OWNER,
     )
 
-    token = create_access_token(user_id=user.id, organization_id=org.id)
+    # Generate tokens
+    access_token = create_access_token(user_id=user.id, organization_id=org.id)
+    refresh_token, refresh_expires = create_refresh_token(user_id=user.id, organization_id=org.id)
+
+    # Create session record
+    access_expires = datetime.now(UTC) + timedelta(
+        minutes=config_module.settings.access_token_expire_minutes
+    )
+    await SessionManager(session).create_session(
+        user_id=user.id,
+        organization_id=org.id,
+        token=access_token,
+        expires_at=access_expires,
+        refresh_token=refresh_token,
+        refresh_token_expires_at=refresh_expires,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
     await AuditLogger(session).log(
         action="auth.github.login",
         user_id=user.id,
@@ -300,11 +323,13 @@ async def github_callback(
     response = RedirectResponse(url=_frontend_redirect(request), status_code=status.HTTP_302_FOUND)
     response.set_cookie(
         ACCESS_TOKEN_COOKIE,
-        token,
+        access_token,
         httponly=True,
         secure=_cookie_secure(),
         samesite="lax",
-        max_age=int(timedelta(hours=config_module.settings.jwt_expiry_hours).total_seconds()),
+        max_age=int(
+            timedelta(minutes=config_module.settings.access_token_expire_minutes).total_seconds()
+        ),
         domain=config_module.settings.cookie_domain,
         path="/",
     )
@@ -344,7 +369,25 @@ async def local_signup(
         role=OrganizationRole.OWNER,
     )
 
-    token = create_access_token(user_id=user.id, organization_id=org.id)
+    # Generate tokens
+    access_token = create_access_token(user_id=user.id, organization_id=org.id)
+    refresh_token, refresh_expires = create_refresh_token(user_id=user.id, organization_id=org.id)
+
+    # Create session record
+    access_expires = datetime.now(UTC) + timedelta(
+        minutes=config_module.settings.access_token_expire_minutes
+    )
+    await SessionManager(session).create_session(
+        user_id=user.id,
+        organization_id=org.id,
+        token=access_token,
+        expires_at=access_expires,
+        refresh_token=refresh_token,
+        refresh_token_expires_at=refresh_expires,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
     await AuditLogger(session).log(
         action="auth.local.signup",
         user_id=user.id,
@@ -362,11 +405,13 @@ async def local_signup(
 
     response.set_cookie(
         ACCESS_TOKEN_COOKIE,
-        token,
+        access_token,
         httponly=True,
         secure=_cookie_secure(),
         samesite="lax",
-        max_age=int(timedelta(hours=config_module.settings.jwt_expiry_hours).total_seconds()),
+        max_age=int(
+            timedelta(minutes=config_module.settings.access_token_expire_minutes).total_seconds()
+        ),
         domain=config_module.settings.cookie_domain,
         path="/",
     )
@@ -375,7 +420,9 @@ async def local_signup(
     return {
         "user": {"id": str(user.id), "email": user.email, "name": user.name},
         "organization": {"id": str(org.id), "slug": org.slug, "name": org.name},
-        "access_token": token,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_in": config_module.settings.access_token_expire_minutes * 60,
     }
 
 
@@ -405,7 +452,25 @@ async def local_login(
         role=OrganizationRole.OWNER,
     )
 
-    token = create_access_token(user_id=user.id, organization_id=org.id)
+    # Generate tokens
+    access_token = create_access_token(user_id=user.id, organization_id=org.id)
+    refresh_token, refresh_expires = create_refresh_token(user_id=user.id, organization_id=org.id)
+
+    # Create session record
+    access_expires = datetime.now(UTC) + timedelta(
+        minutes=config_module.settings.access_token_expire_minutes
+    )
+    await SessionManager(session).create_session(
+        user_id=user.id,
+        organization_id=org.id,
+        token=access_token,
+        expires_at=access_expires,
+        refresh_token=refresh_token,
+        refresh_token_expires_at=refresh_expires,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
     await AuditLogger(session).log(
         action="auth.local.login",
         user_id=user.id,
@@ -423,11 +488,13 @@ async def local_login(
 
     response.set_cookie(
         ACCESS_TOKEN_COOKIE,
-        token,
+        access_token,
         httponly=True,
         secure=_cookie_secure(),
         samesite="lax",
-        max_age=int(timedelta(hours=config_module.settings.jwt_expiry_hours).total_seconds()),
+        max_age=int(
+            timedelta(minutes=config_module.settings.access_token_expire_minutes).total_seconds()
+        ),
         domain=config_module.settings.cookie_domain,
         path="/",
     )
@@ -436,7 +503,9 @@ async def local_login(
     return {
         "user": {"id": str(user.id), "email": user.email, "name": user.name},
         "organization": {"id": str(org.id), "slug": org.slug, "name": org.name},
-        "access_token": token,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_in": config_module.settings.access_token_expire_minutes * 60,
     }
 
 
@@ -702,7 +771,11 @@ async def device_verify_post(
             httponly=True,
             secure=_cookie_secure(),
             samesite="lax",
-            max_age=int(timedelta(hours=config_module.settings.jwt_expiry_hours).total_seconds()),
+            max_age=int(
+                timedelta(
+                    minutes=config_module.settings.access_token_expire_minutes
+                ).total_seconds()
+            ),
             domain=config_module.settings.cookie_domain,
             path="/",
         )
@@ -763,6 +836,101 @@ async def device_verify_post(
         "<h1>Approved</h1><p>Device login approved. You can close this tab and return to your terminal.</p>",
         status_code=200,
     )
+
+
+@router.post("/refresh", response_model=None)
+@limiter.limit("30/minute")
+async def refresh_tokens(
+    request: Request,
+    session: AsyncSession = Depends(get_session_dependency),
+):
+    """Exchange a refresh token for new access + refresh tokens (token rotation)."""
+    _ = _require_jwt_secret()
+    data = await _read_auth_payload(request)
+    body = RefreshTokenRequest.model_validate(data)
+
+    # Verify the refresh token JWT
+    try:
+        claims = verify_refresh_token(body.refresh_token)
+    except JwtError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid refresh token: {e}",
+        ) from e
+
+    # Find the session by refresh token
+    session_mgr = SessionManager(session)
+    user_session = await session_mgr.get_session_by_refresh_token(body.refresh_token)
+    if user_session is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session not found or revoked",
+        )
+
+    # Extract user/org from claims
+    try:
+        user_id = UUID(str(claims["sub"]))
+    except (KeyError, ValueError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token claims",
+        ) from e
+
+    org_raw = claims.get("org")
+    org_id = UUID(str(org_raw)) if org_raw else None
+
+    # Generate new tokens (rotation)
+    new_access_token = create_access_token(user_id=user_id, organization_id=org_id)
+    new_refresh_token, new_refresh_expires = create_refresh_token(
+        user_id=user_id,
+        organization_id=org_id,
+        session_id=user_session.id,
+    )
+
+    # Calculate access token expiry
+    access_expires = datetime.now(UTC) + timedelta(
+        minutes=config_module.settings.access_token_expire_minutes
+    )
+
+    # Update session with new tokens
+    await session_mgr.rotate_tokens(
+        user_session,
+        new_access_token=new_access_token,
+        new_access_expires_at=access_expires,
+        new_refresh_token=new_refresh_token,
+        new_refresh_expires_at=new_refresh_expires,
+    )
+
+    await AuditLogger(session).log(
+        action="auth.token.refresh",
+        user_id=user_id,
+        organization_id=org_id,
+        request=request,
+        details={"session_id": str(user_session.id)},
+    )
+
+    # Set new access token cookie
+    response = JSONResponse(
+        content={
+            "access_token": new_access_token,
+            "refresh_token": new_refresh_token,
+            "token_type": "Bearer",
+            "expires_in": config_module.settings.access_token_expire_minutes * 60,
+        }
+    )
+    response.set_cookie(
+        ACCESS_TOKEN_COOKIE,
+        new_access_token,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        max_age=int(
+            timedelta(minutes=config_module.settings.access_token_expire_minutes).total_seconds()
+        ),
+        domain=config_module.settings.cookie_domain,
+        path="/",
+    )
+    return response
 
 
 @router.post("/logout")

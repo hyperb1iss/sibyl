@@ -185,7 +185,9 @@ class SibylMcpOAuthProvider(
             access_token=access,
             refresh_token=refresh,
             expires_in=int(
-                timedelta(hours=config_module.settings.jwt_expiry_hours).total_seconds()
+                timedelta(
+                    minutes=config_module.settings.access_token_expire_minutes
+                ).total_seconds()
             ),
             scope=" ".join(scopes),
         )
@@ -241,7 +243,9 @@ class SibylMcpOAuthProvider(
             access_token=access,
             refresh_token=new_refresh,
             expires_in=int(
-                timedelta(hours=config_module.settings.jwt_expiry_hours).total_seconds()
+                timedelta(
+                    minutes=config_module.settings.access_token_expire_minutes
+                ).total_seconds()
             ),
             scope=" ".join(scopes),
         )

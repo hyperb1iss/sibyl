@@ -47,7 +47,9 @@ def _set_access_cookie(response: Response, token: str) -> None:
         httponly=True,
         secure=_cookie_secure(),
         samesite="lax",
-        max_age=int(timedelta(hours=config_module.settings.jwt_expiry_hours).total_seconds()),
+        max_age=int(
+            timedelta(minutes=config_module.settings.access_token_expire_minutes).total_seconds()
+        ),
         domain=config_module.settings.cookie_domain,
         path="/",
     )

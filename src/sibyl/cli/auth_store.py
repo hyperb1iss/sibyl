@@ -73,9 +73,63 @@ def set_access_token(token: str, path: Path | None = None) -> None:
     write_auth_data(data, path)
 
 
+def set_tokens(
+    access_token: str,
+    refresh_token: str | None = None,
+    expires_in: int | None = None,
+    path: Path | None = None,
+) -> None:
+    """Store access token and optionally refresh token."""
+    data = read_auth_data(path)
+    data["access_token"] = access_token
+    if refresh_token:
+        data["refresh_token"] = refresh_token
+    if expires_in:
+        import time
+
+        data["access_token_expires_at"] = int(time.time()) + expires_in
+    write_auth_data(data, path)
+
+
+def get_refresh_token(path: Path | None = None) -> str | None:
+    """Get stored refresh token."""
+    data = read_auth_data(path)
+    return data.get("refresh_token")
+
+
+def get_access_token_expires_at(path: Path | None = None) -> int | None:
+    """Get access token expiry timestamp."""
+    data = read_auth_data(path)
+    return data.get("access_token_expires_at")
+
+
+def is_access_token_expired(path: Path | None = None, buffer_seconds: int = 60) -> bool:
+    """Check if access token is expired or about to expire."""
+    expires_at = get_access_token_expires_at(path)
+    if expires_at is None:
+        return False  # Assume not expired if no expiry stored
+    import time
+
+    return time.time() >= (expires_at - buffer_seconds)
+
+
 def clear_access_token(path: Path | None = None) -> None:
     data = read_auth_data(path)
     data.pop("access_token", None)
+    if not data:
+        p = path or auth_path()
+        if p.exists():
+            p.unlink()
+        return
+    write_auth_data(data, path)
+
+
+def clear_tokens(path: Path | None = None) -> None:
+    """Clear all tokens (access and refresh)."""
+    data = read_auth_data(path)
+    data.pop("access_token", None)
+    data.pop("refresh_token", None)
+    data.pop("access_token_expires_at", None)
     if not data:
         p = path or auth_path()
         if p.exists():

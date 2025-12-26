@@ -20,7 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from sibyl import config as config_module
-from sibyl.auth.jwt import create_access_token
+from sibyl.auth.jwt import create_access_token, create_refresh_token
+from sibyl.auth.sessions import SessionManager
 from sibyl.db.models import DeviceAuthorizationRequest
 
 if TYPE_CHECKING:
@@ -193,13 +194,33 @@ class DeviceAuthorizationManager:
             organization_id=req.organization_id,
             extra_claims={"scope": (req.scope or "mcp").strip() or "mcp"},
         )
+        refresh_token, refresh_expires = create_refresh_token(
+            user_id=req.user_id,
+            organization_id=req.organization_id,
+        )
+
+        # Create session record
+        access_expires = now + timedelta(minutes=config_module.settings.access_token_expire_minutes)
+        await SessionManager(self._session).create_session(
+            user_id=req.user_id,
+            organization_id=req.organization_id,
+            token=access_token,
+            expires_at=access_expires,
+            refresh_token=refresh_token,
+            refresh_token_expires_at=refresh_expires,
+            device_name=req.client_name,
+        )
+
         req.status = "consumed"
         req.consumed_at = now
         self._session.add(req)
 
-        expires_in = int(timedelta(hours=config_module.settings.jwt_expiry_hours).total_seconds())
+        expires_in = int(
+            timedelta(minutes=config_module.settings.access_token_expire_minutes).total_seconds()
+        )
         return {
             "access_token": access_token,
+            "refresh_token": refresh_token,
             "token_type": "Bearer",
             "expires_in": expires_in,
             "scope": (req.scope or "mcp").strip() or "mcp",

@@ -15,11 +15,12 @@ from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 import typer
 
 from sibyl.cli.auth_store import (
-    clear_access_token,
+    clear_tokens,
     normalize_api_url,
     read_auth_data,
     read_server_credentials,
     set_access_token,
+    set_tokens,
     write_server_credentials,
 )
 from sibyl.cli.client import SibylClient, SibylClientError, get_client
@@ -158,9 +159,19 @@ def _exchange_oauth_code(
     return token_resp.json()
 
 
-def _persist_access_token(*, api_url: str, access_token: str) -> None:
-    set_access_token(access_token)
-    write_server_credentials(api_url, {"access_token": access_token})
+def _persist_tokens(
+    *,
+    api_url: str,
+    access_token: str,
+    refresh_token: str | None = None,
+    expires_in: int | None = None,
+) -> None:
+    """Persist access token and optionally refresh token."""
+    set_tokens(access_token, refresh_token=refresh_token, expires_in=expires_in)
+    creds: dict[str, str] = {"access_token": access_token}
+    if refresh_token:
+        creds["refresh_token"] = refresh_token
+    write_server_credentials(api_url, creds)
 
 
 class _DeviceLoginError(RuntimeError):
@@ -345,7 +356,8 @@ def _local_password_login(*, api_url: str, email: str, password: str) -> dict:
     return _run()
 
 
-def _login_via_device_flow(*, api_url: str, no_browser: bool, timeout_seconds: int) -> str:
+def _login_via_device_flow(*, api_url: str, no_browser: bool, timeout_seconds: int) -> dict:
+    """Execute device authorization flow. Returns token response dict."""
     token_url = api_url.rstrip("/") + "/auth/device/token"
     device_code, user_code, verify, interval, expires_in = _start_device_flow(api_url=api_url)
 
@@ -366,24 +378,26 @@ def _login_via_device_flow(*, api_url: str, no_browser: bool, timeout_seconds: i
     access_token = str(tok.get("access_token", "")).strip()
     if not access_token:
         raise _DeviceLoginError("Token response missing access_token", tok)
-    return access_token
+    return tok
 
 
-def _login_via_oauth(*, api_url: str, no_browser: bool, timeout_seconds: int) -> str:
-    access_token, _refresh, _issuer = _oauth_pkce_login(
+def _login_via_oauth(*, api_url: str, no_browser: bool, timeout_seconds: int) -> dict:
+    """Execute OAuth PKCE flow. Returns token response dict."""
+    access_token, refresh_token, _issuer = _oauth_pkce_login(
         api_url=api_url,
         no_browser=no_browser,
         timeout_seconds=timeout_seconds,
     )
-    return access_token
+    return {"access_token": access_token, "refresh_token": refresh_token}
 
 
-def _login_via_local_password(*, api_url: str, email: str, password: str) -> str:
+def _login_via_local_password(*, api_url: str, email: str, password: str) -> dict:
+    """Execute local password login. Returns token response dict."""
     result = _local_password_login(api_url=api_url, email=email, password=password)
     token = str(result.get("access_token", "")).strip()
     if not token:
         raise _OAuthLoginError("Local login response missing access_token", result)
-    return token
+    return result
 
 
 def _login_auto(
@@ -405,10 +419,15 @@ def _login_auto(
 
     # 1) Device flow (preferred)
     try:
-        access_token = _login_via_device_flow(
+        tok = _login_via_device_flow(
             api_url=api_url, no_browser=no_browser, timeout_seconds=timeout_seconds
         )
-        _persist_access_token(api_url=api_url, access_token=access_token)
+        _persist_tokens(
+            api_url=api_url,
+            access_token=tok["access_token"],
+            refresh_token=tok.get("refresh_token"),
+            expires_in=tok.get("expires_in"),
+        )
         success(f"Login complete (saved credentials for {api_url})")
         return
     except TimeoutError:
@@ -430,10 +449,15 @@ def _login_auto(
 
     # 2) OAuth PKCE
     try:
-        access_token = _login_via_oauth(
+        tok = _login_via_oauth(
             api_url=api_url, no_browser=no_browser, timeout_seconds=timeout_seconds
         )
-        _persist_access_token(api_url=api_url, access_token=access_token)
+        _persist_tokens(
+            api_url=api_url,
+            access_token=tok["access_token"],
+            refresh_token=tok.get("refresh_token"),
+            expires_in=tok.get("expires_in"),
+        )
         success(f"Login complete (saved credentials for {api_url})")
         return
     except TimeoutError:
@@ -462,7 +486,7 @@ def _login_auto(
         return
 
     try:
-        token = _login_via_local_password(api_url=api_url, email=email, password=password)
+        tok = _login_via_local_password(api_url=api_url, email=email, password=password)
     except SibylClientError as e:
         error(str(e))
         return
@@ -472,7 +496,12 @@ def _login_auto(
             print_json(e.payload)
         return
 
-    _persist_access_token(api_url=api_url, access_token=token)
+    _persist_tokens(
+        api_url=api_url,
+        access_token=tok["access_token"],
+        refresh_token=tok.get("refresh_token"),
+        expires_in=tok.get("expires_in"),
+    )
     success(f"Login complete (saved credentials for {api_url})")
     return
 
@@ -497,8 +526,8 @@ def set_token_cmd(token: str) -> None:
 
 @app.command("clear-token")
 def clear_token_cmd() -> None:
-    clear_access_token()
-    success("Auth token cleared")
+    clear_tokens()
+    success("Auth tokens cleared")
 
 
 @app.command("login")
@@ -548,9 +577,13 @@ def local_signup_cmd(
         result = _run()
         token = str(result.get("access_token", "")).strip()
         if token:
-            set_access_token(token)
-            write_server_credentials(_compute_api_url(None), {"access_token": token})
-            success("Auth token saved to ~/.sibyl/auth.json")
+            _persist_tokens(
+                api_url=_compute_api_url(None),
+                access_token=token,
+                refresh_token=result.get("refresh_token"),
+                expires_in=result.get("expires_in"),
+            )
+            success("Auth tokens saved to ~/.sibyl/auth.json")
         print_json(result)
     except SibylClientError as e:
         error(str(e))

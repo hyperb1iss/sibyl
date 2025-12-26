@@ -52,7 +52,12 @@ class Settings(BaseSettings):
         description="JWT signing secret (required for auth)",
     )
     jwt_algorithm: str = Field(default="HS256", description="JWT signing algorithm")
-    jwt_expiry_hours: int = Field(default=24, ge=1, le=720, description="Access token TTL (hours)")
+    access_token_expire_minutes: int = Field(
+        default=60, ge=5, le=1440, description="Access token TTL (minutes, default 1 hour)"
+    )
+    refresh_token_expire_days: int = Field(
+        default=30, ge=1, le=365, description="Refresh token TTL (days, default 30 days)"
+    )
 
     github_client_id: SecretStr = Field(default=SecretStr(""), description="GitHub OAuth client id")
     github_client_secret: SecretStr = Field(

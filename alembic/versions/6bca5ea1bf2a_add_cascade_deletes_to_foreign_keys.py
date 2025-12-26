@@ -61,6 +61,15 @@ FK_CHANGES: list[tuple[str, str, str, str, str]] = [
 ]
 
 
+def _table_exists(conn, table_name: str) -> bool:
+    """Check if a table exists in the database."""
+    result = conn.execute(
+        text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = :name)"),
+        {"name": table_name},
+    )
+    return bool(result.scalar())
+
+
 def _get_fk_constraint_name(conn, table: str, column: str) -> str | None:
     """Look up the actual FK constraint name from the database."""
     result = conn.execute(
@@ -90,6 +99,10 @@ def upgrade() -> None:
     conn = op.get_bind()
 
     for table, column, ref_table, ref_column, ondelete in FK_CHANGES:
+        # Skip if table doesn't exist (e.g., password_reset_tokens)
+        if not _table_exists(conn, table):
+            continue
+
         # Find current FK name
         old_name = _get_fk_constraint_name(conn, table, column)
         new_name = _new_fk_name(table, column)
@@ -111,7 +124,13 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Remove ON DELETE behavior (restore default NO ACTION)."""
+    conn = op.get_bind()
+
     for table, column, ref_table, ref_column, _ondelete in FK_CHANGES:
+        # Skip if table doesn't exist
+        if not _table_exists(conn, table):
+            continue
+
         fk_name = _new_fk_name(table, column)
 
         # Drop our named FK

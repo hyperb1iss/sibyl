@@ -11,7 +11,18 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 import sqlmodel.sql.sqltypes
 from alembic import op
+from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
+
+
+def _table_exists(conn, table_name: str) -> bool:
+    """Check if a table exists in the database."""
+    result = conn.execute(
+        text("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = :name)"),
+        {"name": table_name},
+    )
+    return bool(result.scalar())
+
 
 # revision identifiers, used by Alembic.
 revision: str = "b0614e6f7ae3"
@@ -190,16 +201,21 @@ def upgrade() -> None:  # noqa: PLR0915
     op.drop_constraint(op.f("organizations_slug_key"), "organizations", type_="unique")
     op.drop_index(op.f("ix_organizations_slug"), table_name="organizations")
     op.create_index(op.f("ix_organizations_slug"), "organizations", ["slug"], unique=True)
-    op.drop_constraint(
-        op.f("password_reset_tokens_token_hash_key"), "password_reset_tokens", type_="unique"
-    )
-    op.drop_index(op.f("ix_password_reset_tokens_token_hash"), table_name="password_reset_tokens")
-    op.create_index(
-        op.f("ix_password_reset_tokens_token_hash"),
-        "password_reset_tokens",
-        ["token_hash"],
-        unique=True,
-    )
+    # password_reset_tokens - only modify if table exists (not created via migration)
+    conn = op.get_bind()
+    if _table_exists(conn, "password_reset_tokens"):
+        op.drop_constraint(
+            op.f("password_reset_tokens_token_hash_key"), "password_reset_tokens", type_="unique"
+        )
+        op.drop_index(
+            op.f("ix_password_reset_tokens_token_hash"), table_name="password_reset_tokens"
+        )
+        op.create_index(
+            op.f("ix_password_reset_tokens_token_hash"),
+            "password_reset_tokens",
+            ["token_hash"],
+            unique=True,
+        )
     op.alter_column(
         "team_members",
         "created_at",
@@ -458,19 +474,24 @@ def downgrade() -> None:  # noqa: PLR0915
         server_default=sa.text("now()"),
         existing_nullable=False,
     )
-    op.drop_index(op.f("ix_password_reset_tokens_token_hash"), table_name="password_reset_tokens")
-    op.create_index(
-        op.f("ix_password_reset_tokens_token_hash"),
-        "password_reset_tokens",
-        ["token_hash"],
-        unique=False,
-    )
-    op.create_unique_constraint(
-        op.f("password_reset_tokens_token_hash_key"),
-        "password_reset_tokens",
-        ["token_hash"],
-        postgresql_nulls_not_distinct=False,
-    )
+    # password_reset_tokens - only modify if table exists
+    conn = op.get_bind()
+    if _table_exists(conn, "password_reset_tokens"):
+        op.drop_index(
+            op.f("ix_password_reset_tokens_token_hash"), table_name="password_reset_tokens"
+        )
+        op.create_index(
+            op.f("ix_password_reset_tokens_token_hash"),
+            "password_reset_tokens",
+            ["token_hash"],
+            unique=False,
+        )
+        op.create_unique_constraint(
+            op.f("password_reset_tokens_token_hash_key"),
+            "password_reset_tokens",
+            ["token_hash"],
+            postgresql_nulls_not_distinct=False,
+        )
     op.drop_index(op.f("ix_organizations_slug"), table_name="organizations")
     op.create_index(op.f("ix_organizations_slug"), "organizations", ["slug"], unique=False)
     op.create_unique_constraint(

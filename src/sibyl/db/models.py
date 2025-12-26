@@ -320,7 +320,17 @@ class UserSession(TimestampMixin, table=True):
     token_hash: str = Field(
         max_length=128,
         index=True,
-        description="SHA256 hash of the session token",
+        description="SHA256 hash of the access token",
+    )
+    refresh_token_hash: str | None = Field(
+        default=None,
+        max_length=128,
+        index=True,
+        description="SHA256 hash of the refresh token",
+    )
+    refresh_token_expires_at: datetime | None = Field(
+        default=None,
+        description="Refresh token expiry (longer than access token)",
     )
 
     # Device info

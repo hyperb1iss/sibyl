@@ -58,9 +58,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_teams_organization_id"), "teams", ["organization_id"], unique=False)
-    op.create_index(
-        "ix_teams_org_slug_unique", "teams", ["organization_id", "slug"], unique=True
-    )
+    op.create_index("ix_teams_org_slug_unique", "teams", ["organization_id", "slug"], unique=True)
 
     # Create team_members table
     op.create_table(

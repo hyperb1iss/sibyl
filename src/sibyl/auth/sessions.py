@@ -46,6 +46,8 @@ class SessionManager:
         token: str,
         expires_at: datetime,
         organization_id: UUID | None = None,
+        refresh_token: str | None = None,
+        refresh_token_expires_at: datetime | None = None,
         device_name: str | None = None,
         device_type: str | None = None,
         browser: str | None = None,
@@ -54,14 +56,22 @@ class SessionManager:
         user_agent: str | None = None,
         location: str | None = None,
     ) -> UserSession:
-        """Create a new user session."""
+        """Create a new user session with optional refresh token."""
         token_hash = self.hash_token(token)
+        refresh_hash = self.hash_token(refresh_token) if refresh_token else None
+        refresh_exp = (
+            refresh_token_expires_at.replace(tzinfo=None)
+            if refresh_token_expires_at and refresh_token_expires_at.tzinfo
+            else refresh_token_expires_at
+        )
 
         session_record = UserSession(
             id=uuid4(),
             user_id=user_id,
             organization_id=organization_id,
             token_hash=token_hash,
+            refresh_token_hash=refresh_hash,
+            refresh_token_expires_at=refresh_exp,
             device_name=device_name,
             device_type=device_type,
             browser=browser,
@@ -86,6 +96,45 @@ class SessionManager:
             .where(_is_none(UserSession.revoked_at))
         )
         return result.scalar_one_or_none()
+
+    async def get_session_by_refresh_token(self, refresh_token: str) -> UserSession | None:
+        """Get a session by refresh token (for token rotation)."""
+        refresh_hash = self.hash_token(refresh_token)
+        now = datetime.now(UTC).replace(tzinfo=None)
+        result = await self._session.execute(
+            select(UserSession)
+            .where(UserSession.refresh_token_hash == refresh_hash)
+            .where(_is_none(UserSession.revoked_at))
+            .where(UserSession.refresh_token_expires_at.is_not(None))  # type: ignore[union-attr]
+            .where(UserSession.refresh_token_expires_at > now)  # type: ignore[operator]
+        )
+        return result.scalar_one_or_none()
+
+    async def rotate_tokens(
+        self,
+        session: UserSession,
+        *,
+        new_access_token: str,
+        new_access_expires_at: datetime,
+        new_refresh_token: str,
+        new_refresh_expires_at: datetime,
+    ) -> UserSession:
+        """Rotate both access and refresh tokens for a session."""
+        session.token_hash = self.hash_token(new_access_token)
+        session.expires_at = (
+            new_access_expires_at.replace(tzinfo=None)
+            if new_access_expires_at.tzinfo
+            else new_access_expires_at
+        )
+        session.refresh_token_hash = self.hash_token(new_refresh_token)
+        session.refresh_token_expires_at = (
+            new_refresh_expires_at.replace(tzinfo=None)
+            if new_refresh_expires_at.tzinfo
+            else new_refresh_expires_at
+        )
+        session.last_active_at = datetime.now(UTC).replace(tzinfo=None)
+        await self._session.flush()
+        return session
 
     async def list_user_sessions(
         self,
