@@ -143,23 +143,55 @@ jobs:
         run: uv run pytest --ignore=tests/e2e --cov=src --cov-report=xml --cov-report=term -v
 
       # =========================================================================
-      # E2E Tests (requires running server)
+      # E2E Tests (requires running servers)
       # =========================================================================
       - name: Start backend server
         run: |
-          uv run python -m sibyl.main &
-          echo "Waiting for server to start..."
-          for i in {1..30}; do
+          uv run sibyl-serve &
+          echo "Waiting for backend to start..."
+          for i in {1..60}; do
             if curl -s http://localhost:3334/api/health > /dev/null; then
-              echo "Server is ready!"
+              echo "Backend is ready!"
+              # Give graph client time to fully initialize
+              sleep 2
               break
             fi
-            echo "Attempt $i: Server not ready yet..."
+            echo "Attempt $i: Backend not ready yet..."
+            sleep 1
+          done
+          # Verify health endpoint returns success
+          curl -s http://localhost:3334/api/health | head -c 200
+
+      - name: Start frontend server
+        run: |
+          cd web
+          pnpm start &
+          echo "Waiting for frontend to start..."
+          for i in {1..60}; do
+            if curl -s http://localhost:3337 > /dev/null 2>&1; then
+              echo "Frontend is ready!"
+              break
+            fi
+            echo "Attempt $i: Frontend not ready yet..."
             sleep 1
           done
 
       - name: Run e2e tests
         run: uv run pytest tests/e2e -v
+
+      - name: Collect diagnostics on failure
+        if: failure() || success()
+        run: |
+          echo "=== Backend server logs (last 100 lines) ==="
+          # Check if server is still running
+          curl -s http://localhost:3334/api/health || echo "Backend not responding"
+          echo ""
+          echo "=== FalkorDB graph contents ==="
+          # Query the default graph to see what's there
+          docker exec $(docker ps -q --filter ancestor=falkordb/falkordb:latest) redis-cli GRAPH.QUERY default "MATCH (n) RETURN labels(n), count(*) LIMIT 10" 2>/dev/null || echo "Could not query FalkorDB"
+          echo ""
+          echo "=== Check for Entity nodes ==="
+          docker exec $(docker ps -q --filter ancestor=falkordb/falkordb:latest) redis-cli GRAPH.QUERY default "MATCH (n:Entity) RETURN n.uuid, n.entity_type, n.name LIMIT 5" 2>/dev/null || echo "No Entity nodes found"
 
       - name: Upload coverage
         uses: codecov/codecov-action@v5
