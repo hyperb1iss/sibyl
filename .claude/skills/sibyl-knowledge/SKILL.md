@@ -97,9 +97,11 @@ sibyl add "Retry pattern" "Exponential backoff..." --type pattern
 ```bash
 # CREATE a task (requires project)
 sibyl task create --title "Implement OAuth" --project proj_abc
-sibyl task create -t "Add rate limiting" -p proj_api --priority high
-sibyl task create -t "Fix bug" -p proj_web --assignee alice --tech python,redis
+sibyl task create --title "Add rate limiting" -p proj_api --priority high
+sibyl task create --title "Fix bug" -p proj_web --assignee alice --tech python,redis
 ```
+
+**IMPORTANT:** Use `--title` (not `-t`). The `-t` flag is for table output!
 
 ```bash
 # List tasks (ALWAYS filter by project or status)
@@ -165,9 +167,9 @@ sibyl project link                    # Interactive - pick from list
 sibyl project link project_abc123     # Link to specific project
 sibyl project link proj_x --path ~/dev/other  # Link a different path
 
-# Check current context
-sibyl context                         # JSON output
-sibyl context -t                      # Human-readable
+# Check current context (verify linked project)
+cat ~/.sibyl/config.toml              # View path mappings
+sibyl project list                    # See all projects
 
 # List all directory-to-project links
 sibyl project links
@@ -308,41 +310,9 @@ sibyl task complete task_xyz \
 
 ## Output Formats
 
-**Always use JSON output** (the default). Parse with `jq`.
-
-### Extracting Data with jq
-
-```bash
-# Extract just task names
-sibyl task list --status todo 2>&1 | jq -r '.[].name'
-
-# Count tasks by status
-sibyl task list --status todo 2>&1 | jq 'length'
-
-# Get names and priorities
-sibyl task list --status todo 2>&1 | jq -r '.[] | "\(.metadata.priority)\t\(.name)"'
-
-# Filter by priority
-sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "high") | .name'
-
-# Get tasks grouped by feature
-sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.feature) | .[] | "\(.[0].metadata.feature // "none"):\n\(.[].name | "  - \(.)")"'
-
-# Sorted by priority (critical first)
-sibyl task list --status todo 2>&1 | jq -r 'sort_by(.metadata.priority) | .[].name'
-```
-
-### JSON Output Notes
-
-- **Clean output**: Embeddings are automatically stripped from CLI output
-- **Valid JSON**: Output is properly escaped and jq-parseable
-
-### CSV Export (Alternative)
-
-```bash
-sibyl task list --csv
-sibyl entity list --type pattern --csv
-```
+- **JSON** (default): Parse with `jq`, embeddings auto-stripped
+- **Table**: Add `-t` for human-readable output
+- **CSV**: Add `--csv` for spreadsheet export
 
 ---
 
@@ -362,38 +332,28 @@ sibyl entity list --type pattern --csv
 
 ## CLI vs MCP Tools
 
-**Prefer CLI over MCP tools** (`mcp__sibyl__*`):
+Both work well. Choose based on context:
 
-| Aspect | CLI (`sibyl`) | MCP Tools |
-|--------|---------------------|-----------|
-| Reliability | Always works | May have session issues |
-| Output control | `--table`, `--csv`, JSON | JSON only |
-| Bulk operations | Pipes, grep, scripts | One call at a time |
-| Status filtering | `--status`, `--project` | Parameters in JSON |
+| Use Case | Best Choice |
+|----------|-------------|
+| Single operations | Either works |
+| Bulk/batch operations | CLI (pipes, scripts) |
+| Output formatting | CLI (`--table`, `--csv`) |
+| Direct from agent | MCP tools are fine |
 
-The MCP tools (`mcp__sibyl__search`, `mcp__sibyl__add`, etc.) are available but may return session errors if the server isn't running. **CLI is the reliable path.**
+Both require the Sibyl server to be reachable. Use `sibyl health` to verify connectivity.
 
 ---
 
 ## Troubleshooting
 
-### "No valid session ID" from MCP tools
-The Sibyl MCP server isn't running. Use CLI instead:
+### Connection errors
+Check server health first:
 ```bash
-sibyl search "query"  # Instead of mcp__sibyl__search
-```
-
-### FalkorDB connection errors
-```bash
-# Check if FalkorDB is running
-docker ps | grep falkordb
-
-# Start it
-docker compose up -d
-
-# Verify
 sibyl health
 ```
+
+If unhealthy, verify the Sibyl server and FalkorDB are running. Check your `SIBYL_API_URL` if using a remote server.
 
 ### Task list shows wrong project's tasks
 Check your project context:
@@ -411,41 +371,103 @@ sibyl task list --status todo      # Active work only
 
 ---
 
-## Task Reporting Recipes
+## Quick jq Recipes
 
-### Get task counts by status
 ```bash
-echo "TODO: $(sibyl task list --status todo 2>&1 | jq 'length')"
-echo "DOING: $(sibyl task list --status doing 2>&1 | jq 'length')"
-echo "DONE: $(sibyl task list --status done 2>&1 | jq 'length')"
-```
+# Count tasks
+sibyl task list --status todo 2>&1 | jq 'length'
 
-### List task names by status
-```bash
+# List names
 sibyl task list --status todo 2>&1 | jq -r '.[].name'
-```
 
-### List tasks with priority and feature (sorted)
-```bash
-# Priority + feature + name, sorted
-sibyl task list --status todo 2>&1 | jq -r '.[] | "\(.metadata.priority)\t\(.metadata.feature // "-")\t\(.name)"' | sort
-```
+# Filter by priority
+sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "high") | .name'
 
-### Filter by priority
-```bash
-# Only critical/high priority
-sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "critical" or .metadata.priority == "high") | .name'
-```
-
-### Group by feature
-```bash
-sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.feature) | .[] | "\(.[0].metadata.feature // "other"):", (.[].name | "  - \(.)")'
-```
-
-### Export for external tools
-```bash
-# CSV export for spreadsheets
+# Export CSV
 sibyl task list --status todo --csv > tasks.csv
+```
+
+See WORKFLOWS.md for advanced recipes.
+
+---
+
+## Common Pitfalls (AVOID THESE)
+
+Based on analysis of 200MB of conversation history, these are the most common CLI mistakes:
+
+### Wrong Command Names
+
+| ❌ Wrong | ✅ Correct | Note |
+|----------|-----------|------|
+| `sibyl task add "..."` | `sibyl task create --title "..."` | Use `create` not `add` |
+| `sibyl task list --todo` | `sibyl task list --status todo` | Status is a value, not a flag |
+| `sibyl task list --doing` | `sibyl task list --status doing` | Same issue |
+
+### Non-Existent Flags
+
+| ❌ Won't Work | Why | ✅ Alternative |
+|--------------|-----|----------------|
+| `--json` | JSON is already the default | Just omit it |
+| `--complexity` | Not a CLI flag | Not available |
+| `--tags` | Not a CLI flag | Use `--tech` or `--feature` |
+| `--description` on `task update` | Only at creation | Set in `task create -d "..."` |
+| `--format json` | Not a flag | JSON is default, just omit |
+| `--format csv` | Not a flag | Use `--csv` instead |
+
+### Title Flag Confusion
+
+```bash
+# ❌ WRONG: -t is for TABLE output, not title!
+sibyl task create -t "My Task" -p project_id
+
+# ✅ CORRECT: Use --title (no short form)
+sibyl task create --title "My Task" -p project_id
+```
+
+### JSON Field Names
+
+When parsing CLI JSON output with jq, tasks use `name` not `title`:
+
+```bash
+# ❌ WRONG: Field is called "name", not "title"
+sibyl task list --status todo 2>&1 | jq '.[].title'
+
+# ✅ CORRECT
+sibyl task list --status todo 2>&1 | jq '.[].name'
+```
+
+### Multiline Commands Break
+
+Trailing spaces after `\` cause "Got unexpected extra arguments":
+
+```bash
+# ❌ WRONG: Space after backslash
+sibyl task create --title "Fix" \
+  --priority high
+
+# ✅ CORRECT: Single line or no trailing spaces
+sibyl task create --title "Fix" --priority high -p project_id
+```
+
+### Error Handling
+
+When piping to jq, failed commands send error text instead of JSON:
+
+```bash
+# If server is down, jq will fail with parse error
+# Check server first: sibyl health
+```
+
+### Task ID Resolution
+
+The CLI supports short ID prefixes - it will resolve them automatically:
+
+```bash
+# Both work - CLI finds the full ID
+sibyl task show task_c24
+sibyl task show task_c24fc3228e7c
+
+# Only fails if prefix matches multiple tasks (ambiguous)
 ```
 
 ---
@@ -453,12 +475,9 @@ sibyl task list --status todo --csv > tasks.csv
 ## Prerequisites
 
 ```bash
-# Ensure FalkorDB is running
-docker compose up -d
-
-# Check health
+# Check connectivity
 sibyl health
 
-# If fresh install, run setup
+# First-time setup (checks environment, dependencies)
 sibyl setup
 ```

@@ -2,6 +2,12 @@
 
 Concrete examples showing the CLI in action.
 
+> ⚠️ **Common Mistakes to Avoid:**
+> - `sibyl task add` → Use `sibyl task create --title "..."`
+> - `--json` flag → JSON is default (no flag needed)
+> - `-t "Title"` → Use `--title "..."` (`-t` is for table output)
+> - `jq '.[].title'` → Use `jq '.[].name'` (field is `name`)
+
 ---
 
 ## Search Examples
@@ -49,8 +55,8 @@ sibyl task list --status blocked
 # Filter by assignee
 sibyl task list --assignee alice
 
-# JSON output
-sibyl task list --project proj_auth --format json
+# JSON is the default output (no flag needed)
+sibyl task list --project proj_auth
 ```
 
 ### Task Details
@@ -205,17 +211,25 @@ sibyl explore path pattern_auth task_login
 
 ## Output Formats
 
-### JSON Output
+### JSON Output (Default)
 ```bash
-sibyl task list --format json
-sibyl entity list --type pattern --format json
-sibyl project list --format json
+# JSON is the default - no flag needed
+sibyl task list
+sibyl entity list --type pattern
+sibyl project list
+```
+
+### Table Output (Human-Readable)
+```bash
+# Use -t for table format
+sibyl task list -t
+sibyl entity list --type pattern -t
 ```
 
 ### CSV Output
 ```bash
-sibyl task list --format csv > tasks.csv
-sibyl entity list --type episode --format csv > episodes.csv
+sibyl task list --csv > tasks.csv
+sibyl entity list --type episode --csv > episodes.csv
 ```
 
 ---
