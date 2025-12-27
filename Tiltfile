@@ -22,6 +22,7 @@ cfg = config.parse()
 helm_repo('cnpg', 'https://cloudnative-pg.github.io/charts')
 helm_repo('bitnami', 'https://charts.bitnami.com/bitnami')
 helm_repo('kong', 'https://charts.konghq.com')
+helm_repo('jetstack', 'https://charts.jetstack.io')
 
 # =============================================================================
 # INFRASTRUCTURE
@@ -52,6 +53,61 @@ if not cfg.get("skip-infra"):
     k8s_yaml("infra/local/namespace.yaml")
 
     # -------------------------------------------------------------------------
+    # cert-manager
+    # -------------------------------------------------------------------------
+    helm_resource(
+        'cert-manager',
+        chart='jetstack/cert-manager',
+        namespace='cert-manager',
+        flags=[
+            '--create-namespace',
+            '--wait',
+            '--timeout=5m',
+            '--set=crds.enabled=true',
+        ],
+        resource_deps=['gateway-api-crds']
+    )
+
+    # Self-signed ClusterIssuer and Certificate for sibyl.local
+    local_resource(
+        'cert-manager-issuer',
+        cmd='''
+        echo "⏳ Waiting for cert-manager webhook..."
+        kubectl wait --for=condition=available --timeout=120s \
+            deployment/cert-manager-webhook \
+            -n cert-manager
+
+        sleep 3
+
+        echo "✅ Creating ClusterIssuer and Certificate..."
+        kubectl apply -f - <<EOF
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sibyl-local-tls
+  namespace: kong
+spec:
+  secretName: sibyl-local-tls
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - sibyl.local
+    - "*.sibyl.local"
+  duration: 8760h  # 1 year
+EOF
+        ''',
+        resource_deps=['cert-manager'],
+    )
+
+    # -------------------------------------------------------------------------
     # Secrets from environment
     # -------------------------------------------------------------------------
     openai_key = os.getenv("SIBYL_OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
@@ -73,15 +129,7 @@ stringData:
   SIBYL_OPENAI_API_KEY: "{openai_key}"
   SIBYL_ANTHROPIC_API_KEY: "{anthropic_key}"
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: sibyl-db-secret
-  namespace: sibyl
-type: Opaque
-stringData:
-  SIBYL_POSTGRES_PASSWORD: "sibyl_dev"
----
+# Note: Database password comes from CNPG auto-generated secret (sibyl-postgres-app)
 apiVersion: v1
 kind: Secret
 metadata:
@@ -105,7 +153,7 @@ stringData:
             '--timeout=5m',
             '--skip-crds',  # We install Gateway API CRDs separately
         ],
-        resource_deps=['gateway-api-crds']
+        resource_deps=['cert-manager-issuer']  # Wait for cert-manager + issuer
     )
 
     # Apply Kong Gateway manifests after webhook is ready
@@ -122,12 +170,17 @@ stringData:
         echo "✅ Applying Kong Gateway manifests..."
         kubectl apply -f infra/local/kong/gateway-class.yaml
         kubectl apply -f infra/local/kong/gateway.yaml
+        kubectl apply -f infra/local/kong/reference-grant.yaml
         kubectl apply -f infra/local/kong/httproutes.yaml
         ''',
         deps=['infra/local/kong/'],
         resource_deps=['kong-operator'],
         trigger_mode=TRIGGER_MODE_AUTO
     )
+
+    # Kong Gateway DataPlane is created dynamically by Kong operator
+    # Tilt will auto-discover it once created
+    # Access via: kubectl port-forward -n kong svc/dataplane-sibyl-gateway-proxy 8080:80 8443:443
 
     # -------------------------------------------------------------------------
     # CNPG Operator
@@ -184,7 +237,7 @@ spec:
       containers:
         - name: falkordb
           image: falkordb/falkordb:latest
-          args: ["--requirepass", "conventions"]
+          # No auth for local dev - simpler
           ports:
             - containerPort: 6379
           resources:
@@ -222,7 +275,8 @@ spec:
     k8s_resource(
         workload='falkordb',
         labels=['infrastructure'],
-        port_forwards=['6380:6379'],
+        # No port-forward - FalkorDB stays in-cluster only
+        # Use Docker Compose FalkorDB for standalone local dev
         resource_deps=['kong-gateway-manifests']
     )
 
@@ -239,6 +293,7 @@ docker_build(
         'src/',
         'pyproject.toml',
         'uv.lock',
+        'README.md',
         'alembic/',
         'alembic.ini',
     ],
@@ -268,11 +323,11 @@ k8s_resource(
     workload='sibyl-backend',
     new_name='backend',
     labels=['application'],
-    port_forwards=['3334:3334'],
+    # No port-forward - access via Kong gateway at sibyl.local
     resource_deps=backend_deps,
     links=[
-        link('http://localhost:3334/api/docs', 'API Docs'),
-        link('http://localhost:3334/api/health', 'Health Check'),
+        link('https://sibyl.local/api/docs', 'API Docs'),
+        link('https://sibyl.local/api/health', 'Health Check'),
     ],
 )
 
@@ -368,11 +423,111 @@ k8s_resource(
     workload='sibyl-frontend',
     new_name='frontend',
     labels=['application'],
-    port_forwards=['3337:3337'],
+    # No port-forward - access via Kong gateway at sibyl.local
     resource_deps=frontend_deps,
     links=[
-        link('http://localhost:3337', 'Sibyl UI'),
+        link('https://sibyl.local', 'Sibyl UI'),
     ],
+)
+
+
+# =============================================================================
+# APPLICATION: Worker (arq job queue processor)
+# =============================================================================
+
+k8s_yaml(blob("""
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sibyl-worker
+  namespace: sibyl
+  labels:
+    app.kubernetes.io/name: sibyl
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sibyl
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sibyl
+        app.kubernetes.io/component: worker
+    spec:
+      containers:
+        - name: worker
+          image: sibyl-backend
+          imagePullPolicy: Never
+          command: ["sibyl", "worker"]
+          envFrom:
+            - configMapRef:
+                name: sibyl-config
+          env:
+            - name: SIBYL_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: sibyl-secrets
+                  key: SIBYL_JWT_SECRET
+            - name: SIBYL_OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sibyl-secrets
+                  key: SIBYL_OPENAI_API_KEY
+                  optional: true
+            - name: SIBYL_ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sibyl-secrets
+                  key: SIBYL_ANTHROPIC_API_KEY
+                  optional: true
+            # Database connection from CNPG-generated secret
+            - name: SIBYL_POSTGRES_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: sibyl-postgres-app
+                  key: host
+            - name: SIBYL_POSTGRES_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: sibyl-postgres-app
+                  key: port
+            - name: SIBYL_POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: sibyl-postgres-app
+                  key: dbname
+            - name: SIBYL_POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: sibyl-postgres-app
+                  key: username
+            - name: SIBYL_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sibyl-postgres-app
+                  key: password
+            - name: SIBYL_FALKORDB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sibyl-falkordb-secret
+                  key: SIBYL_FALKORDB_PASSWORD
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+"""))
+
+worker_deps = ['backend'] if not cfg.get('skip-infra') else ['backend']
+k8s_resource(
+    workload='sibyl-worker',
+    new_name='worker',
+    labels=['application'],
+    resource_deps=worker_deps,
 )
 
 
@@ -396,14 +551,14 @@ local_resource(
 
 local_resource(
     'open-api-docs',
-    cmd='open http://localhost:3334/api/docs',
+    cmd='open https://sibyl.local:8443/api/docs',
     auto_init=False,
     labels=['tools'],
 )
 
 local_resource(
     'open-frontend',
-    cmd='open http://localhost:3337',
+    cmd='open https://sibyl.local:8443',
     auto_init=False,
     labels=['tools'],
 )

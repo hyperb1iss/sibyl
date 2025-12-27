@@ -1,4 +1,5 @@
 # HTTP Routes for Sibyl services
+# Routes live in sibyl namespace, reference Gateway in kong namespace
 ---
 # API routes to backend
 apiVersion: gateway.networking.k8s.io/v1
@@ -9,7 +10,7 @@ metadata:
 spec:
   parentRefs:
     - name: sibyl-gateway
-      namespace: sibyl
+      namespace: kong
   rules:
     - matches:
         - path:
@@ -35,7 +36,7 @@ metadata:
 spec:
   parentRefs:
     - name: sibyl-gateway
-      namespace: sibyl
+      namespace: kong
   rules:
     - matches:
         - path:

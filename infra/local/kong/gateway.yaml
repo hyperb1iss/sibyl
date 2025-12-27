@@ -1,9 +1,10 @@
 # Kong Gateway instance for Sibyl
+# DataPlane runs in kong namespace, routes traffic to sibyl namespace
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: sibyl-gateway
-  namespace: sibyl
+  namespace: kong
 spec:
   gatewayClassName: kong
   listeners:
@@ -12,4 +13,16 @@ spec:
       port: 80
       allowedRoutes:
         namespaces:
-          from: Same
+          from: All
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: sibyl.local
+      allowedRoutes:
+        namespaces:
+          from: All
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: sibyl-local-tls
+            kind: Secret

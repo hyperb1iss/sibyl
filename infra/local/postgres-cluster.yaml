@@ -1,5 +1,6 @@
 # CloudNativePG Cluster for Sibyl
 # Deploys a single-node PostgreSQL with pgvector extension
+# CNPG auto-generates credentials in secret: sibyl-postgres-app
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -11,13 +12,11 @@ spec:
   # PostgreSQL version with pgvector support
   imageName: ghcr.io/cloudnative-pg/postgresql:17
 
-  # Bootstrap from scratch
+  # Bootstrap from scratch (CNPG auto-generates password)
   bootstrap:
     initdb:
       database: sibyl
       owner: sibyl
-      secret:
-        name: sibyl-postgres-credentials
       postInitSQL:
         - CREATE EXTENSION IF NOT EXISTS vector
 
@@ -42,15 +41,3 @@ spec:
   # Backup (disabled for local)
   backup:
     barmanObjectStore: null
-
----
-# Credentials secret for the database
-apiVersion: v1
-kind: Secret
-metadata:
-  name: sibyl-postgres-credentials
-  namespace: sibyl
-type: kubernetes.io/basic-auth
-stringData:
-  username: sibyl
-  password: sibyl_dev

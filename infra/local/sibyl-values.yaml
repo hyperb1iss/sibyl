@@ -13,13 +13,10 @@ backend:
   # Reference secrets
   existingSecret: sibyl-secrets
 
-  # Database connection to CNPG cluster
+  # Database connection - pulls all values from CNPG auto-generated secret
+  # CNPG creates sibyl-postgres-app with: host, port, dbname, username, password, uri
   database:
-    host: sibyl-postgres-rw # CNPG read-write service
-    port: "5432"
-    database: sibyl
-    user: sibyl
-    existingSecret: sibyl-db-secret
+    existingSecret: sibyl-postgres-app
 
   # FalkorDB connection
   falkordb:

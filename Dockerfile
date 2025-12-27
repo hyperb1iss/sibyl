@@ -16,12 +16,12 @@ COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
-# Copy source and install project
+# Copy source and install project (non-editable for production)
 COPY src/ src/
 COPY alembic/ alembic/
 COPY alembic.ini .
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --no-editable
 
 
 # Stage 2: Runtime
@@ -42,6 +42,8 @@ COPY --from=builder --chown=sibyl:sibyl /app/alembic.ini /app/alembic.ini
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    # crawl4ai needs a writable directory
+    CRAWL4_AI_BASE_DIRECTORY=/tmp \
     # Sibyl defaults (override in compose/k8s)
     SIBYL_SERVER_HOST=0.0.0.0 \
     SIBYL_SERVER_PORT=3334
@@ -56,5 +58,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 # Expose MCP + API port
 EXPOSE 3334
 
-# Run the server
-CMD ["python", "-m", "sibyl.main", "serve"]
+# Run the server using CLI
+CMD ["sibyl", "serve"]

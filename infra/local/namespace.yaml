@@ -5,3 +5,10 @@ metadata:
   labels:
     app.kubernetes.io/name: sibyl
     app.kubernetes.io/part-of: sibyl
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kong
+  labels:
+    app.kubernetes.io/name: kong

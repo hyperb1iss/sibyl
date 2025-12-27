@@ -60,11 +60,32 @@ spec:
                   optional: true
             {{- end }}
             {{- if .Values.backend.database.existingSecret }}
+            # Pull all database connection info from CNPG-generated secret
+            - name: SIBYL_POSTGRES_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: host
+            - name: SIBYL_POSTGRES_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: port
+            - name: SIBYL_POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: dbname
+            - name: SIBYL_POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: username
             - name: SIBYL_POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.backend.database.existingSecret }}
-                  key: SIBYL_POSTGRES_PASSWORD
+                  key: password
             {{- end }}
             {{- if .Values.backend.falkordb.existingSecret }}
             - name: SIBYL_FALKORDB_PASSWORD

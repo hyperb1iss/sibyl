@@ -9,14 +9,14 @@ spec:
     group: gateway-operator.konghq.com
     kind: GatewayConfiguration
     name: kong-config
-    namespace: kong-system
+    namespace: kong
 ---
 # Gateway Configuration for Kong
 apiVersion: gateway-operator.konghq.com/v1beta1
 kind: GatewayConfiguration
 metadata:
   name: kong-config
-  namespace: kong-system
+  namespace: kong
 spec:
   dataPlaneOptions:
     deployment:

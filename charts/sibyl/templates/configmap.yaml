@@ -13,11 +13,13 @@ data:
   SIBYL_LLM_MODEL: {{ .Values.backend.env.SIBYL_LLM_MODEL | quote }}
   SIBYL_EMBEDDING_MODEL: {{ .Values.backend.env.SIBYL_EMBEDDING_MODEL | quote }}
   SIBYL_EMBEDDING_DIMENSIONS: {{ .Values.backend.env.SIBYL_EMBEDDING_DIMENSIONS | quote }}
-  # Database connection
+  # Database connection (non-secret values, or fallbacks if not using existingSecret)
+  {{- if not .Values.backend.database.existingSecret }}
   SIBYL_POSTGRES_HOST: {{ .Values.backend.database.host | quote }}
   SIBYL_POSTGRES_PORT: {{ .Values.backend.database.port | quote }}
   SIBYL_POSTGRES_DB: {{ .Values.backend.database.database | quote }}
   SIBYL_POSTGRES_USER: {{ .Values.backend.database.user | quote }}
+  {{- end }}
   # FalkorDB connection
   SIBYL_FALKORDB_HOST: {{ .Values.backend.falkordb.host | quote }}
   SIBYL_FALKORDB_PORT: {{ .Values.backend.falkordb.port | quote }}

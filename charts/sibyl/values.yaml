@@ -65,18 +65,25 @@ backend:
   # Must contain: SIBYL_JWT_SECRET, SIBYL_OPENAI_API_KEY, SIBYL_ANTHROPIC_API_KEY
   existingSecret: ""
 
-  # -- Database connection settings (injected from configmap or secret)
+  # -- Database connection settings
+  # Option 1: Use CNPG-generated secret (recommended)
+  #   Set existingSecret to the CNPG app secret (e.g., "sibyl-postgres-app")
+  #   All connection values (host, port, dbname, username, password) are pulled automatically
+  # Option 2: Manual configuration
+  #   Leave existingSecret empty and set host, port, database, user manually
+  #   Password must be in a separate secret
   database:
-    # -- PostgreSQL host
-    host: "postgres"
-    # -- PostgreSQL port
-    port: "5432"
-    # -- PostgreSQL database name
-    database: "sibyl"
-    # -- PostgreSQL user (secret recommended)
-    user: "sibyl"
-    # -- Reference to secret containing SIBYL_POSTGRES_PASSWORD
+    # -- Reference to CNPG-generated secret (contains host, port, dbname, username, password)
+    # When set, all other database values are ignored
     existingSecret: ""
+    # -- PostgreSQL host (only used if existingSecret is empty)
+    host: "postgres"
+    # -- PostgreSQL port (only used if existingSecret is empty)
+    port: "5432"
+    # -- PostgreSQL database name (only used if existingSecret is empty)
+    database: "sibyl"
+    # -- PostgreSQL user (only used if existingSecret is empty)
+    user: "sibyl"
 
   # -- FalkorDB connection settings
   falkordb:

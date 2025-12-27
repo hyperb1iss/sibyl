@@ -1,0 +1,14 @@
+# Allow Kong Gateway (in kong namespace) to route to services in sibyl namespace
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: kong-to-sibyl
+  namespace: sibyl
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: sibyl
+  to:
+    - group: ""
+      kind: Service
