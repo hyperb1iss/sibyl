@@ -11,7 +11,13 @@ from typing import Any
 
 import httpx
 
-from sibyl.cli.auth_store import normalize_api_url, read_server_credentials
+from sibyl.cli.auth_store import (
+    get_refresh_token,
+    is_access_token_expired,
+    normalize_api_url,
+    read_server_credentials,
+    set_tokens,
+)
 from sibyl.config import settings
 
 
@@ -144,12 +150,66 @@ class SibylClient:
             await self._client.aclose()
             self._client = None
 
+    async def _refresh_token(self) -> bool:
+        """Attempt to refresh the access token using stored refresh token.
+
+        Returns:
+            True if refresh succeeded, False otherwise
+        """
+        refresh_token = get_refresh_token()
+        if not refresh_token:
+            return False
+
+        try:
+            # Use a fresh client without auth header for the refresh call
+            async with httpx.AsyncClient(
+                base_url=self.base_url.replace("/api", ""),
+                timeout=self.timeout,
+            ) as client:
+                response = await client.post(
+                    "/auth/refresh",
+                    json={"refresh_token": refresh_token},
+                )
+
+                if response.status_code != 200:
+                    return False
+
+                data = response.json()
+                new_access_token = data.get("access_token")
+                new_refresh_token = data.get("refresh_token")
+                expires_in = data.get("expires_in")
+
+                if not new_access_token:
+                    return False
+
+                # Store new tokens
+                set_tokens(
+                    new_access_token,
+                    refresh_token=new_refresh_token,
+                    expires_in=expires_in,
+                )
+
+                # Update client state
+                self.auth_token = new_access_token
+
+                # Recreate HTTP client with new token
+                if self._client and not self._client.is_closed:
+                    await self._client.aclose()
+                self._client = None
+
+                return True
+
+        except Exception:
+            return False
+
     async def _request(
         self,
         method: str,
         path: str,
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        *,
+        _retry_on_401: bool = True,
     ) -> dict[str, Any]:
         """Make an HTTP request to the API.
 
@@ -158,6 +218,7 @@ class SibylClient:
             path: API path (e.g., /entities, /tasks/123/start)
             json: JSON body for POST/PATCH requests
             params: Query parameters
+            _retry_on_401: Internal flag to prevent infinite retry loops
 
         Returns:
             Response JSON as dict
@@ -165,6 +226,10 @@ class SibylClient:
         Raises:
             SibylClientError: On API errors or connection issues
         """
+        # Proactively refresh if token is about to expire
+        if self.auth_token and is_access_token_expired():
+            await self._refresh_token()
+
         client = await self._get_client()
 
         try:
@@ -174,6 +239,14 @@ class SibylClient:
                 json=json,
                 params=params,
             )
+
+            # Handle 401 - try to refresh token and retry once
+            if response.status_code == 401 and _retry_on_401:
+                if await self._refresh_token():
+                    # Retry with new token
+                    return await self._request(
+                        method, path, json=json, params=params, _retry_on_401=False
+                    )
 
             # Handle error responses
             if response.status_code >= 400:
@@ -186,8 +259,7 @@ class SibylClient:
                 if response.status_code in {401, 403}:
                     detail = (
                         f"{detail}\n\n"
-                        "Auth required. Set SIBYL_AUTH_TOKEN or create ~/.sibyl/auth.json "
-                        'with {"access_token": "..."}.'
+                        "Auth required. Run 'sibyl auth login' or set SIBYL_AUTH_TOKEN."
                     )
 
                 raise SibylClientError(
