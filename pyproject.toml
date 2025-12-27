@@ -316,6 +316,8 @@ branch = true
 omit = ["*/tests/*", "*/__pycache__/*"]
 parallel = true
 source = ["src"]
+sigterm = true  # Handle SIGTERM for subprocess coverage
+concurrency = ["thread", "greenlet"]  # Handle async code
 
 [tool.coverage.report]
 exclude_lines = [

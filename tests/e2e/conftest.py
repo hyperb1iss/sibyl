@@ -230,15 +230,31 @@ def cli(e2e_auth_token: str) -> CLIRunner:
 
 @pytest_asyncio.fixture
 async def api_client() -> AsyncGenerator[httpx.AsyncClient]:
-    """Async HTTP client for API calls."""
+    """Unauthenticated async HTTP client for API calls."""
     async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=30.0) as client:
+        yield client
+
+
+@pytest_asyncio.fixture
+async def auth_api_client(e2e_auth_token: str) -> AsyncGenerator[httpx.AsyncClient]:
+    """Authenticated async HTTP client for API calls."""
+    headers = {"Authorization": f"Bearer {e2e_auth_token}"}
+    async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=30.0, headers=headers) as client:
         yield client
 
 
 @pytest.fixture
 def sync_api_client() -> Generator[httpx.Client]:
-    """Sync HTTP client for API calls."""
+    """Unauthenticated sync HTTP client for API calls."""
     with httpx.Client(base_url=API_BASE_URL, timeout=30.0) as client:
+        yield client
+
+
+@pytest.fixture
+def sync_auth_client(e2e_auth_token: str) -> Generator[httpx.Client]:
+    """Authenticated sync HTTP client for API calls."""
+    headers = {"Authorization": f"Bearer {e2e_auth_token}"}
+    with httpx.Client(base_url=API_BASE_URL, timeout=30.0, headers=headers) as client:
         yield client
 
 
