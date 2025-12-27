@@ -1,12 +1,16 @@
 ---
 name: sibyl-knowledge
-description: Graph-RAG knowledge oracle with CLI interface. Use `sibyl` for semantic search, task management, knowledge capture, and graph exploration. Invoke when you need persistent memory across sessions, pattern/learning lookup, or task tracking. Requires FalkorDB running.
+description:
+  Graph-RAG knowledge oracle with CLI interface. Use `sibyl` for semantic search, task management,
+  knowledge capture, and graph exploration. Invoke when you need persistent memory across sessions,
+  pattern/learning lookup, or task tracking. Requires FalkorDB running.
 allowed-tools: Bash
 ---
 
 # Sibyl Knowledge Oracle
 
-Sibyl gives you persistent memory across coding sessions. Search patterns, track tasks, capture learnings—all stored in a knowledge graph.
+Sibyl gives you persistent memory across coding sessions. Search patterns, track tasks, capture
+learnings—all stored in a knowledge graph.
 
 ## Quick Start
 
@@ -35,6 +39,7 @@ sibyl task complete task_xyz --learnings "OAuth tokens expire..."
 ```
 
 **Pro tips:**
+
 - **Link your project first** - then task commands just work without `--project`
 - **Always use JSON output** (default) - it's structured and jq-parseable
 - Use `--all` flag to bypass context and see all projects
@@ -159,7 +164,8 @@ sibyl project create --name "Auth System" --description "OAuth and JWT implement
 
 ### Project Context (Directory Linking)
 
-Link directories to projects for automatic task scoping. Once linked, you don't need `--project` flags.
+Link directories to projects for automatic task scoping. Once linked, you don't need `--project`
+flags.
 
 ```bash
 # Link current directory to a project
@@ -180,6 +186,7 @@ sibyl project unlink --path ~/old/project
 ```
 
 **How it works:**
+
 - Mappings stored in `~/.sibyl/config.toml` under `[paths]`
 - Uses longest-prefix matching (so `~/dev/sibyl/web` matches `~/dev/sibyl`)
 - Task commands auto-resolve project from cwd
@@ -334,12 +341,12 @@ sibyl task complete task_xyz \
 
 Both work well. Choose based on context:
 
-| Use Case | Best Choice |
-|----------|-------------|
-| Single operations | Either works |
-| Bulk/batch operations | CLI (pipes, scripts) |
-| Output formatting | CLI (`--table`, `--csv`) |
-| Direct from agent | MCP tools are fine |
+| Use Case              | Best Choice              |
+| --------------------- | ------------------------ |
+| Single operations     | Either works             |
+| Bulk/batch operations | CLI (pipes, scripts)     |
+| Output formatting     | CLI (`--table`, `--csv`) |
+| Direct from agent     | MCP tools are fine       |
 
 Both require the Sibyl server to be reachable. Use `sibyl health` to verify connectivity.
 
@@ -348,15 +355,20 @@ Both require the Sibyl server to be reachable. Use `sibyl health` to verify conn
 ## Troubleshooting
 
 ### Connection errors
+
 Check server health first:
+
 ```bash
 sibyl health
 ```
 
-If unhealthy, verify the Sibyl server and FalkorDB are running. Check your `SIBYL_API_URL` if using a remote server.
+If unhealthy, verify the Sibyl server and FalkorDB are running. Check your `SIBYL_API_URL` if using
+a remote server.
 
 ### Task list shows wrong project's tasks
+
 Check your project context:
+
 ```bash
 sibyl context                      # See which project you're linked to
 sibyl project link                 # Link to correct project
@@ -364,7 +376,9 @@ sibyl task list --all              # Bypass context to see all
 ```
 
 ### Task list shows old/test data
+
 Filter by status to focus:
+
 ```bash
 sibyl task list --status todo      # Active work only
 ```
@@ -397,22 +411,22 @@ Based on analysis of 200MB of conversation history, these are the most common CL
 
 ### Wrong Command Names
 
-| ❌ Wrong | ✅ Correct | Note |
-|----------|-----------|------|
-| `sibyl task add "..."` | `sibyl task create --title "..."` | Use `create` not `add` |
-| `sibyl task list --todo` | `sibyl task list --status todo` | Status is a value, not a flag |
-| `sibyl task list --doing` | `sibyl task list --status doing` | Same issue |
+| ❌ Wrong                  | ✅ Correct                        | Note                          |
+| ------------------------- | --------------------------------- | ----------------------------- |
+| `sibyl task add "..."`    | `sibyl task create --title "..."` | Use `create` not `add`        |
+| `sibyl task list --todo`  | `sibyl task list --status todo`   | Status is a value, not a flag |
+| `sibyl task list --doing` | `sibyl task list --status doing`  | Same issue                    |
 
 ### Non-Existent Flags
 
-| ❌ Won't Work | Why | ✅ Alternative |
-|--------------|-----|----------------|
-| `--json` | JSON is already the default | Just omit it |
-| `--complexity` | Not a CLI flag | Not available |
-| `--tags` | Not a CLI flag | Use `--tech` or `--feature` |
-| `--description` on `task update` | Only at creation | Set in `task create -d "..."` |
-| `--format json` | Not a flag | JSON is default, just omit |
-| `--format csv` | Not a flag | Use `--csv` instead |
+| ❌ Won't Work                    | Why                         | ✅ Alternative                |
+| -------------------------------- | --------------------------- | ----------------------------- |
+| `--json`                         | JSON is already the default | Just omit it                  |
+| `--complexity`                   | Not a CLI flag              | Not available                 |
+| `--tags`                         | Not a CLI flag              | Use `--tech` or `--feature`   |
+| `--description` on `task update` | Only at creation            | Set in `task create -d "..."` |
+| `--format json`                  | Not a flag                  | JSON is default, just omit    |
+| `--format csv`                   | Not a flag                  | Use `--csv` instead           |
 
 ### Title Flag Confusion
 

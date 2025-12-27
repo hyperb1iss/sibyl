@@ -2,9 +2,11 @@
 
 ## Project Overview
 
-**Sibyl** is a Graph-RAG Knowledge Oracle - an MCP server that provides AI agents access to development wisdom through a Graphiti-powered knowledge graph stored in FalkorDB.
+**Sibyl** is a Graph-RAG Knowledge Oracle - an MCP server that provides AI agents access to
+development wisdom through a Graphiti-powered knowledge graph stored in FalkorDB.
 
 **Stack:**
+
 - Backend: Python 3.11+ / FastMCP / FastAPI / Graphiti / FalkorDB
 - Frontend: Next.js 16 / React 19 / React Query / Tailwind 4
 - Package Managers: `uv` (Python), `pnpm` (TypeScript)
@@ -17,47 +19,57 @@
 
 ### ALWAYS Use Skills
 
-**Use `/sibyl-knowledge` and `/sibyl-project-manager` skills** for ALL Sibyl operations. These skills know the correct patterns and handle authentication properly.
+**Use `/sibyl-knowledge` and `/sibyl-project-manager` skills** for ALL Sibyl operations. These
+skills know the correct patterns and handle authentication properly.
 
 - `/sibyl-knowledge` - Search, explore, add knowledge, manage tasks
 - `/sibyl-project-manager` - Project audits, task triage, sprint planning
 
-**Never call Sibyl MCP tools or CLI directly** without going through a skill first. The skills ensure proper org context and prevent the "wrong graph" problem.
+**Never call Sibyl MCP tools or CLI directly** without going through a skill first. The skills
+ensure proper org context and prevent the "wrong graph" problem.
 
 ### Research → Do → Reflect Cycle
 
 Every significant task follows this cycle:
 
 **1. RESEARCH** (before coding)
+
 ```
 /sibyl-knowledge search "topic"
 /sibyl-knowledge explore patterns
 ```
+
 Find existing patterns, gotchas, past solutions. Don't reinvent wheels.
 
 **2. DO** (while coding)
+
 ```
 /sibyl-knowledge task start <id>
 # ... implement with task context ...
 ```
+
 Work is tracked. Status updates flow through skills.
 
 **3. REFLECT** (after completing)
+
 ```
 /sibyl-knowledge task complete <id> --learnings "What I learned"
 /sibyl-knowledge add "Pattern Title" "What, why, how, caveats"
 ```
+
 Capture insights. The graph gets smarter every session.
 
 ### When to Use Sibyl
 
 **Always use for:**
+
 - Multi-file features or refactors
 - Debugging non-obvious issues
 - Architectural decisions
 - Work spanning multiple sessions
 
 **Skip for:**
+
 - Quick fixes, typos, simple tweaks
 - Single-file changes with clear scope
 - Tasks completable in < 5 minutes
@@ -77,14 +89,14 @@ Sibyl Combined App (Starlette, port 3334)
 
 ### Backend Layers
 
-| Layer | Location | Purpose |
-|-------|----------|---------|
-| MCP Server | `server.py` | 4-tool surface (search/explore/add/manage) |
-| Tools | `tools/*.py` | Tool implementations |
-| Graph | `graph/*.py` | FalkorDB client, entity/relationship managers |
-| Models | `models/*.py` | Pydantic entities, tasks, sources |
-| API | `api/*.py` | FastAPI REST routes |
-| CLI | `cli/*.py` | Typer commands with Rich output |
+| Layer      | Location      | Purpose                                       |
+| ---------- | ------------- | --------------------------------------------- |
+| MCP Server | `server.py`   | 4-tool surface (search/explore/add/manage)    |
+| Tools      | `tools/*.py`  | Tool implementations                          |
+| Graph      | `graph/*.py`  | FalkorDB client, entity/relationship managers |
+| Models     | `models/*.py` | Pydantic entities, tasks, sources             |
+| API        | `api/*.py`    | FastAPI REST routes                           |
+| CLI        | `cli/*.py`    | Typer commands with Rich output               |
 
 ### Frontend Structure
 
@@ -106,7 +118,8 @@ web/src/
 
 ### FalkorDB Write Concurrency
 
-GraphClient uses a semaphore to limit concurrent writes (default: 20) to prevent connection contention:
+GraphClient uses a semaphore to limit concurrent writes (default: 20) to prevent connection
+contention:
 
 ```python
 # GraphClient limits concurrent writes
@@ -130,10 +143,12 @@ await entity_manager.create_direct(entity)  # Direct Cypher MERGE
 ### Node Labels
 
 Graphiti creates two types of nodes:
+
 - `Episodic` - Created by `add_episode()`, has `entity_type` property
 - `Entity` - Extracted entities, may not have `entity_type`
 
 **Queries must handle both:**
+
 ```cypher
 MATCH (n)
 WHERE (n:Episodic OR n:Entity) AND n.entity_type = $type
@@ -161,15 +176,15 @@ async def graph_operation():
 
 ```typescript
 // Server-side fetch with cache tags
-const data = await serverFetch<Stats>('/admin/stats', {
-  next: { revalidate: 60, tags: ['stats'] }
+const data = await serverFetch<Stats>("/admin/stats", {
+  next: { revalidate: 60, tags: ["stats"] },
 });
 
 // Client hydration with React Query
 const { data } = useStats(initialData);
 
 // WebSocket invalidates on changes
-wsClient.on('entity_created', () => {
+wsClient.on("entity_created", () => {
   queryClient.invalidateQueries({ queryKey: queryKeys.entities.all });
 });
 ```
@@ -182,18 +197,18 @@ wsClient.on('entity_created', () => {
 
 ```css
 /* Core Neon Palette */
---sc-purple: #e135ff;    /* Keywords, primary actions, importance */
---sc-cyan: #80ffea;      /* Functions, highlights, interactions */
---sc-coral: #ff6ac1;     /* Data, secondary, hashes */
---sc-yellow: #f1fa8c;    /* Warnings, attention, timestamps */
---sc-green: #50fa7b;     /* Success, confirmations */
---sc-red: #ff6363;       /* Errors, danger */
+--sc-purple: #e135ff; /* Keywords, primary actions, importance */
+--sc-cyan: #80ffea; /* Functions, highlights, interactions */
+--sc-coral: #ff6ac1; /* Data, secondary, hashes */
+--sc-yellow: #f1fa8c; /* Warnings, attention, timestamps */
+--sc-green: #50fa7b; /* Success, confirmations */
+--sc-red: #ff6363; /* Errors, danger */
 
 /* Background Hierarchy */
---sc-bg-dark: #0a0812;      /* Main background */
---sc-bg-base: #12101a;      /* Cards, elevated */
+--sc-bg-dark: #0a0812; /* Main background */
+--sc-bg-base: #12101a; /* Cards, elevated */
 --sc-bg-highlight: #1a162a; /* Hover states */
---sc-bg-elevated: #221e30;  /* Modals, dropdowns */
+--sc-bg-elevated: #221e30; /* Modals, dropdowns */
 ```
 
 ### CLI Colors (Python)
@@ -217,16 +232,16 @@ info("Note:")         # Cyan arrow
 
 ### Semantic Usage
 
-| Element | Color |
-|---------|-------|
+| Element         | Color           |
+| --------------- | --------------- |
 | Titles, headers | ELECTRIC_PURPLE |
-| Borders, tables | NEON_CYAN |
-| IDs, hashes | CORAL |
-| Status: doing | ELECTRIC_PURPLE |
-| Status: todo | NEON_CYAN |
-| Status: done | SUCCESS_GREEN |
-| Status: blocked | ERROR_RED |
-| Warnings | ELECTRIC_YELLOW |
+| Borders, tables | NEON_CYAN       |
+| IDs, hashes     | CORAL           |
+| Status: doing   | ELECTRIC_PURPLE |
+| Status: todo    | NEON_CYAN       |
+| Status: done    | SUCCESS_GREEN   |
+| Status: blocked | ERROR_RED       |
+| Warnings        | ELECTRIC_YELLOW |
 
 ---
 
@@ -256,9 +271,9 @@ class Task(Entity):
 
 ### Relationships (22 types)
 
-**Knowledge:** APPLIES_TO, REQUIRES, CONFLICTS_WITH, SUPERSEDES, ENABLES, BREAKS
-**Tasks:** BELONGS_TO, DEPENDS_ON, BLOCKS, ASSIGNED_TO, REFERENCES, ENCOUNTERED
-**Docs:** CRAWLED_FROM, CHILD_OF, MENTIONS
+**Knowledge:** APPLIES_TO, REQUIRES, CONFLICTS_WITH, SUPERSEDES, ENABLES, BREAKS **Tasks:**
+BELONGS_TO, DEPENDS_ON, BLOCKS, ASSIGNED_TO, REFERENCES, ENCOUNTERED **Docs:** CRAWLED_FROM,
+CHILD_OF, MENTIONS
 
 ---
 
@@ -289,12 +304,13 @@ pnpm lint          # Biome lint
 **Dev Server:** Runs on port **3337** (Next.js 16)
 
 **Browser Automation:** Use the `next-devtools` MCP for UI testing and automation:
+
 ```typescript
 // Evaluate in browser context
-mcp__next-devtools__browser_eval({ code: "document.title", port: 3337 })
+mcp__next - devtools__browser_eval({ code: "document.title", port: 3337 });
 
 // Initialize Next.js DevTools context
-mcp__next-devtools__init({ project_path: "/Users/bliss/dev/sibyl/web" })
+mcp__next - devtools__init({ project_path: "/Users/bliss/dev/sibyl/web" });
 ```
 
 ### Docker
@@ -377,26 +393,26 @@ just test -m integration            # Integration tests only
 
 ### Critical Backend Files
 
-| File | Purpose |
-|------|---------|
-| `main.py` | Server entry, combined app factory |
-| `server.py` | MCP tool registration |
-| `graph/client.py` | FalkorDB connection + write lock |
-| `graph/entities.py` | Entity CRUD + search |
-| `tools/core.py` | search/explore/add implementations |
-| `tools/manage.py` | Task workflow actions |
-| `config.py` | Settings from environment |
+| File                | Purpose                            |
+| ------------------- | ---------------------------------- |
+| `main.py`           | Server entry, combined app factory |
+| `server.py`         | MCP tool registration              |
+| `graph/client.py`   | FalkorDB connection + write lock   |
+| `graph/entities.py` | Entity CRUD + search               |
+| `tools/core.py`     | search/explore/add implementations |
+| `tools/manage.py`   | Task workflow actions              |
+| `config.py`         | Settings from environment          |
 
 ### Critical Frontend Files
 
-| File | Purpose |
-|------|---------|
-| `app/layout.tsx` | Root layout + providers |
-| `lib/api.ts` | Client-side API |
-| `lib/hooks.ts` | React Query hooks |
-| `lib/websocket.ts` | Real-time updates |
-| `lib/constants.ts` | Colors, entity configs |
-| `app/globals.css` | SilkCircuit design tokens |
+| File               | Purpose                   |
+| ------------------ | ------------------------- |
+| `app/layout.tsx`   | Root layout + providers   |
+| `lib/api.ts`       | Client-side API           |
+| `lib/hooks.ts`     | React Query hooks         |
+| `lib/websocket.ts` | Real-time updates         |
+| `lib/constants.ts` | Colors, entity configs    |
+| `app/globals.css`  | SilkCircuit design tokens |
 
 ---
 

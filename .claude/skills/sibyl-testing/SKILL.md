@@ -1,6 +1,8 @@
 ---
 name: sibyl-testing
-description: Write tests for Sibyl using the test harness, mocks, and pytest patterns. Use when writing unit tests, integration tests, or testing MCP tools and graph operations.
+description:
+  Write tests for Sibyl using the test harness, mocks, and pytest patterns. Use when writing unit
+  tests, integration tests, or testing MCP tools and graph operations.
 ---
 
 # Sibyl Testing

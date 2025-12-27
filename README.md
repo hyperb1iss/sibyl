@@ -47,16 +47,17 @@
 
 ## 💎 What Sibyl Does
 
-Sibyl transforms scattered development knowledge into a queryable graph. Patterns, learnings, tasks, documentation—all connected, all searchable by meaning.
+Sibyl transforms scattered development knowledge into a queryable graph. Patterns, learnings, tasks,
+documentation—all connected, all searchable by meaning.
 
-| Capability | What You Get |
-|------------|--------------|
-| **Semantic Search** | Find knowledge by meaning, not keywords |
-| **Task Tracking** | Full workflow with status, blockers, learnings |
-| **Auto-Linking** | New knowledge connects to related entities |
-| **Graph Traversal** | Navigate relationships to discover connections |
-| **Doc Ingestion** | Crawl and index external documentation |
-| **Persistent Memory** | What you learn today helps tomorrow |
+| Capability            | What You Get                                   |
+| --------------------- | ---------------------------------------------- |
+| **Semantic Search**   | Find knowledge by meaning, not keywords        |
+| **Task Tracking**     | Full workflow with status, blockers, learnings |
+| **Auto-Linking**      | New knowledge connects to related entities     |
+| **Graph Traversal**   | Navigate relationships to discover connections |
+| **Doc Ingestion**     | Crawl and index external documentation         |
+| **Persistent Memory** | What you learn today helps tomorrow            |
 
 **Stack:** Python 3.11+ / FastMCP / Graphiti / FalkorDB / Next.js 16
 
@@ -84,25 +85,32 @@ Server runs at `localhost:3334`. Web UI at `localhost:3337` (if running frontend
 
 ## 🔐 Auth
 
-Sibyl uses a signed JWT access token for web auth (stored in the `sibyl_access_token` HTTP-only cookie) and supports scoped API keys for programmatic access.
+Sibyl uses a signed JWT access token for web auth (stored in the `sibyl_access_token` HTTP-only
+cookie) and supports scoped API keys for programmatic access.
 
 **Required env:**
+
 - `SIBYL_JWT_SECRET` (JWT signing secret)
 
 **Optional env (GitHub login):**
+
 - `SIBYL_GITHUB_CLIENT_ID`, `SIBYL_GITHUB_CLIENT_SECRET`
 - `SIBYL_SERVER_URL` (public base URL; used for OAuth callbacks)
 - `SIBYL_FRONTEND_URL` (default post-login redirect)
 
 **Cookie defaults:**
-- `Secure` auto-enables when `SIBYL_SERVER_URL` starts with `https://` (override with `SIBYL_COOKIE_SECURE=true|false`)
+
+- `Secure` auto-enables when `SIBYL_SERVER_URL` starts with `https://` (override with
+  `SIBYL_COOKIE_SECURE=true|false`)
 - Host-only cookies by default (override with `SIBYL_COOKIE_DOMAIN=…`)
 
 **Local users (email/password):**
+
 - `POST /api/auth/local/signup` and `POST /api/auth/local/login` (accept JSON or form posts)
 - Optional hardening: set `SIBYL_PASSWORD_PEPPER` and (if needed) `SIBYL_PASSWORD_ITERATIONS`
 
 **MCP protection:**
+
 - Set `SIBYL_MCP_AUTH_MODE=auto|on|off` (auto enforces when `SIBYL_JWT_SECRET` is set)
 
 ## 🪄 The CLI
@@ -152,12 +160,12 @@ uv run sibyl task list --csv        # Spreadsheets
 
 Sibyl exposes exactly 4 MCP tools. Simple surface, rich capabilities.
 
-| Tool | Purpose | Examples |
-|------|---------|----------|
-| `search` | Find by meaning | Patterns, tasks, docs, errors |
+| Tool      | Purpose            | Examples                              |
+| --------- | ------------------ | ------------------------------------- |
+| `search`  | Find by meaning    | Patterns, tasks, docs, errors         |
 | `explore` | Navigate structure | List entities, traverse relationships |
-| `add` | Create knowledge | Episodes, patterns, tasks |
-| `manage` | Lifecycle & admin | Task workflow, crawling, health |
+| `add`     | Create knowledge   | Episodes, patterns, tasks             |
+| `manage`  | Lifecycle & admin  | Task workflow, crawling, health       |
 
 ### search
 
@@ -232,15 +240,15 @@ pnpm dev
 
 ## 🧪 Entity Types
 
-| Type | What It Holds |
-|------|---------------|
-| `pattern` | Reusable coding patterns |
-| `episode` | Temporal learnings, discoveries |
-| `task` | Work items with workflow |
-| `project` | Container for related work |
-| `rule` | Sacred constraints, invariants |
-| `source` | Knowledge origins (URLs, repos) |
-| `document` | Crawled/ingested content |
+| Type       | What It Holds                   |
+| ---------- | ------------------------------- |
+| `pattern`  | Reusable coding patterns        |
+| `episode`  | Temporal learnings, discoveries |
+| `task`     | Work items with workflow        |
+| `project`  | Container for related work      |
+| `rule`     | Sacred constraints, invariants  |
+| `source`   | Knowledge origins (URLs, repos) |
+| `document` | Crawled/ingested content        |
 
 ## 💜 Philosophy
 
@@ -255,7 +263,8 @@ uv run sibyl search "error you hit" --type episode
 
 ### Work In Task Context
 
-Never do significant work outside a task. Tasks provide traceability, progress tracking, and knowledge linking.
+Never do significant work outside a task. Tasks provide traceability, progress tracking, and
+knowledge linking.
 
 ### Capture What You Learn
 
@@ -265,8 +274,8 @@ If it took time to figure out, save it:
 uv run sibyl add "Descriptive title" "What, why, how, caveats"
 ```
 
-**Bad:** "Fixed the bug"
-**Good:** "JWT refresh fails when Redis TTL expires. Root cause: token service doesn't handle WRONGTYPE. Fix: try/except with regeneration fallback."
+**Bad:** "Fixed the bug" **Good:** "JWT refresh fails when Redis TTL expires. Root cause: token
+service doesn't handle WRONGTYPE. Fix: try/except with regeneration fallback."
 
 ### Complete With Learnings
 
@@ -323,11 +332,11 @@ SIBYL_EMBEDDING_MODEL=text-embedding-3-small
 
 ## 📚 Documentation
 
-| Doc | What's Inside |
-|-----|---------------|
-| [Architecture](docs/CONSOLIDATED_ARCHITECTURE.md) | System design deep dive |
-| [Agent Prompt](docs/agent-system-prompt.md) | How to integrate Sibyl in agent prompts |
-| [Graph-RAG Research](docs/graph-rag-sota-research.md) | SOTA research summary |
+| Doc                                                   | What's Inside                           |
+| ----------------------------------------------------- | --------------------------------------- |
+| [Architecture](docs/CONSOLIDATED_ARCHITECTURE.md)     | System design deep dive                 |
+| [Agent Prompt](docs/agent-system-prompt.md)           | How to integrate Sibyl in agent prompts |
+| [Graph-RAG Research](docs/graph-rag-sota-research.md) | SOTA research summary                   |
 
 ## 🛠️ Development
 

@@ -1,6 +1,9 @@
 ---
 name: sibyl-frontend
-description: Next.js 16 frontend development for Sibyl including React Query hooks, SilkCircuit design system, server/client components, and WebSocket integration. Use when building UI components, pages, or data fetching.
+description:
+  Next.js 16 frontend development for Sibyl including React Query hooks, SilkCircuit design system,
+  server/client components, and WebSocket integration. Use when building UI components, pages, or
+  data fetching.
 ---
 
 # Sibyl Frontend Development
@@ -45,35 +48,33 @@ export function EntitiesContent({ initialData }) {
 
 ```css
 /* globals.css */
---sc-purple: #e135ff;   /* Primary actions, keywords */
---sc-cyan: #80ffea;     /* Interactions, highlights */
---sc-coral: #ff6ac1;    /* Data, secondary */
---sc-yellow: #f1fa8c;   /* Warnings */
---sc-green: #50fa7b;    /* Success */
---sc-red: #ff6363;      /* Errors */
+--sc-purple: #e135ff; /* Primary actions, keywords */
+--sc-cyan: #80ffea; /* Interactions, highlights */
+--sc-coral: #ff6ac1; /* Data, secondary */
+--sc-yellow: #f1fa8c; /* Warnings */
+--sc-green: #50fa7b; /* Success */
+--sc-red: #ff6363; /* Errors */
 ```
 
 ```tsx
 // Tailwind usage
-<button className="bg-[var(--sc-purple)] hover:bg-[var(--sc-cyan)]">
-  Action
-</button>
+<button className="bg-[var(--sc-purple)] hover:bg-[var(--sc-cyan)]">Action</button>
 ```
 
 ## React Query Hooks
 
 ```tsx
-import { useEntities, useEntity, useCreateEntity } from '@/lib/hooks';
+import { useEntities, useEntity, useCreateEntity } from "@/lib/hooks";
 
 // List with filters
-const { data, isLoading } = useEntities({ type: 'task', status: 'todo' });
+const { data, isLoading } = useEntities({ type: "task", status: "todo" });
 
 // Single entity
 const { data: entity } = useEntity(id);
 
 // Mutations
 const { mutate } = useCreateEntity();
-mutate({ name: 'New Entity', entity_type: 'episode' });
+mutate({ name: "New Entity", entity_type: "episode" });
 ```
 
 ## WebSocket Real-time Updates
@@ -85,7 +86,7 @@ useRealtimeUpdates(); // Invalidates queries on WS events
 // Manual subscription
 const ws = useWebSocket();
 useEffect(() => {
-  return ws.on('entity_created', (data) => {
+  return ws.on("entity_created", (data) => {
     // Handle new entity
   });
 }, []);
@@ -94,6 +95,7 @@ useEffect(() => {
 ## Component Patterns
 
 ### Loading States
+
 ```tsx
 <Suspense fallback={<Skeleton variant="card" count={6} />}>
   <AsyncContent />
@@ -101,6 +103,7 @@ useEffect(() => {
 ```
 
 ### Error Boundaries
+
 ```tsx
 <ErrorBoundary level="section" fallback={<ErrorCard />}>
   <RiskyComponent />
@@ -108,6 +111,7 @@ useEffect(() => {
 ```
 
 ### Entity Cards
+
 ```tsx
 <Card variant="entity" color={ENTITY_COLORS[entity.entity_type]}>
   <CardHeader title={entity.name} badge={entity.entity_type} />
@@ -122,8 +126,8 @@ useEffect(() => {
 const data = await fetchApi<Entity>(`/entities/${id}`);
 
 // Server-side (in page.tsx)
-const data = await serverFetch<Stats>('/admin/stats', {
-  next: { revalidate: 60, tags: ['stats'] }
+const data = await serverFetch<Stats>("/admin/stats", {
+  next: { revalidate: 60, tags: ["stats"] },
 });
 ```
 
@@ -131,11 +135,11 @@ const data = await serverFetch<Stats>('/admin/stats', {
 
 ```tsx
 const STATUS_COLORS = {
-  backlog: 'gray',
-  todo: 'cyan',
-  doing: 'purple',
-  blocked: 'red',
-  review: 'yellow',
-  done: 'green',
+  backlog: "gray",
+  todo: "cyan",
+  doing: "purple",
+  blocked: "red",
+  review: "yellow",
+  done: "green",
 };
 ```

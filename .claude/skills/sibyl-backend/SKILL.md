@@ -1,6 +1,9 @@
 ---
 name: sibyl-backend
-description: Python backend development for Sibyl including Graphiti integration, FalkorDB queries, async patterns, and the 4-tool MCP API. Use when implementing backend features, graph operations, entity managers, or MCP tools.
+description:
+  Python backend development for Sibyl including Graphiti integration, FalkorDB queries, async
+  patterns, and the 4-tool MCP API. Use when implementing backend features, graph operations, entity
+  managers, or MCP tools.
 ---
 
 # Sibyl Backend Development
@@ -33,12 +36,13 @@ await entity_manager.create(entity)  # Uses Graphiti add_episode
 await entity_manager.create_direct(entity)  # Direct Cypher MERGE
 ```
 
-Use `create_direct()` for batch imports and structured data (tasks, projects).
-Use `create()` when you want Graphiti's LLM to extract entities and relationships.
+Use `create_direct()` for batch imports and structured data (tasks, projects). Use `create()` when
+you want Graphiti's LLM to extract entities and relationships.
 
 ## Querying Nodes - Critical Pattern
 
 Graphiti creates **two different node labels**:
+
 - `Episodic` - Created by `add_episode()`, has our `entity_type` property
 - `Entity` - Extracted by Graphiti's LLM, may NOT have `entity_type`
 
@@ -57,7 +61,8 @@ result = await client.driver.execute_query(
 )
 ```
 
-**Common mistake:** Using `MATCH (n:Entity)` only finds LLM-extracted nodes, missing all our `Episodic` nodes from `add_episode()`.
+**Common mistake:** Using `MATCH (n:Entity)` only finds LLM-extracted nodes, missing all our
+`Episodic` nodes from `add_episode()`.
 
 ## Async Patterns
 
@@ -84,6 +89,7 @@ async def risky_operation():
 
 1. Add implementation in `tools/core.py` or `tools/manage.py`
 2. Register in `server.py`:
+
 ```python
 @mcp.tool()
 async def my_tool(param: str) -> dict:
@@ -110,6 +116,7 @@ except EntityNotFoundError:
 ## Environment Configuration
 
 Key settings in `.env`:
+
 ```bash
 SIBYL_FALKORDB_PORT=6380           # Note: 6380, not 6379
 SIBYL_FALKORDB_PASSWORD=conventions

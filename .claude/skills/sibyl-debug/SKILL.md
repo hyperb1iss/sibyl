@@ -1,6 +1,8 @@
 ---
 name: sibyl-debug
-description: Debug FalkorDB, Graphiti, and connection issues in Sibyl. Use when encountering graph crashes, connection drops, missing entities, or query failures.
+description:
+  Debug FalkorDB, Graphiti, and connection issues in Sibyl. Use when encountering graph crashes,
+  connection drops, missing entities, or query failures.
 ---
 
 # Sibyl Debugging Guide
@@ -10,10 +12,12 @@ description: Debug FalkorDB, Graphiti, and connection issues in Sibyl. Use when 
 ### 1. FalkorDB Connection Issues
 
 **Symptoms:**
+
 - "Connection closed by server"
 - Intermittent failures
 
 **Debugging:**
+
 ```bash
 # Check if FalkorDB is running
 docker ps | grep sibyl-falkordb
@@ -26,21 +30,25 @@ docker exec sibyl-falkordb redis-cli -a conventions ping
 ```
 
 **Common fixes:**
+
 - Restart FalkorDB: `docker compose restart`
 - Verify port 6380 is correct (not 6379)
 
 ### 2. Entities Not Found / Empty Stats
 
 **Symptoms:**
+
 - `sibyl stats` shows 0 for entity types
 - Entity detail view fails with 404
 - Search returns no results
 
 **Root Cause:** Query using wrong node label. Graphiti creates:
+
 - `Episodic` nodes (from `add_episode`)
 - `Entity` nodes (from LLM extraction)
 
 **Fix:** Ensure queries check both labels:
+
 ```cypher
 MATCH (n)
 WHERE (n:Episodic OR n:Entity) AND n.entity_type = $type
@@ -54,6 +62,7 @@ RETURN n
 **Cause:** MCP server not running or session expired.
 
 **Fix:**
+
 ```bash
 # Restart Sibyl server
 sibyl serve
@@ -91,6 +100,7 @@ docker exec sibyl-falkordb redis-cli -a conventions \
 **Symptom:** Deadlocks or very slow writes
 
 **Debug:**
+
 ```python
 # Add logging to see lock acquisition
 import logging
@@ -98,6 +108,7 @@ logging.getLogger("sibyl.graph.client").setLevel(logging.DEBUG)
 ```
 
 **Fix:** Ensure all writes use `execute_write()`:
+
 ```python
 # Good
 await client.execute_write("CREATE (n:Entity {...})", ...)

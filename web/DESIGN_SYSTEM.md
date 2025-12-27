@@ -6,45 +6,45 @@ Sibyl's design language: electric meets elegant. Neon hues over deep purple-blac
 
 ### Core Colors (OKLCH)
 
-| Token | OKLCH | Usage |
-|-------|-------|-------|
-| `--sc-purple` | `oklch(64% 0.31 328)` | Primary actions, keywords, importance |
-| `--sc-magenta` | `oklch(70% 0.32 328)` | Secondary accent |
-| `--sc-cyan` | `oklch(92% 0.16 180)` | Interactions, focus, links |
-| `--sc-coral` | `oklch(72% 0.22 350)` | Data, hashes, numbers |
-| `--sc-yellow` | `oklch(95% 0.13 105)` | Warnings, attention |
-| `--sc-green` | `oklch(88% 0.23 145)` | Success, confirmations |
-| `--sc-red` | `oklch(68% 0.22 25)` | Errors, danger |
+| Token          | OKLCH                 | Usage                                 |
+| -------------- | --------------------- | ------------------------------------- |
+| `--sc-purple`  | `oklch(64% 0.31 328)` | Primary actions, keywords, importance |
+| `--sc-magenta` | `oklch(70% 0.32 328)` | Secondary accent                      |
+| `--sc-cyan`    | `oklch(92% 0.16 180)` | Interactions, focus, links            |
+| `--sc-coral`   | `oklch(72% 0.22 350)` | Data, hashes, numbers                 |
+| `--sc-yellow`  | `oklch(95% 0.13 105)` | Warnings, attention                   |
+| `--sc-green`   | `oklch(88% 0.23 145)` | Success, confirmations                |
+| `--sc-red`     | `oklch(68% 0.22 25)`  | Errors, danger                        |
 
 ### Background Hierarchy
 
-| Token | OKLCH | Usage |
-|-------|-------|-------|
-| `--sc-bg-dark` | `oklch(6% 0.015 285)` | Page background |
-| `--sc-bg-base` | `oklch(10% 0.02 285)` | Cards, containers |
-| `--sc-bg-highlight` | `oklch(14% 0.025 285)` | Hover states |
-| `--sc-bg-elevated` | `oklch(17% 0.03 285)` | Modals, dropdowns |
-| `--sc-bg-surface` | `oklch(21% 0.035 285)` | Active states |
+| Token               | OKLCH                  | Usage             |
+| ------------------- | ---------------------- | ----------------- |
+| `--sc-bg-dark`      | `oklch(6% 0.015 285)`  | Page background   |
+| `--sc-bg-base`      | `oklch(10% 0.02 285)`  | Cards, containers |
+| `--sc-bg-highlight` | `oklch(14% 0.025 285)` | Hover states      |
+| `--sc-bg-elevated`  | `oklch(17% 0.03 285)`  | Modals, dropdowns |
+| `--sc-bg-surface`   | `oklch(21% 0.035 285)` | Active states     |
 
 ### Foreground
 
-| Token | OKLCH | Usage |
-|-------|-------|-------|
-| `--sc-fg-primary` | `oklch(98% 0.005 110)` | Primary text |
-| `--sc-fg-muted` | `oklch(62% 0.035 280)` | Secondary text |
-| `--sc-fg-subtle` | `oklch(42% 0.03 280)` | Disabled, borders |
+| Token             | OKLCH                  | Usage             |
+| ----------------- | ---------------------- | ----------------- |
+| `--sc-fg-primary` | `oklch(98% 0.005 110)` | Primary text      |
+| `--sc-fg-muted`   | `oklch(62% 0.035 280)` | Secondary text    |
+| `--sc-fg-subtle`  | `oklch(42% 0.03 280)`  | Disabled, borders |
 
 ## Tailwind Usage
 
 ```tsx
 // Colors
-className="text-sc-purple bg-sc-bg-base border-sc-fg-subtle/20"
+className = "text-sc-purple bg-sc-bg-base border-sc-fg-subtle/20";
 
 // With opacity
-className="bg-sc-purple/20 text-sc-cyan/80"
+className = "bg-sc-purple/20 text-sc-cyan/80";
 
 // Semantic backgrounds
-className="bg-sc-bg-elevated hover:bg-sc-bg-highlight"
+className = "bg-sc-bg-elevated hover:bg-sc-bg-highlight";
 ```
 
 ## Focus States
@@ -52,7 +52,8 @@ className="bg-sc-bg-elevated hover:bg-sc-bg-highlight"
 All interactive elements use consistent focus styles:
 
 ```tsx
-className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
+className =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base";
 ```
 
 ## Components
@@ -93,7 +94,15 @@ import { Card, CardHeader, StatCard, CollapsibleCard } from '@/components/ui';
 ### Dialog
 
 ```tsx
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui";
 
 <Dialog open={open} onOpenChange={setOpen}>
   <DialogContent size="md">
@@ -109,7 +118,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
       <Button>Confirm</Button>
     </DialogFooter>
   </DialogContent>
-</Dialog>
+</Dialog>;
 
 // Sizes: sm, md, lg, xl, full
 ```
@@ -117,7 +126,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 ### Select
 
 ```tsx
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel } from '@/components/ui';
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+  SelectGroup,
+  SelectLabel,
+} from "@/components/ui";
 
 <Select value={value} onValueChange={setValue}>
   <SelectTrigger>
@@ -130,13 +147,22 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGr
       <SelectItem value="b">Option B</SelectItem>
     </SelectGroup>
   </SelectContent>
-</Select>
+</Select>;
 ```
 
 ### DropdownMenu
 
 ```tsx
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuCheckboxItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from '@/components/ui';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuCheckboxItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+} from "@/components/ui";
 
 <DropdownMenu>
   <DropdownMenuTrigger asChild>
@@ -150,7 +176,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
       Toggle
     </DropdownMenuCheckboxItem>
   </DropdownMenuContent>
-</DropdownMenu>
+</DropdownMenu>;
 ```
 
 ### Form Components
@@ -187,7 +213,15 @@ import { Checkbox, RadioGroup, RadioGroupItem, Switch, FormField, FormFieldInlin
 ### Table
 
 ```tsx
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, TableEmpty } from '@/components/ui';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+  TableEmpty,
+} from "@/components/ui";
 
 <Table striped compact>
   <TableHeader>
@@ -200,13 +234,9 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, TableEmp
   </TableHeader>
   <TableBody>
     {items.length === 0 ? (
-      <TableEmpty
-        icon={<SearchIcon />}
-        title="No results"
-        description="Try a different search"
-      />
+      <TableEmpty icon={<SearchIcon />} title="No results" description="Try a different search" />
     ) : (
-      items.map(item => (
+      items.map((item) => (
         <TableRow key={item.id} interactive selected={selected === item.id}>
           <TableCell>{item.name}</TableCell>
           <TableCell>{item.status}</TableCell>
@@ -214,7 +244,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, TableEmp
       ))
     )}
   </TableBody>
-</Table>
+</Table>;
 ```
 
 ### Avatar
@@ -287,7 +317,7 @@ import { Input } from '@/components/ui';
 ### Tabs
 
 ```tsx
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui";
 
 <Tabs defaultValue="tab1" variant="underline">
   <TabsList>
@@ -296,7 +326,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui';
   </TabsList>
   <TabsContent value="tab1">Account content</TabsContent>
   <TabsContent value="tab2">Settings content</TabsContent>
-</Tabs>
+</Tabs>;
 
 // Variants: underline, pills, enclosed
 ```
@@ -353,51 +383,58 @@ import { Pagination, SimplePagination, PageSizeSelector } from '@/components/ui'
 Built-in animation classes:
 
 ```tsx
-className="animate-fade-in"      // Opacity 0 -> 1
-className="animate-slide-up"     // Slide from below
-className="animate-pulse-glow"   // Subtle purple glow
-className="animate-shimmer"      // Loading shimmer
+className = "animate-fade-in"; // Opacity 0 -> 1
+className = "animate-slide-up"; // Slide from below
+className = "animate-pulse-glow"; // Subtle purple glow
+className = "animate-shimmer"; // Loading shimmer
 ```
 
 ## Typography
 
 ```tsx
 // Font families
-className="font-sans"  // Space Grotesk
-className="font-mono"  // Fira Code
+className = "font-sans"; // Space Grotesk
+className = "font-mono"; // Fira Code
 
 // Text colors
-className="text-sc-fg-primary"  // White (98%)
-className="text-sc-fg-muted"    // Muted purple-gray
-className="text-sc-fg-subtle"   // Subtle, borders
+className = "text-sc-fg-primary"; // White (98%)
+className = "text-sc-fg-muted"; // Muted purple-gray
+className = "text-sc-fg-subtle"; // Subtle, borders
 ```
 
 ## Best Practices
 
 ### 1. Always use design tokens
+
 ```tsx
 // Good
-className="bg-sc-bg-elevated text-sc-fg-primary"
+className = "bg-sc-bg-elevated text-sc-fg-primary";
 
 // Bad
-className="bg-gray-800 text-white"
+className = "bg-gray-800 text-white";
 ```
 
 ### 2. Consistent focus states
+
 Copy the standard focus ring to all interactive elements:
+
 ```tsx
-"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
+"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base";
 ```
 
 ### 3. Use Radix primitives
+
 All complex interactions should use Radix UI primitives for accessibility:
+
 - Dialog, Select, DropdownMenu, Tooltip (already wrapped)
 - Checkbox, RadioGroup, Switch (already wrapped)
 
 ### 4. Motion with purpose
+
 Use Framer Motion (`motion/react`) for meaningful transitions:
+
 ```tsx
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from "motion/react";
 
 <AnimatePresence>
   {visible && (
@@ -409,12 +446,14 @@ import { motion, AnimatePresence } from 'motion/react';
       Content
     </motion.div>
   )}
-</AnimatePresence>
+</AnimatePresence>;
 ```
 
 ### 5. Responsive by default
+
 Use Tailwind breakpoints consistently:
+
 ```tsx
-className="p-4 md:p-6 lg:p-8"
-className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+className = "p-4 md:p-6 lg:p-8";
+className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3";
 ```

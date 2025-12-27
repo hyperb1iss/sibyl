@@ -1,15 +1,19 @@
 # State-of-the-Art Graph-RAG Research Summary
 
-**Research Date**: 2025-12-20
-**Purpose**: Identify SOTA techniques for building the ultimate knowledge oracle with graph-enhanced retrieval
+**Research Date**: 2025-12-20 **Purpose**: Identify SOTA techniques for building the ultimate
+knowledge oracle with graph-enhanced retrieval
 
 ---
 
 ## Executive Summary
 
-Graph-RAG represents a paradigm shift from traditional RAG by combining semantic embeddings with explicit knowledge graph structures. The key insight is that information retrieval benefits from both **similarity** (embeddings) and **structure** (graph relationships). Current SOTA systems achieve 20-40% improvements in multi-hop reasoning tasks and complex question-answering scenarios.
+Graph-RAG represents a paradigm shift from traditional RAG by combining semantic embeddings with
+explicit knowledge graph structures. The key insight is that information retrieval benefits from
+both **similarity** (embeddings) and **structure** (graph relationships). Current SOTA systems
+achieve 20-40% improvements in multi-hop reasoning tasks and complex question-answering scenarios.
 
 **Critical Finding**: The most effective systems combine:
+
 1. **Hierarchical community detection** (Microsoft GraphRAG)
 2. **Temporal episodic memory** (Graphiti's unique contribution)
 3. **Hybrid retrieval** (semantic + graph traversal)
@@ -21,9 +25,11 @@ Graph-RAG represents a paradigm shift from traditional RAG by combining semantic
 
 ### 1.1 Microsoft GraphRAG: Community-Based Summarization
 
-**Core Innovation**: Instead of retrieving raw chunks, GraphRAG detects communities in the knowledge graph and generates summaries at multiple hierarchical levels.
+**Core Innovation**: Instead of retrieving raw chunks, GraphRAG detects communities in the knowledge
+graph and generates summaries at multiple hierarchical levels.
 
 **Architecture**:
+
 ```
 Documents → Entities & Relationships → Graph
          ↓
@@ -35,44 +41,53 @@ Query → Retrieval from appropriate community level
 ```
 
 **Key Techniques**:
+
 - **Entity extraction via LLM**: Use GPT-4 to extract entities and relationships from chunks
 - **Leiden community detection**: Hierarchical clustering to find semantic communities
 - **Community summarization**: Pre-generate summaries for each community at multiple resolutions
 - **Global vs. Local search**:
   - **Global**: Query across all community summaries (great for "tell me everything about X")
-  - **Local**: Start from specific entities and traverse neighbors (great for "how does X relate to Y")
+  - **Local**: Start from specific entities and traverse neighbors (great for "how does X relate to
+    Y")
 
 **Performance**:
+
 - 20-40% improvement on multi-hop reasoning vs. baseline RAG
 - Excels at "broad summarization" queries (e.g., "What are the main themes in this corpus?")
 - Trade-off: Higher indexing cost for pre-computed summaries
 
 **Limitations**:
+
 - Requires re-processing entire corpus when community structure changes
 - Pre-computed summaries can become stale
 - Higher storage overhead (summaries + raw content)
 
 ### 1.2 Neo4j's Graph-RAG Pattern
 
-**Core Innovation**: Leverage property graph model with typed relationships for structured traversal.
+**Core Innovation**: Leverage property graph model with typed relationships for structured
+traversal.
 
 **Architecture**:
+
 ```
 Query → Entity Linking → Graph Traversal → Context Assembly → LLM
 ```
 
 **Key Techniques**:
+
 - **Cypher query generation**: LLM generates Cypher queries from natural language
 - **Relationship-aware retrieval**: Follow typed edges (e.g., CAUSED_BY, PREVENTED_BY)
 - **Path ranking**: Score subgraphs by relevance to query
 - **Hybrid index**: Combine vector similarity + graph distance
 
 **Strengths**:
+
 - Rich query language (Cypher) for complex traversals
 - Supports OLTP workloads (updates during retrieval)
 - Strong consistency guarantees
 
 **Weaknesses**:
+
 - Cypher generation still error-prone
 - Requires graph schema design upfront
 - Can be slower than specialized vector DBs for pure similarity search
@@ -82,6 +97,7 @@ Query → Entity Linking → Graph Traversal → Context Assembly → LLM
 **Core Innovation**: Flexible abstraction layer supporting multiple graph backends.
 
 **Key Features**:
+
 - **`KnowledgeGraphIndex`**: Abstraction over Neo4j, NetworkX, etc.
 - **Triplet extraction**: Extract (subject, predicate, object) triplets via LLM
 - **Keyword-based graph queries**: Use entity mentions in query to seed graph traversal
@@ -91,26 +107,31 @@ Query → Entity Linking → Graph Traversal → Context Assembly → LLM
   - `hybrid`: Combine both strategies
 
 **Strengths**:
+
 - Easy integration with existing LlamaIndex pipelines
 - Supports custom graph backends
 - Good for rapid prototyping
 
 **Weaknesses**:
+
 - Triplet extraction is naive (no entity resolution)
 - Limited support for temporal or hierarchical relationships
 - Graph traversal depth fixed at query time
 
 ### 1.4 Graphiti: Episodic Temporal Memory
 
-**Core Innovation** (Sibyl's foundation): Treat knowledge as temporal episodes with evolving entity states.
+**Core Innovation** (Sibyl's foundation): Treat knowledge as temporal episodes with evolving entity
+states.
 
 **Unique Differentiators**:
+
 - **Episodic memory**: Knowledge chunks represent episodes in time
 - **Temporal edges**: Relationships are timestamped, allowing "knowledge as of T"
 - **Entity evolution**: Entities have version history (e.g., "Python was version 3.8 in 2020")
 - **Fact invalidation**: Old facts can be superseded by new episodes
 
 **Architecture** (from Sibyl codebase):
+
 ```python
 Episode (H2/H3 section) → Entity Extraction → Graph Storage
      ↓
@@ -118,22 +139,26 @@ Temporal relationships: DOCUMENTED_IN, SUPERSEDES, EVOLVED_FROM
 ```
 
 **Strengths**:
+
 - Perfect for capturing evolving knowledge (e.g., "React Hooks were introduced in 16.8")
 - Temporal queries: "What was best practice for auth in 2022 vs. 2024?"
 - Natural fit for documentation and wisdom that changes over time
 
 **Weaknesses**:
+
 - Requires timestamps on all content
 - More complex invalidation logic
 - Graph grows faster (versions rather than replacements)
 
 **Sibyl's Current Implementation**:
+
 - Uses **FalkorDB** (Redis-based graph)
 - **Semantic chunking** at H2/H3 boundaries (50-800 words)
 - **Pattern matching** for entity extraction (regex-based)
 - **Heuristic relationships** (co-occurrence in episodes)
 
 **Opportunities**:
+
 - Upgrade to LLM-based entity extraction (GPT-4 or local LLM)
 - Add community detection for better summarization
 - Implement temporal invalidation for outdated wisdom
@@ -145,6 +170,7 @@ Temporal relationships: DOCUMENTED_IN, SUPERSEDES, EVOLVED_FROM
 ### 2.1 SOTA Entity Extraction
 
 **Progression**:
+
 1. **Named Entity Recognition (NER)**: SpaCy, BERT-based models
    - Fast but domain-limited
    - Misses custom entities (e.g., "Graphiti server" not recognized)
@@ -156,6 +182,7 @@ Temporal relationships: DOCUMENTED_IN, SUPERSEDES, EVOLVED_FROM
    - Good middle ground (cost vs. accuracy)
 
 **Microsoft GraphRAG Approach**:
+
 ```python
 prompt = """
 Extract all entities and their types from this text.
@@ -168,6 +195,7 @@ entities, relationships = llm.extract(text, prompt)
 ```
 
 **Accuracy Comparison**:
+
 - Regex (Sibyl current): ~60% recall, ~80% precision
 - SpaCy NER: ~75% recall, ~85% precision
 - GPT-4 extraction: ~90% recall, ~88% precision (with good prompts)
@@ -195,19 +223,23 @@ entities, relationships = llm.extract(text, prompt)
    - Microsoft's UniLM, Google's REALM models
 
 4. **LLM-based resolution** (emerging):
+
    ```python
    prompt = f"Are '{entity1}' and '{entity2}' the same entity? Yes/No."
    ```
+
    - High accuracy but expensive at scale
    - Use as final arbiter for uncertain cases
 
-**Graphiti Opportunity**: Currently no entity resolution in Sibyl. Adding embedding-based clustering would catch ~80% of duplicates.
+**Graphiti Opportunity**: Currently no entity resolution in Sibyl. Adding embedding-based clustering
+would catch ~80% of duplicates.
 
 ### 2.3 Cross-Document Entity Linking
 
 **Goal**: Link "FastAPI" mentioned in doc A to "FastAPI" in doc B.
 
 **SOTA Approach**:
+
 1. **Canonical entity table**: Maintain master list of entities
 2. **Linking confidence**: Score each mention against canonical entities
 3. **Disambiguation**: Use context embeddings to resolve ambiguity
@@ -215,6 +247,7 @@ entities, relationships = llm.extract(text, prompt)
    - Compare paragraph embedding to entity description embedding
 
 **Example (LlamaIndex)**:
+
 ```python
 entity_linker = EntityLinker(
     canonical_entities=load_entities(),
@@ -232,6 +265,7 @@ linked_entities = entity_linker.link(mention, context)
 **Core Idea**: Combine vector similarity with graph structure.
 
 **Strategy 1: Sequential** (LlamaIndex default)
+
 ```python
 # Step 1: Vector search
 top_chunks = vector_search(query_embedding, top_k=20)
@@ -247,6 +281,7 @@ final_context = rerank(query, top_chunks + neighbors, top_k=10)
 ```
 
 **Strategy 2: Parallel** (Microsoft GraphRAG)
+
 ```python
 # Run both in parallel
 vector_results = vector_search(query_embedding)
@@ -257,6 +292,7 @@ combined = rrf_merge(vector_results, graph_results)
 ```
 
 **Strategy 3: Graph-first** (Neo4j pattern)
+
 ```python
 # Entity linking first
 entities = entity_linker.link(query)
@@ -269,6 +305,7 @@ results = rerank(query_embedding, subgraph.nodes)
 ```
 
 **Performance Comparison** (Microsoft benchmarks):
+
 - Vector-only: Baseline
 - Sequential hybrid: +15% accuracy
 - Parallel hybrid: +22% accuracy
@@ -277,9 +314,11 @@ results = rerank(query_embedding, subgraph.nodes)
 ### 3.2 Multi-Hop Reasoning
 
 **Challenge**: "What tools does Bliss use for Python error handling, and why?"
+
 - Requires: Python → error handling → tools → rationale
 
 **SOTA Approach: Beam Search over Graph**
+
 ```python
 def multi_hop_search(query, max_hops=3, beam_width=5):
     # Step 1: Entity linking
@@ -322,6 +361,7 @@ def multi_hop_search(query, max_hops=3, beam_width=5):
    - Include full text for top 5, summaries for next 20
 
 3. **Structured context**:
+
    ```
    Entities:
    - FastAPI: Web framework for Python...
@@ -344,27 +384,32 @@ def multi_hop_search(query, max_hops=3, beam_width=5):
 ### 4.1 Sibyl's Current Approach: Semantic Chunking
 
 **Strategy**:
+
 - Split at H2/H3 boundaries (section-based)
 - Min 50 words, max 800 words
 - Preserve hierarchical structure (parent/child episodes)
 
 **Strengths**:
+
 - Respects document structure
 - Good for documentation
 - Captures coherent ideas
 
 **Weaknesses**:
+
 - Fixed boundaries (what if insight spans sections?)
 - No overlap (context loss at boundaries)
 
 ### 4.2 SOTA Chunking Strategies
 
 **1. Entity-Centric Chunking**
+
 - Identify entities in document
 - Create chunks that contain complete entity context
 - Allow overlap if entity is discussed across sections
 
 **Example**:
+
 ```
 Document: "FastAPI is a web framework. It uses Pydantic for validation. Pydantic is..."
 
@@ -373,6 +418,7 @@ Chunk 2: "It uses Pydantic for validation. Pydantic is a data validation library
 ```
 
 **2. Recursive Semantic Splitting** (LangChain)
+
 ```python
 def recursive_split(text, max_chunk_size=500):
     # Try splitting by paragraph
@@ -394,28 +440,27 @@ def recursive_split(text, max_chunk_size=500):
 ```
 
 **3. Sliding Window with Overlap**
+
 - 500-word windows
 - 100-word overlap
 - Preserves context across boundaries
 - Higher storage cost (3-5x more chunks)
 
 **4. Hierarchical Chunking** (Microsoft GraphRAG)
+
 - Create parent-child chunk hierarchy
 - Parent: Entire section (800 words)
 - Children: Sub-sections (200 words each)
 - Retrieval: Search children, return parent for full context
 
-**Comparison**:
-| Strategy | Precision | Recall | Storage | Best For |
-|----------|-----------|--------|---------|----------|
-| Fixed-size | 70% | 65% | 1x | Simple docs |
-| Semantic (H2/H3) | 80% | 75% | 1x | Structured docs |
-| Entity-centric | 85% | 82% | 2x | Knowledge bases |
-| Recursive | 82% | 80% | 1.2x | Mixed structure |
-| Sliding window | 88% | 85% | 4x | Dense knowledge |
-| Hierarchical | 90% | 88% | 2x | Long documents |
+**Comparison**: | Strategy | Precision | Recall | Storage | Best For |
+|----------|-----------|--------|---------|----------| | Fixed-size | 70% | 65% | 1x | Simple docs |
+| Semantic (H2/H3) | 80% | 75% | 1x | Structured docs | | Entity-centric | 85% | 82% | 2x |
+Knowledge bases | | Recursive | 82% | 80% | 1.2x | Mixed structure | | Sliding window | 88% | 85% |
+4x | Dense knowledge | | Hierarchical | 90% | 88% | 2x | Long documents |
 
 **Recommendation for Sibyl**:
+
 - Keep semantic chunking as primary
 - Add entity-centric chunks for critical entities (e.g., tools, languages)
 - Implement hierarchical summarization (episode → section → document)
@@ -427,6 +472,7 @@ def recursive_split(text, max_chunk_size=500):
 **SOTA Solutions**:
 
 1. **Contextual prefix** (Anthropic):
+
    ```python
    chunk_with_context = f"{document_title}\n{section_path}\n\n{chunk_content}"
    ```
@@ -444,6 +490,7 @@ def recursive_split(text, max_chunk_size=500):
    - Retrieve chunk, but show parent to LLM
 
 **Sibyl Implementation**:
+
 ```python
 class Episode:
     section_path: list[str]  # ["Error Handling", "Python Patterns"]
@@ -453,7 +500,9 @@ class Episode:
     def full_context(self):
         return f"{' > '.join(self.section_path)}\n\n{self.content}"
 ```
+
 This is already good, but could add:
+
 ```python
     @property
     def full_context_with_parent(self):
@@ -468,11 +517,13 @@ This is already good, but could add:
 ### 5.1 Graphiti's Unique Architecture
 
 **Temporal Episodic Memory**:
+
 - Every fact is grounded in an **episode** (a timestamped event)
 - Entities evolve over time (versioned states)
 - Relationships have validity periods
 
 **Example**:
+
 ```cypher
 // Episode 1 (2022-01-15)
 CREATE (e:Episode {id: "ep_001", timestamp: "2022-01-15"})
@@ -487,24 +538,27 @@ CREATE (python_new)-[:SUPERSEDES]->(python)
 ```
 
 **Query**: "What Python version should I use?"
+
 - Retrieves `ep_002` (most recent)
 - Returns "Python 3.13"
 
 **Query**: "What Python version was recommended in 2022?"
+
 - Filters episodes by timestamp ≤ 2022-01-15
 - Returns "Python 3.9"
 
 ### 5.2 Graphiti vs. Traditional Knowledge Graphs
 
-| Feature | Traditional KG | Graphiti |
-|---------|---------------|----------|
-| **Time** | Static snapshot | Temporal episodes |
-| **Updates** | Replace nodes/edges | Add new episodes |
-| **History** | Version control external | Built-in versioning |
-| **Invalidation** | Manual deletion | SUPERSEDES relationships |
-| **Query** | Current state only | Point-in-time queries |
+| Feature          | Traditional KG           | Graphiti                 |
+| ---------------- | ------------------------ | ------------------------ |
+| **Time**         | Static snapshot          | Temporal episodes        |
+| **Updates**      | Replace nodes/edges      | Add new episodes         |
+| **History**      | Version control external | Built-in versioning      |
+| **Invalidation** | Manual deletion          | SUPERSEDES relationships |
+| **Query**        | Current state only       | Point-in-time queries    |
 
 **Use Cases Perfect for Graphiti**:
+
 - Developer wisdom (tools/practices evolve)
 - API documentation (versions change)
 - Security advisories (vulnerabilities discovered/patched)
@@ -513,6 +567,7 @@ CREATE (python_new)-[:SUPERSEDES]->(python)
 ### 5.3 Optimizing Graphiti for RAG
 
 **Current Sibyl Architecture**:
+
 1. Parse markdown → Semantic chunks (episodes)
 2. Extract entities via regex patterns
 3. Build relationships via co-occurrence
@@ -521,6 +576,7 @@ CREATE (python_new)-[:SUPERSEDES]->(python)
 **Improvements**:
 
 1. **LLM Entity Extraction**:
+
    ```python
    async def extract_entities_llm(episode: Episode) -> list[Entity]:
        prompt = f"""
@@ -535,6 +591,7 @@ CREATE (python_new)-[:SUPERSEDES]->(python)
    ```
 
 2. **Relationship Extraction via LLM**:
+
    ```python
    prompt = f"""
    Extract relationships between entities:
@@ -546,6 +603,7 @@ CREATE (python_new)-[:SUPERSEDES]->(python)
    ```
 
 3. **Community Detection**:
+
    ```python
    from graphiti_core.communities import detect_communities
 
@@ -556,6 +614,7 @@ CREATE (python_new)-[:SUPERSEDES]->(python)
    ```
 
 4. **Hybrid Retrieval**:
+
    ```python
    async def hybrid_search(query: str, limit: int = 10):
        # 1. Semantic search
@@ -641,17 +700,20 @@ CREATE (python_new)-[:SUPERSEDES]->(python)
 ### 7.1 Retrieval Quality Metrics
 
 **NDCG@10** (Normalized Discounted Cumulative Gain):
+
 - Baseline RAG (vector only): 0.65
 - Hybrid (vector + graph): 0.78 (+20%)
 - Microsoft GraphRAG: 0.82 (+26%)
 - Temporal-aware (Graphiti-style): 0.79 (+22%)
 
 **Success@5** (Query answered in top 5 results):
+
 - Baseline RAG: 68%
 - Hybrid: 82% (+14pp)
 - GraphRAG: 86% (+18pp)
 
 **Multi-hop Accuracy**:
+
 - Baseline RAG: 42%
 - Hybrid: 61% (+19pp)
 - GraphRAG with beam search: 73% (+31pp)
@@ -659,12 +721,14 @@ CREATE (python_new)-[:SUPERSEDES]->(python)
 ### 7.2 Latency & Throughput
 
 **Retrieval Latency** (P95):
+
 - Vector search only: 50ms
 - Vector + graph (sequential): 180ms
 - Vector + graph (parallel): 95ms
 - Community-based: 120ms (amortized via caching)
 
 **Indexing Throughput**:
+
 - Regex extraction: 100 docs/sec
 - SpaCy NER: 50 docs/sec
 - GPT-4 extraction: 5 docs/sec (with batching: 20 docs/sec)
@@ -710,30 +774,35 @@ CREATE (python_new)-[:SUPERSEDES]->(python)
 ## 9. Implementation Checklist for "Ultimate Knowledge Oracle"
 
 ### Phase 1: Foundation (Weeks 1-2)
+
 - [ ] Upgrade entity extraction to LLM-based (GPT-4 or local Llama)
 - [ ] Implement embedding-based entity deduplication
 - [ ] Add temporal decay to search scoring
 - [ ] Implement hierarchical context (episode + parent + document)
 
 ### Phase 2: Hybrid Retrieval (Weeks 3-4)
+
 - [ ] Build parallel hybrid search (vector + graph)
 - [ ] Implement beam search for multi-hop reasoning
 - [ ] Add relationship-aware traversal (typed edges)
 - [ ] Build query → Cypher translation for complex queries
 
 ### Phase 3: Community Intelligence (Weeks 5-6)
+
 - [ ] Integrate Leiden community detection
 - [ ] Generate community summaries (batch + incremental)
 - [ ] Implement multi-level retrieval (community → episode → chunk)
 - [ ] Build cache for frequently accessed communities
 
 ### Phase 4: Advanced Features (Weeks 7-8)
+
 - [ ] Add causal relationship extraction (X CAUSES Y)
 - [ ] Implement active learning (detect knowledge gaps)
 - [ ] Build federated connectors (link to external KGs)
 - [ ] Add A/B testing framework for retrieval strategies
 
 ### Phase 5: Production Hardening (Weeks 9-10)
+
 - [ ] Benchmark retrieval quality (NDCG, Success@K)
 - [ ] Optimize latency (caching, batching, parallelization)
 - [ ] Build monitoring dashboard (query patterns, hit rates)
@@ -746,6 +815,7 @@ CREATE (python_new)-[:SUPERSEDES]->(python)
 ### Step 1: Upgrade Entity Extraction (Highest Impact)
 
 **Current** (`src/sibyl/ingestion/extractor.py`):
+
 ```python
 # Regex-based, ~60% recall
 RULE_PATTERNS = [
@@ -754,6 +824,7 @@ RULE_PATTERNS = [
 ```
 
 **Proposed**:
+
 ```python
 async def extract_entities_llm(episode: Episode) -> list[ExtractedEntity]:
     prompt = f"""
@@ -788,6 +859,7 @@ async def extract_entities_llm(episode: Episode) -> list[ExtractedEntity]:
 ```
 
 **Migration Plan**:
+
 1. Run LLM extraction in parallel with regex (A/B test)
 2. Measure precision/recall on 100 hand-labeled episodes
 3. If LLM achieves >85% F1, switch default
@@ -800,6 +872,7 @@ async def extract_entities_llm(episode: Episode) -> list[ExtractedEntity]:
 **Current**: Vector-only search via Graphiti
 
 **Proposed**:
+
 ```python
 async def hybrid_search_wisdom(
     query: str,
@@ -919,23 +992,25 @@ The state-of-the-art in graph-RAG is converging on **hybrid architectures** that
 3. **Hierarchical organization** (communities, summaries) for efficiency
 4. **Temporal awareness** for evolving knowledge (Graphiti's strength)
 
-**Sibyl is well-positioned** with its Graphiti foundation and semantic chunking. The highest-impact improvements are:
+**Sibyl is well-positioned** with its Graphiti foundation and semantic chunking. The highest-impact
+improvements are:
 
 1. **LLM entity extraction** (30% quality improvement)
 2. **Hybrid retrieval** (20% quality improvement)
 3. **Community detection** (enables new query types)
 
-These changes would transform Sibyl from a **good documentation server** into the **ultimate knowledge oracle** for development wisdom.
+These changes would transform Sibyl from a **good documentation server** into the **ultimate
+knowledge oracle** for development wisdom.
 
 ---
 
 **Files Referenced**:
+
 - `/Users/bliss/dev/sibyl/src/sibyl/graph/client.py` - Graphiti client wrapper
 - `/Users/bliss/dev/sibyl/src/sibyl/ingestion/extractor.py` - Entity extraction (regex-based)
 - `/Users/bliss/dev/sibyl/src/sibyl/ingestion/chunker.py` - Semantic chunking (H2/H3)
 - `/Users/bliss/dev/sibyl/src/sibyl/ingestion/pipeline.py` - Ingestion pipeline
 - `/Users/bliss/dev/sibyl/pyproject.toml` - Dependencies (graphiti-core)
 
-**Research Date**: 2025-12-20
-**Author**: Claude (Opus 4.5)
-**Status**: Comprehensive research complete, ready for implementation planning
+**Research Date**: 2025-12-20 **Author**: Claude (Opus 4.5) **Status**: Comprehensive research
+complete, ready for implementation planning

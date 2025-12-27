@@ -11,7 +11,7 @@ services:
     image: falkordb/falkordb:latest
     container_name: sibyl-falkordb-e2e
     ports:
-      - "6381:6379"  # Different port than dev (6380)
+      - "6381:6379" # Different port than dev (6380)
     environment:
       - FALKORDB_ARGS=--requirepass e2e_test
     healthcheck:
@@ -25,7 +25,7 @@ services:
     image: pgvector/pgvector:pg18
     container_name: sibyl-postgres-e2e
     ports:
-      - "5434:5432"  # Different port than dev (5433)
+      - "5434:5432" # Different port than dev (5433)
     environment:
       POSTGRES_USER: sibyl_e2e
       POSTGRES_PASSWORD: sibyl_e2e_password

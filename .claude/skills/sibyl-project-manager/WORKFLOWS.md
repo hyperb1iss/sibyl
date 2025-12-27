@@ -74,6 +74,7 @@ Look for tasks that reference each other or share feature tags.
 ### Step 4: Recommend sprint scope
 
 Based on:
+
 - 6-day cycle = ~4-6 meaningful tasks
 - Mix of high impact + quick wins
 - Dependencies resolved first
@@ -93,10 +94,12 @@ sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.priority) | .[] |
 ### Step 2: Identify misclassified tasks
 
 **Too High:**
+
 - Polish/optimization marked critical
 - Nice-to-haves marked high
 
 **Too Low:**
+
 - Bugs marked low
 - Blocking issues marked medium
 
@@ -166,6 +169,7 @@ sibyl task list --status todo 2>&1 | jq -r '.[] | select(.metadata.priority == "
 When verifying a specific task is complete:
 
 ### Backend Tasks
+
 ```bash
 # Check implementation
 grep -r "function_or_class_name" src/sibyl/
@@ -178,6 +182,7 @@ grep -r "@router" src/sibyl/api/routes/ | grep "endpoint_name"
 ```
 
 ### Frontend Tasks
+
 ```bash
 # Check component
 ls web/src/components/ | grep -i "component_name"
@@ -190,6 +195,7 @@ grep "use.*Name" web/src/lib/hooks.ts
 ```
 
 ### CLI Tasks
+
 ```bash
 # Check command
 grep "@app.command" src/sibyl/cli/ | grep "command_name"
@@ -222,21 +228,25 @@ sibyl task update task_bbb --priority medium 2>&1
 Run weekly:
 
 1. **Check for stale "doing" tasks** (stuck in progress)
+
 ```bash
 sibyl task list --status doing 2>&1 | jq 'length'
 ```
 
 2. **Review blocked tasks** (may need escalation)
+
 ```bash
 sibyl task list --status blocked 2>&1 | jq -r '.[] | .name'
 ```
 
 3. **Clean up completed work** (done but not archived)
+
 ```bash
 sibyl task list --status done 2>&1 | jq -r '.[] | "\(.id[-12:])\t\(.name)"'
 ```
 
 4. **Priority sanity check**
+
 ```bash
 sibyl task list --status todo 2>&1 | jq -r 'group_by(.metadata.priority) | .[] | "\(.[0].metadata.priority): \(length)"'
 ```

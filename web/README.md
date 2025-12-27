@@ -1,6 +1,7 @@
 # Sibyl Web UI
 
-Admin interface for managing the Sibyl knowledge graph. Built with Next.js 16 and the SilkCircuit design system.
+Admin interface for managing the Sibyl knowledge graph. Built with Next.js 16 and the SilkCircuit
+design system.
 
 ## Purpose
 
@@ -21,7 +22,8 @@ This is **not** a chat interface. The web UI provides:
 
 ## Design System
 
-Uses [SilkCircuit](../../conventions/shared/STYLE_GUIDE.md) — an OKLCH-based color system with five variants:
+Uses [SilkCircuit](../../conventions/shared/STYLE_GUIDE.md) — an OKLCH-based color system with five
+variants:
 
 - **Neon** (default) — Full intensity for dark environments
 - **Vibrant** — High energy, slightly tamed

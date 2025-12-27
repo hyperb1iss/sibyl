@@ -21,10 +21,7 @@ jobs:
         ports:
           - 6380:6379
         options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
 
       postgres:
         image: pgvector/pgvector:pg18
@@ -35,10 +32,7 @@ jobs:
           POSTGRES_PASSWORD: sibyl_ci_password
           POSTGRES_DB: sibyl_ci
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
 
     env:
       SIBYL_ENVIRONMENT: production
@@ -115,7 +109,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: web/.next/cache
-          key: nextjs-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}-${{ hashFiles('web/src/**/*') }}
+          key:
+            nextjs-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}-${{
+            hashFiles('web/src/**/*') }}
           restore-keys: |
             nextjs-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}-
             nextjs-${{ runner.os }}-

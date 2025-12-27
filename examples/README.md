@@ -25,6 +25,7 @@ uv run python examples/quickstart.py
 ### [task_workflow_example.py](task_workflow_example.py)
 
 Full task management lifecycle including:
+
 - Creating projects and tasks
 - Task state transitions (start → block → unblock → review → complete)
 - Automatic knowledge linking
@@ -48,22 +49,22 @@ uv run python examples/mcp_client_example.py
 
 ## Tool Reference
 
-| Tool | Purpose |
-|------|---------|
-| `search` | Semantic discovery across all entity types |
+| Tool      | Purpose                                    |
+| --------- | ------------------------------------------ |
+| `search`  | Semantic discovery across all entity types |
 | `explore` | Graph navigation (list, related, traverse) |
-| `add` | Create entities with auto-linking |
-| `manage` | Workflows, crawling, admin operations |
+| `add`     | Create entities with auto-linking          |
+| `manage`  | Workflows, crawling, admin operations      |
 
 ## Entity Types
 
-| Type | Description |
-|------|-------------|
-| `episode` | Temporal knowledge (learnings, insights) |
-| `pattern` | Coding patterns and best practices |
-| `rule` | Sacred rules and invariants |
-| `template` | Code templates and boilerplates |
-| `task` | Work items with workflow states |
-| `project` | Container for related tasks |
-| `source` | Knowledge source (URL, file) |
-| `document` | Crawled/ingested content |
+| Type       | Description                              |
+| ---------- | ---------------------------------------- |
+| `episode`  | Temporal knowledge (learnings, insights) |
+| `pattern`  | Coding patterns and best practices       |
+| `rule`     | Sacred rules and invariants              |
+| `template` | Code templates and boilerplates          |
+| `task`     | Work items with workflow states          |
+| `project`  | Container for related tasks              |
+| `source`   | Knowledge source (URL, file)             |
+| `document` | Crawled/ingested content                 |

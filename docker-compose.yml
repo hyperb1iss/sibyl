@@ -3,8 +3,8 @@ services:
     image: falkordb/falkordb:latest
     container_name: sibyl-falkordb
     ports:
-      - "6380:6379"  # Redis port (mapped to 6380 to avoid gradial-redis conflict)
-      - "3335:3000"  # FalkorDB Browser UI
+      - "6380:6379" # Redis port (mapped to 6380 to avoid gradial-redis conflict)
+      - "3335:3000" # FalkorDB Browser UI
     volumes:
       - falkordb_data:/data
     environment:
@@ -20,15 +20,16 @@ services:
     image: pgvector/pgvector:pg18
     container_name: sibyl-postgres
     ports:
-      - "5433:5432"  # Mapped to 5433 to avoid conflicts
+      - "5433:5432" # Mapped to 5433 to avoid conflicts
     volumes:
-      - postgres_data:/var/lib/postgresql  # pg18+ uses subdirectory structure
+      - postgres_data:/var/lib/postgresql # pg18+ uses subdirectory structure
     environment:
       POSTGRES_USER: ${SIBYL_POSTGRES_USER:-sibyl}
       POSTGRES_PASSWORD: ${SIBYL_POSTGRES_PASSWORD:-sibyl_dev}
       POSTGRES_DB: ${SIBYL_POSTGRES_DB:-sibyl}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${SIBYL_POSTGRES_USER:-sibyl} -d ${SIBYL_POSTGRES_DB:-sibyl}"]
+      test:
+        ["CMD-SHELL", "pg_isready -U ${SIBYL_POSTGRES_USER:-sibyl} -d ${SIBYL_POSTGRES_DB:-sibyl}"]
       interval: 10s
       timeout: 5s
       retries: 5

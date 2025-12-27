@@ -76,9 +76,11 @@ Reranked Results
 ## Implementation Phases
 
 ### Phase 1: Foundation Upgrades (Weeks 1-2)
+
 **Theme**: Improve data quality and retrieval basics
 
 #### Week 1: Entity Extraction Upgrade
+
 - [ ] Implement LLM-based entity extractor (`src/sibyl/ingestion/extractor_llm.py`)
 - [ ] Add structured output schema for entities
 - [ ] Create A/B testing harness (regex vs. LLM)
@@ -88,6 +90,7 @@ Reranked Results
 **Deliverable**: `EntityExtractorLLM` class with 90% recall
 
 #### Week 2: Entity Deduplication
+
 - [ ] Implement embedding-based entity clustering
 - [ ] Add entity resolution logic (merge duplicates)
 - [ ] Create canonical entity table
@@ -98,9 +101,11 @@ Reranked Results
 ---
 
 ### Phase 2: Hybrid Retrieval (Weeks 3-4)
+
 **Theme**: Combine vector + graph search for better results
 
 #### Week 3: Parallel Hybrid Search
+
 - [ ] Implement entity linker (query → entities)
 - [ ] Add graph traversal from entities (depth 1-3)
 - [ ] Build parallel execution (vector + graph)
@@ -110,6 +115,7 @@ Reranked Results
 **Deliverable**: `hybrid_search()` function with 20% quality boost
 
 #### Week 4: Multi-Hop Reasoning
+
 - [ ] Implement beam search over graph
 - [ ] Add path scoring and pruning
 - [ ] Create multi-hop query interface
@@ -120,9 +126,11 @@ Reranked Results
 ---
 
 ### Phase 3: Community Intelligence (Weeks 5-6)
+
 **Theme**: Hierarchical organization for scalability
 
 #### Week 5: Community Detection
+
 - [ ] Integrate Leiden algorithm
 - [ ] Create community entity clusters
 - [ ] Build hierarchical community tree (C0, C1, C2...)
@@ -131,6 +139,7 @@ Reranked Results
 **Deliverable**: Community-based entity organization
 
 #### Week 6: Community Summarization
+
 - [ ] Generate summaries for each community
 - [ ] Implement incremental summary updates
 - [ ] Add community-level search endpoint
@@ -141,9 +150,11 @@ Reranked Results
 ---
 
 ### Phase 4: Advanced Features (Weeks 7-8)
+
 **Theme**: Next-gen capabilities
 
 #### Week 7: Relationship Enhancement
+
 - [ ] Extract typed relationships via LLM (CAUSES, PREVENTS, ENABLES)
 - [ ] Add causal relationship detection
 - [ ] Implement relationship-aware traversal
@@ -152,6 +163,7 @@ Reranked Results
 **Deliverable**: Causal reasoning for debugging queries
 
 #### Week 8: Active Learning
+
 - [ ] Detect knowledge gaps from failed queries
 - [ ] Generate template suggestions
 - [ ] Build feedback loop (user ratings → retraining)
@@ -162,9 +174,11 @@ Reranked Results
 ---
 
 ### Phase 5: Production Hardening (Weeks 9-10)
+
 **Theme**: Performance, monitoring, reliability
 
 #### Week 9: Optimization
+
 - [ ] Benchmark retrieval quality (NDCG@10, Success@5)
 - [ ] Optimize latency (caching, batching, parallelization)
 - [ ] Add query result caching (Redis)
@@ -173,6 +187,7 @@ Reranked Results
 **Deliverable**: <100ms P95 latency, 85%+ NDCG@10
 
 #### Week 10: Monitoring & Documentation
+
 - [ ] Build monitoring dashboard (query patterns, hit rates)
 - [ ] Create retrieval quality alerts
 - [ ] Write implementation docs
@@ -185,18 +200,21 @@ Reranked Results
 ## Key Metrics to Track
 
 ### Retrieval Quality
+
 - **NDCG@10**: Normalized Discounted Cumulative Gain (target: >0.80)
 - **Success@5**: Query answered in top 5 results (target: >85%)
 - **Multi-hop Accuracy**: Correct answer for 2-3 hop queries (target: >70%)
 - **User Satisfaction**: Thumbs up/down on results (target: >80% positive)
 
 ### Performance
+
 - **Latency P50**: Median response time (target: <50ms)
 - **Latency P95**: 95th percentile response time (target: <100ms)
 - **Throughput**: Queries per second (target: >100 QPS)
 - **Cache Hit Rate**: Percentage of cached results (target: >60%)
 
 ### Data Quality
+
 - **Entity Recall**: % of true entities extracted (target: >90%)
 - **Entity Precision**: % of extracted entities correct (target: >88%)
 - **Duplicate Rate**: % of duplicate entities (target: <5%)
@@ -354,6 +372,7 @@ asyncio.run(benchmark())
 ## Cost Analysis
 
 ### One-Time Ingestion Costs (LLM Extraction)
+
 - **Documents**: ~200 wisdom docs
 - **Episodes**: ~1,500 episodes (avg 7.5 per doc)
 - **Tokens per episode**: ~800 tokens (500 input + 300 output)
@@ -364,39 +383,46 @@ asyncio.run(benchmark())
   - **Total: ~$0.45**
 
 ### Ongoing Costs (Incremental Updates)
+
 - **New episodes per week**: ~10
 - **Weekly cost**: ~$0.03
 - **Monthly cost**: ~$0.12
 
 ### Community Summarization (One-Time)
+
 - **Communities**: ~50 communities (estimate)
 - **Tokens per summary**: ~2,000 tokens
 - **Total tokens**: 100K tokens
 - **Cost**: ~$0.10
 
-**Total first-month cost**: ~$0.60
-**Ongoing monthly cost**: ~$0.15
+**Total first-month cost**: ~$0.60 **Ongoing monthly cost**: ~$0.15
 
 ---
 
 ## Risk Mitigation
 
 ### Risk 1: LLM Extraction Errors
+
 **Mitigation**:
+
 - Use low temperature (0.1) for consistency
 - Validate output schema before storage
 - Keep regex extractor as fallback
 - Manual review of first 100 extractions
 
 ### Risk 2: Increased Latency
+
 **Mitigation**:
+
 - Run all expensive operations during ingestion (offline)
 - Cache community summaries
 - Use parallel hybrid search (async)
 - Monitor P95 latency, alert if >150ms
 
 ### Risk 3: Graph Complexity Growth
+
 **Mitigation**:
+
 - Implement entity deduplication (reduce nodes by 20%)
 - Prune low-confidence relationships (<0.5)
 - Archive old episodes (>2 years) to separate graph
@@ -407,6 +433,7 @@ asyncio.run(benchmark())
 ## Success Criteria
 
 After 10 weeks, Sibyl should:
+
 - [ ] Extract entities with >90% recall (vs. ~60% baseline)
 - [ ] Answer multi-hop queries with >70% accuracy
 - [ ] Support "tell me about X" global queries via communities
@@ -416,15 +443,16 @@ After 10 weeks, Sibyl should:
 ---
 
 **Next Steps**:
+
 1. Read full research doc: `/Users/bliss/dev/sibyl/docs/graph-rag-sota-research.md`
 2. Start Phase 1, Week 1: Implement `EntityExtractorLLM`
 3. Benchmark on 100 episodes, measure F1 score
 4. If successful, proceed to entity deduplication (Week 2)
 
 **Resources**:
+
 - Microsoft GraphRAG paper: https://arxiv.org/abs/2404.16130
 - Graphiti docs: https://github.com/getzep/graphiti
 - LlamaIndex KG guide: https://docs.llamaindex.ai/en/stable/examples/knowledge_graph/
 
-**Author**: Claude (Opus 4.5)
-**Date**: 2025-12-20
+**Author**: Claude (Opus 4.5) **Date**: 2025-12-20
