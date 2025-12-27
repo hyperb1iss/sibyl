@@ -136,9 +136,7 @@ class TestCreateTaskWithKnowledgeLinks:
     ) -> None:
         """Should not link low-relevance knowledge."""
         # Mock search returning low-relevance entity (below default 0.75 threshold)
-        mock_entity_manager.search = AsyncMock(
-            return_value=[(sample_entity, 0.50)]
-        )
+        mock_entity_manager.search = AsyncMock(return_value=[(sample_entity, 0.50)])
         # Remove project_id to avoid project link
         sample_task.project_id = None
         sample_task.domain = None
@@ -166,9 +164,7 @@ class TestCreateTaskWithKnowledgeLinks:
         )
 
         # First call returns empty (knowledge search), second call returns topic
-        mock_entity_manager.search = AsyncMock(
-            side_effect=[[], [(topic_entity, 1.0)]]
-        )
+        mock_entity_manager.search = AsyncMock(side_effect=[[], [(topic_entity, 1.0)]])
 
         await task_manager.create_task_with_knowledge_links(sample_task)
 
@@ -210,13 +206,9 @@ class TestCreateTaskWithKnowledgeLinks:
         sample_task.domain = None
 
         # 0.60 is below default 0.75 but above custom 0.50
-        mock_entity_manager.search = AsyncMock(
-            return_value=[(sample_entity, 0.60)]
-        )
+        mock_entity_manager.search = AsyncMock(return_value=[(sample_entity, 0.60)])
 
-        await task_manager.create_task_with_knowledge_links(
-            sample_task, auto_link_threshold=0.50
-        )
+        await task_manager.create_task_with_knowledge_links(sample_task, auto_link_threshold=0.50)
 
         # Should create relationship with lower threshold
         mock_relationship_manager.create.assert_called()
@@ -310,9 +302,7 @@ class TestFindSimilarTasks:
             content="",
             metadata={"status": "todo", "priority": "medium"},
         )
-        mock_entity_manager.search = AsyncMock(
-            return_value=[(similar_entity, 0.85)]
-        )
+        mock_entity_manager.search = AsyncMock(return_value=[(similar_entity, 0.85)])
 
         result = await task_manager.find_similar_tasks(sample_task)
 
@@ -333,9 +323,7 @@ class TestFindSimilarTasks:
             content="",
             metadata={"status": "todo"},
         )
-        mock_entity_manager.search = AsyncMock(
-            return_value=[(self_entity, 1.0)]
-        )
+        mock_entity_manager.search = AsyncMock(return_value=[(self_entity, 1.0)])
 
         result = await task_manager.find_similar_tasks(sample_task)
 
@@ -366,9 +354,7 @@ class TestFindSimilarTasks:
             return_value=[(done_entity, 0.9), (todo_entity, 0.8)]
         )
 
-        result = await task_manager.find_similar_tasks(
-            sample_task, status_filter=[TaskStatus.DONE]
-        )
+        result = await task_manager.find_similar_tasks(sample_task, status_filter=[TaskStatus.DONE])
 
         assert len(result) == 1
         assert result[0][0].status == TaskStatus.DONE
@@ -594,44 +580,32 @@ class TestGetBlockingTasks:
 class TestDetermineRelationshipType:
     """Tests for _determine_relationship_type method."""
 
-    def test_pattern_maps_to_references(
-        self, task_manager: TaskManager
-    ) -> None:
+    def test_pattern_maps_to_references(self, task_manager: TaskManager) -> None:
         """PATTERN should map to REFERENCES."""
         result = task_manager._determine_relationship_type(EntityType.PATTERN)
         assert result == RelationshipType.REFERENCES
 
-    def test_rule_maps_to_requires(
-        self, task_manager: TaskManager
-    ) -> None:
+    def test_rule_maps_to_requires(self, task_manager: TaskManager) -> None:
         """RULE should map to REQUIRES."""
         result = task_manager._determine_relationship_type(EntityType.RULE)
         assert result == RelationshipType.REQUIRES
 
-    def test_template_maps_to_references(
-        self, task_manager: TaskManager
-    ) -> None:
+    def test_template_maps_to_references(self, task_manager: TaskManager) -> None:
         """TEMPLATE should map to REFERENCES."""
         result = task_manager._determine_relationship_type(EntityType.TEMPLATE)
         assert result == RelationshipType.REFERENCES
 
-    def test_episode_maps_to_references(
-        self, task_manager: TaskManager
-    ) -> None:
+    def test_episode_maps_to_references(self, task_manager: TaskManager) -> None:
         """EPISODE should map to REFERENCES."""
         result = task_manager._determine_relationship_type(EntityType.EPISODE)
         assert result == RelationshipType.REFERENCES
 
-    def test_error_pattern_maps_to_references(
-        self, task_manager: TaskManager
-    ) -> None:
+    def test_error_pattern_maps_to_references(self, task_manager: TaskManager) -> None:
         """ERROR_PATTERN should map to REFERENCES."""
         result = task_manager._determine_relationship_type(EntityType.ERROR_PATTERN)
         assert result == RelationshipType.REFERENCES
 
-    def test_unknown_maps_to_related_to(
-        self, task_manager: TaskManager
-    ) -> None:
+    def test_unknown_maps_to_related_to(self, task_manager: TaskManager) -> None:
         """Unknown types should map to RELATED_TO."""
         result = task_manager._determine_relationship_type(EntityType.PROJECT)
         assert result == RelationshipType.RELATED_TO
@@ -640,9 +614,7 @@ class TestDetermineRelationshipType:
 class TestEntityToTask:
     """Tests for _entity_to_task method."""
 
-    def test_converts_basic_fields(
-        self, task_manager: TaskManager
-    ) -> None:
+    def test_converts_basic_fields(self, task_manager: TaskManager) -> None:
         """Should convert basic entity fields to task."""
         entity = Entity(
             id="entity_123",
@@ -662,9 +634,7 @@ class TestEntityToTask:
         assert result.description == "Description"
         assert result.created_at == datetime(2024, 1, 1, tzinfo=UTC)
 
-    def test_extracts_metadata_fields(
-        self, task_manager: TaskManager
-    ) -> None:
+    def test_extracts_metadata_fields(self, task_manager: TaskManager) -> None:
         """Should extract task-specific fields from metadata."""
         entity = Entity(
             id="entity_123",
@@ -693,9 +663,7 @@ class TestEntityToTask:
         assert result.technologies == ["python", "redis"]
         assert result.actual_hours == 4.5
 
-    def test_uses_defaults_for_missing_fields(
-        self, task_manager: TaskManager
-    ) -> None:
+    def test_uses_defaults_for_missing_fields(self, task_manager: TaskManager) -> None:
         """Should use defaults for missing metadata fields."""
         entity = Entity(
             id="entity_123",

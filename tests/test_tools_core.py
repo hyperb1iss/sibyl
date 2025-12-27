@@ -315,9 +315,7 @@ class TestSearchWithHarness:
             ctx.entity_manager.add_entity(rule)
             ctx.entity_manager.set_search_results([(pattern, 0.9), (rule, 0.8)])
 
-            result = await search(
-                "test", types=["pattern"], organization_id=TEST_ORG_ID
-            )
+            result = await search("test", types=["pattern"], organization_id=TEST_ORG_ID)
 
             assert isinstance(result, SearchResponse)
 
@@ -336,9 +334,7 @@ class TestSearchWithHarness:
     async def test_search_with_project_filter(self) -> None:
         """Search should accept project filter for tasks."""
         async with mock_tools():
-            result = await search(
-                "task", project="proj_123", organization_id=TEST_ORG_ID
-            )
+            result = await search("task", project="proj_123", organization_id=TEST_ORG_ID)
 
             assert isinstance(result, SearchResponse)
             assert result.filters.get("project") == "proj_123"
@@ -366,9 +362,7 @@ class TestExploreWithHarness:
             ctx.entity_manager.add_entity(entity)
             ctx.entity_manager._list_results = [entity]
 
-            result = await explore(
-                mode="list", types=["pattern"], organization_id=TEST_ORG_ID
-            )
+            result = await explore(mode="list", types=["pattern"], organization_id=TEST_ORG_ID)
 
             assert isinstance(result, ExploreResponse)
             assert result.mode == "list"
@@ -570,14 +564,15 @@ class TestGetStats:
             ]
         )
 
-        with patch(
-            "sibyl.tools.core.get_graph_client", AsyncMock(return_value=mock_client)
-        ), patch(
-            "sibyl.tools.core.GraphClient.normalize_result",
-            return_value=[
-                {"type": "pattern", "count": 10},
-                {"type": "rule", "count": 5},
-            ],
+        with (
+            patch("sibyl.tools.core.get_graph_client", AsyncMock(return_value=mock_client)),
+            patch(
+                "sibyl.tools.core.GraphClient.normalize_result",
+                return_value=[
+                    {"type": "pattern", "count": 10},
+                    {"type": "rule", "count": 5},
+                ],
+            ),
         ):
             result = await get_stats(organization_id=TEST_ORG_ID)
 
@@ -681,9 +676,7 @@ class TestGetProjectTags:
         from sibyl.tools.core import get_project_tags
 
         mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[{"tags": ["backend", "api"]}]
-        )
+        mock_client.execute_read_org = AsyncMock(return_value=[{"tags": ["backend", "api"]}])
 
         result = await get_project_tags(mock_client, "proj_123")
 

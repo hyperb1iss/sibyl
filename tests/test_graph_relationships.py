@@ -93,9 +93,7 @@ class TestToGraphitiEdge:
         edge = relationship_manager._to_graphiti_edge(sample_relationship)
         assert edge.attributes["auto_created"] is True
 
-    def test_generates_uuid_if_empty(
-        self, relationship_manager: RelationshipManager
-    ) -> None:
+    def test_generates_uuid_if_empty(self, relationship_manager: RelationshipManager) -> None:
         """Should generate UUID if relationship.id is empty."""
         rel = Relationship(
             id="",  # Empty string triggers UUID generation
@@ -112,9 +110,7 @@ class TestToGraphitiEdge:
 class TestFromGraphitiEdge:
     """Tests for _from_graphiti_edge method."""
 
-    def test_converts_edge_to_relationship(
-        self, relationship_manager: RelationshipManager
-    ) -> None:
+    def test_converts_edge_to_relationship(self, relationship_manager: RelationshipManager) -> None:
         """Should convert EntityEdge to Relationship."""
         edge = EntityEdge(
             uuid="edge_123",
@@ -164,9 +160,7 @@ class TestFromGraphitiEdge:
         rel = relationship_manager._from_graphiti_edge(edge)
         assert rel.relationship_type == RelationshipType.RELATED_TO
 
-    def test_defaults_weight_to_one(
-        self, relationship_manager: RelationshipManager
-    ) -> None:
+    def test_defaults_weight_to_one(self, relationship_manager: RelationshipManager) -> None:
         """Should default weight to 1.0 if not in attributes."""
         edge = EntityEdge(
             uuid="edge_123",
@@ -422,8 +416,20 @@ class TestGetForEntity:
         """Should filter results by relationship type."""
         relationship_manager._driver.execute_query = AsyncMock(return_value=MagicMock())
         mock_graph_client.normalize_result.return_value = [
-            {"uuid": "rel_1", "name": "DEPENDS_ON", "source_id": "s", "target_id": "t", "weight": 1.0},
-            {"uuid": "rel_2", "name": "REQUIRES", "source_id": "s", "target_id": "t", "weight": 1.0},
+            {
+                "uuid": "rel_1",
+                "name": "DEPENDS_ON",
+                "source_id": "s",
+                "target_id": "t",
+                "weight": 1.0,
+            },
+            {
+                "uuid": "rel_2",
+                "name": "REQUIRES",
+                "source_id": "s",
+                "target_id": "t",
+                "weight": 1.0,
+            },
         ]
 
         result = await relationship_manager.get_for_entity(

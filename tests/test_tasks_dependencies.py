@@ -182,9 +182,7 @@ class TestGetTaskDependencies:
             ]
         )
 
-        result = await get_task_dependencies(
-            mock_client, "task-123", TEST_ORG_ID, depth=1
-        )
+        result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID, depth=1)
 
         assert result.task_id == "task-123"
         assert "dep-1" in result.dependencies
@@ -204,9 +202,7 @@ class TestGetTaskDependencies:
             ]
         )
 
-        result = await get_task_dependencies(
-            mock_client, "task-123", TEST_ORG_ID, depth=1
-        )
+        result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID, depth=1)
 
         assert len(result.blockers) == 2
         assert "dep-1" in result.blockers
@@ -225,9 +221,7 @@ class TestGetTaskDependencies:
             ]
         )
 
-        result = await get_task_dependencies(
-            mock_client, "task-123", TEST_ORG_ID, depth=1
-        )
+        result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID, depth=1)
 
         assert len(result.dependencies) == 2
         assert "dep-1" in result.dependencies
@@ -239,15 +233,11 @@ class TestGetTaskDependencies:
         mock_client.execute_read_org = AsyncMock(return_value=[])
 
         # Depth too low
-        result = await get_task_dependencies(
-            mock_client, "task-123", TEST_ORG_ID, depth=0
-        )
+        result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID, depth=0)
         assert result.depth == 1
 
         # Depth too high
-        result = await get_task_dependencies(
-            mock_client, "task-123", TEST_ORG_ID, depth=10
-        )
+        result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID, depth=10)
         assert result.depth == 1  # Not include_transitive, so depth stays 1
 
     @pytest.mark.asyncio
@@ -268,9 +258,7 @@ class TestGetTaskDependencies:
         mock_client = MagicMock()
         mock_client.execute_read_org = AsyncMock(return_value=[])
 
-        result = await get_task_dependencies(
-            mock_client, "task-standalone", TEST_ORG_ID
-        )
+        result = await get_task_dependencies(mock_client, "task-standalone", TEST_ORG_ID)
 
         assert result.dependencies == []
         assert result.blockers == []
@@ -279,9 +267,7 @@ class TestGetTaskDependencies:
     async def test_handles_query_exception(self) -> None:
         """Should return empty result on query failure."""
         mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=RuntimeError("Connection failed")
-        )
+        mock_client.execute_read_org = AsyncMock(side_effect=RuntimeError("Connection failed"))
 
         result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID)
 
@@ -362,9 +348,7 @@ class TestGetBlockingTasks:
         mock_client = MagicMock()
         mock_client.execute_read_org = AsyncMock(return_value=[])
 
-        result = await get_blocking_tasks(
-            mock_client, "task-123", TEST_ORG_ID, depth=10
-        )
+        result = await get_blocking_tasks(mock_client, "task-123", TEST_ORG_ID, depth=10)
 
         assert result.depth == 5
 
@@ -372,9 +356,7 @@ class TestGetBlockingTasks:
     async def test_handles_query_exception(self) -> None:
         """Should return empty result on query failure."""
         mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=RuntimeError("Connection failed")
-        )
+        mock_client.execute_read_org = AsyncMock(side_effect=RuntimeError("Connection failed"))
 
         result = await get_blocking_tasks(mock_client, "task-123", TEST_ORG_ID)
 
@@ -442,9 +424,7 @@ class TestDetectDependencyCycles:
         mock_client = MagicMock()
         mock_client.execute_read_org = AsyncMock(return_value=[])
 
-        await detect_dependency_cycles(
-            mock_client, TEST_ORG_ID, project_id="proj-123"
-        )
+        await detect_dependency_cycles(mock_client, TEST_ORG_ID, project_id="proj-123")
 
         # Verify query was called with project_id
         call_args = mock_client.execute_read_org.call_args
@@ -479,9 +459,7 @@ class TestDetectDependencyCycles:
     async def test_handles_query_exception(self) -> None:
         """Should return safe result on query failure."""
         mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=RuntimeError("Connection failed")
-        )
+        mock_client.execute_read_org = AsyncMock(side_effect=RuntimeError("Connection failed"))
 
         result = await detect_dependency_cycles(mock_client, TEST_ORG_ID)
 
@@ -526,21 +504,15 @@ class TestSuggestTaskOrder:
             ("task-3", "task-2"),
         ]
 
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=[task_results, dep_results]
-        )
+        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
 
         result = await suggest_task_order(mock_client, TEST_ORG_ID)
 
         assert len(result.ordered_tasks) == 3
         # task-1 should come before task-2
-        assert result.ordered_tasks.index("task-1") < result.ordered_tasks.index(
-            "task-2"
-        )
+        assert result.ordered_tasks.index("task-1") < result.ordered_tasks.index("task-2")
         # task-2 should come before task-3
-        assert result.ordered_tasks.index("task-2") < result.ordered_tasks.index(
-            "task-3"
-        )
+        assert result.ordered_tasks.index("task-2") < result.ordered_tasks.index("task-3")
 
     @pytest.mark.asyncio
     async def test_handles_independent_tasks(self) -> None:
@@ -554,9 +526,7 @@ class TestSuggestTaskOrder:
         ]
         dep_results = []  # No dependencies
 
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=[task_results, dep_results]
-        )
+        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
 
         result = await suggest_task_order(mock_client, TEST_ORG_ID)
 
@@ -580,9 +550,7 @@ class TestSuggestTaskOrder:
             ("task-b", "task-a"),
         ]
 
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=[task_results, dep_results]
-        )
+        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
 
         result = await suggest_task_order(mock_client, TEST_ORG_ID)
 
@@ -605,9 +573,7 @@ class TestSuggestTaskOrder:
         ]
         dep_results = []
 
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=[task_results, dep_results]
-        )
+        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
 
         result = await suggest_task_order(
             mock_client,
@@ -644,9 +610,7 @@ class TestSuggestTaskOrder:
         ]
         dep_results = []
 
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=[task_results, dep_results]
-        )
+        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
 
         result = await suggest_task_order(mock_client, TEST_ORG_ID)
 
@@ -669,9 +633,7 @@ class TestSuggestTaskOrder:
     async def test_handles_query_exception(self) -> None:
         """Should return safe result on query failure."""
         mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=RuntimeError("Connection failed")
-        )
+        mock_client.execute_read_org = AsyncMock(side_effect=RuntimeError("Connection failed"))
 
         result = await suggest_task_order(mock_client, TEST_ORG_ID)
 
@@ -692,9 +654,7 @@ class TestSuggestTaskOrder:
             ("task-2", "task-external"),
         ]
 
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=[task_results, dep_results]
-        )
+        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
 
         result = await suggest_task_order(mock_client, TEST_ORG_ID)
 
@@ -712,9 +672,7 @@ class TestSuggestTaskOrder:
         ]
         dep_results = []
 
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=[task_results, dep_results]
-        )
+        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
 
         result = await suggest_task_order(mock_client, TEST_ORG_ID)
 
