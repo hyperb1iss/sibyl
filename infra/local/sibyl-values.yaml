@@ -1,0 +1,80 @@
+# Sibyl values for local development
+# Uses local infrastructure (CNPG, FalkorDB, Kong)
+
+backend:
+  replicaCount: 1
+
+  image:
+    # For local dev with Tilt, this gets overridden
+    repository: sibyl-backend
+    pullPolicy: Never
+    tag: dev
+
+  # Reference secrets
+  existingSecret: sibyl-secrets
+
+  # Database connection to CNPG cluster
+  database:
+    host: sibyl-postgres-rw # CNPG read-write service
+    port: "5432"
+    database: sibyl
+    user: sibyl
+    existingSecret: sibyl-db-secret
+
+  # FalkorDB connection
+  falkordb:
+    host: falkordb-redis-master # Bitnami Redis master service
+    port: "6379"
+    existingSecret: sibyl-falkordb-secret
+
+  env:
+    SIBYL_SERVER_HOST: "0.0.0.0"
+    SIBYL_SERVER_PORT: "3334"
+    SIBYL_ENVIRONMENT: "development"
+    SIBYL_LLM_PROVIDER: "anthropic"
+    SIBYL_LLM_MODEL: "claude-haiku-4-5"
+    SIBYL_EMBEDDING_MODEL: "text-embedding-3-small"
+    SIBYL_EMBEDDING_DIMENSIONS: "1536"
+
+  # Relaxed resources for local
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  # Disable security context for local dev
+  podSecurityContext: {}
+  securityContext: {}
+
+frontend:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    # For local dev with Tilt, this gets overridden
+    repository: sibyl-frontend
+    pullPolicy: Never
+    tag: dev
+
+  # Relaxed resources for local
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+  # Disable security context for local dev
+  podSecurityContext: {}
+  securityContext: {}
+
+# Ingress handled by Kong Gateway API resources
+ingress:
+  enabled: false
+
+serviceAccount:
+  create: true

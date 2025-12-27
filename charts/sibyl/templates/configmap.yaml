@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sibyl.fullname" . }}-config
+  labels:
+    {{- include "sibyl.labels" . | nindent 4 }}
+data:
+  # Backend configuration
+  SIBYL_SERVER_HOST: {{ .Values.backend.env.SIBYL_SERVER_HOST | quote }}
+  SIBYL_SERVER_PORT: {{ .Values.backend.env.SIBYL_SERVER_PORT | quote }}
+  SIBYL_ENVIRONMENT: {{ .Values.backend.env.SIBYL_ENVIRONMENT | quote }}
+  SIBYL_LLM_PROVIDER: {{ .Values.backend.env.SIBYL_LLM_PROVIDER | quote }}
+  SIBYL_LLM_MODEL: {{ .Values.backend.env.SIBYL_LLM_MODEL | quote }}
+  SIBYL_EMBEDDING_MODEL: {{ .Values.backend.env.SIBYL_EMBEDDING_MODEL | quote }}
+  SIBYL_EMBEDDING_DIMENSIONS: {{ .Values.backend.env.SIBYL_EMBEDDING_DIMENSIONS | quote }}
+  # Database connection
+  SIBYL_POSTGRES_HOST: {{ .Values.backend.database.host | quote }}
+  SIBYL_POSTGRES_PORT: {{ .Values.backend.database.port | quote }}
+  SIBYL_POSTGRES_DB: {{ .Values.backend.database.database | quote }}
+  SIBYL_POSTGRES_USER: {{ .Values.backend.database.user | quote }}
+  # FalkorDB connection
+  SIBYL_FALKORDB_HOST: {{ .Values.backend.falkordb.host | quote }}
+  SIBYL_FALKORDB_PORT: {{ .Values.backend.falkordb.port | quote }}

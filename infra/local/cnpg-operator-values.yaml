@@ -1,0 +1,18 @@
+# CloudNativePG Operator values for local development
+# Chart: cnpg/cloudnative-pg v0.27.0
+
+# Reduce resource usage for local dev
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 128Mi
+
+# Disable monitoring for local
+monitoring:
+  enabled: false
+
+# Single replica for local
+replicaCount: 1

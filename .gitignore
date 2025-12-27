@@ -55,6 +55,11 @@ dmypy.json
 # Docker
 falkordb_data/
 
+# Kubernetes / Tilt
+infra/local/secrets.yaml
+.tiltbuild/
+tilt_modules/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -64,3 +69,4 @@ Thumbs.db
 logs/
 
 .serena
+.coverage.*

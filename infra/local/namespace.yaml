@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sibyl
+  labels:
+    app.kubernetes.io/name: sibyl
+    app.kubernetes.io/part-of: sibyl

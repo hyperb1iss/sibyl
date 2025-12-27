@@ -1,0 +1,66 @@
+# FalkorDB via Bitnami Redis chart
+# Uses FalkorDB Docker image with Redis compatibility
+# Chart: bitnami/redis (latest)
+
+# Use FalkorDB image instead of Redis
+image:
+  registry: docker.io
+  repository: falkordb/falkordb
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Allow non-standard image (FalkorDB instead of Redis)
+global:
+  security:
+    allowInsecureImages: true
+
+# Architecture: standalone for local dev (no replication)
+architecture: standalone
+
+# Authentication
+auth:
+  enabled: true
+  password: "conventions"
+
+# Disable sentinel for standalone
+sentinel:
+  enabled: false
+
+# Master configuration
+master:
+  # FalkorDB module loading
+  extraFlags:
+    - --loadmodule /FalkorDB/bin/linux-x64-release/src/falkordb.so
+
+  # Persistence
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: standard # minikube default
+
+  # Resources for local dev
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  # Service
+  service:
+    type: ClusterIP
+    ports:
+      redis: 6379
+
+# Disable replica for local
+replica:
+  replicaCount: 0
+
+# Metrics (disabled for local)
+metrics:
+  enabled: false
+
+# Network policy (disabled for local)
+networkPolicy:
+  enabled: false

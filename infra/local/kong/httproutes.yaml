@@ -1,0 +1,46 @@
+# HTTP Routes for Sibyl services
+---
+# API routes to backend
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sibyl-api
+  namespace: sibyl
+spec:
+  parentRefs:
+    - name: sibyl-gateway
+      namespace: sibyl
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
+        - name: sibyl-backend
+          port: 3334
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /mcp
+      backendRefs:
+        - name: sibyl-backend
+          port: 3334
+---
+# Frontend routes (catch-all)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sibyl-frontend
+  namespace: sibyl
+spec:
+  parentRefs:
+    - name: sibyl-gateway
+      namespace: sibyl
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: sibyl-frontend
+          port: 3337

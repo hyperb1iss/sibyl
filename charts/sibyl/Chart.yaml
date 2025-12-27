@@ -1,0 +1,18 @@
+apiVersion: v2
+name: sibyl
+description: Graph-RAG Knowledge Oracle - MCP server for AI agent development wisdom
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - knowledge-graph
+  - mcp
+  - ai
+  - graphrag
+  - falkordb
+home: https://github.com/hyperb1iss/sibyl
+sources:
+  - https://github.com/hyperb1iss/sibyl
+maintainers:
+  - name: hyperb1iss
+    url: https://github.com/hyperb1iss

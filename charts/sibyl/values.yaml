@@ -1,0 +1,223 @@
+# Sibyl Helm Chart Values
+# This chart deploys the Sibyl application (backend + frontend)
+# It does NOT include infrastructure (PostgreSQL, FalkorDB, Kong)
+# Those should be deployed separately using their respective charts
+
+# -- Global settings
+global:
+  # -- Image pull secrets for private registries
+  imagePullSecrets: []
+
+# -- Backend configuration
+backend:
+  # -- Number of replicas
+  replicaCount: 1
+
+  image:
+    # -- Backend image repository
+    repository: ghcr.io/hyperb1iss/sibyl
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+    # -- Image tag (defaults to chart appVersion)
+    tag: ""
+
+  # -- Service configuration
+  service:
+    type: ClusterIP
+    port: 3334
+
+  # -- Resource limits and requests
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  # -- Liveness probe configuration
+  livenessProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 30
+
+  # -- Readiness probe configuration
+  readinessProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+  # -- Environment variables (non-secret)
+  env:
+    SIBYL_SERVER_HOST: "0.0.0.0"
+    SIBYL_SERVER_PORT: "3334"
+    SIBYL_ENVIRONMENT: "production"
+    SIBYL_LLM_PROVIDER: "anthropic"
+    SIBYL_LLM_MODEL: "claude-haiku-4-5"
+    SIBYL_EMBEDDING_MODEL: "text-embedding-3-small"
+    SIBYL_EMBEDDING_DIMENSIONS: "1536"
+
+  # -- Reference to existing secret for sensitive env vars
+  # Must contain: SIBYL_JWT_SECRET, SIBYL_OPENAI_API_KEY, SIBYL_ANTHROPIC_API_KEY
+  existingSecret: ""
+
+  # -- Database connection settings (injected from configmap or secret)
+  database:
+    # -- PostgreSQL host
+    host: "postgres"
+    # -- PostgreSQL port
+    port: "5432"
+    # -- PostgreSQL database name
+    database: "sibyl"
+    # -- PostgreSQL user (secret recommended)
+    user: "sibyl"
+    # -- Reference to secret containing SIBYL_POSTGRES_PASSWORD
+    existingSecret: ""
+
+  # -- FalkorDB connection settings
+  falkordb:
+    # -- FalkorDB host
+    host: "falkordb"
+    # -- FalkorDB port
+    port: "6379"
+    # -- Reference to secret containing SIBYL_FALKORDB_PASSWORD
+    existingSecret: ""
+
+  # -- Pod annotations
+  podAnnotations: {}
+
+  # -- Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  # -- Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+  # -- Node selector
+  nodeSelector: {}
+
+  # -- Tolerations
+  tolerations: []
+
+  # -- Affinity rules
+  affinity: {}
+
+# -- Frontend configuration
+frontend:
+  # -- Enable frontend deployment
+  enabled: true
+
+  # -- Number of replicas
+  replicaCount: 1
+
+  image:
+    # -- Frontend image repository
+    repository: ghcr.io/hyperb1iss/sibyl-web
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+    # -- Image tag (defaults to chart appVersion)
+    tag: ""
+
+  # -- Service configuration
+  service:
+    type: ClusterIP
+    port: 3337
+
+  # -- Resource limits and requests
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+  # -- Liveness probe configuration
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 30
+
+  # -- Readiness probe configuration
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+  # -- Environment variables
+  env:
+    NODE_ENV: "production"
+    NEXT_TELEMETRY_DISABLED: "1"
+
+  # -- Pod annotations
+  podAnnotations: {}
+
+  # -- Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  # -- Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false # Next.js needs write access
+    capabilities:
+      drop:
+        - ALL
+
+  # -- Node selector
+  nodeSelector: {}
+
+  # -- Tolerations
+  tolerations: []
+
+  # -- Affinity rules
+  affinity: {}
+
+# -- Ingress configuration (for reference, actual ingress via Kong)
+ingress:
+  # -- Enable ingress resource creation
+  enabled: false
+  # -- Ingress class name
+  className: "kong"
+  # -- Ingress annotations
+  annotations: {}
+  # -- Ingress hosts
+  hosts:
+    - host: sibyl.local
+      paths:
+        - path: /api
+          pathType: Prefix
+          service: backend
+        - path: /
+          pathType: Prefix
+          service: frontend
+  # -- TLS configuration
+  tls: []
+
+# -- Service account configuration
+serviceAccount:
+  # -- Create service account
+  create: true
+  # -- Service account name
+  name: ""
+  # -- Service account annotations
+  annotations: {}

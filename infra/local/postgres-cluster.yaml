@@ -1,0 +1,56 @@
+# CloudNativePG Cluster for Sibyl
+# Deploys a single-node PostgreSQL with pgvector extension
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: sibyl-postgres
+  namespace: sibyl
+spec:
+  instances: 1
+
+  # PostgreSQL version with pgvector support
+  imageName: ghcr.io/cloudnative-pg/postgresql:17
+
+  # Bootstrap from scratch
+  bootstrap:
+    initdb:
+      database: sibyl
+      owner: sibyl
+      secret:
+        name: sibyl-postgres-credentials
+      postInitSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector
+
+  # Storage configuration
+  storage:
+    size: 5Gi
+    storageClass: standard # minikube default
+
+  # Resource limits for local dev
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  # Monitoring (disabled for local)
+  monitoring:
+    enablePodMonitor: false
+
+  # Backup (disabled for local)
+  backup:
+    barmanObjectStore: null
+
+---
+# Credentials secret for the database
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sibyl-postgres-credentials
+  namespace: sibyl
+type: kubernetes.io/basic-auth
+stringData:
+  username: sibyl
+  password: sibyl_dev
