@@ -1,0 +1,45 @@
+# sibyl-cli package tasks
+$schema: "https://moonrepo.dev/schemas/project.json"
+
+type: application
+language: python
+platform: system
+
+tags:
+  - python
+  - cli
+
+fileGroups:
+  sources:
+    - "src/**/*.py"
+  tests:
+    - "tests/**/*.py"
+  configs:
+    - "pyproject.toml"
+    - "moon.yml"
+
+tasks:
+  sync:
+    command: "uv sync"
+    inputs:
+      - "@group(configs)"
+
+  lint:
+    command: "uv run ruff check src/"
+    inputs:
+      - "@group(sources)"
+
+  format:
+    command: "uv run ruff format src/"
+    inputs:
+      - "@group(sources)"
+
+  typecheck:
+    command: "uv run pyright src/"
+    inputs:
+      - "@group(sources)"
+
+  check:
+    deps:
+      - "~:lint"
+      - "~:typecheck"

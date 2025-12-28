@@ -7,3 +7,4 @@ projects:
   web: 'apps/web'
   # Shared packages
   core: 'packages/python/sibyl-core'
+  cli: 'packages/python/sibyl-cli'
