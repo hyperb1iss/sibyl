@@ -629,14 +629,6 @@ def worker(
 
     from sibyl.jobs.worker import WorkerSettings
 
-    console.print(
-        create_panel(
-            f"[{ELECTRIC_PURPLE}]Sibyl Job Worker[/{ELECTRIC_PURPLE}]\n"
-            f"[{NEON_CYAN}]Processing background jobs...[/{NEON_CYAN}]\n"
-            f"[dim]Press Ctrl+C to stop[/dim]"
-        )
-    )
-
     # Python 3.14+ requires an explicit event loop before arq's run_worker
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

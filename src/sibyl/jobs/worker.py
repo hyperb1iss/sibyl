@@ -54,17 +54,6 @@ async def startup(ctx: dict[str, Any]) -> None:
     from sibyl.banner import print_banner
 
     print_banner(component="worker")
-
-    log.info(
-        "Job worker online",
-        functions=[
-            "crawl_source",
-            "sync_source",
-            "sync_all_sources",
-            "create_entity",
-            "update_entity",
-        ],
-    )
     ctx["start_time"] = datetime.now(UTC)
 
 
