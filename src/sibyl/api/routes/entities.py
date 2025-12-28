@@ -298,6 +298,7 @@ async def create_entity(
 
         # Extract task-specific fields from metadata if present
         project = entity.metadata.get("project_id") if entity.metadata else None
+        epic = entity.metadata.get("epic_id") if entity.metadata else None
         priority = entity.metadata.get("priority") if entity.metadata else None
         assignees = entity.metadata.get("assignees") if entity.metadata else None
         auto_link = bool(entity.metadata.get("auto_link")) if entity.metadata else False
@@ -321,6 +322,7 @@ async def create_entity(
             metadata=merged_metadata,
             # Task-specific fields
             project=project,
+            epic=epic,
             priority=priority,
             assignees=assignees,
             # Auto-link
