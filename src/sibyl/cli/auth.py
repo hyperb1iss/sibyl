@@ -55,10 +55,14 @@ def _compute_api_url(server: str | None) -> str:
     return normalize_api_url(SibylClient().base_url)
 
 
-def _load_oauth_metadata(*, issuer_url: str) -> dict:
+def _load_oauth_metadata(*, issuer_url: str, insecure: bool = False) -> dict:
     import httpx
 
-    resp = httpx.get(issuer_url.rstrip("/") + "/.well-known/oauth-authorization-server", timeout=10)
+    resp = httpx.get(
+        issuer_url.rstrip("/") + "/.well-known/oauth-authorization-server",
+        timeout=10,
+        verify=not insecure,
+    )
     resp.raise_for_status()
     return resp.json()
 
@@ -105,6 +109,7 @@ def _register_oauth_client(
     *,
     registration_endpoint: str,
     redirect_uri: str,
+    insecure: bool = False,
 ) -> tuple[str, str]:
     import httpx
 
@@ -117,10 +122,10 @@ def _register_oauth_client(
         "client_name": "sibyl-cli",
     }
 
-    reg_resp = httpx.post(registration_endpoint, json=reg_payload, timeout=10)
+    reg_resp = httpx.post(registration_endpoint, json=reg_payload, timeout=10, verify=not insecure)
     if reg_resp.status_code >= 400:
         reg_payload["token_endpoint_auth_method"] = "client_secret_post"  # noqa: S105
-        reg_resp = httpx.post(registration_endpoint, json=reg_payload, timeout=10)
+        reg_resp = httpx.post(registration_endpoint, json=reg_payload, timeout=10, verify=not insecure)
     reg_resp.raise_for_status()
 
     reg = reg_resp.json()
@@ -140,6 +145,7 @@ def _exchange_oauth_code(
     client_secret: str,
     code_verifier: str,
     resource: str,
+    insecure: bool = False,
 ) -> dict:
     import httpx
 
@@ -154,7 +160,7 @@ def _exchange_oauth_code(
     if client_secret:
         data["client_secret"] = client_secret
 
-    token_resp = httpx.post(token_endpoint, data=data, timeout=15)
+    token_resp = httpx.post(token_endpoint, data=data, timeout=15, verify=not insecure)
     token_resp.raise_for_status()
     return token_resp.json()
 
@@ -180,7 +186,7 @@ class _DeviceLoginError(RuntimeError):
         self.payload = payload
 
 
-def _start_device_flow(*, api_url: str) -> tuple[str, str, str, int, int]:
+def _start_device_flow(*, api_url: str, insecure: bool = False) -> tuple[str, str, str, int, int]:
     import httpx
 
     start_url = api_url.rstrip("/") + "/auth/device"
@@ -188,6 +194,7 @@ def _start_device_flow(*, api_url: str) -> tuple[str, str, str, int, int]:
         start_url,
         json={"client_name": "sibyl-cli", "scope": "mcp", "interval": 5, "expires_in": 600},
         timeout=10,
+        verify=not insecure,
     )
     resp.raise_for_status()
     start = resp.json()
@@ -213,6 +220,7 @@ def _poll_device_token(
     device_code: str,
     interval: int,
     deadline: float,
+    insecure: bool = False,
 ) -> dict:
     import httpx
 
@@ -225,6 +233,7 @@ def _poll_device_token(
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
             },
             timeout=15,
+            verify=not insecure,
         )
         data = token_resp.json()
 
@@ -254,12 +263,12 @@ class _OAuthLoginError(RuntimeError):
 
 
 def _oauth_pkce_login(
-    *, api_url: str, no_browser: bool, timeout_seconds: int
+    *, api_url: str, no_browser: bool, timeout_seconds: int, insecure: bool = False
 ) -> tuple[str, str, str]:
     issuer_url = _issuer_url_from_api_url(api_url)
     resource = issuer_url.rstrip("/") + "/mcp"
 
-    meta = _load_oauth_metadata(issuer_url=issuer_url)
+    meta = _load_oauth_metadata(issuer_url=issuer_url, insecure=insecure)
     authorization_endpoint = str(meta.get("authorization_endpoint", "")).strip()
     token_endpoint = str(meta.get("token_endpoint", "")).strip()
     registration_endpoint = str(meta.get("registration_endpoint", "")).strip()
@@ -273,6 +282,7 @@ def _oauth_pkce_login(
         client_id, client_secret = _register_oauth_client(
             registration_endpoint=registration_endpoint,
             redirect_uri=redirect_uri,
+            insecure=insecure,
         )
     except Exception as e:
         httpd.shutdown()
@@ -322,6 +332,7 @@ def _oauth_pkce_login(
         client_secret=client_secret,
         code_verifier=code_verifier,
         resource=resource,
+        insecure=insecure,
     )
 
     access_token = str(tok.get("access_token", "")).strip()
@@ -356,10 +367,14 @@ def _local_password_login(*, api_url: str, email: str, password: str) -> dict:
     return _run()
 
 
-def _login_via_device_flow(*, api_url: str, no_browser: bool, timeout_seconds: int) -> dict:
+def _login_via_device_flow(
+    *, api_url: str, no_browser: bool, timeout_seconds: int, insecure: bool = False
+) -> dict:
     """Execute device authorization flow. Returns token response dict."""
     token_url = api_url.rstrip("/") + "/auth/device/token"
-    device_code, user_code, verify, interval, expires_in = _start_device_flow(api_url=api_url)
+    device_code, user_code, verify, interval, expires_in = _start_device_flow(
+        api_url=api_url, insecure=insecure
+    )
 
     info(f"User code: {user_code}")
     if no_browser:
@@ -374,6 +389,7 @@ def _login_via_device_flow(*, api_url: str, no_browser: bool, timeout_seconds: i
         device_code=device_code,
         interval=interval,
         deadline=deadline,
+        insecure=insecure,
     )
     access_token = str(tok.get("access_token", "")).strip()
     if not access_token:
@@ -381,12 +397,15 @@ def _login_via_device_flow(*, api_url: str, no_browser: bool, timeout_seconds: i
     return tok
 
 
-def _login_via_oauth(*, api_url: str, no_browser: bool, timeout_seconds: int) -> dict:
+def _login_via_oauth(
+    *, api_url: str, no_browser: bool, timeout_seconds: int, insecure: bool = False
+) -> dict:
     """Execute OAuth PKCE flow. Returns token response dict."""
     access_token, refresh_token, _issuer = _oauth_pkce_login(
         api_url=api_url,
         no_browser=no_browser,
         timeout_seconds=timeout_seconds,
+        insecure=insecure,
     )
     return {"access_token": access_token, "refresh_token": refresh_token}
 
@@ -407,6 +426,7 @@ def _login_auto(
     timeout_seconds: int,
     email: str | None,
     password: str | None,
+    insecure: bool = False,
 ) -> None:
     """Single login entrypoint.
 
@@ -420,7 +440,7 @@ def _login_auto(
     # 1) Device flow (preferred)
     try:
         tok = _login_via_device_flow(
-            api_url=api_url, no_browser=no_browser, timeout_seconds=timeout_seconds
+            api_url=api_url, no_browser=no_browser, timeout_seconds=timeout_seconds, insecure=insecure
         )
         _persist_tokens(
             api_url=api_url,
@@ -450,7 +470,7 @@ def _login_auto(
     # 2) OAuth PKCE
     try:
         tok = _login_via_oauth(
-            api_url=api_url, no_browser=no_browser, timeout_seconds=timeout_seconds
+            api_url=api_url, no_browser=no_browser, timeout_seconds=timeout_seconds, insecure=insecure
         )
         _persist_tokens(
             api_url=api_url,
@@ -558,6 +578,9 @@ def login_cmd(
     password: str | None = typer.Option(
         None, "--password", "-p", help="Password for local login (method=local)"
     ),
+    insecure: bool = typer.Option(
+        False, "--insecure", "-k", help="Disable SSL certificate verification (for self-signed certs)"
+    ),
 ) -> None:
     """Login to a Sibyl server and save credentials.
 
@@ -577,6 +600,7 @@ def login_cmd(
         timeout_seconds=timeout_seconds,
         email=email,
         password=password,
+        insecure=insecure,
     )
 
     # Create/update context if requested
