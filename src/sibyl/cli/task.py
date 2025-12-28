@@ -28,6 +28,7 @@ from sibyl.cli.common import (
     format_status,
     handle_client_error,
     info,
+    pagination_hint,
     print_json,
     run_async,
     spinner,
@@ -387,6 +388,9 @@ def list_tasks(
 
             if fmt == "json":
                 print_json(entities)
+                pagination_hint(
+                    effective_offset, len(entities), total, has_more, effective_limit, "task"
+                )
             elif fmt == "csv":
                 _output_tasks_csv(entities)
             else:

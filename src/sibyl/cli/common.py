@@ -58,6 +58,29 @@ def print_json(data: object) -> None:
     print(json.dumps(clean_data, indent=2, default=str, ensure_ascii=False))
 
 
+def pagination_hint(
+    offset: int, count: int, total: int, has_more: bool, limit: int, entity_type: str = "result"
+) -> None:
+    """Print pagination info to stderr (doesn't break JSON output).
+
+    Shows something like:
+        Showing 1-50 of 81 results (--page 2 for more)
+    """
+    import sys
+
+    start = offset + 1
+    end = offset + count
+    plural = "s" if count != 1 else ""
+
+    if has_more:
+        next_page = (offset // limit) + 2
+        msg = f"Showing {start}-{end} of {total}+ {entity_type}{plural} (--page {next_page} for more)"
+    else:
+        msg = f"Showing {count} {entity_type}{plural}"
+
+    print(msg, file=sys.stderr)
+
+
 def styled_header(text: str) -> Text:
     """Create a styled header with SilkCircuit colors."""
     return Text(text, style=f"bold {NEON_CYAN}")
