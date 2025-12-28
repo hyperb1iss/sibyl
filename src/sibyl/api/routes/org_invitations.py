@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -18,9 +18,6 @@ from sibyl.auth.memberships import OrganizationMembershipManager
 from sibyl.auth.organizations import OrganizationManager
 from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import OrganizationRole, User
-
-if TYPE_CHECKING:
-    from uuid import UUID
 
 router = APIRouter(prefix="/orgs/{slug}/invitations", tags=["org-invitations"])
 invitations_router = APIRouter(prefix="/invitations", tags=["invitations"])
