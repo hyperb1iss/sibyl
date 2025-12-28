@@ -114,8 +114,10 @@ install-editable:
 install-skills:
     @echo "Installing Sibyl skills..."
     @mkdir -p ~/.claude/skills ~/.codex/skills
-    @ln -sfn "$(pwd)/skills/sibyl-knowledge" ~/.claude/skills/sibyl-knowledge
-    @ln -sfn "$(pwd)/skills/sibyl-project-manager" ~/.claude/skills/sibyl-project-manager
-    @ln -sfn "$(pwd)/skills/sibyl-knowledge" ~/.codex/skills/sibyl-knowledge
-    @ln -sfn "$(pwd)/skills/sibyl-project-manager" ~/.codex/skills/sibyl-project-manager
+    @rm -rf ~/.claude/skills/sibyl-knowledge ~/.claude/skills/sibyl-project-manager
+    @rm -rf ~/.codex/skills/sibyl-knowledge ~/.codex/skills/sibyl-project-manager
+    @cp -r "$(pwd)/skills/sibyl-knowledge" ~/.claude/skills/
+    @cp -r "$(pwd)/skills/sibyl-project-manager" ~/.claude/skills/
+    @cp -r "$(pwd)/skills/sibyl-knowledge" ~/.codex/skills/
+    @cp -r "$(pwd)/skills/sibyl-project-manager" ~/.codex/skills/
     @echo "✓ Installed to ~/.claude/skills and ~/.codex/skills"
