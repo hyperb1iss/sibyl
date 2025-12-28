@@ -19,7 +19,12 @@ def test_settings_auth_fallbacks(monkeypatch) -> None:
 
 def test_settings_server_url_default() -> None:
     s = Settings(_env_file=None)
-    assert s.server_url.startswith("http")
+    assert s.server_url == "http://localhost:3334"
+
+
+def test_settings_server_url_uses_public_url_when_explicit() -> None:
+    s = Settings(_env_file=None, public_url="https://public.example.com")
+    assert s.server_url == "https://public.example.com"
 
 
 def test_settings_mcp_auth_mode_default() -> None:

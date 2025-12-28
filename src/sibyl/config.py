@@ -85,7 +85,13 @@ class Settings(BaseSettings):
     def derive_urls_from_public(self) -> "Settings":
         """Derive server_url and frontend_url from public_url if not explicitly set."""
         if not self.server_url:
-            object.__setattr__(self, "server_url", self.public_url.rstrip("/"))
+            if "public_url" in self.model_fields_set:
+                object.__setattr__(self, "server_url", self.public_url.rstrip("/"))
+            else:
+                host = self.server_host
+                if host in {"0.0.0.0", "::"}:
+                    host = "localhost"
+                object.__setattr__(self, "server_url", f"http://{host}:{self.server_port}")
         if not self.frontend_url:
             object.__setattr__(self, "frontend_url", self.public_url.rstrip("/") + "/")
         return self
