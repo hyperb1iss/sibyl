@@ -514,6 +514,15 @@ class EntityManager:
         entity_type: EntityType,
         limit: int = 50,
         offset: int = 0,
+        *,
+        project_id: str | None = None,
+        epic_id: str | None = None,
+        status: str | None = None,
+        priority: str | None = None,
+        complexity: str | None = None,
+        feature: str | None = None,
+        tags: list[str] | None = None,
+        include_archived: bool = False,
     ) -> list[Entity]:
         """List all entities of a specific type using direct Cypher query.
 
@@ -524,20 +533,80 @@ class EntityManager:
             entity_type: The type of entities to list.
             limit: Maximum results to return.
             offset: Pagination offset.
+            project_id: Filter by project ID.
+            epic_id: Filter by epic ID.
+            status: Filter by status (for tasks).
+            priority: Filter by priority (for tasks).
+            complexity: Filter by complexity (for tasks).
+            feature: Filter by feature area (for tasks).
+            tags: Filter by tags (matches if ANY tag present).
+            include_archived: Include archived entities.
 
         Returns:
             List of entities.
         """
-        log.debug("Listing entities", entity_type=entity_type, limit=limit, offset=offset)
+        log.debug(
+            "Listing entities",
+            entity_type=entity_type,
+            limit=limit,
+            offset=offset,
+            project_id=project_id,
+            status=status,
+            priority=priority,
+        )
+
+        # Build dynamic WHERE clauses
+        where_clauses = ["n.entity_type = $entity_type", "n.group_id = $group_id"]
+        params: dict[str, Any] = {
+            "entity_type": entity_type.value,
+            "group_id": self._group_id,
+            "offset": offset,
+            "limit": limit,
+        }
+
+        if project_id:
+            where_clauses.append("n.project_id = $project_id")
+            params["project_id"] = project_id
+
+        if epic_id:
+            where_clauses.append("n.epic_id = $epic_id")
+            params["epic_id"] = epic_id
+
+        if status:
+            where_clauses.append("n.status = $status")
+            params["status"] = status
+
+        if priority:
+            where_clauses.append("n.priority = $priority")
+            params["priority"] = priority
+
+        if complexity:
+            where_clauses.append("n.complexity = $complexity")
+            params["complexity"] = complexity
+
+        if feature:
+            where_clauses.append("n.feature = $feature")
+            params["feature"] = feature
+
+        if tags:
+            # Match if entity has ANY of the specified tags
+            # FalkorDB uses list operations - check intersection
+            where_clauses.append("size([t IN $tags WHERE t IN n.tags]) > 0")
+            params["tags"] = tags
+
+        if not include_archived:
+            where_clauses.append("(n.status IS NULL OR n.status <> 'archived')")
+
+        where_clause = " AND ".join(where_clauses)
 
         try:
             # Direct Cypher query to get entities with all their properties
             # This is more reliable than Graphiti's get_by_group_ids which doesn't
             # return custom properties like entity_type
             result = await self._driver.execute_query(
-                """
+                f"""
                 MATCH (n)
-                WHERE n.entity_type = $entity_type AND n.group_id = $group_id
+                WHERE {where_clause}
                 RETURN n.uuid AS uuid,
                        n.name AS name,
                        n.entity_type AS entity_type,
@@ -564,10 +633,7 @@ class EntityManager:
                 SKIP $offset
                 LIMIT $limit
                 """,
-                entity_type=entity_type.value,
-                group_id=self._group_id,
-                offset=offset,
-                limit=limit,
+                **params,
             )
 
             entities: list[Entity] = []

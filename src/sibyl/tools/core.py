@@ -1275,19 +1275,34 @@ async def _explore_list(
             EntityType.TOPIC,
         ]
 
-    # Fetch more than limit to detect has_more and apply filters
-    fetch_limit = limit + 50  # Over-fetch to detect pagination
+    # Parse tags into list if provided
+    tag_list = [t.strip() for t in tags.split(",")] if tags else None
+
+    # Fetch with DB-level filtering for efficiency
+    # Over-fetch to detect has_more after any remaining client-side filters
+    fetch_limit = limit + offset + 50
     all_entities = []
     for entity_type in target_types:
-        entities = await entity_manager.list_by_type(entity_type, limit=fetch_limit)
+        entities = await entity_manager.list_by_type(
+            entity_type,
+            limit=fetch_limit,
+            project_id=project,
+            epic_id=epic,
+            status=status,
+            priority=priority,
+            complexity=complexity,
+            feature=feature,
+            tags=tag_list,
+            include_archived=include_archived,
+        )
         all_entities.extend(entities)
 
-    # Apply filters
+    # Apply remaining filters not handled by DB (language, category)
     filtered_entities = [
         entity
         for entity in all_entities
         if _passes_entity_filters(
-            entity, language, category, project, epic, status, priority, complexity, feature, tags, include_archived
+            entity, language, category, None, None, None, None, None, None, None, include_archived
         )
     ]
 
