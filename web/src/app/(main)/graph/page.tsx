@@ -488,10 +488,6 @@ function GraphPageContent() {
     }
   }, []);
 
-  // Track drawn labels to avoid overlap - capped for performance
-  const drawnLabelsRef = useRef<{ x: number; y: number; width: number }[]>([]);
-  const maxLabelsToTrack = 50; // Limit overlap checks for performance
-
   // Clean node rendering - entity colors + degree-based sizing
   // Labels scale with zoom: more labels appear as you zoom in
   const paintNode = useCallback(
@@ -550,43 +546,26 @@ function GraphPageContent() {
       // =================================================================
       // LABEL VISIBILITY - Progressive reveal based on zoom level
       // =================================================================
-      // Zoom thresholds (globalScale values):
-      //   0.3 = very zoomed out (see whole graph)
-      //   1.0 = default zoom
-      //   2.0 = moderate zoom (focused area)
-      //   4.0+ = very zoomed in (detail view)
+      // globalScale: 0.3 = zoomed out, 1.0 = default, 4.0+ = zoomed in
 
       const isHubNode = degree > Math.max(3, maxDegree * 0.05);
 
       // Determine if label should show based on zoom + importance
       let showLabel = false;
 
-      // Always show: selected, hovered
       if (isSelected || isHovered) {
         showLabel = true;
-      }
-      // Projects: show at zoom >= 0.5
-      else if (isProject && globalScale >= 0.5) {
+      } else if (isProject && globalScale >= 0.4) {
         showLabel = true;
-      }
-      // Hub nodes (top 5%): show at zoom >= 0.8
-      else if (isHubNode && globalScale >= 0.8) {
+      } else if (isHubNode && globalScale >= 0.7) {
         showLabel = true;
-      }
-      // High-degree nodes (5+ connections): show at zoom >= 1.5
-      else if (degree >= 5 && globalScale >= 1.5) {
+      } else if (degree >= 5 && globalScale >= 1.2) {
         showLabel = true;
-      }
-      // Medium-degree nodes (3+ connections): show at zoom >= 2.5
-      else if (degree >= 3 && globalScale >= 2.5) {
+      } else if (degree >= 3 && globalScale >= 1.8) {
         showLabel = true;
-      }
-      // Low-degree nodes (1+ connections): show at zoom >= 4.0
-      else if (degree >= 1 && globalScale >= 4.0) {
+      } else if (degree >= 1 && globalScale >= 2.5) {
         showLabel = true;
-      }
-      // Isolated nodes: show at zoom >= 6.0
-      else if (globalScale >= 6.0) {
+      } else if (globalScale >= 3.5) {
         showLabel = true;
       }
 
@@ -597,76 +576,31 @@ function GraphPageContent() {
         const maxLen = Math.min(40, Math.floor(10 + globalScale * 5));
         const displayLabel = label.length > maxLen ? `${label.slice(0, maxLen - 3)}...` : label;
 
-        // Font size: scales with zoom but stays readable
-        // At zoom 1.0: 10px, at zoom 2.0: 11px, at zoom 4.0: 12px (capped)
-        const baseFontSize = 10;
-        const fontSize = Math.min(12, baseFontSize + Math.log2(globalScale + 1));
+        // Font size: DIVIDE by globalScale to keep consistent screen size
+        // Canvas is scaled by globalScale, so counter-scale the font
+        const screenFontSize = 11; // desired size on screen in pixels
+        const fontSize = screenFontSize / globalScale;
 
         ctx.font = `${fontSize}px "JetBrains Mono", monospace`;
-        const textWidth = ctx.measureText(displayLabel).width;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
 
-        const labelX = x;
-        const labelY = y + size + 3;
+        const labelY = y + size + 2 / globalScale; // small gap below node
 
-        // Priority labels bypass overlap check
+        // Text shadow for readability
+        const shadowOffset = 0.5 / globalScale;
+        ctx.fillStyle = theme === 'neon' ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.9)';
+        ctx.fillText(displayLabel, x + shadowOffset, labelY + shadowOffset);
+
+        // Text color - slightly transparent for non-priority labels
+        const textColor = colors.fgPrimary;
         const isPriority = isSelected || isHovered || isProject || isHubNode;
-        let shouldDraw = isPriority;
-
-        if (!isPriority) {
-          if (drawnLabelsRef.current.length >= maxLabelsToTrack) {
-            shouldDraw = false;
-          } else {
-            const recentLabels = drawnLabelsRef.current.slice(-20);
-            const minSpacing = 20 / globalScale;
-            const overlaps = recentLabels.some(existing => {
-              const dx = Math.abs(labelX - existing.x);
-              const dy = Math.abs(labelY - existing.y);
-              return dx < (textWidth + existing.width) / 2 + minSpacing && dy < fontSize + 4;
-            });
-            shouldDraw = !overlaps;
-          }
-        }
-
-        if (shouldDraw) {
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'top';
-
-          // Text shadow
-          const shadowColor = theme === 'neon' ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.8)';
-          ctx.fillStyle = shadowColor;
-          ctx.fillText(displayLabel, x + 0.5, labelY + 0.5);
-
-          // Text color
-          const textColor = colors.fgPrimary;
-          ctx.fillStyle = isSelected ? textColor : isProject ? `${textColor}ee` : `${textColor}cc`;
-          ctx.fillText(displayLabel, x, labelY);
-
-          if (drawnLabelsRef.current.length < maxLabelsToTrack) {
-            drawnLabelsRef.current.push({ x: labelX, y: labelY, width: textWidth });
-          }
-        }
+        ctx.fillStyle = isPriority ? textColor : `${textColor}bb`;
+        ctx.fillText(displayLabel, x, labelY);
       }
     },
     [selectedNodeId, hoveredNode, graphData.maxDegree, theme, colors]
   );
-
-  // Clear label tracking before each frame - runs once on mount
-  useEffect(() => {
-    const fg = graphRef.current;
-    if (!fg) return;
-
-    // Hook into the render cycle to clear labels before drawing
-    // Access internal _renderFrame property (not in public types)
-    type FGInternal = { _renderFrame?: (...args: unknown[]) => void };
-    const fgInternal = fg as unknown as FGInternal;
-    const originalRender = fgInternal._renderFrame;
-    if (originalRender) {
-      fgInternal._renderFrame = function (...args: unknown[]) {
-        drawnLabelsRef.current = [];
-        return originalRender.apply(this, args);
-      };
-    }
-  }, []); // Only run once on mount
 
   // Clean link rendering
   const paintLink = useCallback(
