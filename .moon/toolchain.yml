@@ -1,0 +1,15 @@
+# https://moonrepo.dev/docs/config/toolchain
+$schema: './cache/schemas/toolchain.json'
+
+# Use proto for version management
+# Toolchain versions defined in .prototools
+
+node:
+  # Sync engines from package.json
+  syncPackageManagerField: true
+  # Use pnpm as package manager
+  packageManager: pnpm
+
+python:
+  # Use uv for dependency management
+  packageManager: uv

@@ -12,14 +12,15 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 
 # Install dependencies first (cached unless requirements change)
-COPY pyproject.toml uv.lock README.md ./
+COPY apps/api/pyproject.toml apps/api/uv.lock ./
+COPY README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
 # Copy source and install project (non-editable for production)
-COPY src/ src/
-COPY alembic/ alembic/
-COPY alembic.ini .
+COPY apps/api/src/ src/
+COPY apps/api/alembic/ alembic/
+COPY apps/api/alembic.ini .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 

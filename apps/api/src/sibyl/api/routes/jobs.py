@@ -11,14 +11,12 @@ from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from sibyl.auth.dependencies import get_current_organization, require_org_admin
 from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import CrawlSource, Organization
-from sibyl.db.models import OrganizationRole
 
 log = structlog.get_logger()
 router = APIRouter(
@@ -169,8 +167,7 @@ async def cancel_job(
     session: AsyncSession = Depends(get_session_dependency),
 ) -> dict[str, Any]:
     """Cancel a queued job."""
-    from sibyl.jobs.queue import cancel_job as _cancel_job
-    from sibyl.jobs.queue import get_job_status
+    from sibyl.jobs.queue import cancel_job as _cancel_job, get_job_status
 
     try:
         info = await get_job_status(job_id)

@@ -1,0 +1,11 @@
+# Sibyl monorepo toolchain versions
+# Managed by proto - https://moonrepo.dev/proto
+
+python = "3.13"
+node = "24"
+pnpm = "10.26"
+uv = "0.9"
+
+[settings]
+detect-strategy = "prefer-prototools"
+auto-install = true

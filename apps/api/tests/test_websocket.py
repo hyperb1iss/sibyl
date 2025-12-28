@@ -1,9 +1,9 @@
 """Tests for WebSocket org scoping and auth integration."""
 
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
-from uuid import uuid4
 
 from sibyl.api.websocket import (
     Connection,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from contextlib import asynccontextmanager
-from urllib.parse import urlencode, urlsplit, parse_qs
+from urllib.parse import parse_qs, urlencode, urlsplit
 from uuid import uuid4
 
 import pytest

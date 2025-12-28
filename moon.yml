@@ -1,0 +1,65 @@
+# https://moonrepo.dev/docs/config/project
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+# Root project for workspace-level tasks
+language: other
+type: configuration
+
+tasks:
+  # ==========================================================================
+  # Docker
+  # ==========================================================================
+  docker-up:
+    command: 'docker compose up -d'
+    local: true
+
+  docker-down:
+    command: 'docker compose down'
+    local: true
+
+  docker-logs:
+    command: 'docker compose logs -f'
+    local: true
+    options:
+      persistent: true
+
+  # ==========================================================================
+  # Formatting (non-code files)
+  # ==========================================================================
+  fmt:
+    command: 'npx prettier --write "**/*.{yaml,yml,md}"'
+    local: true
+
+  # ==========================================================================
+  # Installation
+  # ==========================================================================
+  install-cli:
+    command: 'cd apps/api && uv tool install . --force'
+    local: true
+
+  install-cli-dev:
+    command: 'cd apps/api && uv tool install . --editable --force'
+    local: true
+
+  install-skills:
+    command: |
+      mkdir -p ~/.claude/skills ~/.codex/skills
+      rm -rf ~/.claude/skills/sibyl-knowledge ~/.claude/skills/sibyl-project-manager
+      rm -rf ~/.codex/skills/sibyl-knowledge ~/.codex/skills/sibyl-project-manager
+      cp -r skills/sibyl-knowledge ~/.claude/skills/
+      cp -r skills/sibyl-project-manager ~/.claude/skills/
+      cp -r skills/sibyl-knowledge ~/.codex/skills/
+      cp -r skills/sibyl-project-manager ~/.codex/skills/
+      echo "✓ Installed to ~/.claude/skills and ~/.codex/skills"
+    local: true
+
+  # ==========================================================================
+  # E2E Testing
+  # ==========================================================================
+  e2e-up:
+    command: 'docker compose -f compose.e2e.yml up -d'
+    local: true
+
+  e2e-down:
+    command: 'docker compose -f compose.e2e.yml down -v'
+    local: true

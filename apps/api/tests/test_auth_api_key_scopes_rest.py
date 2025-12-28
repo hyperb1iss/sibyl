@@ -16,7 +16,7 @@ def _make_request(*, method: str, path: str, token: str) -> Request:
         "method": method.upper(),
         "path": path,
         "headers": [
-            (b"authorization", f"Bearer {token}".encode("utf-8")),
+            (b"authorization", f"Bearer {token}".encode()),
             (b"host", b"testserver"),
         ],
         "query_string": b"",

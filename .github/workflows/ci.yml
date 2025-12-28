@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: Build & Test
+  ci:
+    name: CI
     runs-on: ubuntu-latest
 
     services:
@@ -47,11 +47,12 @@ jobs:
       SIBYL_POSTGRES_DB: sibyl_ci
       SIBYL_OPENAI_API_KEY: sk-test-key
       SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
-      # Use mock LLM for E2E tests (no real API calls)
       SIBYL_MOCK_LLM: true
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       # =========================================================================
       # System Dependencies
@@ -62,117 +63,89 @@ jobs:
           sudo apt-get install -y libxml2-dev libxslt-dev
 
       # =========================================================================
-      # Backend
+      # Moonrepo Toolchain (proto + moon + all tools)
       # =========================================================================
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0
         with:
-          python-version: "3.13"
-
-      - name: Install Python dependencies
-        run: uv sync --all-extras
-
-      - name: Backend lint
-        run: |
-          uv run ruff check src tests
-          uv run ruff format --check src tests
-
-      - name: Backend typecheck
-        run: uv run pyright src
-
-      - name: Backend build
-        run: uv build
+          auto-install: true
 
       # =========================================================================
-      # Frontend
+      # Caching
       # =========================================================================
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+      - name: Cache moon outputs
+        uses: actions/cache@v5
         with:
-          version: "10"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: "pnpm"
-          cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Install Node dependencies
-        run: pnpm install --frozen-lockfile
-        working-directory: web
-
-      - name: Cache Next.js build
-        uses: actions/cache@v4
-        with:
-          path: web/.next/cache
-          key:
-            nextjs-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}-${{
-            hashFiles('web/src/**/*') }}
+          path: |
+            .moon/cache
+            apps/api/.venv
+            apps/web/node_modules
+            apps/web/.next/cache
+          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock', 'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
-            nextjs-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}-
-            nextjs-${{ runner.os }}-
+            moon-${{ runner.os }}-
 
-      - name: Frontend lint
-        run: pnpm lint
-        working-directory: web
+      # =========================================================================
+      # Lint & Typecheck (all projects in parallel via moon)
+      # =========================================================================
+      - name: Lint
+        run: moon ci :lint
 
-      - name: Frontend typecheck
-        run: pnpm typecheck
-        working-directory: web
+      - name: Typecheck
+        run: moon ci :typecheck
 
-      - name: Frontend build
-        run: pnpm build
-        working-directory: web
+      # =========================================================================
+      # Build (all projects)
+      # =========================================================================
+      - name: Build
+        run: moon ci :build
 
-      - name: Storybook build
-        run: pnpm build-storybook
-        working-directory: web
+      - name: Build Storybook
+        run: moon run web:build-storybook
 
       # =========================================================================
       # Database Setup
       # =========================================================================
       - name: Run database migrations
-        run: uv run alembic upgrade head
+        run: moon run api:db-migrate
 
       # =========================================================================
-      # Unit Tests (no server required)
+      # Unit Tests
       # =========================================================================
       - name: Run unit tests
-        run: uv run pytest --ignore=tests/e2e --cov=src --cov-report=xml --cov-report=term -v
+        run: |
+          cd apps/api
+          uv run pytest --ignore=tests/e2e --cov=src --cov-report=xml --cov-report=term -v
 
       # =========================================================================
-      # E2E Tests (requires running servers)
+      # E2E Tests
       # =========================================================================
       - name: Start backend server
         run: |
+          cd apps/api
           uv run sibyl-serve &
           echo "Waiting for backend to start..."
           for i in {1..60}; do
             if curl -s http://localhost:3334/api/health > /dev/null; then
               echo "Backend is ready!"
-              # Give graph client time to fully initialize
               sleep 2
               break
             fi
             echo "Attempt $i: Backend not ready yet..."
             sleep 1
           done
-          # Verify health endpoint returns success
           curl -s http://localhost:3334/api/health | head -c 200
 
       - name: Start background job worker
         run: |
+          cd apps/api
           uv run sibyl worker &
           echo "Background job worker started"
           sleep 2
 
       - name: Start frontend server
         run: |
-          cd web
+          cd apps/web
           pnpm start &
           echo "Waiting for frontend to start..."
           for i in {1..60}; do
@@ -185,30 +158,36 @@ jobs:
           done
 
       - name: Run e2e tests
-        run: uv run pytest tests/e2e -v
+        run: |
+          cd apps/api
+          uv run pytest tests/e2e -v
 
       - name: Collect diagnostics on failure
-        if: failure() || success()
+        if: failure()
         run: |
-          echo "=== Backend server logs (last 100 lines) ==="
-          # Check if server is still running
+          echo "=== Backend server logs ==="
           curl -s http://localhost:3334/api/health || echo "Backend not responding"
           echo ""
           echo "=== FalkorDB graph contents ==="
-          # Query the default graph to see what's there
           docker exec $(docker ps -q --filter ancestor=falkordb/falkordb:latest) redis-cli GRAPH.QUERY default "MATCH (n) RETURN labels(n), count(*) LIMIT 10" 2>/dev/null || echo "Could not query FalkorDB"
-          echo ""
-          echo "=== Check for Entity nodes ==="
-          docker exec $(docker ps -q --filter ancestor=falkordb/falkordb:latest) redis-cli GRAPH.QUERY default "MATCH (n:Entity) RETURN n.uuid, n.entity_type, n.name LIMIT 5" 2>/dev/null || echo "No Entity nodes found"
 
+      # =========================================================================
+      # Upload Artifacts
+      # =========================================================================
       - name: Upload coverage
         uses: codecov/codecov-action@v5
         with:
-          files: ./coverage.xml
+          files: apps/api/coverage.xml
           fail_ci_if_error: false
+
+      - name: Upload moon run report
+        uses: moonrepo/run-report-action@v1
+        if: success() || failure()
+        with:
+          access-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v6
         with:
           name: dist
-          path: dist/
+          path: apps/api/dist/

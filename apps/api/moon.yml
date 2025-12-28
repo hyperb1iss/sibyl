@@ -1,0 +1,100 @@
+# https://moonrepo.dev/docs/config/project
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+language: python
+type: application
+platform: system
+
+fileGroups:
+  sources:
+    - 'src/**/*'
+  tests:
+    - 'tests/**/*'
+  configs:
+    - 'pyproject.toml'
+    - 'alembic.ini'
+
+tasks:
+  # Linting & Formatting
+  lint:
+    command: 'uv run ruff check src tests'
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+      - '@group(configs)'
+
+  format:
+    command: 'uv run ruff format src tests'
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+    local: true
+
+  fix:
+    command: 'uv run ruff check --fix src tests && uv run ruff format src tests'
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+    local: true
+
+  # Type Checking
+  typecheck:
+    command: 'uv run pyright'
+    inputs:
+      - '@group(sources)'
+      - '@group(configs)'
+
+  # Testing
+  test:
+    command: 'uv run pytest'
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+    options:
+      envFile: '.env'
+
+  test-cov:
+    command: 'uv run pytest --cov=src --cov-report=term-missing'
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+    options:
+      envFile: '.env'
+
+  # Development
+  serve:
+    command: 'uv run sibyl-serve'
+    local: true
+    options:
+      envFile: '.env'
+      persistent: true
+
+  # Database
+  db-migrate:
+    command: 'uv run alembic upgrade head'
+    local: true
+    options:
+      envFile: '.env'
+
+  db-revision:
+    command: 'uv run alembic revision --autogenerate'
+    local: true
+    options:
+      envFile: '.env'
+
+  # Dependencies
+  sync:
+    command: 'uv sync'
+    inputs:
+      - 'pyproject.toml'
+      - 'uv.lock'
+    local: true
+
+  # Build
+  build:
+    command: 'uv build'
+    inputs:
+      - '@group(sources)'
+      - '@group(configs)'
+    outputs:
+      - 'dist'

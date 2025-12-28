@@ -1,0 +1,117 @@
+# https://moonrepo.dev/docs/config/project
+$schema: 'https://moonrepo.dev/schemas/project.json'
+
+language: typescript
+type: application
+platform: node
+
+fileGroups:
+  sources:
+    - 'src/**/*'
+  tests:
+    - 'src/**/*.test.{ts,tsx}'
+    - 'src/**/*.spec.{ts,tsx}'
+  configs:
+    - 'package.json'
+    - 'tsconfig.json'
+    - 'next.config.ts'
+    - 'biome.json'
+
+tasks:
+  # Linting & Formatting
+  lint:
+    command: 'pnpm biome check .'
+    inputs:
+      - '@group(sources)'
+      - '@group(configs)'
+
+  lint-fix:
+    command: 'pnpm biome check --write .'
+    inputs:
+      - '@group(sources)'
+    local: true
+
+  format:
+    command: 'pnpm biome format --write .'
+    inputs:
+      - '@group(sources)'
+    local: true
+
+  # Type Checking
+  typecheck:
+    command: 'pnpm tsc --noEmit'
+    inputs:
+      - '@group(sources)'
+      - '@group(configs)'
+
+  # Testing
+  test:
+    command: 'pnpm vitest run'
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+
+  test-watch:
+    command: 'pnpm vitest'
+    local: true
+    options:
+      persistent: true
+
+  test-cov:
+    command: 'pnpm vitest run --coverage'
+    inputs:
+      - '@group(sources)'
+      - '@group(tests)'
+
+  # Development
+  dev:
+    command: 'pnpm next dev --port 3337'
+    local: true
+    options:
+      persistent: true
+
+  # Build
+  build:
+    command: 'pnpm next build'
+    inputs:
+      - '@group(sources)'
+      - '@group(configs)'
+    outputs:
+      - '.next'
+
+  start:
+    command: 'pnpm next start --port 3337'
+    local: true
+    deps:
+      - '~:build'
+    options:
+      persistent: true
+
+  # Code Generation
+  generate-types:
+    command: 'pnpm openapi-typescript http://localhost:3334/api/openapi.json -o src/lib/api-types.ts'
+    local: true
+    outputs:
+      - 'src/lib/api-types.ts'
+
+  # Storybook
+  storybook:
+    command: 'pnpm storybook dev -p 6006'
+    local: true
+    options:
+      persistent: true
+
+  build-storybook:
+    command: 'pnpm storybook build'
+    inputs:
+      - '@group(sources)'
+    outputs:
+      - 'storybook-static'
+
+  # Dependencies
+  install:
+    command: 'pnpm install'
+    inputs:
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+    local: true
