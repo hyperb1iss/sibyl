@@ -546,7 +546,7 @@ async def _search_documents(
     source_name: str | None = None,
     language: str | None = None,
     limit: int = 10,
-    include_content: bool = True,  # noqa: ARG001 - reserved for future use
+    include_content: bool = True,
 ) -> list[SearchResult]:
     """Search crawled documentation using pgvector similarity.
 
@@ -611,8 +611,11 @@ async def _search_documents(
             # Convert to SearchResult
             results = []
             for chunk, doc, src_name, src_id, similarity in rows:
-                # Truncate content for search results - agents should fetch full content via entity ID
-                content = chunk.content[:200] if chunk.content else ""
+                # Control content length based on include_content flag
+                if include_content:
+                    content = chunk.content[:500] if chunk.content else ""
+                else:
+                    content = chunk.content[:200] if chunk.content else ""
 
                 # Build heading context for better preview
                 heading_context = " > ".join(chunk.heading_path) if chunk.heading_path else ""
