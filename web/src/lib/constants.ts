@@ -59,6 +59,7 @@ export const ENTITY_TYPES = [
   'slash_command',
   'task',
   'project',
+  'epic',
   'team',
   'error_pattern',
   'milestone',
@@ -83,6 +84,7 @@ export const ENTITY_COLORS: Record<EntityType, string> = {
   slash_command: '#80ffea',
   task: '#e135ff',
   project: '#80ffea',
+  epic: '#ffb86c',
   team: '#ff6ac1',
   error_pattern: '#ff6363',
   milestone: '#f1fa8c',
@@ -105,6 +107,7 @@ export const ENTITY_ICONS: Record<EntityType, string> = {
   slash_command: '/',
   task: '☐',
   project: '◆',
+  epic: '◈',
   team: '⚑',
   error_pattern: '⚠',
   milestone: '◎',
@@ -242,6 +245,15 @@ export const ENTITY_STYLES: Record<EntityType, EntityStyle> = {
     border: 'border-[#80ffea]/30',
     glow: 'shadow-[#80ffea]/20',
   },
+  epic: {
+    badge: 'bg-[#ffb86c]/20 text-[#ffb86c] border-[#ffb86c]/30',
+    card: 'hover:border-[#ffb86c]/50 hover:shadow-[#ffb86c]/20',
+    dot: 'bg-[#ffb86c]',
+    accent: 'bg-[#ffb86c]',
+    gradient: 'from-[#ffb86c]/15 via-transparent to-transparent',
+    border: 'border-[#ffb86c]/30',
+    glow: 'shadow-[#ffb86c]/20',
+  },
   team: {
     badge: 'bg-[#ff6ac1]/20 text-[#ff6ac1] border-[#ff6ac1]/30',
     card: 'hover:border-[#ff6ac1]/50 hover:shadow-[#ff6ac1]/20',
@@ -355,6 +367,60 @@ export const TASK_STATUS_CONFIG: Record<
 };
 
 export const TASK_PRIORITIES = ['critical', 'high', 'medium', 'low', 'someday'] as const;
+
+// =============================================================================
+// Epic Status Styling
+// =============================================================================
+
+export const EPIC_STATUSES = [
+  'planning',
+  'in_progress',
+  'blocked',
+  'completed',
+  'archived',
+] as const;
+export type EpicStatusType = (typeof EPIC_STATUSES)[number];
+
+export const EPIC_STATUS_CONFIG: Record<
+  EpicStatusType,
+  { label: string; color: string; bgClass: string; textClass: string; icon: string }
+> = {
+  planning: {
+    label: 'Planning',
+    color: '#80ffea',
+    bgClass: 'bg-[#80ffea]/20',
+    textClass: 'text-[#80ffea]',
+    icon: '◇',
+  },
+  in_progress: {
+    label: 'In Progress',
+    color: '#e135ff',
+    bgClass: 'bg-[#e135ff]/20',
+    textClass: 'text-[#e135ff]',
+    icon: '◉',
+  },
+  blocked: {
+    label: 'Blocked',
+    color: '#ff6363',
+    bgClass: 'bg-[#ff6363]/20',
+    textClass: 'text-[#ff6363]',
+    icon: '⊘',
+  },
+  completed: {
+    label: 'Completed',
+    color: '#50fa7b',
+    bgClass: 'bg-[#50fa7b]/20',
+    textClass: 'text-[#50fa7b]',
+    icon: '◆',
+  },
+  archived: {
+    label: 'Archived',
+    color: '#8b85a0',
+    bgClass: 'bg-[#8b85a0]/20',
+    textClass: 'text-[#8b85a0]',
+    icon: '▣',
+  },
+};
 export type TaskPriorityType = (typeof TASK_PRIORITIES)[number];
 
 export const TASK_PRIORITY_CONFIG: Record<

@@ -10,6 +10,7 @@ import {
   Boxes,
   FolderKanban,
   type IconComponent,
+  Layers,
   LayoutDashboard,
   ListTodo,
   Network,
@@ -24,6 +25,7 @@ import { NavLink } from './nav-link';
 const NAVIGATION: Array<{ name: string; href: string; icon: IconComponent }> = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Projects', href: '/projects', icon: FolderKanban },
+  { name: 'Epics', href: '/epics', icon: Layers },
   { name: 'Tasks', href: '/tasks', icon: ListTodo },
   { name: 'Sources', href: '/sources', icon: BookOpen },
   { name: 'Graph', href: '/graph', icon: Network },

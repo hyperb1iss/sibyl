@@ -10,6 +10,7 @@ import {
   FileText,
   FolderKanban,
   type IconComponent,
+  Layers,
   LayoutDashboard,
   ListTodo,
   Network,
@@ -23,6 +24,7 @@ import {
 export const ROUTE_CONFIG: Record<string, { label: string; icon: IconComponent }> = {
   '': { label: 'Home', icon: LayoutDashboard },
   projects: { label: 'Projects', icon: FolderKanban },
+  epics: { label: 'Epics', icon: Layers },
   tasks: { label: 'Tasks', icon: ListTodo },
   sources: { label: 'Sources', icon: BookOpen },
   documents: { label: 'Documents', icon: FileText },
@@ -132,7 +134,7 @@ export const Breadcrumb = memo(BreadcrumbInner);
  * Automatically uses correct icons from ROUTE_CONFIG.
  */
 interface EntityBreadcrumbProps {
-  entityType: 'project' | 'task' | 'entity' | 'source';
+  entityType: 'project' | 'epic' | 'task' | 'entity' | 'source';
   entityName: string;
   parentProject?: { id: string; name: string };
 }
@@ -149,6 +151,15 @@ export function EntityBreadcrumb({ entityType, entityName, parentProject }: Enti
       items.push({
         label: parentProject.name,
         href: `/tasks?project=${parentProject.id}`,
+        icon: ROUTE_CONFIG.projects.icon,
+      });
+    }
+  } else if (entityType === 'epic') {
+    items.push({ label: 'Epics', href: '/epics', icon: ROUTE_CONFIG.epics.icon });
+    if (parentProject) {
+      items.push({
+        label: parentProject.name,
+        href: `/epics?project=${parentProject.id}`,
         icon: ROUTE_CONFIG.projects.icon,
       });
     }
