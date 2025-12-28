@@ -5,7 +5,9 @@ metadata:
   labels:
     {{- include "sibyl.backend.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.backend.autoscaling.enabled }}
   replicas: {{ .Values.backend.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "sibyl.backend.selectorLabels" . | nindent 6 }}
@@ -26,42 +28,28 @@ spec:
       serviceAccountName: {{ include "sibyl.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.backend.podSecurityContext | nindent 8 }}
-      initContainers:
-        - name: migrate
-          image: {{ include "sibyl.backend.image" . }}
-          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
-          command: ["alembic", "upgrade", "head"]
-          envFrom:
-            - configMapRef:
-                name: {{ include "sibyl.fullname" . }}-config
-          env:
-            {{- if .Values.backend.database.existingSecret }}
-            - name: SIBYL_POSTGRES_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.backend.database.existingSecret }}
-                  key: host
-            - name: SIBYL_POSTGRES_PORT
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.backend.database.existingSecret }}
-                  key: port
-            - name: SIBYL_POSTGRES_DB
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.backend.database.existingSecret }}
-                  key: dbname
-            - name: SIBYL_POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.backend.database.existingSecret }}
-                  key: username
-            - name: SIBYL_POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.backend.database.existingSecret }}
-                  key: password
-            {{- end }}
+      {{- if .Values.backend.podAntiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          {{- if eq .Values.backend.podAntiAffinity.type "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "sibyl.backend.selectorLabels" . | nindent 18 }}
+              topologyKey: {{ .Values.backend.podAntiAffinity.topologyKey | default "kubernetes.io/hostname" }}
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "sibyl.backend.selectorLabels" . | nindent 20 }}
+                topologyKey: {{ .Values.backend.podAntiAffinity.topologyKey | default "kubernetes.io/hostname" }}
+          {{- end }}
+      {{- else if .Values.backend.affinity }}
+      affinity:
+        {{- toYaml .Values.backend.affinity | nindent 8 }}
+      {{- end }}
       containers:
         - name: backend
           securityContext:
@@ -148,10 +136,6 @@ spec:
           emptyDir: {}
       {{- with .Values.backend.nodeSelector }}
       nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.backend.affinity }}
-      affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.backend.tolerations }}

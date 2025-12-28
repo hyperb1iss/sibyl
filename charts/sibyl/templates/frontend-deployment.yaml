@@ -6,7 +6,9 @@ metadata:
   labels:
     {{- include "sibyl.frontend.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.frontend.autoscaling.enabled }}
   replicas: {{ .Values.frontend.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "sibyl.frontend.selectorLabels" . | nindent 6 }}
@@ -26,6 +28,28 @@ spec:
       serviceAccountName: {{ include "sibyl.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.frontend.podSecurityContext | nindent 8 }}
+      {{- if .Values.frontend.podAntiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          {{- if eq .Values.frontend.podAntiAffinity.type "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "sibyl.frontend.selectorLabels" . | nindent 18 }}
+              topologyKey: {{ .Values.frontend.podAntiAffinity.topologyKey | default "kubernetes.io/hostname" }}
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "sibyl.frontend.selectorLabels" . | nindent 20 }}
+                topologyKey: {{ .Values.frontend.podAntiAffinity.topologyKey | default "kubernetes.io/hostname" }}
+          {{- end }}
+      {{- else if .Values.frontend.affinity }}
+      affinity:
+        {{- toYaml .Values.frontend.affinity | nindent 8 }}
+      {{- end }}
       containers:
         - name: frontend
           securityContext:
@@ -54,10 +78,6 @@ spec:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
       {{- with .Values.frontend.nodeSelector }}
       nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.frontend.affinity }}
-      affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.frontend.tolerations }}

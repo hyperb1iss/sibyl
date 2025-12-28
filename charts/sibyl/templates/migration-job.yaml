@@ -1,0 +1,81 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "sibyl.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "sibyl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    "helm.sh/hook": pre-upgrade,pre-install
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit | default 3 }}
+  ttlSecondsAfterFinished: {{ .Values.migrations.ttlSecondsAfterFinished | default 600 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sibyl.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "sibyl.serviceAccountName" . }}
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml .Values.backend.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "sibyl.backend.image" . }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          command: ["alembic", "upgrade", "head"]
+          securityContext:
+            {{- toYaml .Values.backend.securityContext | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "sibyl.fullname" . }}-config
+          env:
+            {{- if .Values.backend.database.existingSecret }}
+            - name: SIBYL_POSTGRES_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: host
+            - name: SIBYL_POSTGRES_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: port
+            - name: SIBYL_POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: dbname
+            - name: SIBYL_POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: username
+            - name: SIBYL_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.backend.database.existingSecret }}
+                  key: password
+            {{- end }}
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

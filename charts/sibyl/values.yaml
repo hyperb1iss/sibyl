@@ -1,5 +1,5 @@
 # Sibyl Helm Chart Values
-# This chart deploys the Sibyl application (backend + frontend)
+# This chart deploys the Sibyl application (backend + frontend + worker)
 # It does NOT include infrastructure (PostgreSQL, FalkorDB, Kong)
 # Those should be deployed separately using their respective charts
 
@@ -8,9 +8,18 @@ global:
   # -- Image pull secrets for private registries
   imagePullSecrets: []
 
+# -- Database migrations configuration
+migrations:
+  # -- Enable migration job (runs as pre-upgrade/pre-install hook)
+  enabled: true
+  # -- Number of retries before marking migration as failed
+  backoffLimit: 3
+  # -- Seconds to keep completed job before cleanup
+  ttlSecondsAfterFinished: 600
+
 # -- Backend configuration
 backend:
-  # -- Number of replicas
+  # -- Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
 
   image:
@@ -25,6 +34,64 @@ backend:
   service:
     type: ClusterIP
     port: 3334
+    # -- Service annotations
+    annotations: {}
+    # -- Session affinity for MCP stateful connections
+    # Set to "ClientIP" to enable sticky sessions (recommended for multi-replica)
+    sessionAffinity: ""
+    # -- Session affinity config (only used if sessionAffinity is set)
+    sessionAffinityConfig:
+      clientIP:
+        timeoutSeconds: 10800  # 3 hours
+
+  # -- Autoscaling configuration
+  autoscaling:
+    # -- Enable horizontal pod autoscaler
+    enabled: false
+    # -- Minimum replicas
+    minReplicas: 2
+    # -- Maximum replicas
+    maxReplicas: 10
+    # -- Target CPU utilization percentage
+    targetCPUUtilizationPercentage: 70
+    # -- Target memory utilization percentage
+    targetMemoryUtilizationPercentage: 80
+    # -- Scaling behavior configuration
+    behavior:
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        policies:
+          - type: Percent
+            value: 10
+            periodSeconds: 60
+      scaleUp:
+        stabilizationWindowSeconds: 0
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 15
+          - type: Pods
+            value: 4
+            periodSeconds: 15
+        selectPolicy: Max
+
+  # -- Pod disruption budget
+  pdb:
+    # -- Enable PDB
+    enabled: false
+    # -- Minimum available pods (mutually exclusive with maxUnavailable)
+    minAvailable: 1
+    # -- Maximum unavailable pods
+    # maxUnavailable: 1
+
+  # -- Pod anti-affinity configuration
+  podAntiAffinity:
+    # -- Enable pod anti-affinity (spreads pods across nodes)
+    enabled: false
+    # -- Anti-affinity type: "soft" (preferred) or "hard" (required)
+    type: soft
+    # -- Topology key for anti-affinity
+    topologyKey: kubernetes.io/hostname
 
   # -- Resource limits and requests
   resources:
@@ -118,7 +185,7 @@ backend:
   # -- Tolerations
   tolerations: []
 
-  # -- Affinity rules
+  # -- Affinity rules (overridden by podAntiAffinity if enabled)
   affinity: {}
 
 # -- Frontend configuration
@@ -126,7 +193,7 @@ frontend:
   # -- Enable frontend deployment
   enabled: true
 
-  # -- Number of replicas
+  # -- Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
 
   image:
@@ -141,6 +208,43 @@ frontend:
   service:
     type: ClusterIP
     port: 3337
+
+  # -- Autoscaling configuration
+  autoscaling:
+    # -- Enable horizontal pod autoscaler
+    enabled: false
+    # -- Minimum replicas
+    minReplicas: 2
+    # -- Maximum replicas
+    maxReplicas: 10
+    # -- Target CPU utilization percentage
+    targetCPUUtilizationPercentage: 70
+    # -- Target memory utilization percentage
+    targetMemoryUtilizationPercentage: 80
+    # -- Scaling behavior configuration
+    behavior:
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        policies:
+          - type: Percent
+            value: 10
+            periodSeconds: 60
+
+  # -- Pod disruption budget
+  pdb:
+    # -- Enable PDB
+    enabled: false
+    # -- Minimum available pods
+    minAvailable: 1
+
+  # -- Pod anti-affinity configuration
+  podAntiAffinity:
+    # -- Enable pod anti-affinity
+    enabled: false
+    # -- Anti-affinity type: "soft" or "hard"
+    type: soft
+    # -- Topology key
+    topologyKey: kubernetes.io/hostname
 
   # -- Resource limits and requests
   resources:
@@ -196,7 +300,7 @@ frontend:
   # -- Tolerations
   tolerations: []
 
-  # -- Affinity rules
+  # -- Affinity rules (overridden by podAntiAffinity if enabled)
   affinity: {}
 
 # -- Worker configuration (arq job queue processor)
@@ -204,8 +308,45 @@ worker:
   # -- Enable worker deployment
   enabled: true
 
-  # -- Number of replicas
+  # -- Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
+
+  # -- Autoscaling configuration
+  autoscaling:
+    # -- Enable horizontal pod autoscaler
+    enabled: false
+    # -- Minimum replicas
+    minReplicas: 1
+    # -- Maximum replicas
+    maxReplicas: 5
+    # -- Target CPU utilization percentage
+    targetCPUUtilizationPercentage: 70
+    # -- Target memory utilization percentage
+    targetMemoryUtilizationPercentage: 80
+    # -- Scaling behavior configuration
+    behavior:
+      scaleDown:
+        stabilizationWindowSeconds: 300
+        policies:
+          - type: Percent
+            value: 10
+            periodSeconds: 60
+
+  # -- Pod disruption budget
+  pdb:
+    # -- Enable PDB
+    enabled: false
+    # -- Minimum available pods
+    minAvailable: 1
+
+  # -- Pod anti-affinity configuration
+  podAntiAffinity:
+    # -- Enable pod anti-affinity
+    enabled: false
+    # -- Anti-affinity type: "soft" or "hard"
+    type: soft
+    # -- Topology key
+    topologyKey: kubernetes.io/hostname
 
   # -- Resource limits and requests
   resources:
@@ -240,7 +381,7 @@ worker:
   # -- Tolerations
   tolerations: []
 
-  # -- Affinity rules
+  # -- Affinity rules (overridden by podAntiAffinity if enabled)
   affinity: {}
 
 # -- Ingress configuration (for reference, actual ingress via Kong)

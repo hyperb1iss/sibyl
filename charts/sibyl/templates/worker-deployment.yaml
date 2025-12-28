@@ -6,7 +6,9 @@ metadata:
   labels:
     {{- include "sibyl.worker.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.worker.autoscaling.enabled }}
   replicas: {{ .Values.worker.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "sibyl.worker.selectorLabels" . | nindent 6 }}
@@ -27,6 +29,28 @@ spec:
       serviceAccountName: {{ include "sibyl.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.worker.podSecurityContext | nindent 8 }}
+      {{- if .Values.worker.podAntiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          {{- if eq .Values.worker.podAntiAffinity.type "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "sibyl.worker.selectorLabels" . | nindent 18 }}
+              topologyKey: {{ .Values.worker.podAntiAffinity.topologyKey | default "kubernetes.io/hostname" }}
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "sibyl.worker.selectorLabels" . | nindent 20 }}
+                topologyKey: {{ .Values.worker.podAntiAffinity.topologyKey | default "kubernetes.io/hostname" }}
+          {{- end }}
+      {{- else if .Values.worker.affinity }}
+      affinity:
+        {{- toYaml .Values.worker.affinity | nindent 8 }}
+      {{- end }}
       containers:
         - name: worker
           securityContext:
@@ -104,10 +128,6 @@ spec:
           emptyDir: {}
       {{- with .Values.worker.nodeSelector }}
       nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.worker.affinity }}
-      affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.worker.tolerations }}

@@ -4,8 +4,19 @@ metadata:
   name: {{ include "sibyl.fullname" . }}-backend
   labels:
     {{- include "sibyl.backend.labels" . | nindent 4 }}
+  {{- with .Values.backend.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.backend.service.type }}
+  {{- if .Values.backend.service.sessionAffinity }}
+  sessionAffinity: {{ .Values.backend.service.sessionAffinity }}
+  {{- if .Values.backend.service.sessionAffinityConfig }}
+  sessionAffinityConfig:
+    {{- toYaml .Values.backend.service.sessionAffinityConfig | nindent 4 }}
+  {{- end }}
+  {{- end }}
   ports:
     - port: {{ .Values.backend.service.port }}
       targetPort: http
