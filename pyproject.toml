@@ -61,6 +61,7 @@ dependencies = [
     # Background Jobs
     "arq>=0.26.3",
     "slowapi>=0.1.9",
+    "python-louvain>=0.16",
 ]
 
 [project.optional-dependencies]

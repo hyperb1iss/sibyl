@@ -571,9 +571,9 @@ def _render_device_result_page(*, title: str, message: str, success: bool = True
     """Render a styled result page for device auth (approved/denied)."""
     icon = "✓" if success else "✗"
     accent = "#50fa7b" if success else "#ff6363"  # SilkCircuit green/red
+    glow = "rgba(80, 250, 123, 0.2)" if success else "rgba(255, 99, 99, 0.2)"
 
-    html = f"""
-<!doctype html>
+    html = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -581,22 +581,66 @@ def _render_device_result_page(*, title: str, message: str, success: bool = True
   <title>{title} — Sibyl</title>
   <style>
     :root {{ color-scheme: dark; }}
-    body {{ font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: #0a0812; color: #e8e8f0; margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
-    .wrap {{ text-align: center; max-width: 400px; padding: 48px 32px; background: #12101a; border: 1px solid #2a2a3a; border-radius: 16px; }}
-    .icon {{ font-size: 48px; color: {accent}; margin-bottom: 16px; }}
-    h1 {{ margin: 0 0 12px; font-size: 24px; color: {accent}; }}
-    p {{ color: #a7a7c7; margin: 0; line-height: 1.5; }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(180deg, #0a0812 0%, #0d0a14 100%);
+      color: #f0f0f8;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }}
+    .wrap {{
+      text-align: center;
+      width: 100%;
+      max-width: 400px;
+      padding: 48px 32px;
+      background: #12101a;
+      border: 1px solid #2a2640;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    }}
+    .icon-wrap {{
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 20px;
+      border-radius: 50%;
+      background: {glow};
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }}
+    .icon {{
+      font-size: 36px;
+      color: {accent};
+    }}
+    h1 {{
+      margin: 0 0 12px;
+      font-size: 22px;
+      font-weight: 600;
+      color: {accent};
+    }}
+    p {{
+      color: #8888a8;
+      margin: 0;
+      line-height: 1.6;
+      font-size: 15px;
+    }}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="icon">{icon}</div>
+    <div class="icon-wrap">
+      <div class="icon">{icon}</div>
+    </div>
     <h1>{title}</h1>
     <p>{message}</p>
   </div>
 </body>
-</html>
-"""
+</html>"""
     return HTMLResponse(html, status_code=200)
 
 
@@ -607,105 +651,241 @@ def _render_device_verify_page(
     authed_user: User | None = None,
     pending: dict[str, object] | None = None,
 ) -> HTMLResponse:
+    """Render the device verification page with SilkCircuit styling."""
     safe_code = user_code or ""
     err = error_code or ""
     is_authed = authed_user is not None
-    title = "Approve Device Login"
 
-    client_name = ""
-    scope = ""
-    expires_at = ""
-    if pending:
-        client_name = str(pending.get("client_name") or "")
-        scope = str(pending.get("scope") or "")
-        expires_at = str(pending.get("expires_at") or "")
+    # Error messages with user-friendly descriptions
+    error_messages = {
+        "invalid_or_expired": "This device code has expired or is invalid. Please return to your terminal and start a new login.",
+        "invalid_credentials": "Incorrect email or password. Please try again.",
+        "not_authenticated": "You need to sign in first.",
+        "invalid_token": "Your session has expired. Please sign in again.",
+        "user_not_found": "User account not found.",
+        "missing_user_code": "No device code provided.",
+        "invalid_action": "Invalid action.",
+    }
+    error_message = error_messages.get(err, f"An error occurred: {err}") if err else ""
 
-    authed_banner = (
-        f"<div class='sub'>Signed in as <strong>{authed_user.email or authed_user.name}</strong></div>"
-        if is_authed
-        else "<div class='sub'>Sign in to approve this device.</div>"
-    )
-
-    error_html = f"<div class='err'>Error: <code>{err}</code></div>" if err else ""
-
-    pending_html = ""
-    if pending:
-        pending_html = (
-            "<div class='card'>"
-            f"<div><strong>Client</strong>: {client_name or 'sibyl-cli'}</div>"
-            f"<div><strong>Scope</strong>: <code>{scope or 'mcp'}</code></div>"
-            f"<div><strong>Expires</strong>: {expires_at}</div>"
-            "</div>"
-        )
-
-    login_form = f"""
-    <form method="post" action="/api/auth/device/verify">
-      <input type="hidden" name="action" value="login" />
-      <input type="hidden" name="user_code" value="{safe_code}" />
-      <label>Email</label>
-      <input name="email" type="email" autocomplete="username" required />
-      <label>Password</label>
-      <input name="password" type="password" autocomplete="current-password" required />
-      <button type="submit">Sign in</button>
-    </form>
+    # SilkCircuit CSS (matches frontend design tokens)
+    css = """
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(180deg, #0a0812 0%, #0d0a14 100%);
+      color: #f0f0f8;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .wrap {
+      width: 100%;
+      max-width: 420px;
+      padding: 32px;
+      background: #12101a;
+      border: 1px solid #2a2640;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(225, 53, 255, 0.05);
+    }
+    .logo {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .logo-icon {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, #e135ff 0%, #80ffea 100%);
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 20px;
+      font-weight: 600;
+      color: #f0f0f8;
+      text-align: center;
+    }
+    .sub {
+      color: #8888a8;
+      font-size: 14px;
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .sub strong { color: #80ffea; font-weight: 500; }
+    .card {
+      margin: 20px 0;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid #2a2640;
+      background: #0d0a14;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .card div { color: #8888a8; }
+    .card strong { color: #c0c0d8; font-weight: 500; }
+    .card code { color: #80ffea; background: rgba(128, 255, 234, 0.1); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    .err {
+      margin: 0 0 20px;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 99, 99, 0.3);
+      background: rgba(255, 99, 99, 0.08);
+      color: #ff9999;
+      font-size: 14px;
+      line-height: 1.5;
+      text-align: center;
+    }
+    .err-icon { font-size: 32px; margin-bottom: 8px; }
+    label {
+      display: block;
+      margin: 16px 0 6px;
+      color: #a0a0c0;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    input {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid #2a2640;
+      background: #0d0a14;
+      color: #f0f0f8;
+      font-size: 15px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus {
+      outline: none;
+      border-color: #e135ff;
+      box-shadow: 0 0 0 3px rgba(225, 53, 255, 0.15);
+    }
+    input::placeholder { color: #505068; }
+    button {
+      margin-top: 20px;
+      width: 100%;
+      padding: 12px 16px;
+      border-radius: 10px;
+      border: none;
+      background: linear-gradient(135deg, #e135ff 0%, #a855f7 100%);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    button:hover { opacity: 0.9; }
+    button:active { transform: scale(0.98); }
+    button.secondary {
+      background: #1a1624;
+      border: 1px solid #2a2640;
+      color: #c0c0d8;
+    }
+    button.secondary:hover { background: #221e30; }
+    .link {
+      display: block;
+      text-align: center;
+      margin-top: 16px;
+      color: #80ffea;
+      font-size: 14px;
+      text-decoration: none;
+    }
+    .link:hover { text-decoration: underline; }
     """
 
-    approve_form = f"""
-    <form method="post" action="/api/auth/device/verify">
-      <input type="hidden" name="action" value="approve" />
-      <input type="hidden" name="user_code" value="{safe_code}" />
-      <button type="submit">Approve</button>
-    </form>
-    <form method="post" action="/api/auth/device/verify" style="margin-top: 10px">
-      <input type="hidden" name="action" value="deny" />
-      <input type="hidden" name="user_code" value="{safe_code}" />
-      <button type="submit" class="secondary">Deny</button>
-    </form>
-    """
+    # Page content varies by state
+    if err:
+        # Error state: show message with option to try again
+        body_html = f"""
+        <div class="err">
+          <div class="err-icon">⚠</div>
+          {error_message}
+        </div>
+        <a href="/api/auth/device/verify" class="link">← Enter a different code</a>
+        """
+        title = "Device Login Failed"
+    elif not safe_code:
+        # No code: show code entry form
+        body_html = """
+        <form method="get" action="/api/auth/device/verify">
+          <label>Device Code</label>
+          <input name="user_code" placeholder="ABCD-EFGH" autofocus />
+          <button type="submit">Continue</button>
+        </form>
+        """
+        title = "Device Login"
+    elif not is_authed:
+        # Has code but not logged in: show login form
+        body_html = f"""
+        <form method="post" action="/api/auth/device/verify">
+          <input type="hidden" name="action" value="login" />
+          <input type="hidden" name="user_code" value="{safe_code}" />
+          <label>Email</label>
+          <input name="email" type="email" autocomplete="username" required autofocus />
+          <label>Password</label>
+          <input name="password" type="password" autocomplete="current-password" required />
+          <button type="submit">Sign in & Continue</button>
+        </form>
+        """
+        title = "Sign In to Approve"
+    else:
+        # Logged in with valid code: show approve/deny
+        client_name = str(pending.get("client_name") or "sibyl-cli") if pending else "sibyl-cli"
+        scope = str(pending.get("scope") or "mcp") if pending else "mcp"
+        body_html = f"""
+        <div class="card">
+          <div><strong>Application:</strong> {client_name}</div>
+          <div><strong>Permissions:</strong> <code>{scope}</code></div>
+        </div>
+        <form method="post" action="/api/auth/device/verify">
+          <input type="hidden" name="action" value="approve" />
+          <input type="hidden" name="user_code" value="{safe_code}" />
+          <button type="submit">Approve Device</button>
+        </form>
+        <form method="post" action="/api/auth/device/verify">
+          <input type="hidden" name="action" value="deny" />
+          <input type="hidden" name="user_code" value="{safe_code}" />
+          <button type="submit" class="secondary">Deny</button>
+        </form>
+        """
+        title = "Approve Device Login"
 
-    code_form = f"""
-    <form method="get" action="/api/auth/device/verify">
-      <label>Device code</label>
-      <input name="user_code" value="{safe_code}" placeholder="ABCD-EFGH" />
-      <button type="submit">Continue</button>
-    </form>
-    """
+    # Auth status banner
+    if is_authed and not err:
+        authed_banner = f"<div class='sub'>Signed in as <strong>{authed_user.email or authed_user.name}</strong></div>"
+    elif not safe_code:
+        authed_banner = "<div class='sub'>Enter the code shown in your terminal</div>"
+    elif not err:
+        authed_banner = "<div class='sub'>Sign in to approve this device</div>"
+    else:
+        authed_banner = ""
 
-    body_html = code_form if not safe_code else (login_form if not is_authed else approve_form)
-
-    html = f"""
-<!doctype html>
+    html = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{title}</title>
-  <style>
-    :root {{ color-scheme: dark; }}
-    body {{ font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: #0b0b10; color: #e8e8f0; margin: 0; }}
-    .wrap {{ max-width: 560px; margin: 8vh auto; padding: 24px; background: #12121a; border: 1px solid #2a2a3a; border-radius: 14px; }}
-    h1 {{ margin: 0 0 8px; font-size: 22px; }}
-    .sub {{ color: #a7a7c7; margin-bottom: 18px; }}
-    label {{ display: block; margin: 12px 0 6px; color: #cfcfe9; }}
-    input {{ width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #2a2a3a; background: #0f0f16; color: #fff; }}
-    button {{ margin-top: 16px; width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #3a2a6a; background: #5b2bff; color: #fff; font-weight: 600; cursor: pointer; }}
-    button.secondary {{ background: #1a1a24; border-color: #2a2a3a; }}
-    .card {{ margin: 16px 0; padding: 12px; border-radius: 12px; border: 1px solid #2a2a3a; background: #0f0f16; color: #cfcfe9; }}
-    .err {{ margin: 12px 0; padding: 10px 12px; border-radius: 12px; border: 1px solid #5a2a2a; background: #1a0f12; color: #ffb4b4; }}
-    code {{ color: #80ffea; }}
-  </style>
+  <title>{title} — Sibyl</title>
+  <style>{css}</style>
 </head>
 <body>
   <div class="wrap">
+    <div class="logo">
+      <div class="logo-icon">◈</div>
+    </div>
     <h1>{title}</h1>
     {authed_banner}
-    {error_html}
-    {pending_html}
     {body_html}
   </div>
 </body>
-</html>
-"""
+</html>"""
     return HTMLResponse(html, status_code=200)
 
 

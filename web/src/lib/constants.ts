@@ -17,10 +17,33 @@ export const TIMING = {
   STALE_TIME: 60000, // 1 minute stale time for React Query
 } as const;
 
+// Cluster colors palette - for coloring nodes by cluster membership
+// Uses distinct, visually separable colors that work on dark background
+export const CLUSTER_COLORS = [
+  '#e135ff', // Electric Purple
+  '#80ffea', // Neon Cyan
+  '#ff6ac1', // Coral
+  '#f1fa8c', // Electric Yellow
+  '#50fa7b', // Success Green
+  '#ff9580', // Warm Orange
+  '#bd93f9', // Soft Purple
+  '#8be9fd', // Light Cyan
+  '#ffb86c', // Orange
+  '#ff79c6', // Pink
+  '#6272a4', // Muted Blue
+  '#44475a', // Dark Gray (for unclustered)
+] as const;
+
+// Get cluster color by index (cycles through palette)
+export function getClusterColor(clusterId: string, clusterIndex: number): string {
+  if (clusterId === 'unclustered') return CLUSTER_COLORS[11]; // Dark gray for unclustered
+  return CLUSTER_COLORS[clusterIndex % (CLUSTER_COLORS.length - 1)];
+}
+
 // Graph visualization defaults
 export const GRAPH_DEFAULTS = {
-  MAX_NODES: 500,
-  MAX_EDGES: 1000,
+  MAX_NODES: 1000, // Increased for hierarchical view
+  MAX_EDGES: 5000, // Increased for hierarchical view
   // Node sizing
   NODE_SIZE_MIN: 3,
   NODE_SIZE_MAX: 10,
@@ -70,27 +93,31 @@ export const ENTITY_TYPES = [
 export type EntityType = (typeof ENTITY_TYPES)[number];
 
 // Entity colors - the soul of SilkCircuit
+// Each type has a distinct color for visual identification
 export const ENTITY_COLORS: Record<EntityType, string> = {
-  pattern: '#e135ff',
-  rule: '#ff6363',
-  template: '#80ffea',
-  convention: '#ffb86c',
-  tool: '#f1fa8c',
-  language: '#ff6ac1',
-  topic: '#ff00ff',
-  episode: '#50fa7b',
-  knowledge_source: '#8b85a0',
-  config_file: '#f1fa8c',
-  slash_command: '#80ffea',
-  task: '#e135ff',
-  project: '#80ffea',
-  epic: '#ffb86c',
-  team: '#ff6ac1',
-  error_pattern: '#ff6363',
-  milestone: '#f1fa8c',
-  source: '#ff6ac1',
-  document: '#f1fa8c',
+  pattern: '#e135ff', // Electric Purple
+  rule: '#ff6363', // Error Red
+  template: '#80ffea', // Neon Cyan
+  convention: '#ffb86c', // Orange
+  tool: '#f1fa8c', // Electric Yellow
+  language: '#ff6ac1', // Coral
+  topic: '#ff00ff', // Magenta
+  episode: '#50fa7b', // Success Green
+  knowledge_source: '#8b85a0', // Muted
+  config_file: '#bd93f9', // Soft Purple
+  slash_command: '#8be9fd', // Light Cyan
+  task: '#e135ff', // Electric Purple (work items)
+  project: '#ff79c6', // Bright Pink (distinct from others!)
+  epic: '#ffb86c', // Orange
+  team: '#ff6ac1', // Coral
+  error_pattern: '#ff6363', // Error Red
+  milestone: '#f1fa8c', // Electric Yellow
+  source: '#ff9580', // Warm Orange
+  document: '#6272a4', // Muted Blue
 };
+
+// Default color for unknown entity types
+export const DEFAULT_ENTITY_COLOR = '#8b85a0';
 
 // Entity icons - visual identity for each type (Unicode symbols, no emojis)
 export const ENTITY_ICONS: Record<EntityType, string> = {
@@ -303,7 +330,7 @@ export const ENTITY_STYLES: Record<EntityType, EntityStyle> = {
 
 // Get color for any entity type (with fallback)
 export function getEntityColor(type: string): string {
-  return ENTITY_COLORS[type as EntityType] ?? ENTITY_COLORS.knowledge_source;
+  return ENTITY_COLORS[type as EntityType] ?? DEFAULT_ENTITY_COLOR;
 }
 
 // Get style classes for any entity type (with fallback)

@@ -19,7 +19,7 @@ export function printConsoleGreeting(): void {
   if (typeof window === 'undefined') return;
 
   console.log(
-    '%c✦ %cSIBYL%c — %cknowledge echoes forward  %cv' + VERSION,
+    `%c✦ %cSIBYL%c — %cknowledge echoes forward  %cv${VERSION}`,
     STYLES.star,
     STYLES.name,
     STYLES.dash,

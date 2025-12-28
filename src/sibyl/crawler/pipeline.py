@@ -13,6 +13,7 @@ Supports both single-document and bulk source ingestion.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -41,6 +42,9 @@ if TYPE_CHECKING:
     from uuid import UUID
 
 log = structlog.get_logger()
+
+# Type alias for progress callback: receives (stats, chunks_in_last_doc)
+ProgressCallback = Callable[["IngestionStats", int], Awaitable[None]]
 
 
 @dataclass
@@ -163,6 +167,7 @@ class IngestionPipeline:
         *,
         max_pages: int = 100,
         max_depth: int = 3,
+        on_progress: ProgressCallback | None = None,
     ) -> IngestionStats:
         """Ingest a full documentation source.
 
@@ -173,6 +178,7 @@ class IngestionPipeline:
             source: CrawlSource to ingest
             max_pages: Maximum pages to crawl
             max_depth: Maximum link depth
+            on_progress: Optional callback called after each document with (stats, chunks_created)
 
         Returns:
             IngestionStats with results
@@ -216,11 +222,20 @@ class IngestionPipeline:
             # Crawl and process documents
             async for doc in doc_stream:
                 stats.documents_crawled += 1
+                chunks_before = stats.chunks_created
 
                 try:
                     # Store document and create chunks
                     await self._process_document(doc, stats, source.source_type)
                     stats.documents_stored += 1
+
+                    # Report progress after each successful document
+                    if on_progress:
+                        chunks_added = stats.chunks_created - chunks_before
+                        try:
+                            await on_progress(stats, chunks_added)
+                        except Exception as cb_err:
+                            log.warning("Progress callback failed", error=str(cb_err))
 
                 except Exception as e:
                     stats.errors += 1

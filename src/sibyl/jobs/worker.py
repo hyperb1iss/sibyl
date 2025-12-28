@@ -124,6 +124,28 @@ async def crawl_source(
         },
     )
 
+    # Progress callback: update DB + broadcast after each document
+    async def on_progress(stats: Any, chunks_added: int) -> None:
+        """Update source stats and broadcast progress after each document."""
+        async with get_session() as session:
+            db_source = await session.get(CrawlSource, UUID(source_id))
+            if db_source:
+                db_source.document_count = stats.documents_stored
+                db_source.chunk_count = stats.chunks_created
+
+        await _safe_broadcast(
+            "crawl_progress",
+            {
+                "source_id": source_id,
+                "source_name": source_name,
+                "documents_crawled": stats.documents_crawled,
+                "documents_stored": stats.documents_stored,
+                "chunks_created": stats.chunks_created,
+                "chunks_added": chunks_added,
+                "errors": stats.errors,
+            },
+        )
+
     # Run ingestion
     try:
         async with IngestionPipeline(
@@ -133,6 +155,7 @@ async def crawl_source(
                 source,
                 max_pages=max_pages,
                 max_depth=max_depth,
+                on_progress=on_progress,
             )
 
         # Update source with results

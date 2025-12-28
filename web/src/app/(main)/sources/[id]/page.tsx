@@ -17,7 +17,9 @@ import {
   Loader2,
   Play,
   RefreshCw,
+  Settings,
   StopCircle,
+  X,
 } from '@/components/ui/icons';
 import { CRAWL_STATUS_CONFIG, formatDateTime, SOURCE_TYPE_CONFIG } from '@/lib/constants';
 import {
@@ -26,6 +28,7 @@ import {
   useSource,
   useSourcePages,
   useSyncSource,
+  useUpdateSource,
 } from '@/lib/hooks';
 
 interface SourceDetailPageProps {
@@ -39,8 +42,49 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
   const crawlSource = useCrawlSource();
   const cancelCrawl = useCancelCrawl();
   const syncSource = useSyncSource();
+  const updateSource = useUpdateSource();
 
   const [isCrawling, setIsCrawling] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({
+    crawl_depth: 2,
+    include_patterns: '',
+    exclude_patterns: '',
+  });
+
+  const openEditModal = useCallback(() => {
+    if (source) {
+      setEditForm({
+        crawl_depth: source.crawl_depth,
+        include_patterns: source.include_patterns?.join('\n') || '',
+        exclude_patterns: source.exclude_patterns?.join('\n') || '',
+      });
+      setIsEditOpen(true);
+    }
+  }, [source]);
+
+  const handleSaveSettings = useCallback(async () => {
+    try {
+      await updateSource.mutateAsync({
+        id,
+        updates: {
+          crawl_depth: editForm.crawl_depth,
+          include_patterns: editForm.include_patterns
+            .split('\n')
+            .map(p => p.trim())
+            .filter(Boolean),
+          exclude_patterns: editForm.exclude_patterns
+            .split('\n')
+            .map(p => p.trim())
+            .filter(Boolean),
+        },
+      });
+      setIsEditOpen(false);
+      toast.success('Settings updated');
+    } catch {
+      toast.error('Failed to update settings');
+    }
+  }, [id, editForm, updateSource]);
 
   const handleCrawl = useCallback(async () => {
     if (isCrawling || source?.crawl_status === 'in_progress') {
@@ -210,6 +254,16 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
               <RefreshCw width={16} height={16} />
               Sync
             </button>
+            {source.source_type !== 'local' && (
+              <button
+                type="button"
+                onClick={openEditModal}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-sc-bg-highlight text-sc-fg-muted hover:text-sc-purple hover:bg-sc-purple/10 border border-sc-fg-subtle/10 transition-colors"
+              >
+                <Settings width={16} height={16} />
+                Settings
+              </button>
+            )}
           </div>
         </div>
 
@@ -378,6 +432,104 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
           </div>
         )}
       </div>
+
+      {/* Edit Settings Modal */}
+      {isEditOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setIsEditOpen(false)}
+            onKeyDown={e => e.key === 'Escape' && setIsEditOpen(false)}
+          />
+          <div className="relative bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold text-sc-fg-primary">Crawl Settings</h2>
+              <button
+                type="button"
+                onClick={() => setIsEditOpen(false)}
+                className="p-1.5 text-sc-fg-subtle hover:text-sc-fg-primary transition-colors"
+              >
+                <X width={18} height={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label
+                  htmlFor="crawl_depth"
+                  className="block text-sm font-medium text-sc-fg-muted mb-1.5"
+                >
+                  Crawl Depth
+                </label>
+                <input
+                  id="crawl_depth"
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={editForm.crawl_depth}
+                  onChange={e => setEditForm(f => ({ ...f, crawl_depth: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary focus:outline-none focus:border-sc-purple"
+                />
+                <p className="text-xs text-sc-fg-subtle mt-1">
+                  How many links deep to follow (1-5)
+                </p>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="include_patterns"
+                  className="block text-sm font-medium text-sc-fg-muted mb-1.5"
+                >
+                  Include Patterns
+                </label>
+                <textarea
+                  id="include_patterns"
+                  value={editForm.include_patterns}
+                  onChange={e => setEditForm(f => ({ ...f, include_patterns: e.target.value }))}
+                  placeholder="One pattern per line"
+                  rows={3}
+                  className="w-full px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary font-mono text-sm focus:outline-none focus:border-sc-purple resize-none"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="exclude_patterns"
+                  className="block text-sm font-medium text-sc-fg-muted mb-1.5"
+                >
+                  Exclude Patterns
+                </label>
+                <textarea
+                  id="exclude_patterns"
+                  value={editForm.exclude_patterns}
+                  onChange={e => setEditForm(f => ({ ...f, exclude_patterns: e.target.value }))}
+                  placeholder="One pattern per line"
+                  rows={3}
+                  className="w-full px-3 py-2 bg-sc-bg-dark border border-sc-fg-subtle/20 rounded-lg text-sc-fg-primary font-mono text-sm focus:outline-none focus:border-sc-purple resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => setIsEditOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-sc-fg-muted hover:text-sc-fg-primary transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveSettings}
+                disabled={updateSource.isPending}
+                className="px-4 py-2 text-sm font-medium bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg transition-colors disabled:opacity-50"
+              >
+                {updateSource.isPending ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

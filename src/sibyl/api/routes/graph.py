@@ -454,3 +454,239 @@ async def get_subgraph(
             status_code=500,
             detail="Failed to retrieve subgraph. Please try again.",
         ) from e
+
+
+# =============================================================================
+# Cluster Endpoints for Bubble Visualization
+# =============================================================================
+
+
+@router.get("/clusters")
+async def get_clusters(
+    org: Organization = Depends(get_current_organization),
+    refresh: bool = Query(default=False, description="Force refresh clusters"),
+) -> dict:
+    """Get clusters for bubble visualization.
+
+    Returns community-detected clusters with type distribution for coloring.
+    Results are cached for 5 minutes to avoid expensive recomputation.
+    """
+    from sibyl.graph.communities import get_clusters_for_visualization
+
+    try:
+        client = await get_graph_client()
+        group_id = str(org.id)
+
+        clusters = await get_clusters_for_visualization(
+            client, group_id, force_refresh=refresh
+        )
+
+        # Transform to API response format
+        cluster_data = [
+            {
+                "id": c.id,
+                "count": c.member_count,
+                "dominant_type": c.dominant_type,
+                "type_distribution": c.type_distribution,
+                "level": c.level,
+            }
+            for c in clusters
+        ]
+
+        total_nodes = sum(c.member_count for c in clusters)
+
+        return {
+            "clusters": cluster_data,
+            "total_nodes": total_nodes,
+            "total_clusters": len(clusters),
+        }
+
+    except Exception as e:
+        log.exception("get_clusters_failed", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve clusters. Please try again.",
+        ) from e
+
+
+@router.get("/clusters/{cluster_id}")
+async def get_cluster_detail(
+    cluster_id: str,
+    org: Organization = Depends(get_current_organization),
+) -> dict:
+    """Get nodes and edges within a specific cluster for drill-down view."""
+    from sibyl.graph.communities import get_cluster_nodes
+
+    try:
+        client = await get_graph_client()
+        group_id = str(org.id)
+
+        result = await get_cluster_nodes(client, group_id, cluster_id)
+
+        if result.get("error"):
+            raise HTTPException(status_code=404, detail=result["error"])
+
+        # Transform nodes to GraphNode format
+        nodes = [
+            GraphNode(
+                id=n["id"],
+                type=n["type"],
+                label=(n["name"] or n["id"][:20])[:50],
+                color=get_entity_color(
+                    EntityType(n["type"]) if n["type"] in [e.value for e in EntityType] else EntityType.EPISODE
+                ),
+                size=1.5,
+                metadata={"summary": n.get("summary", "")},
+            )
+            for n in result["nodes"]
+        ]
+
+        # Transform edges to GraphEdge format
+        edges = [
+            GraphEdge(
+                id=f"{e['source']}-{e['target']}",
+                source=e["source"],
+                target=e["target"],
+                type=e["type"],
+                label=e["type"].replace("_", " ").title(),
+                weight=1.0,
+            )
+            for e in result["edges"]
+        ]
+
+        return {
+            "cluster_id": cluster_id,
+            "nodes": [n.model_dump() for n in nodes],
+            "edges": [e.model_dump() for e in edges],
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("get_cluster_detail_failed", cluster_id=cluster_id, error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve cluster details. Please try again.",
+        ) from e
+
+
+@router.get("/hierarchical")
+async def get_hierarchical_graph_data(
+    org: Organization = Depends(get_current_organization),
+    max_nodes: int = Query(default=1000, ge=100, le=2000, description="Maximum nodes"),
+    max_edges: int = Query(default=5000, ge=500, le=10000, description="Maximum edges"),
+    refresh: bool = Query(default=False, description="Force refresh clusters"),
+) -> dict:
+    """Get hierarchical graph data with cluster assignments.
+
+    Returns actual nodes and edges (not aggregated bubbles) with each node
+    assigned to a cluster based on Louvain community detection.
+
+    This endpoint is designed for rich graph visualization:
+    - Up to 2000 nodes with real edges
+    - Each node has cluster_id for coloring
+    - Cluster metadata for legends
+    - Inter-cluster edges for summary views
+    """
+    from sibyl.graph.communities import get_hierarchical_graph
+
+    try:
+        client = await get_graph_client()
+        group_id = str(org.id)
+
+        data = await get_hierarchical_graph(
+            client,
+            group_id,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+            force_refresh=refresh,
+        )
+
+        # Transform nodes to include colors
+        colored_nodes = []
+        for node in data.nodes:
+            entity_type_str = node.get("type", "episode")
+            try:
+                entity_type = EntityType(entity_type_str)
+            except ValueError:
+                entity_type = EntityType.EPISODE
+
+            colored_nodes.append({
+                **node,
+                "label": (node.get("name") or node["id"][:20])[:50],
+                "color": get_entity_color(entity_type),
+            })
+
+        return {
+            "nodes": colored_nodes,
+            "edges": data.edges,
+            "clusters": data.clusters,
+            "cluster_edges": data.cluster_edges,
+            "total_nodes": data.total_nodes,
+            "total_edges": data.total_edges,
+            "displayed_nodes": data.displayed_nodes,
+            "displayed_edges": data.displayed_edges,
+        }
+
+    except Exception as e:
+        log.exception("get_hierarchical_graph_failed", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve hierarchical graph. Please try again.",
+        ) from e
+
+
+@router.get("/stats")
+async def get_graph_stats(
+    org: Organization = Depends(get_current_organization),
+) -> dict:
+    """Get efficient graph statistics using aggregate queries.
+
+    Does not load the full graph - uses Cypher aggregation for performance.
+    """
+    try:
+        client = await get_graph_client()
+        group_id = str(org.id)
+        driver = client.get_org_driver(group_id)
+
+        # Count nodes by type - single aggregation query
+        node_query = """
+        MATCH (n)
+        WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+        RETURN n.entity_type AS type, count(*) AS cnt
+        """
+        node_result = await driver.execute_query(node_query, group_id=group_id)
+        node_rows = GraphClient.normalize_result(node_result)
+
+        type_counts: dict[str, int] = {}
+        for row in node_rows:
+            t = row.get("type") or "unknown"
+            c = row.get("cnt", 0)
+            type_counts[t] = c
+
+        total_nodes = sum(type_counts.values())
+
+        # Count edges - single count query
+        edge_query = """
+        MATCH ()-[r]->()
+        WHERE r.group_id = $group_id
+        RETURN count(r) AS cnt
+        """
+        edge_result = await driver.execute_query(edge_query, group_id=group_id)
+        edge_rows = GraphClient.normalize_result(edge_result)
+        total_edges = edge_rows[0].get("cnt", 0) if edge_rows else 0
+
+        return {
+            "total_nodes": total_nodes,
+            "total_edges": total_edges,
+            "by_type": type_counts,
+        }
+
+    except Exception as e:
+        log.exception("get_graph_stats_failed", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve graph stats. Please try again.",
+        ) from e

@@ -180,21 +180,26 @@ class CrawlerService:
             raise RuntimeError("Crawler not started. Use 'async with' or call start()")
 
         # Build filter chain from source patterns
-        filters: list[URLPatternFilter] = []
+        filters: list[URLPatternFilter] = [
+            # Always exclude localhost/loopback URLs (common in docs as examples)
+            URLPatternFilter(
+                patterns=["*localhost*", "*127.0.0.1*", "*0.0.0.0*"],
+                reverse=True,  # reverse=True means EXCLUDE matching URLs
+                use_glob=True,
+            ),
+        ]
         if source.include_patterns:
             filters.extend(
                 URLPatternFilter(patterns=[pattern]) for pattern in source.include_patterns
             )
 
-        # Configure deep crawl strategy
-        # Only pass filter_chain if we have filters
+        # Configure deep crawl strategy with filter chain
         strategy_kwargs = {
             "max_depth": max_depth,
             "include_external": False,
             "max_pages": max_pages,
+            "filter_chain": FilterChain(filters=filters),
         }
-        if filters:
-            strategy_kwargs["filter_chain"] = FilterChain(filters=filters)
 
         strategy = BFSDeepCrawlStrategy(**strategy_kwargs)
 

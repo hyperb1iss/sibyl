@@ -98,6 +98,77 @@ export interface GraphData {
   edge_count: number;
 }
 
+// Cluster types for bubble visualization
+export interface Cluster {
+  id: string;
+  count: number;
+  dominant_type: string;
+  type_distribution: Record<string, number>;
+  level: number;
+}
+
+export interface ClustersResponse {
+  clusters: Cluster[];
+  total_nodes: number;
+  total_clusters: number;
+}
+
+export interface ClusterDetailResponse {
+  cluster_id: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  node_count: number;
+  edge_count: number;
+}
+
+export interface GraphStatsResponse {
+  total_nodes: number;
+  total_edges: number;
+  by_type: Record<string, number>;
+}
+
+// Hierarchical graph with cluster assignments for rich visualization
+export interface HierarchicalNode {
+  id: string;
+  name: string;
+  type: string;
+  label: string;
+  color: string;
+  summary: string;
+  cluster_id: string;
+}
+
+export interface HierarchicalEdge {
+  source: string;
+  target: string;
+  type: string;
+}
+
+export interface HierarchicalCluster {
+  id: string;
+  member_count: number;
+  level: number;
+  type_distribution: Record<string, number>;
+  dominant_type: string;
+}
+
+export interface ClusterEdge {
+  source: string;
+  target: string;
+  weight: number;
+}
+
+export interface HierarchicalGraphResponse {
+  nodes: HierarchicalNode[];
+  edges: HierarchicalEdge[];
+  clusters: HierarchicalCluster[];
+  cluster_edges: ClusterEdge[];
+  total_nodes: number;
+  total_edges: number;
+  displayed_nodes?: number;
+  displayed_edges?: number;
+}
+
 export interface HealthResponse {
   status: 'healthy' | 'unhealthy' | 'unknown';
   server_name: string;
@@ -851,6 +922,29 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(params),
       }),
+
+    // Cluster endpoints for bubble visualization
+    clusters: (params?: { refresh?: boolean }) => {
+      const searchParams = new URLSearchParams();
+      if (params?.refresh) searchParams.set('refresh', 'true');
+      const query = searchParams.toString();
+      return fetchApi<ClustersResponse>(`/graph/clusters${query ? `?${query}` : ''}`);
+    },
+
+    clusterDetail: (clusterId: string) =>
+      fetchApi<ClusterDetailResponse>(`/graph/clusters/${encodeURIComponent(clusterId)}`),
+
+    stats: () => fetchApi<GraphStatsResponse>('/graph/stats'),
+
+    // Hierarchical graph with cluster assignments for rich visualization
+    hierarchical: (params?: { max_nodes?: number; max_edges?: number; refresh?: boolean }) => {
+      const searchParams = new URLSearchParams();
+      if (params?.max_nodes) searchParams.set('max_nodes', params.max_nodes.toString());
+      if (params?.max_edges) searchParams.set('max_edges', params.max_edges.toString());
+      if (params?.refresh) searchParams.set('refresh', 'true');
+      const query = searchParams.toString();
+      return fetchApi<HierarchicalGraphResponse>(`/graph/hierarchical${query ? `?${query}` : ''}`);
+    },
   },
 
   // Health check (public - no auth required)
@@ -1155,6 +1249,21 @@ export const api = {
     delete: (id: string) =>
       fetchApi<void>(`/sources/${id}`, {
         method: 'DELETE',
+      }),
+
+    update: (
+      id: string,
+      updates: {
+        name?: string;
+        description?: string;
+        crawl_depth?: number;
+        include_patterns?: string[];
+        exclude_patterns?: string[];
+      }
+    ) =>
+      fetchApi<CrawlSource>(`/sources/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
       }),
 
     // Trigger a crawl for a source

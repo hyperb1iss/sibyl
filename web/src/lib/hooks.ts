@@ -66,6 +66,11 @@ export const queryKeys = {
     full: (params?: Parameters<typeof api.graph.full>[0]) => ['graph', 'full', params] as const,
     subgraph: (params: Parameters<typeof api.graph.subgraph>[0]) =>
       ['graph', 'subgraph', params] as const,
+    clusters: (params?: { refresh?: boolean }) => ['graph', 'clusters', params] as const,
+    clusterDetail: (clusterId: string) => ['graph', 'cluster', clusterId] as const,
+    stats: ['graph', 'stats'] as const,
+    hierarchical: (params?: { max_nodes?: number; max_edges?: number; refresh?: boolean }) =>
+      ['graph', 'hierarchical', params] as const,
   },
   admin: {
     health: ['admin', 'health'] as const,
@@ -626,6 +631,39 @@ export function useSubgraph(params: Parameters<typeof api.graph.subgraph>[0]) {
   });
 }
 
+export function useClusters(params?: { refresh?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.graph.clusters(params),
+    queryFn: () => api.graph.clusters(params),
+  });
+}
+
+export function useClusterDetail(clusterId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.graph.clusterDetail(clusterId || ''),
+    queryFn: () => api.graph.clusterDetail(clusterId!),
+    enabled: !!clusterId,
+  });
+}
+
+export function useGraphStats() {
+  return useQuery({
+    queryKey: queryKeys.graph.stats,
+    queryFn: () => api.graph.stats(),
+  });
+}
+
+export function useHierarchicalGraph(params?: {
+  max_nodes?: number;
+  max_edges?: number;
+  refresh?: boolean;
+}) {
+  return useQuery({
+    queryKey: queryKeys.graph.hierarchical(params),
+    queryFn: () => api.graph.hierarchical(params),
+  });
+}
+
 // =============================================================================
 // Admin Hooks
 // =============================================================================
@@ -998,6 +1036,24 @@ export function useSyncSource() {
       return res.json();
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
+    },
+  });
+}
+
+export function useUpdateSource() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      updates,
+    }: {
+      id: string;
+      updates: Parameters<typeof api.sources.update>[1];
+    }) => api.sources.update(id, updates),
+    onSuccess: (data, { id }) => {
+      queryClient.setQueryData(queryKeys.sources.detail(id), data);
       queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
     },
   });
