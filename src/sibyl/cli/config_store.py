@@ -2,10 +2,14 @@
 
 Manages ~/.sibyl/config.toml for CLI-specific settings.
 Server settings stay in .env - this is just for the CLI client.
+
+Supports multiple named contexts, each with its own server URL,
+organization, and default project settings.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +20,47 @@ except ImportError:
 
 import tomli_w
 
-# Default configuration
+# =============================================================================
+# Context Model
+# =============================================================================
+
+
+@dataclass
+class Context:
+    """A named CLI context bundling server, org, and project settings.
+
+    Contexts allow working with multiple Sibyl instances (e.g., local, staging, prod)
+    without reconfiguring between sessions.
+    """
+
+    name: str
+    server_url: str = "http://localhost:3334"
+    org_slug: str | None = None  # None = auto-pick first/only org
+    default_project: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dict for TOML storage."""
+        return {
+            "server_url": self.server_url,
+            "org_slug": self.org_slug or "",
+            "default_project": self.default_project or "",
+        }
+
+    @classmethod
+    def from_dict(cls, name: str, data: dict[str, Any]) -> Context:
+        """Create from TOML dict."""
+        return cls(
+            name=name,
+            server_url=data.get("server_url", "http://localhost:3334"),
+            org_slug=data.get("org_slug") or None,
+            default_project=data.get("default_project") or None,
+        )
+
+
+# =============================================================================
+# Default Configuration
+# =============================================================================
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "server": {
         "url": "http://localhost:3334",
@@ -25,6 +69,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "project": "",
     },
     "paths": {},  # path -> project_id mappings
+    "active_context": "",  # Name of active context (empty = use legacy server.url)
+    "contexts": {},  # name -> {server_url, org_slug, default_project}
 }
 
 
@@ -286,3 +332,222 @@ def _set_nested(d: dict[str, Any], key: str, value: Any) -> None:
             current[k] = {}
         current = current[k]
     current[keys[-1]] = value
+
+
+# =============================================================================
+# Context Management
+# =============================================================================
+
+
+def get_active_context_name() -> str | None:
+    """Get the name of the active context.
+
+    Returns:
+        Context name, or None if no active context (legacy mode).
+    """
+    name = get("active_context", "")
+    return name if name else None
+
+
+def set_active_context(name: str | None) -> None:
+    """Set the active context by name.
+
+    Args:
+        name: Context name, or None to clear (use legacy mode).
+    """
+    set_value("active_context", name or "")
+
+
+def get_context(name: str) -> Context | None:
+    """Get a context by name.
+
+    Args:
+        name: Context name.
+
+    Returns:
+        Context if found, None otherwise.
+    """
+    config = load_config()
+    contexts = config.get("contexts", {})
+    if name in contexts:
+        return Context.from_dict(name, contexts[name])
+    return None
+
+
+def get_active_context() -> Context | None:
+    """Get the currently active context.
+
+    Returns:
+        Active Context, or None if no context is active (legacy mode).
+    """
+    name = get_active_context_name()
+    if not name:
+        return None
+    return get_context(name)
+
+
+def list_contexts() -> list[Context]:
+    """List all configured contexts.
+
+    Returns:
+        List of all contexts.
+    """
+    config = load_config()
+    contexts = config.get("contexts", {})
+    return [Context.from_dict(name, data) for name, data in contexts.items()]
+
+
+def create_context(
+    name: str,
+    server_url: str,
+    org_slug: str | None = None,
+    default_project: str | None = None,
+    *,
+    set_active: bool = False,
+) -> Context:
+    """Create a new context.
+
+    Args:
+        name: Context name (e.g., "prod", "local").
+        server_url: Server URL for this context.
+        org_slug: Organization slug (optional, auto-picked if None).
+        default_project: Default project ID (optional).
+        set_active: If True, make this the active context.
+
+    Returns:
+        The created Context.
+
+    Raises:
+        ValueError: If context with this name already exists.
+    """
+    config = load_config()
+    contexts = config.get("contexts", {})
+
+    if name in contexts:
+        raise ValueError(f"Context '{name}' already exists")
+
+    context = Context(
+        name=name,
+        server_url=server_url,
+        org_slug=org_slug,
+        default_project=default_project,
+    )
+
+    contexts[name] = context.to_dict()
+    config["contexts"] = contexts
+    save_config(config)
+
+    if set_active:
+        set_active_context(name)
+
+    return context
+
+
+def update_context(
+    name: str,
+    server_url: str | None = None,
+    org_slug: str | None = ...,  # type: ignore[assignment]
+    default_project: str | None = ...,  # type: ignore[assignment]
+) -> Context:
+    """Update an existing context.
+
+    Args:
+        name: Context name to update.
+        server_url: New server URL (None = keep existing).
+        org_slug: New org slug (... = keep existing, None = clear).
+        default_project: New default project (... = keep existing, None = clear).
+
+    Returns:
+        The updated Context.
+
+    Raises:
+        ValueError: If context doesn't exist.
+    """
+    config = load_config()
+    contexts = config.get("contexts", {})
+
+    if name not in contexts:
+        raise ValueError(f"Context '{name}' not found")
+
+    ctx_data = contexts[name]
+
+    if server_url is not None:
+        ctx_data["server_url"] = server_url
+    if org_slug is not ...:
+        ctx_data["org_slug"] = org_slug or ""
+    if default_project is not ...:
+        ctx_data["default_project"] = default_project or ""
+
+    config["contexts"] = contexts
+    save_config(config)
+
+    return Context.from_dict(name, ctx_data)
+
+
+def delete_context(name: str) -> bool:
+    """Delete a context.
+
+    Args:
+        name: Context name to delete.
+
+    Returns:
+        True if deleted, False if not found.
+    """
+    config = load_config()
+    contexts = config.get("contexts", {})
+
+    if name not in contexts:
+        return False
+
+    del contexts[name]
+    config["contexts"] = contexts
+
+    # Clear active context if it was the deleted one
+    if config.get("active_context") == name:
+        config["active_context"] = ""
+
+    save_config(config)
+    return True
+
+
+def get_effective_server_url() -> str:
+    """Get the effective server URL, considering active context.
+
+    Priority:
+    1. Active context's server_url
+    2. Legacy server.url config
+    3. Default localhost
+
+    Returns:
+        Server URL to use.
+    """
+    context = get_active_context()
+    if context:
+        return context.server_url
+    return get_server_url()
+
+
+def get_effective_project() -> str | None:
+    """Get the effective default project, considering context and path.
+
+    Priority:
+    1. Path mapping for cwd
+    2. Active context's default_project
+    3. Legacy defaults.project
+
+    Returns:
+        Project ID or None.
+    """
+    # First check path mapping
+    project = resolve_project_from_cwd()
+    if project:
+        return project
+
+    # Then check active context
+    context = get_active_context()
+    if context and context.default_project:
+        return context.default_project
+
+    # Finally legacy default
+    default = get_default_project()
+    return default if default else None
