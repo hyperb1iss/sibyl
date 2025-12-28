@@ -4,18 +4,16 @@ The CLI is a thin client - all operations go through the REST API,
 ensuring consistent event broadcasting and state management.
 """
 
-import json
 import os
-from pathlib import Path
 from typing import Any
 
 import httpx
 
 from sibyl.cli.auth_store import (
+    get_access_token,
     get_refresh_token,
     is_access_token_expired,
     normalize_api_url,
-    read_server_credentials,
     set_tokens,
 )
 from sibyl.config import settings
@@ -65,50 +63,17 @@ def _get_default_api_url(context_name: str | None = None) -> str:
 
 
 def _load_default_auth_token(api_base_url: str) -> str | None:
+    """Load auth token for the given API URL.
+
+    Priority:
+    1. SIBYL_AUTH_TOKEN environment variable
+    2. Stored access token for the specific server
+    """
     env_token = os.environ.get("SIBYL_AUTH_TOKEN", "").strip()
     if env_token:
         return env_token
 
-    auth_path = Path.home() / ".sibyl" / "auth.json"
-    if not auth_path.exists():
-        return None
-
-    try:
-        data = json.loads(auth_path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-    # Per-server credentials (preferred)
-    server_creds = read_server_credentials(api_base_url, auth_path)
-    token = str(server_creds.get("access_token", "")).strip()
-    if token:
-        return token
-    token = str(server_creds.get("api_key", "")).strip()
-    if token:
-        return token
-
-    # If exactly one server profile exists, use it
-    servers = data.get("servers")
-    if isinstance(servers, dict) and len(servers) == 1:
-        only = next(iter(servers.values()))
-        if isinstance(only, dict):
-            token = str(only.get("access_token", "")).strip()
-            if token:
-                return token
-            token = str(only.get("api_key", "")).strip()
-            if token:
-                return token
-
-    # Legacy flat fields
-    token = str(data.get("access_token", "")).strip()
-    if token:
-        return token
-
-    token = str(data.get("api_key", "")).strip()
-    if token:
-        return token
-
-    return None
+    return get_access_token(api_base_url)
 
 
 class SibylClientError(Exception):
@@ -193,7 +158,7 @@ class SibylClient:
         Returns:
             True if refresh succeeded, False otherwise
         """
-        refresh_token = get_refresh_token()
+        refresh_token = get_refresh_token(self.base_url)
         if not refresh_token:
             return False
 
@@ -220,8 +185,9 @@ class SibylClient:
                 if not new_access_token:
                     return False
 
-                # Store new tokens
+                # Store new tokens for this server
                 set_tokens(
+                    self.base_url,
                     new_access_token,
                     refresh_token=new_refresh_token,
                     expires_in=expires_in,
@@ -265,7 +231,7 @@ class SibylClient:
             SibylClientError: On API errors or connection issues
         """
         # Proactively refresh if token is about to expire
-        if self.auth_token and is_access_token_expired():
+        if self.auth_token and is_access_token_expired(self.base_url):
             await self._refresh_token()
 
         client = await self._get_client()
@@ -504,11 +470,14 @@ class SibylClient:
         task_id: str,
         status: str | None = None,
         priority: str | None = None,
+        complexity: str | None = None,
         title: str | None = None,
         description: str | None = None,
         assignees: list[str] | None = None,
         epic_id: str | None = None,
         feature: str | None = None,
+        tags: list[str] | None = None,
+        technologies: list[str] | None = None,
     ) -> dict[str, Any]:
         """Update task fields."""
         data: dict[str, Any] = {}
@@ -516,6 +485,8 @@ class SibylClient:
             data["status"] = status
         if priority:
             data["priority"] = priority
+        if complexity:
+            data["complexity"] = complexity
         if title:
             data["title"] = title
         if description:
@@ -526,6 +497,10 @@ class SibylClient:
             data["epic_id"] = epic_id
         if feature:
             data["feature"] = feature
+        if tags:
+            data["tags"] = tags
+        if technologies:
+            data["technologies"] = technologies
 
         return await self._request("PATCH", f"/tasks/{task_id}", json=data)
 

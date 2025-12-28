@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from sibyl.cli.auth_store import set_access_token, write_server_credentials
+from sibyl.cli.auth_store import set_tokens
 from sibyl.cli.client import SibylClientError, get_client
 from sibyl.cli.common import error, print_json, run_async, success
 
@@ -43,8 +43,7 @@ def create_cmd(
         if switch and "access_token" in result:
             token = str(result["access_token"]).strip()
             if token:
-                set_access_token(token)
-                write_server_credentials(get_client().base_url, {"access_token": token})
+                set_tokens(client.base_url, token)
             success("Switched org (token saved to ~/.sibyl/auth.json)")
         print_json(result)
     except SibylClientError as e:
@@ -63,8 +62,7 @@ def switch_cmd(slug: str) -> None:
         result = _run()
         token = str(result.get("access_token", "")).strip()
         if token:
-            set_access_token(token)
-            write_server_credentials(get_client().base_url, {"access_token": token})
+            set_tokens(client.base_url, token)
             success("Org switched (token saved to ~/.sibyl/auth.json)")
         print_json(result)
     except SibylClientError as e:

@@ -17,11 +17,7 @@ import typer
 from sibyl.cli.auth_store import (
     clear_tokens,
     normalize_api_url,
-    read_auth_data,
-    read_server_credentials,
-    set_access_token,
     set_tokens,
-    write_server_credentials,
 )
 from sibyl.cli.client import SibylClient, SibylClientError, get_client
 from sibyl.cli.common import error, info, print_json, run_async, success
@@ -174,12 +170,8 @@ def _persist_tokens(
     refresh_token: str | None = None,
     expires_in: int | None = None,
 ) -> None:
-    """Persist access token and optionally refresh token."""
-    set_tokens(access_token, refresh_token=refresh_token, expires_in=expires_in)
-    creds: dict[str, str] = {"access_token": access_token}
-    if refresh_token:
-        creds["refresh_token"] = refresh_token
-    write_server_credentials(api_url, creds)
+    """Persist access token and optionally refresh token for the server."""
+    set_tokens(api_url, access_token, refresh_token=refresh_token, expires_in=expires_in)
 
 
 class _DeviceLoginError(RuntimeError):
@@ -339,20 +331,28 @@ def _oauth_pkce_login(
 
     access_token = str(tok.get("access_token", "")).strip()
     refresh_token = str(tok.get("refresh_token", "")).strip()
+    expires_in = tok.get("expires_in")
     if not access_token:
         raise _OAuthLoginError("Token response missing access_token", tok)
 
+    # Store tokens and OAuth metadata
+    from sibyl.cli.auth_store import write_server_credentials
+
+    set_tokens(
+        api_url,
+        access_token,
+        refresh_token=refresh_token or None,
+        expires_in=int(expires_in) if expires_in else None,
+    )
+    # Also store OAuth metadata for potential token refresh
     write_server_credentials(
         api_url,
         {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
             "oauth_client_id": client_id,
             "oauth_client_secret": client_secret,
             "issuer_url": issuer_url,
         },
     )
-    set_access_token(access_token)
     return access_token, refresh_token, issuer_url
 
 
@@ -536,10 +536,11 @@ def _login_auto(
 
 @app.command("status")
 def status_cmd() -> None:
-    data = read_auth_data()
+    """Show auth status for the current context."""
+    from sibyl.cli.auth_store import get_access_token
+
     api_url = _compute_api_url(None)
-    server_creds = read_server_credentials(api_url)
-    token = str(server_creds.get("access_token") or data.get("access_token") or "").strip()
+    token = get_access_token(api_url)
     if token:
         success(f"Auth token found (server: {api_url})")
     else:
@@ -547,15 +548,46 @@ def status_cmd() -> None:
 
 
 @app.command("set-token")
-def set_token_cmd(token: str) -> None:
-    set_access_token(token.strip())
-    success("Auth token saved to ~/.sibyl/auth.json")
+def set_token_cmd(
+    token: str,
+    server: str | None = typer.Option(
+        None,
+        "--server",
+        "-s",
+        help="Server URL to set token for (defaults to active context)",
+    ),
+) -> None:
+    """Set an auth token for a server."""
+    api_url = _compute_api_url(server)
+    set_tokens(api_url, token.strip())
+    success(f"Auth token saved for {api_url}")
 
 
 @app.command("clear-token")
-def clear_token_cmd() -> None:
-    clear_tokens()
-    success("Auth tokens cleared")
+def clear_token_cmd(
+    server: str | None = typer.Option(
+        None,
+        "--server",
+        "-s",
+        help="Server URL to clear tokens for (defaults to active context)",
+    ),
+    all_servers: bool = typer.Option(
+        False,
+        "--all",
+        "-a",
+        help="Clear tokens for ALL servers",
+    ),
+) -> None:
+    """Clear auth tokens for a server."""
+    from sibyl.cli.auth_store import clear_all_tokens
+
+    if all_servers:
+        clear_all_tokens()
+        success("All auth tokens cleared")
+    else:
+        api_url = _compute_api_url(server)
+        clear_tokens(api_url)
+        success(f"Auth tokens cleared for {api_url}")
 
 
 @app.command("login")

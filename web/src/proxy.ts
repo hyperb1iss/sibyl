@@ -2,14 +2,22 @@ import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
 const ACCESS_TOKEN_COOKIE = 'sibyl_access_token';
+const REFRESH_TOKEN_COOKIE = 'sibyl_refresh_token';
 
 /**
- * Check if request has an auth token cookie.
- * We don't validate the token here - that happens in API routes.
+ * Check if request has valid auth cookies.
+ * We accept EITHER access token OR refresh token.
+ *
+ * If only refresh token is present (access token expired), the page will load
+ * and the frontend will attempt a token refresh on the first API call.
+ *
+ * We don't validate tokens here - that happens in API routes.
  * This just gates access to protected pages.
  */
 function hasAuthCookie(request: NextRequest): boolean {
-  return !!request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
+  const hasAccess = !!request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
+  const hasRefresh = !!request.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
+  return hasAccess || hasRefresh;
 }
 
 export function proxy(request: NextRequest) {
