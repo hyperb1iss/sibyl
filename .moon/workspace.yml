@@ -5,3 +5,5 @@ projects:
   root: '.'
   api: 'apps/api'
   web: 'apps/web'
+  # Shared packages
+  core: 'packages/python/sibyl-core'

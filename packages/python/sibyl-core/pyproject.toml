@@ -1,0 +1,82 @@
+# sibyl-core - Shared library for Sibyl knowledge graph operations
+# Domain models, graph client, retrieval, tools, auth primitives
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sibyl-core"
+version = "0.1.0"
+description = "Core library for Sibyl - domain models, graph operations, and knowledge retrieval"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13"
+authors = [{ name = "Stefanie Jane", email = "stef@hyperbliss.tech" }]
+keywords = ["ai-agents", "knowledge-graph", "graph-rag", "collective-intelligence"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    # Knowledge Graph
+    "graphiti-core[falkordb,anthropic]>=0.24",
+    # Data & Validation
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    # Auth primitives (JWT, password hashing)
+    "passlib>=1.7",
+    "pyjwt>=2.10",
+    # Async & HTTP
+    "anyio>=4.0",
+    "httpx>=0.27",
+    # Logging
+    "structlog>=24.0",
+    # Environment
+    "python-dotenv>=1.0",
+    # Content processing
+    "crawl4ai>=0.7.8",
+    "mistune>=3.0",
+    # Graph analysis
+    "python-louvain>=0.16",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyright>=1.1.407",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.14.9",
+]
+
+[project.urls]
+Homepage = "https://github.com/hyperb1iss/sibyl"
+Repository = "https://github.com/hyperb1iss/sibyl"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sibyl_core"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/README.md"]
+
+# Inherit ruff/pyright config from workspace root
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501", "B007"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sibyl_core"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"

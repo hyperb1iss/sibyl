@@ -28,40 +28,30 @@ classifiers = [
 ]
 
 dependencies = [
+    # Sibyl Core Library (shared models, graph, tools)
+    "sibyl-core",
     # Core Framework
     "fastapi>=0.115.0",
     "mcp>=1.25",
     "starlette>=0.41.0",
     "uvicorn[standard]>=0.38",
-    # Knowledge Graph
-    "graphiti-core[falkordb,anthropic]>=0.24",
-    # Database
+    # Database (server-only)
     "alembic>=1.17.2",
     "asyncpg>=0.31.0",
     "pgvector>=0.4.2",
     "sqlmodel>=0.0.27",
-    # Auth & HTTP
-    "httpx>=0.27",
-    "pyjwt>=2.10",
-    # Data & Validation
+    # Auth & HTTP (server-specific deps)
     "email-validator>=2.3.0",
-    "pydantic>=2.0",
-    "pydantic-settings>=2.0",
+    "passlib>=1.7",
     "pyyaml>=6.0",
-    # CLI & Output
+    # CLI & Output (will move to sibyl-cli later)
     "rich>=13.0",
     "typer>=0.20.0",
-    # Utilities
-    "anyio>=4.0",
-    "crawl4ai>=0.7.8",
-    "greenlet>=3.3.0",
-    "mistune>=3.0",
-    "structlog>=24.0",
     "tomli-w>=1.2.0",
-    # Background Jobs
+    # Background Jobs (server-only)
     "arq>=0.26.3",
+    "greenlet>=3.3.0",
     "slowapi>=0.1.9",
-    "python-louvain>=0.16",
 ]
 
 [project.optional-dependencies]
@@ -116,6 +106,13 @@ dev = [
     "pytest-cov>=7.0.0",
     "ruff>=0.14.9",
 ]
+
+# =============================================================================
+# uv - Package Sources
+# =============================================================================
+
+[tool.uv.sources]
+sibyl-core = { path = "../../packages/python/sibyl-core", editable = true }
 
 # =============================================================================
 # Ruff - Linting & Formatting
@@ -234,7 +231,7 @@ ignore = [
 [tool.ruff.lint.isort]
 combine-as-imports = true
 force-single-line = false
-known-first-party = ["sibyl"]
+known-first-party = ["sibyl", "sibyl_core"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = [

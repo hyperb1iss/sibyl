@@ -1,0 +1,2232 @@
+"""Unified tools for Sibyl MCP Server.
+
+Four consolidated tools: search, explore, add, manage.
+Replaces the previous 18+ specific tools with a generic interface.
+"""
+
+import hashlib
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any, Literal
+
+import structlog
+
+from sibyl_core.graph.client import GraphClient, get_graph_client
+from sibyl_core.graph.entities import EntityManager
+from sibyl_core.graph.relationships import RelationshipManager
+from sibyl_core.models.entities import (
+    Entity,
+    EntityType,
+    Episode,
+    Pattern,
+    Relationship,
+    RelationshipType,
+)
+from sibyl_core.models.tasks import (
+    Epic,
+    EpicStatus,
+    Project,
+    ProjectStatus,
+    Task,
+    TaskPriority,
+    TaskStatus,
+)
+from sibyl_core.retrieval import HybridConfig, hybrid_search, temporal_boost
+from sibyl_core.utils.resilience import TIMEOUTS, with_timeout
+
+log = structlog.get_logger()
+
+# Valid entity types for filtering
+VALID_ENTITY_TYPES = {t.value for t in EntityType}
+
+# Validation constants
+MAX_TITLE_LENGTH = 200
+MAX_CONTENT_LENGTH = 50000
+
+
+# =============================================================================
+# Helper Functions - Entity Attribute Extraction
+# =============================================================================
+
+
+def _get_field(entity: Any, field: str, default: Any = None) -> Any:
+    """Get field from entity object or its metadata, with fallback default."""
+    value = getattr(entity, field, None)
+    if value is None:
+        value = entity.metadata.get(field, default)
+    return value if value is not None else default
+
+
+def _serialize_enum(value: Any) -> Any:
+    """Serialize enum value to its string representation."""
+    if value is None:
+        return None
+    return value.value if hasattr(value, "value") else value
+
+
+def _build_entity_metadata(entity: Any) -> dict[str, Any]:
+    """Build standardized metadata dict from entity with common fields."""
+    status = _serialize_enum(_get_field(entity, "status"))
+    priority = _serialize_enum(_get_field(entity, "priority"))
+
+    extra = {
+        "category": _get_field(entity, "category"),
+        "languages": _get_field(entity, "languages"),
+        "severity": _get_field(entity, "severity"),
+        "template_type": _get_field(entity, "template_type"),
+        "status": status,
+        "priority": priority,
+        "project_id": _get_field(entity, "project_id"),
+        "assignees": _get_field(entity, "assignees"),
+    }
+    return {**entity.metadata, **{k: v for k, v in extra.items() if v is not None}}
+
+
+# =============================================================================
+# Auto-Tagging System
+# =============================================================================
+
+# Domain keywords for auto-tagging
+_DOMAIN_KEYWORDS: dict[str, list[str]] = {
+    "frontend": [
+        "ui",
+        "ux",
+        "component",
+        "react",
+        "vue",
+        "angular",
+        "css",
+        "style",
+        "layout",
+        "responsive",
+        "animation",
+        "button",
+        "modal",
+        "form",
+        "input",
+        "page",
+        "view",
+        "render",
+        "display",
+        "browser",
+        "dom",
+        "jsx",
+        "tsx",
+        "tailwind",
+        "styled",
+        "theme",
+        "dark mode",
+        "light mode",
+    ],
+    "backend": [
+        "api",
+        "server",
+        "endpoint",
+        "route",
+        "handler",
+        "controller",
+        "service",
+        "middleware",
+        "database",
+        "query",
+        "model",
+        "schema",
+        "auth",
+        "jwt",
+        "token",
+        "session",
+        "fastapi",
+        "flask",
+        "django",
+        "express",
+        "graphql",
+        "rest",
+        "crud",
+    ],
+    "database": [
+        "database",
+        "db",
+        "sql",
+        "postgres",
+        "mysql",
+        "mongodb",
+        "redis",
+        "migration",
+        "schema",
+        "query",
+        "index",
+        "table",
+        "collection",
+        "falkordb",
+        "graph",
+        "cypher",
+        "neo4j",
+        "supabase",
+    ],
+    "devops": [
+        "deploy",
+        "docker",
+        "kubernetes",
+        "k8s",
+        "ci",
+        "cd",
+        "pipeline",
+        "github actions",
+        "terraform",
+        "aws",
+        "gcp",
+        "azure",
+        "cloud",
+        "nginx",
+        "load balancer",
+        "scaling",
+        "monitoring",
+    ],
+    "testing": [
+        "test",
+        "spec",
+        "pytest",
+        "jest",
+        "vitest",
+        "unit test",
+        "e2e",
+        "integration",
+        "mock",
+        "fixture",
+        "coverage",
+        "tdd",
+        "assertion",
+    ],
+    "docs": [
+        "documentation",
+        "readme",
+        "docs",
+        "comment",
+        "docstring",
+        "jsdoc",
+        "api docs",
+        "guide",
+        "tutorial",
+        "example",
+    ],
+    "security": [
+        "security",
+        "auth",
+        "authentication",
+        "authorization",
+        "permission",
+        "role",
+        "acl",
+        "xss",
+        "csrf",
+        "injection",
+        "encrypt",
+        "hash",
+        "password",
+        "secret",
+        "vulnerability",
+    ],
+    "performance": [
+        "performance",
+        "optimize",
+        "cache",
+        "lazy",
+        "memoize",
+        "bundle",
+        "minify",
+        "compress",
+        "speed",
+        "latency",
+        "profil",
+        "benchmark",
+    ],
+}
+
+# Task type keywords
+_TYPE_KEYWORDS: dict[str, list[str]] = {
+    "feature": [
+        "add",
+        "implement",
+        "create",
+        "build",
+        "new",
+        "introduce",
+        "support",
+    ],
+    "bug": [
+        "fix",
+        "bug",
+        "issue",
+        "error",
+        "broken",
+        "crash",
+        "fail",
+        "wrong",
+    ],
+    "refactor": [
+        "refactor",
+        "clean",
+        "reorganize",
+        "restructure",
+        "simplify",
+        "improve",
+        "extract",
+        "consolidate",
+        "dedup",
+    ],
+    "chore": [
+        "update",
+        "upgrade",
+        "bump",
+        "dependency",
+        "deps",
+        "config",
+        "setup",
+        "maintenance",
+        "housekeeping",
+    ],
+    "research": [
+        "research",
+        "investigate",
+        "explore",
+        "spike",
+        "poc",
+        "prototype",
+        "experiment",
+        "evaluate",
+        "compare",
+    ],
+}
+
+
+def auto_tag_task(
+    title: str,
+    description: str,
+    technologies: list[str] | None = None,
+    domain: str | None = None,
+    explicit_tags: list[str] | None = None,
+    project_tags: list[str] | None = None,
+) -> list[str]:
+    """Generate tags automatically based on task content.
+
+    Analyzes title, description, technologies, and domain to generate
+    relevant tags. Prefers existing project tags when applicable.
+
+    Args:
+        title: Task title
+        description: Task description
+        technologies: List of technologies
+        domain: Knowledge domain
+        explicit_tags: Manually specified tags
+        project_tags: Existing tags from project's tasks (for consistency)
+
+    Returns:
+        Deduplicated list of tags
+    """
+    tags: set[str] = set()
+    text = f"{title} {description}".lower()
+
+    # Normalize project tags for matching
+    existing_tags = {t.lower().strip(): t for t in (project_tags or [])}
+
+    # Start with explicit tags (normalized to lowercase)
+    if explicit_tags:
+        tags.update(t.lower().strip() for t in explicit_tags if t.strip())
+
+    # Add domain as a tag if provided
+    if domain:
+        tags.add(domain.lower().strip())
+
+    # Add technology-derived tags
+    if technologies:
+        for tech in technologies:
+            normalized = tech.lower().strip()
+            # Common tech name mappings to domains
+            tech_tag = {
+                "react": "frontend",
+                "vue": "frontend",
+                "angular": "frontend",
+                "next.js": "frontend",
+                "nextjs": "frontend",
+                "tailwind": "frontend",
+                "python": "backend",
+                "fastapi": "backend",
+                "django": "backend",
+                "flask": "backend",
+                "typescript": "typescript",
+                "javascript": "javascript",
+                "postgres": "database",
+                "postgresql": "database",
+                "mongodb": "database",
+                "redis": "database",
+                "docker": "devops",
+                "kubernetes": "devops",
+            }.get(normalized)
+            if tech_tag:
+                tags.add(tech_tag)
+            # Also add the tech itself as a tag if it's short enough
+            if len(normalized) <= 15:
+                tags.add(normalized)
+
+    # Check existing project tags first - prefer consistency
+    for existing_lower in existing_tags:
+        # Check if existing tag appears in text
+        if existing_lower in text:
+            tags.add(existing_lower)
+
+    # Match domain keywords (only if not already matched from project tags)
+    for tag, keywords in _DOMAIN_KEYWORDS.items():
+        if tag not in tags:
+            for keyword in keywords:
+                if keyword in text:
+                    tags.add(tag)
+                    break
+
+    # Match type keywords (only add the first match)
+    type_tag = None
+    for tag, keywords in _TYPE_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword in text:
+                type_tag = tag
+                break
+        if type_tag:
+            break
+    if type_tag:
+        tags.add(type_tag)
+
+    # Clean and sort tags
+    return sorted(t for t in tags if t and len(t) >= 2)
+
+
+async def get_project_tags(client: "GraphClient", project_id: str) -> list[str]:
+    """Fetch all unique tags from a project's existing tasks.
+
+    Args:
+        client: Graph client instance
+        project_id: Project ID to get tags from
+
+    Returns:
+        List of unique tags used in the project
+    """
+    import json
+
+    from sibyl_core.graph.client import GraphClient
+
+    try:
+        # Query existing tasks in this project for their tags
+        result = await client.driver.execute_query(
+            """
+            MATCH (n)
+            WHERE (n:Episodic OR n:Entity)
+              AND n.entity_type = 'task'
+              AND n.project_id = $project_id
+              AND n.tags IS NOT NULL
+            RETURN DISTINCT n.tags as tags
+            """,
+            project_id=project_id,
+        )
+
+        # Normalize FalkorDB result (returns tuple, not object with result_set)
+        rows = GraphClient.normalize_result(result)
+
+        all_tags: set[str] = set()
+        for row in rows:
+            # Row is a list, tags is first element
+            tags = row[0] if isinstance(row, list | tuple) else row.get("tags")
+            if isinstance(tags, list):
+                all_tags.update(t.lower() for t in tags if isinstance(t, str))
+            elif isinstance(tags, str):
+                # Handle JSON encoded list
+                try:
+                    parsed = json.loads(tags)
+                    if isinstance(parsed, list):
+                        all_tags.update(t.lower() for t in parsed if isinstance(t, str))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        return sorted(all_tags)
+    except Exception as e:
+        log.debug("Failed to fetch project tags", error=str(e))
+        return []
+
+
+# =============================================================================
+# Response Models
+# =============================================================================
+
+
+@dataclass
+class SearchResult:
+    """A single search result - unified across graph entities and documents."""
+
+    id: str
+    type: str
+    name: str
+    content: str
+    score: float
+    source: str | None = None
+    url: str | None = None
+    result_origin: Literal["graph", "document"] = "graph"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SearchResponse:
+    """Response from search operation - unified across graph and documents."""
+
+    results: list[SearchResult]
+    total: int
+    query: str
+    filters: dict[str, Any]
+    graph_count: int = 0
+    document_count: int = 0
+    limit: int = 10
+    offset: int = 0
+    has_more: bool = False
+    # Agent guidance - tells agents how to get full content
+    usage_hint: str = "Results show previews. To get full content, use: sibyl entity show <id>"
+
+
+@dataclass
+class EntitySummary:
+    """Summary of an entity for listing."""
+
+    id: str
+    type: str
+    name: str
+    description: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RelatedEntity:
+    """An entity related through the graph."""
+
+    id: str
+    type: str
+    name: str
+    relationship: str
+    direction: Literal["outgoing", "incoming"]
+    distance: int = 1
+
+
+@dataclass
+class ExploreResponse:
+    """Response from explore operation."""
+
+    mode: str
+    entities: list[EntitySummary] | list[RelatedEntity]
+    total: int  # Count of entities returned in this response
+    filters: dict[str, Any]
+    limit: int = 50  # Results per page
+    offset: int = 0  # Current offset
+    has_more: bool = False  # True if more results exist beyond the limit
+    actual_total: int | None = None  # Actual total count in DB (if available)
+
+
+@dataclass
+class AddResponse:
+    """Response from add operation."""
+
+    success: bool
+    id: str | None
+    message: str
+    timestamp: datetime
+
+
+# =============================================================================
+# TOOL 1: search
+# =============================================================================
+
+
+async def _search_documents(
+    query: str,
+    organization_id: str,
+    source_id: str | None = None,
+    source_name: str | None = None,
+    language: str | None = None,
+    limit: int = 10,
+    include_content: bool = True,
+) -> list[SearchResult]:
+    """Search crawled documentation using pgvector similarity.
+
+    Returns SearchResult objects for unified result merging.
+    """
+    try:
+        from uuid import UUID
+
+        from sqlalchemy import select
+        from sqlmodel import col
+
+        from sibyl_core.crawler.embedder import embed_text
+        from sibyl_core.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
+        from sibyl_core.db.models import ChunkType
+
+        # Generate query embedding
+        query_embedding = await embed_text(query)
+
+        async with get_session() as session:
+            # Build similarity search query
+            similarity_expr = 1 - DocumentChunk.embedding.cosine_distance(query_embedding)
+
+            doc_query = (
+                select(
+                    DocumentChunk,
+                    CrawledDocument,
+                    CrawlSource.name.label("source_name"),
+                    CrawlSource.id.label("source_id"),
+                    similarity_expr.label("similarity"),
+                )
+                .join(CrawledDocument, DocumentChunk.document_id == CrawledDocument.id)
+                .join(CrawlSource, CrawledDocument.source_id == CrawlSource.id)
+                .where(col(DocumentChunk.embedding).is_not(None))
+            )
+
+            # Filter by organization (required for multi-tenancy)
+            doc_query = doc_query.where(col(CrawlSource.organization_id) == UUID(organization_id))
+
+            # Apply source filters
+            if source_id:
+                doc_query = doc_query.where(col(CrawlSource.id) == UUID(source_id))
+            if source_name:
+                doc_query = doc_query.where(col(CrawlSource.name).ilike(f"%{source_name}%"))
+
+            # Apply language filter (for code chunks)
+            if language:
+                doc_query = doc_query.where(
+                    (col(DocumentChunk.language).ilike(language))
+                    | (col(DocumentChunk.chunk_type) != ChunkType.CODE)
+                )
+
+            # Order by similarity and limit
+            doc_query = (
+                doc_query.where(similarity_expr >= 0.5)  # Minimum threshold
+                .order_by(similarity_expr.desc())
+                .limit(limit)
+            )
+
+            result = await session.execute(doc_query)
+            rows = result.all()
+
+            # Convert to SearchResult
+            results = []
+            for chunk, doc, src_name, src_id, similarity in rows:
+                # Control content length based on include_content flag
+                if include_content:
+                    content = chunk.content[:500] if chunk.content else ""
+                else:
+                    content = chunk.content[:200] if chunk.content else ""
+
+                # Build heading context for better preview
+                heading_context = " > ".join(chunk.heading_path) if chunk.heading_path else ""
+                if heading_context:
+                    content = f"[{heading_context}] {content}"
+
+                # Don't expose file:// URLs - agents will try to read them
+                # Instead, provide entity URL for fetching full content
+                display_url = None
+                if doc.url and not doc.url.startswith("file://"):
+                    display_url = doc.url
+
+                results.append(
+                    SearchResult(
+                        id=str(chunk.id),
+                        type="document",
+                        name=doc.title or src_name,
+                        content=content,
+                        score=float(similarity),
+                        source=src_name,
+                        url=display_url,  # Only show web URLs, not file paths
+                        result_origin="document",
+                        metadata={
+                            "document_id": str(doc.id),
+                            "source_id": str(src_id),
+                            "chunk_type": chunk.chunk_type.value
+                            if hasattr(chunk.chunk_type, "value")
+                            else str(chunk.chunk_type),
+                            "chunk_index": chunk.chunk_index,
+                            "heading_path": chunk.heading_path or [],
+                            "language": chunk.language,
+                            "has_code": doc.has_code,
+                            # Help agents understand how to get full content
+                            "hint": "Use 'sibyl entity <id>' or fetch /api/entities/<id> for full content",
+                        },
+                    )
+                )
+            return results
+
+    except Exception as e:
+        log.warning("document_search_failed", error=str(e))
+        return []
+
+
+async def search(  # noqa: PLR0915
+    query: str,
+    types: list[str] | None = None,
+    language: str | None = None,
+    category: str | None = None,
+    status: str | None = None,
+    project: str | None = None,
+    source: str | None = None,
+    source_id: str | None = None,
+    source_name: str | None = None,
+    assignee: str | None = None,
+    since: str | None = None,
+    limit: int = 10,
+    offset: int = 0,
+    include_content: bool = True,
+    include_documents: bool = True,
+    include_graph: bool = True,
+    use_enhanced: bool = True,
+    boost_recent: bool = True,
+    organization_id: str | None = None,
+) -> SearchResponse:
+    """Unified semantic search across knowledge graph AND documentation.
+
+    Searches both Sibyl's knowledge graph (patterns, rules, episodes, tasks)
+    AND crawled documentation (pgvector similarity search). Results are
+    merged and ranked by relevance score.
+
+    TASK MANAGEMENT WORKFLOW:
+    For task searches, always include project filter:
+    1. First: explore(mode="list", types=["project"]) - Identify the project
+    2. Then: search("query", types=["task"], project="<project_id>") - Search within project
+
+    USE CASES:
+    • Find patterns/rules: search("OAuth authentication best practices")
+    • Search documentation: search("Next.js middleware", source_name="next-dynenv")
+    • Find tasks: search("", types=["task"], project="proj_abc", status="todo")
+    • Search by language: search("async patterns", language="python")
+    • Documentation only: search("hooks", include_graph=False)
+    • Graph only: search("debugging", include_documents=False)
+
+    Args:
+        query: Natural language search query. Required.
+        types: Entity types to search. Options: pattern, rule, template, topic,
+               episode, task, project, document. Include 'document' to search docs.
+        language: Filter by programming language (python, typescript, etc.).
+        category: Filter by category/domain (authentication, database, api, etc.).
+        status: Filter tasks by workflow status (backlog, todo, doing, etc.).
+        project: Filter by project_id for tasks.
+        source: Filter graph entities by source_id.
+        source_id: Filter documents by source UUID.
+        source_name: Filter documents by source name (partial match).
+        assignee: Filter tasks by assignee name.
+        since: Temporal filter - only return entities created after this ISO date.
+        limit: Maximum results to return (1-50, default 10).
+        offset: Offset for pagination (default 0).
+        include_content: Include full content in results (default True).
+        include_documents: Include crawled documentation in search (default True).
+        include_graph: Include knowledge graph entities in search (default True).
+        use_enhanced: Use enhanced hybrid retrieval for graph (default True).
+        boost_recent: Apply temporal boosting for graph results (default True).
+
+    Returns:
+        SearchResponse with ranked results from both sources, including
+        graph_count and document_count for result breakdown.
+
+    EXAMPLES:
+        search("error handling patterns", types=["pattern"], language="python")
+        search("Next.js routing", source_name="next-dynenv")
+        search("", types=["task"], status="todo", project="proj_auth")
+    """
+    # Clamp limit and offset
+    limit = max(1, min(limit, 50))
+    offset = max(0, offset)
+
+    log.info(
+        "unified_search",
+        query=query[:100],
+        types=types,
+        language=language,
+        category=category,
+        status=status,
+        project=project,
+        source_id=source_id,
+        source_name=source_name,
+        include_documents=include_documents,
+        include_graph=include_graph,
+        limit=limit,
+    )
+
+    filters = {}
+    if types:
+        filters["types"] = types
+    if language:
+        filters["language"] = language
+    if category:
+        filters["category"] = category
+    if status:
+        filters["status"] = status
+    if project:
+        filters["project"] = project
+    if source:
+        filters["source"] = source
+    if source_id:
+        filters["source_id"] = source_id
+    if source_name:
+        filters["source_name"] = source_name
+    if assignee:
+        filters["assignee"] = assignee
+    if since:
+        filters["since"] = since
+
+    # Determine if we should search documents based on types filter
+    search_documents = include_documents
+    search_graph = include_graph
+    if types:
+        # If 'document' is in types, search documents
+        # If only 'document' is in types, skip graph search
+        type_set = {t.lower() for t in types}
+        if "document" in type_set:
+            search_documents = True
+            if type_set == {"document"}:
+                search_graph = False
+        elif source_id or source_name:
+            # If source filters are set but document not in types, add document search
+            search_documents = True
+        else:
+            # Types specified but document not included - skip document search
+            search_documents = False
+
+    graph_results: list[SearchResult] = []
+    doc_results: list[SearchResult] = []
+
+    # =========================================================================
+    # GRAPH SEARCH - Search knowledge graph entities
+    # =========================================================================
+    if search_graph and query:
+        try:
+            client = await get_graph_client()
+            if not organization_id:
+                raise ValueError(
+                    "organization_id is required - cannot access graph without org context"
+                )
+            entity_manager = EntityManager(client, group_id=organization_id)
+
+            # Determine entity types to search (exclude 'document' - that's for doc search)
+            entity_types = None
+            if types:
+                entity_types = []
+                for t in types:
+                    if t.lower() in VALID_ENTITY_TYPES and t.lower() != "document":
+                        entity_types.append(EntityType(t.lower()))
+
+            # Parse since date if provided
+            since_date = None
+            if since:
+                try:
+                    since_date = datetime.fromisoformat(since)
+                except ValueError:
+                    log.warning("invalid_since_date", since=since)
+
+            # Perform search - try enhanced hybrid first, fall back to vector-only
+            raw_results: list[tuple[Any, float]] = []
+
+            if use_enhanced:
+                try:
+                    hybrid_config = HybridConfig(
+                        apply_temporal=boost_recent,
+                        temporal_decay_days=365.0,
+                        graph_depth=2,
+                    )
+
+                    hybrid_result = await with_timeout(
+                        hybrid_search(
+                            query=query,
+                            client=client,
+                            entity_manager=entity_manager,
+                            entity_types=entity_types,
+                            limit=limit * 3,
+                            config=hybrid_config,
+                            group_id=organization_id,
+                        ),
+                        timeout_seconds=TIMEOUTS["search"],
+                        operation_name="hybrid_search",
+                    )
+                    raw_results = hybrid_result.results
+                    log.debug("graph_search_enhanced", results=len(raw_results))
+
+                except Exception as e:
+                    log.warning("enhanced_search_failed_fallback", error=str(e))
+
+            # Fall back to vector-only search
+            if not raw_results:
+                raw_results = await with_timeout(
+                    entity_manager.search(
+                        query=query,
+                        entity_types=entity_types,
+                        limit=limit * 3,
+                    ),
+                    timeout_seconds=TIMEOUTS["search"],
+                    operation_name="search",
+                )
+                if boost_recent and raw_results:
+                    raw_results = temporal_boost(raw_results, decay_days=365.0)
+
+            # Filter and convert to SearchResult
+            for entity, score in raw_results:
+                # Apply filters
+                if language:
+                    entity_langs = _get_field(entity, "languages", [])
+                    if language.lower() not in [lang.lower() for lang in entity_langs]:
+                        continue
+
+                if category:
+                    entity_cat = _get_field(entity, "category", "")
+                    if category.lower() not in entity_cat.lower():
+                        continue
+
+                if status:
+                    entity_status = _get_field(entity, "status")
+                    if entity_status is None:
+                        continue
+                    status_val = _serialize_enum(entity_status)
+                    if status.lower() != str(status_val).lower():
+                        continue
+
+                if project:
+                    if _get_field(entity, "project_id") != project:
+                        continue
+
+                if source:
+                    if _get_field(entity, "source_id") != source:
+                        continue
+
+                if assignee:
+                    entity_assignees = _get_field(entity, "assignees", [])
+                    if assignee.lower() not in [a.lower() for a in entity_assignees]:
+                        continue
+
+                if since_date:
+                    entity_created = _get_field(entity, "created_at")
+                    if entity_created:
+                        try:
+                            if isinstance(entity_created, str):
+                                entity_created = datetime.fromisoformat(entity_created)
+                            if entity_created < since_date:
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+
+                content = ""
+                if include_content:
+                    content = entity.content[:500] if entity.content else entity.description
+                else:
+                    content = entity.description[:200] if entity.description else ""
+
+                graph_results.append(
+                    SearchResult(
+                        id=entity.id,
+                        type=entity.entity_type.value,
+                        name=entity.name,
+                        content=content or "",
+                        score=score,
+                        source=entity.source_file,
+                        result_origin="graph",
+                        metadata=_build_entity_metadata(entity),
+                    )
+                )
+
+                if len(graph_results) >= limit:
+                    break
+
+        except Exception as e:
+            log.warning("graph_search_failed", error=str(e))
+
+    # =========================================================================
+    # DOCUMENT SEARCH - Search crawled documentation
+    # =========================================================================
+    if search_documents and query and organization_id:
+        try:
+            doc_results = await _search_documents(
+                query=query,
+                organization_id=organization_id,
+                source_id=source_id,
+                source_name=source_name,
+                language=language,
+                limit=limit,
+                include_content=include_content,
+            )
+            log.debug("document_search_complete", results=len(doc_results))
+        except Exception as e:
+            log.warning("document_search_failed", error=str(e))
+
+    # =========================================================================
+    # MERGE AND RANK RESULTS
+    # =========================================================================
+    # Deduplicate by ID, keeping highest score for each entity
+    seen_ids: dict[str, SearchResult] = {}
+    for result in graph_results + doc_results:
+        if result.id not in seen_ids or result.score > seen_ids[result.id].score:
+            seen_ids[result.id] = result
+
+    all_results = list(seen_ids.values())
+
+    # Sort by score descending
+    all_results.sort(key=lambda r: r.score, reverse=True)
+
+    # Apply pagination
+    total_count = len(all_results)
+    paginated_results = all_results[offset : offset + limit]
+    has_more = offset + len(paginated_results) < total_count
+
+    return SearchResponse(
+        results=paginated_results,
+        total=total_count,
+        query=query,
+        filters=filters,
+        graph_count=len([r for r in paginated_results if r.result_origin == "graph"]),
+        document_count=len([r for r in paginated_results if r.result_origin == "document"]),
+        limit=limit,
+        offset=offset,
+        has_more=has_more,
+    )
+
+
+# =============================================================================
+# TOOL 2: explore
+# =============================================================================
+
+
+async def explore(
+    mode: Literal["list", "related", "traverse", "dependencies"] = "list",
+    types: list[str] | None = None,
+    entity_id: str | None = None,
+    relationship_types: list[str] | None = None,
+    depth: int = 1,
+    language: str | None = None,
+    category: str | None = None,
+    project: str | None = None,
+    epic: str | None = None,
+    status: str | None = None,
+    priority: str | None = None,
+    complexity: str | None = None,
+    feature: str | None = None,
+    tags: str | None = None,
+    include_archived: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    organization_id: str | None = None,
+) -> ExploreResponse:
+    """Navigate and browse the Sibyl knowledge graph structure.
+
+    Use this tool to explore entities and their relationships without
+    semantic search. Ideal for browsing, listing, and graph traversal.
+
+    MODES:
+    • list: Browse entities by type with optional filters
+    • related: Find entities directly connected to a specific entity
+    • traverse: Multi-hop graph traversal (1-3 hops) from an entity
+    • dependencies: Task dependency chains in topological order
+
+    TASK MANAGEMENT WORKFLOW:
+    For task operations, always use project-first approach:
+    1. First: explore(mode="list", types=["project"]) - Find relevant project
+    2. Then: explore(mode="list", types=["epic"], project="<project_id>") - List epics in project
+    3. Then: explore(mode="list", types=["task"], epic="<epic_id>") - List tasks in epic
+    Prefer listing tasks with a project or epic filter to keep results focused.
+
+    USE CASES:
+    • List projects first: explore(mode="list", types=["project"])
+    • List epics in project: explore(mode="list", types=["epic"], project="proj_abc")
+    • List tasks in epic: explore(mode="list", types=["task"], epic="epic_abc")
+    • List tasks for project: explore(mode="list", types=["task"], project="proj_abc", status="todo")
+    • Find related knowledge: explore(mode="related", entity_id="pattern_oauth")
+    • Task dependency chain: explore(mode="dependencies", entity_id="task_123")
+    • Explore project graph: explore(mode="traverse", entity_id="proj_abc", depth=2)
+
+    Args:
+        mode: Exploration mode - list, related, traverse, or dependencies.
+        types: Entity types to include. Options: pattern, rule, template, topic,
+               episode, task, project, source, document (for list mode).
+        entity_id: Starting entity ID (required for related/traverse/dependencies).
+        relationship_types: Filter edges by type - DEPENDS_ON, BELONGS_TO, RELATED_TO.
+        depth: Traversal depth for traverse mode (1-3, default 1).
+        language: Filter by programming language.
+        category: Filter by category/domain.
+        project: Optional project filter (recommended for task/epic listing).
+        epic: Optional epic filter (for listing tasks within an epic).
+        status: Filter tasks by workflow status (backlog, todo, doing, blocked, review, done).
+        priority: Filter tasks by priority (critical, high, medium, low, someday).
+        complexity: Filter tasks by complexity (trivial, simple, medium, complex, epic).
+        feature: Filter tasks by feature area.
+        tags: Filter tasks by tags (comma-separated, matches if task has ANY).
+        limit: Maximum results (1-200, default 50).
+        offset: Offset for pagination (default 0).
+
+    Returns:
+        ExploreResponse with:
+        - entities: List of matching entities
+        - total: Count returned in this response
+        - has_more: True if more results exist beyond limit
+        - actual_total: Actual count matching filters (for pagination awareness)
+        - filters: Applied filter criteria
+
+    EXAMPLES:
+        explore(mode="list", types=["project"])  # First: find projects
+        explore(mode="list", types=["task"], project="proj_abc", status="todo")  # Then: tasks in project
+        explore(mode="related", entity_id="pattern_oauth")
+        explore(mode="dependencies", entity_id="task_123")
+    """
+    # Clamp values
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    depth = max(1, min(depth, 3))
+
+    log.info(
+        "explore",
+        mode=mode,
+        types=types,
+        entity_id=entity_id,
+        project=project,
+        status=status,
+        depth=depth,
+    )
+
+    filters = {}
+    if types:
+        filters["types"] = types
+    if language:
+        filters["language"] = language
+    if category:
+        filters["category"] = category
+    if entity_id:
+        filters["entity_id"] = entity_id
+    if project:
+        filters["project"] = project
+    if epic:
+        filters["epic"] = epic
+    if status:
+        filters["status"] = status
+    if priority:
+        filters["priority"] = priority
+    if complexity:
+        filters["complexity"] = complexity
+    if feature:
+        filters["feature"] = feature
+    if tags:
+        filters["tags"] = tags
+
+    if not organization_id:
+        raise ValueError("organization_id is required - cannot access graph without org context")
+
+    try:
+        if mode == "dependencies":
+            return await _explore_dependencies(
+                entity_id=entity_id,
+                project=project,
+                limit=limit,
+                filters=filters,
+                group_id=organization_id,
+            )
+        if mode in ("related", "traverse"):
+            return await _explore_related(
+                entity_id=entity_id,
+                relationship_types=relationship_types,
+                depth=depth if mode == "traverse" else 1,
+                limit=limit,
+                filters=filters,
+                mode=mode,
+                group_id=organization_id,
+            )
+        return await _explore_list(
+            types=types,
+            language=language,
+            category=category,
+            project=project,
+            epic=epic,
+            status=status,
+            priority=priority,
+            complexity=complexity,
+            feature=feature,
+            tags=tags,
+            include_archived=include_archived,
+            limit=limit,
+            offset=offset,
+            filters=filters,
+            group_id=organization_id,
+        )
+
+    except Exception as e:
+        log.warning("explore_failed", error=str(e), mode=mode)
+        return ExploreResponse(mode=mode, entities=[], total=0, filters=filters)
+
+
+def _passes_entity_filters(
+    entity: Entity,
+    language: str | None,
+    category: str | None,
+    project: str | None,
+    epic: str | None,
+    status: str | None,
+    priority: str | None,
+    complexity: str | None,
+    feature: str | None,
+    tags: str | None,
+    include_archived: bool,
+) -> bool:
+    """Check if an entity passes all specified filters."""
+    # Language filter
+    if language:
+        entity_langs = _get_field(entity, "languages", [])
+        if language.lower() not in [lang.lower() for lang in entity_langs]:
+            return False
+
+    # Category filter
+    if category:
+        entity_cat = _get_field(entity, "category", "")
+        if category.lower() not in entity_cat.lower():
+            return False
+
+    # Project filter (for tasks and epics)
+    if project and _get_field(entity, "project_id") != project:
+        return False
+
+    # Epic filter (for tasks)
+    if epic and _get_field(entity, "epic_id") != epic:
+        return False
+
+    # Status filter (for tasks)
+    if status:
+        entity_status = _get_field(entity, "status")
+        if entity_status is None:
+            return False
+        status_val = _serialize_enum(entity_status)
+        if status.lower() != str(status_val).lower():
+            return False
+
+    # Priority filter (for tasks)
+    if priority:
+        entity_priority = _get_field(entity, "priority")
+        if entity_priority is None:
+            return False
+        priority_val = _serialize_enum(entity_priority)
+        if priority.lower() != str(priority_val).lower():
+            return False
+
+    # Complexity filter (for tasks)
+    if complexity:
+        entity_complexity = _get_field(entity, "complexity")
+        if entity_complexity is None:
+            return False
+        complexity_val = _serialize_enum(entity_complexity)
+        if complexity.lower() != str(complexity_val).lower():
+            return False
+
+    # Feature filter (for tasks)
+    if feature:
+        entity_feature = _get_field(entity, "feature")
+        if entity_feature is None or entity_feature.lower() != feature.lower():
+            return False
+
+    # Tags filter (for tasks) - match if ANY tag matches
+    if tags:
+        tag_list = [t.strip().lower() for t in tags.split(",")]
+        entity_tags = _get_field(entity, "tags", [])
+        entity_tags_lower = [str(t).lower() for t in entity_tags]
+        if not any(t in entity_tags_lower for t in tag_list):
+            return False
+
+    # Archive filter (for projects) - hide archived unless explicitly included
+    if not include_archived:
+        entity_type = _get_field(entity, "entity_type")
+        if entity_type and str(entity_type).lower() == "project":
+            entity_status = _get_field(entity, "status")
+            if entity_status:
+                status_val = _serialize_enum(entity_status)
+                if str(status_val).lower() == "archived":
+                    return False
+
+    return True
+
+
+async def _explore_list(
+    types: list[str] | None,
+    language: str | None,
+    category: str | None,
+    project: str | None,
+    epic: str | None,
+    status: str | None,
+    priority: str | None,
+    complexity: str | None,
+    feature: str | None,
+    tags: str | None,
+    include_archived: bool,
+    limit: int,
+    offset: int,
+    filters: dict[str, Any],
+    group_id: str,
+) -> ExploreResponse:
+    """List entities by type with filters."""
+    client = await get_graph_client()
+    entity_manager = EntityManager(client, group_id=group_id)
+
+    # Default to listing all types if none specified
+    target_types: list[EntityType] = []
+    if types:
+        target_types = [EntityType(t.lower()) for t in types if t.lower() in VALID_ENTITY_TYPES]
+    else:
+        # Default to common browsable types
+        target_types = [
+            EntityType.PATTERN,
+            EntityType.RULE,
+            EntityType.TEMPLATE,
+            EntityType.TOPIC,
+        ]
+
+    # Parse tags into list if provided
+    tag_list = [t.strip() for t in tags.split(",")] if tags else None
+
+    # Fetch with DB-level filtering for efficiency
+    # Over-fetch to detect has_more after any remaining client-side filters
+    fetch_limit = limit + offset + 50
+    all_entities = []
+    for entity_type in target_types:
+        entities = await entity_manager.list_by_type(
+            entity_type,
+            limit=fetch_limit,
+            project_id=project,
+            epic_id=epic,
+            status=status,
+            priority=priority,
+            complexity=complexity,
+            feature=feature,
+            tags=tag_list,
+            include_archived=include_archived,
+        )
+        all_entities.extend(entities)
+
+    # Apply remaining filters not handled by DB (language, category)
+    filtered_entities = [
+        entity
+        for entity in all_entities
+        if _passes_entity_filters(
+            entity, language, category, None, None, None, None, None, None, None, include_archived
+        )
+    ]
+
+    # Apply pagination
+    actual_total = len(filtered_entities)
+    paginated_entities = filtered_entities[offset : offset + limit]
+    has_more = offset + len(paginated_entities) < actual_total
+
+    # Build result summaries
+    results = [
+        EntitySummary(
+            id=entity.id,
+            type=entity.entity_type.value,
+            name=entity.name,
+            description=entity.description[:200] if entity.description else "",
+            metadata=_build_entity_metadata(entity),
+        )
+        for entity in paginated_entities
+    ]
+
+    return ExploreResponse(
+        mode="list",
+        entities=results,
+        total=len(results),
+        filters=filters,
+        limit=limit,
+        offset=offset,
+        has_more=has_more,
+        actual_total=actual_total,
+    )
+
+
+@dataclass
+class DependencyNode:
+    """A task in a dependency chain."""
+
+    id: str
+    name: str
+    status: str | None
+    depth: int  # Distance from root task
+    is_blocking: bool  # True if this blocks the root task
+
+
+async def _explore_dependencies(
+    entity_id: str | None,
+    project: str | None,
+    limit: int,
+    filters: dict[str, Any],
+    group_id: str,
+) -> ExploreResponse:
+    """Traverse task dependency chains with topological sorting.
+
+    Returns tasks in dependency order (dependencies before dependents).
+    Detects and reports circular dependencies.
+    """
+    if not entity_id:
+        return ExploreResponse(
+            mode="dependencies",
+            entities=[],
+            total=0,
+            filters={**filters, "error": "entity_id required for dependencies mode"},
+        )
+
+    client = await get_graph_client()
+    relationship_manager = RelationshipManager(client, group_id=group_id)
+    entity_manager = EntityManager(client, group_id=group_id)
+
+    # Track visited nodes and detect cycles
+    visited: set[str] = set()
+    in_stack: set[str] = set()  # For cycle detection
+    dependency_order: list[tuple[str, int]] = []  # (entity_id, depth)
+    circular_deps: list[tuple[str, str]] = []  # Detected cycles
+
+    async def traverse_dependencies(task_id: str, depth: int = 0) -> None:
+        """DFS traversal to build dependency order."""
+        if task_id in in_stack:
+            # Cycle detected
+            circular_deps.append((entity_id or "", task_id))
+            return
+
+        if task_id in visited:
+            return
+
+        visited.add(task_id)
+        in_stack.add(task_id)
+
+        # Get DEPENDS_ON relationships (tasks this task depends on)
+        deps = await relationship_manager.get_related_entities(
+            entity_id=task_id,
+            relationship_types=[RelationshipType.DEPENDS_ON],
+            max_depth=1,
+            limit=100,
+        )
+
+        for dep_entity, rel in deps:
+            # Only follow outgoing DEPENDS_ON (this task depends on dep_entity)
+            if rel.source_id == task_id:
+                # Apply project filter if specified
+                if project:
+                    dep_project = getattr(
+                        dep_entity, "project_id", None
+                    ) or dep_entity.metadata.get("project_id")
+                    if dep_project != project:
+                        continue
+                await traverse_dependencies(dep_entity.id, depth + 1)
+
+        in_stack.remove(task_id)
+        dependency_order.append((task_id, depth))
+
+    # Start traversal from the given entity
+    await traverse_dependencies(entity_id)
+
+    # dependency_order is in reverse topological order (dependencies first)
+    # Reverse it so dependencies come first
+    dependency_order.reverse()
+
+    # Build result entities
+    results: list[EntitySummary] = []
+    for task_id, depth in dependency_order[:limit]:
+        try:
+            entity = await entity_manager.get(task_id)
+            if entity:
+                raw_status = getattr(entity, "status", None) or entity.metadata.get("status")
+                status_value = (
+                    raw_status.value if raw_status and hasattr(raw_status, "value") else raw_status
+                )
+
+                results.append(
+                    EntitySummary(
+                        id=entity.id,
+                        type=entity.entity_type.value,
+                        name=entity.name,
+                        description=entity.description[:200] if entity.description else "",
+                        metadata={
+                            "status": status_value,
+                            "depth": depth,
+                            "is_root": entity.id == entity_id,
+                            "project_id": getattr(entity, "project_id", None)
+                            or entity.metadata.get("project_id"),
+                        },
+                    )
+                )
+        except Exception:
+            log.warning("dependency_entity_fetch_failed", task_id=task_id)
+
+    # Add circular dependency warning to filters if detected
+    result_filters = {**filters}
+    if circular_deps:
+        result_filters["circular_dependencies"] = [
+            {"from": c[0], "to": c[1]} for c in circular_deps
+        ]
+        result_filters["warning"] = "Circular dependencies detected"
+
+    return ExploreResponse(
+        mode="dependencies",
+        entities=results,
+        total=len(results),
+        filters=result_filters,
+    )
+
+
+async def _explore_related(
+    entity_id: str | None,
+    relationship_types: list[str] | None,
+    depth: int,
+    limit: int,
+    filters: dict[str, Any],
+    mode: str,
+    group_id: str,
+) -> ExploreResponse:
+    """Find related entities via graph traversal."""
+    if not entity_id:
+        return ExploreResponse(
+            mode=mode,
+            entities=[],
+            total=0,
+            filters={**filters, "error": "entity_id required for related/traverse mode"},
+        )
+
+    client = await get_graph_client()
+    relationship_manager = RelationshipManager(client, group_id=group_id)
+
+    # Convert relationship type strings to enum
+    rel_types = None
+    if relationship_types:
+        rel_types = []
+        for rt in relationship_types:
+            try:
+                rel_types.append(RelationshipType(rt.upper()))
+            except ValueError:
+                log.warning("unknown_relationship_type", type=rt)
+
+    # Get related entities
+    raw_results = await relationship_manager.get_related_entities(
+        entity_id=entity_id,
+        relationship_types=rel_types,
+        max_depth=depth,
+        limit=limit,
+    )
+
+    results = []
+    for entity, relationship in raw_results:
+        direction: Literal["outgoing", "incoming"] = (
+            "outgoing" if relationship.source_id == entity_id else "incoming"
+        )
+
+        results.append(
+            RelatedEntity(
+                id=entity.id,
+                type=entity.entity_type.value,
+                name=entity.name,
+                relationship=relationship.relationship_type.value,
+                direction=direction,
+                distance=1,  # Would need path info for multi-hop
+            )
+        )
+
+    return ExploreResponse(
+        mode=mode,
+        entities=results,
+        total=len(results),
+        filters=filters,
+    )
+
+
+# =============================================================================
+# TOOL 3: add
+# =============================================================================
+
+
+async def add(  # noqa: PLR0915
+    title: str,
+    content: str,
+    entity_type: str = "episode",
+    category: str | None = None,
+    languages: list[str] | None = None,
+    tags: list[str] | None = None,
+    related_to: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+    # Task/Epic-specific parameters
+    project: str | None = None,
+    epic: str | None = None,
+    priority: str | None = None,
+    assignees: list[str] | None = None,
+    due_date: str | None = None,
+    technologies: list[str] | None = None,
+    depends_on: list[str] | None = None,
+    # Project-specific parameters
+    repository_url: str | None = None,
+    # Auto-linking
+    auto_link: bool = False,
+    # Sync mode - wait for Graphiti processing instead of returning immediately
+    sync: bool = False,
+) -> AddResponse:
+    """Add new knowledge to the Sibyl knowledge graph.
+
+    Use this tool to create entities with automatic relationship discovery.
+    Supports episodes (learnings), patterns, tasks, epics, and projects.
+
+    ENTITY TYPES:
+    • episode: Temporal knowledge snapshot (default) - insights, learnings, discoveries
+    • pattern: Coding pattern or best practice
+    • task: Work item with workflow state machine (REQUIRES project)
+    • epic: Feature initiative grouping related tasks (REQUIRES project)
+    • project: Container for epics and tasks
+
+    USE CASES:
+    • Record a learning: add("Redis pooling insight", "Discovered that...", category="debugging")
+    • Create a pattern: add("Error handling pattern", "...", entity_type="pattern", languages=["python"])
+    • Create an epic: add("OAuth Integration", "...", entity_type="epic", project="proj_abc", priority="high")
+    • Create a task: add("Implement OAuth", "...", entity_type="task", project="proj_abc", epic="epic_xyz")
+    • Create a project: add("Auth System", "...", entity_type="project", repository_url="...")
+    • Auto-link to related knowledge: add("OAuth insight", "...", auto_link=True)
+
+    IMPORTANT: Tasks and Epics REQUIRE a project. Always specify project="<project_id>".
+    Tasks can optionally belong to an epic via epic="<epic_id>".
+    Use explore(mode="list", types=["project"]) to find available projects first.
+
+    Args:
+        title: Short title (max 200 chars).
+        content: Full content/description (max 50k chars).
+        entity_type: Type to create - episode (default), pattern, task, epic, project.
+        category: Domain category (authentication, database, api, debugging, etc.).
+        languages: Programming languages (python, typescript, rust, etc.).
+        tags: Searchable tags for discovery.
+        related_to: Entity IDs to explicitly link (creates RELATED_TO edges).
+        metadata: Additional structured data.
+        project: Project ID (REQUIRED for tasks and epics, creates BELONGS_TO edge).
+        epic: Epic ID for tasks (optional, creates BELONGS_TO edge).
+        priority: Task/epic priority - critical, high, medium (default), low, someday.
+        assignees: List of assignee names for tasks/epics.
+        due_date: Due date for tasks (ISO format: 2024-03-15).
+        technologies: Technologies involved (for tasks).
+        depends_on: Task IDs this depends on (creates DEPENDS_ON edges).
+        repository_url: Repository URL for projects.
+        auto_link: Auto-discover related patterns/rules/templates (similarity > 0.75).
+        sync: If True, wait for Graphiti processing (slower but entity exists immediately).
+              If False (default), return immediately and process in background.
+
+    Returns:
+        AddResponse with created entity ID, auto-discovered links, and timestamp.
+
+    EXAMPLES:
+        add("OAuth redirect bug", "Fixed issue where...", category="debugging", languages=["python"])
+        add("Add user auth", "Implement login flow", entity_type="task", project="proj_web", priority="high")
+        add("E-commerce API", "Backend services for...", entity_type="project", repository_url="github.com/...")
+        add("Connection pooling pattern", "Best practice for...", entity_type="pattern", auto_link=True)
+    """
+    # Sanitize inputs
+    title = title.strip()
+    content = content.strip()
+
+    # Validate
+    if not title:
+        return AddResponse(
+            success=False,
+            id=None,
+            message="Title cannot be empty",
+            timestamp=datetime.now(UTC),
+        )
+
+    if len(title) > MAX_TITLE_LENGTH:
+        return AddResponse(
+            success=False,
+            id=None,
+            message=f"Title exceeds {MAX_TITLE_LENGTH} characters",
+            timestamp=datetime.now(UTC),
+        )
+
+    if not content:
+        return AddResponse(
+            success=False,
+            id=None,
+            message="Content cannot be empty",
+            timestamp=datetime.now(UTC),
+        )
+
+    if len(content) > MAX_CONTENT_LENGTH:
+        return AddResponse(
+            success=False,
+            id=None,
+            message=f"Content exceeds {MAX_CONTENT_LENGTH} characters",
+            timestamp=datetime.now(UTC),
+        )
+
+    log.info(
+        "add",
+        title=title[:50],
+        entity_type=entity_type,
+        category=category,
+        languages=languages,
+    )
+
+    try:
+        client = await get_graph_client()
+        org_id = (metadata or {}).get("organization_id") or (metadata or {}).get("group_id")
+        if not org_id:
+            raise ValueError(
+                "organization_id is required in metadata - cannot create entity without org context"
+            )
+        org_id = str(org_id)
+        entity_manager = EntityManager(client, group_id=org_id)
+
+        # Generate deterministic ID
+        entity_id = _generate_id(entity_type, title, category or "general")
+
+        # Merge metadata
+        full_metadata = {
+            "category": category,
+            "languages": languages or [],
+            "tags": tags or [],
+            "added_at": datetime.now(UTC).isoformat(),
+            "organization_id": org_id,
+            **(metadata or {}),
+        }
+
+        # Create appropriate entity type
+        entity: Episode | Pattern | Task | Project
+        relationship_manager = RelationshipManager(client, group_id=org_id)
+
+        if entity_type == "task":
+            # Validate project_id is provided for tasks
+            if not project:
+                return AddResponse(
+                    success=False,
+                    id=None,
+                    message="Tasks require a project. Use explore(types=['project']) to find projects.",
+                    timestamp=datetime.now(UTC),
+                )
+
+            # Parse due date if provided
+            parsed_due_date = None
+            if due_date:
+                try:
+                    parsed_due_date = datetime.fromisoformat(due_date)
+                except ValueError:
+                    log.warning("invalid_due_date", due_date=due_date)
+
+            # Parse priority
+            task_priority = TaskPriority.MEDIUM
+            if priority:
+                try:
+                    task_priority = TaskPriority(priority.lower())
+                except ValueError:
+                    log.warning("invalid_priority", priority=priority)
+
+            # Get existing project tags for consistency (when project-scoped)
+            project_tags = await get_project_tags(client, project) if project else []
+
+            # Auto-generate tags based on task content + project context
+            task_technologies = technologies or languages or []
+            auto_tags = auto_tag_task(
+                title=title,
+                description=content,
+                technologies=task_technologies,
+                domain=category,
+                explicit_tags=tags,
+                project_tags=project_tags,
+            )
+            full_metadata["tags"] = auto_tags
+
+            log.debug(
+                "auto_tags_generated",
+                tags=auto_tags,
+                count=len(auto_tags),
+                project_tags_used=len(project_tags),
+            )
+
+            entity = Task(  # type: ignore[call-arg]  # model_validator sets name from title
+                id=entity_id,
+                title=title,
+                description=content,
+                status=TaskStatus.TODO,
+                priority=task_priority,
+                project_id=project or None,
+                epic_id=epic or None,
+                assignees=assignees or [],
+                due_date=parsed_due_date,
+                technologies=task_technologies,
+                domain=category,
+                tags=auto_tags,
+                metadata=full_metadata,
+            )
+
+        elif entity_type == "project":
+            entity = Project(  # type: ignore[call-arg]  # model_validator sets name from title
+                id=entity_id,
+                title=title,
+                description=content,
+                status=ProjectStatus.ACTIVE,
+                repository_url=repository_url,
+                tech_stack=technologies or languages or [],
+                tags=tags or [],
+                metadata=full_metadata,
+            )
+
+        elif entity_type == "epic":
+            # Validate project_id is provided for epics
+            if not project:
+                return AddResponse(
+                    success=False,
+                    id=None,
+                    message="Epics require a project. Use explore(types=['project']) to find projects.",
+                    timestamp=datetime.now(UTC),
+                )
+
+            # Parse priority
+            epic_priority = TaskPriority.MEDIUM
+            if priority:
+                try:
+                    epic_priority = TaskPriority(priority.lower())
+                except ValueError:
+                    log.warning("invalid_priority", priority=priority)
+
+            # Parse target date if provided
+            parsed_target_date = None
+            if due_date:
+                try:
+                    parsed_target_date = datetime.fromisoformat(due_date)
+                except ValueError:
+                    log.warning("invalid_target_date", due_date=due_date)
+
+            entity = Epic(  # type: ignore[call-arg]  # model_validator sets name from title
+                id=entity_id,
+                title=title,
+                description=content,
+                status=EpicStatus.PLANNING,
+                priority=epic_priority,
+                project_id=project,
+                assignees=assignees or [],
+                target_date=parsed_target_date,
+                tags=tags or [],
+                metadata=full_metadata,
+            )
+
+        elif entity_type == "pattern":
+            entity = Pattern(
+                id=entity_id,
+                entity_type=EntityType.PATTERN,
+                name=title,
+                description=content[:500] if len(content) > 500 else content,
+                content=content,
+                category=category or "",
+                languages=languages or [],
+                metadata=full_metadata,
+            )
+
+        else:
+            # Default to Episode for temporal knowledge
+            entity = Episode(
+                id=entity_id,
+                entity_type=EntityType.EPISODE,
+                name=title,
+                description=content[:500] if len(content) > 500 else content,
+                content=content,
+                metadata=full_metadata,
+            )
+
+        # Build list of explicit relationships to create
+        relationships_to_create: list[dict[str, Any]] = []
+
+        # Task -> Project (BELONGS_TO)
+        if entity_type == "task" and project:
+            relationships_to_create.append(
+                {
+                    "id": f"rel_{entity_id}_belongs_to_{project}",
+                    "source_id": entity_id,
+                    "target_id": project,
+                    "type": "BELONGS_TO",
+                    "metadata": {"created_at": datetime.now(UTC).isoformat()},
+                }
+            )
+
+        # Task -> Epic (BELONGS_TO)
+        if entity_type == "task" and epic:
+            relationships_to_create.append(
+                {
+                    "id": f"rel_{entity_id}_belongs_to_{epic}",
+                    "source_id": entity_id,
+                    "target_id": epic,
+                    "type": "BELONGS_TO",
+                    "metadata": {"created_at": datetime.now(UTC).isoformat()},
+                }
+            )
+
+        # Epic -> Project (BELONGS_TO)
+        if entity_type == "epic" and project:
+            relationships_to_create.append(
+                {
+                    "id": f"rel_{entity_id}_belongs_to_{project}",
+                    "source_id": entity_id,
+                    "target_id": project,
+                    "type": "BELONGS_TO",
+                    "metadata": {"created_at": datetime.now(UTC).isoformat()},
+                }
+            )
+
+        # Task -> Task (DEPENDS_ON)
+        if entity_type == "task" and depends_on:
+            relationships_to_create.extend(
+                [
+                    {
+                        "id": f"rel_{entity_id}_depends_on_{dep_id}",
+                        "source_id": entity_id,
+                        "target_id": dep_id,
+                        "type": "DEPENDS_ON",
+                        "metadata": {"created_at": datetime.now(UTC).isoformat()},
+                    }
+                    for dep_id in depends_on
+                ]
+            )
+
+        # Generic RELATED_TO relationships
+        if related_to:
+            relationships_to_create.extend(
+                [
+                    {
+                        "id": f"rel_{entity_id}_related_to_{related_id}",
+                        "source_id": entity_id,
+                        "target_id": related_id,
+                        "type": "RELATED_TO",
+                        "metadata": {"created_at": datetime.now(UTC).isoformat()},
+                    }
+                    for related_id in related_to
+                ]
+            )
+
+        # Sync mode: create entity + relationships immediately via Graphiti
+        if sync:
+            # Use create_direct() for structured entities (faster, generates embeddings)
+            # Use create() for episodes (LLM extraction may add value)
+            if entity_type in ("task", "project", "epic", "pattern"):
+                created_id = await entity_manager.create_direct(entity)
+            else:
+                created_id = await entity_manager.create(entity)
+
+            # Create explicit relationships
+            for rel_data in relationships_to_create:
+                try:
+                    rel = Relationship(
+                        id=rel_data["id"],
+                        source_id=rel_data["source_id"],
+                        target_id=rel_data["target_id"],
+                        relationship_type=RelationshipType(rel_data["type"]),
+                        metadata=rel_data.get("metadata", {}),
+                    )
+                    await relationship_manager.create(rel)
+                except Exception as e:
+                    log.warning("relationship_creation_failed", error=str(e), rel=rel_data)
+
+            # Auto-link in sync mode
+            if auto_link:
+                try:
+                    auto_link_results = await _auto_discover_links(
+                        entity_manager=entity_manager,
+                        title=title,
+                        content=content,
+                        technologies=technologies or languages or [],
+                        category=category,
+                        exclude_id=created_id,
+                        threshold=0.75,
+                        limit=5,
+                    )
+                    for linked_id, score in auto_link_results:
+                        try:
+                            rel = Relationship(
+                                id=f"rel_{created_id}_references_{linked_id}",
+                                source_id=created_id,
+                                target_id=linked_id,
+                                relationship_type=RelationshipType.RELATED_TO,
+                                metadata={
+                                    "created_at": datetime.now(UTC).isoformat(),
+                                    "auto_linked": True,
+                                    "similarity_score": score,
+                                },
+                            )
+                            await relationship_manager.create(rel)
+                        except Exception as e:
+                            log.warning("auto_link_failed", error=str(e), target=linked_id)
+                except Exception as e:
+                    log.warning("auto_link_search_failed", error=str(e))
+
+            message = f"Added: {title}"
+            if relationships_to_create:
+                message += f" (linked: {len(relationships_to_create)})"
+
+            return AddResponse(
+                success=True,
+                id=created_id,
+                message=message,
+                timestamp=datetime.now(UTC),
+            )
+
+        # Async mode (default): queue arq job, return immediately
+        try:
+            from sibyl_core.jobs.queue import enqueue_create_entity
+
+            await enqueue_create_entity(
+                entity_id=entity_id,
+                entity_data=entity.model_dump(mode="json"),
+                entity_type=entity_type,
+                group_id=org_id,
+                relationships=relationships_to_create if relationships_to_create else None,
+                auto_link=auto_link,
+                auto_link_params={
+                    "title": title,
+                    "content": content,
+                    "technologies": technologies or languages or [],
+                    "category": category,
+                }
+                if auto_link
+                else None,
+            )
+            log.info("add_queued_for_arq", entity_id=entity_id, entity_type=entity_type)
+
+        except Exception as e:
+            # If arq queue fails, fall back to sync creation
+            log.warning("arq_queue_failed_falling_back_to_sync", error=str(e))
+            # Use create_direct() for structured entities (faster, generates embeddings)
+            if entity_type in ("task", "project", "epic", "pattern"):
+                created_id = await entity_manager.create_direct(entity)
+            else:
+                created_id = await entity_manager.create(entity)
+
+            for rel_data in relationships_to_create:
+                try:
+                    rel = Relationship(
+                        id=rel_data["id"],
+                        source_id=rel_data["source_id"],
+                        target_id=rel_data["target_id"],
+                        relationship_type=RelationshipType(rel_data["type"]),
+                        metadata=rel_data.get("metadata", {}),
+                    )
+                    await relationship_manager.create(rel)
+                except Exception as rel_e:
+                    log.warning("relationship_creation_failed", error=str(rel_e))
+
+            return AddResponse(
+                success=True,
+                id=created_id,
+                message=f"Added (sync fallback): {title}",
+                timestamp=datetime.now(UTC),
+            )
+
+        # Return immediately with the entity ID - entity will be created in background
+        return AddResponse(
+            success=True,
+            id=entity_id,
+            message=f"Queued: {title} (processing in background)",
+            timestamp=datetime.now(UTC),
+        )
+
+    except Exception as e:
+        log.warning("add_failed", error=str(e))
+        return AddResponse(
+            success=False,
+            id=None,
+            message=f"Failed: {e}",
+            timestamp=datetime.now(UTC),
+        )
+
+
+def _generate_id(prefix: str, *parts: str) -> str:
+    """Generate a deterministic entity ID."""
+    combined = ":".join(str(p)[:100] for p in parts)
+    hash_bytes = hashlib.sha256(combined.encode()).hexdigest()[:12]
+    return f"{prefix}_{hash_bytes}"
+
+
+async def _auto_discover_links(
+    entity_manager: EntityManager,
+    title: str,
+    content: str,
+    technologies: list[str],
+    category: str | None,
+    exclude_id: str,
+    threshold: float = 0.75,
+    limit: int = 5,
+) -> list[tuple[str, float]]:
+    """Discover related entities for auto-linking.
+
+    Searches for patterns, rules, templates, and topics that are
+    semantically similar to the new entity.
+
+    Args:
+        entity_manager: Entity manager for search.
+        title: Entity title.
+        content: Entity content.
+        technologies: Technologies to include in search.
+        category: Category/domain for filtering.
+        exclude_id: ID to exclude from results (the new entity).
+        threshold: Minimum similarity score (0-1).
+        limit: Maximum links to discover.
+
+    Returns:
+        List of (entity_id, score) tuples above threshold.
+    """
+    # Build search query from title, content summary, and technologies
+    tech_str = ", ".join(technologies[:5]) if technologies else ""
+    query_parts = [title]
+    if content:
+        # Take first 200 chars of content
+        query_parts.append(content[:200])
+    if tech_str:
+        query_parts.append(tech_str)
+    if category:
+        query_parts.append(category)
+
+    query = " ".join(query_parts)
+
+    # Search for linkable entity types
+    linkable_types = [
+        EntityType.PATTERN,
+        EntityType.RULE,
+        EntityType.TEMPLATE,
+        EntityType.CONVENTION,
+        EntityType.TOPIC,
+    ]
+
+    try:
+        results = await entity_manager.search(
+            query=query,
+            entity_types=linkable_types,
+            limit=limit * 2,  # Over-fetch to filter by threshold
+        )
+
+        # Filter by threshold and exclude self
+        links: list[tuple[str, float]] = []
+        for entity, score in results:
+            if entity.id == exclude_id:
+                continue
+            if score >= threshold:
+                links.append((entity.id, score))
+            if len(links) >= limit:
+                break
+
+        return links
+
+    except Exception as e:
+        log.warning("auto_discover_search_failed", error=str(e))
+        return []
+
+
+# =============================================================================
+# TOOL 4: manage - MOVED to sibyl/tools/manage.py
+# =============================================================================
+# The canonical manage() implementation with all action categories
+# (task workflow, source operations, analysis, admin) is in tools/manage.py.
+# Import from there: from sibyl_core.tools.manage import manage, ManageResponse
+
+
+# Removed: ManageResponse class (duplicate of manage.py)
+# Removed: manage() function (duplicate with limited actions)
+
+
+# Resource functions (Admin-only, exposed as MCP resources)
+
+# Module-level state for uptime tracking
+_server_start_time: float | None = None
+
+
+async def get_health(*, organization_id: str | None = None) -> dict[str, Any]:
+    """Get server health status.
+
+    Args:
+        organization_id: Organization ID for graph operations. If None, only basic
+                        connectivity is checked.
+    """
+    import time
+
+    from sibyl_core.config import settings
+
+    global _server_start_time  # noqa: PLW0603
+    if _server_start_time is None:
+        _server_start_time = time.time()
+
+    health: dict[str, Any] = {
+        "status": "unknown",
+        "server_name": settings.server_name,
+        "uptime_seconds": int(time.time() - _server_start_time),
+        "graph_connected": False,
+        "entity_counts": {},
+        "errors": [],
+    }
+
+    try:
+        client = await get_graph_client()
+
+        # Test connectivity
+        health["graph_connected"] = True
+
+        # Entity counts require org context
+        if organization_id:
+            entity_manager = EntityManager(client, group_id=organization_id)
+
+            # Get entity counts
+            for entity_type in [EntityType.PATTERN, EntityType.RULE, EntityType.EPISODE]:
+                try:
+                    entities = await entity_manager.list_by_type(entity_type, limit=1000)
+                    health["entity_counts"][entity_type.value] = len(entities)
+                except Exception:
+                    health["entity_counts"][entity_type.value] = -1
+
+        health["status"] = "healthy"
+
+    except Exception as e:
+        health["status"] = "unhealthy"
+        health["errors"].append(str(e))
+
+    return health
+
+
+async def get_stats(organization_id: str | None = None) -> dict[str, Any]:
+    """Get knowledge graph statistics.
+
+    Uses a single aggregation query for performance instead of N separate queries.
+
+    Args:
+        organization_id: Organization ID to scope stats to (required).
+
+    Raises:
+        ValueError: If organization_id is not provided.
+    """
+    if not organization_id:
+        raise ValueError("organization_id is required - cannot get stats without org context")
+
+    try:
+        client = await get_graph_client()
+
+        # Clone driver for org-specific graph (multi-tenancy)
+        driver = client.client.driver.clone(organization_id)
+
+        # Single aggregation query - much faster than N separate list queries
+        result = await driver.execute_query(
+            """
+            MATCH (n)
+            WHERE n.entity_type IS NOT NULL
+            RETURN n.entity_type as type, count(*) as count
+            """
+        )
+
+        stats: dict[str, Any] = {
+            "entity_counts": {},
+            "total_entities": 0,
+        }
+
+        # Initialize all known types to 0
+        for entity_type in EntityType:
+            stats["entity_counts"][entity_type.value] = 0
+
+        # Fill in actual counts from query
+        data = GraphClient.normalize_result(result)
+        for row in data:
+            if isinstance(row, dict):
+                etype = row.get("type")
+                count = row.get("count", 0)
+            else:
+                etype, count = row[0], row[1]
+
+            if etype:
+                stats["entity_counts"][etype] = count
+                stats["total_entities"] += count
+
+        return stats
+
+    except Exception as e:
+        return {"error": str(e), "entity_counts": {}, "total_entities": 0}
