@@ -85,4 +85,4 @@ typeCheckingMode = "standard"
 # =============================================================================
 
 [tool.uv.sources]
-sibyl-core = { path = "../sibyl-core", editable = true }
+sibyl-core = { workspace = true }

@@ -112,7 +112,7 @@ dev = [
 # =============================================================================
 
 [tool.uv.sources]
-sibyl-core = { path = "../../packages/python/sibyl-core", editable = true }
+sibyl-core = { workspace = true }
 
 # =============================================================================
 # Ruff - Linting & Formatting

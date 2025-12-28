@@ -80,3 +80,9 @@ known-first-party = ["sibyl_core"]
 include = ["src"]
 pythonVersion = "3.13"
 typeCheckingMode = "standard"
+
+# =============================================================================
+# UV Workspace (inherits from root)
+# =============================================================================
+# This package is part of the sibyl-workspace
+# Dependencies on other workspace members use workspace = true

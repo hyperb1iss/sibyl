@@ -1,0 +1,65 @@
+# Sibyl - Collective Intelligence Runtime
+# Root workspace configuration for dependency version management
+
+# =============================================================================
+# UV Workspace Configuration (virtual workspace - not a package)
+# =============================================================================
+
+[tool.uv]
+
+[tool.uv.workspace]
+members = [
+    "apps/api",
+    "packages/python/sibyl-core",
+    "packages/python/sibyl-cli",
+]
+
+# =============================================================================
+# Shared Dependency Sources
+# These are inherited by all workspace members
+# =============================================================================
+
+[tool.uv.sources]
+# Local packages - workspace members reference each other
+sibyl-core = { workspace = true }
+sibyl-cli = { workspace = true }
+sibyl = { workspace = true }
+
+# =============================================================================
+# Shared Tool Configuration
+# =============================================================================
+
+[tool.ruff]
+line-length = 100
+src = ["apps/*/src", "packages/*/src"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "I", "UP", "B", "SIM", "RUF",
+    "ASYNC", "S", "C4", "T20", "PT", "PL", "TRY",
+]
+ignore = [
+    "E501",    # Line length (formatter handles)
+    "S101",    # Assert (tests/contracts)
+    "TRY003",  # Long exception messages
+    "PLR0913", # Too many arguments
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sibyl", "sibyl_core", "sibyl_cli"]
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+reportMissingImports = false
+reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = ["-ra", "--strict-markers", "-v"]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
