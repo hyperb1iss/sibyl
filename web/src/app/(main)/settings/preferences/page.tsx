@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Eye, Globe, Network, Settings, Sparks } from '@/components/ui/icons';
 import type { UserPreferences } from '@/lib/api';
 import { usePreferences, useUpdatePreferences } from '@/lib/hooks';
+import { type ThemePreference, useTheme } from '@/lib/theme';
 
 function SectionSkeleton() {
   return (
@@ -90,11 +91,52 @@ interface SectionProps {
   isUpdating: boolean;
 }
 
-function AppearanceSection({ prefs, onUpdate, isUpdating }: SectionProps) {
+// Map between display values and internal theme values
+const toDisplayValue = (pref: ThemePreference): string => {
+  if (pref === 'neon') return 'dark';
+  if (pref === 'dawn') return 'light';
+  return 'system';
+};
+
+const toThemePreference = (display: string): ThemePreference => {
+  if (display === 'dark') return 'neon';
+  if (display === 'light') return 'dawn';
+  return 'system';
+};
+
+interface AppearanceSectionProps {
+  backendTheme?: 'light' | 'dark' | 'system';
+  onBackendUpdate: (theme: 'light' | 'dark' | 'system') => void;
+  isUpdating: boolean;
+}
+
+function AppearanceSection({ backendTheme, onBackendUpdate, isUpdating }: AppearanceSectionProps) {
+  const { preference, setPreference } = useTheme();
+
+  // Sync backend theme to localStorage on mount (backend is source of truth)
+  // Only runs when backendTheme changes - intentionally excludes preference/setPreference to avoid loops
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sync only on backend change
+  useEffect(() => {
+    if (backendTheme) {
+      const localPref = toThemePreference(backendTheme);
+      if (localPref !== preference) {
+        setPreference(localPref);
+      }
+    }
+  }, [backendTheme]);
+
+  const handleThemeChange = (displayValue: string) => {
+    const themePref = toThemePreference(displayValue);
+    // Update localStorage (immediate)
+    setPreference(themePref);
+    // Update backend (persisted)
+    onBackendUpdate(displayValue as 'light' | 'dark' | 'system');
+  };
+
   const themes: SelectOption[] = [
     { value: 'system', label: 'System Default' },
-    { value: 'dark', label: 'Dark' },
-    { value: 'light', label: 'Light' },
+    { value: 'dark', label: 'Dark (Neon)' },
+    { value: 'light', label: 'Light (Dawn)' },
   ];
 
   return (
@@ -111,8 +153,8 @@ function AppearanceSection({ prefs, onUpdate, isUpdating }: SectionProps) {
             <p className="text-xs text-sc-fg-muted">Choose your preferred color theme</p>
           </div>
           <Select
-            value={prefs.theme || 'system'}
-            onChange={v => onUpdate({ theme: v as 'light' | 'dark' | 'system' })}
+            value={toDisplayValue(preference)}
+            onChange={handleThemeChange}
             options={themes}
             disabled={isUpdating}
           />
@@ -362,8 +404,8 @@ export default function PreferencesPage() {
       </div>
 
       <AppearanceSection
-        prefs={localPrefs}
-        onUpdate={handleUpdate}
+        backendTheme={localPrefs.theme}
+        onBackendUpdate={theme => handleUpdate({ theme })}
         isUpdating={updatePrefs.isPending}
       />
       <LocaleSection

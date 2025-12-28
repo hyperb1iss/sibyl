@@ -14,6 +14,7 @@ import {
 import type { ForceGraphMethods } from 'react-force-graph-2d';
 import { GraphEmptyState } from '@/components/ui/empty-state';
 import { ENTITY_COLORS, GRAPH_DEFAULTS } from '@/lib/constants';
+import { useTheme } from '@/lib/theme';
 
 // Dynamic import to avoid SSR issues with canvas
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
@@ -97,8 +98,17 @@ interface KnowledgeGraphProps {
   searchTerm?: string;
 }
 
+// Canvas requires hex colors - OKLCH CSS vars don't work directly
+const CANVAS_COLORS = {
+  neon: { bg: '#0a0812', fgPrimary: '#fafaf5', fgMuted: '#9b93b8', fgSubtle: '#5a5478' },
+  dawn: { bg: '#f1ecff', fgPrimary: '#2b2540', fgMuted: '#8e84a8', fgSubtle: '#b8b0cc' },
+};
+
 export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>(
   function KnowledgeGraph({ data, onNodeClick, selectedNodeId, searchTerm }, ref) {
+    const { theme } = useTheme();
+    const colors = CANVAS_COLORS[theme];
+
     // Using ForceGraphMethods with default generics since library types don't properly support custom types
     const graphRef = useRef<ForceGraphMethods | undefined>(undefined);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -303,7 +313,7 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         ctx.fill();
 
         // Border
-        ctx.strokeStyle = isSelected ? '#e135ff' : 'rgba(255, 255, 255, 0.15)';
+        ctx.strokeStyle = isSelected ? '#e135ff' : colors.fgSubtle;
         ctx.lineWidth = isSelected ? 1.5 : 0.3;
         ctx.stroke();
 
@@ -315,14 +325,14 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         ctx.font = `${fontSize}px "Space Grotesk", sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        ctx.fillStyle = isSelected ? '#ffffff' : '#8b85a0';
+        ctx.fillStyle = isSelected ? colors.fgPrimary : colors.fgMuted;
         // Truncate long labels
         const maxLabelLen = isSelected ? 30 : 20;
         const label =
           node.label.length > maxLabelLen ? `${node.label.slice(0, maxLabelLen)}…` : node.label;
         ctx.fillText(label, x, y + size + 1);
       },
-      [selectedNodeId, searchTerm]
+      [selectedNodeId, searchTerm, colors]
     );
 
     // Custom link rendering with arrows
@@ -392,7 +402,10 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
 
     if (!data || data.nodes.length === 0) {
       return (
-        <div className="flex items-center justify-center h-full bg-sc-bg-dark">
+        <div
+          className="flex items-center justify-center h-full"
+          style={{ backgroundColor: colors.bg }}
+        >
           <GraphEmptyState />
         </div>
       );
@@ -401,11 +414,13 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     return (
       <div
         ref={containerRef}
-        className="relative w-full h-full bg-[#0a0812]"
-        style={{ minHeight: '400px' }}
+        className="relative w-full h-full"
+        style={{ minHeight: '400px', backgroundColor: colors.bg }}
       >
         {/* Cast callbacks to any since react-force-graph-2d types don't properly support custom node/link types */}
+        {/* Key forces re-render when theme changes since ForceGraph2D doesn't react to backgroundColor prop changes */}
         <ForceGraph2D
+          key={theme}
           ref={graphRef as React.MutableRefObject<ForceGraphMethods | undefined>}
           graphData={graphData as { nodes: object[]; links: object[] }}
           nodeCanvasObject={
@@ -426,7 +441,7 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
           onEngineStop={handleEngineStop}
           cooldownTicks={GRAPH_DEFAULTS.COOLDOWN_TICKS}
           warmupTicks={GRAPH_DEFAULTS.WARMUP_TICKS}
-          backgroundColor="#0a0812"
+          backgroundColor={colors.bg}
           enableZoomInteraction={true}
           enablePanInteraction={true}
           enableNodeDrag={true}

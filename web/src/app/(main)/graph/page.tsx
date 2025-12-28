@@ -23,12 +23,19 @@ import { LoadingState } from '@/components/ui/spinner';
 import type { HierarchicalCluster, HierarchicalEdge, HierarchicalNode } from '@/lib/api';
 import { GRAPH_DEFAULTS, getClusterColor, getEntityColor } from '@/lib/constants';
 import { useHierarchicalGraph } from '@/lib/hooks';
+import { useTheme } from '@/lib/theme';
+
+// Canvas requires hex colors - OKLCH CSS vars don't work directly
+const CANVAS_COLORS = {
+  neon: { bg: '#0a0812', fgPrimary: '#fafaf5', fgMuted: '#9b93b8' },
+  dawn: { bg: '#f1ecff', fgPrimary: '#2b2540', fgMuted: '#8e84a8' },
+};
 
 // Dynamic import to avoid SSR issues with canvas
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
   ssr: false,
   loading: () => (
-    <div className="flex items-center justify-center h-full bg-sc-bg-dark">
+    <div className="flex items-center justify-center h-full bg-sc-bg-base">
       <div className="text-sc-fg-muted">Loading graph...</div>
     </div>
   ),
@@ -85,10 +92,7 @@ function MobileEntitySheet({ entityId, onClose }: { entityId: string; onClose: (
 }
 
 // Generate a descriptive label for a cluster from its top nodes
-function getClusterLabel(
-  cluster: HierarchicalCluster,
-  nodes: GraphNode[]
-): string {
+function getClusterLabel(cluster: HierarchicalCluster, nodes: GraphNode[]): string {
   // Find nodes belonging to this cluster, sorted by degree (most connected first)
   const clusterNodes = nodes
     .filter(n => n.cluster_id === cluster.id)
@@ -157,31 +161,35 @@ function ClusterLegend({
             <div className="w-2 h-2 rounded-full bg-gradient-to-r from-sc-purple to-sc-cyan" />
             <span>All clusters</span>
           </button>
-          {[...clusters].sort((a, b) => b.member_count - a.member_count).map(cluster => {
-            const color = clusterColorMap.get(cluster.id) || '#8b85a0';
-            const isSelected = selectedCluster === cluster.id;
-            const label = getClusterLabel(cluster, nodes);
-            return (
-              <button
-                key={cluster.id}
-                type="button"
-                onClick={() => onClusterClick(cluster.id)}
-                className={`w-full flex items-center gap-2 px-2 py-1 rounded text-xs transition-colors ${
-                  isSelected
-                    ? 'bg-sc-purple/20 text-sc-fg-primary'
-                    : 'text-sc-fg-muted hover:text-sc-fg-primary'
-                }`}
-                title={label}
-              >
-                <div
-                  className="w-2 h-2 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: color }}
-                />
-                <span className="truncate">{label}</span>
-                <span className="ml-auto text-sc-fg-subtle flex-shrink-0">{cluster.member_count}</span>
-              </button>
-            );
-          })}
+          {[...clusters]
+            .sort((a, b) => b.member_count - a.member_count)
+            .map(cluster => {
+              const color = clusterColorMap.get(cluster.id) || '#8b85a0';
+              const isSelected = selectedCluster === cluster.id;
+              const label = getClusterLabel(cluster, nodes);
+              return (
+                <button
+                  key={cluster.id}
+                  type="button"
+                  onClick={() => onClusterClick(cluster.id)}
+                  className={`w-full flex items-center gap-2 px-2 py-1 rounded text-xs transition-colors ${
+                    isSelected
+                      ? 'bg-sc-purple/20 text-sc-fg-primary'
+                      : 'text-sc-fg-muted hover:text-sc-fg-primary'
+                  }`}
+                  title={label}
+                >
+                  <div
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="truncate">{label}</span>
+                  <span className="ml-auto text-sc-fg-subtle flex-shrink-0">
+                    {cluster.member_count}
+                  </span>
+                </button>
+              );
+            })}
         </div>
       )}
     </Card>
@@ -355,6 +363,8 @@ function GraphToolbar({
 }
 
 function GraphPageContent() {
+  const { theme } = useTheme();
+  const colors = CANVAS_COLORS[theme];
   const graphRef = useRef<ForceGraphMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -598,11 +608,14 @@ function GraphPageContent() {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
 
-          // Text shadow
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+          // Text shadow - inverted based on theme
+          const shadowColor = theme === 'neon' ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.8)';
+          ctx.fillStyle = shadowColor;
           ctx.fillText(displayLabel, x + 0.5, labelY + 0.5);
 
-          ctx.fillStyle = isSelected ? '#ffffff' : isProject ? '#ffffffee' : '#ffffffcc';
+          // Text color - use theme foreground
+          const textColor = colors.fgPrimary;
+          ctx.fillStyle = isSelected ? textColor : isProject ? `${textColor}ee` : `${textColor}cc`;
           ctx.fillText(displayLabel, x, labelY);
 
           // Track this label (only if under cap)
@@ -612,7 +625,7 @@ function GraphPageContent() {
         }
       }
     },
-    [selectedNodeId, hoveredNode, graphData.maxDegree]
+    [selectedNodeId, hoveredNode, graphData.maxDegree, theme, colors]
   );
 
   // Clear label tracking before each frame - runs once on mount
@@ -657,16 +670,18 @@ function GraphPageContent() {
       ctx.moveTo(sx, sy);
       ctx.lineTo(tx, ty);
 
+      // Theme-aware link colors - stronger in light mode for visibility
+      const linkColor = theme === 'neon' ? '#ffffff' : '#2b2540';
       if (isHighlighted) {
-        ctx.strokeStyle = '#ffffff50';
+        ctx.strokeStyle = theme === 'neon' ? `${linkColor}50` : `${linkColor}70`;
         ctx.lineWidth = 1.5;
       } else {
-        ctx.strokeStyle = '#ffffff12';
-        ctx.lineWidth = 0.5;
+        ctx.strokeStyle = theme === 'neon' ? `${linkColor}18` : `${linkColor}35`;
+        ctx.lineWidth = theme === 'neon' ? 0.5 : 0.8;
       }
       ctx.stroke();
     },
-    [selectedNodeId, hoveredNode]
+    [selectedNodeId, hoveredNode, theme]
   );
 
   // Smooth zoom to node on click
@@ -734,12 +749,18 @@ function GraphPageContent() {
   return (
     <div
       ref={containerRef}
-      className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 bg-sc-bg-dark' : 'h-full'}`}
+      className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-50' : 'h-full'}`}
+      style={isFullscreen ? { backgroundColor: colors.bg } : undefined}
+      suppressHydrationWarning
     >
       {!isFullscreen && <Breadcrumb className="hidden md:flex" />}
 
       <div className="flex-1 flex gap-4 min-h-0 mt-0 md:mt-4">
-        <div className="flex-1 relative bg-sc-bg-dark md:rounded-xl md:border border-sc-fg-subtle/20 overflow-hidden">
+        <div
+          className="flex-1 relative md:rounded-xl md:border border-sc-fg-subtle/20 overflow-hidden"
+          style={{ backgroundColor: colors.bg }}
+          suppressHydrationWarning
+        >
           <GraphToolbar
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
@@ -753,7 +774,11 @@ function GraphPageContent() {
 
           {/* Loading overlay */}
           {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-sc-bg-dark/80 z-20">
+            <div
+              className="absolute inset-0 flex items-center justify-center z-20"
+              style={{ backgroundColor: `${colors.bg}cc` }}
+              suppressHydrationWarning
+            >
               <div className="flex items-center gap-3 text-sc-fg-muted">
                 <Loader2 width={20} height={20} className="animate-spin text-sc-purple" />
                 <span>Detecting communities & building graph...</span>
@@ -763,14 +788,19 @@ function GraphPageContent() {
 
           {/* Empty state */}
           {!isLoading && graphData.nodes.length === 0 && (
-            <div className="flex items-center justify-center h-full bg-sc-bg-dark">
+            <div
+              className="flex items-center justify-center h-full"
+              style={{ backgroundColor: colors.bg }}
+              suppressHydrationWarning
+            >
               <GraphEmptyState />
             </div>
           )}
 
-          {/* Graph */}
+          {/* Graph - key forces re-render when theme changes */}
           {!isLoading && graphData.nodes.length > 0 && (
             <ForceGraph2D
+              key={theme}
               ref={graphRef as React.MutableRefObject<ForceGraphMethods | undefined>}
               graphData={graphData as { nodes: object[]; links: object[] }}
               nodeCanvasObject={
@@ -793,7 +823,7 @@ function GraphPageContent() {
               onNodeHover={node => setHoveredNode((node as GraphNode)?.id || null)}
               cooldownTicks={GRAPH_DEFAULTS.COOLDOWN_TICKS}
               warmupTicks={GRAPH_DEFAULTS.WARMUP_TICKS}
-              backgroundColor="#0a0812"
+              backgroundColor={colors.bg}
               enableZoomInteraction={true}
               enablePanInteraction={true}
               enableNodeDrag={true}

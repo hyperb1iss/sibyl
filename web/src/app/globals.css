@@ -4,7 +4,39 @@
    SilkCircuit Design Tokens
    ============================================================================= */
 
+/* Base fallback - defaults to neon (must come FIRST for specificity) */
 :root {
+  --sc-purple: oklch(64% 0.31 328);
+  --sc-magenta: oklch(70% 0.32 328);
+  --sc-cyan: oklch(92% 0.16 180);
+  --sc-coral: oklch(72% 0.22 350);
+  --sc-yellow: oklch(95% 0.13 105);
+  --sc-green: oklch(88% 0.23 145);
+  --sc-red: oklch(68% 0.22 25);
+  --sc-bg-base: oklch(10% 0.02 285);
+  --sc-bg-dark: oklch(6% 0.015 285);
+  --sc-bg-highlight: oklch(14% 0.025 285);
+  --sc-bg-elevated: oklch(17% 0.03 285);
+  --sc-bg-surface: oklch(21% 0.035 285);
+  --sc-fg-primary: oklch(98% 0.005 110);
+  --sc-fg-muted: oklch(62% 0.035 280);
+  --sc-fg-subtle: oklch(42% 0.03 280);
+  --background: var(--sc-bg-base);
+  --foreground: var(--sc-fg-primary);
+  --entity-pattern: var(--sc-purple);
+  --entity-rule: var(--sc-red);
+  --entity-template: var(--sc-cyan);
+  --entity-tool: var(--sc-yellow);
+  --entity-language: var(--sc-coral);
+  --entity-topic: var(--sc-magenta);
+  --entity-episode: var(--sc-green);
+  --entity-knowledge-source: var(--sc-fg-muted);
+}
+
+/* -----------------------------------------------------------------------------
+   Neon (Dark Theme) - The original SilkCircuit aesthetic
+   ----------------------------------------------------------------------------- */
+[data-theme="neon"] {
   /* Core palette - OKLCH for perceptual uniformity and P3 gamut */
   --sc-purple: oklch(64% 0.31 328);
   --sc-magenta: oklch(70% 0.32 328);
@@ -31,6 +63,46 @@
   --foreground: var(--sc-fg-primary);
 
   /* Entity type colors */
+  --entity-pattern: var(--sc-purple);
+  --entity-rule: var(--sc-red);
+  --entity-template: var(--sc-cyan);
+  --entity-tool: var(--sc-yellow);
+  --entity-language: var(--sc-coral);
+  --entity-topic: var(--sc-magenta);
+  --entity-episode: var(--sc-green);
+  --entity-knowledge-source: var(--sc-fg-muted);
+}
+
+/* -----------------------------------------------------------------------------
+   Dawn (Light Theme) - Warm, focused, professional
+   ----------------------------------------------------------------------------- */
+[data-theme="dawn"] {
+  /* Core palette - adjusted for light backgrounds */
+  --sc-purple: oklch(45% 0.28 300); /* #7e2bd5 - Deep purple */
+  --sc-magenta: oklch(42% 0.26 340); /* #b40077 - Rich magenta */
+  --sc-cyan: oklch(48% 0.14 200); /* #007f8e - Teal */
+  --sc-coral: oklch(52% 0.2 350); /* #c74a8c - Coral */
+  --sc-yellow: oklch(58% 0.14 85); /* #a88600 - Golden yellow */
+  --sc-green: oklch(50% 0.18 145); /* Adjusted green for light */
+  --sc-red: oklch(55% 0.22 25); /* Adjusted red for light */
+
+  /* Background hierarchy - warm lavender whites */
+  --sc-bg-base: oklch(98% 0.01 290); /* #faf8ff */
+  --sc-bg-dark: oklch(96% 0.015 290); /* #f1ecff */
+  --sc-bg-highlight: oklch(93% 0.02 290); /* #e8e0ff */
+  --sc-bg-elevated: oklch(99% 0.005 290); /* Near white for cards */
+  --sc-bg-surface: oklch(91% 0.025 290); /* Deeper for contrast */
+
+  /* Foreground - dark purple-grays */
+  --sc-fg-primary: oklch(22% 0.03 290); /* #2b2540 */
+  --sc-fg-muted: oklch(58% 0.04 290); /* #8e84a8 */
+  --sc-fg-subtle: oklch(72% 0.03 290); /* Light gray-purple */
+
+  /* Semantic */
+  --background: var(--sc-bg-base);
+  --foreground: var(--sc-fg-primary);
+
+  /* Entity type colors - same references, palette adjusts */
   --entity-pattern: var(--sc-purple);
   --entity-rule: var(--sc-red);
   --entity-template: var(--sc-cyan);

@@ -6,6 +6,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import type { ForceGraphMethods } from 'react-force-graph-2d';
 import { GraphEmptyState } from '@/components/ui/empty-state';
 import { ENTITY_COLORS, type EntityType } from '@/lib/constants';
+import { useTheme } from '@/lib/theme';
 
 // Dynamic import to avoid SSR issues with canvas
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
@@ -52,10 +53,18 @@ interface ClusterGraphProps {
 
 const DEFAULT_COLOR = '#8b85a0';
 
+// Canvas requires hex colors - OKLCH CSS vars don't work directly
+const CANVAS_COLORS = {
+  neon: { bg: '#0a0812', fgPrimary: '#fafaf5', fgMuted: '#9b93b8' },
+  dawn: { bg: '#f1ecff', fgPrimary: '#2b2540', fgMuted: '#8e84a8' },
+};
+
 export const ClusterGraph = forwardRef<ClusterGraphRef, ClusterGraphProps>(function ClusterGraph(
   { clusters, onClusterClick, isLoading },
   ref
 ) {
+  const { theme } = useTheme();
+  const colors = CANVAS_COLORS[theme];
   const graphRef = useRef<ForceGraphMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -132,51 +141,54 @@ export const ClusterGraph = forwardRef<ClusterGraphRef, ClusterGraphProps>(funct
   }, [clusters]);
 
   // Custom bubble rendering with radial gradient
-  const paintNode = useCallback((node: ClusterNode, ctx: CanvasRenderingContext2D) => {
-    const size = node.size || 30;
-    const x = node.x || 0;
-    const y = node.y || 0;
+  const paintNode = useCallback(
+    (node: ClusterNode, ctx: CanvasRenderingContext2D) => {
+      const size = node.size || 30;
+      const x = node.x || 0;
+      const y = node.y || 0;
 
-    // Outer glow
-    ctx.beginPath();
-    ctx.arc(x, y, size + 6, 0, 2 * Math.PI);
-    ctx.fillStyle = `${node.color}22`;
-    ctx.fill();
+      // Outer glow
+      ctx.beginPath();
+      ctx.arc(x, y, size + 6, 0, 2 * Math.PI);
+      ctx.fillStyle = `${node.color}22`;
+      ctx.fill();
 
-    // Create radial gradient for bubble effect
-    const gradient = ctx.createRadialGradient(x - size / 3, y - size / 3, 0, x, y, size);
-    gradient.addColorStop(0, `${node.color}ee`);
-    gradient.addColorStop(0.7, `${node.color}aa`);
-    gradient.addColorStop(1, `${node.color}66`);
+      // Create radial gradient for bubble effect
+      const gradient = ctx.createRadialGradient(x - size / 3, y - size / 3, 0, x, y, size);
+      gradient.addColorStop(0, `${node.color}ee`);
+      gradient.addColorStop(0.7, `${node.color}aa`);
+      gradient.addColorStop(1, `${node.color}66`);
 
-    // Main bubble
-    ctx.beginPath();
-    ctx.arc(x, y, size, 0, 2 * Math.PI);
-    ctx.fillStyle = gradient;
-    ctx.fill();
+      // Main bubble
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, 2 * Math.PI);
+      ctx.fillStyle = gradient;
+      ctx.fill();
 
-    // Subtle border
-    ctx.strokeStyle = `${node.color}55`;
-    ctx.lineWidth = 1;
-    ctx.stroke();
+      // Subtle border
+      ctx.strokeStyle = `${node.color}55`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
 
-    // Count label (center)
-    const countFontSize = Math.max(12, size * 0.4);
-    ctx.font = `bold ${countFontSize}px "JetBrains Mono", monospace`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(node.count.toString(), x, y);
+      // Count label (center)
+      const countFontSize = Math.max(12, size * 0.4);
+      ctx.font = `bold ${countFontSize}px "JetBrains Mono", monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = colors.fgPrimary;
+      ctx.fillText(node.count.toString(), x, y);
 
-    // Type label (below bubble)
-    if (size > 25) {
-      const typeFontSize = Math.max(8, size * 0.2);
-      ctx.font = `${typeFontSize}px "Space Grotesk", sans-serif`;
-      ctx.fillStyle = '#ffffff88';
-      const typeLabel = node.type?.replace(/_/g, ' ') || 'unknown';
-      ctx.fillText(typeLabel, x, y + size + 10);
-    }
-  }, []);
+      // Type label (below bubble)
+      if (size > 25) {
+        const typeFontSize = Math.max(8, size * 0.2);
+        ctx.font = `${typeFontSize}px "Space Grotesk", sans-serif`;
+        ctx.fillStyle = colors.fgMuted;
+        const typeLabel = node.type?.replace(/_/g, ' ') || 'unknown';
+        ctx.fillText(typeLabel, x, y + size + 10);
+      }
+    },
+    [colors]
+  );
 
   const handleNodeClick = useCallback(
     (node: ClusterNode) => {
@@ -199,7 +211,10 @@ export const ClusterGraph = forwardRef<ClusterGraphRef, ClusterGraphProps>(funct
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full bg-sc-bg-dark">
+      <div
+        className="flex items-center justify-center h-full"
+        style={{ backgroundColor: colors.bg }}
+      >
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-sc-purple border-t-transparent rounded-full animate-spin" />
           <div className="text-sc-fg-muted text-sm">Detecting communities...</div>
@@ -210,7 +225,10 @@ export const ClusterGraph = forwardRef<ClusterGraphRef, ClusterGraphProps>(funct
 
   if (!clusters || clusters.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full bg-sc-bg-dark">
+      <div
+        className="flex items-center justify-center h-full"
+        style={{ backgroundColor: colors.bg }}
+      >
         <GraphEmptyState />
       </div>
     );
@@ -219,10 +237,12 @@ export const ClusterGraph = forwardRef<ClusterGraphRef, ClusterGraphProps>(funct
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full bg-[#0a0812]"
-      style={{ minHeight: '400px' }}
+      className="relative w-full h-full"
+      style={{ minHeight: '400px', backgroundColor: colors.bg }}
     >
+      {/* Key forces re-render when theme changes */}
       <ForceGraph2D
+        key={theme}
         ref={graphRef as React.MutableRefObject<ForceGraphMethods | undefined>}
         graphData={graphData as { nodes: object[]; links: object[] }}
         nodeCanvasObject={
@@ -235,7 +255,7 @@ export const ClusterGraph = forwardRef<ClusterGraphRef, ClusterGraphProps>(funct
         onNodeClick={handleNodeClick as (node: object, event: MouseEvent) => void}
         cooldownTicks={150}
         warmupTicks={50}
-        backgroundColor="#0a0812"
+        backgroundColor={colors.bg}
         enableZoomInteraction={true}
         enablePanInteraction={true}
         enableNodeDrag={true}

@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from 'next';
 import { Fira_Code, Space_Grotesk } from 'next/font/google';
 import { PublicEnvScript } from 'next-dynenv';
 import type { ReactNode } from 'react';
-import { Toaster } from 'sonner';
 
 import { Providers } from '@/components/providers';
 
@@ -31,27 +30,30 @@ export const viewport: Viewport = {
   themeColor: '#0a0812',
 };
 
+// Inline script to prevent FOUC - runs before React hydrates
+const themeScript = `
+(function() {
+  const stored = localStorage.getItem('sibyl-theme');
+  let theme = 'neon';
+  if (stored === 'neon' || stored === 'dawn') {
+    theme = stored;
+  } else if (stored === 'system' || !stored) {
+    theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'dawn' : 'neon';
+  }
+  document.documentElement.setAttribute('data-theme', theme);
+})();
+`;
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: FOUC prevention requires inline script */}
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <PublicEnvScript />
       </head>
       <body className={`${spaceGrotesk.variable} ${firaCode.variable} antialiased bg-sc-bg-dark`}>
-        <Providers>
-          {children}
-          <Toaster
-            theme="dark"
-            position="bottom-right"
-            toastOptions={{
-              style: {
-                background: 'var(--sc-bg-elevated)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                color: 'var(--sc-fg-primary)',
-              },
-            }}
-          />
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

@@ -2,9 +2,10 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type ReactNode, useEffect, useState } from 'react';
-
+import { ThemedToaster } from '@/components/ui/themed-toaster';
 import { printConsoleGreeting } from '@/lib/console-greeting';
 import { useMe, useRealtimeUpdates } from '@/lib/hooks';
+import { ThemeProvider } from '@/lib/theme';
 
 function RealtimeProvider({ children }: { children: ReactNode }) {
   const { data: me, isSuccess } = useMe();
@@ -32,8 +33,11 @@ export function Providers({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <RealtimeProvider>{children}</RealtimeProvider>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <RealtimeProvider>{children}</RealtimeProvider>
+        <ThemedToaster />
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }
