@@ -122,6 +122,14 @@ tasks:
       echo "✓ Installed to ~/.claude/skills and ~/.codex/skills"
     local: true
 
+  install-hooks:
+    command: "bash -c 'echo \"Installing Claude Code hooks...\" && mkdir -p ~/.claude/hooks/sibyl && cp hooks/*.py ~/.claude/hooks/sibyl/ && chmod +x ~/.claude/hooks/sibyl/*.py && python3 hooks/configure.py && echo \"✓ Hooks installed - restart Claude Code to activate\"'"
+    local: true
+
+  uninstall-hooks:
+    command: "bash -c 'rm -rf ~/.claude/hooks/sibyl && echo \"✓ Removed Sibyl hooks (settings.json unchanged - edit manually if needed)\"'"
+    local: true
+
   # ==========================================================================
   # E2E Testing
   # ==========================================================================

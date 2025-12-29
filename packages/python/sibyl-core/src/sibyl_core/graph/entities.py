@@ -623,22 +623,25 @@ class EntityManager:
                     if project_id and metadata.get("project_id") != project_id:
                         continue
 
-                    # Filter by status from metadata
+                    # Filter by status from metadata (supports comma-separated)
                     if status:
-                        entity_status = metadata.get("status")
-                        if entity_status != status:
+                        entity_status = metadata.get("status", "").lower()
+                        status_list = [s.strip().lower() for s in status.split(",")]
+                        if entity_status not in status_list:
                             continue
 
-                    # Filter by priority from metadata
+                    # Filter by priority from metadata (supports comma-separated)
                     if priority:
-                        entity_priority = metadata.get("priority")
-                        if entity_priority != priority:
+                        entity_priority = metadata.get("priority", "").lower()
+                        priority_list = [p.strip().lower() for p in priority.split(",")]
+                        if entity_priority not in priority_list:
                             continue
 
-                    # Filter by complexity from metadata
+                    # Filter by complexity from metadata (supports comma-separated)
                     if complexity:
-                        entity_complexity = metadata.get("complexity")
-                        if entity_complexity != complexity:
+                        entity_complexity = metadata.get("complexity", "").lower()
+                        complexity_list = [c.strip().lower() for c in complexity.split(",")]
+                        if entity_complexity not in complexity_list:
                             continue
 
                     # Filter by feature from metadata

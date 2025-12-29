@@ -881,8 +881,9 @@ async def search(
                     entity_status = _get_field(entity, "status")
                     if entity_status is None:
                         continue
-                    status_val = _serialize_enum(entity_status)
-                    if status.lower() != str(status_val).lower():
+                    status_val = str(_serialize_enum(entity_status)).lower()
+                    status_list = [s.strip().lower() for s in status.split(",")]
+                    if status_val not in status_list:
                         continue
 
                 if project and _get_field(entity, "project_id") != project:
@@ -1185,31 +1186,34 @@ def _passes_entity_filters(
     if epic and _get_field(entity, "epic_id") != epic:
         return False
 
-    # Status filter (for tasks)
+    # Status filter (for tasks) - supports comma-separated values
     if status:
         entity_status = _get_field(entity, "status")
         if entity_status is None:
             return False
-        status_val = _serialize_enum(entity_status)
-        if status.lower() != str(status_val).lower():
+        status_val = str(_serialize_enum(entity_status)).lower()
+        status_list = [s.strip().lower() for s in status.split(",")]
+        if status_val not in status_list:
             return False
 
-    # Priority filter (for tasks)
+    # Priority filter (for tasks) - supports comma-separated values
     if priority:
         entity_priority = _get_field(entity, "priority")
         if entity_priority is None:
             return False
-        priority_val = _serialize_enum(entity_priority)
-        if priority.lower() != str(priority_val).lower():
+        priority_val = str(_serialize_enum(entity_priority)).lower()
+        priority_list = [p.strip().lower() for p in priority.split(",")]
+        if priority_val not in priority_list:
             return False
 
-    # Complexity filter (for tasks)
+    # Complexity filter (for tasks) - supports comma-separated values
     if complexity:
         entity_complexity = _get_field(entity, "complexity")
         if entity_complexity is None:
             return False
-        complexity_val = _serialize_enum(entity_complexity)
-        if complexity.lower() != str(complexity_val).lower():
+        complexity_val = str(_serialize_enum(entity_complexity)).lower()
+        complexity_list = [c.strip().lower() for c in complexity.split(",")]
+        if complexity_val not in complexity_list:
             return False
 
     # Feature filter (for tasks)

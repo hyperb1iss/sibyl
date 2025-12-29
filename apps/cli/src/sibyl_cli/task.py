@@ -331,17 +331,10 @@ def list_tasks(
                 has_more = response.get("has_more", False)
                 total = response.get("total", len(entities))
             else:
-                # Only pass single values to API; multiple values filtered client-side
-                api_status = None
-                if status and "," not in status:
-                    api_status = status
-                api_priority = None
-                if priority and "," not in priority:
-                    api_priority = priority
-                api_complexity = None
-                if complexity and "," not in complexity:
-                    api_complexity = complexity
-                # Tags always goes to API (any-match is handled by backend)
+                # All filtering handled by backend (supports comma-separated values)
+                api_status = status
+                api_priority = priority
+                api_complexity = complexity
                 api_tags = tags
 
                 if fmt in ("json", "csv"):
