@@ -113,3 +113,12 @@ tasks:
       - "@group(configs)"
     outputs:
       - "dist"
+
+  # Installation
+  install:
+    command: "uv tool install . --force"
+    local: true
+
+  install-dev:
+    command: "uv tool install . --editable --force"
+    local: true

@@ -70,67 +70,6 @@ tasks:
     local: true
 
   # ==========================================================================
-  # Installation
-  # ==========================================================================
-  install:
-    command: |
-      echo "Installing sibyl CLI..."
-      uv tool install ./apps/cli --force
-      echo "Installing sibyld daemon..."
-      uv tool install ./apps/api --force
-      echo "Installing skills..."
-      mkdir -p ~/.claude/skills ~/.codex/skills
-      rm -rf ~/.claude/skills/sibyl-knowledge ~/.claude/skills/sibyl-project-manager
-      rm -rf ~/.codex/skills/sibyl-knowledge ~/.codex/skills/sibyl-project-manager
-      cp -r skills/sibyl-knowledge ~/.claude/skills/
-      cp -r skills/sibyl-project-manager ~/.claude/skills/
-      cp -r skills/sibyl-knowledge ~/.codex/skills/
-      cp -r skills/sibyl-project-manager ~/.codex/skills/
-      echo "✓ Installed sibyl, sibyld, and skills"
-    local: true
-    options:
-      shell: true
-
-  install-dev:
-    command: |
-      echo "Installing sibyl CLI (editable)..."
-      uv tool install ./apps/cli --editable --force
-      echo "Installing sibyld daemon (editable)..."
-      uv tool install ./apps/api --editable --force
-      echo "Installing skills..."
-      mkdir -p ~/.claude/skills ~/.codex/skills
-      rm -rf ~/.claude/skills/sibyl-knowledge ~/.claude/skills/sibyl-project-manager
-      rm -rf ~/.codex/skills/sibyl-knowledge ~/.codex/skills/sibyl-project-manager
-      cp -r skills/sibyl-knowledge ~/.claude/skills/
-      cp -r skills/sibyl-project-manager ~/.claude/skills/
-      cp -r skills/sibyl-knowledge ~/.codex/skills/
-      cp -r skills/sibyl-project-manager ~/.codex/skills/
-      echo "✓ Installed sibyl, sibyld (editable), and skills"
-    local: true
-    options:
-      shell: true
-
-  install-skills:
-    command: |
-      mkdir -p ~/.claude/skills ~/.codex/skills
-      rm -rf ~/.claude/skills/sibyl-knowledge ~/.claude/skills/sibyl-project-manager
-      rm -rf ~/.codex/skills/sibyl-knowledge ~/.codex/skills/sibyl-project-manager
-      cp -r skills/sibyl-knowledge ~/.claude/skills/
-      cp -r skills/sibyl-project-manager ~/.claude/skills/
-      cp -r skills/sibyl-knowledge ~/.codex/skills/
-      cp -r skills/sibyl-project-manager ~/.codex/skills/
-      echo "✓ Installed to ~/.claude/skills and ~/.codex/skills"
-    local: true
-
-  install-hooks:
-    command: "bash -c 'echo \"Installing Claude Code hooks...\" && mkdir -p ~/.claude/hooks/sibyl && cp hooks/*.py ~/.claude/hooks/sibyl/ && chmod +x ~/.claude/hooks/sibyl/*.py && python3 hooks/configure.py && echo \"✓ Hooks installed - restart Claude Code to activate\"'"
-    local: true
-
-  uninstall-hooks:
-    command: "bash -c 'rm -rf ~/.claude/hooks/sibyl && echo \"✓ Removed Sibyl hooks (settings.json unchanged - edit manually if needed)\"'"
-    local: true
-
-  # ==========================================================================
   # E2E Testing
   # ==========================================================================
   e2e-up:

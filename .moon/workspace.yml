@@ -11,3 +11,4 @@ projects:
   core: "packages/python/sibyl-core"
   # Tools
   hooks: "hooks"
+  skills: "skills"

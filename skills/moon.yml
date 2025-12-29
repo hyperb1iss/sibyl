@@ -1,0 +1,30 @@
+# https://moonrepo.dev/docs/config/project
+$schema: "https://moonrepo.dev/schemas/project.json"
+
+language: other
+type: tool
+
+tasks:
+  install:
+    command: |
+      echo "Installing Sibyl skills..."
+      mkdir -p ~/.claude/skills ~/.codex/skills
+      rm -rf ~/.claude/skills/sibyl-knowledge ~/.claude/skills/sibyl-project-manager
+      rm -rf ~/.codex/skills/sibyl-knowledge ~/.codex/skills/sibyl-project-manager
+      cp -r sibyl-knowledge ~/.claude/skills/
+      cp -r sibyl-project-manager ~/.claude/skills/
+      cp -r sibyl-knowledge ~/.codex/skills/
+      cp -r sibyl-project-manager ~/.codex/skills/
+      echo "✓ Installed to ~/.claude/skills and ~/.codex/skills"
+    local: true
+    options:
+      shell: true
+
+  uninstall:
+    command: |
+      rm -rf ~/.claude/skills/sibyl-knowledge ~/.claude/skills/sibyl-project-manager
+      rm -rf ~/.codex/skills/sibyl-knowledge ~/.codex/skills/sibyl-project-manager
+      echo "✓ Removed Sibyl skills"
+    local: true
+    options:
+      shell: true
