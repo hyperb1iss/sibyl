@@ -41,19 +41,18 @@ sibyl task complete task_xyz --learnings "OAuth tokens expire..."
 **Pro tips:**
 
 - **Link your project first** - then task commands just work without `--project`
-- **Always use JSON output** (default) - it's structured and jq-parseable
+- **Table output is default** - use `--json` only for scripting
 - Use `--all` flag to bypass context and see all projects
-- Use `2>&1` when piping to capture all output (spinner goes to stderr)
 
 ---
 
 ## The Agent Feedback Loop
 
 ```
-1. SEARCH FIRST     → sibyl search "topic"
-2. CHECK TASKS      → sibyl task list --status doing
-3. WORK & CAPTURE   → sibyl entity create (for learnings)
-4. COMPLETE         → sibyl task complete --learnings "..."
+1. SEARCH FIRST     -> sibyl search "topic"
+2. CHECK TASKS      -> sibyl task list --status doing
+3. WORK & CAPTURE   -> sibyl entity create (for learnings)
+4. COMPLETE         -> sibyl task complete --learnings "..."
 ```
 
 ---
@@ -103,50 +102,21 @@ sibyl add "Retry pattern" "Exponential backoff..." --type pattern
 # CREATE a task (requires project)
 sibyl task create --title "Implement OAuth" --project proj_abc
 sibyl task create --title "Add rate limiting" -p proj_api --priority high
-sibyl task create --title "Fix bug" -p proj_web --assignee alice --tech python,redis
-sibyl task create --title "Complex feature" -p proj_api --complexity complex --tags backend,urgent
-sibyl task create --title "Simple tweak" -p proj_web --complexity trivial --feature ui --tags cleanup
 ```
 
-**IMPORTANT:** Use `--title` (not `-t`). The `-t` flag is for table output!
+**IMPORTANT:** Use `--title` (not `-t`). The `-t` flag was for table output (now default).
 
 ```bash
-# List tasks (ALWAYS filter by project, status, or priority)
-sibyl task list --project proj_abc
-sibyl task list --status todo
-sibyl task list --status doing
-sibyl task list --priority high
-sibyl task list --assignee alice
-
-# Multiple statuses (comma-separated)
+# List tasks (table output is default, comma-separated values supported)
 sibyl task list --status todo,doing,blocked
-
-# Multiple priorities (comma-separated)
 sibyl task list --priority critical,high
+sibyl task list --tags bug,urgent
 
-# Filter by complexity
-sibyl task list --complexity simple
-sibyl task list --complexity trivial,simple,medium  # Multiple
+# Combine filters
+sibyl task list --status todo --priority high --feature backend
 
-# Filter by feature area
-sibyl task list --feature auth
-sibyl task list -f backend           # Short form
-
-# Filter by tags (matches if task has ANY of the tags)
-sibyl task list --tags bug
-sibyl task list --tags bug,urgent,critical
-
-# Combine multiple filters (all backend-filtered, respects pagination limits)
-sibyl task list --status todo --priority high --complexity simple --feature auth
-
-# Semantic search within tasks (use -q for query mode)
+# Semantic search within tasks
 sibyl task list -q "authentication"
-sibyl task list -q "fix bug" --status todo
-
-# Pagination (max 200 per page)
-sibyl task list --status todo --limit 100
-sibyl task list --status todo --page 2
-sibyl task list --status todo --limit 50 --offset 100
 
 # Show task details
 sibyl task show task_xyz
@@ -167,25 +137,13 @@ sibyl task review task_xyz --pr "github.com/.../pull/42"
 sibyl task complete task_xyz --hours 4.5 --learnings "Token refresh needs..."
 
 # Archive single task
-sibyl task archive task_xyz --yes
+sibyl task archive task_xyz --reason "Completed: implemented feature"
 
-# Bulk archive via stdin (pipe task IDs)
-sibyl task list -q "test" --status todo 2>&1 | jq -r '.[].id' | sibyl task archive --stdin --yes
-
-# Direct update (bulk/historical updates)
+# Direct update
 sibyl task update task_xyz --status done --priority high
-sibyl task update task_xyz -s todo -p medium
-
-# Update complexity, tags, tech
-sibyl task update task_xyz --complexity complex
-sibyl task update task_xyz --tags bug,urgent,backend
-sibyl task update task_xyz --tech python,redis,celery
-sibyl task update task_xyz --feature auth --complexity medium --tags sprint-1
 ```
 
-**Task States:** `backlog ↔ todo ↔ doing ↔ blocked ↔ review ↔ done ↔ archived`
-
-(Any transition is allowed for flexibility with historical/bulk data)
+**Task States:** `backlog <-> todo <-> doing <-> blocked <-> review <-> done <-> archived`
 
 ---
 
@@ -206,33 +164,22 @@ sibyl project create --name "Auth System" --description "OAuth and JWT implement
 
 ### Project Context (Directory Linking)
 
-Link directories to projects for automatic task scoping. Once linked, you don't need `--project`
-flags.
+Link directories to projects for automatic task scoping.
 
 ```bash
 # Link current directory to a project
 sibyl project link                    # Interactive - pick from list
 sibyl project link project_abc123     # Link to specific project
-sibyl project link proj_x --path ~/dev/other  # Link a different path
 
-# Check current context (verify linked project)
-cat ~/.sibyl/config.toml              # View path mappings
-sibyl project list                    # See all projects
+# Check current context
+sibyl context
 
 # List all directory-to-project links
 sibyl project links
 
 # Remove a link
-sibyl project unlink                  # Unlink current directory
-sibyl project unlink --path ~/old/project
+sibyl project unlink
 ```
-
-**How it works:**
-
-- Mappings stored in `~/.sibyl/config.toml` under `[paths]`
-- Uses longest-prefix matching (so `~/dev/sibyl/web` matches `~/dev/sibyl`)
-- Task commands auto-resolve project from cwd
-- Use `--all` flag to bypass context: `sibyl task list --all`
 
 ---
 
@@ -242,7 +189,6 @@ sibyl project unlink --path ~/old/project
 # List entities by type
 sibyl entity list --type pattern
 sibyl entity list --type episode
-sibyl entity list --type rule --language python
 
 # Show entity details
 sibyl entity show entity_xyz
@@ -296,27 +242,16 @@ sibyl config
 
 ## Common Workflows
 
-### First-Time Setup (per project)
-
-```bash
-# Link your project directory (one-time)
-cd ~/dev/my-project
-sibyl project link
-
-# Verify
-sibyl context -t
-```
-
 ### Starting a New Session
 
 ```bash
-# 1. Check current context (should show your project)
+# 1. Check current context
 sibyl context
 
 # 2. Check for in-progress work
 sibyl task list --status doing
 
-# 3. Or find todo tasks (auto-scoped to project)
+# 3. Or find todo tasks
 sibyl task list --status todo
 
 # 4. Start working
@@ -326,41 +261,29 @@ sibyl task start task_xyz
 ### Research Before Implementation
 
 ```bash
-# Find patterns
 sibyl search "what you're implementing" --type pattern
-
-# Find past learnings
 sibyl search "related topic" --type episode
-
-# Check for gotchas
 sibyl search "common mistakes" --type episode
 ```
 
 ### Capture a Learning
 
 ```bash
-# Quick capture
 sibyl add "Descriptive title" "What you learned and why it matters"
-
-# With metadata
-sibyl add "Descriptive title" "What you learned..." -c debugging -l python --auto-link
 ```
 
 ### Complete Task with Learnings
 
 ```bash
-# Capture insights when completing
-sibyl task complete task_xyz \
-  --hours 4.5 \
-  --learnings "Key insight: The OAuth flow requires..."
+sibyl task complete task_xyz --hours 4.5 --learnings "Key insight: The OAuth flow requires..."
 ```
 
 ---
 
 ## Output Formats
 
-- **JSON** (default): Parse with `jq`, embeddings auto-stripped
-- **Table**: Add `-t` for human-readable output
+- **Table** (default): Human-readable, clean output
+- **JSON**: Add `--json` for scripting
 - **CSV**: Add `--csv` for spreadsheet export
 
 ---
@@ -379,37 +302,17 @@ sibyl task complete task_xyz \
 
 ---
 
-## CLI vs MCP Tools
-
-Both work well. Choose based on context:
-
-| Use Case              | Best Choice              |
-| --------------------- | ------------------------ |
-| Single operations     | Either works             |
-| Bulk/batch operations | CLI (pipes, scripts)     |
-| Output formatting     | CLI (`--table`, `--csv`) |
-| Direct from agent     | MCP tools are fine       |
-
-Both require the Sibyl server to be reachable. Use `sibyl health` to verify connectivity.
-
----
-
 ## Troubleshooting
 
 ### Connection errors
-
-Check server health first:
 
 ```bash
 sibyl health
 ```
 
-If unhealthy, verify the Sibyl server and FalkorDB are running. Check your `SIBYL_API_URL` if using
-a remote server.
+If unhealthy, verify the Sibyl server and FalkorDB are running.
 
 ### Task list shows wrong project's tasks
-
-Check your project context:
 
 ```bash
 sibyl context                      # See which project you're linked to
@@ -417,118 +320,21 @@ sibyl project link                 # Link to correct project
 sibyl task list --all              # Bypass context to see all
 ```
 
-### Task list shows old/test data
-
-Filter by status to focus:
-
-```bash
-sibyl task list --status todo      # Active work only
-```
-
 ---
 
-## Quick jq Recipes
+## Common Pitfalls
 
-```bash
-# Count tasks
-sibyl task list --status todo 2>&1 | jq 'length'
-
-# List names
-sibyl task list --status todo 2>&1 | jq -r '.[].name'
-
-# Filter by priority/complexity/feature/tags (USE THE FLAGS, not jq!)
-sibyl task list --priority high              # Backend filters - efficient!
-sibyl task list --priority critical,high     # Multiple priorities
-sibyl task list --complexity simple          # Filter by complexity
-sibyl task list --feature auth               # Filter by feature area
-sibyl task list --tags bug,urgent            # Filter by tags (ANY match)
-
-# Combine filters (all backend-filtered, respects pagination limits)
-sibyl task list --status todo --priority high --feature backend
-
-# Export CSV
-sibyl task list --status todo --csv > tasks.csv
-```
-
-See WORKFLOWS.md for advanced recipes.
-
----
-
-## Common Pitfalls (AVOID THESE)
-
-Based on analysis of 200MB of conversation history, these are the most common CLI mistakes:
-
-### Wrong Command Names
-
-| ❌ Wrong                  | ✅ Correct                        | Note                          |
-| ------------------------- | --------------------------------- | ----------------------------- |
-| `sibyl task add "..."`    | `sibyl task create --title "..."` | Use `create` not `add`        |
-| `sibyl task list --todo`  | `sibyl task list --status todo`   | Status is a value, not a flag |
-| `sibyl task list --doing` | `sibyl task list --status doing`  | Same issue                    |
-
-### Non-Existent Flags
-
-| ❌ Won't Work                    | Why                         | ✅ Alternative                |
-| -------------------------------- | --------------------------- | ----------------------------- |
-| `--json`                         | JSON is already the default | Just omit it                  |
-| `--description` on `task update` | Only at creation            | Set in `task create -d "..."` |
-| `--format json`                  | Not a flag                  | JSON is default, just omit    |
-| `--format csv`                   | Not a flag                  | Use `--csv` instead           |
-
-### Title Flag Confusion
-
-```bash
-# ❌ WRONG: -t is for TABLE output, not title!
-sibyl task create -t "My Task" -p project_id
-
-# ✅ CORRECT: Use --title (no short form)
-sibyl task create --title "My Task" -p project_id
-```
-
-### JSON Field Names
-
-When parsing CLI JSON output with jq, tasks use `name` not `title`:
-
-```bash
-# ❌ WRONG: Field is called "name", not "title"
-sibyl task list --status todo 2>&1 | jq '.[].title'
-
-# ✅ CORRECT
-sibyl task list --status todo 2>&1 | jq '.[].name'
-```
-
-### Multiline Commands Break
-
-Trailing spaces after `\` cause "Got unexpected extra arguments":
-
-```bash
-# ❌ WRONG: Space after backslash
-sibyl task create --title "Fix" \
-  --priority high
-
-# ✅ CORRECT: Single line or no trailing spaces
-sibyl task create --title "Fix" --priority high -p project_id
-```
-
-### Error Handling
-
-When piping to jq, failed commands send error text instead of JSON:
-
-```bash
-# If server is down, jq will fail with parse error
-# Check server first: sibyl health
-```
-
-### Task ID Resolution
+| Wrong                        | Correct                              |
+| ---------------------------- | ------------------------------------ |
+| `sibyl task add "..."`       | `sibyl task create --title "..."`    |
+| `sibyl task list --todo`     | `sibyl task list --status todo`      |
+| `sibyl task create -t "..."` | `sibyl task create --title "..."` (!) |
 
 The CLI supports short ID prefixes - it will resolve them automatically:
 
 ```bash
-# Both work - CLI finds the full ID
-sibyl task show task_c24
-sibyl task show task_c24fc3228e7c
-
-# Only fails if prefix matches multiple tasks (ambiguous)
+sibyl task show task_c24          # Works - CLI finds the full ID
+sibyl task show task_c24fc3228e7c # Also works
 ```
 
 ---
@@ -536,9 +342,6 @@ sibyl task show task_c24fc3228e7c
 ## Prerequisites
 
 ```bash
-# Check connectivity
-sibyl health
-
-# First-time setup (checks environment, dependencies)
-sibyl setup
+sibyl health   # Check connectivity
+sibyl setup    # First-time setup
 ```

@@ -53,11 +53,11 @@ def explore_related(
         str | None, typer.Option("--rel", "-r", help="Relationship types (comma-sep)")
     ] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Find directly connected entities (1-hop). Default: JSON output."""
+    """Find directly connected entities (1-hop). Default: table output."""
 
     @run_async
     async def _related() -> None:
@@ -68,7 +68,7 @@ def explore_related(
                 [r.strip() for r in relationship_types.split(",")] if relationship_types else None
             )
 
-            if table_out:
+            if not json_out:
                 with spinner("Exploring relationships...") as progress:
                     progress.add_task("Exploring relationships...", total=None)
                     response = await client.explore(
@@ -88,7 +88,7 @@ def explore_related(
             entities = response.get("entities", [])
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(entities)
                 return
 
@@ -121,11 +121,11 @@ def explore_traverse(
     entity_id: Annotated[str, typer.Argument(help="Starting entity ID")],
     depth: Annotated[int, typer.Option("--depth", "-d", help="Traversal depth (1-3)")] = 2,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 50,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Multi-hop graph traversal from an entity. Default: JSON output."""
+    """Multi-hop graph traversal from an entity. Default: table output."""
     if depth < 1 or depth > 3:
         error("Depth must be between 1 and 3")
         return
@@ -135,7 +135,7 @@ def explore_traverse(
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner(f"Traversing {depth} hops...") as progress:
                     progress.add_task(f"Traversing {depth} hops...", total=None)
                     response = await client.explore(
@@ -155,7 +155,7 @@ def explore_traverse(
             entities = response.get("entities", [])
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(entities)
                 return
 
@@ -202,11 +202,11 @@ def explore_dependencies(
     project: Annotated[
         str | None, typer.Option("--project", "-p", help="Project ID for all deps")
     ] = None,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show task dependency graph with topological ordering. Default: JSON output."""
+    """Show task dependency graph with topological ordering. Default: table output."""
     if not entity_id and not project:
         error("Must specify either entity_id or --project")
         return
@@ -216,7 +216,7 @@ def explore_dependencies(
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Analyzing dependencies...") as progress:
                     progress.add_task("Analyzing dependencies...", total=None)
                     response = await client.explore(
@@ -235,7 +235,7 @@ def explore_dependencies(
             metadata = response.get("metadata", {})
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 output = {
                     "entities": entities,
                     "has_cycles": metadata.get("has_cycles", False),
@@ -289,11 +289,11 @@ def explore_path(
     from_id: Annotated[str, typer.Argument(help="Starting entity ID")],
     to_id: Annotated[str, typer.Argument(help="Target entity ID")],
     max_depth: Annotated[int, typer.Option("--depth", "-d", help="Max path length")] = 5,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Find shortest path between two entities. Default: JSON output."""
+    """Find shortest path between two entities. Default: table output."""
 
     @run_async
     async def _path() -> None:
@@ -301,7 +301,7 @@ def explore_path(
 
         try:
             # Use explore with path mode
-            if table_out:
+            if not json_out:
                 with spinner("Finding path...") as progress:
                     progress.add_task("Finding path...", total=None)
                     response = await client.explore(
@@ -323,7 +323,7 @@ def explore_path(
             entities = response.get("entities", [])
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 output = {
                     "from_id": from_id,
                     "to_id": to_id,

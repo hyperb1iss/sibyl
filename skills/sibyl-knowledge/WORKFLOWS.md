@@ -219,8 +219,8 @@ sibyl task list --project proj_abc --status blocked
 ### Export for Reports
 
 ```bash
-# Export tasks as JSON (default output)
-sibyl task list --project proj_abc > tasks.json
+# Export tasks as JSON
+sibyl task list --project proj_abc --json > tasks.json
 
 # Export as CSV for spreadsheets
 sibyl task list --project proj_abc --csv > tasks.csv

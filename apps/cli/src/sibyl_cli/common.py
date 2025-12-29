@@ -11,6 +11,7 @@ from functools import wraps
 from typing import TYPE_CHECKING
 
 import typer
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -120,10 +121,13 @@ def print_db_hint() -> None:
 
 
 def create_table(title: str | None = None, *columns: str) -> Table:
-    """Create a styled table with SilkCircuit colors."""
-    table = Table(title=title, border_style=NEON_CYAN)
+    """Create a styled table with SilkCircuit colors.
+
+    Uses SIMPLE_HEAD box style - just a header underline, no heavy frames.
+    """
+    table = Table(title=title, box=box.SIMPLE_HEAD, header_style=f"bold {NEON_CYAN}")
     for i, col in enumerate(columns):
-        style = ELECTRIC_PURPLE if i == 0 else NEON_CYAN
+        style = ELECTRIC_PURPLE if i == 0 else None
         justify = (
             "left" if i == 0 else "right" if col.lower() in ("count", "score", "value") else "left"
         )

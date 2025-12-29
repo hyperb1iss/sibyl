@@ -81,13 +81,13 @@ def list_entities(
         str | None, typer.Option("--category", "-c", help="Filter by category")
     ] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 50,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
     csv_out: Annotated[bool, typer.Option("--csv", help="CSV output")] = False,
 ) -> None:
-    """List entities by type with optional filters. Default: JSON output."""
-    format_ = "table" if table_out else ("csv" if csv_out else "json")
+    """List entities by type with optional filters. Default: table output."""
+    format_ = "table" if json_out else ("csv" if csv_out else "json")
     if entity_type not in ENTITY_TYPES:
         error(f"Invalid entity type: {entity_type}")
         info(f"Valid types: {', '.join(ENTITY_TYPES)}")
@@ -164,18 +164,18 @@ def list_entities(
 @app.command("show")
 def show_entity(
     entity_id: Annotated[str, typer.Argument(help="Entity ID")],
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show detailed entity information. Default: JSON output."""
+    """Show detailed entity information. Default: table output."""
 
     @run_async
     async def _show() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Loading entity...") as progress:
                     progress.add_task("Loading entity...", total=None)
                     entity = await client.get_entity(entity_id)
@@ -183,7 +183,7 @@ def show_entity(
                 entity = await client.get_entity(entity_id)
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(entity)
                 return
 
@@ -233,11 +233,11 @@ def create_entity(
         str | None, typer.Option("--languages", "-l", help="Comma-separated languages")
     ] = None,
     tags: Annotated[str | None, typer.Option("--tags", help="Comma-separated tags")] = None,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Create a new entity. Default: JSON output."""
+    """Create a new entity. Default: table output."""
     if entity_type not in ENTITY_TYPES:
         error(f"Invalid entity type: {entity_type}")
         info(f"Valid types: {', '.join(ENTITY_TYPES)}")
@@ -251,7 +251,7 @@ def create_entity(
             lang_list = [lang.strip() for lang in languages.split(",")] if languages else None
             tag_list = [tag.strip() for tag in tags.split(",")] if tags else None
 
-            if table_out:
+            if not json_out:
                 with spinner("Creating entity...") as progress:
                     progress.add_task("Creating entity...", total=None)
                     response = await client.create_entity(
@@ -277,7 +277,7 @@ def create_entity(
                 )
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -297,18 +297,18 @@ def create_entity(
 def delete_entity(
     entity_id: Annotated[str, typer.Argument(help="Entity ID to delete")],
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Delete an entity. Default: JSON output."""
+    """Delete an entity. Default: table output."""
 
     @run_async
     async def _delete() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Deleting entity...") as progress:
                     progress.add_task("Deleting entity...", total=None)
                     await client.delete_entity(entity_id)
@@ -316,7 +316,7 @@ def delete_entity(
                 await client.delete_entity(entity_id)
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 response = {"deleted": True, "id": entity_id}
                 print_json(response)
                 return
@@ -334,18 +334,18 @@ def delete_entity(
 def related_entities(
     entity_id: Annotated[str, typer.Argument(help="Entity ID")],
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show entities related to the given entity (1-hop). Default: JSON output."""
+    """Show entities related to the given entity (1-hop). Default: table output."""
 
     @run_async
     async def _related() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Finding related entities...") as progress:
                     progress.add_task("Finding related entities...", total=None)
                     response = await client.explore(
@@ -363,7 +363,7 @@ def related_entities(
             entities = response.get("entities", [])
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(entities)
                 return
 

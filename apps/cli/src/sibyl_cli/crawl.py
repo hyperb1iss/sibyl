@@ -53,18 +53,18 @@ def _handle_client_error(e: SibylClientError) -> None:
 def list_sources(
     status: Annotated[str | None, typer.Option("--status", "-s", help="Filter by status")] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """List all crawl sources. Default: JSON output."""
+    """List all crawl sources. Default: table output."""
 
     @run_async
     async def _list() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Loading sources...") as progress:
                     progress.add_task("Loading sources...", total=None)
                     response = await client.list_crawl_sources(status=status, limit=limit)
@@ -74,7 +74,7 @@ def list_sources(
             sources = response.get("sources", [])
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -124,11 +124,11 @@ def add_source(
     pattern: Annotated[
         list[str] | None, typer.Option("--pattern", "-p", help="URL patterns to include")
     ] = None,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Add a new documentation source. Default: JSON output."""
+    """Add a new documentation source. Default: table output."""
 
     @run_async
     async def _add() -> None:
@@ -137,7 +137,7 @@ def add_source(
         try:
             source_name = name or url.split("//")[-1].split("/")[0]
 
-            if table_out:
+            if not json_out:
                 with spinner("Adding source...") as progress:
                     progress.add_task("Adding source...", total=None)
                     response = await client.create_crawl_source(
@@ -157,7 +157,7 @@ def add_source(
                 )
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -182,11 +182,11 @@ def ingest(
     ] = 50,
     max_depth: Annotated[int, typer.Option("--depth", "-d", help="Maximum link depth")] = 3,
     no_embed: Annotated[bool, typer.Option("--no-embed", help="Skip embedding generation")] = False,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Start crawling a documentation source. Default: JSON output.
+    """Start crawling a documentation source. Default: table output.
 
     Examples:
         sibyl crawl ingest abc123 --max-pages 100
@@ -198,7 +198,7 @@ def ingest(
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Starting ingestion...") as progress:
                     progress.add_task("Starting ingestion...", total=None)
                     response = await client.start_crawl(
@@ -216,7 +216,7 @@ def ingest(
                 )
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -239,18 +239,18 @@ def ingest(
 @app.command("status")
 def crawl_status(
     source_id: Annotated[str, typer.Argument(help="Source ID")],
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Get status of a crawl job. Default: JSON output."""
+    """Get status of a crawl job. Default: table output."""
 
     @run_async
     async def _status() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Checking status...") as progress:
                     progress.add_task("Checking status...", total=None)
                     response = await client.get_crawl_status(source_id)
@@ -258,7 +258,7 @@ def crawl_status(
                 response = await client.get_crawl_status(source_id)
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -303,18 +303,18 @@ def list_documents(
         str | None, typer.Option("--source", "-s", help="Filter by source ID")
     ] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """List crawled documents. Default: JSON output."""
+    """List crawled documents. Default: table output."""
 
     @run_async
     async def _list() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Loading documents...") as progress:
                     progress.add_task("Loading documents...", total=None)
                     response = await client.list_crawl_documents(source_id=source_id, limit=limit)
@@ -324,7 +324,7 @@ def list_documents(
             documents = response.get("documents", [])
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -355,18 +355,18 @@ def list_documents(
 
 @app.command("stats")
 def stats(
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show crawling statistics. Default: JSON output."""
+    """Show crawling statistics. Default: table output."""
 
     @run_async
     async def _stats() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Loading stats...") as progress:
                     progress.add_task("Loading stats...", total=None)
                     response = await client.crawler_stats()
@@ -374,7 +374,7 @@ def stats(
                 response = await client.crawler_stats()
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -400,18 +400,18 @@ def stats(
 
 @app.command("health")
 def health(
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Check crawl system health. Default: JSON output."""
+    """Check crawl system health. Default: table output."""
 
     @run_async
     async def _health() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Checking health...") as progress:
                     progress.add_task("Checking health...", total=None)
                     response = await client.crawler_health()
@@ -419,7 +419,7 @@ def health(
                 response = await client.crawler_health()
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -449,18 +449,18 @@ def health(
 @app.command("delete")
 def delete_source(
     source_id: Annotated[str, typer.Argument(help="Source ID to delete")],
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Delete a crawl source and all its documents. Default: JSON output."""
+    """Delete a crawl source and all its documents. Default: table output."""
 
     @run_async
     async def _delete() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Deleting source...") as progress:
                     progress.add_task("Deleting source...", total=None)
                     response = await client.delete_crawl_source(source_id)
@@ -468,7 +468,7 @@ def delete_source(
                 response = await client.delete_crawl_source(source_id)
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 

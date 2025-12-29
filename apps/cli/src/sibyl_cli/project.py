@@ -57,13 +57,13 @@ def _handle_client_error(e: SibylClientError) -> None:
 @app.command("list")
 def list_projects(
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
     csv_out: Annotated[bool, typer.Option("--csv", help="CSV output")] = False,
 ) -> None:
-    """List all projects. Default: JSON output."""
-    format_ = "table" if table_out else ("csv" if csv_out else "json")
+    """List all projects. Default: table output."""
+    format_ = "table" if json_out else ("csv" if csv_out else "json")
 
     @run_async
     async def _list() -> None:
@@ -135,18 +135,18 @@ def list_projects(
 @app.command("show")
 def show_project(
     project_id: Annotated[str, typer.Argument(help="Project ID")],
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show project details with task summary. Default: JSON output."""
+    """Show project details with task summary. Default: table output."""
 
     @run_async
     async def _show() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Loading project...") as progress:
                     progress.add_task("Loading project...", total=None)
                     entity = await client.get_entity(project_id)
@@ -166,7 +166,7 @@ def show_project(
                 )
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 # Include task summary in output
                 tasks = tasks_response.get("entities", [])
                 status_counts: dict[str, int] = {}
@@ -234,11 +234,11 @@ def create_project(
         str | None, typer.Option("--description", "-d", help="Project description")
     ] = None,
     repo: Annotated[str | None, typer.Option("--repo", "-r", help="Repository URL")] = None,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Create a new project. Default: JSON output."""
+    """Create a new project. Default: table output."""
 
     @run_async
     async def _create() -> None:
@@ -249,7 +249,7 @@ def create_project(
             if repo:
                 metadata["repository_url"] = repo
 
-            if table_out:
+            if not json_out:
                 with spinner("Creating project...") as progress:
                     progress.add_task("Creating project...", total=None)
                     response = await client.create_entity(
@@ -267,7 +267,7 @@ def create_project(
                 )
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -286,18 +286,18 @@ def create_project(
 @app.command("progress")
 def project_progress(
     project_id: Annotated[str, typer.Argument(help="Project ID")],
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show project progress with visual breakdown. Default: JSON output."""
+    """Show project progress with visual breakdown. Default: table output."""
 
     @run_async
     async def _progress() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Loading progress...") as progress:
                     progress.add_task("Loading progress...", total=None)
                     response = await client.explore(
@@ -326,7 +326,7 @@ def project_progress(
             pct = (done / total) * 100 if total > 0 else 0
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 output = {
                     "project_id": project_id,
                     "total_tasks": total,

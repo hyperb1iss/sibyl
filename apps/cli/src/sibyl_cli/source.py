@@ -47,12 +47,12 @@ def _handle_client_error(e: SibylClientError) -> None:
 @app.command("list")
 def list_sources(
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """List all documentation sources. Default: JSON output."""
-    format_ = "table" if table_out else "json"
+    """List all documentation sources. Default: table output."""
+    format_ = "table" if json_out else "json"
 
     @run_async
     async def _list() -> None:
@@ -102,11 +102,11 @@ def add_source(
         str, typer.Option("--type", "-T", help="Source type: website, github, api_docs")
     ] = "website",
     depth: Annotated[int, typer.Option("--depth", "-d", help="Crawl depth")] = 2,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Add a new documentation source. Default: JSON output."""
+    """Add a new documentation source. Default: table output."""
 
     @run_async
     async def _add() -> None:
@@ -115,7 +115,7 @@ def add_source(
         try:
             source_name = name or url.split("//")[-1].split("/")[0]
 
-            if table_out:
+            if not json_out:
                 with spinner("Adding source...") as progress:
                     progress.add_task("Adding source...", total=None)
                     response = await client.create_entity(
@@ -143,7 +143,7 @@ def add_source(
                 )
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -163,18 +163,18 @@ def add_source(
 @app.command("show")
 def show_source(
     source_id: Annotated[str, typer.Argument(help="Source ID")],
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show source details. Default: JSON output."""
+    """Show source details. Default: table output."""
 
     @run_async
     async def _show() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Loading source...") as progress:
                     progress.add_task("Loading source...", total=None)
                     entity = await client.get_entity(source_id)
@@ -182,7 +182,7 @@ def show_source(
                 entity = await client.get_entity(source_id)
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(entity)
                 return
 
@@ -219,18 +219,18 @@ def crawl_source(
 @app.command("status")
 def source_status(
     source_id: Annotated[str, typer.Argument(help="Source ID")],
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show crawl status for a source. Default: JSON output."""
+    """Show crawl status for a source. Default: table output."""
 
     @run_async
     async def _status() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Loading status...") as progress:
                     progress.add_task("Loading status...", total=None)
                     entity = await client.get_entity(source_id)
@@ -240,7 +240,7 @@ def source_status(
             meta = entity.get("metadata", {})
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 status_data = {
                     "id": entity.get("id"),
                     "name": entity.get("name"),
@@ -274,18 +274,18 @@ def source_status(
 def list_documents(
     source_id: Annotated[str, typer.Argument(help="Source ID")],
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 50,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """List documents crawled from a source. Default: JSON output."""
+    """List documents crawled from a source. Default: table output."""
 
     @run_async
     async def _docs() -> None:
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Loading documents...") as progress:
                     progress.add_task("Loading documents...", total=None)
                     response = await client.explore(
@@ -307,7 +307,7 @@ def list_documents(
             ][:limit]
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(entities)
                 return
 
@@ -337,8 +337,8 @@ def list_documents(
 
 @app.command("link-status")
 def link_status(
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
     """Show pending graph linking work per source.
@@ -352,7 +352,7 @@ def link_status(
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Checking link status...") as progress:
                     progress.add_task("Checking...", total=None)
                     response = await client.link_graph_status()
@@ -363,7 +363,7 @@ def link_status(
             return
 
         # JSON output (default)
-        if not table_out:
+        if json_out:
             print_json(response)
             return
 
@@ -400,8 +400,8 @@ def link_graph(
     dry_run: Annotated[
         bool, typer.Option("--dry-run", "-n", help="Show what would be processed")
     ] = False,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
     """Re-process existing chunks through graph integration.
@@ -419,7 +419,7 @@ def link_graph(
         sid = None if source_id == "all" else source_id
 
         try:
-            if table_out and not dry_run:
+            if json_out and not dry_run:
                 with spinner("Linking documents to graph...") as progress:
                     progress.add_task("Processing...", total=None)
                     response = await client.link_graph(
@@ -438,7 +438,7 @@ def link_graph(
             return
 
         # JSON output (default)
-        if not table_out:
+        if json_out:
             print_json(response)
             return
 

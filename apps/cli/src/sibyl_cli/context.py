@@ -44,8 +44,8 @@ app = typer.Typer(
 @app.callback()
 def callback(
     ctx: typer.Context,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
     """Show current context when invoked without subcommand."""
@@ -59,7 +59,7 @@ def callback(
         info("Set one with: sibyl context use <name>")
         raise typer.Exit(1)
 
-    if not table_out:
+    if json_out:
         result = _context_to_dict(active)
         result["active"] = True
         print_json(result)
@@ -95,15 +95,15 @@ def _context_to_dict(ctx: Context) -> dict:
 
 @app.command("list")
 def list_cmd(
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """List all configured contexts. Default: JSON output."""
+    """List all configured contexts. Default: table output."""
     contexts = list_contexts()
     active_name = get_active_context_name()
 
-    if not table_out:
+    if json_out:
         result = [_context_to_dict(ctx) for ctx in contexts]
         for item in result:
             item["active"] = item["name"] == active_name
@@ -139,11 +139,11 @@ def list_cmd(
 @app.command("show")
 def show_cmd(
     name: Annotated[str, typer.Argument(help="Context name (omit for active context)")] = "",
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show context details. Default: JSON output."""
+    """Show context details. Default: table output."""
     if name:
         ctx = get_context(name)
         if not ctx:
@@ -159,7 +159,7 @@ def show_cmd(
     active_name = get_active_context_name()
     is_active = ctx.name == active_name
 
-    if not table_out:
+    if json_out:
         result = _context_to_dict(ctx)
         result["active"] = is_active
         print_json(result)
@@ -197,8 +197,8 @@ def create_cmd(
     insecure: Annotated[
         bool, typer.Option("--insecure", "-k", help="Skip SSL verification (self-signed certs)")
     ] = False,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
     """Create a new context."""
@@ -215,7 +215,7 @@ def create_cmd(
         error(str(e))
         raise typer.Exit(1) from None
 
-    if not table_out:
+    if json_out:
         result = _context_to_dict(ctx)
         result["active"] = use
         print_json(result)
@@ -237,8 +237,8 @@ def create_cmd(
 @app.command("use")
 def use_cmd(
     name: Annotated[str, typer.Argument(help="Context name to activate")],
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
     """Set the active context."""
@@ -253,7 +253,7 @@ def use_cmd(
     set_active_context(name)
     clear_client_cache()  # Ensure new connections use the new context
 
-    if not table_out:
+    if json_out:
         result = _context_to_dict(ctx)
         result["active"] = True
         print_json(result)
@@ -277,8 +277,8 @@ def update_cmd(
         bool, typer.Option("--insecure", "-k", help="Skip SSL verification (self-signed certs)")
     ] = False,
     secure: Annotated[bool, typer.Option("--secure", help="Re-enable SSL verification")] = False,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
     """Update an existing context."""
@@ -305,7 +305,7 @@ def update_cmd(
         error(str(e))
         raise typer.Exit(1) from None
 
-    if not table_out:
+    if json_out:
         result = _context_to_dict(ctx)
         result["active"] = get_active_context_name() == name
         print_json(result)

@@ -4,7 +4,7 @@ Commands for the full task lifecycle: list, show, create, start, block,
 unblock, review, complete, archive, update.
 
 All commands communicate with the REST API to ensure proper event broadcasting.
-All commands output JSON by default for LLM consumption. Use -t for table output.
+All commands output table format by default. Use --json for JSON output.
 """
 
 from typing import TYPE_CHECKING, Annotated
@@ -48,9 +48,9 @@ app = typer.Typer(
 _handle_client_error = handle_client_error
 
 
-def _output_response(response: dict, table_out: bool, success_msg: str | None = None) -> None:
+def _output_response(response: dict, json_out: bool, success_msg: str | None = None) -> None:
     """Output response as JSON or table message."""
-    if not table_out:
+    if json_out:
         print_json(response)
     elif success_msg and response.get("success"):
         success(success_msg)
@@ -271,21 +271,21 @@ def list_tasks(
     page: Annotated[
         int | None, typer.Option("--page", help="Page number (1-based, uses limit)")
     ] = None,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
     csv_out: Annotated[bool, typer.Option("--csv", help="CSV output")] = False,
     all_projects: Annotated[
         bool, typer.Option("--all", "-A", help="Ignore context, list from all projects")
     ] = False,
 ) -> None:
-    """List tasks with optional filters. Use -q for semantic search. Default: JSON output.
+    """List tasks with optional filters. Use -q for semantic search. Default: table output.
 
     Auto-scopes to current project context unless --all is specified.
 
     Pagination: Use --limit (max 200) and --offset, or --page for convenience.
     """
-    fmt = "table" if table_out else ("csv" if csv_out else "json")
+    fmt = "json" if json_out else ("csv" if csv_out else "table")
 
     # Clamp limit to API maximum
     effective_limit = min(limit, 200)
@@ -403,11 +403,11 @@ def list_tasks(
 @app.command("show")
 def show_task(
     task_id: Annotated[str, typer.Argument(help="Task ID (full or prefix)")],
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show detailed task information. Default: JSON output."""
+    """Show detailed task information. Default: table output."""
 
     @run_async
     async def _show() -> None:
@@ -417,7 +417,7 @@ def show_task(
             # Resolve short ID prefix to full ID
             resolved_id = await _resolve_task_id(client, task_id)
 
-            if table_out:
+            if not json_out:
                 with spinner("Loading task...") as progress:
                     progress.add_task("Loading task...", total=None)
                     entity = await client.get_entity(resolved_id)
@@ -425,7 +425,7 @@ def show_task(
                 entity = await client.get_entity(resolved_id)
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(entity)
                 return
 
@@ -474,11 +474,11 @@ def show_task(
 def start_task(
     task_id: Annotated[str, typer.Argument(help="Task ID to start (full or prefix)")],
     assignee: Annotated[str | None, typer.Option("--assignee", "-a", help="Assignee name")] = None,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Start working on a task (moves to 'doing' status). Default: JSON output."""
+    """Start working on a task (moves to 'doing' status). Default: table output."""
 
     @run_async
     async def _start() -> None:
@@ -488,14 +488,14 @@ def start_task(
             # Resolve short ID prefix to full ID
             resolved_id = await _resolve_task_id(client, task_id)
 
-            if table_out:
+            if not json_out:
                 with spinner("Starting task...") as progress:
                     progress.add_task("Starting task...", total=None)
                     response = await client.start_task(resolved_id, assignee)
             else:
                 response = await client.start_task(resolved_id, assignee)
 
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -516,11 +516,11 @@ def start_task(
 def block_task(
     task_id: Annotated[str, typer.Argument(help="Task ID to block (full or prefix)")],
     reason: Annotated[str, typer.Option("--reason", "-r", help="Blocker reason (required)")],
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Mark a task as blocked with a reason. Default: JSON output."""
+    """Mark a task as blocked with a reason. Default: table output."""
 
     @run_async
     async def _block() -> None:
@@ -530,14 +530,14 @@ def block_task(
             # Resolve short ID prefix to full ID
             resolved_id = await _resolve_task_id(client, task_id)
 
-            if table_out:
+            if not json_out:
                 with spinner("Blocking task...") as progress:
                     progress.add_task("Blocking task...", total=None)
                     response = await client.block_task(resolved_id, reason)
             else:
                 response = await client.block_task(resolved_id, reason)
 
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -555,11 +555,11 @@ def block_task(
 @app.command("unblock")
 def unblock_task(
     task_id: Annotated[str, typer.Argument(help="Task ID to unblock (full or prefix)")],
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Resume a blocked task (moves back to 'doing'). Default: JSON output."""
+    """Resume a blocked task (moves back to 'doing'). Default: table output."""
 
     @run_async
     async def _unblock() -> None:
@@ -569,14 +569,14 @@ def unblock_task(
             # Resolve short ID prefix to full ID
             resolved_id = await _resolve_task_id(client, task_id)
 
-            if table_out:
+            if not json_out:
                 with spinner("Unblocking task...") as progress:
                     progress.add_task("Unblocking task...", total=None)
                     response = await client.unblock_task(resolved_id)
             else:
                 response = await client.unblock_task(resolved_id)
 
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -598,11 +598,11 @@ def submit_review(
     commits: Annotated[
         str | None, typer.Option("--commits", "-c", help="Comma-separated commit SHAs")
     ] = None,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Submit a task for review. Default: JSON output."""
+    """Submit a task for review. Default: table output."""
 
     @run_async
     async def _review() -> None:
@@ -613,14 +613,14 @@ def submit_review(
             resolved_id = await _resolve_task_id(client, task_id)
             commit_list = [c.strip() for c in commits.split(",")] if commits else None
 
-            if table_out:
+            if not json_out:
                 with spinner("Submitting for review...") as progress:
                     progress.add_task("Submitting for review...", total=None)
                     response = await client.submit_review(resolved_id, pr_url, commit_list)
             else:
                 response = await client.submit_review(resolved_id, pr_url, commit_list)
 
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -642,11 +642,11 @@ def complete_task(
     learnings: Annotated[
         str | None, typer.Option("--learnings", "-l", help="Key learnings (creates episode)")
     ] = None,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Complete a task and optionally capture learnings. Default: JSON output."""
+    """Complete a task and optionally capture learnings. Default: table output."""
 
     @run_async
     async def _complete() -> None:
@@ -656,14 +656,14 @@ def complete_task(
             # Resolve short ID prefix to full ID
             resolved_id = await _resolve_task_id(client, task_id)
 
-            if table_out:
+            if not json_out:
                 with spinner("Completing task...") as progress:
                     progress.add_task("Completing task...", total=None)
                     response = await client.complete_task(resolved_id, hours, learnings)
             else:
                 response = await client.complete_task(resolved_id, hours, learnings)
 
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -688,8 +688,8 @@ def archive_task(
     stdin: Annotated[
         bool, typer.Option("--stdin", help="Read task IDs from stdin (one per line)")
     ] = False,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
     """Archive task(s). Supports --stdin for bulk operations.
@@ -743,7 +743,7 @@ def archive_task(
                 results.append({"id": tid, "success": False, "error": str(e)})
                 failed += 1
 
-        if not table_out:
+        if json_out:
             print_json(results if len(results) > 1 else results[0])
             return
 
@@ -790,11 +790,11 @@ def create_task(
         bool,
         typer.Option("--sync", help="Wait for task creation (slower but immediately available)"),
     ] = False,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Create a new task in a project. Default: JSON output.
+    """Create a new task in a project. Default: table output.
 
     Project is auto-resolved from linked directory if not specified.
     Use 'sibyl project link' to link a directory to a project.
@@ -835,7 +835,7 @@ def create_task(
             if epic:
                 metadata["epic_id"] = epic
 
-            if table_out:
+            if not json_out:
                 with spinner("Creating task...") as progress:
                     progress.add_task("Creating task...", total=None)
                     response = await client.create_entity(
@@ -854,7 +854,7 @@ def create_task(
                     sync=sync,
                 )
 
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -895,11 +895,11 @@ def update_task(
     technologies: Annotated[
         str | None, typer.Option("--tech", help="Comma-separated technologies (replaces existing)")
     ] = None,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Update task fields directly. Default: JSON output."""
+    """Update task fields directly. Default: table output."""
 
     @run_async
     async def _update() -> None:
@@ -920,7 +920,7 @@ def update_task(
             tag_list = [t.strip() for t in tags.split(",")] if tags else None
             tech_list = [t.strip() for t in technologies.split(",")] if technologies else None
 
-            if table_out:
+            if not json_out:
                 with spinner("Updating task...") as progress:
                     progress.add_task("Updating task...", total=None)
                     response = await client.update_task(
@@ -949,7 +949,7 @@ def update_task(
                     technologies=tech_list,
                 )
 
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 

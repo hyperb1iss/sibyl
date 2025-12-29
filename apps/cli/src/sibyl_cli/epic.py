@@ -114,14 +114,14 @@ def list_epics(
         str | None, typer.Option("-s", "--status", help="planning|in_progress|blocked|completed")
     ] = None,
     limit: Annotated[int, typer.Option("-n", "--limit", help="Max results")] = 50,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
     all_projects: Annotated[
         bool, typer.Option("--all", "-A", help="Ignore context, list from all projects")
     ] = False,
 ) -> None:
-    """List epics with optional filters. Default: JSON output.
+    """List epics with optional filters. Default: table output.
 
     Auto-scopes to current project context unless --all is specified.
     """
@@ -135,7 +135,7 @@ def list_epics(
         client = get_client()
 
         try:
-            if table_out:
+            if not json_out:
                 with spinner("Loading epics...") as progress:
                     progress.add_task("Loading epics...", total=None)
                     response = await client.explore(
@@ -166,7 +166,7 @@ def list_epics(
                     if e.get("metadata", {}).get("project_id") == effective_project
                 ]
 
-            if not table_out:
+            if json_out:
                 print_json(entities)
                 return
 
@@ -201,11 +201,11 @@ def list_epics(
 @app.command("show")
 def show_epic(
     epic_id: Annotated[str, typer.Argument(help="Epic ID (full or prefix)")],
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show detailed epic information including progress. Default: JSON output."""
+    """Show detailed epic information including progress. Default: table output."""
 
     @run_async
     async def _show() -> None:
@@ -215,7 +215,7 @@ def show_epic(
             # Resolve short ID prefix to full ID
             resolved_id = await _resolve_epic_id(client, epic_id)
 
-            if table_out:
+            if not json_out:
                 with spinner("Loading epic...") as progress:
                     progress.add_task("Loading epic...", total=None)
                     entity = await client.get_entity(resolved_id)
@@ -223,7 +223,7 @@ def show_epic(
                 entity = await client.get_entity(resolved_id)
 
             # JSON output (default)
-            if not table_out:
+            if json_out:
                 print_json(entity)
                 return
 
@@ -291,11 +291,11 @@ def create_epic(
         bool,
         typer.Option("--sync", help="Wait for epic creation (slower but immediately available)"),
     ] = False,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Create a new epic in a project. Default: JSON output.
+    """Create a new epic in a project. Default: table output.
 
     Project is auto-resolved from linked directory if not specified.
     Use 'sibyl project link' to link a directory to a project.
@@ -328,7 +328,7 @@ def create_epic(
             if tag_list:
                 metadata["tags"] = tag_list
 
-            if table_out:
+            if not json_out:
                 with spinner("Creating epic...") as progress:
                     progress.add_task("Creating epic...", total=None)
                     response = await client.create_entity(
@@ -347,7 +347,7 @@ def create_epic(
                     sync=sync,
                 )
 
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -368,11 +368,11 @@ def create_epic(
 def start_epic(
     epic_id: Annotated[str, typer.Argument(help="Epic ID to start (full or prefix)")],
     assignee: Annotated[str | None, typer.Option("--assignee", "-a", help="Epic lead")] = None,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Start working on an epic (moves to 'in_progress' status). Default: JSON output."""
+    """Start working on an epic (moves to 'in_progress' status). Default: table output."""
 
     @run_async
     async def _start() -> None:
@@ -386,14 +386,14 @@ def start_epic(
             if assignee:
                 updates["assignees"] = [assignee]
 
-            if table_out:
+            if not json_out:
                 with spinner("Starting epic...") as progress:
                     progress.add_task("Starting epic...", total=None)
                     response = await client.update_entity(resolved_id, **updates)
             else:
                 response = await client.update_entity(resolved_id, **updates)
 
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -414,11 +414,11 @@ def complete_epic(
     learnings: Annotated[
         str | None, typer.Option("--learnings", "-l", help="Key learnings from the epic")
     ] = None,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Complete an epic. Default: JSON output."""
+    """Complete an epic. Default: table output."""
 
     @run_async
     async def _complete() -> None:
@@ -432,14 +432,14 @@ def complete_epic(
             if learnings:
                 updates["learnings"] = learnings
 
-            if table_out:
+            if not json_out:
                 with spinner("Completing epic...") as progress:
                     progress.add_task("Completing epic...", total=None)
                     response = await client.update_entity(resolved_id, **updates)
             else:
                 response = await client.update_entity(resolved_id, **updates)
 
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -461,11 +461,11 @@ def archive_epic(
     epic_id: Annotated[str, typer.Argument(help="Epic ID to archive")],
     reason: Annotated[str | None, typer.Option("--reason", "-r", help="Archive reason")] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Archive an epic (terminal state). Default: JSON output."""
+    """Archive an epic (terminal state). Default: table output."""
 
     @run_async
     async def _archive() -> None:
@@ -479,14 +479,14 @@ def archive_epic(
             if reason:
                 updates["learnings"] = f"Archived: {reason}"
 
-            if table_out:
+            if not json_out:
                 with spinner("Archiving epic...") as progress:
                     progress.add_task("Archiving epic...", total=None)
                     response = await client.update_entity(resolved_id, **updates)
             else:
                 response = await client.update_entity(resolved_id, **updates)
 
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -515,11 +515,11 @@ def update_epic(
     title: Annotated[str | None, typer.Option("--title", help="Epic title")] = None,
     assignee: Annotated[str | None, typer.Option("-a", "--assignee", help="Epic lead")] = None,
     tags: Annotated[str | None, typer.Option("--tags", help="Comma-separated tags")] = None,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Update epic fields directly. Default: JSON output."""
+    """Update epic fields directly. Default: table output."""
 
     @run_async
     async def _update() -> None:
@@ -548,14 +548,14 @@ def update_epic(
             if tags:
                 updates["tags"] = [t.strip() for t in tags.split(",")]
 
-            if table_out:
+            if not json_out:
                 with spinner("Updating epic...") as progress:
                     progress.add_task("Updating epic...", total=None)
                     response = await client.update_entity(resolved_id, **updates)
             else:
                 response = await client.update_entity(resolved_id, **updates)
 
-            if not table_out:
+            if json_out:
                 print_json(response)
                 return
 
@@ -578,11 +578,11 @@ def list_epic_tasks(
         str | None, typer.Option("-s", "--status", help="Filter by task status")
     ] = None,
     limit: Annotated[int, typer.Option("-n", "--limit", help="Max results")] = 50,
-    table_out: Annotated[
-        bool, typer.Option("--table", "-t", help="Table output (human-readable)")
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """List tasks belonging to an epic. Default: JSON output."""
+    """List tasks belonging to an epic. Default: table output."""
 
     @run_async
     async def _list_tasks() -> None:
@@ -592,7 +592,7 @@ def list_epic_tasks(
             resolved_id = await _resolve_epic_id(client, epic_id)
 
             # Get all tasks and filter by epic_id
-            if table_out:
+            if not json_out:
                 with spinner("Loading tasks...") as progress:
                     progress.add_task("Loading tasks...", total=None)
                     response = await client.explore(
@@ -616,7 +616,7 @@ def list_epic_tasks(
             if status:
                 entities = [e for e in entities if e.get("metadata", {}).get("status") == status]
 
-            if not table_out:
+            if json_out:
                 print_json(entities)
                 return
 

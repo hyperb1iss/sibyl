@@ -6,7 +6,7 @@ All commands communicate with the REST API.
 Server commands (serve, dev, db, generate, etc.) are in sibyl-server.
 """
 
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 
