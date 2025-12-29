@@ -1,5 +1,5 @@
 # https://moonrepo.dev/docs/config/project
-$schema: 'https://moonrepo.dev/schemas/project.json'
+$schema: "https://moonrepo.dev/schemas/project.json"
 
 # Root project for workspace-level tasks
 language: other
@@ -10,7 +10,10 @@ tasks:
   # Development
   # ==========================================================================
   dev:
-    command: 'docker compose up -d && sleep 1 && npx concurrently --kill-others-on-fail -n "api,worker,web" -c "magenta,yellow,cyan" "moon run api:serve" "moon run api:worker" "moon run web:dev"'
+    command:
+      'docker compose up -d && sleep 1 && npx concurrently --kill-others-on-fail -n "api,worker,web"
+      -c "magenta,yellow,cyan" "uv run --directory apps/api sibyld serve --reload" "uv run
+      --directory apps/api arq sibyl.jobs.worker.WorkerSettings --watch src" "moon run web:dev"'
     local: true
     options:
       persistent: true
@@ -19,14 +22,14 @@ tasks:
     command: |
       docker compose up -d
       sleep 1
-      moon run api:serve
+      uv run --directory apps/api sibyld serve --reload
     local: true
     options:
       persistent: true
       shell: true
 
   dev-web:
-    command: 'moon run web:dev'
+    command: "moon run web:dev"
     local: true
     options:
       persistent: true
@@ -46,15 +49,15 @@ tasks:
   # Docker
   # ==========================================================================
   docker-up:
-    command: 'docker compose up -d'
+    command: "docker compose up -d"
     local: true
 
   docker-down:
-    command: 'docker compose down'
+    command: "docker compose down"
     local: true
 
   docker-logs:
-    command: 'docker compose logs -f'
+    command: "docker compose logs -f"
     local: true
     options:
       persistent: true
@@ -63,19 +66,49 @@ tasks:
   # Formatting (non-code files)
   # ==========================================================================
   fmt:
-    command: 'npx prettier --write "**/*.{yaml,yml,md}"'
+    command: "pnpm run fmt"
     local: true
 
   # ==========================================================================
   # Installation
   # ==========================================================================
-  install-cli:
-    command: 'cd apps/api && uv tool install . --force'
+  install:
+    command: |
+      echo "Installing sibyl CLI..."
+      (cd apps/cli && uv tool install . --force)
+      echo "Installing sibyld daemon..."
+      (cd apps/api && uv tool install . --force)
+      echo "Installing skills..."
+      mkdir -p ~/.claude/skills ~/.codex/skills
+      rm -rf ~/.claude/skills/sibyl-knowledge ~/.claude/skills/sibyl-project-manager
+      rm -rf ~/.codex/skills/sibyl-knowledge ~/.codex/skills/sibyl-project-manager
+      cp -r skills/sibyl-knowledge ~/.claude/skills/
+      cp -r skills/sibyl-project-manager ~/.claude/skills/
+      cp -r skills/sibyl-knowledge ~/.codex/skills/
+      cp -r skills/sibyl-project-manager ~/.codex/skills/
+      echo "✓ Installed sibyl, sibyld, and skills"
     local: true
+    options:
+      shell: true
 
-  install-cli-dev:
-    command: 'cd apps/api && uv tool install . --editable --force'
+  install-dev:
+    command: |
+      echo "Installing sibyl CLI (editable)..."
+      (cd apps/cli && uv tool install . --editable --force)
+      echo "Installing sibyld daemon (editable)..."
+      (cd apps/api && uv tool install . --editable --force)
+      echo "Installing skills..."
+      mkdir -p ~/.claude/skills ~/.codex/skills
+      rm -rf ~/.claude/skills/sibyl-knowledge ~/.claude/skills/sibyl-project-manager
+      rm -rf ~/.codex/skills/sibyl-knowledge ~/.codex/skills/sibyl-project-manager
+      cp -r skills/sibyl-knowledge ~/.claude/skills/
+      cp -r skills/sibyl-project-manager ~/.claude/skills/
+      cp -r skills/sibyl-knowledge ~/.codex/skills/
+      cp -r skills/sibyl-project-manager ~/.codex/skills/
+      echo "✓ Installed sibyl, sibyld (editable), and skills"
     local: true
+    options:
+      shell: true
 
   install-skills:
     command: |
@@ -93,9 +126,9 @@ tasks:
   # E2E Testing
   # ==========================================================================
   e2e-up:
-    command: 'docker compose -f compose.e2e.yml up -d'
+    command: "docker compose -f compose.e2e.yml up -d"
     local: true
 
   e2e-down:
-    command: 'docker compose -f compose.e2e.yml down -v'
+    command: "docker compose -f compose.e2e.yml down -v"
     local: true

@@ -10,8 +10,8 @@
 [tool.uv.workspace]
 members = [
     "apps/api",
+    "apps/cli",
     "packages/python/sibyl-core",
-    "packages/python/sibyl-cli",
 ]
 
 # =============================================================================
@@ -23,7 +23,7 @@ members = [
 # Local packages - workspace members reference each other
 sibyl-core = { workspace = true }
 sibyl-cli = { workspace = true }
-sibyl = { workspace = true }
+sibyld = { workspace = true }
 
 # =============================================================================
 # Shared Tool Configuration

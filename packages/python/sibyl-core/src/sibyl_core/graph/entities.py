@@ -1214,7 +1214,7 @@ class EntityManager:
 
         return "\n".join(parts)
 
-    def _format_specialized_fields(  # noqa: PLR0915
+    def _format_specialized_fields(
         self,
         entity: Entity,
         sanitize: Any,

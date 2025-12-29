@@ -164,7 +164,10 @@ def run_async[**P, R](func: Callable[P, Awaitable[R]]) -> Callable[P, R]:
 
     @wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-        return asyncio.run(func(*args, **kwargs))
+        async def coro() -> R:
+            return await func(*args, **kwargs)
+
+        return asyncio.run(coro())
 
     return wrapper
 

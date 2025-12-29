@@ -421,6 +421,9 @@ def link_project(
                     return
 
                 project_id = entities[choice - 1].get("id")
+                if not project_id:
+                    error("Selected project has no ID")
+                    return
 
             except SibylClientError as e:
                 _handle_client_error(e)

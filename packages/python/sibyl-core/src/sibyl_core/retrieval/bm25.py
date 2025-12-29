@@ -354,7 +354,7 @@ _bm25_index: BM25Index | None = None
 
 def get_bm25_index() -> BM25Index:
     """Get the global BM25 index."""
-    global _bm25_index  # noqa: PLW0603
+    global _bm25_index
     if _bm25_index is None:
         _bm25_index = BM25Index()
     return _bm25_index
@@ -362,7 +362,7 @@ def get_bm25_index() -> BM25Index:
 
 def reset_bm25_index() -> None:
     """Reset the global BM25 index."""
-    global _bm25_index  # noqa: PLW0603
+    global _bm25_index
     if _bm25_index is not None:
         _bm25_index.clear()
     _bm25_index = None

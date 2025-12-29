@@ -1,0 +1,14 @@
+{
+  "name": "sibyl-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "fmt": "prettier --write \"**/*.{yaml,yml,md}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2"
+  },
+  "engines": {
+    "node": "~24"
+  }
+}

@@ -1,5 +1,5 @@
 # https://moonrepo.dev/docs/config/project
-$schema: 'https://moonrepo.dev/schemas/project.json'
+$schema: "https://moonrepo.dev/schemas/project.json"
 
 language: typescript
 type: application
@@ -7,111 +7,118 @@ platform: node
 
 fileGroups:
   sources:
-    - 'src/**/*'
+    - "src/**/*"
   tests:
-    - 'src/**/*.test.{ts,tsx}'
-    - 'src/**/*.spec.{ts,tsx}'
+    - "src/**/*.test.{ts,tsx}"
+    - "src/**/*.spec.{ts,tsx}"
   configs:
-    - 'package.json'
-    - 'tsconfig.json'
-    - 'next.config.ts'
-    - 'biome.json'
+    - "package.json"
+    - "tsconfig.json"
+    - "next.config.ts"
+    - "biome.json"
 
 tasks:
   # Linting & Formatting
   lint:
-    command: 'pnpm biome check .'
+    command: "pnpm biome check ."
     inputs:
-      - '@group(sources)'
-      - '@group(configs)'
+      - "@group(sources)"
+      - "@group(configs)"
 
-  lint-fix:
-    command: 'pnpm biome check --write .'
+  fix:
+    command: "pnpm biome check --write ."
     inputs:
-      - '@group(sources)'
+      - "@group(sources)"
+    local: true
+
+  fix-all:
+    command: "pnpm biome check --write --unsafe ."
+    inputs:
+      - "@group(sources)"
     local: true
 
   format:
-    command: 'pnpm biome format --write .'
+    command: "pnpm biome format --write ."
     inputs:
-      - '@group(sources)'
+      - "@group(sources)"
     local: true
 
   # Type Checking
   typecheck:
-    command: 'pnpm tsc --noEmit'
+    command: "pnpm tsc --noEmit"
     inputs:
-      - '@group(sources)'
-      - '@group(configs)'
+      - "@group(sources)"
+      - "@group(configs)"
 
   # Testing
   test:
-    command: 'pnpm vitest run'
+    command: "pnpm vitest run"
     inputs:
-      - '@group(sources)'
-      - '@group(tests)'
+      - "@group(sources)"
+      - "@group(tests)"
 
   test-watch:
-    command: 'pnpm vitest'
+    command: "pnpm vitest"
     local: true
     options:
       persistent: true
 
   test-cov:
-    command: 'pnpm vitest run --coverage'
+    command: "pnpm vitest run --coverage"
     inputs:
-      - '@group(sources)'
-      - '@group(tests)'
+      - "@group(sources)"
+      - "@group(tests)"
 
   # Development
   dev:
-    command: 'pnpm next dev --port 3337'
+    command: "pnpm next dev --port 3337"
     local: true
     options:
       persistent: true
 
   # Build
   build:
-    command: 'pnpm next build'
+    command: "pnpm next build"
     inputs:
-      - '@group(sources)'
-      - '@group(configs)'
+      - "@group(sources)"
+      - "@group(configs)"
     outputs:
-      - '.next'
+      - ".next"
 
   start:
-    command: 'pnpm next start --port 3337'
+    command: "pnpm next start --port 3337"
     local: true
     deps:
-      - '~:build'
+      - "~:build"
     options:
       persistent: true
 
   # Code Generation
   generate-types:
-    command: 'pnpm openapi-typescript http://localhost:3334/api/openapi.json -o src/lib/api-types.ts'
+    command:
+      "pnpm openapi-typescript http://localhost:3334/api/openapi.json -o src/lib/api-types.ts"
     local: true
     outputs:
-      - 'src/lib/api-types.ts'
+      - "src/lib/api-types.ts"
 
   # Storybook
   storybook:
-    command: 'pnpm storybook dev -p 6006'
+    command: "pnpm storybook dev -p 6006"
     local: true
     options:
       persistent: true
 
   build-storybook:
-    command: 'pnpm storybook build'
+    command: "pnpm storybook build"
     inputs:
-      - '@group(sources)'
+      - "@group(sources)"
     outputs:
-      - 'storybook-static'
+      - "storybook-static"
 
   # Dependencies
   install:
-    command: 'pnpm install'
+    command: "pnpm install"
     inputs:
-      - 'package.json'
-      - 'pnpm-lock.yaml'
+      - "package.json"
+      - "pnpm-lock.yaml"
     local: true

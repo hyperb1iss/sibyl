@@ -454,7 +454,7 @@ def get_deduplicator(
     config: DedupConfig | None = None,
 ) -> EntityDeduplicator:
     """Get or create a global deduplicator instance."""
-    global _deduplicator  # noqa: PLW0603
+    global _deduplicator
     if _deduplicator is None or config is not None:
         _deduplicator = EntityDeduplicator(
             client=client,

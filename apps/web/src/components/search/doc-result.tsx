@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+import { ExternalLink } from '@/components/ui/icons';
 import type { RAGChunkResult, RAGPageResult } from '@/lib/api';
 
 interface DocChunkResultProps {
@@ -12,12 +14,11 @@ interface DocChunkResultProps {
  */
 export function DocChunkResult({ result }: DocChunkResultProps) {
   const scorePercent = Math.round(result.similarity * 100);
+  const internalUrl = `/sources/${result.source_id}/documents/${result.document_id}`;
 
   return (
-    <a
-      href={result.url}
-      target="_blank"
-      rel="noopener noreferrer"
+    <Link
+      href={internalUrl}
       className="block bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-4 transition-all duration-200 hover:shadow-lg hover:border-sc-cyan/30"
     >
       <div className="space-y-2">
@@ -61,12 +62,24 @@ export function DocChunkResult({ result }: DocChunkResultProps) {
         {/* Content Preview */}
         <p className="text-sc-fg-muted text-sm line-clamp-3 leading-relaxed">{result.content}</p>
 
-        {/* Footer: URL */}
-        <div className="pt-1">
-          <span className="text-xs text-sc-fg-subtle truncate block">{result.url}</span>
+        {/* Footer: URL with external link */}
+        <div className="pt-1 flex items-center justify-between gap-2">
+          <span className="text-xs text-sc-fg-subtle truncate">{result.url}</span>
+          <button
+            type="button"
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              window.open(result.url, '_blank', 'noopener,noreferrer');
+            }}
+            className="shrink-0 p-1 text-sc-fg-subtle hover:text-sc-cyan transition-colors"
+            title="Open original page"
+          >
+            <ExternalLink width={14} height={14} />
+          </button>
         </div>
       </div>
-    </a>
+    </Link>
   );
 }
 
@@ -80,12 +93,11 @@ interface DocPageResultProps {
  */
 export function DocPageResult({ result }: DocPageResultProps) {
   const scorePercent = Math.round(result.best_chunk_similarity * 100);
+  const internalUrl = `/sources/${result.source_id}/documents/${result.document_id}`;
 
   return (
-    <a
-      href={result.url}
-      target="_blank"
-      rel="noopener noreferrer"
+    <Link
+      href={internalUrl}
       className="block bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-4 transition-all duration-200 hover:shadow-lg hover:border-sc-cyan/30"
     >
       <div className="space-y-2">
@@ -145,12 +157,26 @@ export function DocPageResult({ result }: DocPageResultProps) {
             <span>{result.word_count.toLocaleString()} words</span>
             {result.code_languages.length > 0 && <span>{result.code_languages.join(', ')}</span>}
           </div>
-          <span className="text-xs text-sc-fg-subtle truncate max-w-[200px]">
-            {new URL(result.url).hostname}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-sc-fg-subtle truncate max-w-[150px]">
+              {new URL(result.url).hostname}
+            </span>
+            <button
+              type="button"
+              onClick={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.open(result.url, '_blank', 'noopener,noreferrer');
+              }}
+              className="shrink-0 p-1 text-sc-fg-subtle hover:text-sc-cyan transition-colors"
+              title="Open original page"
+            >
+              <ExternalLink width={14} height={14} />
+            </button>
+          </div>
         </div>
       </div>
-    </a>
+    </Link>
   );
 }
 

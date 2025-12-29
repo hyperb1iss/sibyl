@@ -220,6 +220,7 @@ async def search_code_examples(
             select(
                 DocumentChunk,
                 CrawledDocument,
+                CrawlSource.id.label("source_id"),
                 CrawlSource.name.label("source_name"),
                 similarity_expr.label("similarity"),
             )
@@ -247,6 +248,7 @@ async def search_code_examples(
             CodeExampleResult(
                 chunk_id=str(chunk.id),
                 document_id=str(doc.id),
+                source_id=str(source_id),
                 source_name=source_name,
                 url=doc.url,
                 title=doc.title,
@@ -256,7 +258,7 @@ async def search_code_examples(
                 similarity=similarity,
                 heading_path=chunk.heading_path or [],
             )
-            for chunk, doc, source_name, similarity in rows
+            for chunk, doc, source_id, source_name, similarity in rows
         ]
 
     log.debug(
@@ -307,7 +309,7 @@ async def list_source_pages(
         source = await session.get(CrawlSource, source_uuid)
         if not source:
             raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
-        if source.organization_id != auth.organization_id:
+        if str(source.organization_id) != auth.organization_id:
             raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
 
         # Build query
@@ -381,7 +383,7 @@ async def get_full_page(
 
         # Get source and verify org ownership
         source = await session.get(CrawlSource, doc.source_id)
-        if not source or source.organization_id != auth.organization_id:
+        if not source or str(source.organization_id) != auth.organization_id:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
         source_name = source.name
 
@@ -625,7 +627,7 @@ async def update_document(
 
         # Verify organization ownership
         source = await session.get(CrawlSource, doc.source_id)
-        if not source or source.organization_id != auth.organization_id:
+        if not source or str(source.organization_id) != auth.organization_id:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
         # Update title if provided
@@ -706,7 +708,7 @@ async def get_document_related_entities(
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
         source = await session.get(CrawlSource, doc.source_id)
-        if not source or source.organization_id != auth.organization_id:
+        if not source or str(source.organization_id) != auth.organization_id:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
         doc_title = doc.title

@@ -1,376 +1,400 @@
-<h1 align="center">
-  <br>
-  🔮 Sibyl
-  <br>
-</h1>
+# Sibyl API Server
 
-<p align="center">
-  <strong>Your AI agent's persistent memory</strong>
-</p>
+FastAPI + MCP server providing the backend for Sibyl's knowledge graph operations.
 
-<p align="center">
-  <a href="#-what-sibyl-does">
-    <img src="https://img.shields.io/badge/Knowledge-Graph_RAG-e135ff?style=for-the-badge&logo=graphql&logoColor=white" alt="Graph-RAG">
-  </a>
-  <a href="#-the-4-tool-api">
-    <img src="https://img.shields.io/badge/Interface-4_Tools-80ffea?style=for-the-badge&logo=openai&logoColor=white" alt="4 Tools">
-  </a>
-  <a href="#-the-cli">
-    <img src="https://img.shields.io/badge/CLI-First-ff6ac1?style=for-the-badge&logo=gnubash&logoColor=white" alt="CLI First">
-  </a>
-</p>
+## Overview
 
-<p align="center">
-  <a href="https://github.com/hyperb1iss/sibyl/actions/workflows/ci.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/hyperb1iss/sibyl/ci.yml?branch=main&style=flat-square&logo=github&logoColor=white&label=CI" alt="CI Status">
-  </a>
-  <a href="https://github.com/hyperb1iss/sibyl/releases">
-    <img src="https://img.shields.io/github/v/release/hyperb1iss/sibyl?style=flat-square&logo=github&logoColor=white" alt="Latest Release">
-  </a>
-  <a href="https://github.com/hyperb1iss/sibyl/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/hyperb1iss/sibyl?style=flat-square&logo=apache&logoColor=white" alt="License">
-  </a>
-</p>
+This package contains the server-side components:
 
-<p align="center">
-  <a href="#-what-sibyl-does">What It Does</a> •
-  <a href="#-quickstart">Quickstart</a> •
-  <a href="#-the-cli">CLI</a> •
-  <a href="#-the-4-tool-api">API</a> •
-  <a href="#-the-web-ui">Web UI</a>
-</p>
+- **MCP Server** — 4-tool surface for AI agents (search, explore, add, manage)
+- **REST API** — Full CRUD for entities, tasks, projects, sources
+- **Auth System** — JWT sessions, OAuth (GitHub), API keys, organizations
+- **Background Jobs** — arq workers for async processing
+- **CLI** — Server administration and direct database commands
+- **Crawler** — Documentation ingestion pipeline
 
----
-
-> **AI Agents:** Sibyl is your extended memory. Search before implementing. Capture what you learn.
-> Track your work. The graph should be smarter after every session.
-
-## 💎 What Sibyl Does
-
-Sibyl transforms scattered development knowledge into a queryable graph. Patterns, learnings, tasks,
-documentation—all connected, all searchable by meaning.
-
-| Capability            | What You Get                                   |
-| --------------------- | ---------------------------------------------- |
-| **Semantic Search**   | Find knowledge by meaning, not keywords        |
-| **Task Tracking**     | Full workflow with status, blockers, learnings |
-| **Auto-Linking**      | New knowledge connects to related entities     |
-| **Graph Traversal**   | Navigate relationships to discover connections |
-| **Doc Ingestion**     | Crawl and index external documentation         |
-| **Persistent Memory** | What you learn today helps tomorrow            |
-
-**Stack:** Python 3.11+ / FastMCP / Graphiti / FalkorDB / Next.js 16
-
-## ⚡ Quickstart
-
-```bash
-# Start FalkorDB
-docker compose up -d
-
-# Install
-uv sync --all-extras
-
-# Configure
-cp .env.example .env
-# Add your SIBYL_OPENAI_API_KEY + SIBYL_JWT_SECRET
-
-# Verify
-uv run sibyl health
-
-# Launch
-uv run sibyl serve
-```
-
-Server runs at `localhost:3334`. Web UI at `localhost:3337` (if running frontend).
-
-## 🔐 Auth
-
-Sibyl uses a signed JWT access token for web auth (stored in the `sibyl_access_token` HTTP-only
-cookie) and supports scoped API keys for programmatic access.
-
-**Required env:**
-
-- `SIBYL_JWT_SECRET` (JWT signing secret)
-
-**Optional env (GitHub login):**
-
-- `SIBYL_GITHUB_CLIENT_ID`, `SIBYL_GITHUB_CLIENT_SECRET`
-- `SIBYL_SERVER_URL` (public base URL; used for OAuth callbacks)
-- `SIBYL_FRONTEND_URL` (default post-login redirect)
-
-**Cookie defaults:**
-
-- `Secure` auto-enables when `SIBYL_SERVER_URL` starts with `https://` (override with
-  `SIBYL_COOKIE_SECURE=true|false`)
-- Host-only cookies by default (override with `SIBYL_COOKIE_DOMAIN=…`)
-
-**Local users (email/password):**
-
-- `POST /api/auth/local/signup` and `POST /api/auth/local/login` (accept JSON or form posts)
-- Optional hardening: set `SIBYL_PASSWORD_PEPPER` and (if needed) `SIBYL_PASSWORD_ITERATIONS`
-
-**MCP protection:**
-
-- Set `SIBYL_MCP_AUTH_MODE=auto|on|off` (auto enforces when `SIBYL_JWT_SECRET` is set)
-
-**API key scopes:**
-
-- `mcp`: required for `/mcp` tool calls (MCP clients)
-- `api:read`: allows REST safe methods (`GET/HEAD/OPTIONS`) with an API key
-- `api:write`: allows REST writes (and implies read) with an API key
-
-## 🪄 The CLI
-
-**The CLI is the preferred interface.** Clean JSON output, optimized for AI agents.
-
-```bash
-# Search for knowledge
-uv run sibyl search "authentication patterns"
-uv run sibyl search "OAuth" --type pattern
-
-# List tasks
-uv run sibyl task list --status todo
-uv run sibyl task list --project proj_abc
-
-# Capture a learning
-uv run sibyl add "Redis insight" "Connection pool must be >= concurrent requests"
-
-# Task lifecycle
-uv run sibyl task start <id>
-uv run sibyl task complete <id> --learnings "Key insight: ..."
-
-# Direct updates (bulk/historical)
-uv run sibyl task update <id> --status done --priority high
-```
-
-### Task Workflow
+## Architecture
 
 ```
-backlog ──► todo ──► doing ──► review ──► done ──► archived
-                       │
-                       ▼
-                    blocked
+Sibyl Combined App (Starlette, port 3334)
+├── /api/*    → FastAPI REST endpoints
+├── /mcp      → MCP streamable-http (4 tools)
+├── /ws       → WebSocket for real-time updates
+└── Lifespan  → Background queue + session management
 ```
 
-Any state transition is allowed. Use workflow commands for semantics, `update` for direct changes.
+## Structure
 
-### Output Formats
-
-```bash
-uv run sibyl task list              # JSON (default, for agents)
-uv run sibyl task list --table      # Human-readable
-uv run sibyl task list --csv        # Spreadsheets
+```
+src/sibyl/
+├── main.py           # App factory, combined Starlette app
+├── server.py         # MCP tool registration
+├── config.py         # Server configuration (extends sibyl_core)
+│
+├── api/              # FastAPI REST
+│   ├── app.py        # FastAPI app with routes
+│   ├── routes/       # Route modules (entities, tasks, auth, etc.)
+│   ├── schemas.py    # Request/response models
+│   ├── websocket.py  # Real-time updates
+│   └── rate_limit.py # SlowAPI rate limiting
+│
+├── auth/             # Authentication & authorization
+│   ├── jwt.py        # Token creation/validation
+│   ├── sessions.py   # Session management
+│   ├── users.py      # User CRUD
+│   ├── organizations.py  # Multi-tenancy
+│   ├── api_keys.py   # Scoped API keys
+│   ├── mcp_auth.py   # MCP-specific auth
+│   └── middleware.py # Auth middleware
+│
+├── cli/              # Server CLI commands
+│   ├── main.py       # Typer app entry
+│   ├── db.py         # Database operations
+│   ├── generate.py   # Test data generation
+│   └── ...           # Other commands
+│
+├── crawler/          # Documentation ingestion
+│   ├── pipeline.py   # Crawl orchestration
+│   ├── chunker.py    # Content splitting
+│   ├── embedder.py   # Vector embeddings
+│   └── tagger.py     # Entity extraction
+│
+├── db/               # PostgreSQL (SQLModel + Alembic)
+│   ├── connection.py # Async session factory
+│   └── models.py     # SQLModel entities
+│
+├── jobs/             # Background processing
+│   ├── worker.py     # arq worker settings
+│   └── queue.py      # Job definitions
+│
+├── ingestion/        # Local file ingestion
+│   ├── pipeline.py   # Ingestion orchestration
+│   ├── parser.py     # File parsing
+│   └── extractor.py  # Metadata extraction
+│
+└── generator/        # Test data generation
+    ├── llm.py        # LLM-powered generation
+    └── scenarios.py  # Scenario templates
 ```
 
-## 🔮 The 4-Tool API
-
-Sibyl exposes exactly 4 MCP tools. Simple surface, rich capabilities.
-
-| Tool      | Purpose            | Examples                              |
-| --------- | ------------------ | ------------------------------------- |
-| `search`  | Find by meaning    | Patterns, tasks, docs, errors         |
-| `explore` | Navigate structure | List entities, traverse relationships |
-| `add`     | Create knowledge   | Episodes, patterns, tasks             |
-| `manage`  | Lifecycle & admin  | Task workflow, crawling, health       |
+## The 4-Tool MCP API
 
 ### search
 
+Find entities by semantic similarity.
+
 ```python
-# Find patterns
-search("OAuth 2.0 implementation", types=["pattern"])
-
-# Find open tasks
-search("", types=["task"], status="doing")
-
-# Search crawled docs
-search("hooks state management", source="react-docs")
+search(
+    query="OAuth implementation patterns",
+    types=["pattern", "episode"],  # Filter by entity type
+    status="doing",                # Filter tasks by status
+    source="react-docs",           # Filter by source
+    limit=20                       # Max results
+)
 ```
 
 ### explore
 
+Navigate the graph structure.
+
 ```python
-# List all projects
+# List entities
 explore(mode="list", types=["project"])
 
-# Find related knowledge
-explore(mode="related", entity_id="pattern_oauth")
+# Find related entities
+explore(mode="related", entity_id="pattern_abc")
 
-# Task dependencies
-explore(mode="dependencies", entity_id="task_abc")
+# Get task dependencies
+explore(mode="dependencies", entity_id="task_xyz")
+
+# View communities
+explore(mode="communities")
 ```
 
 ### add
 
+Create new knowledge.
+
 ```python
-# Record a learning
-add("Redis connection pooling",
-    "Connection pool must be >= concurrent requests...",
-    category="debugging", technologies=["redis"])
+# Add an episode (learning)
+add(
+    name="Redis connection pooling insight",
+    content="Pool size must be >= concurrent requests...",
+    category="debugging",
+    technologies=["redis", "python"]
+)
 
 # Create a task
-add("Implement OAuth", "Add Google and GitHub...",
-    entity_type="task", project="proj_auth", priority="high")
+add(
+    name="Implement OAuth flow",
+    content="Add Google and GitHub OAuth...",
+    entity_type="task",
+    project="proj_auth",
+    priority="high"
+)
 ```
 
 ### manage
+
+Lifecycle operations and administration.
 
 ```python
 # Task workflow
 manage("start_task", entity_id="task_abc")
 manage("complete_task", entity_id="task_abc",
-       data={"learnings": "Token refresh needs exact URI match"})
+       data={"learnings": "Key insight..."})
+manage("block_task", entity_id="task_abc",
+       data={"reason": "Waiting on API access"})
 
-# Crawl documentation
+# Crawling
 manage("crawl", data={"url": "https://docs.example.com", "depth": 3})
 
-# Health check
+# Admin
 manage("health")
+manage("stats")
 ```
 
-## 🦋 The Web UI
+## REST API
 
-Full-featured dashboard at `localhost:3337`:
+### Core Endpoints
 
-- **Dashboard** — Stats, task overview, quick actions
-- **Projects** — Organize work into containers
-- **Tasks** — Kanban-style task management
-- **Entities** — Browse all knowledge types
-- **Graph** — Visual exploration of connections
-- **Search** — Semantic search with filters
+| Endpoint                   | Method | Description                |
+| -------------------------- | ------ | -------------------------- |
+| `/api/entities`            | GET    | List entities with filters |
+| `/api/entities/{id}`       | GET    | Get entity by ID           |
+| `/api/entities`            | POST   | Create entity              |
+| `/api/entities/{id}`       | PATCH  | Update entity              |
+| `/api/entities/{id}`       | DELETE | Delete entity              |
+| `/api/search`              | POST   | Semantic search            |
+| `/api/tasks`               | GET    | List tasks with filters    |
+| `/api/tasks/{id}/start`    | POST   | Start task                 |
+| `/api/tasks/{id}/complete` | POST   | Complete task              |
+| `/api/projects`            | GET    | List projects              |
+| `/api/sources`             | GET    | List documentation sources |
+| `/api/sources/{id}/crawl`  | POST   | Trigger crawl              |
 
-```bash
-cd web
-pnpm install
-pnpm dev
-```
+### Auth Endpoints
 
-## 🧪 Entity Types
+| Endpoint                     | Method | Description           |
+| ---------------------------- | ------ | --------------------- |
+| `/api/auth/local/signup`     | POST   | Create local account  |
+| `/api/auth/local/login`      | POST   | Login with email/pass |
+| `/api/auth/github/authorize` | GET    | Start GitHub OAuth    |
+| `/api/auth/github/callback`  | GET    | GitHub OAuth callback |
+| `/api/auth/logout`           | POST   | End session           |
+| `/api/auth/me`               | GET    | Current user info     |
+| `/api/auth/api-keys`         | GET    | List API keys         |
+| `/api/auth/api-keys`         | POST   | Create API key        |
 
-| Type       | What It Holds                   |
-| ---------- | ------------------------------- |
-| `pattern`  | Reusable coding patterns        |
-| `episode`  | Temporal learnings, discoveries |
-| `task`     | Work items with workflow        |
-| `project`  | Container for related work      |
-| `rule`     | Sacred constraints, invariants  |
-| `source`   | Knowledge origins (URLs, repos) |
-| `document` | Crawled/ingested content        |
+### Admin Endpoints
 
-## 💜 Philosophy
+| Endpoint            | Method | Description          |
+| ------------------- | ------ | -------------------- |
+| `/api/admin/stats`  | GET    | System statistics    |
+| `/api/admin/health` | GET    | Health check         |
+| `/api/admin/backup` | POST   | Trigger graph backup |
 
-### Search Before Implementing
+## Authentication
 
-The graph knows things. Before you code:
+### JWT Sessions
 
-```bash
-uv run sibyl search "what you're building"
-uv run sibyl search "error you hit" --type episode
-```
-
-### Work In Task Context
-
-Never do significant work outside a task. Tasks provide traceability, progress tracking, and
-knowledge linking.
-
-### Capture What You Learn
-
-If it took time to figure out, save it:
-
-```bash
-uv run sibyl add "Descriptive title" "What, why, how, caveats"
-```
-
-**Bad:** "Fixed the bug" **Good:** "JWT refresh fails when Redis TTL expires. Root cause: token
-service doesn't handle WRONGTYPE. Fix: try/except with regeneration fallback."
-
-### Complete With Learnings
-
-```bash
-uv run sibyl task complete <id> --learnings "Key insight: ..."
-```
-
-The graph should be smarter after every session.
-
-## 🔧 Configuration
+Web clients authenticate via JWT stored in `sibyl_access_token` HTTP-only cookie.
 
 ```bash
 # Required
-SIBYL_OPENAI_API_KEY=sk-...
+SIBYL_JWT_SECRET=your-secret-key
 
-# FalkorDB (defaults work with docker-compose)
+# Optional
+SIBYL_JWT_EXPIRY_HOURS=24
+```
+
+### OAuth (GitHub)
+
+```bash
+SIBYL_GITHUB_CLIENT_ID=...
+SIBYL_GITHUB_CLIENT_SECRET=...
+SIBYL_SERVER_URL=https://api.example.com     # For callbacks
+SIBYL_FRONTEND_URL=https://app.example.com   # Post-login redirect
+```
+
+### API Keys
+
+Scoped keys for programmatic access:
+
+- `mcp` — Required for `/mcp` endpoint
+- `api:read` — GET/HEAD/OPTIONS on `/api/*`
+- `api:write` — All `/api/*` methods (implies read)
+
+```bash
+# Create via CLI
+sibyl auth api-key create --name "CI/CD" --scopes mcp,api:read
+
+# Or via API
+curl -X POST /api/auth/api-keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"name": "CI/CD", "scopes": ["mcp", "api:read"]}'
+```
+
+### MCP Auth
+
+```bash
+# auto (default): enforce when SIBYL_JWT_SECRET is set
+# on: always require auth
+# off: disable auth (dev only)
+SIBYL_MCP_AUTH_MODE=auto
+```
+
+## Configuration
+
+### Required
+
+```bash
+SIBYL_OPENAI_API_KEY=sk-...       # For embeddings
+SIBYL_JWT_SECRET=...              # For auth
+```
+
+### Database
+
+```bash
+# FalkorDB (graph)
 SIBYL_FALKORDB_HOST=localhost
 SIBYL_FALKORDB_PORT=6380
 SIBYL_FALKORDB_PASSWORD=conventions
 
-# Optional
-SIBYL_LOG_LEVEL=INFO
-SIBYL_EMBEDDING_MODEL=text-embedding-3-small
+# PostgreSQL (relational)
+SIBYL_DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/sibyl
 ```
 
-## 🔌 Integration
-
-### Claude Code (MCP)
-
-```json
-{
-  "mcpServers": {
-    "sibyl": {
-      "type": "http",
-      "url": "http://localhost:3334/mcp"
-    }
-  }
-}
-```
-
-### Subprocess Mode
-
-```json
-{
-  "mcpServers": {
-    "sibyl": {
-      "command": "uv",
-      "args": ["--directory", "/path/to/sibyl", "run", "sibyl", "serve", "-t", "stdio"],
-      "env": { "SIBYL_OPENAI_API_KEY": "sk-..." }
-    }
-  }
-}
-```
-
-## 📚 Documentation
-
-| Doc                                                   | What's Inside                           |
-| ----------------------------------------------------- | --------------------------------------- |
-| [Architecture](docs/CONSOLIDATED_ARCHITECTURE.md)     | System design deep dive                 |
-| [Agent Prompt](docs/agent-system-prompt.md)           | How to integrate Sibyl in agent prompts |
-| [Graph-RAG Research](docs/graph-rag-sota-research.md) | SOTA research summary                   |
-
-## 🛠️ Development
+### Optional
 
 ```bash
-just lint          # ruff check + pyright
-just fix           # ruff fix + format
-just test          # pytest
-just serve         # Start server
-
-# Frontend
-cd web && pnpm dev
+SIBYL_LOG_LEVEL=INFO
+SIBYL_EMBEDDING_MODEL=text-embedding-3-small
+SIBYL_ANTHROPIC_API_KEY=...       # For LLM operations
+SIBYL_SERVER_URL=...              # Public URL
+SIBYL_FRONTEND_URL=...            # Frontend URL
 ```
 
-## License
+## Development
 
-Apache 2.0 — See [LICENSE](LICENSE)
+### moonrepo Tasks
 
----
+```bash
+moon run api:serve        # Start server
+moon run api:worker       # Start background worker
+moon run api:test         # Run tests
+moon run api:lint         # Lint code
+moon run api:typecheck    # Type check
+moon run api:db-migrate   # Run migrations
+```
 
-<p align="center">
-  Created by <a href="https://hyperbliss.tech">Stefanie Jane</a>
-</p>
+### Direct Commands
 
-<p align="center">
-  <a href="https://github.com/hyperb1iss">
-    <img src="https://img.shields.io/badge/GitHub-hyperb1iss-181717?style=for-the-badge&logo=github" alt="GitHub">
-  </a>
-  <a href="https://bsky.app/profile/hyperbliss.tech">
-    <img src="https://img.shields.io/badge/Bluesky-@hyperbliss.tech-1185fe?style=for-the-badge&logo=bluesky" alt="Bluesky">
-  </a>
-</p>
+```bash
+# From apps/api/
+uv run sibyl-serve                     # Start server (HTTP mode)
+uv run sibyl-serve -t stdio            # Start server (stdio mode)
+uv run arq sibyl.jobs.WorkerSettings   # Start worker
+
+# Testing
+uv run pytest
+uv run pytest -k "test_auth"           # Filter tests
+uv run pytest --cov=src                # With coverage
+
+# Linting
+uv run ruff check src tests
+uv run ruff format src tests
+uv run pyright
+```
+
+### Database Migrations
+
+```bash
+# Create migration
+moon run api:db-revision -- -m "Add new column"
+
+# Apply migrations
+moon run api:db-migrate
+```
+
+## CLI Commands
+
+The server CLI provides administration commands:
+
+```bash
+# Server
+sibyl-serve                   # Start HTTP server
+sibyl-serve -t stdio          # Start stdio server
+
+# Database
+sibyl db backup               # Backup graph
+sibyl db restore <file>       # Restore from backup
+sibyl db nuke                 # Delete all data (dangerous!)
+
+# Test data
+sibyl generate quick          # Generate sample data
+sibyl generate stress         # Generate load test data
+
+# Health
+sibyl health                  # Check system health
+sibyl stats                   # Show statistics
+```
+
+## Multi-Tenancy
+
+Each organization gets its own isolated FalkorDB graph:
+
+```python
+# Graph named by org UUID
+graph_name = str(org.id)  # e.g., "550e8400-e29b-41d4-a716-446655440000"
+
+# All operations require org context
+manager = EntityManager(client, group_id=str(org.id))
+```
+
+**Never query without org scope** — it will hit the wrong graph or break isolation.
+
+## Key Patterns
+
+### Write Concurrency
+
+All FalkorDB writes use a semaphore to prevent corruption:
+
+```python
+async with client.write_lock:
+    await client.execute_write_org(org_id, query, **params)
+```
+
+### Request Context
+
+Auth middleware injects context available throughout request:
+
+```python
+from sibyl.auth.context import get_current_user, get_current_org
+
+user = await get_current_user()
+org = await get_current_org()
+```
+
+### Background Jobs
+
+Long-running tasks use arq:
+
+```python
+from sibyl.jobs import queue
+
+await queue.enqueue("crawl_source", source_id=source.id)
+```
+
+## Dependencies
+
+This package depends on:
+
+- `sibyl-core` — Models, graph client, tool implementations
+
+It provides:
+
+- Server runtime (FastAPI + MCP)
+- Database layer (PostgreSQL + Alembic)
+- Full auth system
+- Background job processing

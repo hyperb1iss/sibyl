@@ -68,7 +68,7 @@ def _start_callback_server() -> tuple[HTTPServer, str, threading.Event, dict[str
     done = threading.Event()
 
     class CallbackHandler(BaseHTTPRequestHandler):
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+        def log_message(self, format: str, *args: object) -> None:
             _ = format, args  # Suppress logging
 
         def do_GET(self) -> None:
@@ -120,7 +120,7 @@ def _register_oauth_client(
 
     reg_resp = httpx.post(registration_endpoint, json=reg_payload, timeout=10, verify=not insecure)
     if reg_resp.status_code >= 400:
-        reg_payload["token_endpoint_auth_method"] = "client_secret_post"  # noqa: S105
+        reg_payload["token_endpoint_auth_method"] = "client_secret_post"
         reg_resp = httpx.post(
             registration_endpoint, json=reg_payload, timeout=10, verify=not insecure
         )

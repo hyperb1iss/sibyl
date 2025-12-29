@@ -14,7 +14,7 @@ _context_override: str | None = None
 
 def set_context_override(context_name: str | None) -> None:
     """Set the global context override for this CLI session."""
-    global _context_override  # noqa: PLW0603
+    global _context_override
     _context_override = context_name
 
 
@@ -38,5 +38,5 @@ def get_context_override() -> str | None:
 
 def clear_context_override() -> None:
     """Clear the context override (mainly for testing)."""
-    global _context_override  # noqa: PLW0603
+    global _context_override
     _context_override = None

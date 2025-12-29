@@ -1,5 +1,5 @@
 # ============================================================================
-# Sibyl Backend Dockerfile
+# Sibyld Backend Dockerfile
 # Multi-stage build for Python 3.13+ with uv package manager
 # ============================================================================
 
@@ -11,18 +11,21 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# Install dependencies first (cached unless requirements change)
-COPY apps/api/pyproject.toml apps/api/uv.lock ./
-COPY README.md ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+# Copy workspace config for dependency resolution
+COPY pyproject.toml uv.lock ./
+COPY packages/python/sibyl-core/pyproject.toml packages/python/sibyl-core/
+COPY packages/python/sibyl-core/src packages/python/sibyl-core/src
 
-# Copy source and install project (non-editable for production)
-COPY apps/api/src/ src/
-COPY apps/api/alembic/ alembic/
-COPY apps/api/alembic.ini .
+# Copy API package
+COPY apps/api/pyproject.toml apps/api/
+COPY apps/api/src apps/api/src
+COPY apps/api/alembic apps/api/alembic
+COPY apps/api/alembic.ini apps/api/
+COPY README.md ./
+
+# Install from workspace
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
+    uv sync --frozen --no-dev --package sibyld
 
 
 # Stage 2: Runtime
@@ -36,8 +39,8 @@ WORKDIR /app
 
 # Copy virtual environment from builder
 COPY --from=builder --chown=sibyl:sibyl /app/.venv /app/.venv
-COPY --from=builder --chown=sibyl:sibyl /app/alembic /app/alembic
-COPY --from=builder --chown=sibyl:sibyl /app/alembic.ini /app/alembic.ini
+COPY --from=builder --chown=sibyl:sibyl /app/apps/api/alembic /app/alembic
+COPY --from=builder --chown=sibyl:sibyl /app/apps/api/alembic.ini /app/alembic.ini
 
 # Set environment
 ENV PATH="/app/.venv/bin:$PATH" \
@@ -59,5 +62,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 # Expose MCP + API port
 EXPOSE 3334
 
-# Run the server using CLI
-CMD ["sibyl", "serve"]
+# Run the server
+CMD ["sibyld", "serve"]

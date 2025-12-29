@@ -120,7 +120,10 @@ async def test_mcp_oauth_exchange_refresh_rotates_session(monkeypatch) -> None:
 
     monkeypatch.setattr("sibyl.auth.mcp_oauth.get_session", fake_session)
     monkeypatch.setattr("sibyl.auth.mcp_oauth._jwt_decode", lambda t: claims)
-    monkeypatch.setattr("sibyl.auth.mcp_oauth._create_refresh_token", lambda **k: ("new_refresh", datetime.now(UTC) + timedelta(days=30)))
+    monkeypatch.setattr(
+        "sibyl.auth.mcp_oauth._create_refresh_token",
+        lambda **k: ("new_refresh", datetime.now(UTC) + timedelta(days=30)),
+    )
     monkeypatch.setattr("sibyl.auth.mcp_oauth.SessionManager", FakeSessionManager)
     monkeypatch.setattr("sibyl.auth.mcp_oauth.create_access_token", lambda **k: "new_access")
 
@@ -134,4 +137,3 @@ async def test_mcp_oauth_exchange_refresh_rotates_session(monkeypatch) -> None:
     assert tok.refresh_token == "new_refresh"
     assert tok.access_token == "new_access"
     assert rotated["called"] is True
-

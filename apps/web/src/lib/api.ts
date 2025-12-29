@@ -61,6 +61,8 @@ export interface SearchResult {
   content: string;
   score: number;
   source: string | null;
+  url: string | null;
+  result_origin: 'graph' | 'document';
   metadata: Record<string, unknown>;
 }
 
@@ -679,6 +681,7 @@ export interface CodeExampleParams {
 export interface CodeExampleResult {
   chunk_id: string;
   document_id: string;
+  source_id: string;
   source_name: string;
   url: string;
   title: string;

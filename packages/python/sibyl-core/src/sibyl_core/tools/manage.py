@@ -732,11 +732,11 @@ async def _link_graph(
     organization_id: str,
 ) -> ManageResponse:
     """Link document chunks to knowledge graph entities via LLM extraction."""
+    from sibyl.crawler.graph_integration import GraphIntegrationService
+    from sibyl.db import CrawledDocument, DocumentChunk, get_session
     from sqlalchemy import select
     from sqlmodel import col
 
-    from sibyl_core.crawler.graph_integration import GraphIntegrationService
-    from sibyl_core.db import CrawledDocument, DocumentChunk, get_session
     from sibyl_core.graph.client import get_graph_client
 
     max_chunks = data.get("max_chunks", 1000)
@@ -746,7 +746,7 @@ async def _link_graph(
 
     if source_id:
         # Filter to specific source via document join
-        from sibyl_core.db import CrawlSource
+        from sibyl.db import CrawlSource
 
         query = (
             query.join(CrawledDocument, CrawledDocument.id == DocumentChunk.document_id)
@@ -793,10 +793,9 @@ async def _link_graph(
 
 async def _link_graph_status() -> ManageResponse:
     """Get status of graph linking (pending chunks per source)."""
+    from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
     from sqlalchemy import func, select
     from sqlmodel import col
-
-    from sibyl_core.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
 
     async with get_session() as session:
         # Total chunks
@@ -897,7 +896,7 @@ async def _estimate_effort(
     # Get the task
     try:
         entity = await entity_manager.get(task_id)
-        task = task_manager._entity_to_task(entity)  # noqa: SLF001
+        task = task_manager._entity_to_task(entity)
     except Exception:
         return ManageResponse(
             success=False,
@@ -1016,7 +1015,7 @@ async def _suggest_knowledge(
     # Get the task
     try:
         entity = await entity_manager.get(task_id)
-        task = task_manager._entity_to_task(entity)  # noqa: SLF001
+        task = task_manager._entity_to_task(entity)
     except Exception:
         return ManageResponse(
             success=False,
@@ -1046,4 +1045,3 @@ async def _suggest_knowledge(
             "error_patterns": suggestions.error_patterns,
         },
     )
-

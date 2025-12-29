@@ -290,10 +290,7 @@ def weighted_score_merge(
         for entity, original_score in results:
             key = dedup_key(entity)
 
-            if normalize:
-                norm_score = (original_score - min_score) / score_range
-            else:
-                norm_score = original_score
+            norm_score = (original_score - min_score) / score_range if normalize else original_score
 
             scores[key] += norm_score * weight
             counts[key] += 1

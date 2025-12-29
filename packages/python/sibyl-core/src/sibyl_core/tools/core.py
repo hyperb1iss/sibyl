@@ -555,12 +555,11 @@ async def _search_documents(
     try:
         from uuid import UUID
 
+        from sibyl.crawler.embedder import embed_text
+        from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
+        from sibyl.db.models import ChunkType
         from sqlalchemy import select
         from sqlmodel import col
-
-        from sibyl_core.crawler.embedder import embed_text
-        from sibyl_core.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
-        from sibyl_core.db.models import ChunkType
 
         # Generate query embedding
         query_embedding = await embed_text(query)
@@ -660,7 +659,7 @@ async def _search_documents(
         return []
 
 
-async def search(  # noqa: PLR0915
+async def search(
     query: str,
     types: list[str] | None = None,
     language: str | None = None,
@@ -885,13 +884,11 @@ async def search(  # noqa: PLR0915
                     if status.lower() != str(status_val).lower():
                         continue
 
-                if project:
-                    if _get_field(entity, "project_id") != project:
-                        continue
+                if project and _get_field(entity, "project_id") != project:
+                    continue
 
-                if source:
-                    if _get_field(entity, "source_id") != source:
-                        continue
+                if source and _get_field(entity, "source_id") != source:
+                    continue
 
                 if assignee:
                     entity_assignees = _get_field(entity, "assignees", [])
@@ -1533,7 +1530,7 @@ async def _explore_related(
 # =============================================================================
 
 
-async def add(  # noqa: PLR0915
+async def add(
     title: str,
     content: str,
     entity_type: str = "episode",
@@ -2135,7 +2132,7 @@ async def get_health(*, organization_id: str | None = None) -> dict[str, Any]:
 
     from sibyl_core.config import settings
 
-    global _server_start_time  # noqa: PLW0603
+    global _server_start_time
     if _server_start_time is None:
         _server_start_time = time.time()
 

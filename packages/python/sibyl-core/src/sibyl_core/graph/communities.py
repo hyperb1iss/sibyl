@@ -395,8 +395,13 @@ def _extract_entity_type(
     # Try to extract from labels array - skip known graph/system labels
     if labels:
         skip_labels = {
-            "Entity", "Episodic", "EntityNode", "EpisodicNode",
-            "Cluster", "Community", "Node",  # System labels
+            "Entity",
+            "Episodic",
+            "EntityNode",
+            "EpisodicNode",
+            "Cluster",
+            "Community",
+            "Node",  # System labels
         }
         for label in labels:
             if label and label not in skip_labels:
@@ -406,7 +411,10 @@ def _extract_entity_type(
     if name:
         name_lower = name.lower()
         # File paths
-        if any(name_lower.endswith(ext) for ext in (".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".md")):
+        if any(
+            name_lower.endswith(ext)
+            for ext in (".py", ".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".md")
+        ):
             return "file"
         # URLs
         if name_lower.startswith(("http://", "https://", "www.")):
@@ -738,7 +746,7 @@ async def export_to_networkx(
     log.info("export_to_networkx_start", org_id=organization_id, type_affinity=type_affinity_weight)
 
     # Create undirected graph for community detection
-    G = nx.Graph()  # noqa: N806
+    G = nx.Graph()
 
     # Fetch ALL nodes - both Episodic and Entity labels with group_id filter
     # Also fetch labels array for type resolution
@@ -825,7 +833,7 @@ async def export_to_networkx(
 
 
 def detect_communities_louvain(
-    G: Any,  # noqa: N803
+    G: Any,
     resolution: float = 1.0,
 ) -> tuple[dict[str, int], float]:
     """Detect communities using Louvain algorithm.
@@ -859,7 +867,7 @@ def detect_communities_louvain(
 
 
 def detect_communities_leiden(
-    G: Any,  # noqa: N803
+    G: Any,
     resolution: float = 1.0,
 ) -> tuple[dict[str, int], float]:
     """Detect communities using Leiden algorithm.
@@ -887,7 +895,7 @@ def detect_communities_leiden(
         return {}, 0.0
 
     # Convert NetworkX to igraph
-    G_ig = ig.Graph.from_networkx(G)  # noqa: N806
+    G_ig = ig.Graph.from_networkx(G)
 
     # Run Leiden algorithm
     partition = leidenalg.find_partition(
@@ -1016,17 +1024,14 @@ async def detect_communities(
     )
 
     # Export graph to NetworkX
-    G = await export_to_networkx(client, organization_id)  # noqa: N806
+    G = await export_to_networkx(client, organization_id)
 
     if G.number_of_nodes() < config.min_community_size:
         log.info("detect_communities_too_few_nodes", nodes=G.number_of_nodes())
         return []
 
     # Select algorithm
-    if algorithm == "leiden":
-        detect_fn = detect_communities_leiden
-    else:
-        detect_fn = detect_communities_louvain
+    detect_fn = detect_communities_leiden if algorithm == "leiden" else detect_communities_louvain
 
     # Detect communities at each resolution level
     all_level_communities: list[list[DetectedCommunity]] = []

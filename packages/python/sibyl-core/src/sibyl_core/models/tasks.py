@@ -224,9 +224,8 @@ class Team(Entity):
     @classmethod
     def set_entity_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
         """Set content from description."""
-        if isinstance(data, dict):
-            if "content" not in data and "description" in data:
-                data["content"] = data["description"]
+        if isinstance(data, dict) and "content" not in data and "description" in data:
+            data["content"] = data["description"]
         return data
 
 
@@ -286,9 +285,8 @@ class Milestone(Entity):
     @classmethod
     def set_entity_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
         """Set content from description."""
-        if isinstance(data, dict):
-            if "content" not in data and "description" in data:
-                data["content"] = data["description"]
+        if isinstance(data, dict) and "content" not in data and "description" in data:
+            data["content"] = data["description"]
         return data
 
 

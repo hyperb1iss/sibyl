@@ -30,13 +30,12 @@ app = typer.Typer(
 @app.command("init")
 def config_init() -> None:
     """Interactive setup wizard for first-time configuration."""
-    if config_store.config_exists():
-        if not typer.confirm(
-            "Config already exists. Run setup again?",
-            default=False,
-        ):
-            info("Setup cancelled. Use 'sibyl config show' to view current config.")
-            return
+    if config_store.config_exists() and not typer.confirm(
+        "Config already exists. Run setup again?",
+        default=False,
+    ):
+        info("Setup cancelled. Use 'sibyl config show' to view current config.")
+        return
 
     if run_onboarding():
         success("Configuration saved!")
@@ -143,7 +142,7 @@ def config_edit() -> None:
     editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "nano"))
 
     try:
-        subprocess.run([editor, str(path)], check=True)  # noqa: S603
+        subprocess.run([editor, str(path)], check=True)
         success(f"Config file saved: {path}")
     except FileNotFoundError:
         error(f"Editor '{editor}' not found. Set EDITOR environment variable.")

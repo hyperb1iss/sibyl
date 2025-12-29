@@ -24,23 +24,23 @@ from sibyl_core.tasks.workflow import (
 )
 
 __all__ = [
+    "CycleResult",
+    "DependencyResult",
+    "SimilarTask",
+    "TaskEstimate",
     # Workflow
     "TaskManager",
-    "TaskWorkflowEngine",
-    "is_valid_transition",
-    "get_allowed_transitions",
-    # Dependencies
-    "get_task_dependencies",
-    "get_blocking_tasks",
-    "detect_dependency_cycles",
-    "suggest_task_order",
-    "DependencyResult",
-    "CycleResult",
     "TaskOrderResult",
-    # Estimation
-    "estimate_task_effort",
+    "TaskWorkflowEngine",
     "batch_estimate",
     "calculate_project_estimate",
-    "TaskEstimate",
-    "SimilarTask",
+    "detect_dependency_cycles",
+    # Estimation
+    "estimate_task_effort",
+    "get_allowed_transitions",
+    "get_blocking_tasks",
+    # Dependencies
+    "get_task_dependencies",
+    "is_valid_transition",
+    "suggest_task_order",
 ]

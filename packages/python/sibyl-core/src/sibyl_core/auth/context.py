@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sibyl_core.db.models import Organization, OrganizationRole, User
+from sibyl.db.models import Organization, OrganizationRole, User
 
 
 @dataclass(frozen=True)

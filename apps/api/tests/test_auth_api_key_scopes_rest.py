@@ -111,4 +111,3 @@ async def test_api_key_rest_allows_write_with_api_write() -> None:
         assert claims is not None
         assert claims["typ"] == "api_key"
         assert "api:write" in claims["scopes"]
-

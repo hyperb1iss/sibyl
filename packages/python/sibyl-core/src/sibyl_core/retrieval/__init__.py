@@ -37,31 +37,31 @@ from sibyl_core.retrieval.temporal import (
 )
 
 __all__ = [
-    # Temporal
-    "TemporalConfig",
-    "temporal_boost",
-    "temporal_boost_single",
-    "calculate_boost",
-    # Fusion
-    "FusionConfig",
-    "rrf_merge",
-    "rrf_merge_with_metadata",
-    "weighted_score_merge",
     # BM25
     "BM25Config",
     "BM25Index",
-    "bm25_search",
-    "get_bm25_index",
-    # Hybrid
-    "HybridConfig",
-    "HybridResult",
-    "hybrid_search",
-    "simple_hybrid_search",
     # Dedup
     "DedupConfig",
     "DuplicatePair",
     "EntityDeduplicator",
+    # Fusion
+    "FusionConfig",
+    # Hybrid
+    "HybridConfig",
+    "HybridResult",
+    # Temporal
+    "TemporalConfig",
+    "bm25_search",
+    "calculate_boost",
     "cosine_similarity",
     "find_duplicates",
+    "get_bm25_index",
     "get_deduplicator",
+    "hybrid_search",
+    "rrf_merge",
+    "rrf_merge_with_metadata",
+    "simple_hybrid_search",
+    "temporal_boost",
+    "temporal_boost_single",
+    "weighted_score_merge",
 ]

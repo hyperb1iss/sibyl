@@ -2,14 +2,17 @@
 
 ## Project Overview
 
-**Sibyl** is a Graph-RAG Knowledge Oracle - an MCP server that provides AI agents access to
-development wisdom through a Graphiti-powered knowledge graph stored in FalkorDB.
+**Sibyl** is a Collective Intelligence Runtime - an MCP server providing AI agents shared memory,
+task orchestration, and collaborative knowledge through a Graphiti-powered knowledge graph.
 
-**Stack:**
+**See package READMEs for detailed documentation:**
 
-- Backend: Python 3.11+ / FastMCP / FastAPI / Graphiti / FalkorDB
-- Frontend: Next.js 16 / React 19 / React Query / Tailwind 4
-- Package Managers: `uv` (Python), `pnpm` (TypeScript)
+- [`README.md`](README.md) — Project overview, quickstart, philosophy
+- [`apps/api/README.md`](apps/api/README.md) — Server daemon (sibyld), MCP API, REST endpoints
+- [`apps/cli/README.md`](apps/cli/README.md) — Client CLI (sibyl), user commands
+- [`apps/web/README.md`](apps/web/README.md) — Web UI, components, React Query hooks
+- [`packages/python/sibyl-core/README.md`](packages/python/sibyl-core/README.md) — Core library,
+  models, graph client
 
 ---
 
@@ -25,8 +28,7 @@ skills know the correct patterns and handle authentication properly.
 - `/sibyl-knowledge` - Search, explore, add knowledge, manage tasks
 - `/sibyl-project-manager` - Project audits, task triage, sprint planning
 
-**Never call Sibyl MCP tools or CLI directly** without going through a skill first. The skills
-ensure proper org context and prevent the "wrong graph" problem.
+**Never call Sibyl MCP tools or CLI directly** without going through a skill first.
 
 ### Research → Do → Reflect Cycle
 
@@ -39,16 +41,11 @@ Every significant task follows this cycle:
 /sibyl-knowledge explore patterns
 ```
 
-Find existing patterns, gotchas, past solutions. Don't reinvent wheels.
-
 **2. DO** (while coding)
 
 ```
 /sibyl-knowledge task start <id>
-# ... implement with task context ...
 ```
-
-Work is tracked. Status updates flow through skills.
 
 **3. REFLECT** (after completing)
 
@@ -57,322 +54,102 @@ Work is tracked. Status updates flow through skills.
 /sibyl-knowledge add "Pattern Title" "What, why, how, caveats"
 ```
 
-Capture insights. The graph gets smarter every session.
-
-### When to Use Sibyl
-
-**Always use for:**
-
-- Multi-file features or refactors
-- Debugging non-obvious issues
-- Architectural decisions
-- Work spanning multiple sessions
-
-**Skip for:**
-
-- Quick fixes, typos, simple tweaks
-- Single-file changes with clear scope
-- Tasks completable in < 5 minutes
-
 ---
 
-## Architecture
+## Quick Reference
 
-### Server Architecture
-
-```
-Sibyl Combined App (Starlette, port 3334)
-├── /api/*  → FastAPI REST (CRUD, search, admin)
-├── /mcp    → MCP streamable-http (4 tools for agents)
-└── Lifespan → Background queue + MCP session manager
-```
-
-### Backend Layers
-
-| Layer      | Location      | Purpose                                       |
-| ---------- | ------------- | --------------------------------------------- |
-| MCP Server | `server.py`   | 4-tool surface (search/explore/add/manage)    |
-| Tools      | `tools/*.py`  | Tool implementations                          |
-| Graph      | `graph/*.py`  | FalkorDB client, entity/relationship managers |
-| Models     | `models/*.py` | Pydantic entities, tasks, sources             |
-| API        | `api/*.py`    | FastAPI REST routes                           |
-| CLI        | `cli/*.py`    | Typer commands with Rich output               |
-
-### Frontend Structure
+### Monorepo Structure
 
 ```
-web/src/
-├── app/           # Next.js 16 app router (SSR + client hydration)
-├── components/    # 30+ components (ui/, layout/, domain-specific)
-├── lib/           # API clients, hooks, constants
-│   ├── api.ts         # Client-side fetch wrapper
-│   ├── api-server.ts  # Server-side with caching
-│   ├── hooks.ts       # 21 React Query hooks
-│   └── websocket.ts   # Real-time updates
-└── app/globals.css    # SilkCircuit design system
+sibyl/
+├── apps/
+│   ├── api/              # sibyld - Server daemon (serve, worker, db)
+│   ├── cli/              # sibyl - Client CLI (task, search, add, etc.)
+│   └── web/              # Next.js 16 frontend
+├── packages/python/
+│   └── sibyl-core/       # Shared library (models, graph, tools)
+├── skills/               # Claude Code skills
+└── charts/               # Helm charts
 ```
+
+### CLI Executables
+
+| Binary   | Package    | Purpose                                    |
+| -------- | ---------- | ------------------------------------------ |
+| `sibyld` | `apps/api` | Server daemon (serve, worker, db, up/down) |
+| `sibyl`  | `apps/cli` | Client CLI (task, search, add, explore)    |
+
+### Development Commands
+
+```bash
+moon run dev              # Start everything (FalkorDB, API, worker, web)
+moon run stop             # Stop all services
+
+moon run api:test         # Run API tests
+moon run api:lint         # Lint API
+moon run web:dev          # Start frontend only
+moon run core:check       # Lint + typecheck + test core
+
+# Installation
+moon run install-dev      # Install everything (sibyl, sibyld, skills) - editable
+moon run install          # Install everything (production)
+```
+
+### Ports
+
+| Service   | Port |
+| --------- | ---- |
+| API + MCP | 3334 |
+| Frontend  | 3337 |
+| FalkorDB  | 6380 |
 
 ---
 
 ## Key Patterns
 
+### Multi-Tenancy
+
+**Every graph operation requires org context - NO defaults:**
+
+```python
+manager = EntityManager(client, group_id=str(org.id))
+```
+
+Each organization gets its own isolated FalkorDB graph. Forgetting org scope queries the wrong graph
+or breaks isolation.
+
 ### FalkorDB Write Concurrency
 
-GraphClient uses a semaphore to limit concurrent writes (max 20) to prevent connection corruption:
+All writes use a semaphore to prevent corruption:
 
 ```python
-# ALL writes MUST use the write lock to prevent FalkorDB corruption
-async with self._client.write_lock:
-    await self._driver.execute_query(...)
-
-# Three write methods (prefer org-scoped):
-await client.execute_write_org(org_id, query, **params)  # Multi-tenant (preferred)
-await client.execute_write(query, **params)              # Default graph only (legacy)
-
-# SEMAPHORE_LIMIT controls Graphiti's LLM concurrency (separate from DB writes)
-SEMAPHORE_LIMIT=10  # Controls parallel LLM calls to avoid rate limits
-```
-
-### Multi-Tenancy (Organization Scoping)
-
-**Every graph operation requires org context - there are NO defaults:**
-
-```python
-# org_id is MANDATORY for all managers
-manager = EntityManager(client, group_id=str(org.id))  # Must be string
-
-# API routes extract org from auth context
-group_id = str(org.id)  # From authenticated request
-entity_manager = EntityManager(client, group_id=group_id)
-```
-
-Each organization gets its own isolated FalkorDB graph (named by org UUID). Forgetting org scope
-queries the wrong graph or breaks isolation.
-
-### Entity Creation Dual Path
-
-```python
-# Path 1: LLM-powered extraction (slower, richer)
-await entity_manager.create(entity)  # Uses Graphiti add_episode
-
-# Path 2: Direct insertion (faster, structured data)
-await entity_manager.create_direct(entity)  # Direct Cypher MERGE
+async with client.write_lock:
+    await client.execute_write_org(org_id, query, **params)
 ```
 
 ### Node Labels
 
-Graphiti creates two types of nodes:
+Graphiti creates two node types:
 
-- `Episodic` - Created by `add_episode()`, has `entity_type` property
-- `Entity` - Extracted entities, may not have `entity_type`
+- `Episodic` - Created by `add_episode()`
+- `Entity` - Extracted entities
 
 **Queries must handle both:**
 
 ```cypher
-MATCH (n)
 WHERE (n:Episodic OR n:Entity) AND n.entity_type = $type
 ```
 
-### Async Patterns
+### Package Imports
 
 ```python
-# CLI commands use @run_async decorator
-@app.command()
-def my_command():
-    @run_async
-    async def _impl():
-        client = await get_graph_client()
-        # async work...
-    _impl()
+# Core library
+from sibyl_core.models import Task, Entity
+from sibyl_core.graph import EntityManager
 
-# Resilience with retry
-@retry(config=GRAPH_RETRY)  # 3 attempts, exponential backoff
-async def graph_operation():
-    ...
-```
-
-### React Query + WebSocket
-
-```typescript
-// Server-side fetch with cache tags
-const data = await serverFetch<Stats>("/admin/stats", {
-  next: { revalidate: 60, tags: ["stats"] },
-});
-
-// Client hydration with React Query
-const { data } = useStats(initialData);
-
-// WebSocket invalidates on changes
-wsClient.on("entity_created", () => {
-  queryClient.invalidateQueries({ queryKey: queryKeys.entities.all });
-});
-```
-
----
-
-## SilkCircuit Design System
-
-### Color Palette
-
-```css
-/* Core Neon Palette */
---sc-purple: #e135ff; /* Keywords, primary actions, importance */
---sc-cyan: #80ffea; /* Functions, highlights, interactions */
---sc-coral: #ff6ac1; /* Data, secondary, hashes */
---sc-yellow: #f1fa8c; /* Warnings, attention, timestamps */
---sc-green: #50fa7b; /* Success, confirmations */
---sc-red: #ff6363; /* Errors, danger */
-
-/* Background Hierarchy */
---sc-bg-dark: #0a0812; /* Main background */
---sc-bg-base: #12101a; /* Cards, elevated */
---sc-bg-highlight: #1a162a; /* Hover states */
---sc-bg-elevated: #221e30; /* Modals, dropdowns */
-```
-
-### CLI Colors (Python)
-
-```python
-from sibyl.cli.common import (
-    ELECTRIC_PURPLE,  # "#e135ff"
-    NEON_CYAN,        # "#80ffea"
-    CORAL,            # "#ff6ac1"
-    ELECTRIC_YELLOW,  # "#f1fa8c"
-    SUCCESS_GREEN,    # "#50fa7b"
-    ERROR_RED,        # "#ff6363"
-)
-
-# Message helpers
-success("Done!")      # Green checkmark
-error("Failed!")      # Red X
-warn("Caution!")      # Yellow warning
-info("Note:")         # Cyan arrow
-```
-
-### Semantic Usage
-
-| Element         | Color           |
-| --------------- | --------------- |
-| Titles, headers | ELECTRIC_PURPLE |
-| Borders, tables | NEON_CYAN       |
-| IDs, hashes     | CORAL           |
-| Status: doing   | ELECTRIC_PURPLE |
-| Status: todo    | NEON_CYAN       |
-| Status: done    | SUCCESS_GREEN   |
-| Status: blocked | ERROR_RED       |
-| Warnings        | ELECTRIC_YELLOW |
-
----
-
-## Data Models
-
-### Entity Hierarchy
-
-```
-Entity (base)
-├── Knowledge: Pattern, Rule, Template, Tool, Language, Topic, Episode
-├── Tasks: Task, Project, Team, Milestone, ErrorPattern
-└── Docs: Source, Document, Community
-```
-
-### Task Model
-
-```python
-class Task(Entity):
-    project_id: str      # Required - tasks must belong to a project
-    status: TaskStatus   # backlog→todo→doing→blocked/review→done→archived
-    priority: TaskPriority  # critical, high, medium, low, someday
-    complexity: TaskComplexity  # trivial, simple, medium, complex, epic
-    task_order: int      # Higher = more important
-    feature: str | None  # Feature area grouping
-    learnings: str       # Captured after completion
-```
-
-### Relationships (22 types)
-
-**Knowledge:** APPLIES_TO, REQUIRES, CONFLICTS_WITH, SUPERSEDES, ENABLES, BREAKS **Tasks:**
-BELONGS_TO, DEPENDS_ON, BLOCKS, ASSIGNED_TO, REFERENCES, ENCOUNTERED **Docs:** CRAWLED_FROM,
-CHILD_OF, MENTIONS
-
----
-
-## Development Commands
-
-### Python Backend
-
-```bash
-just lint          # ruff check + pyright
-just fix           # ruff fix + format
-just test          # pytest
-just serve         # Start server on :3334
-
-sibyl stats          # Graph statistics
-sibyl task list      # List tasks
-sibyl db backup      # Backup graph
-```
-
-### Frontend
-
-```bash
-cd web
-pnpm dev           # Start on :3337
-pnpm build         # Production build
-pnpm lint          # Biome lint
-```
-
-**Dev Server:** Runs on port **3337** (Next.js 16)
-
-**Browser Automation:** Use the `next-devtools` MCP for UI testing and automation:
-
-```typescript
-// Evaluate in browser context
-mcp__next - devtools__browser_eval({ code: "document.title", port: 3337 });
-
-// Initialize Next.js DevTools context
-mcp__next - devtools__init({ project_path: "/Users/bliss/dev/sibyl/web" });
-```
-
-### Docker
-
-```bash
-docker compose up -d                    # Start FalkorDB
-
-# List available graphs (each org has its own graph, named by org UUID)
-docker exec sibyl-falkordb redis-cli -a conventions GRAPH.LIST
-
-# Query a specific org's graph (replace <org-uuid> with actual org ID)
-docker exec sibyl-falkordb redis-cli -a conventions GRAPH.QUERY <org-uuid> "MATCH (n) RETURN count(n)"
-```
-
----
-
-## Testing
-
-### Test Harness
-
-```python
-from tests.harness import (
-    ToolTestContext,      # Patches all tool dependencies
-    MockEntityManager,    # In-memory entity store
-    create_test_entity,   # Factory for test entities
-)
-
-async def test_search():
-    ctx = ToolTestContext()
-    ctx.entity_manager.set_search_results([(entity, 0.9)])
-
-    async with ctx.patch():
-        result = await search("query")
-        assert result.total >= 0
-```
-
-### Running Tests
-
-```bash
-just test                           # All tests
-just test tests/test_models.py      # Specific file
-just test -k "test_task"            # Pattern match
-just test -m integration            # Integration tests only
+# Server-side (apps/api)
+from sibyl.auth.context import get_current_user
+from sibyl.cli.common import ELECTRIC_PURPLE
 ```
 
 ---
@@ -382,56 +159,25 @@ just test -m integration            # Integration tests only
 ### FalkorDB
 
 - **Port 6380** (not 6379) to avoid Redis conflicts
-- **Multi-tenant graphs**: Each org has its own graph, named by org UUID
-- **Graph corruption** can cause crashes - nuke with `GRAPH.DELETE <org-uuid>`
-- **Connection drops** under load - ensure SEMAPHORE_LIMIT is set
-- **Organization required**: All graph operations require org context - no defaults
+- **Graph corruption** can crash - nuke with `GRAPH.DELETE <org-uuid>`
+- **SEMAPHORE_LIMIT** must be set before importing graphiti
 
 ### Graphiti
 
 - `add_episode()` creates `Episodic` nodes, not `Entity` nodes
-- `EntityNode.get_by_uuids()` only finds `Entity` labeled nodes
-- Always query both labels: `WHERE (n:Episodic OR n:Entity)`
+- Always query both labels
 
-### Next.js
+### Next.js 16
 
 - Server components are default - add `'use client'` only when needed
+- Middleware file is `proxy.ts` (not `middleware.ts`)
 - API rewrites: `/api/*` proxies to backend `:3334`
-- React Query needs hydration boundary for SSR data
-- **Middleware is `proxy.ts`** (not `middleware.ts`) - Next.js 16 renamed it
 
-### Environment
+### Monorepo
 
-- Python env vars use `SIBYL_` prefix
-- Graphiti expects `OPENAI_API_KEY` (set by GraphClient from SIBYL_OPENAI_API_KEY)
-- Load `.env` BEFORE importing graphiti to ensure SEMAPHORE_LIMIT is set
-
----
-
-## File Reference
-
-### Critical Backend Files
-
-| File                | Purpose                            |
-| ------------------- | ---------------------------------- |
-| `main.py`           | Server entry, combined app factory |
-| `server.py`         | MCP tool registration              |
-| `graph/client.py`   | FalkorDB connection + write lock   |
-| `graph/entities.py` | Entity CRUD + search               |
-| `tools/core.py`     | search/explore/add implementations |
-| `tools/manage.py`   | Task workflow actions              |
-| `config.py`         | Settings from environment          |
-
-### Critical Frontend Files
-
-| File               | Purpose                   |
-| ------------------ | ------------------------- |
-| `app/layout.tsx`   | Root layout + providers   |
-| `lib/api.ts`       | Client-side API           |
-| `lib/hooks.ts`     | React Query hooks         |
-| `lib/websocket.ts` | Real-time updates         |
-| `lib/constants.ts` | Colors, entity configs    |
-| `app/globals.css`  | SilkCircuit design tokens |
+- Run from workspace root unless working on isolated package
+- `uv sync` at root syncs all Python deps
+- `moon run` commands for orchestration
 
 ---
 
@@ -439,42 +185,25 @@ just test -m integration            # Integration tests only
 
 When working on Sibyl itself:
 
-1. **Verify context:** `sibyl context` (should show Sibyl project)
+1. **Run `/sibyl-knowledge`** at session start
 2. **Check current tasks:** `sibyl task list --status doing`
 3. **Start a task:** `sibyl task start <id>`
 4. **Search for context:** Query Sibyl for relevant patterns
-5. **Implement** following patterns in this guide
+5. **Implement** following patterns in the READMEs
 6. **Complete with learnings:** `sibyl task complete <id> --learnings "..."`
-7. **Capture new knowledge:** Add episodes for gotchas discovered
+7. **Capture new knowledge:** Add patterns for gotchas discovered
 
 ---
 
-## Quick Reference
+## SilkCircuit Design System
 
-```bash
-# First-time setup: link directory to project
-sibyl project link project_05eb5c8c782a  # Sibyl project
-
-# Check current context
-sibyl context -t
-
-# Start everything
-sibyl up &              # Starts FalkorDB + API server
-cd web && pnpm dev
-
-# Check status
-sibyl stats
-sibyl health
-
-# Common operations (auto-scoped to Sibyl project)
-sibyl search "authentication"
-sibyl task list --status todo
-sibyl entity list --type pattern
-
-# See all projects' tasks (bypass context)
-sibyl task list --all
-
-# Debug FalkorDB (list graphs, then query by org UUID)
-docker exec sibyl-falkordb redis-cli -a conventions GRAPH.LIST
-docker exec sibyl-falkordb redis-cli -a conventions GRAPH.QUERY <org-uuid> "MATCH (n) RETURN labels(n), count(*)"
+```css
+--sc-purple: #e135ff; /* Primary, importance */
+--sc-cyan: #80ffea; /* Interactions */
+--sc-coral: #ff6ac1; /* Secondary, data */
+--sc-yellow: #f1fa8c; /* Warnings */
+--sc-green: #50fa7b; /* Success */
+--sc-red: #ff6363; /* Errors */
 ```
+
+See [`apps/web/README.md`](apps/web/README.md) for full design system documentation.

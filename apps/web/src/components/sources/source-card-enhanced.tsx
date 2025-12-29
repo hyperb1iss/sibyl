@@ -40,6 +40,8 @@ export interface CrawlProgress {
   percentage: number;
   pagesProcessed: number;
   documentsCreated: number;
+  chunksCreated?: number;
+  errorsCount?: number;
   currentUrl?: string;
   status: string;
 }
@@ -202,18 +204,42 @@ export const SourceCardEnhanced = memo(function SourceCardEnhanced({
                   <span className="text-sc-purple font-medium">{progress.percentage}%</span>
                 </div>
                 {progress.currentUrl && (
-                  <p className="text-xs text-sc-fg-subtle truncate font-mono">
-                    {progress.currentUrl}
-                  </p>
+                  <div className="bg-sc-bg-base rounded-lg p-2 mb-2">
+                    <p className="text-[10px] uppercase tracking-wide text-sc-fg-subtle mb-0.5">
+                      Processing
+                    </p>
+                    <p className="text-xs text-sc-cyan truncate font-mono">
+                      {(() => {
+                        try {
+                          const url = new URL(progress.currentUrl);
+                          return url.pathname || '/';
+                        } catch {
+                          return progress.currentUrl;
+                        }
+                      })()}
+                    </p>
+                  </div>
                 )}
-                <div className="grid grid-cols-2 gap-3 pt-1">
+                <div className="grid grid-cols-4 gap-2 pt-1">
                   <div className="text-center">
                     <p className="text-lg font-bold text-sc-cyan">{progress.pagesProcessed}</p>
-                    <p className="text-xs text-sc-fg-subtle">Pages</p>
+                    <p className="text-[10px] text-sc-fg-subtle">Pages</p>
                   </div>
                   <div className="text-center">
                     <p className="text-lg font-bold text-sc-green">{progress.documentsCreated}</p>
-                    <p className="text-xs text-sc-fg-subtle">Documents</p>
+                    <p className="text-[10px] text-sc-fg-subtle">Docs</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-sc-coral">{progress.chunksCreated ?? 0}</p>
+                    <p className="text-[10px] text-sc-fg-subtle">Chunks</p>
+                  </div>
+                  <div className="text-center">
+                    <p
+                      className={`text-lg font-bold ${(progress.errorsCount ?? 0) > 0 ? 'text-sc-red' : 'text-sc-fg-muted'}`}
+                    >
+                      {progress.errorsCount ?? 0}
+                    </p>
+                    <p className="text-[10px] text-sc-fg-subtle">Errors</p>
                   </div>
                 </div>
               </div>

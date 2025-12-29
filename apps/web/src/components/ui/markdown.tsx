@@ -42,26 +42,37 @@ const silkCircuitTheme = {
   ],
 };
 
+// Extended props from react-markdown
+interface CodeBlockProps extends ComponentPropsWithoutRef<'code'> {
+  inline?: boolean;
+  node?: { tagName?: string };
+}
+
 // Async code block with shiki highlighting
-function CodeBlock({ className, children, ...props }: ComponentPropsWithoutRef<'code'>) {
+function CodeBlock({ className, children, inline, ...props }: CodeBlockProps) {
   const [html, setHtml] = useState<string | null>(null);
   const match = /language-(\w+)/.exec(className || '');
   const lang = match?.[1] || 'text';
   const code = String(children).replace(/\n$/, '');
 
+  // Check if this is a code block (not inline)
+  // react-markdown passes inline=true for inline code, or we check if code has newlines
+  const isBlock = inline === false || (!inline && code.includes('\n'));
+
   useEffect(() => {
-    if (!match) return;
+    // Only attempt highlighting for blocks (with or without language)
+    if (!isBlock) return;
 
     codeToHtml(code, {
-      lang,
+      lang: match ? lang : 'text',
       theme: silkCircuitTheme,
     })
       .then(setHtml)
       .catch(() => setHtml(null));
-  }, [code, lang, match]);
+  }, [code, lang, match, isBlock]);
 
-  // Inline code
-  if (!match) {
+  // Inline code (no newlines, not in pre block)
+  if (!isBlock) {
     return (
       <code
         className="px-1.5 py-0.5 rounded bg-sc-bg-elevated text-sc-coral font-mono text-[0.9em] border border-sc-fg-subtle/20"
@@ -76,9 +87,11 @@ function CodeBlock({ className, children, ...props }: ComponentPropsWithoutRef<'
   if (html) {
     return (
       <div className="relative group my-4">
-        <div className="absolute top-2 right-2 text-[10px] font-mono text-sc-fg-subtle uppercase opacity-0 group-hover:opacity-100 transition-opacity">
-          {lang}
-        </div>
+        {match && (
+          <div className="absolute top-2 right-2 text-[10px] font-mono text-sc-fg-subtle uppercase opacity-0 group-hover:opacity-100 transition-opacity">
+            {lang}
+          </div>
+        )}
         <div
           className="overflow-x-auto rounded-xl border border-sc-fg-subtle/20 [&>pre]:!bg-sc-bg-dark [&>pre]:p-4 [&>pre]:overflow-x-auto [&_code]:text-sm [&_code]:leading-relaxed"
           // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki output is safe
@@ -91,9 +104,11 @@ function CodeBlock({ className, children, ...props }: ComponentPropsWithoutRef<'
   // Fallback while loading
   return (
     <div className="relative group my-4">
-      <div className="absolute top-2 right-2 text-[10px] font-mono text-sc-fg-subtle uppercase">
-        {lang}
-      </div>
+      {match && (
+        <div className="absolute top-2 right-2 text-[10px] font-mono text-sc-fg-subtle uppercase">
+          {lang}
+        </div>
+      )}
       <pre className="overflow-x-auto rounded-xl border border-sc-fg-subtle/20 bg-sc-bg-dark p-4">
         <code className="text-sm font-mono text-sc-fg-primary leading-relaxed">{code}</code>
       </pre>

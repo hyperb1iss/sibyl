@@ -1,3 +1,6 @@
+# Symlinks (prettier doesn't handle them)
+AGENTS.md
+
 # Helm templates contain Go templating syntax
 charts/*/templates/
 

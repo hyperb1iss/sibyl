@@ -154,6 +154,14 @@ class SibylClient:
             await self._client.aclose()
             self._client = None
 
+    async def __aenter__(self) -> "SibylClient":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        """Async context manager exit."""
+        await self.close()
+
     async def _refresh_token(self) -> bool:
         """Attempt to refresh the access token using stored refresh token.
 
@@ -247,12 +255,11 @@ class SibylClient:
             )
 
             # Handle 401 - try to refresh token and retry once
-            if response.status_code == 401 and _retry_on_401:
-                if await self._refresh_token():
-                    # Retry with new token
-                    return await self._request(
-                        method, path, json=json, params=params, _retry_on_401=False
-                    )
+            if response.status_code == 401 and _retry_on_401 and await self._refresh_token():
+                # Retry with new token
+                return await self._request(
+                    method, path, json=json, params=params, _retry_on_401=False
+                )
 
             # Handle error responses
             if response.status_code >= 400:
@@ -290,6 +297,29 @@ class SibylClient:
                 f"Request timed out after {self.timeout}s",
                 detail=str(e),
             ) from e
+
+    # =========================================================================
+    # Generic HTTP Methods
+    # =========================================================================
+
+    async def get(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Generic GET request."""
+        return await self._request("GET", path, params=params)
+
+    async def post(
+        self,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Generic POST request."""
+        return await self._request("POST", path, json=json, params=params)
 
     # =========================================================================
     # Entity Operations
@@ -778,7 +808,7 @@ def get_client(context_name: str | None = None) -> SibylClient:
     Returns:
         SibylClient configured for the specified context.
     """
-    global _clients  # noqa: PLW0602
+    global _clients
 
     # Check for global override if no explicit context provided
     if context_name is None:
@@ -796,5 +826,5 @@ def get_client(context_name: str | None = None) -> SibylClient:
 
 def clear_client_cache() -> None:
     """Clear the client cache. Useful when context settings change."""
-    global _clients  # noqa: PLW0602
+    global _clients
     _clients.clear()

@@ -181,7 +181,7 @@ async def rebuild_indices(
         )
 
     except Exception as e:
-        log.error("Index rebuild failed", error=str(e))  # noqa: TRY400
+        log.error("Index rebuild failed", error=str(e))
         return RebuildResult(
             success=False,
             indices_rebuilt=indices_rebuilt,
@@ -233,7 +233,7 @@ async def get_stats(*, organization_id: str | None = None) -> dict[str, object]:
         return stats
 
     except Exception as e:
-        log.error("Failed to get stats", error=str(e))  # noqa: TRY400
+        log.error("Failed to get stats", error=str(e))
         return {
             "error": str(e),
             "timestamp": datetime.now(UTC).isoformat(),

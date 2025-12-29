@@ -528,6 +528,7 @@ class CodeExampleResult(BaseModel):
 
     chunk_id: str
     document_id: str
+    source_id: str
     source_name: str
     url: str
     title: str

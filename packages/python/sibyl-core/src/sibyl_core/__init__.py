@@ -27,11 +27,10 @@ from sibyl_core.errors import (
 __version__ = "0.1.0"
 
 __all__ = [
-    # Config
-    "CoreConfig",
-    "core_config",
     # Errors
     "ConventionsMCPError",
+    # Config
+    "CoreConfig",
     "EntityCreationError",
     "EntityNotFoundError",
     "GraphConnectionError",
@@ -41,4 +40,5 @@ __all__ = [
     "SearchError",
     "SibylError",
     "ValidationError",
+    "core_config",
 ]

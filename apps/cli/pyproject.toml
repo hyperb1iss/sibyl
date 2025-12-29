@@ -63,14 +63,16 @@ packages = ["src/sibyl_cli"]
 [tool.hatch.build.targets.sdist]
 include = ["/src", "/tests", "/README.md"]
 
-# Inherit ruff/pyright config
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["E501", "B007"]
+ignore = [
+    "E501",    # Line length (formatter handles)
+    "RUF001",  # Ambiguous unicode (intentional for CLI styling)
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["sibyl_cli", "sibyl_core"]

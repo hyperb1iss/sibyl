@@ -8,9 +8,9 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "sibyl",
     "sibyl-cli",
     "sibyl-core",
+    "sibyld",
 ]
 
 [[package]]
@@ -2895,7 +2895,94 @@ wheels = [
 ]
 
 [[package]]
-name = "sibyl"
+name = "sibyl-cli"
+version = "0.1.0"
+source = { editable = "apps/cli" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pyjwt" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "sibyl-core" },
+    { name = "tomli-w" },
+    { name = "typer" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pyjwt", specifier = ">=2.10" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rich", specifier = ">=13.0" },
+    { name = "sibyl-core", editable = "packages/python/sibyl-core" },
+    { name = "tomli-w", specifier = ">=1.2.0" },
+    { name = "typer", specifier = ">=0.20.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pyright", specifier = ">=1.1.407" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "ruff", specifier = ">=0.14.9" },
+]
+
+[[package]]
+name = "sibyl-core"
+version = "0.1.0"
+source = { editable = "packages/python/sibyl-core" }
+dependencies = [
+    { name = "anyio" },
+    { name = "crawl4ai" },
+    { name = "graphiti-core", extra = ["anthropic", "falkordb"] },
+    { name = "httpx" },
+    { name = "mistune" },
+    { name = "passlib" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyjwt" },
+    { name = "python-dotenv" },
+    { name = "python-louvain" },
+    { name = "structlog" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anyio", specifier = ">=4.0" },
+    { name = "crawl4ai", specifier = ">=0.7.8" },
+    { name = "graphiti-core", extras = ["falkordb", "anthropic"], specifier = ">=0.24" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "mistune", specifier = ">=3.0" },
+    { name = "passlib", specifier = ">=1.7" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "pyjwt", specifier = ">=2.10" },
+    { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.407" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.3.0" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "python-louvain", specifier = ">=0.16" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.9" },
+    { name = "structlog", specifier = ">=24.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "sibyld"
 version = "0.1.0"
 source = { editable = "apps/api" }
 dependencies = [
@@ -2991,93 +3078,6 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "ruff", specifier = ">=0.14.9" },
 ]
-
-[[package]]
-name = "sibyl-cli"
-version = "0.1.0"
-source = { editable = "packages/python/sibyl-cli" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pyjwt" },
-    { name = "pyyaml" },
-    { name = "rich" },
-    { name = "sibyl-core" },
-    { name = "tomli-w" },
-    { name = "typer" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "pyjwt", specifier = ">=2.10" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "rich", specifier = ">=13.0" },
-    { name = "sibyl-core", editable = "packages/python/sibyl-core" },
-    { name = "tomli-w", specifier = ">=1.2.0" },
-    { name = "typer", specifier = ">=0.20.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pyright", specifier = ">=1.1.407" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "ruff", specifier = ">=0.14.9" },
-]
-
-[[package]]
-name = "sibyl-core"
-version = "0.1.0"
-source = { editable = "packages/python/sibyl-core" }
-dependencies = [
-    { name = "anyio" },
-    { name = "crawl4ai" },
-    { name = "graphiti-core", extra = ["anthropic", "falkordb"] },
-    { name = "httpx" },
-    { name = "mistune" },
-    { name = "passlib" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyjwt" },
-    { name = "python-dotenv" },
-    { name = "python-louvain" },
-    { name = "structlog" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anyio", specifier = ">=4.0" },
-    { name = "crawl4ai", specifier = ">=0.7.8" },
-    { name = "graphiti-core", extras = ["falkordb", "anthropic"], specifier = ">=0.24" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "mistune", specifier = ">=3.0" },
-    { name = "passlib", specifier = ">=1.7" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "pydantic-settings", specifier = ">=2.0" },
-    { name = "pyjwt", specifier = ">=2.10" },
-    { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.407" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.3.0" },
-    { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "python-louvain", specifier = ">=0.16" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.9" },
-    { name = "structlog", specifier = ">=24.0" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "six"

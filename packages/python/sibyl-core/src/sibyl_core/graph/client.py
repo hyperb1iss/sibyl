@@ -26,11 +26,16 @@ if not os.getenv("SEMAPHORE_LIMIT"):
 if not os.getenv("EMBEDDING_DIM"):
     os.environ["EMBEDDING_DIM"] = str(settings.graph_embedding_dimensions)
 
+# Disable Graphiti's PostHog telemetry (noisy retry errors when offline)
+os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
+
 from sibyl_core.errors import GraphConnectionError  # noqa: E402
 from sibyl_core.utils.resilience import GRAPH_RETRY, TIMEOUTS, retry, with_timeout  # noqa: E402
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
+    from graphiti_core.driver.falkordb_driver import FalkorDriver
+    from graphiti_core.llm_client import LLMClient
 
 log = structlog.get_logger()
 
@@ -58,7 +63,7 @@ class GraphClient:
         if GraphClient._write_semaphore is None:
             GraphClient._write_semaphore = asyncio.Semaphore(self._MAX_CONCURRENT_WRITES)
 
-    def _create_llm_client(self) -> object:
+    def _create_llm_client(self) -> "LLMClient":
         """Create the LLM client based on provider settings.
 
         Returns:
@@ -167,7 +172,7 @@ class GraphClient:
 
         except Exception as e:
             # Use log.error (not exception) to avoid traceback spam in CLI
-            log.error("Failed to connect to FalkorDB", error=str(e))  # noqa: TRY400
+            log.error("Failed to connect to FalkorDB", error=str(e))
             raise GraphConnectionError(
                 f"Failed to connect to FalkorDB: {e}",
                 details={"host": settings.falkordb_host, "port": settings.falkordb_port},
@@ -197,7 +202,7 @@ class GraphClient:
         return self._connected
 
     @property
-    def driver(self) -> object:
+    def driver(self) -> "FalkorDriver":
         """Get the underlying FalkorDB driver.
 
         Convenience property to access client.driver directly.
@@ -208,7 +213,7 @@ class GraphClient:
         Raises:
             GraphConnectionError: If not connected.
         """
-        return self.client.driver
+        return self.client.driver  # type: ignore[return-value]
 
     async def query_with_timeout(
         self,
@@ -326,7 +331,8 @@ class GraphClient:
         Returns:
             List of result records as dicts
         """
-        result = await self.client.driver.execute_query(query, **params)
+        # type: ignore[arg-type] - dynamic query strings
+        result = await self.client.driver.execute_query(query, **params)  # type: ignore[arg-type]
         return self.normalize_result(result)
 
     async def execute_write(self, query: str, **params: object) -> list[dict]:  # type: ignore[type-arg]
@@ -349,7 +355,8 @@ class GraphClient:
             Exception: If query execution fails
         """
         async with self.write_lock:
-            result = await self.client.driver.execute_query(query, **params)
+            # type: ignore[arg-type] - dynamic query strings
+            result = await self.client.driver.execute_query(query, **params)  # type: ignore[arg-type]
             return self.normalize_result(result)
 
     async def execute_read_org(
@@ -368,7 +375,7 @@ class GraphClient:
             List of result records as dicts
         """
         driver = self.get_org_driver(organization_id)
-        result = await driver.execute_query(query, **params)
+        result = await driver.execute_query(query, **params)  # type: ignore[arg-type]
         return self.normalize_result(result)
 
     async def execute_write_org(
@@ -393,7 +400,7 @@ class GraphClient:
         """
         async with self.write_lock:
             driver = self.get_org_driver(organization_id)
-            result = await driver.execute_query(query, **params)
+            result = await driver.execute_query(query, **params)  # type: ignore[arg-type]
             return self.normalize_result(result)
 
     async def __aenter__(self) -> "GraphClient":
@@ -431,7 +438,7 @@ async def get_graph_client() -> GraphClient:
     Thread-safe via asyncio.Lock to prevent race conditions.
     Retries on transient connection failures.
     """
-    global _graph_client  # noqa: PLW0603
+    global _graph_client
     async with _client_lock:
         if _graph_client is None:
             _graph_client = await _connect_client()
@@ -440,7 +447,7 @@ async def get_graph_client() -> GraphClient:
 
 async def reset_graph_client() -> None:
     """Reset the global client (useful for testing)."""
-    global _graph_client  # noqa: PLW0603
+    global _graph_client
     async with _client_lock:
         if _graph_client is not None:
             await _graph_client.disconnect()

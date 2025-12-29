@@ -1,5 +1,5 @@
 # https://moonrepo.dev/docs/config/toolchain
-$schema: './cache/schemas/toolchain.json'
+$schema: "./cache/schemas/toolchain.json"
 
 # Use proto for version management
 # Toolchain versions defined in .prototools
@@ -11,5 +11,5 @@ node:
   packageManager: pnpm
 
 python:
-  version: '3.13'
+  version: "3.13"
   packageManager: uv

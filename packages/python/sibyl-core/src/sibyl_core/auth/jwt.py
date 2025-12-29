@@ -12,7 +12,6 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import jwt
-
 from sibyl import config as config_module
 
 if TYPE_CHECKING:

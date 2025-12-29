@@ -127,15 +127,14 @@ class Document(Entity):
     @classmethod
     def set_entity_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
         """Set name from document-specific fields."""
-        if isinstance(data, dict):
-            if "name" not in data:
-                title = data.get("title", "")
-                if title:
-                    data["name"] = title
-                else:
-                    url = data.get("url", "")
-                    segment = url.rstrip("/").split("/")[-1] if url else ""
-                    data["name"] = segment or "Untitled"
+        if isinstance(data, dict) and "name" not in data:
+            title = data.get("title", "")
+            if title:
+                data["name"] = title
+            else:
+                url = data.get("url", "")
+                segment = url.rstrip("/").split("/")[-1] if url else ""
+                data["name"] = segment or "Untitled"
         return data
 
 

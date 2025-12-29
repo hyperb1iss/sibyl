@@ -64,14 +64,13 @@ packages = ["src/sibyl_core"]
 [tool.hatch.build.targets.sdist]
 include = ["/src", "/tests", "/README.md"]
 
-# Inherit ruff/pyright config from workspace root
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["E501", "B007"]
+ignore = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["sibyl_core"]

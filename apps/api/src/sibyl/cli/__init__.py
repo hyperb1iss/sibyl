@@ -1,14 +1,13 @@
-"""Sibyl CLI - Modular command-line interface.
+"""Sibyld CLI - Server daemon commands.
 
-This package provides a comprehensive CLI for Sibyl with subcommand groups:
-- task: Task lifecycle management
-- project: Project operations
-- entity: Generic entity CRUD
-- explore: Graph traversal and exploration
-- source: Documentation source management
-- export: Data export (JSON/CSV)
-- db: Database operations
+This module provides the server-side CLI for operators:
+- serve: Start the MCP server
+- worker: Start the background job worker
+- db: Database operations (backup, restore, migrations)
 - generate: Synthetic data generation
+- up/down/status: Local development services
+
+For client commands (task, search, add, etc.), use the `sibyl` CLI.
 """
 
 import os

@@ -218,12 +218,11 @@ docker_build(
     context='.',
     dockerfile='Dockerfile',
     only=[
-        'src/',
         'pyproject.toml',
         'uv.lock',
         'README.md',
-        'alembic/',
-        'alembic.ini',
+        'apps/api/',
+        'packages/python/sibyl-core/',
     ],
 )
 
@@ -253,8 +252,8 @@ k8s_resource(
 
 docker_build(
     'sibyl-frontend',
-    context='web',
-    dockerfile='web/Dockerfile',
+    context='apps/web',
+    dockerfile='apps/web/Dockerfile',
     only=[
         'src/',
         'public/',

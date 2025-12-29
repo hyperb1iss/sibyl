@@ -80,7 +80,7 @@ def calculate_delay(attempt: int, config: RetryConfig) -> float:
     if config.jitter:
         # Add up to 25% jitter (non-cryptographic, just for retry backoff)
         jitter_range = delay * 0.25
-        delay += random.uniform(-jitter_range, jitter_range)  # noqa: S311
+        delay += random.uniform(-jitter_range, jitter_range)
 
     return max(0.0, delay)
 
@@ -134,7 +134,7 @@ def retry(
                         await asyncio.sleep(delay)
                     else:
                         # Use log.error (not exception) to avoid traceback spam
-                        log.error(  # noqa: TRY400
+                        log.error(
                             "All retry attempts exhausted",
                             function=func.__name__,
                             attempts=config.max_attempts,
@@ -173,7 +173,7 @@ async def with_timeout[R](
         return await asyncio.wait_for(coro, timeout=timeout_seconds)
     except TimeoutError as e:
         # Use log.error (not exception) to avoid traceback spam
-        log.error(  # noqa: TRY400
+        log.error(
             "Operation timed out",
             operation=operation_name,
             timeout=f"{timeout_seconds}s",

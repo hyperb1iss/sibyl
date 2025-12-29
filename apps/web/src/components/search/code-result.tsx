@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+import { ExternalLink } from '@/components/ui/icons';
 import type { CodeExampleResult } from '@/lib/api';
 
 // Language colors for common languages
@@ -41,11 +43,11 @@ export function CodeResult({ result }: CodeResultProps) {
   const displayCode = codeLines.slice(0, 15).join('\n');
   const hasMore = codeLines.length > 15;
 
+  const internalUrl = `/sources/${result.source_id}/documents/${result.document_id}`;
+
   return (
-    <a
-      href={result.url}
-      target="_blank"
-      rel="noopener noreferrer"
+    <Link
+      href={internalUrl}
       className="block bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl overflow-hidden transition-all duration-200 hover:shadow-lg hover:border-sc-purple/30"
     >
       {/* Header */}
@@ -108,9 +110,23 @@ export function CodeResult({ result }: CodeResultProps) {
       {/* Footer */}
       <div className="flex items-center justify-between px-4 py-2 border-t border-sc-fg-subtle/10">
         <span className="text-sm font-medium text-sc-fg-primary truncate">{result.title}</span>
-        <span className="text-xs text-sc-fg-subtle shrink-0">{new URL(result.url).hostname}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-sc-fg-subtle">{new URL(result.url).hostname}</span>
+          <button
+            type="button"
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              window.open(result.url, '_blank', 'noopener,noreferrer');
+            }}
+            className="p-1 text-sc-fg-subtle hover:text-sc-purple transition-colors"
+            title="Open original page"
+          >
+            <ExternalLink width={14} height={14} />
+          </button>
+        </div>
       </div>
-    </a>
+    </Link>
   );
 }
 

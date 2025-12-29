@@ -777,7 +777,15 @@ class TestEntityManagerListByType:
                         }
                         for i in range(10)
                     ],
-                    ["uuid", "name", "entity_type", "group_id", "description", "created_at", "updated_at"],
+                    [
+                        "uuid",
+                        "name",
+                        "entity_type",
+                        "group_id",
+                        "description",
+                        "created_at",
+                        "updated_at",
+                    ],
                     {},
                 )
             ]
@@ -1293,7 +1301,15 @@ class TestGetTasksForEpic:
                             "updated_at": now,
                         },
                     ],
-                    ["uuid", "name", "entity_type", "group_id", "metadata", "created_at", "updated_at"],
+                    [
+                        "uuid",
+                        "name",
+                        "entity_type",
+                        "group_id",
+                        "metadata",
+                        "created_at",
+                        "updated_at",
+                    ],
                     {},
                 )
             ]

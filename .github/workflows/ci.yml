@@ -81,7 +81,9 @@ jobs:
             apps/api/.venv
             apps/web/node_modules
             apps/web/.next/cache
-          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock', 'apps/web/pnpm-lock.yaml') }}
+          key:
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock',
+            'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
             moon-${{ runner.os }}-
 

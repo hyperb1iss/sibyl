@@ -1,10 +1,10 @@
 # https://moonrepo.dev/docs/config/workspace
-$schema: './cache/schemas/workspace.json'
+$schema: "./cache/schemas/workspace.json"
 
 projects:
-  root: '.'
-  api: 'apps/api'
-  web: 'apps/web'
+  root: "."
+  api: "apps/api"
+  cli: "apps/cli"
+  web: "apps/web"
   # Shared packages
-  core: 'packages/python/sibyl-core'
-  cli: 'packages/python/sibyl-cli'
+  core: "packages/python/sibyl-core"

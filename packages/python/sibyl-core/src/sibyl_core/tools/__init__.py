@@ -31,31 +31,33 @@ from sibyl_core.tools.core import (
     explore,
     # Resources
     get_health,
-    get_stats as get_unified_stats,
     # Tools
     search,
 )
+from sibyl_core.tools.core import (
+    get_stats as get_unified_stats,
+)
 
 __all__ = [
-    # Unified tools (MCP)
-    "search",
-    "explore",
-    "add",
-    # Response types
-    "SearchResponse",
-    "SearchResult",
-    "ExploreResponse",
-    "EntitySummary",
-    "RelatedEntity",
     "AddResponse",
-    # Resources
-    "get_health",
-    "get_unified_stats",
+    "EntitySummary",
+    "ExploreResponse",
     # Admin (CLI only)
     "HealthStatus",
     "RebuildResult",
+    "RelatedEntity",
+    # Response types
+    "SearchResponse",
+    "SearchResult",
+    "add",
+    "explore",
+    # Resources
+    "get_health",
     "get_stats",
+    "get_unified_stats",
     "health_check",
     "mark_server_started",
     "rebuild_indices",
+    # Unified tools (MCP)
+    "search",
 ]

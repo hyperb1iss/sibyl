@@ -37,6 +37,20 @@ tasks:
       - "@group(sources)"
       - "@group(tests)"
 
+  fix:
+    command: "uv run ruff check --fix src/ tests/ && uv run ruff format src/ tests/"
+    inputs:
+      - "@group(sources)"
+      - "@group(tests)"
+    local: true
+
+  fix-all:
+    command: "uv run ruff check --fix --unsafe-fixes src/ tests/ && uv run ruff format src/ tests/"
+    inputs:
+      - "@group(sources)"
+      - "@group(tests)"
+    local: true
+
   typecheck:
     command: "uv run pyright src/"
     inputs:

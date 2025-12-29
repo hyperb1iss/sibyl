@@ -591,7 +591,9 @@ export default function SourcesPage() {
                 ? {
                     percentage: progressData.percentage,
                     pagesProcessed: progressData.pages_crawled,
-                    documentsCreated: progressData.pages_crawled, // Use pages as docs
+                    documentsCreated: progressData.documents_stored ?? progressData.pages_crawled,
+                    chunksCreated: progressData.chunks_created,
+                    errorsCount: progressData.errors,
                     currentUrl: progressData.current_url,
                     status: `Crawling ${progressData.pages_crawled}/${progressData.max_pages} pages`,
                   }

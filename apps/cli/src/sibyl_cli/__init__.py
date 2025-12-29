@@ -28,4 +28,4 @@ __version__ = "0.1.0"
 
 from sibyl_cli.main import app, main
 
-__all__ = ["app", "main", "__version__"]
+__all__ = ["__version__", "app", "main"]

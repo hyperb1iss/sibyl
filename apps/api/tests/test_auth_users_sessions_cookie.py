@@ -37,4 +37,3 @@ async def test_list_sessions_marks_current_from_sibyl_access_token_cookie() -> N
 
     assert len(rows) == 1
     assert rows[0].is_current is True
-

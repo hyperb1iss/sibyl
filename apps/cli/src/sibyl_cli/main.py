@@ -6,10 +6,7 @@ All commands communicate with the REST API.
 Server commands (serve, dev, db, generate, etc.) are in sibyl-server.
 """
 
-import asyncio
-import contextlib
-from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -17,12 +14,8 @@ from sibyl_cli.auth import app as auth_app
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
     CORAL,
-    ELECTRIC_PURPLE,
-    ELECTRIC_YELLOW,
     NEON_CYAN,
-    SUCCESS_GREEN,
     console,
-    create_panel,
     create_table,
     error,
     info,
@@ -74,9 +67,7 @@ def _handle_client_error(e: SibylClientError) -> None:
         console.print()
         console.print(f"  [{CORAL}]×[/{CORAL}] [bold]Cannot connect to Sibyl server[/bold]")
         console.print()
-        console.print(
-            f"    [{NEON_CYAN}]›[/{NEON_CYAN}] Check that the Sibyl server is running"
-        )
+        console.print(f"    [{NEON_CYAN}]›[/{NEON_CYAN}] Check that the Sibyl server is running")
         console.print()
     elif e.status_code in {401, 403}:
         console.print()
@@ -141,13 +132,11 @@ def health(
         try:
             async with get_client() as client:
                 with spinner("Checking health..."):
-                    response = await client.get("/health")
+                    data = await client.get("/health")
 
                 if json_output:
-                    print_json(response.json())
+                    print_json(data)
                     return
-
-                data = response.json()
                 status = data.get("status", "unknown")
                 server = data.get("server_name", "sibyl")
 
@@ -181,12 +170,10 @@ def search(
         try:
             async with get_client() as client:
                 with spinner(f"Searching for '{query}'..."):
-                    params = {"q": query, "limit": limit}
+                    params: dict[str, Any] = {"q": query, "limit": limit}
                     if entity_type:
                         params["type"] = entity_type
-                    response = await client.get("/search", params=params)
-
-                data = response.json()
+                    data = await client.get("/search", params=params)
 
                 if json_output:
                     print_json(data)
@@ -232,7 +219,7 @@ def add_knowledge(
         try:
             async with get_client() as client:
                 with spinner("Adding knowledge..."):
-                    payload = {
+                    payload: dict[str, Any] = {
                         "title": title,
                         "content": content,
                         "entity_type": entity_type,
@@ -244,9 +231,7 @@ def add_knowledge(
                     if tags:
                         payload["tags"] = [t.strip() for t in tags.split(",")]
 
-                    response = await client.post("/entities", json=payload)
-
-                data = response.json()
+                    data = await client.post("/entities", json=payload)
 
                 if json_output:
                     print_json(data)
@@ -272,9 +257,7 @@ def stats(
         try:
             async with get_client() as client:
                 with spinner("Getting stats..."):
-                    response = await client.get("/admin/stats")
-
-                data = response.json()
+                    data = await client.get("/admin/stats")
 
                 if json_output:
                     print_json(data)

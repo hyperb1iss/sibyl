@@ -60,4 +60,3 @@ async def test_entities_create_passes_task_fields_to_add() -> None:
     assert kwargs["epic"] == "epic_456"
     assert kwargs["technologies"] == ["python"]
     assert kwargs["depends_on"] == ["task_a", "task_b"]
-

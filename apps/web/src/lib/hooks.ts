@@ -753,11 +753,60 @@ export function useRealtimeUpdates(isAuthenticated = false) {
       console.log('[WS] Crawl started:', sourceId);
     });
 
-    // Crawl progress - update in real-time
+    // Crawl progress - update in real-time with merged data
     const unsubCrawlProgress = wsClient.on('crawl_progress', data => {
       const sourceId = data.source_id as string;
-      queryClient.setQueryData(['crawl_progress', sourceId], data);
-      console.log('[WS] Crawl progress:', data);
+      const documentsStored = data.documents_stored as number | undefined;
+
+      // Merge new progress with existing (we get page-level and doc-level events)
+      const existing = queryClient.getQueryData<CrawlProgressData>(['crawl_progress', sourceId]);
+      const merged: CrawlProgressData = {
+        ...existing,
+        source_id: sourceId,
+        source_name: (data.source_name as string) ?? existing?.source_name,
+        pages_crawled: (data.pages_crawled as number) ?? existing?.pages_crawled ?? 0,
+        max_pages: (data.max_pages as number) ?? existing?.max_pages ?? 0,
+        current_url: (data.current_url as string) ?? existing?.current_url ?? '',
+        percentage: (data.percentage as number) ?? existing?.percentage ?? 0,
+        documents_crawled: (data.documents_crawled as number) ?? existing?.documents_crawled,
+        documents_stored: documentsStored ?? existing?.documents_stored,
+        chunks_created: (data.chunks_created as number) ?? existing?.chunks_created,
+        chunks_added: (data.chunks_added as number) ?? existing?.chunks_added,
+        errors: (data.errors as number) ?? existing?.errors,
+      };
+      queryClient.setQueryData(['crawl_progress', sourceId], merged);
+
+      // Also update source's document_count in cache for real-time display
+      if (documentsStored !== undefined) {
+        // Update source list cache
+        queryClient.setQueryData(
+          queryKeys.sources.list,
+          (
+            old: { entities: Array<{ id: string; metadata: Record<string, unknown> }> } | undefined
+          ) => {
+            if (!old?.entities) return old;
+            return {
+              ...old,
+              entities: old.entities.map(s =>
+                s.id === sourceId
+                  ? { ...s, metadata: { ...s.metadata, document_count: documentsStored } }
+                  : s
+              ),
+            };
+          }
+        );
+
+        // Also update source detail cache (for source detail page)
+        queryClient.setQueryData(
+          queryKeys.sources.detail(sourceId),
+          (old: { document_count?: number } | undefined) => {
+            if (!old) return old;
+            return { ...old, document_count: documentsStored };
+          }
+        );
+      }
+
+      console.log('[WS] Crawl progress:', merged);
     });
 
     // Crawl complete - refresh source and documents
@@ -1148,10 +1197,18 @@ export function useCancelCrawl() {
 
 export interface CrawlProgressData {
   source_id: string;
+  source_name?: string;
+  // Page-level progress (from CrawlerService)
   pages_crawled: number;
   max_pages: number;
   current_url: string;
   percentage: number;
+  // Document-level stats (from Worker on_progress)
+  documents_crawled?: number;
+  documents_stored?: number;
+  chunks_created?: number;
+  chunks_added?: number;
+  errors?: number;
 }
 
 export function useCrawlProgress(sourceId: string): CrawlProgressData | undefined {
