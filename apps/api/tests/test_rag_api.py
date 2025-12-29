@@ -287,7 +287,7 @@ class TestCodeExampleSearch:
         """Test code example search."""
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            (sample_code_chunk, sample_document, sample_source.name, 0.82)
+            (sample_code_chunk, sample_document, sample_source.id, sample_source.name, 0.82)
         ]
         mock_session.execute = AsyncMock(return_value=mock_result)
 
@@ -321,7 +321,7 @@ class TestCodeExampleSearch:
         """Test code search with language filter."""
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            (sample_code_chunk, sample_document, sample_source.name, 0.82)
+            (sample_code_chunk, sample_document, sample_source.id, sample_source.name, 0.82)
         ]
         mock_session.execute = AsyncMock(return_value=mock_result)
 
@@ -636,6 +636,7 @@ class TestSchemaValidation:
         code_result = CodeExampleResult(
             chunk_id="chunk-1",
             document_id="doc-1",
+            source_id="source-1",
             source_name="Test Source",
             url="https://example.com",
             title="API Reference",

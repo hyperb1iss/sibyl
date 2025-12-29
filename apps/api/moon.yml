@@ -51,7 +51,7 @@ tasks:
       - "@group(sources)"
       - "@group(configs)"
 
-  # Testing
+  # Testing (unit tests only - e2e tests are in apps/e2e)
   test:
     command: "uv run pytest"
     inputs:

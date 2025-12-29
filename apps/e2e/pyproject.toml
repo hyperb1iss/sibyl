@@ -1,0 +1,81 @@
+# Sibyl E2E Tests
+# End-to-end tests for the complete Sibyl system
+# This is a test-only package with no source code to ship
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sibyl-e2e"
+version = "0.1.0"
+description = "End-to-end tests for Sibyl"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13"
+authors = [{ name = "Stefanie Jane", email = "stef@hyperbliss.tech" }]
+
+# Minimal dependencies - tests only
+dependencies = []
+
+[project.optional-dependencies]
+browser = [
+    "playwright>=1.40",
+]
+
+[dependency-groups]
+dev = [
+    # Testing
+    "httpx>=0.28",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    # Browser automation (optional, install with: uv sync --extra browser)
+    "playwright>=1.40",
+]
+
+# =============================================================================
+# Build Configuration (test-only package)
+# =============================================================================
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sibyl_e2e"]
+
+# =============================================================================
+# Pytest
+# =============================================================================
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = ["-ra", "--strict-markers", "--strict-config", "-v"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+    "ignore:unclosed.*:ResourceWarning",
+]
+markers = [
+    "api: API endpoint tests",
+    "cli: CLI command tests",
+    "browser: Browser automation tests (requires playwright)",
+    "slow: marks tests as slow",
+]
+
+# =============================================================================
+# Ruff
+# =============================================================================
+
+[tool.ruff]
+line-length = 100
+src = ["tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PT"]
+ignore = [
+    "E501",    # line length (formatter handles)
+    "S101",    # assert in tests
+    "PT011",   # pytest.raises match
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sibyl", "sibyl_core", "sibyl_cli"]

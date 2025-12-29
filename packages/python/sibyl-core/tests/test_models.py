@@ -1,6 +1,6 @@
 """Tests for sibyl-core models."""
 
-from sibyl_core.models import Task, TaskStatus, TaskPriority, TaskComplexity
+from sibyl_core.models import Task, TaskComplexity, TaskPriority, TaskStatus
 
 
 class TestTaskModel:

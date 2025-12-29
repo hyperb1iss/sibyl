@@ -3,6 +3,7 @@
 import pytest
 
 
+@pytest.mark.api
 class TestPublicEndpoints:
     """Test endpoints that don't require authentication."""
 
@@ -15,6 +16,7 @@ class TestPublicEndpoints:
         assert data["status"] == "healthy"
 
 
+@pytest.mark.api
 class TestAuthRequired:
     """Verify endpoints require authentication."""
 
@@ -39,6 +41,7 @@ class TestAuthRequired:
         assert response.status_code == 401
 
 
+@pytest.mark.api
 class TestAuthenticatedEndpoints:
     """Test endpoints with authentication."""
 
@@ -89,6 +92,7 @@ class TestAuthenticatedEndpoints:
         assert "entities" in data or "results" in data or isinstance(data, list)
 
 
+@pytest.mark.api
 @pytest.mark.asyncio
 class TestAsyncAuthenticatedAPI:
     """Async API tests with authentication."""

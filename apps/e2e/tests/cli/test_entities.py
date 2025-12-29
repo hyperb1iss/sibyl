@@ -4,7 +4,12 @@ Note: Tests use 'pattern' type which uses create_direct() - no LLM needed.
 This allows e2e tests to run without real OpenAI API keys.
 """
 
+import time
 
+import pytest
+
+
+@pytest.mark.cli
 class TestEntityOperations:
     """Test entity creation and search."""
 
@@ -51,8 +56,6 @@ class TestEntityOperations:
         assert add_result.success
 
         # Search - give it a moment to index
-        import time
-
         time.sleep(0.5)
 
         search_result = cli.search(unique_id, limit=10)

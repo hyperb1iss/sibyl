@@ -6,6 +6,7 @@ Verify that all services are running and accessible.
 import pytest
 
 
+@pytest.mark.api
 class TestHealthConnectivity:
     """Test service health and connectivity."""
 
@@ -40,6 +41,7 @@ class TestHealthConnectivity:
             assert "total_entities" in data or "entities" in data or isinstance(data, dict)
 
 
+@pytest.mark.api
 @pytest.mark.asyncio
 class TestAsyncHealth:
     """Async health tests."""

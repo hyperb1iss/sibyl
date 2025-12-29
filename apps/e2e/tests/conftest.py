@@ -1,6 +1,6 @@
 """E2E test fixtures.
 
-Fixtures for running tests against a live Sibyl system.
+Shared fixtures for running tests against a live Sibyl system.
 """
 
 import json
@@ -18,7 +18,8 @@ import pytest_asyncio
 # Configuration
 # =============================================================================
 
-API_BASE_URL = "http://localhost:3334/api"
+API_BASE_URL = os.getenv("SIBYL_API_URL", "http://localhost:3334/api")
+FRONTEND_URL = os.getenv("SIBYL_FRONTEND_URL", "http://localhost:3337")
 HEALTH_TIMEOUT = 30  # seconds to wait for services
 HEALTH_INTERVAL = 0.5  # seconds between health checks
 E2E_TEST_EMAIL = "e2e-test@sibyl.dev"
@@ -44,7 +45,7 @@ class CLIResult:
         if self.returncode != 0:
             return False
         # Check for error markers in output (CLI may return 0 on API errors)
-        return not (self.stdout.startswith("✗") or "error" in self.stdout.lower()[:50])
+        return not (self.stdout.startswith("\u2717") or "error" in self.stdout.lower()[:50])
 
     @property
     def is_json(self) -> bool:
@@ -124,7 +125,16 @@ class CLIRunner:
             sync: Wait for task creation to complete. Defaults to True for E2E tests
                   since workflow operations (start, complete) require the task to exist.
         """
-        args = ["task", "create", "--title", title, "--project", project_id, "--priority", priority]
+        args = [
+            "task",
+            "create",
+            "--title",
+            title,
+            "--project",
+            project_id,
+            "--priority",
+            priority,
+        ]
         if feature:
             args.extend(["--feature", feature])
         if sync:
@@ -179,6 +189,11 @@ class CLIRunner:
         return self.run(*args)
 
 
+# =============================================================================
+# Authentication
+# =============================================================================
+
+
 @pytest.fixture(scope="session")
 def e2e_auth_token() -> str:
     """Create or login test user and return auth token.
@@ -224,7 +239,7 @@ def cli(e2e_auth_token: str) -> CLIRunner:
 
 
 # =============================================================================
-# HTTP Client
+# HTTP Clients
 # =============================================================================
 
 
@@ -239,7 +254,9 @@ async def api_client() -> AsyncGenerator[httpx.AsyncClient]:
 async def auth_api_client(e2e_auth_token: str) -> AsyncGenerator[httpx.AsyncClient]:
     """Authenticated async HTTP client for API calls."""
     headers = {"Authorization": f"Bearer {e2e_auth_token}"}
-    async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=30.0, headers=headers) as client:
+    async with httpx.AsyncClient(
+        base_url=API_BASE_URL, timeout=30.0, headers=headers
+    ) as client:
         yield client
 
 
@@ -294,7 +311,7 @@ def require_services(wait_for_services: None) -> None:
 
 
 # =============================================================================
-# Test Data Cleanup
+# Test Data Helpers
 # =============================================================================
 
 
@@ -316,3 +333,19 @@ def test_project_name(unique_id: str) -> str:
 def test_task_title(unique_id: str) -> str:
     """Generate a unique task title."""
     return f"E2E Test Task {unique_id}"
+
+
+# =============================================================================
+# Frontend Helpers
+# =============================================================================
+
+
+@pytest.fixture
+def frontend_available() -> bool:
+    """Check if frontend is running."""
+    try:
+        with httpx.Client(timeout=2.0) as client:
+            response = client.get(FRONTEND_URL)
+            return response.status_code in (200, 301, 302, 307, 308)
+    except httpx.RequestError:
+        return False

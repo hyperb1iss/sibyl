@@ -48,7 +48,9 @@ class ProfileUpdateRequest(BaseModel):
     name: str | None = Field(None, max_length=100)
     bio: str | None = Field(None, max_length=500)
     timezone: str | None = Field(None, max_length=50)
-    avatar_url: str | None = Field(None, max_length=500_000)  # Supports data URLs
+    avatar_url: str | None = Field(
+        None, max_length=7_000_000
+    )  # Supports data URLs up to ~5MB images
 
 
 class PreferencesResponse(BaseModel):

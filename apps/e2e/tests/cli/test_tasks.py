@@ -3,6 +3,7 @@
 import pytest
 
 
+@pytest.mark.cli
 class TestTaskWorkflow:
     """Test full task lifecycle."""
 
@@ -71,7 +72,7 @@ class TestTaskWorkflow:
         assert data.get("data", {}).get("status") == "done"
 
     def test_task_full_lifecycle(self, cli, project_id, unique_id) -> None:
-        """Full task lifecycle: create → start → complete."""
+        """Full task lifecycle: create -> start -> complete."""
         task_title = f"Lifecycle Test {unique_id}"
 
         # Create (sync=True by default ensures immediate availability)

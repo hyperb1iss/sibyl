@@ -1,6 +1,9 @@
 """E2E tests for project CRUD via CLI."""
 
+import pytest
 
+
+@pytest.mark.cli
 class TestProjectCRUD:
     """Test project creation, listing, and retrieval."""
 

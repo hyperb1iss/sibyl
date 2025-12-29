@@ -147,19 +147,27 @@
    ============================================================================= */
 
 .shadow-header {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.06),
+    0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 [data-theme="neon"] .shadow-header {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .shadow-sidebar {
-  box-shadow: 4px 0 16px rgba(0, 0, 0, 0.06), 8px 0 24px rgba(0, 0, 0, 0.04);
+  box-shadow:
+    4px 0 16px rgba(0, 0, 0, 0.06),
+    8px 0 24px rgba(0, 0, 0, 0.04);
 }
 
 [data-theme="neon"] .shadow-sidebar {
-  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5), 8px 0 40px rgba(0, 0, 0, 0.3);
+  box-shadow:
+    4px 0 24px rgba(0, 0, 0, 0.5),
+    8px 0 40px rgba(0, 0, 0, 0.3);
 }
 
 /* =============================================================================

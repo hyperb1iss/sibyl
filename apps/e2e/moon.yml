@@ -1,0 +1,66 @@
+# E2E Tests - End-to-end testing for Sibyl
+# Requires running services: sibyld, falkordb, (optionally) web
+$schema: "https://moonrepo.dev/schemas/project.json"
+
+language: python
+type: application
+platform: system
+
+tags:
+  - python
+  - e2e
+  - testing
+
+fileGroups:
+  tests:
+    - "tests/**/*.py"
+  configs:
+    - "pyproject.toml"
+    - "moon.yml"
+
+tasks:
+  # Run all e2e tests
+  test:
+    command: "uv run pytest"
+    inputs:
+      - "@group(tests)"
+    local: true
+
+  # API & CLI tests only
+  test-api:
+    command: "uv run pytest -m 'api or cli'"
+    inputs:
+      - "@group(tests)"
+    local: true
+
+  # Browser tests only (requires playwright)
+  test-browser:
+    command: "uv run pytest -m browser"
+    inputs:
+      - "@group(tests)"
+    local: true
+
+  # Install playwright browsers
+  playwright-install:
+    command: "uv run playwright install chromium"
+    local: true
+
+  # Sync dependencies
+  sync:
+    command: "uv sync"
+    inputs:
+      - "@group(configs)"
+    local: true
+
+  # Lint test code
+  lint:
+    command: "uv run ruff check tests"
+    inputs:
+      - "@group(tests)"
+
+  # Format test code
+  format:
+    command: "uv run ruff format tests"
+    inputs:
+      - "@group(tests)"
+    local: true

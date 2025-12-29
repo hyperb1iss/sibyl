@@ -1,11 +1,11 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from '@/lib/hooks';
 import { useCallback, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EditableText } from '@/components/editable';
 import { Calendar, Check, EditPencil, Link, Upload, User, X } from '@/components/ui/icons';
+import { queryKeys } from '@/lib/hooks';
 
 interface UserProfile {
   id: string;
