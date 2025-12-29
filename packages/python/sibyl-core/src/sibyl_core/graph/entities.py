@@ -912,19 +912,24 @@ class EntityManager:
         except ValueError:
             entity_type = EntityType.EPISODE
 
-        return Entity(
-            id=node_data.get("uuid", ""),
-            name=node_data.get("name", ""),
-            entity_type=entity_type,
-            description=node_data.get("description") or node_data.get("summary", ""),
-            content=node_data.get("content", ""),
-            organization_id=node_data.get("group_id") or metadata.get("organization_id"),
-            created_by=metadata.get("created_by"),
-            modified_by=metadata.get("modified_by"),
-            metadata=metadata,
-            created_at=self._parse_datetime(node_data.get("created_at")),
-            updated_at=self._parse_datetime(node_data.get("updated_at")),
-        )
+        # Build entity kwargs, only including datetime fields if present
+        entity_kwargs: dict[str, Any] = {
+            "id": node_data.get("uuid", ""),
+            "name": node_data.get("name", ""),
+            "entity_type": entity_type,
+            "description": node_data.get("description") or node_data.get("summary", ""),
+            "content": node_data.get("content", ""),
+            "organization_id": node_data.get("group_id") or metadata.get("organization_id"),
+            "created_by": metadata.get("created_by"),
+            "modified_by": metadata.get("modified_by"),
+            "metadata": metadata,
+        }
+        if created_at := self._parse_datetime(node_data.get("created_at")):
+            entity_kwargs["created_at"] = created_at
+        if updated_at := self._parse_datetime(node_data.get("updated_at")):
+            entity_kwargs["updated_at"] = updated_at
+
+        return Entity(**entity_kwargs)
 
     def _parse_datetime(self, value: Any) -> datetime | None:
         """Parse datetime from various formats."""
@@ -1104,13 +1109,13 @@ class EntityManager:
             if entity.learnings:
                 metadata["learnings"] = entity.learnings
 
-        # Common fields (check hasattr since not all entities have these)
-        if hasattr(entity, "languages") and entity.languages:
-            metadata["languages"] = entity.languages
-        if hasattr(entity, "tags") and entity.tags:
-            metadata["tags"] = entity.tags
-        if hasattr(entity, "category") and entity.category:
-            metadata["category"] = entity.category
+        # Common fields (use getattr since not all entity types have these)
+        if languages := getattr(entity, "languages", None):
+            metadata["languages"] = languages
+        if tags := getattr(entity, "tags", None):
+            metadata["tags"] = tags
+        if category := getattr(entity, "category", None):
+            metadata["category"] = category
 
         return self._serialize_metadata(metadata)
 
@@ -1422,23 +1427,28 @@ class EntityManager:
         except ValueError:
             entity_type = EntityType.EPISODE
 
-        # Extract content and description from node
-        content = node.content if hasattr(node, "content") else ""
-        description = node.source_description if hasattr(node, "source_description") else ""
+        # Extract content and description from node (use getattr for type safety)
+        content = getattr(node, "content", "") or ""
+        description = getattr(node, "source_description", "") or ""
 
         # Try to parse metadata if stored in content as structured text
         metadata: dict[str, Any] = {}
-        if hasattr(node, "entity_type"):
-            metadata["entity_type"] = node.entity_type
+        if node_entity_type := getattr(node, "entity_type", None):
+            metadata["entity_type"] = node_entity_type
 
-        return Entity(
-            id=node.uuid,
-            entity_type=entity_type,
-            name=name,
-            description=description,
-            content=content,
-            organization_id=getattr(node, "group_id", None),
-            metadata=metadata,
-            created_at=node.created_at if hasattr(node, "created_at") else None,
-            updated_at=node.created_at if hasattr(node, "created_at") else None,
-        )
+        # Build entity kwargs, only including datetime fields if present
+        entity_kwargs: dict[str, Any] = {
+            "id": node.uuid,
+            "entity_type": entity_type,
+            "name": name,
+            "description": description,
+            "content": content,
+            "organization_id": getattr(node, "group_id", None),
+            "metadata": metadata,
+        }
+        if created_at := getattr(node, "created_at", None):
+            entity_kwargs["created_at"] = created_at
+            # Use created_at for updated_at if no explicit updated_at
+            entity_kwargs["updated_at"] = created_at
+
+        return Entity(**entity_kwargs)

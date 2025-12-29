@@ -266,7 +266,7 @@ class GraphClient:
             return result  # type: ignore[return-value]
         return []
 
-    def get_org_driver(self, organization_id: str) -> object:
+    def get_org_driver(self, organization_id: str) -> "FalkorDriver":
         """Get a driver cloned for a specific organization's graph.
 
         Each organization has its own isolated graph in FalkorDB.
@@ -283,7 +283,7 @@ class GraphClient:
         """
         if not organization_id:
             raise ValueError("organization_id is required for org-scoped operations")
-        return self.client.driver.clone(organization_id)
+        return self.client.driver.clone(organization_id)  # type: ignore[return-value]
 
     async def ensure_indexes(self, organization_id: str) -> None:
         """Ensure required indexes exist for an organization's graph.

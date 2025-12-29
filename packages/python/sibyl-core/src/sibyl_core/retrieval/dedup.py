@@ -190,7 +190,7 @@ class EntityDeduplicator:
                     continue
 
                 # Skip if already compared (in either direction)
-                pair_key = tuple(sorted([id1, id2]))
+                pair_key = (min(id1, id2), max(id1, id2))
                 if pair_key in seen_pairs:
                     continue
                 seen_pairs.add(pair_key)
@@ -337,20 +337,22 @@ class EntityDeduplicator:
         """
 
         try:
-            result = await self.client.client.driver.execute_query(query, **params)
+            result = await self.client.client.driver.execute_query(query, **params)  # type: ignore[arg-type]
 
             entities: list[tuple[str, str, str, list[float]]] = []
             for record in result:
                 if isinstance(record, (list, tuple)):
-                    entity_id = record[0] if len(record) > 0 else None
-                    name = record[1] if len(record) > 1 else ""
-                    entity_type = record[2] if len(record) > 2 else ""
+                    entity_id = str(record[0]) if len(record) > 0 else None
+                    name = str(record[1]) if len(record) > 1 else ""
+                    entity_type = str(record[2]) if len(record) > 2 else ""
                     embedding = record[3] if len(record) > 3 else None
-                else:
-                    entity_id = record.get("id")
-                    name = record.get("name", "")
-                    entity_type = record.get("type", "")
+                elif isinstance(record, dict):
+                    entity_id = str(record.get("id", ""))
+                    name = str(record.get("name", ""))
+                    entity_type = str(record.get("type", ""))
                     embedding = record.get("embedding")
+                else:
+                    continue  # Skip unknown record types
 
                 if entity_id and embedding and isinstance(embedding, list):
                     entities.append((entity_id, name, entity_type, embedding))
@@ -401,13 +403,14 @@ class EntityDeduplicator:
         try:
             # Execute both redirections
             for query in [outgoing_query, incoming_query]:
-                result = await self.client.client.driver.execute_query(query, **params)
+                result = await self.client.client.driver.execute_query(query, **params)  # type: ignore[arg-type]
                 if result:
-                    for record in result:
+                    for record in result:  # type: ignore[union-attr]
                         if isinstance(record, (list, tuple)) and len(record) > 0:
-                            total_redirected += int(record[0] or 0)
-                        elif hasattr(record, "get"):
-                            total_redirected += record.get("redirected", 0)
+                            val = record[0]
+                            total_redirected += int(val) if val else 0  # type: ignore[arg-type]
+                        elif isinstance(record, dict):
+                            total_redirected += int(record.get("redirected", 0))
 
             log.debug(
                 "relationships_redirected",

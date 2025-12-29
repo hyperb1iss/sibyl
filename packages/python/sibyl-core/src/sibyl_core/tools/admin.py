@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 import structlog
 
 from sibyl_core.config import settings
-from sibyl_core.graph.client import get_graph_client
+from sibyl_core.graph.client import GraphClient, get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.graph.relationships import RelationshipManager
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -251,7 +251,7 @@ class MigrationResult:
 
 
 async def _cast_name_embeddings_to_vecf32(
-    client: object,
+    client: GraphClient,
     *,
     batch_size: int,
     max_entities: int,
@@ -261,8 +261,7 @@ async def _cast_name_embeddings_to_vecf32(
     scanned = 0
 
     while scanned < max_entities:
-        result = await client.driver.execute_query(
-            """
+        query = """
             MATCH (n)
             WHERE (n:Entity OR n:Community)
               AND n.name_embedding IS NOT NULL
@@ -270,12 +269,10 @@ async def _cast_name_embeddings_to_vecf32(
             ORDER BY uuid
             SKIP $offset
             LIMIT $limit
-            """,
-            offset=offset,
-            limit=batch_size,
-        )
+            """
+        result = await client.driver.execute_query(query, offset=offset, limit=batch_size)  # type: ignore[arg-type]
 
-        records = result[0] if result and len(result) > 0 else []
+        records = result[0] if result and len(result) > 0 else []  # type: ignore[index]
         if not records:
             break
 
@@ -284,14 +281,12 @@ async def _cast_name_embeddings_to_vecf32(
 
         for uuid in uuids:
             try:
-                await client.driver.execute_query(
-                    """
+                cast_query = """
                     MATCH (n {uuid: $uuid})
                     SET n.name_embedding = vecf32(n.name_embedding)
                     RETURN n.uuid AS uuid
-                    """,
-                    uuid=uuid,
-                )
+                    """
+                await client.driver.execute_query(cast_query, uuid=uuid)  # type: ignore[arg-type]
                 entities_updated += 1
             except Exception as e:
                 # Already Vectorf32 (expected), skip silently.
@@ -305,7 +300,7 @@ async def _cast_name_embeddings_to_vecf32(
 
 
 async def _clear_mismatched_name_embedding_dimensions(
-    client: object,
+    client: GraphClient,
     *,
     expected_dim: int,
     batch_size: int,
@@ -316,8 +311,7 @@ async def _clear_mismatched_name_embedding_dimensions(
     scanned = 0
 
     while scanned < max_entities:
-        result = await client.driver.execute_query(
-            """
+        query = """
             MATCH (n)
             WHERE (n:Entity OR n:Community)
               AND n.name_embedding IS NOT NULL
@@ -325,12 +319,10 @@ async def _clear_mismatched_name_embedding_dimensions(
             ORDER BY uuid
             SKIP $offset
             LIMIT $limit
-            """,
-            offset=offset,
-            limit=batch_size,
-        )
+            """
+        result = await client.driver.execute_query(query, offset=offset, limit=batch_size)  # type: ignore[arg-type]
 
-        records = result[0] if result and len(result) > 0 else []
+        records = result[0] if result and len(result) > 0 else []  # type: ignore[index]
         if not records:
             break
 
@@ -355,14 +347,12 @@ async def _clear_mismatched_name_embedding_dimensions(
                 continue
 
             try:
-                await client.driver.execute_query(
-                    """
+                clear_query = """
                     MATCH (n {uuid: $uuid})
                     SET n.name_embedding = NULL
                     RETURN n.uuid AS uuid
-                    """,
-                    uuid=uuid,
-                )
+                    """
+                await client.driver.execute_query(clear_query, uuid=uuid)  # type: ignore[arg-type]
                 embeddings_cleared += 1
             except Exception as e:
                 log.warning("embedding_clear_failed", uuid=uuid, error=str(e))
@@ -621,12 +611,8 @@ async def restore_backup(
         for rel_data in backup_data.relationships:
             try:
                 relationship = Relationship.model_validate(rel_data)
-                # Check if relationship exists
-                existing = await relationship_manager.get(relationship.id)
-                if existing and skip_existing:
-                    relationships_skipped += 1
-                    continue
-
+                # Note: RelationshipManager doesn't have get(id), so we can't check existence
+                # Create will fail if relationship already exists (handled in except block)
                 await relationship_manager.create(relationship)
                 relationships_restored += 1
             except Exception as e:

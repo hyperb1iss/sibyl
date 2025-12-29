@@ -883,8 +883,8 @@ def detect_communities_leiden(
         ImportError: If leidenalg/igraph is not installed.
     """
     try:
-        import igraph as ig
-        import leidenalg
+        import igraph as ig  # type: ignore[import-not-found]
+        import leidenalg  # type: ignore[import-not-found]
     except ImportError as e:
         raise ImportError(
             "leidenalg and igraph are required for Leiden algorithm. "

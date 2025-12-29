@@ -337,10 +337,10 @@ class RelationshipManager:
 
                 relationships.append(
                     Relationship(
-                        id=rel_uuid,
+                        id=str(rel_uuid) if rel_uuid else "",
                         relationship_type=rel_type,
-                        source_id=source_id,
-                        target_id=target_id,
+                        source_id=str(source_id),
+                        target_id=str(target_id),
                         weight=float(weight) if weight else 1.0,
                         metadata={},
                     )

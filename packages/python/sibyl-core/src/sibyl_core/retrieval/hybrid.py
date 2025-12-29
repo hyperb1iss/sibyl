@@ -151,7 +151,7 @@ async def graph_traversal(
 
         from sibyl_core.graph.client import GraphClient
 
-        result = await client.client.driver.execute_query(query, **params)
+        result = await client.client.driver.execute_query(query, **params)  # type: ignore[arg-type]
         rows = GraphClient.normalize_result(result)
 
         # Convert to Entity objects with distance-based scores

@@ -225,8 +225,10 @@ async def _handle_task_action(
 
     workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, organization_id)
 
+    # All actions below require entity_id (validated above except for update_task)
     try:
         if action == "start_task":
+            assert entity_id is not None  # validated above
             assignee = data.get("assignee", "system")
             task = await workflow.start_task(entity_id, assignee)
             return ManageResponse(
@@ -238,6 +240,7 @@ async def _handle_task_action(
             )
 
         if action == "block_task":
+            assert entity_id is not None  # validated above
             reason = data.get("reason", "No reason provided")
             task = await workflow.block_task(entity_id, reason)
             return ManageResponse(
@@ -249,6 +252,7 @@ async def _handle_task_action(
             )
 
         if action == "unblock_task":
+            assert entity_id is not None  # validated above
             task = await workflow.unblock_task(entity_id)
             return ManageResponse(
                 success=True,
@@ -259,6 +263,7 @@ async def _handle_task_action(
             )
 
         if action == "submit_review":
+            assert entity_id is not None  # validated above
             commit_shas = data.get("commit_shas", [])
             pr_url = data.get("pr_url")
             task = await workflow.submit_for_review(entity_id, commit_shas, pr_url)
@@ -271,6 +276,7 @@ async def _handle_task_action(
             )
 
         if action == "complete_task":
+            assert entity_id is not None  # validated above
             learnings = data.get("learnings", "")
             actual_hours = data.get("actual_hours")
             task = await workflow.complete_task(entity_id, actual_hours, learnings)
@@ -283,6 +289,7 @@ async def _handle_task_action(
             )
 
         if action == "archive_task":
+            assert entity_id is not None  # validated above
             reason = data.get("reason", "")
             task = await workflow.archive_task(entity_id, reason)
             return ManageResponse(
@@ -378,7 +385,7 @@ async def _update_task(
                 message="organization_id required for async update",
             )
 
-        from sibyl_core.jobs.queue import enqueue_update_task
+        from sibyl.jobs.queue import enqueue_update_task
 
         job_id = await enqueue_update_task(entity_id, updates, organization_id)
         return ManageResponse(
@@ -466,7 +473,9 @@ async def _handle_epic_action(
             message=f"Epic not found: {entity_id}",
         )
 
+    # Actions below require entity_id (already validated above except for update_epic)
     if action == "start_epic":
+        assert entity_id is not None  # validated above
         updates = {"status": "in_progress"}
         await entity_manager.update(entity_id, updates)
         return ManageResponse(
@@ -478,6 +487,7 @@ async def _handle_epic_action(
         )
 
     if action == "complete_epic":
+        assert entity_id is not None  # validated above
         learnings = data.get("learnings", "")
         updates = {
             "status": "completed",
@@ -495,6 +505,7 @@ async def _handle_epic_action(
         )
 
     if action == "archive_epic":
+        assert entity_id is not None  # validated above
         reason = data.get("reason", "")
         updates = {"status": "archived"}
         await entity_manager.update(entity_id, updates)
@@ -608,11 +619,13 @@ async def _handle_source_action(
     entity_manager = EntityManager(client, group_id=organization_id)
 
     if action == "crawl":
-        url = data.get("url")  # Already validated above
+        url = data.get("url")
+        assert isinstance(url, str)  # validated above
         depth = data.get("depth", 2)
         return await _crawl_source(entity_manager, url, depth, data)
 
     if action == "sync":
+        assert entity_id is not None  # validated above
         return await _sync_source(entity_manager, entity_id)
 
     if action == "refresh":
@@ -747,11 +760,13 @@ async def _link_graph(
     if source_id:
         # Filter to specific source via document join
         from sibyl.db import CrawlSource
+        from uuid import UUID
 
+        # SQLAlchemy comparisons produce ColumnElement but pyright sees them as bool
         query = (
-            query.join(CrawledDocument, CrawledDocument.id == DocumentChunk.document_id)
-            .join(CrawlSource, CrawlSource.id == CrawledDocument.source_id)
-            .where(CrawlSource.id == source_id)
+            query.join(CrawledDocument, CrawledDocument.id == DocumentChunk.document_id)  # type: ignore[arg-type]
+            .join(CrawlSource, CrawlSource.id == CrawledDocument.source_id)  # type: ignore[arg-type]
+            .where(CrawlSource.id == UUID(source_id))  # type: ignore[arg-type]
         )
 
     query = query.limit(max_chunks)
@@ -798,26 +813,27 @@ async def _link_graph_status() -> ManageResponse:
     from sqlmodel import col
 
     async with get_session() as session:
-        # Total chunks
-        total_result = await session.execute(select(func.count(DocumentChunk.id)))
+        # Total chunks (pyright doesn't understand SQLAlchemy func.count)
+        total_result = await session.execute(
+            select(func.count(DocumentChunk.id))  # type: ignore[arg-type]
+        )
         total_chunks = total_result.scalar() or 0
 
         # Chunks with entities
         linked_result = await session.execute(
-            select(func.count(DocumentChunk.id)).where(
-                col(DocumentChunk.has_entities) == True  # noqa: E712
-            )
+            select(func.count(DocumentChunk.id))  # type: ignore[arg-type]
+            .where(col(DocumentChunk.has_entities) == True)  # noqa: E712
         )
         chunks_with_entities = linked_result.scalar() or 0
 
-        # Pending per source
+        # Pending per source (complex select with joins)
         pending_query = (
             select(  # type: ignore[call-overload]
-                CrawlSource.name,
-                func.count(DocumentChunk.id).label("pending"),
+                CrawlSource.name,  # type: ignore[arg-type]
+                func.count(DocumentChunk.id).label("pending"),  # type: ignore[arg-type]
             )
-            .join(CrawledDocument, CrawledDocument.source_id == CrawlSource.id)
-            .join(DocumentChunk, DocumentChunk.document_id == CrawledDocument.id)
+            .join(CrawledDocument, CrawledDocument.source_id == CrawlSource.id)  # type: ignore[arg-type]
+            .join(DocumentChunk, DocumentChunk.document_id == CrawledDocument.id)  # type: ignore[arg-type]
             .where(col(DocumentChunk.has_entities) == False)  # noqa: E712
             .group_by(CrawlSource.name)
         )

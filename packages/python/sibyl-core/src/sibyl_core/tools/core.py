@@ -568,16 +568,17 @@ async def _search_documents(
             # Build similarity search query
             similarity_expr = 1 - DocumentChunk.embedding.cosine_distance(query_embedding)
 
+            # SQLModel columns have .label() method at runtime but pyright sees them as plain types
             doc_query = (
                 select(
                     DocumentChunk,
                     CrawledDocument,
-                    CrawlSource.name.label("source_name"),
-                    CrawlSource.id.label("source_id"),
+                    CrawlSource.name.label("source_name"),  # type: ignore[attr-defined]
+                    CrawlSource.id.label("source_id"),  # type: ignore[attr-defined]
                     similarity_expr.label("similarity"),
                 )
-                .join(CrawledDocument, DocumentChunk.document_id == CrawledDocument.id)
-                .join(CrawlSource, CrawledDocument.source_id == CrawlSource.id)
+                .join(CrawledDocument, DocumentChunk.document_id == CrawledDocument.id)  # type: ignore[arg-type]
+                .join(CrawlSource, CrawledDocument.source_id == CrawlSource.id)  # type: ignore[arg-type]
                 .where(col(DocumentChunk.embedding).is_not(None))
             )
 
@@ -1955,7 +1956,7 @@ async def add(
 
         # Async mode (default): queue arq job, return immediately
         try:
-            from sibyl_core.jobs.queue import enqueue_create_entity
+            from sibyl.jobs.queue import enqueue_create_entity
 
             await enqueue_create_entity(
                 entity_id=entity_id,
