@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/hooks';
 import { useCallback, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EditableText } from '@/components/editable';
@@ -309,6 +310,8 @@ export default function ProfilePage() {
     mutationFn: updateProfile,
     onSuccess: data => {
       queryClient.setQueryData(['user', 'profile'], data);
+      // Also invalidate auth.me so the nav avatar updates
+      queryClient.invalidateQueries({ queryKey: queryKeys.auth.me });
       toast.success('Profile updated');
     },
     onError: () => {

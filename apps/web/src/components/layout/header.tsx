@@ -33,7 +33,7 @@ export function Header() {
   }, []);
 
   return (
-    <header className="h-14 bg-sc-bg-base border-b border-sc-fg-subtle/10 flex items-center justify-between px-3 md:px-6 gap-3 shadow-none dark:shadow-[0_4px_16px_rgba(0,0,0,0.4),0_2px_8px_rgba(0,0,0,0.3)] z-10">
+    <header className="h-14 bg-sc-bg-base border-b border-sc-fg-subtle/10 flex items-center justify-between px-3 md:px-6 gap-3 shadow-header z-10">
       {/* Mobile: Hamburger + Logo */}
       <div className="flex items-center gap-2 md:hidden">
         <button
