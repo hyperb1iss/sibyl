@@ -51,7 +51,14 @@ tasks:
     inputs:
       - "@group(sources)"
 
+  test:
+    command: "uv run pytest tests/ -v"
+    inputs:
+      - "@group(sources)"
+      - "@group(tests)"
+
   check:
     deps:
       - "~:lint"
       - "~:typecheck"
+      - "~:test"

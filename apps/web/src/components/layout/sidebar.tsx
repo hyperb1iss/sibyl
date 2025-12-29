@@ -100,7 +100,7 @@ export function Sidebar() {
   return (
     <>
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className="hidden md:flex w-64 bg-sc-bg-base border-r border-sc-fg-subtle/10 flex-col">
+      <aside className="hidden md:flex w-64 bg-sc-bg-base border-r border-sc-fg-subtle/10 flex-col shadow-[4px_0_20px_rgba(0,0,0,0.04),8px_0_32px_rgba(0,0,0,0.025)] dark:shadow-[4px_0_24px_rgba(0,0,0,0.5),8px_0_40px_rgba(0,0,0,0.3)]">
         <SidebarContent />
       </aside>
 
