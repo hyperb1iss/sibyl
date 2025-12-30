@@ -46,12 +46,12 @@ dependencies = [
     "python-louvain>=0.16",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    "pyright>=1.1.407",
-    "pytest>=9.0.2",
-    "pytest-asyncio>=1.3.0",
-    "ruff>=0.14.9",
+    "pyright",
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
 ]
 
 [project.urls]

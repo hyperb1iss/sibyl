@@ -12,6 +12,16 @@ members = [
     "sibyl-core",
     "sibyld",
 ]
+constraints = [
+    { name = "httpx", specifier = ">=0.28,<1.0" },
+    { name = "playwright", specifier = ">=1.50,<2.0" },
+    { name = "pre-commit", specifier = ">=4.0,<5.0" },
+    { name = "pyright", specifier = ">=1.1,<2.0" },
+    { name = "pytest", specifier = ">=9.0,<10.0" },
+    { name = "pytest-asyncio", specifier = ">=1.3,<2.0" },
+    { name = "pytest-cov", specifier = ">=7.0,<8.0" },
+    { name = "ruff", specifier = ">=0.14,<1.0" },
+]
 
 [[package]]
 name = "aiofiles"
@@ -2928,9 +2938,9 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pyright", specifier = ">=1.1.407" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "ruff", specifier = ">=0.14.9" },
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "ruff" },
 ]
 
 [[package]]
@@ -2952,7 +2962,7 @@ dependencies = [
     { name = "structlog" },
 ]
 
-[package.optional-dependencies]
+[package.dev-dependencies]
 dev = [
     { name = "pyright" },
     { name = "pytest" },
@@ -2971,15 +2981,18 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pyjwt", specifier = ">=2.10" },
-    { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.407" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.3.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "python-louvain", specifier = ">=0.16" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.9" },
     { name = "structlog", specifier = ">=24.0" },
 ]
-provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
 
 [[package]]
 name = "sibyld"
@@ -3071,12 +3084,12 @@ provides-extras = ["generator", "graphrag", "graphrag-leiden", "docs"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pre-commit", specifier = ">=4.0" },
-    { name = "pyright", specifier = ">=1.1.407" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-asyncio", specifier = ">=1.3.0" },
-    { name = "pytest-cov", specifier = ">=7.0.0" },
-    { name = "ruff", specifier = ">=0.14.9" },
+    { name = "pre-commit" },
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
 ]
 
 [[package]]

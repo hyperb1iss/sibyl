@@ -98,12 +98,12 @@ include = ["/src", "/tests", "/README.md", "/LICENSE"]
 
 [dependency-groups]
 dev = [
-    "pre-commit>=4.0",
-    "pyright>=1.1.407",
-    "pytest>=9.0.2",
-    "pytest-asyncio>=1.3.0",
-    "pytest-cov>=7.0.0",
-    "ruff>=0.14.9",
+    "pre-commit",
+    "pyright",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
 ]
 
 # =============================================================================
