@@ -85,9 +85,6 @@ sibyl add "Title" "What you learned..."
 # With metadata
 sibyl add "OAuth insight" "Token refresh timing..." -c authentication -l python
 
-# Auto-link to related entities
-sibyl add "Redis pattern" "Connection pooling..." --auto-link
-
 # Create a pattern instead of episode
 sibyl add "Retry pattern" "Exponential backoff..." --type pattern
 ```

@@ -40,9 +40,6 @@ sibyl task review task_xyz --pr "github.com/org/repo/pull/42"
 sibyl add "Session insight: Topic" "What I discovered today..."
 ```
 
-**Auto-capture:** With Sibyl hooks enabled, a Stop hook evaluates the session for uncaptured
-learnings and prompts Claude to save them before stopping.
-
 ### Resuming Blocked Work
 
 ```bash

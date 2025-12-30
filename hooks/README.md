@@ -16,10 +16,6 @@ Then restart Claude Code.
 |------|---------|--------|
 | **SessionStart** | Session begins | Loads active tasks, reminds about `sibyl add` |
 | **UserPromptSubmit** | Before processing prompt | Searches Sibyl, injects relevant knowledge |
-| **Stop** | Claude stops | LLM evaluates for uncaptured learnings, blocks if needed |
-
-The Stop hook uses Claude's `type: "prompt"` feature - an LLM (Haiku) analyzes the
-session transcript and blocks Claude from stopping until valuable learnings are captured.
 
 ## Uninstall
 
