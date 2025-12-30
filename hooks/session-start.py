@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Sibyl SessionStart Hook - Load context at session start."""
+
 from __future__ import annotations
 
 import json

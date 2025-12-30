@@ -37,11 +37,11 @@ sibyl task block task_xyz --reason "Need to investigate the timeout issue"
 sibyl task review task_xyz --pr "github.com/org/repo/pull/42"
 
 # ALWAYS capture learnings before leaving
-sibyl entity create \
-  --type episode \
-  --name "Session insight: Topic" \
-  --content "What I discovered today..."
+sibyl add "Session insight: Topic" "What I discovered today..."
 ```
+
+**Auto-capture:** With Sibyl hooks enabled, a Stop hook evaluates the session for uncaptured
+learnings and prompts Claude to save them before stopping.
 
 ### Resuming Blocked Work
 

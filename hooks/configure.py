@@ -15,6 +15,26 @@ from pathlib import Path
 SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
 HOOKS_DIR = Path.home() / ".claude" / "hooks" / "sibyl"
 
+STOP_HOOK_PROMPT = """You are evaluating whether Claude should stop or first capture learnings to Sibyl (a knowledge graph).
+
+Session context: $ARGUMENTS
+
+Analyze the conversation for UNCAPTURED valuable learnings:
+1. Non-obvious solutions or workarounds discovered
+2. Gotchas, edge cases, or debugging insights
+3. Architectural decisions with reasoning
+4. Integration patterns or configuration quirks
+
+IMPORTANT:
+- If stop_hook_active is true, ALWAYS return ok:true (prevents infinite loops)
+- Only block if there are SPECIFIC, CONCRETE learnings worth capturing
+- Skip trivial info, well-documented basics, or temporary hacks
+- Look for 'sibyl add' calls - if learnings were already captured, approve
+
+Respond with JSON:
+- To BLOCK (has uncaptured learnings): {"ok": false, "reason": "Before stopping, capture these learnings to Sibyl via 'sibyl add':\\n\\n1. [Title]: [What, why, caveats]\\n2. ..."}
+- To APPROVE (no learnings or already captured): {"ok": true, "reason": "No uncaptured learnings"}"""
+
 SIBYL_HOOKS = {
     "SessionStart": [
         {
@@ -50,14 +70,30 @@ SIBYL_HOOKS = {
             ],
         }
     ],
+    "Stop": [
+        {
+            "hooks": [
+                {
+                    "type": "prompt",
+                    "prompt": STOP_HOOK_PROMPT,
+                    "timeout": 45,
+                }
+            ],
+        }
+    ],
 }
 
 
 def is_sibyl_hook(hook_entry: dict) -> bool:
     """Check if a hook entry is a Sibyl hook."""
     for hook in hook_entry.get("hooks", []):
+        # Command-based hooks
         cmd = str(hook.get("command", ""))
         if "sibyl" in cmd or "hooks/sibyl" in cmd:
+            return True
+        # Prompt-based hooks (check for Sibyl mention in prompt)
+        prompt = str(hook.get("prompt", ""))
+        if "Sibyl" in prompt and "knowledge graph" in prompt:
             return True
     return False
 

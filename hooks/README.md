@@ -14,10 +14,12 @@ Then restart Claude Code.
 
 | Hook | Trigger | Action |
 |------|---------|--------|
-| **SessionStart** | Session begins | Loads active tasks + relevant patterns |
-| **UserPromptSubmit** | Before processing prompt | Injects relevant Sibyl knowledge |
-| **PostToolUse** | After Write/Edit | Logs file changes to Sibyl |
-| **Stop** | Session ends | Logs session marker |
+| **SessionStart** | Session begins | Loads active tasks, reminds about `sibyl add` |
+| **UserPromptSubmit** | Before processing prompt | Searches Sibyl, injects relevant knowledge |
+| **Stop** | Claude stops | LLM evaluates for uncaptured learnings, blocks if needed |
+
+The Stop hook uses Claude's `type: "prompt"` feature - an LLM (Haiku) analyzes the
+session transcript and blocks Claude from stopping until valuable learnings are captured.
 
 ## Uninstall
 
@@ -31,6 +33,4 @@ Or manually: `rm -rf ~/.claude/hooks/sibyl`
 
 - `session-start.py` - Context loading at session start
 - `user-prompt-submit.py` - Knowledge injection into prompts
-- `post-tool-use.py` - File change capture
-- `stop.py` - Session summary logging
-- `configure.py` - Updates `~/.claude/settings.json`
+- `configure.py` - Updates `~/.claude/settings.json` (includes Stop hook prompt)
