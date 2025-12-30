@@ -300,8 +300,8 @@ class TestKnowledgeCreationE2E:
             assert result.message is not None
 
     @pytest.mark.asyncio
-    async def test_add_pattern_with_auto_link(self) -> None:
-        """Test: add pattern with automatic relationship discovery."""
+    async def test_add_pattern_with_explicit_link(self) -> None:
+        """Test: add pattern with explicit relationship."""
         ctx = ToolTestContext()
 
         # Create existing related pattern

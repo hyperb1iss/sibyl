@@ -294,7 +294,6 @@ async def create_entity(
     entity_type: str,
     group_id: str,
     relationships: list[dict[str, Any]] | None = None,
-    auto_link: bool = False,
     auto_link_params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create entity asynchronously via Graphiti.
@@ -308,8 +307,7 @@ async def create_entity(
         entity_type: Type string (episode, pattern, task, project)
         group_id: Organization ID
         relationships: Optional list of explicit relationships to create
-        auto_link: Whether to auto-discover related entities
-        auto_link_params: Parameters for auto-link discovery
+        auto_link_params: Parameters for auto-link discovery (always runs if provided)
 
     Returns:
         Dict with creation results
@@ -395,7 +393,7 @@ async def create_entity(
 
         # Auto-link: discover related entities via similarity search
         auto_links_created = 0
-        if auto_link and auto_link_params:
+        if auto_link_params:
             try:
                 from sibyl_core.tools.core import _auto_discover_links
 

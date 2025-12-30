@@ -372,8 +372,6 @@ def _register_tools(mcp: FastMCP) -> None:
         depends_on: list[str] | None = None,
         # Project-specific parameters
         repository_url: str | None = None,
-        # Auto-linking
-        auto_link: bool = False,
     ) -> dict[str, Any]:
         """Add new knowledge to the graph.
 
@@ -402,7 +400,6 @@ def _register_tools(mcp: FastMCP) -> None:
             technologies: Technologies involved (for tasks)
             depends_on: Task IDs this depends on (creates DEPENDS_ON edges)
             repository_url: Repository URL for projects
-            auto_link: Auto-discover related patterns/rules (similarity > 0.75)
 
         Returns:
             Result with success status, entity ID, and message
@@ -445,7 +442,6 @@ def _register_tools(mcp: FastMCP) -> None:
             technologies=technologies,
             depends_on=depends_on,
             repository_url=repository_url,
-            auto_link=auto_link,
         )
         return _to_dict(result)
 

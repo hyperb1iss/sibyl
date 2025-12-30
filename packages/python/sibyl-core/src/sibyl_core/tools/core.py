@@ -1561,8 +1561,6 @@ async def add(
     depends_on: list[str] | None = None,
     # Project-specific parameters
     repository_url: str | None = None,
-    # Auto-linking
-    auto_link: bool = False,
     # Sync mode - wait for Graphiti processing instead of returning immediately
     sync: bool = False,
 ) -> AddResponse:
@@ -1584,7 +1582,6 @@ async def add(
     • Create an epic: add("OAuth Integration", "...", entity_type="epic", project="proj_abc", priority="high")
     • Create a task: add("Implement OAuth", "...", entity_type="task", project="proj_abc", epic="epic_xyz")
     • Create a project: add("Auth System", "...", entity_type="project", repository_url="...")
-    • Auto-link to related knowledge: add("OAuth insight", "...", auto_link=True)
 
     IMPORTANT: Tasks and Epics REQUIRE a project. Always specify project="<project_id>".
     Tasks can optionally belong to an epic via epic="<epic_id>".
@@ -1607,7 +1604,6 @@ async def add(
         technologies: Technologies involved (for tasks).
         depends_on: Task IDs this depends on (creates DEPENDS_ON edges).
         repository_url: Repository URL for projects.
-        auto_link: Auto-discover related patterns/rules/templates (similarity > 0.75).
         sync: If True, wait for Graphiti processing (slower but entity exists immediately).
               If False (default), return immediately and process in background.
 
@@ -1618,7 +1614,7 @@ async def add(
         add("OAuth redirect bug", "Fixed issue where...", category="debugging", languages=["python"])
         add("Add user auth", "Implement login flow", entity_type="task", project="proj_web", priority="high")
         add("E-commerce API", "Backend services for...", entity_type="project", repository_url="github.com/...")
-        add("Connection pooling pattern", "Best practice for...", entity_type="pattern", auto_link=True)
+        add("Connection pooling pattern", "Best practice for...", entity_type="pattern")
     """
     # Sanitize inputs
     title = title.strip()
@@ -1922,37 +1918,36 @@ async def add(
                 except Exception as e:
                     log.warning("relationship_creation_failed", error=str(e), rel=rel_data)
 
-            # Auto-link in sync mode
-            if auto_link:
-                try:
-                    auto_link_results = await _auto_discover_links(
-                        entity_manager=entity_manager,
-                        title=title,
-                        content=content,
-                        technologies=technologies or languages or [],
-                        category=category,
-                        exclude_id=created_id,
-                        threshold=0.75,
-                        limit=5,
-                    )
-                    for linked_id, score in auto_link_results:
-                        try:
-                            rel = Relationship(
-                                id=f"rel_{created_id}_references_{linked_id}",
-                                source_id=created_id,
-                                target_id=linked_id,
-                                relationship_type=RelationshipType.RELATED_TO,
-                                metadata={
-                                    "created_at": datetime.now(UTC).isoformat(),
-                                    "auto_linked": True,
-                                    "similarity_score": score,
-                                },
-                            )
-                            await relationship_manager.create(rel)
-                        except Exception as e:
-                            log.warning("auto_link_failed", error=str(e), target=linked_id)
-                except Exception as e:
-                    log.warning("auto_link_search_failed", error=str(e))
+            # Auto-link to related patterns/rules/templates in sync mode
+            try:
+                auto_link_results = await _auto_discover_links(
+                    entity_manager=entity_manager,
+                    title=title,
+                    content=content,
+                    technologies=technologies or languages or [],
+                    category=category,
+                    exclude_id=created_id,
+                    threshold=0.75,
+                    limit=5,
+                )
+                for linked_id, score in auto_link_results:
+                    try:
+                        rel = Relationship(
+                            id=f"rel_{created_id}_references_{linked_id}",
+                            source_id=created_id,
+                            target_id=linked_id,
+                            relationship_type=RelationshipType.RELATED_TO,
+                            metadata={
+                                "created_at": datetime.now(UTC).isoformat(),
+                                "auto_linked": True,
+                                "similarity_score": score,
+                            },
+                        )
+                        await relationship_manager.create(rel)
+                    except Exception as e:
+                        log.warning("auto_link_failed", error=str(e), target=linked_id)
+            except Exception as e:
+                log.warning("auto_link_search_failed", error=str(e))
 
             message = f"Added: {title}"
             if relationships_to_create:
@@ -1975,15 +1970,12 @@ async def add(
                 entity_type=entity_type,
                 group_id=org_id,
                 relationships=relationships_to_create if relationships_to_create else None,
-                auto_link=auto_link,
                 auto_link_params={
                     "title": title,
                     "content": content,
                     "technologies": technologies or languages or [],
                     "category": category,
-                }
-                if auto_link
-                else None,
+                },
             )
             log.info("add_queued_for_arq", entity_id=entity_id, entity_type=entity_type)
 

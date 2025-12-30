@@ -174,7 +174,6 @@ async def enqueue_create_entity(
     entity_type: str,
     group_id: str,
     relationships: list[dict[str, Any]] | None = None,
-    auto_link: bool = False,
     auto_link_params: dict[str, Any] | None = None,
 ) -> str:
     """Enqueue an entity creation job.
@@ -188,8 +187,7 @@ async def enqueue_create_entity(
         entity_type: Type string (episode, pattern, task, project)
         group_id: Organization ID
         relationships: Optional explicit relationships to create
-        auto_link: Whether to auto-discover related entities
-        auto_link_params: Parameters for auto-link discovery
+        auto_link_params: Parameters for auto-link discovery (always runs if provided)
 
     Returns:
         Job ID for tracking
@@ -205,7 +203,6 @@ async def enqueue_create_entity(
         entity_type,
         group_id,
         relationships=relationships,
-        auto_link=auto_link,
         auto_link_params=auto_link_params,
         _job_id=job_id,
     )

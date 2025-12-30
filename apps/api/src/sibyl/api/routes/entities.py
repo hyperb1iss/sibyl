@@ -358,7 +358,6 @@ async def create_entity(
         assignees = entity.metadata.get("assignees") if entity.metadata else None
         technologies = entity.metadata.get("technologies") if entity.metadata else None
         depends_on = entity.metadata.get("depends_on") if entity.metadata else None
-        auto_link = bool(entity.metadata.get("auto_link")) if entity.metadata else False
 
         # Use description as content fallback (frontend sends description, add() needs content)
         content = entity.content or entity.description or entity.name
@@ -384,8 +383,6 @@ async def create_entity(
             assignees=assignees,
             technologies=technologies,
             depends_on=depends_on,
-            # Auto-link
-            auto_link=auto_link,
             # Sync for projects, async for everything else
             sync=is_sync,
         )
