@@ -66,9 +66,18 @@ jobs:
       # Moonrepo Toolchain (proto + moon + all tools)
       # =========================================================================
       - name: Setup moonrepo toolchain
-        uses: moonrepo/setup-toolchain@v0
+        uses: moonrepo/setup-toolchain@v0.6
         with:
           auto-install: true
+
+      - name: Fix proto shim permissions
+        run: |
+          if [ -d "$HOME/.proto/shims" ]; then
+            chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          fi
+          if [ -d "$HOME/.proto/bin" ]; then
+            chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          fi
 
       # =========================================================================
       # Caching
