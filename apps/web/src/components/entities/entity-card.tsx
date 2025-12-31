@@ -29,18 +29,17 @@ export const EntityCard = memo(function EntityCard({
 
   return (
     <article
-      className="relative overflow-hidden rounded-xl transition-all duration-200 group hover:-translate-y-0.5 border"
+      className="relative overflow-hidden rounded-xl transition-all duration-200 group hover:-translate-y-0.5 border shadow-card"
       style={{
         background: `linear-gradient(135deg, ${color}18 0%, var(--sc-bg-base) 50%, var(--sc-bg-base) 100%)`,
         borderColor: `${color}40`,
-        boxShadow: `0 0 0 1px ${color}10`,
       }}
       onMouseEnter={e => {
-        e.currentTarget.style.boxShadow = `0 8px 32px ${color}25, 0 0 0 1px ${color}30`;
+        e.currentTarget.style.boxShadow = `0 4px 8px oklch(0% 0 0 / 0.3), 0 8px 20px oklch(0% 0 0 / 0.2), 0 0 24px ${color}30, inset 0 1px 0 oklch(100% 0 0 / 0.05)`;
         e.currentTarget.style.borderColor = `${color}60`;
       }}
       onMouseLeave={e => {
-        e.currentTarget.style.boxShadow = `0 0 0 1px ${color}10`;
+        e.currentTarget.style.boxShadow = '';
         e.currentTarget.style.borderColor = `${color}40`;
       }}
     >
@@ -113,7 +112,7 @@ export const EntityCard = memo(function EntityCard({
 
 export function EntityCardSkeleton() {
   return (
-    <div className="relative bg-sc-bg-base rounded-xl overflow-hidden border border-sc-fg-subtle/10 animate-pulse">
+    <div className="relative bg-sc-bg-base rounded-xl overflow-hidden border border-sc-fg-subtle/30 shadow-card animate-pulse">
       <div className="absolute left-0 top-0 bottom-0 w-1 bg-sc-fg-subtle/20" />
       <div className="pl-4 pr-3 py-4">
         <div className="flex items-center gap-2 mb-2.5">

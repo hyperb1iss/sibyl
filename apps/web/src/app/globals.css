@@ -77,29 +77,34 @@
    Dawn (Light Theme) - Warm, focused, professional
    ----------------------------------------------------------------------------- */
 [data-theme="dawn"] {
-  /* Core palette - adjusted for light backgrounds */
-  --sc-purple: oklch(45% 0.28 300); /* #7e2bd5 - Deep purple */
-  --sc-magenta: oklch(42% 0.26 340); /* #b40077 - Rich magenta */
-  --sc-cyan: oklch(48% 0.14 200); /* #007f8e - Teal */
-  --sc-coral: oklch(52% 0.2 350); /* #c74a8c - Coral */
-  --sc-yellow: oklch(58% 0.14 85); /* #a88600 - Golden yellow */
-  --sc-green: oklch(50% 0.18 145); /* Adjusted green for light */
-  --sc-red: oklch(55% 0.22 25); /* Adjusted red for light */
+  /* Core palette - adjusted for light backgrounds, higher contrast */
+  --sc-purple: oklch(42% 0.28 300); /* Deeper purple for contrast */
+  --sc-magenta: oklch(40% 0.26 340); /* Rich magenta */
+  --sc-cyan: oklch(45% 0.16 200); /* Deeper teal */
+  --sc-coral: oklch(50% 0.22 350); /* Vivid coral */
+  --sc-yellow: oklch(52% 0.16 85); /* Golden, darker for contrast */
+  --sc-green: oklch(45% 0.2 145); /* Deeper green */
+  --sc-red: oklch(50% 0.24 25); /* Vivid red */
 
-  /* Background hierarchy - warm lavender whites */
-  --sc-bg-base: oklch(98% 0.01 290); /* #faf8ff */
-  --sc-bg-dark: oklch(96% 0.015 290); /* #f1ecff */
-  --sc-bg-highlight: oklch(93% 0.02 290); /* #e8e0ff */
-  --sc-bg-elevated: oklch(99% 0.005 290); /* Near white for cards */
-  --sc-bg-surface: oklch(91% 0.025 290); /* Deeper for contrast */
+  /* Background hierarchy - clear visual separation
+     dark: page body (soft gray)
+     base: sidebar, containers
+     elevated: cards (bright white to pop)
+     highlight: hover states
+     surface: deep areas, dividers */
+  --sc-bg-dark: oklch(95% 0.01 290); /* Page body - soft lavender gray */
+  --sc-bg-base: oklch(97% 0.008 290); /* Sidebar, containers */
+  --sc-bg-elevated: oklch(100% 0 0); /* Cards - pure white for pop */
+  --sc-bg-highlight: oklch(94% 0.015 290); /* Hover states */
+  --sc-bg-surface: oklch(91% 0.02 290); /* Deep areas, dividers */
 
-  /* Foreground - dark purple-grays */
-  --sc-fg-primary: oklch(22% 0.03 290); /* #2b2540 */
-  --sc-fg-muted: oklch(58% 0.04 290); /* #8e84a8 */
-  --sc-fg-subtle: oklch(72% 0.03 290); /* Light gray-purple */
+  /* Foreground - dark purple-grays, high contrast */
+  --sc-fg-primary: oklch(18% 0.03 290); /* Near black */
+  --sc-fg-muted: oklch(45% 0.04 290); /* Medium gray */
+  --sc-fg-subtle: oklch(65% 0.03 290); /* Lighter gray for borders */
 
   /* Semantic */
-  --background: var(--sc-bg-base);
+  --background: var(--sc-bg-dark);
   --foreground: var(--sc-fg-primary);
 
   /* Entity type colors - same references, palette adjusts */
@@ -146,28 +151,242 @@
    Layout Shadows - Theme-aware depth effects
    ============================================================================= */
 
+/* Dark mode defaults (neon) */
 .shadow-header {
   box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.06),
-    0 1px 3px rgba(0, 0, 0, 0.04);
+    0 4px 16px oklch(0% 0 0 / 0.4),
+    0 2px 8px oklch(0% 0 0 / 0.3),
+    inset 0 -1px 0 oklch(100% 0 0 / 0.05);
 }
 
-[data-theme="neon"] .shadow-header {
+[data-theme="dawn"] .shadow-header {
   box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.4),
-    0 2px 8px rgba(0, 0, 0, 0.3);
+    0 1px 3px oklch(0% 0 0 / 0.06),
+    0 2px 6px oklch(0% 0 0 / 0.04),
+    0 0 0 1px oklch(0% 0 0 / 0.04);
 }
 
 .shadow-sidebar {
   box-shadow:
-    4px 0 16px rgba(0, 0, 0, 0.06),
-    8px 0 24px rgba(0, 0, 0, 0.04);
+    4px 0 24px oklch(0% 0 0 / 0.5),
+    8px 0 40px oklch(0% 0 0 / 0.3),
+    inset -1px 0 0 oklch(100% 0 0 / 0.05);
 }
 
-[data-theme="neon"] .shadow-sidebar {
+[data-theme="dawn"] .shadow-sidebar {
   box-shadow:
-    4px 0 24px rgba(0, 0, 0, 0.5),
-    8px 0 40px rgba(0, 0, 0, 0.3);
+    1px 0 3px oklch(0% 0 0 / 0.06),
+    2px 0 8px oklch(0% 0 0 / 0.04),
+    0 0 0 1px oklch(0% 0 0 / 0.04);
+}
+
+/* =============================================================================
+   Card Depth System - Theme-aware shadows for visual hierarchy
+
+   Dark (Neon): Deep shadows + inner highlights + colored glows
+   Light (Dawn): Soft shadows + subtle borders + accent underlines
+   ============================================================================= */
+
+/* -----------------------------------------------------------------------------
+   Base Card Shadow
+   ----------------------------------------------------------------------------- */
+.shadow-card {
+  /* Dark mode: layered depth with inner glow */
+  box-shadow:
+    0 1px 2px oklch(0% 0 0 / 0.4),
+    0 2px 4px oklch(0% 0 0 / 0.3),
+    0 4px 8px oklch(0% 0 0 / 0.2),
+    inset 0 1px 0 oklch(100% 0 0 / 0.06),
+    inset 0 0 0 1px oklch(100% 0 0 / 0.04);
+}
+
+[data-theme="dawn"] .shadow-card {
+  /* Light mode: crisp, subtle shadow */
+  box-shadow:
+    0 1px 2px oklch(0% 0 0 / 0.06),
+    0 2px 4px oklch(0% 0 0 / 0.04),
+    0 0 0 1px oklch(0% 0 0 / 0.06);
+}
+
+/* -----------------------------------------------------------------------------
+   Elevated Card Shadow
+   ----------------------------------------------------------------------------- */
+.shadow-card-elevated {
+  /* Dark mode: prominent lift with purple tint */
+  box-shadow:
+    0 2px 4px oklch(0% 0 0 / 0.4),
+    0 4px 8px oklch(0% 0 0 / 0.3),
+    0 8px 16px oklch(0% 0 0 / 0.25),
+    0 12px 24px oklch(0% 0 0 / 0.15),
+    0 0 0 1px color-mix(in oklch, var(--sc-purple) 15%, transparent),
+    inset 0 1px 0 oklch(100% 0 0 / 0.08);
+}
+
+[data-theme="dawn"] .shadow-card-elevated {
+  /* Light mode: elegant lift with subtle purple border */
+  box-shadow:
+    0 1px 3px oklch(0% 0 0 / 0.08),
+    0 4px 8px oklch(0% 0 0 / 0.06),
+    0 8px 16px oklch(0% 0 0 / 0.04),
+    0 0 0 1px color-mix(in oklch, var(--sc-purple) 20%, transparent);
+}
+
+/* -----------------------------------------------------------------------------
+   Hover State Shadow
+   ----------------------------------------------------------------------------- */
+.shadow-card-hover {
+  /* Dark mode: lifted with purple glow */
+  box-shadow:
+    0 2px 4px oklch(0% 0 0 / 0.4),
+    0 4px 8px oklch(0% 0 0 / 0.35),
+    0 8px 16px oklch(0% 0 0 / 0.25),
+    0 16px 32px oklch(0% 0 0 / 0.15),
+    0 0 20px color-mix(in oklch, var(--sc-purple) 20%, transparent),
+    inset 0 1px 0 oklch(100% 0 0 / 0.08);
+}
+
+[data-theme="dawn"] .shadow-card-hover {
+  /* Light mode: lifted with purple accent */
+  box-shadow:
+    0 2px 4px oklch(0% 0 0 / 0.08),
+    0 4px 8px oklch(0% 0 0 / 0.06),
+    0 8px 16px oklch(0% 0 0 / 0.05),
+    0 0 0 1px color-mix(in oklch, var(--sc-purple) 30%, transparent);
+}
+
+/* -----------------------------------------------------------------------------
+   Colored Glow Variants - For emphasis states
+   ----------------------------------------------------------------------------- */
+
+/* Purple Glow */
+.shadow-glow-purple {
+  box-shadow:
+    0 1px 2px oklch(0% 0 0 / 0.4),
+    0 2px 4px oklch(0% 0 0 / 0.3),
+    0 4px 8px oklch(0% 0 0 / 0.2),
+    0 0 16px color-mix(in oklch, var(--sc-purple) 30%, transparent),
+    0 0 32px color-mix(in oklch, var(--sc-purple) 15%, transparent),
+    inset 0 1px 0 oklch(100% 0 0 / 0.06),
+    inset 0 0 0 1px color-mix(in oklch, var(--sc-purple) 20%, transparent);
+}
+
+[data-theme="dawn"] .shadow-glow-purple {
+  box-shadow:
+    0 1px 3px oklch(0% 0 0 / 0.08),
+    0 4px 8px color-mix(in oklch, var(--sc-purple) 12%, transparent),
+    0 0 0 1px color-mix(in oklch, var(--sc-purple) 35%, transparent);
+}
+
+/* Cyan Glow */
+.shadow-glow-cyan {
+  box-shadow:
+    0 1px 2px oklch(0% 0 0 / 0.4),
+    0 2px 4px oklch(0% 0 0 / 0.3),
+    0 4px 8px oklch(0% 0 0 / 0.2),
+    0 0 16px color-mix(in oklch, var(--sc-cyan) 25%, transparent),
+    0 0 32px color-mix(in oklch, var(--sc-cyan) 12%, transparent),
+    inset 0 1px 0 oklch(100% 0 0 / 0.06),
+    inset 0 0 0 1px color-mix(in oklch, var(--sc-cyan) 18%, transparent);
+}
+
+[data-theme="dawn"] .shadow-glow-cyan {
+  box-shadow:
+    0 1px 3px oklch(0% 0 0 / 0.08),
+    0 4px 8px color-mix(in oklch, var(--sc-cyan) 15%, transparent),
+    0 0 0 1px color-mix(in oklch, var(--sc-cyan) 40%, transparent);
+}
+
+/* Coral Glow */
+.shadow-glow-coral {
+  box-shadow:
+    0 1px 2px oklch(0% 0 0 / 0.4),
+    0 2px 4px oklch(0% 0 0 / 0.3),
+    0 4px 8px oklch(0% 0 0 / 0.2),
+    0 0 16px color-mix(in oklch, var(--sc-coral) 28%, transparent),
+    0 0 32px color-mix(in oklch, var(--sc-coral) 12%, transparent),
+    inset 0 1px 0 oklch(100% 0 0 / 0.06),
+    inset 0 0 0 1px color-mix(in oklch, var(--sc-coral) 18%, transparent);
+}
+
+[data-theme="dawn"] .shadow-glow-coral {
+  box-shadow:
+    0 1px 3px oklch(0% 0 0 / 0.08),
+    0 4px 8px color-mix(in oklch, var(--sc-coral) 12%, transparent),
+    0 0 0 1px color-mix(in oklch, var(--sc-coral) 35%, transparent);
+}
+
+/* Green Glow */
+.shadow-glow-green {
+  box-shadow:
+    0 1px 2px oklch(0% 0 0 / 0.4),
+    0 2px 4px oklch(0% 0 0 / 0.3),
+    0 4px 8px oklch(0% 0 0 / 0.2),
+    0 0 16px color-mix(in oklch, var(--sc-green) 22%, transparent),
+    0 0 32px color-mix(in oklch, var(--sc-green) 10%, transparent),
+    inset 0 1px 0 oklch(100% 0 0 / 0.06),
+    inset 0 0 0 1px color-mix(in oklch, var(--sc-green) 15%, transparent);
+}
+
+[data-theme="dawn"] .shadow-glow-green {
+  box-shadow:
+    0 1px 3px oklch(0% 0 0 / 0.08),
+    0 4px 8px color-mix(in oklch, var(--sc-green) 15%, transparent),
+    0 0 0 1px color-mix(in oklch, var(--sc-green) 40%, transparent);
+}
+
+/* Red Glow */
+.shadow-glow-red {
+  box-shadow:
+    0 1px 2px oklch(0% 0 0 / 0.4),
+    0 2px 4px oklch(0% 0 0 / 0.3),
+    0 4px 8px oklch(0% 0 0 / 0.2),
+    0 0 16px color-mix(in oklch, var(--sc-red) 25%, transparent),
+    0 0 32px color-mix(in oklch, var(--sc-red) 12%, transparent),
+    inset 0 1px 0 oklch(100% 0 0 / 0.06),
+    inset 0 0 0 1px color-mix(in oklch, var(--sc-red) 18%, transparent);
+}
+
+[data-theme="dawn"] .shadow-glow-red {
+  box-shadow:
+    0 1px 3px oklch(0% 0 0 / 0.08),
+    0 4px 8px color-mix(in oklch, var(--sc-red) 12%, transparent),
+    0 0 0 1px color-mix(in oklch, var(--sc-red) 35%, transparent);
+}
+
+/* Yellow Glow */
+.shadow-glow-yellow {
+  box-shadow:
+    0 1px 2px oklch(0% 0 0 / 0.4),
+    0 2px 4px oklch(0% 0 0 / 0.3),
+    0 4px 8px oklch(0% 0 0 / 0.2),
+    0 0 16px color-mix(in oklch, var(--sc-yellow) 20%, transparent),
+    0 0 32px color-mix(in oklch, var(--sc-yellow) 10%, transparent),
+    inset 0 1px 0 oklch(100% 0 0 / 0.06),
+    inset 0 0 0 1px color-mix(in oklch, var(--sc-yellow) 15%, transparent);
+}
+
+[data-theme="dawn"] .shadow-glow-yellow {
+  box-shadow:
+    0 1px 3px oklch(0% 0 0 / 0.08),
+    0 4px 8px color-mix(in oklch, var(--sc-yellow) 15%, transparent),
+    0 0 0 1px color-mix(in oklch, var(--sc-yellow) 45%, transparent);
+}
+
+/* -----------------------------------------------------------------------------
+   Ring Effect - Subtle border enhancement
+   ----------------------------------------------------------------------------- */
+.ring-card {
+  box-shadow:
+    0 1px 2px oklch(0% 0 0 / 0.3),
+    0 2px 4px oklch(0% 0 0 / 0.2),
+    inset 0 1px 0 oklch(100% 0 0 / 0.06),
+    inset 0 0 0 1px oklch(100% 0 0 / 0.05);
+}
+
+[data-theme="dawn"] .ring-card {
+  box-shadow:
+    0 1px 2px oklch(0% 0 0 / 0.06),
+    0 0 0 1px oklch(0% 0 0 / 0.08);
 }
 
 /* =============================================================================

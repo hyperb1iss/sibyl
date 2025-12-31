@@ -79,15 +79,15 @@ export function Header() {
             onBlur={() => setIsFocused(false)}
             placeholder="Search knowledge..."
             className={`
-              w-full pl-10 pr-20 py-2 rounded-lg
-              bg-sc-bg-highlight/50 border text-sc-fg-primary
-              placeholder:text-sc-fg-subtle/60
+              w-full pl-10 pr-20 py-2.5 rounded-xl
+              bg-sc-bg-dark/80 border text-sc-fg-primary
+              placeholder:text-sc-fg-subtle/50
               transition-all duration-300
-              focus:outline-none
+              focus:outline-none focus-visible:outline-none
               ${
                 isFocused
-                  ? 'border-sc-purple/50 shadow-[0_0_20px_rgba(225,53,255,0.15),inset_0_0_20px_rgba(225,53,255,0.05)]'
-                  : 'border-sc-fg-subtle/10 hover:border-sc-fg-subtle/20'
+                  ? 'border-sc-purple bg-sc-bg-dark shadow-[0_0_20px_rgba(225,53,255,0.3),0_0_40px_rgba(225,53,255,0.15)]'
+                  : 'border-sc-fg-subtle/20 hover:border-sc-purple/40 hover:shadow-[0_0_12px_rgba(225,53,255,0.12)]'
               }
             `}
           />

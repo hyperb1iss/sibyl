@@ -157,7 +157,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
         {/* Main Content */}
         <div className="lg:col-span-3 space-y-6">
           {/* Header Card */}
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-6">
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-6 shadow-card">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 {/* Title */}
@@ -319,7 +319,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Stats Card */}
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-5">
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-5 shadow-card">
             <h3 className="text-xs font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4">
               Document Info
             </h3>
@@ -344,7 +344,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
 
           {/* Outline Card */}
           {document.headings.length > 0 && (
-            <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-5">
+            <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-5 shadow-card">
               <h3 className="text-xs font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4">
                 Outline
               </h3>
@@ -369,7 +369,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
 
           {/* Links Card */}
           {document.links.length > 0 && (
-            <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-5">
+            <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-5 shadow-card">
               <h3 className="text-xs font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4">
                 Links ({document.links.length})
               </h3>
@@ -397,7 +397,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
 
           {/* Graph Connections */}
           {entitiesData && entitiesData.entities.length > 0 && (
-            <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-5">
+            <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-5 shadow-card">
               <div className="flex items-center gap-2 mb-4">
                 <Network width={14} height={14} className="text-sc-purple" />
                 <h3 className="text-xs font-semibold text-sc-fg-subtle uppercase tracking-wide">
@@ -447,7 +447,7 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
           )}
 
           {/* Actions */}
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-5">
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-5 shadow-card">
             <Link
               href={`/sources/${sourceId}`}
               className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-sc-fg-muted hover:text-sc-purple hover:bg-sc-purple/10 rounded-xl transition-colors"

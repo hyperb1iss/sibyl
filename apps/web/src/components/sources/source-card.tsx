@@ -52,7 +52,7 @@ export const SourceCard = memo(function SourceCard({
   };
 
   return (
-    <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-4 hover:border-sc-purple/30 transition-colors">
+    <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-4 shadow-card hover:border-sc-purple/40 hover:shadow-card-hover transition-all duration-200">
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex-1 min-w-0">
@@ -127,7 +127,7 @@ export const SourceCard = memo(function SourceCard({
 
 export function SourceCardSkeleton() {
   return (
-    <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-4 animate-pulse">
+    <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-4 shadow-card animate-pulse">
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex-1">
           <div className="h-5 bg-sc-fg-subtle/10 rounded w-3/4 mb-2" />

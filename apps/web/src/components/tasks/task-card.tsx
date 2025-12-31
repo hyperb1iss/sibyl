@@ -150,10 +150,10 @@ export const TaskCard = memo(function TaskCard({
       onDragStart={isDraggable ? e => onDragStart?.(e, task.id) : undefined}
       onClick={() => onClick?.(task.id)}
       className={`
-        relative rounded-xl overflow-hidden
+        relative rounded-xl overflow-hidden shadow-card
         ${isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}
         transition-all duration-200
-        hover:shadow-lg hover:shadow-black/20
+        hover:shadow-card-hover
         hover:-translate-y-0.5
         group select-none
         border ${cardBorder} ${cardBg}
@@ -306,7 +306,7 @@ export const TaskCard = memo(function TaskCard({
 
 export function TaskCardSkeleton() {
   return (
-    <div className="relative bg-sc-bg-base rounded-xl overflow-hidden border border-sc-fg-subtle/10 animate-pulse">
+    <div className="relative bg-sc-bg-base rounded-xl overflow-hidden border border-sc-fg-subtle/30 shadow-card animate-pulse">
       <div className="absolute left-0 top-0 bottom-0 w-1 bg-sc-fg-subtle/20" />
       <div className="pl-4 pr-3 py-3">
         <div className="flex items-center gap-2 mb-2">

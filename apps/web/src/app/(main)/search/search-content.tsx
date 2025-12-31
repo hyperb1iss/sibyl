@@ -266,7 +266,7 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
         </div>
 
         {/* Mode-specific Filters */}
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-lg sm:rounded-xl p-3 sm:p-4 space-y-3 sm:space-y-4">
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-lg sm:rounded-xl p-3 sm:p-4 space-y-3 sm:space-y-4 shadow-card">
           {/* Knowledge Mode Filters */}
           {mode === 'knowledge' && (
             <>

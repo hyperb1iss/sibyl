@@ -21,14 +21,14 @@ interface CardProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 const variants: Record<CardVariant, string> = {
-  default: 'bg-sc-bg-base border border-sc-fg-subtle/20',
-  elevated: 'bg-sc-bg-elevated border border-sc-fg-subtle/10 shadow-xl shadow-black/20',
+  default: 'bg-sc-bg-base border border-sc-fg-subtle/30 shadow-card',
+  elevated: 'bg-sc-bg-elevated border border-sc-fg-subtle/20 shadow-card-elevated',
   interactive:
-    'bg-sc-bg-base border border-sc-fg-subtle/20 hover:border-sc-purple/30 transition-all duration-200 cursor-pointer hover:shadow-lg hover:shadow-sc-purple/5 active:scale-[0.99]',
-  bordered: 'bg-transparent border-2 border-sc-fg-subtle/30',
-  error: 'bg-sc-red/5 border border-sc-red/30 shadow-sm shadow-sc-red/10',
-  warning: 'bg-sc-yellow/5 border border-sc-yellow/30 shadow-sm shadow-sc-yellow/10',
-  success: 'bg-sc-green/5 border border-sc-green/30 shadow-sm shadow-sc-green/10',
+    'bg-sc-bg-base border border-sc-fg-subtle/30 shadow-card hover:border-sc-purple/40 hover:shadow-card-hover transition-all duration-200 cursor-pointer active:scale-[0.99]',
+  bordered: 'bg-transparent border-2 border-sc-fg-subtle/40 ring-card',
+  error: 'bg-sc-red/5 border border-sc-red/40 shadow-glow-red',
+  warning: 'bg-sc-yellow/5 border border-sc-yellow/40 shadow-glow-yellow',
+  success: 'bg-sc-green/5 border border-sc-green/40 shadow-glow-green',
 };
 
 export function Card({
@@ -94,7 +94,7 @@ export function StatCard({ label, value, icon, trend, sublabel, loading }: StatC
   };
 
   return (
-    <Card variant="default" className="relative overflow-hidden group hover-spark">
+    <Card variant="elevated" className="relative overflow-hidden group hover-spark">
       {/* Subtle gradient accent on hover */}
       <div className="absolute inset-0 bg-gradient-to-br from-sc-purple/0 to-sc-purple/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
@@ -388,5 +388,78 @@ export function CollapsibleCard({
         )}
       </AnimatePresence>
     </Card>
+  );
+}
+
+// =============================================================================
+// Section - Page-level content container with consistent styling
+// =============================================================================
+
+interface SectionProps extends HTMLAttributes<HTMLDivElement> {
+  /** Section header title */
+  title?: string;
+  /** Optional description below title */
+  description?: string;
+  /** Icon to display with title */
+  icon?: ReactNode;
+  /** Actions to display in header */
+  actions?: ReactNode;
+  /** Use elevated shadow for prominent sections */
+  elevated?: boolean;
+  /** Content */
+  children: ReactNode;
+}
+
+export function Section({
+  title,
+  description,
+  icon,
+  actions,
+  elevated = true,
+  children,
+  className = '',
+  ...props
+}: SectionProps) {
+  return (
+    <div
+      className={`
+        bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-6
+        ${elevated ? 'shadow-card-elevated' : 'shadow-card'}
+        ${className}
+      `}
+      {...props}
+    >
+      {(title || actions) && (
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div className="flex items-center gap-3">
+            {icon && <span className="text-sc-purple">{icon}</span>}
+            <div>
+              {title && <h2 className="text-lg font-semibold text-sc-fg-primary">{title}</h2>}
+              {description && <p className="text-sm text-sc-fg-muted mt-0.5">{description}</p>}
+            </div>
+          </div>
+          {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+
+// Loading skeleton for Section
+export function SectionSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-6 shadow-card-elevated animate-pulse">
+      <div className="h-6 bg-sc-bg-highlight rounded w-1/4 mb-4" />
+      <div className="space-y-3">
+        {[...Array(rows)].map((_, i) => (
+          <div
+            key={`row-${i}`}
+            className="h-4 bg-sc-bg-highlight rounded"
+            style={{ width: `${100 - i * 15}%` }}
+          />
+        ))}
+      </div>
+    </div>
   );
 }

@@ -417,8 +417,8 @@ function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) 
           isArchived
             ? 'bg-sc-bg-base/50 border-sc-fg-subtle/10 opacity-75'
             : isSelected
-              ? 'bg-gradient-to-br from-sc-purple/15 via-sc-bg-base to-sc-bg-base border-sc-purple/50 shadow-lg shadow-sc-purple/10'
-              : 'bg-sc-bg-base border-sc-fg-subtle/20 hover:border-sc-fg-subtle/40 hover:bg-sc-bg-highlight/30'
+              ? 'bg-gradient-to-br from-sc-purple/15 via-sc-bg-base to-sc-bg-base border-sc-purple/50 shadow-glow-purple'
+              : 'bg-sc-bg-base border-sc-fg-subtle/30 shadow-card hover:border-sc-purple/30 hover:shadow-card-hover hover:bg-sc-bg-highlight/30'
         }
       `}
     >
@@ -516,7 +516,7 @@ function ProjectCard({ project, stats, isSelected, onClick }: ProjectCardProps) 
 
 function ProjectCardSkeleton() {
   return (
-    <div className="p-4 rounded-xl bg-sc-bg-base border border-sc-fg-subtle/20 animate-pulse">
+    <div className="p-4 rounded-xl bg-sc-bg-base border border-sc-fg-subtle/30 shadow-card animate-pulse">
       <div className="h-5 w-3/4 bg-sc-bg-elevated rounded mb-2" />
       <div className="h-3 w-full bg-sc-bg-elevated rounded mb-3" />
       <div className="h-1.5 w-full bg-sc-bg-elevated rounded mb-2" />
@@ -806,7 +806,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
       {/* Stats Overview */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {/* Progress Card */}
-        <div className="col-span-2 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+        <div className="col-span-2 bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold text-sc-fg-primary">Progress</h2>
             <span
@@ -830,7 +830,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
         </div>
 
         {/* Active Work */}
-        <div className="bg-sc-bg-base border border-sc-purple/30 rounded-xl p-5">
+        <div className="bg-sc-bg-base border border-sc-purple/30 rounded-xl p-5 shadow-card">
           <div className="flex items-center gap-2 text-sc-purple mb-1">
             <Clock width={16} height={16} />
             <span className="text-sm font-medium">Active</span>
@@ -841,10 +841,10 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
 
         {/* Blocked/Urgent */}
         <div
-          className={`bg-sc-bg-base border rounded-xl p-5 ${
+          className={`bg-sc-bg-base border rounded-xl p-5 shadow-card ${
             (stats?.blocked ?? 0) > 0 || (stats?.critical ?? 0) > 0
               ? 'border-sc-red/30'
-              : 'border-sc-fg-subtle/20'
+              : 'border-sc-fg-subtle/30'
           }`}
         >
           <div
@@ -875,7 +875,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
       {/* Velocity Chart - Show if we have trend data */}
       {projectMetrics?.metrics?.velocity_trend &&
         projectMetrics.metrics.velocity_trend.length > 0 && (
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <TrendingUp width={16} height={16} className="text-sc-green" />
@@ -896,7 +896,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
 
       {/* Active Work Section */}
       {activeTasks.length > 0 && (
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-sc-fg-primary">Active Work</h2>
             <span className="text-xs text-sc-fg-subtle">{activeTasks.length} tasks</span>
@@ -919,7 +919,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
 
       {/* Up Next Section */}
       {upcomingTasks.length > 0 && (
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-sc-fg-primary">Up Next</h2>
             <span className="text-xs text-sc-fg-subtle">
@@ -936,7 +936,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
 
       {/* Tech & Features Grid - Always show for editing */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
           <h2 className="font-semibold text-sc-fg-primary mb-3">Tech Stack</h2>
           <EditableTags
             values={techStack}
@@ -947,7 +947,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
           />
         </div>
 
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
           <h2 className="font-semibold text-sc-fg-primary mb-3">Features</h2>
           <EditableTags
             values={features}
@@ -960,7 +960,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
       </div>
 
       {/* Repository URL */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
         <h2 className="font-semibold text-sc-fg-primary mb-3 flex items-center gap-2">
           <GitBranch width={16} height={16} className="text-sc-coral" />
           Repository
@@ -975,7 +975,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
 
       {/* Empty state for no tasks */}
       {(!stats || stats.total === 0) && (
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-8 text-center">
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-8 text-center shadow-card">
           <div className="mb-4 flex justify-center">
             <Sparkles width={40} height={40} className="text-sc-yellow" />
           </div>
@@ -1037,20 +1037,20 @@ function ProjectDetailSkeleton() {
         <div className="h-4 w-2/3 bg-sc-bg-elevated rounded mt-3" />
       </div>
       <div className="grid grid-cols-4 gap-4">
-        <div className="col-span-2 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+        <div className="col-span-2 bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
           <div className="h-4 w-20 bg-sc-bg-elevated rounded mb-3" />
           <div className="h-3 w-full bg-sc-bg-elevated rounded" />
         </div>
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
           <div className="h-4 w-16 bg-sc-bg-elevated rounded mb-2" />
           <div className="h-8 w-12 bg-sc-bg-elevated rounded" />
         </div>
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
           <div className="h-4 w-16 bg-sc-bg-elevated rounded mb-2" />
           <div className="h-8 w-12 bg-sc-bg-elevated rounded" />
         </div>
       </div>
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl p-5">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
         <div className="h-4 w-24 bg-sc-bg-elevated rounded mb-4" />
         <div className="space-y-2">
           <div className="h-12 w-full bg-sc-bg-elevated rounded" />

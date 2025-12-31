@@ -77,9 +77,13 @@ export function UserMenu() {
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         className={`
-          flex items-center gap-2 px-2 py-1.5 rounded-lg
-          transition-all duration-200
-          ${isOpen ? 'bg-sc-bg-highlight' : 'hover:bg-sc-bg-highlight/50'}
+          flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl
+          border transition-all duration-200
+          ${
+            isOpen
+              ? 'bg-sc-bg-highlight border-sc-purple/30 shadow-[0_0_16px_rgba(225,53,255,0.15)]'
+              : 'border-transparent hover:bg-sc-bg-highlight/50 hover:border-sc-fg-subtle/20'
+          }
         `}
       >
         {/* Avatar */}
@@ -87,23 +91,33 @@ export function UserMenu() {
           <img
             src={user.avatar_url}
             alt={user.name || 'User'}
-            className="w-7 h-7 rounded-full border border-sc-fg-subtle/20"
+            className={`w-8 h-8 rounded-full border-2 transition-all duration-200 ${
+              isOpen
+                ? 'border-sc-purple/50 shadow-[0_0_12px_rgba(225,53,255,0.3)]'
+                : 'border-sc-fg-subtle/20 hover:border-sc-purple/30'
+            }`}
           />
         ) : (
-          <div className="w-7 h-7 rounded-full bg-sc-bg-highlight border border-sc-fg-subtle/20 flex items-center justify-center">
-            <User width={14} height={14} className="text-sc-fg-muted" />
+          <div
+            className={`w-8 h-8 rounded-full bg-gradient-to-br from-sc-purple/20 to-sc-magenta/20 border-2 flex items-center justify-center transition-all duration-200 ${
+              isOpen
+                ? 'border-sc-purple/50 shadow-[0_0_12px_rgba(225,53,255,0.3)]'
+                : 'border-sc-fg-subtle/20'
+            }`}
+          >
+            <User width={14} height={14} className="text-sc-purple" />
           </div>
         )}
 
         {/* Name (hidden on mobile) */}
-        <span className="hidden md:block text-sm text-sc-fg-primary max-w-[120px] truncate">
+        <span className="hidden md:block text-sm font-medium text-sc-fg-primary max-w-[120px] truncate">
           {user.name || user.email || 'User'}
         </span>
 
         <ChevronDown
           width={14}
           height={14}
-          className={`text-sc-fg-muted transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+          className={`text-sc-fg-muted transition-all duration-200 ${isOpen ? 'rotate-180 text-sc-purple' : ''}`}
         />
       </button>
 
@@ -113,41 +127,51 @@ export function UserMenu() {
             initial={{ opacity: 0, y: -8, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.95 }}
-            transition={{ duration: 0.15 }}
-            className="absolute right-0 top-full mt-2 w-56 rounded-lg bg-sc-bg-elevated border border-sc-fg-subtle/10 shadow-xl shadow-black/30 overflow-hidden z-50"
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            className="absolute right-0 top-full mt-2 w-60 rounded-xl bg-sc-bg-elevated border border-sc-purple/20 shadow-[0_4px_24px_rgba(0,0,0,0.4),0_0_48px_rgba(225,53,255,0.08),inset_0_1px_0_rgba(255,255,255,0.05)] overflow-hidden z-50"
           >
             {/* User info header */}
-            <div className="px-4 py-3 border-b border-sc-fg-subtle/10">
-              <p className="text-sm font-medium text-sc-fg-primary truncate">
+            <div className="px-4 py-3.5 border-b border-sc-fg-subtle/10 bg-gradient-to-r from-sc-purple/5 to-transparent">
+              <p className="text-sm font-semibold text-sc-fg-primary truncate">
                 {user.name || 'User'}
               </p>
-              {user.email && <p className="text-xs text-sc-fg-muted truncate">{user.email}</p>}
+              {user.email && (
+                <p className="text-xs text-sc-fg-muted truncate mt-0.5">{user.email}</p>
+              )}
             </div>
 
             {/* Menu items */}
-            <div className="py-1">
+            <div className="py-1.5">
               <Link
                 href="/settings/profile"
                 onClick={() => setIsOpen(false)}
-                className="flex items-center gap-3 px-4 py-2.5 text-sm text-sc-fg-secondary hover:bg-sc-bg-highlight hover:text-sc-fg-primary transition-colors"
+                className="flex items-center gap-3 px-4 py-2.5 text-sm text-sc-fg-muted hover:bg-sc-purple/10 hover:text-sc-fg-primary transition-all group"
               >
-                <User width={16} height={16} className="text-sc-cyan" />
+                <User
+                  width={16}
+                  height={16}
+                  className="text-sc-cyan group-hover:text-sc-purple transition-colors"
+                />
                 Your Profile
               </Link>
               <Link
                 href="/settings"
                 onClick={() => setIsOpen(false)}
-                className="flex items-center gap-3 px-4 py-2.5 text-sm text-sc-fg-secondary hover:bg-sc-bg-highlight hover:text-sc-fg-primary transition-colors"
+                className="flex items-center gap-3 px-4 py-2.5 text-sm text-sc-fg-muted hover:bg-sc-purple/10 hover:text-sc-fg-primary transition-all group"
               >
-                <Settings width={16} height={16} className="text-sc-cyan" />
+                <Settings
+                  width={16}
+                  height={16}
+                  className="text-sc-cyan group-hover:text-sc-purple transition-colors"
+                />
                 Settings
               </Link>
             </div>
 
             {/* Organization switcher */}
             {orgs.length > 0 && (
-              <div className="border-t border-sc-fg-subtle/10 py-1">
-                <div className="px-4 py-1.5 text-[10px] font-medium uppercase tracking-wider text-sc-fg-subtle">
+              <div className="border-t border-sc-fg-subtle/10 py-1.5">
+                <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-sc-fg-subtle">
                   Organizations
                 </div>
                 {orgs.map(org => (
@@ -156,11 +180,11 @@ export function UserMenu() {
                     type="button"
                     onClick={() => handleSwitchOrg(org.slug)}
                     disabled={org.slug === currentOrg?.slug || switchOrg.isPending}
-                    className={`w-full flex items-center gap-3 px-4 py-2 text-sm transition-colors ${
+                    className={`w-full flex items-center gap-3 px-4 py-2 text-sm transition-all ${
                       org.slug === currentOrg?.slug
-                        ? 'text-sc-purple bg-sc-purple/5'
-                        : 'text-sc-fg-secondary hover:bg-sc-bg-highlight hover:text-sc-fg-primary'
-                    } disabled:opacity-50`}
+                        ? 'text-sc-purple bg-sc-purple/10'
+                        : 'text-sc-fg-muted hover:bg-sc-purple/10 hover:text-sc-fg-primary'
+                    } disabled:cursor-default`}
                   >
                     {org.is_personal ? (
                       <Users width={14} height={14} className="text-sc-purple" />
@@ -169,7 +193,7 @@ export function UserMenu() {
                     )}
                     <span className="flex-1 text-left truncate">{org.name}</span>
                     {org.slug === currentOrg?.slug && (
-                      <Check width={14} height={14} className="text-sc-purple" />
+                      <Check width={14} height={14} className="text-sc-green" />
                     )}
                   </button>
                 ))}
@@ -177,11 +201,11 @@ export function UserMenu() {
             )}
 
             {/* Sign out */}
-            <div className="border-t border-sc-fg-subtle/10 py-1">
+            <div className="border-t border-sc-fg-subtle/10 py-1.5">
               <button
                 type="button"
                 onClick={handleSignOut}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-sc-red hover:bg-sc-red/10 transition-colors"
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-sc-fg-muted hover:text-sc-red hover:bg-sc-red/10 transition-all group"
               >
                 <svg
                   width={16}

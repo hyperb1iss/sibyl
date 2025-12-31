@@ -131,7 +131,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
     return (
       <div className="space-y-4 animate-fade-in">
         <Breadcrumb items={breadcrumbItems} />
-        <div className="bg-sc-bg-base border border-sc-red/30 rounded-2xl p-8 text-center">
+        <div className="bg-sc-bg-base border border-sc-red/40 rounded-2xl p-8 text-center shadow-glow-red">
           <p className="text-sc-red font-medium">Failed to load source</p>
           <p className="text-sc-fg-subtle text-sm mt-2">
             {error instanceof Error ? error.message : 'Unknown error'}
@@ -152,13 +152,16 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
     return (
       <div className="space-y-6 animate-fade-in">
         <Breadcrumb items={breadcrumbItems} />
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-8">
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-8 shadow-card-elevated">
           <div className="animate-pulse space-y-4">
             <div className="h-8 bg-sc-bg-highlight rounded w-1/3" />
             <div className="h-4 bg-sc-bg-highlight rounded w-2/3" />
             <div className="grid grid-cols-4 gap-4 mt-6">
               {[...Array(4)].map((_, i) => (
-                <div key={`skeleton-${i}`} className="h-20 bg-sc-bg-highlight rounded-xl" />
+                <div
+                  key={`skeleton-${i}`}
+                  className="h-20 bg-sc-bg-highlight rounded-xl shadow-card"
+                />
               ))}
             </div>
           </div>
@@ -177,7 +180,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
       <Breadcrumb items={breadcrumbItems} />
 
       {/* Header */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-6">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-6 shadow-card-elevated">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2">
@@ -361,7 +364,7 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
       </div>
 
       {/* Documents List */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-6">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-6 shadow-card-elevated">
         <h2 className="text-lg font-semibold text-sc-fg-primary mb-4 flex items-center gap-2">
           <FileText width={20} height={20} className="text-sc-cyan" />
           {source.source_type === 'local' ? 'Files' : 'Documents'}
@@ -544,7 +547,7 @@ function StatCard({
   value: string | number;
 }) {
   return (
-    <div className="bg-sc-bg-dark rounded-xl p-4">
+    <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-4 shadow-card">
       <div className="flex items-center gap-2 mb-1">
         {icon}
         <span className="text-xs text-sc-fg-subtle">{label}</span>

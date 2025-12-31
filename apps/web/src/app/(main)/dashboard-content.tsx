@@ -245,7 +245,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
       {/* Main Grid - Single grid for all dashboard cards */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* Task Overview - Takes 2 cols */}
-        <div className="lg:col-span-2 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">
+        <div className="lg:col-span-2 bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
           <div className="flex items-center justify-between mb-4 sm:mb-6 gap-2">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-coral/10 border border-sc-coral/20 flex items-center justify-center shrink-0">
@@ -340,7 +340,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
         </div>
 
         {/* Quick Actions */}
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">
+        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
           <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
             <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
               <Zap width={16} height={16} className="text-sc-purple sm:w-5 sm:h-5" />
@@ -449,7 +449,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
 
         {/* Velocity Chart - in same grid, flows under Task Overview */}
         {orgMetrics && (
-          <div className="lg:col-span-2 bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">
+          <div className="lg:col-span-2 bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2 sm:gap-3">
                 <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-green/10 border border-sc-green/20 flex items-center justify-center shrink-0">
@@ -469,7 +469,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
 
         {/* This Week Stats - in same grid */}
         {orgMetrics && (
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
             <div className="flex items-center gap-2 sm:gap-3 mb-3">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
                 <BarChart3 width={16} height={16} className="text-sc-purple sm:w-5 sm:h-5" />
@@ -515,7 +515,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
       </div>
 
       {/* Entity Breakdown - Full Width Bar Chart Style */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-xl sm:rounded-2xl p-4 sm:p-6">
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
         <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
           <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center shrink-0">
             <Layers width={16} height={16} className="text-sc-cyan sm:w-5 sm:h-5" />

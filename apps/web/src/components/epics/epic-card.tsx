@@ -116,9 +116,9 @@ export const EpicCard = memo(function EpicCard({
     <div
       onClick={() => onClick?.(epic.id)}
       className={`
-        relative rounded-xl overflow-hidden cursor-pointer
+        relative rounded-xl overflow-hidden cursor-pointer shadow-card
         transition-all duration-200
-        hover:shadow-lg hover:shadow-black/20
+        hover:shadow-card-hover
         hover:-translate-y-0.5
         group select-none
         border ${cardBorder} ${cardBg}
@@ -259,7 +259,7 @@ export const EpicCard = memo(function EpicCard({
 
 export function EpicCardSkeleton() {
   return (
-    <div className="relative bg-sc-bg-base rounded-xl overflow-hidden border border-sc-fg-subtle/10 animate-pulse">
+    <div className="relative bg-sc-bg-base rounded-xl overflow-hidden border border-sc-fg-subtle/30 shadow-card animate-pulse">
       <div className="absolute left-0 top-0 bottom-0 w-1 bg-sc-fg-subtle/20" />
       <div className="pl-4 pr-3 py-3">
         <div className="flex items-center gap-2 mb-2">
