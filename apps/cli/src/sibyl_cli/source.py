@@ -52,7 +52,7 @@ def list_sources(
     ] = False,
 ) -> None:
     """List all documentation sources. Default: table output."""
-    format_ = "table" if json_out else "json"
+    format_ = "json" if json_out else "table"
 
     @run_async
     async def _list() -> None:

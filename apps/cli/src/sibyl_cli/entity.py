@@ -87,7 +87,7 @@ def list_entities(
     csv_out: Annotated[bool, typer.Option("--csv", help="CSV output")] = False,
 ) -> None:
     """List entities by type with optional filters. Default: table output."""
-    format_ = "table" if json_out else ("csv" if csv_out else "json")
+    format_ = "json" if json_out else ("csv" if csv_out else "table")
     if entity_type not in ENTITY_TYPES:
         error(f"Invalid entity type: {entity_type}")
         info(f"Valid types: {', '.join(ENTITY_TYPES)}")

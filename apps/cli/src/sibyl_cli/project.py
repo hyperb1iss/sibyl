@@ -63,7 +63,7 @@ def list_projects(
     csv_out: Annotated[bool, typer.Option("--csv", help="CSV output")] = False,
 ) -> None:
     """List all projects. Default: table output."""
-    format_ = "table" if json_out else ("csv" if csv_out else "json")
+    format_ = "json" if json_out else ("csv" if csv_out else "table")
 
     @run_async
     async def _list() -> None:
