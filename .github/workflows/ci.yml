@@ -134,7 +134,7 @@ jobs:
       - name: Start backend server
         run: |
           cd apps/api
-          uv run sibyl-serve &
+          uv run sibyld serve &
           echo "Waiting for backend to start..."
           for i in {1..60}; do
             if curl -s http://localhost:3334/api/health > /dev/null; then
@@ -150,7 +150,7 @@ jobs:
       - name: Start background job worker
         run: |
           cd apps/api
-          uv run sibyl worker &
+          uv run sibyld worker &
           echo "Background job worker started"
           sleep 2
 
