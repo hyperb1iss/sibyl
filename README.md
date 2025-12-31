@@ -91,13 +91,28 @@ See each package's README for detailed documentation:
 
 ## ⚡ Quickstart
 
+### One-Line Setup
+
 ```bash
-# Start FalkorDB
-moon run docker-up
+./setup-dev.sh             # Installs proto, moon, toolchain, and dependencies
+```
+
+The setup script handles everything: proto (version manager), moon (task runner), Python 3.13, Node 24, pnpm, uv, and all project dependencies.
+
+### Manual Setup
+
+```bash
+# Install proto (manages toolchain versions)
+curl -fsSL https://moonrepo.dev/install/proto.sh | bash
+proto use                  # Installs node, pnpm, python, uv from .prototools
+
+# Install moon
+proto plugin add moon "https://raw.githubusercontent.com/moonrepo/moon/master/proto-plugin.toml"
+proto install moon
 
 # Install dependencies
 uv sync                    # Python (from workspace root)
-cd apps/web && pnpm install  # Frontend
+pnpm install               # Frontend
 
 # Configure
 cp apps/api/.env.example apps/api/.env

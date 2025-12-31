@@ -3,7 +3,7 @@
 
 python = "3.13"
 node = "24"
-pnpm = "10.26"
+pnpm = "10"
 uv = "0.9"
 
 [settings]
