@@ -29,6 +29,10 @@ env/
 # Node
 node_modules/
 
+# VitePress
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+
 # IDE
 .idea/
 .vscode/

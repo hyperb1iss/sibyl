@@ -35,6 +35,9 @@ export default defineConfig({
     ],
 
     themeConfig: {
+        logo: '/sibyl-logo.png',
+        siteTitle: false,
+
         nav: [
             { text: 'Guide', link: '/guide/' },
             { text: 'CLI', link: '/cli/' },
@@ -67,6 +70,7 @@ export default defineConfig({
                         { text: 'Task Management', link: '/guide/task-management' },
                         { text: 'Project Organization', link: '/guide/project-organization' },
                         { text: 'Capturing Knowledge', link: '/guide/capturing-knowledge' },
+                        { text: 'External Sources', link: '/guide/sources' },
                     ],
                 },
                 {
@@ -74,7 +78,7 @@ export default defineConfig({
                     items: [
                         { text: 'Claude Code', link: '/guide/claude-code' },
                         { text: 'MCP Configuration', link: '/guide/mcp-configuration' },
-                        { text: 'Skills Development', link: '/guide/skills' },
+                        { text: 'Skills & Hooks', link: '/guide/skills' },
                         { text: 'Agent Collaboration', link: '/guide/agent-collaboration' },
                     ],
                 },

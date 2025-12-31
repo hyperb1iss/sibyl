@@ -1,171 +1,168 @@
 ---
-title: Introduction to Sibyl
-description: Collective Intelligence Runtime for AI Agents
+title: Introduction
+description: Give your AI agents the memory they deserve
 ---
 
-# Introduction to Sibyl
+# Introduction
 
-Sibyl is a **Collective Intelligence Runtime** - a system that provides AI agents with persistent memory, semantic search, task orchestration, and collaborative knowledge through a graph-based knowledge store.
+Welcome to Sibyl—the Collective Intelligence Runtime that transforms your AI agents from brilliant amnesiacs into knowledge-building collaborators.
 
-## What is Sibyl?
+## What You'll Learn
 
-At its core, Sibyl transforms scattered development knowledge into a queryable graph. Patterns, learnings, tasks, documentation - all connected, all searchable by meaning rather than keywords.
+This guide teaches you how to:
 
-Think of Sibyl as an extended memory system for AI agents that:
+1. **Set up Sibyl** for your development workflow
+2. **Configure skills and hooks** that teach your agents how to work
+3. **Manage knowledge** through the web UI and CLI
+4. **Ingest external documentation** to augment your knowledge graph
+5. **Coordinate multiple agents** through shared memory
 
-- **Persists across sessions** - What you learn today helps tomorrow
-- **Connects knowledge** - New information automatically links to related entities
-- **Supports multiple agents** - Shared memory enables collaboration
-- **Tracks work** - Full task lifecycle with status, blockers, and learnings
+## The Philosophy
 
-## Key Features
+Sibyl is built on a simple insight: **AI agents are only as good as the context they have.**
 
-### Semantic Search
+Most AI coding assistants start every session from scratch. They can't remember the OAuth gotcha you figured out yesterday. They don't know about the pattern that finally made your tests pass. They're brilliant, but amnesiac.
 
-Find knowledge by meaning, not just keywords. Sibyl uses vector embeddings and hybrid search (semantic + BM25) to surface relevant information.
+Sibyl fixes this by providing:
 
-```bash
-sibyl search "authentication patterns"
-sibyl search "OAuth implementation" --type pattern
-```
+- **Persistent Memory**: Knowledge stored in a graph database survives forever
+- **Semantic Search**: Find relevant patterns by meaning, not keywords
+- **Automatic Context**: Hooks inject knowledge without manual prompting
+- **Structured Workflows**: Skills teach agents the Research → Do → Reflect cycle
 
-### Persistent Memory
+## The Architecture
 
-Knowledge captured in Sibyl persists across coding sessions. When you discover something non-obvious, save it:
+![Sibyl Dashboard](/screenshots/web-dashboard.png)
 
-```bash
-sibyl add "Redis connection pooling" "Pool size must be >= concurrent requests to avoid blocking"
-```
+Sibyl consists of three main components:
 
-### Task Orchestration
+### 1. Skills (For Agents)
 
-Full workflow management with states, priorities, dependencies, and learning capture:
+Skills are documents that teach your AI agents how to work with Sibyl. When you invoke `/sibyl-knowledge` in Claude Code, the agent receives:
 
-```
-backlog -> todo -> doing -> blocked -> review -> done -> archived
-```
+- Command reference for all CLI operations
+- Workflow patterns (when to search, when to capture)
+- Best practices for knowledge quality
 
-### Knowledge Graph
+**Agents don't need to figure out HOW to use Sibyl—skills teach them.**
 
-Entities are connected through typed relationships, enabling graph traversal and discovery of related knowledge.
+### 2. Hooks (Automatic Context)
 
-### Multi-Tenancy
+Hooks are the magic that makes Sibyl invisible. They run automatically:
 
-Each organization gets its own isolated FalkorDB graph, ensuring data separation and security.
+- **SessionStart**: Loads your active tasks when you begin a session
+- **UserPromptSubmit**: Searches for relevant knowledge on every prompt
 
-### Auto-Linking
+Your agent doesn't need to remember to search—relevant patterns appear automatically in their context.
 
-When you add new knowledge, Sibyl automatically discovers and links related entities based on semantic similarity.
+### 3. Web UI (For Humans)
 
-## Use Cases
+The web interface gives you visibility and control:
 
-### Claude Code Integration
+![Knowledge Graph Visualization](/screenshots/web-graph.png)
 
-Sibyl is designed as an MCP (Model Context Protocol) server that integrates directly with Claude Code. Agents can:
+**Graph Explorer**: Visualize connections between entities, patterns, and learnings. See how knowledge clusters and relates.
 
-- Search for patterns before implementing
-- Track work through tasks
-- Capture learnings automatically
-- Access shared organizational knowledge
+![Task Management](/screenshots/web-tasks.png)
 
-```json
-{
-  "mcpServers": {
-    "sibyl": {
-      "type": "http",
-      "url": "http://localhost:3334/mcp"
-    }
-  }
-}
-```
+**Task Management**: Track work across projects with full lifecycle support. Filter by status, priority, assignee, and more.
 
-### Multi-Agent Systems
+![Entity Browser](/screenshots/web-entities.png)
 
-Multiple AI agents can share the same knowledge graph:
+**Entity Browser**: Browse all knowledge types—patterns, episodes, conventions, rules. Search and filter to find what you need.
 
-- Agent A discovers a bug pattern and captures it
-- Agent B searches and finds that pattern when encountering similar issues
-- Both agents contribute to a growing body of organizational knowledge
+![Semantic Search](/screenshots/web-search.png)
 
-### Development Knowledge Management
+**Semantic Search**: Find knowledge by meaning across all entity types, documentation, and code.
 
-Teams can use Sibyl to:
+## The Workflow
 
-- Document architectural decisions
-- Capture debugging insights
-- Track project tasks and progress
-- Build a searchable knowledge base from daily work
-
-## Architecture Overview
-
-Sibyl consists of several components:
-
-| Component | Purpose |
-|-----------|---------|
-| **API Server** (`sibyld`) | FastAPI + MCP server handling requests |
-| **CLI** (`sibyl`) | Command-line interface for human and agent interaction |
-| **Web UI** | Next.js frontend for visual exploration |
-| **FalkorDB** | Graph database storing entities and relationships |
-| **PostgreSQL** | Relational storage for users, sessions, crawled documents |
-| **Worker** | Background job processing (arq) for async operations |
+Every effective Sibyl workflow follows the same cycle:
 
 ```
-Sibyl Combined App (Starlette, port 3334)
-├── /api/*    -> FastAPI REST endpoints
-├── /mcp      -> MCP streamable-http (4 tools)
-├── /ws       -> WebSocket for real-time updates
-└── Lifespan  -> Background queue + session management
+┌─────────────────────────────────────────────────────────┐
+│  RESEARCH                                               │
+│  Before implementing anything, search for existing      │
+│  patterns. Your past self (or other agents) may have    │
+│  already solved this problem.                           │
+│                                                         │
+│  sibyl search "what you're about to implement"          │
+└─────────────────────────┬───────────────────────────────┘
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│  DO                                                     │
+│  Work on your task with the context you found.          │
+│  Track progress with task lifecycle commands.           │
+│                                                         │
+│  sibyl task start task_xyz                              │
+└─────────────────────────┬───────────────────────────────┘
+                          ▼
+┌─────────────────────────────────────────────────────────┐
+│  REFLECT                                                │
+│  When you finish, capture what you learned.             │
+│  Future agents will thank you.                          │
+│                                                         │
+│  sibyl task complete task_xyz --learnings "..."         │
+│  sibyl add "Pattern Title" "What you discovered..."     │
+└─────────────────────────────────────────────────────────┘
 ```
 
-## The 4-Tool API
+## What to Capture
 
-Sibyl exposes exactly 4 MCP tools. Simple surface, rich capabilities:
+Not everything belongs in the knowledge graph. Focus on:
 
-| Tool | Purpose | Examples |
-|------|---------|----------|
-| `search` | Find by meaning | Patterns, tasks, docs, errors |
-| `explore` | Navigate structure | List entities, traverse relationships |
-| `add` | Create knowledge | Episodes, patterns, tasks |
-| `manage` | Lifecycle & admin | Task workflow, crawling, health |
+### Always Capture
 
-## Philosophy
+- **Non-obvious solutions**: If it took time to figure out, save it
+- **Gotchas and quirks**: Configuration issues, platform differences
+- **Architectural decisions**: Why you chose approach A over B
+- **Error patterns**: Problems and their root causes
 
-### Search Before Implementing
+### Consider Capturing
 
-The graph knows things. Before you code:
+- **Useful patterns**: Reusable code structures
+- **Performance findings**: What made things faster
+- **Integration approaches**: How to connect systems
 
-```bash
-sibyl search "what you're building"
-sibyl search "error you hit" --type episode
-```
+### Skip
 
-### Work In Task Context
+- **Trivial info**: Things obvious from documentation
+- **Temporary hacks**: Quick fixes that should be replaced
+- **Well-documented basics**: Standard library usage
 
-Never do significant work outside a task. Tasks provide traceability, progress tracking, and knowledge linking.
+## Quality Bar
 
-### Capture What You Learn
+The knowledge graph gets smarter with every entry—but only if entries are high quality.
 
-If it took time to figure out, save it:
+**Bad entry:**
+> "Fixed the auth bug"
 
-```bash
-sibyl add "Descriptive title" "What, why, how, caveats"
-```
+**Good entry:**
+> "JWT refresh tokens fail silently when Redis TTL expires. Root cause: token service doesn't handle WRONGTYPE error. Fix: Add try/except with token regeneration fallback. Prevention: Always handle Redis type mismatches in token renewal logic."
 
-**Bad:** "Fixed the bug"
+The good entry includes:
+- What happened
+- Root cause
+- How to fix it
+- How to prevent it
 
-**Good:** "JWT refresh fails when Redis TTL expires. Root cause: token service doesn't handle WRONGTYPE. Fix: try/except with regeneration fallback."
+## CLI vs MCP vs Web UI
 
-### Complete With Learnings
+Sibyl offers three interfaces, each suited to different users:
 
-```bash
-sibyl task complete <id> --learnings "Key insight: ..."
-```
+| Interface | Best For | Token Usage |
+|-----------|----------|-------------|
+| **CLI** | Agents doing scripted work | Low—text output only |
+| **MCP** | Direct tool invocation | Higher—full JSON schemas |
+| **Web UI** | Humans managing projects | N/A—visual interface |
 
-The graph should be smarter after every session.
+For AI agents, **prefer the CLI** for routine operations. It's more expressive, enables scripting, and uses fewer tokens than MCP tool calls.
 
 ## Next Steps
 
-- [Installation](./installation.md) - Get Sibyl running locally
-- [Quick Start](./quick-start.md) - 5-minute tutorial
-- [Knowledge Graph](./knowledge-graph.md) - Understand the architecture
-- [Claude Code Integration](./claude-code.md) - Configure MCP integration
+1. **[Installation](./installation)** — Get Sibyl running locally
+2. **[Quick Start](./quick-start)** — Create your first knowledge entries
+3. **[Skills & Hooks](./skills)** — Configure agent workflows
+4. **[Knowledge Graph](./knowledge-graph)** — Understand the data model
+5. **[Task Management](./task-management)** — Track work across sessions
+6. **[Sources](./capturing-knowledge)** — Ingest external documentation

@@ -1,36 +1,105 @@
 ---
-title: Skills Development
-description: Creating and using Claude Code skills for Sibyl
+title: Skills & Hooks
+description: Teaching agents how to work with Sibyl
 ---
 
-# Skills Development
+# Skills & Hooks
 
-Skills are Claude Code's knowledge injection system. They teach Claude specific patterns, commands, and best practices. This guide explains how Sibyl skills work and how to create your own.
+Sibyl's power comes from two complementary systems: **Skills** teach agents structured workflows, and **Hooks** inject knowledge automatically. Together, they transform Claude from a capable assistant into a knowledge-connected collaborator.
 
-## What are Skills?
+## The Two Systems
 
-Skills are markdown files that Claude reads when you invoke them via slash commands. They provide:
+| System | Purpose | When it Runs | User Action |
+|--------|---------|--------------|-------------|
+| **Skills** | Teach workflows | On `/skill-name` invocation | Manual |
+| **Hooks** | Inject context | Automatically on triggers | None needed |
 
-- Command references
-- Workflow patterns
-- Best practices
-- Domain-specific knowledge
+Think of it this way:
+- **Skills** = Training manual (agent reads when invoked)
+- **Hooks** = Invisible assistant (works behind the scenes)
 
-## Sibyl's Built-in Skills
+---
+
+## Hooks: Automatic Context
+
+Hooks are the magic that makes Sibyl invisible. They run automatically at specific moments:
+
+### SessionStart Hook
+
+**Trigger:** When you start a new Claude Code session
+
+**What it does:**
+- Loads your active tasks (status: `doing`, `blocked`, `review`)
+- Shows your project context
+- Reminds the agent about capturing learnings
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  SESSION START                                               │
+│                                                              │
+│  Active Tasks:                                               │
+│  • task_abc123 [doing] Fix authentication token refresh      │
+│  • task_def456 [blocked] Add rate limiting (waiting on API)  │
+│                                                              │
+│  Project: Authentication System (proj_auth)                  │
+│  Remember: Use `sibyl add` to capture learnings!             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### UserPromptSubmit Hook
+
+**Trigger:** Before processing every user prompt
+
+**What it does:**
+- Searches Sibyl for relevant knowledge
+- Injects matching patterns and learnings into context
+- Agent sees relevant knowledge without asking
+
+Example: You type "help me fix the OAuth redirect issue"
+
+The hook automatically:
+1. Searches: `sibyl search "OAuth redirect"`
+2. Finds: Pattern about OAuth callback URL matching
+3. Injects: The pattern content into Claude's context
+
+**Result:** Claude already knows your team's OAuth gotchas before writing code.
+
+### Installing Hooks
+
+```bash
+# Install hooks to ~/.claude/hooks/sibyl
+moon run install-hooks
+
+# Restart Claude Code to activate
+```
+
+### Uninstalling Hooks
+
+```bash
+moon run uninstall-hooks
+# Or: rm -rf ~/.claude/hooks/sibyl
+```
+
+---
+
+## Skills: Teaching Workflows
+
+Skills are markdown documents that teach Claude specific workflows. Invoke them with slash commands:
 
 ### sibyl-knowledge
 
-The primary skill for knowledge graph operations:
+The primary skill for knowledge operations:
 
 ```
 /sibyl-knowledge
 ```
 
-This skill teaches Claude:
-- CLI command syntax
-- Search patterns
-- Task management
+**Teaches Claude:**
+- CLI command syntax and patterns
+- Search-first workflow
+- Task lifecycle management
 - Knowledge capture best practices
+- Common pitfalls to avoid
 
 ### sibyl-project-manager
 
@@ -40,11 +109,12 @@ A specialized skill for project management:
 /sibyl-project-manager
 ```
 
-This skill teaches Claude:
-- Task auditing
-- Project organization
-- Sprint planning
-- Priority management
+**Teaches Claude:**
+- Task auditing against codebase
+- Stale work cleanup
+- Priority rebalancing
+- Sprint planning (6-day cycles)
+- Data hygiene patterns
 
 ## Skill File Format
 

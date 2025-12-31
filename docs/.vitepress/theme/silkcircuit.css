@@ -20,10 +20,20 @@
   --vp-font-family-mono: var(--font-family-mono);
 
   /* ═══════════════════════════════════════════════════════════════
-     SILKCIRCUIT NEON PALETTE (Dark Mode)
+     SILKCIRCUIT NEON PALETTE (Dark Mode) - OKLCH
+     Matches apps/web/src/app/globals.css
      ═══════════════════════════════════════════════════════════════ */
 
-  /* Primary Accent Colors */
+  /* Primary Accent Colors - OKLCH for P3 gamut */
+  --sc-purple: oklch(64% 0.31 328);
+  --sc-magenta: oklch(70% 0.32 328);
+  --sc-cyan: oklch(92% 0.16 180);
+  --sc-coral: oklch(72% 0.22 350);
+  --sc-yellow: oklch(95% 0.13 105);
+  --sc-green: oklch(88% 0.23 145);
+  --sc-red: oklch(68% 0.22 25);
+
+  /* Fallback hex for older browsers */
   --iris-purple: #e135ff;
   --iris-purple-light: #f06eff;
   --iris-purple-deep: #bd93f9;
@@ -34,7 +44,14 @@
   --iris-green: #50fa7b;
   --iris-red: #ff6363;
 
-  /* Backgrounds */
+  /* Backgrounds - deep purple base */
+  --sc-bg-base: oklch(10% 0.02 285);
+  --sc-bg-dark: oklch(6% 0.015 285);
+  --sc-bg-highlight: oklch(14% 0.025 285);
+  --sc-bg-elevated: oklch(17% 0.03 285);
+  --sc-bg-surface: oklch(21% 0.035 285);
+
+  /* Fallback hex */
   --iris-bg-base: #121218;
   --iris-bg-panel: #181820;
   --iris-bg-elevated: #1e1e28;
@@ -42,36 +59,57 @@
   --iris-bg-highlight: #2d283c;
 
   /* Text */
+  --sc-fg-primary: oklch(98% 0.005 110);
+  --sc-fg-muted: oklch(62% 0.035 280);
+  --sc-fg-subtle: oklch(42% 0.03 280);
+
+  /* Fallback hex */
   --iris-text-primary: #f8f8f2;
   --iris-text-secondary: #e0e0e0;
   --iris-text-muted: #a0a0a0;
   --iris-text-dim: #6a6a7a;
 
   /* ═══════════════════════════════════════════════════════════════
-     SILKCIRCUIT DAWN PALETTE (Light Mode)
+     SILKCIRCUIT DAWN PALETTE (Light Mode) - OKLCH
      ═══════════════════════════════════════════════════════════════ */
 
   /* Primary Accent Colors (darker for light backgrounds) */
-  --dawn-purple: #7e2bd5;
+  --dawn-purple: oklch(42% 0.28 300);
+  --dawn-magenta: oklch(40% 0.26 340);
+  --dawn-cyan: oklch(45% 0.16 200);
+  --dawn-coral: oklch(50% 0.22 350);
+  --dawn-yellow: oklch(52% 0.16 85);
+  --dawn-green: oklch(45% 0.20 145);
+  --dawn-red: oklch(50% 0.24 25);
+
+  /* Fallback hex */
+  --dawn-purple-hex: #7e2bd5;
   --dawn-purple-light: #9e4df3;
   --dawn-purple-deep: #5c1a9e;
-  --dawn-cyan: #007f8e;
+  --dawn-cyan-hex: #007f8e;
   --dawn-cyan-light: #00666e;
-  --dawn-coral: #b40077;
-  --dawn-yellow: #a88600;
-  --dawn-green: #1f8752;
-  --dawn-red: #c1272d;
-  --dawn-pink: #d3549a;
 
   /* Backgrounds (lavender-white) */
-  --dawn-bg-base: #faf8ff;
+  --dawn-bg-dark: oklch(95% 0.01 290);
+  --dawn-bg-base: oklch(97% 0.008 290);
+  --dawn-bg-elevated: oklch(100% 0 0);
+  --dawn-bg-highlight: oklch(94% 0.015 290);
+  --dawn-bg-surface: oklch(91% 0.02 290);
+
+  /* Fallback hex */
+  --dawn-bg-base-hex: #faf8ff;
   --dawn-bg-panel: #f1ecff;
-  --dawn-bg-elevated: #efeaff;
+  --dawn-bg-elevated-hex: #efeaff;
   --dawn-bg-code: #e1daf7;
-  --dawn-bg-highlight: #d9d2f2;
+  --dawn-bg-highlight-hex: #d9d2f2;
   --dawn-bg-active: #d0c8eb;
 
   /* Text (darker for light backgrounds) */
+  --dawn-fg-primary: oklch(18% 0.03 290);
+  --dawn-fg-muted: oklch(45% 0.04 290);
+  --dawn-fg-subtle: oklch(65% 0.03 290);
+
+  /* Fallback hex */
   --dawn-text-primary: #2b2540;
   --dawn-text-secondary: #3d3558;
   --dawn-text-muted: #5a4d78;
@@ -81,27 +119,27 @@
      VITEPRESS THEME OVERRIDES (Default/Dark)
      ═══════════════════════════════════════════════════════════════ */
 
-  /* Brand Colors */
-  --vp-c-brand-1: var(--iris-purple);
-  --vp-c-brand-2: var(--iris-purple-light);
+  /* Brand Colors - using OKLCH with hex fallback */
+  --vp-c-brand-1: var(--sc-purple, var(--iris-purple));
+  --vp-c-brand-2: var(--sc-magenta, var(--iris-purple-light));
   --vp-c-brand-3: var(--iris-purple-deep);
-  --vp-c-brand-soft: rgba(225, 53, 255, 0.14);
+  --vp-c-brand-soft: oklch(64% 0.31 328 / 0.14);
 
   /* Accent overrides */
-  --vp-c-tip-1: var(--iris-cyan);
+  --vp-c-tip-1: var(--sc-cyan, var(--iris-cyan));
   --vp-c-tip-2: var(--iris-cyan-light);
-  --vp-c-tip-3: var(--iris-cyan);
-  --vp-c-tip-soft: rgba(128, 255, 234, 0.14);
+  --vp-c-tip-3: var(--sc-cyan, var(--iris-cyan));
+  --vp-c-tip-soft: oklch(92% 0.16 180 / 0.14);
 
-  --vp-c-warning-1: var(--iris-yellow);
-  --vp-c-warning-2: var(--iris-yellow);
-  --vp-c-warning-3: var(--iris-yellow);
-  --vp-c-warning-soft: rgba(241, 250, 140, 0.14);
+  --vp-c-warning-1: var(--sc-yellow, var(--iris-yellow));
+  --vp-c-warning-2: var(--sc-yellow, var(--iris-yellow));
+  --vp-c-warning-3: var(--sc-yellow, var(--iris-yellow));
+  --vp-c-warning-soft: oklch(95% 0.13 105 / 0.14);
 
-  --vp-c-danger-1: var(--iris-red);
-  --vp-c-danger-2: var(--iris-red);
-  --vp-c-danger-3: var(--iris-red);
-  --vp-c-danger-soft: rgba(255, 99, 99, 0.14);
+  --vp-c-danger-1: var(--sc-red, var(--iris-red));
+  --vp-c-danger-2: var(--sc-red, var(--iris-red));
+  --vp-c-danger-3: var(--sc-red, var(--iris-red));
+  --vp-c-danger-soft: oklch(68% 0.22 25 / 0.14);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -109,51 +147,52 @@
    ═══════════════════════════════════════════════════════════════ */
 
 :root:not(.dark) {
-  --vp-c-bg: var(--dawn-bg-base);
-  --vp-c-bg-alt: var(--dawn-bg-panel);
-  --vp-c-bg-elv: var(--dawn-bg-elevated);
-  --vp-c-bg-soft: var(--dawn-bg-highlight);
+  --vp-c-bg: var(--dawn-bg-base, var(--dawn-bg-base-hex));
+  --vp-c-bg-alt: var(--dawn-bg-dark, var(--dawn-bg-panel));
+  --vp-c-bg-elv: var(--dawn-bg-elevated, var(--dawn-bg-elevated-hex));
+  --vp-c-bg-soft: var(--dawn-bg-highlight, var(--dawn-bg-highlight-hex));
 
-  --vp-c-text-1: var(--dawn-text-primary);
-  --vp-c-text-2: var(--dawn-text-secondary);
-  --vp-c-text-3: var(--dawn-text-muted);
+  --vp-c-text-1: var(--dawn-fg-primary, var(--dawn-text-primary));
+  --vp-c-text-2: var(--dawn-fg-muted, var(--dawn-text-secondary));
+  --vp-c-text-3: var(--dawn-fg-subtle, var(--dawn-text-muted));
 
-  --vp-c-brand-1: var(--dawn-purple);
-  --vp-c-brand-2: var(--dawn-purple-light);
+  --vp-c-brand-1: var(--dawn-purple, var(--dawn-purple-hex));
+  --vp-c-brand-2: var(--dawn-magenta, var(--dawn-purple-light));
   --vp-c-brand-3: var(--dawn-purple-deep);
-  --vp-c-brand-soft: rgba(126, 43, 213, 0.12);
+  --vp-c-brand-soft: oklch(42% 0.28 300 / 0.12);
 
-  --vp-c-tip-1: var(--dawn-cyan);
+  --vp-c-tip-1: var(--dawn-cyan, var(--dawn-cyan-hex));
   --vp-c-tip-2: var(--dawn-cyan-light);
-  --vp-c-tip-3: var(--dawn-cyan);
-  --vp-c-tip-soft: rgba(0, 127, 142, 0.12);
+  --vp-c-tip-3: var(--dawn-cyan, var(--dawn-cyan-hex));
+  --vp-c-tip-soft: oklch(45% 0.16 200 / 0.12);
 
   --vp-c-warning-1: var(--dawn-yellow);
   --vp-c-warning-2: var(--dawn-yellow);
   --vp-c-warning-3: var(--dawn-yellow);
-  --vp-c-warning-soft: rgba(168, 134, 0, 0.12);
+  --vp-c-warning-soft: oklch(52% 0.16 85 / 0.12);
 
   --vp-c-danger-1: var(--dawn-red);
   --vp-c-danger-2: var(--dawn-red);
   --vp-c-danger-3: var(--dawn-red);
-  --vp-c-danger-soft: rgba(193, 39, 45, 0.12);
+  --vp-c-danger-soft: oklch(50% 0.24 25 / 0.12);
 
-  --vp-c-divider: rgba(126, 43, 213, 0.15);
-  --vp-c-divider-light: rgba(126, 43, 213, 0.08);
+  --vp-c-divider: oklch(42% 0.28 300 / 0.15);
+  --vp-c-divider-light: oklch(42% 0.28 300 / 0.08);
 
-  --vp-c-gutter: var(--dawn-bg-panel);
+  --vp-c-gutter: var(--dawn-bg-dark, var(--dawn-bg-panel));
 
   --vp-code-block-bg: var(--dawn-bg-code);
-  --vp-code-tab-divider: var(--dawn-purple);
-  --vp-code-copy-code-bg: var(--dawn-bg-highlight);
+  --vp-code-tab-divider: var(--dawn-purple, var(--dawn-purple-hex));
+  --vp-code-copy-code-bg: var(--dawn-bg-highlight, var(--dawn-bg-highlight-hex));
   --vp-code-copy-code-hover-bg: var(--dawn-bg-active);
 }
 
 /* Light Mode Navigation */
 :root:not(.dark) .VPNav {
-  background: rgba(250, 248, 255, 0.9);
+  background: oklch(97% 0.008 290 / 0.92);
   backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(126, 43, 213, 0.12);
+  border-bottom: 1px solid rgba(126, 43, 213, 0.1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(126, 43, 213, 0.08);
 }
 
 :root:not(.dark) .VPNavBarTitle .title {
@@ -171,8 +210,13 @@
 
 /* Light Mode Sidebar */
 :root:not(.dark) .VPSidebar {
-  background: var(--dawn-bg-panel);
-  border-right: 1px solid rgba(126, 43, 213, 0.1);
+  background: oklch(98% 0.006 290);
+  border-right: 1px solid rgba(126, 43, 213, 0.08);
+}
+
+/* Hide the curtain divider */
+:root:not(.dark) .curtain {
+  display: none !important;
 }
 
 /* Light Mode Sidebar Group Titles */
@@ -405,24 +449,24 @@
    ═══════════════════════════════════════════════════════════════ */
 
 .dark {
-  --vp-c-bg: var(--iris-bg-base);
-  --vp-c-bg-alt: var(--iris-bg-panel);
-  --vp-c-bg-elv: var(--iris-bg-elevated);
-  --vp-c-bg-soft: var(--iris-bg-highlight);
+  --vp-c-bg: var(--sc-bg-base, var(--iris-bg-base));
+  --vp-c-bg-alt: var(--sc-bg-dark, var(--iris-bg-panel));
+  --vp-c-bg-elv: var(--sc-bg-elevated, var(--iris-bg-elevated));
+  --vp-c-bg-soft: var(--sc-bg-highlight, var(--iris-bg-highlight));
 
-  --vp-c-text-1: var(--iris-text-primary);
+  --vp-c-text-1: var(--sc-fg-primary, var(--iris-text-primary));
   --vp-c-text-2: var(--iris-text-secondary);
-  --vp-c-text-3: var(--iris-text-muted);
+  --vp-c-text-3: var(--sc-fg-muted, var(--iris-text-muted));
 
-  --vp-c-divider: rgba(128, 255, 234, 0.12);
-  --vp-c-divider-light: rgba(128, 255, 234, 0.06);
+  --vp-c-divider: oklch(64% 0.31 328 / 0.15);
+  --vp-c-divider-light: oklch(64% 0.31 328 / 0.08);
 
-  --vp-c-gutter: var(--iris-bg-panel);
+  --vp-c-gutter: var(--sc-bg-dark, var(--iris-bg-panel));
 
   --vp-code-block-bg: var(--iris-bg-code);
-  --vp-code-tab-divider: var(--iris-purple);
-  --vp-code-copy-code-bg: var(--iris-bg-highlight);
-  --vp-code-copy-code-hover-bg: var(--iris-bg-elevated);
+  --vp-code-tab-divider: var(--sc-purple, var(--iris-purple));
+  --vp-code-copy-code-bg: var(--sc-bg-highlight, var(--iris-bg-highlight));
+  --vp-code-copy-code-hover-bg: var(--sc-bg-elevated, var(--iris-bg-elevated));
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -430,9 +474,13 @@
    ═══════════════════════════════════════════════════════════════ */
 
 .dark .VPNav {
-  background: rgba(18, 18, 24, 0.85);
+  background: oklch(10% 0.02 285 / 0.95);
   backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(128, 255, 234, 0.1);
+  border-bottom: 1px solid rgba(128, 255, 234, 0.12);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4),
+              0 8px 24px rgba(0, 0, 0, 0.5),
+              0 0 30px rgba(225, 53, 255, 0.2),
+              0 0 60px rgba(128, 255, 234, 0.1);
 }
 
 .dark .VPNavBarTitle .title {
@@ -453,8 +501,18 @@
    ═══════════════════════════════════════════════════════════════ */
 
 .dark .VPSidebar {
-  background: var(--iris-bg-panel);
+  background: oklch(10% 0.02 285 / 0.95);
+  backdrop-filter: blur(12px);
   border-right: 1px solid rgba(128, 255, 234, 0.08);
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.4),
+              8px 0 40px rgba(0, 0, 0, 0.3),
+              4px 0 30px rgba(225, 53, 255, 0.15),
+              6px 0 50px rgba(128, 255, 234, 0.08);
+}
+
+/* Hide the curtain divider */
+.dark .curtain {
+  display: none !important;
 }
 
 /* Sidebar Group Titles - Distinguished from links */
@@ -743,33 +801,16 @@
   100% { background-position: 0% 50%; }
 }
 
-/* Site title with oracle indicator */
-.dark .VPNavBarTitle .title::after {
-  content: 'oracle';
-  font-size: 0.6rem;
-  font-weight: 500;
-  letter-spacing: 0.05em;
-  color: var(--iris-cyan);
-  background: rgba(128, 255, 234, 0.1);
-  border: 1px solid rgba(128, 255, 234, 0.3);
-  padding: 2px 8px;
-  border-radius: 10px;
-  margin-left: 10px;
-  vertical-align: middle;
+/* Logo sizing */
+.VPNavBarTitle .logo {
+  height: 36px;
+  width: auto;
 }
 
-:root:not(.dark) .VPNavBarTitle .title::after {
-  content: 'oracle';
-  font-size: 0.6rem;
-  font-weight: 500;
-  letter-spacing: 0.05em;
-  color: var(--dawn-cyan);
-  background: rgba(0, 127, 142, 0.1);
-  border: 1px solid rgba(0, 127, 142, 0.3);
-  padding: 2px 8px;
-  border-radius: 10px;
-  margin-left: 10px;
-  vertical-align: middle;
+@media (min-width: 960px) {
+  .VPNavBarTitle .logo {
+    height: 42px;
+  }
 }
 
 /* Hero section enhancements */
@@ -777,16 +818,6 @@
   position: relative;
 }
 
-/* Oracle badge in hero */
-.dark .VPHero .tagline::before {
-  content: '🔮';
-  margin-right: 8px;
-}
-
-:root:not(.dark) .VPHero .tagline::before {
-  content: '🔮';
-  margin-right: 8px;
-}
 
 /* Feature cards with oracle-themed icons */
 .dark .VPFeature .icon {
@@ -799,39 +830,17 @@
   filter: drop-shadow(0 0 6px rgba(126, 43, 213, 0.3));
 }
 
-/* Sidebar section dividers with gradient */
-.dark .VPSidebarItem.level-0 {
+/* Sidebar section dividers - only between sections */
+.dark .VPSidebarItem.level-0 + .VPSidebarItem.level-0 {
   margin-top: 16px;
   padding-top: 16px;
-  border-top: 1px solid transparent;
-  background-image: linear-gradient(var(--iris-bg-panel), var(--iris-bg-panel)),
-                    linear-gradient(90deg, transparent, rgba(128, 255, 234, 0.2), transparent);
-  background-origin: padding-box, border-box;
-  background-clip: padding-box, border-box;
+  border-top: 1px solid rgba(128, 255, 234, 0.08);
 }
 
-.dark .VPSidebarItem.level-0:first-child {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
-  background: none;
-}
-
-:root:not(.dark) .VPSidebarItem.level-0 {
+:root:not(.dark) .VPSidebarItem.level-0 + .VPSidebarItem.level-0 {
   margin-top: 16px;
   padding-top: 16px;
-  border-top: 1px solid transparent;
-  background-image: linear-gradient(var(--dawn-bg-panel), var(--dawn-bg-panel)),
-                    linear-gradient(90deg, transparent, rgba(126, 43, 213, 0.15), transparent);
-  background-origin: padding-box, border-box;
-  background-clip: padding-box, border-box;
-}
-
-:root:not(.dark) .VPSidebarItem.level-0:first-child {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
-  background: none;
+  border-top: 1px solid rgba(126, 43, 213, 0.08);
 }
 
 /* Footer with project branding */
