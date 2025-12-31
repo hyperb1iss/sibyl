@@ -24,10 +24,10 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:  # noqa: PLR0915
     """Create all tables and constraints."""
     # =========================================================================
-    # Extensions (created by postInitSQL in CNPG cluster, skip if exists)
+    # Extensions
     # =========================================================================
-    # Note: pgvector extension must be created by superuser in postInitSQL
-    # The migration user doesn't have CREATE EXTENSION privileges
+    # Create pgvector extension (idempotent - works in docker-compose, CI, and CNPG)
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
     # =========================================================================
     # Enum Types
