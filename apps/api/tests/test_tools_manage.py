@@ -72,6 +72,7 @@ class TestActionCategories:
             "complete_task",
             "archive_task",
             "update_task",
+            "add_note",
         }
         assert expected == TASK_ACTIONS
 
