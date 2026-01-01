@@ -1,13 +1,13 @@
 ---
-name: sibyl-knowledge
+name: sibyl
 description:
-  Graph-RAG knowledge oracle with CLI interface. Use `sibyl` for semantic search, task management,
-  knowledge capture, and graph exploration. Invoke when you need persistent memory across sessions,
-  pattern/learning lookup, or task tracking. Requires FalkorDB running.
-allowed-tools: Bash
+  Graph-RAG knowledge system with CLI interface. Use for semantic search, task management,
+  knowledge capture, project audits, and sprint planning. Invoke when you need persistent memory
+  across sessions, pattern/learning lookup, or task tracking. Requires FalkorDB running.
+allowed-tools: Bash, Grep, Glob, Read
 ---
 
-# Sibyl Knowledge Oracle
+# Sibyl
 
 Sibyl gives you persistent memory across coding sessions. Search patterns, track tasks, capture
 learnings—all stored in a knowledge graph.
@@ -57,6 +57,30 @@ sibyl task complete task_a1b2c3d4e5f6 --learnings "OAuth tokens expire..."
 ```
 
 **Key insight:** Search shows IDs. Use `sibyl entity show <id>` to fetch full content.
+
+---
+
+## Task Data Model
+
+### Task States
+
+```
+backlog <-> todo <-> doing <-> blocked <-> review <-> done -> archived
+```
+
+### Priority Levels
+
+| Priority   | When to Use                                |
+| ---------- | ------------------------------------------ |
+| `critical` | Production bugs, security issues, blockers |
+| `high`     | Core functionality bugs, blocking features |
+| `medium`   | Standard features, improvements            |
+| `low`      | Nice-to-haves, polish, future work         |
+| `someday`  | Backlog parking lot                        |
+
+### Common Tags
+
+`backend`, `frontend`, `database`, `devops`, `bug`, `feature`, `refactor`, `chore`, `security`, `performance`, `testing`
 
 ---
 

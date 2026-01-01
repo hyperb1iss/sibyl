@@ -86,12 +86,12 @@ moon run uninstall-hooks
 
 Skills are markdown documents that teach Claude specific workflows. Invoke them with slash commands:
 
-### sibyl-knowledge
+### sibyl
 
-The primary skill for knowledge operations:
+The unified skill for all Sibyl operations:
 
 ```
-/sibyl-knowledge
+/sibyl
 ```
 
 **Teaches Claude:**
@@ -99,22 +99,8 @@ The primary skill for knowledge operations:
 - Search-first workflow
 - Task lifecycle management
 - Knowledge capture best practices
+- Project audits and sprint planning
 - Common pitfalls to avoid
-
-### sibyl-project-manager
-
-A specialized skill for project management:
-
-```
-/sibyl-project-manager
-```
-
-**Teaches Claude:**
-- Task auditing against codebase
-- Stale work cleanup
-- Priority rebalancing
-- Sprint planning (6-day cycles)
-- Data hygiene patterns
 
 ## Skill File Format
 
@@ -148,9 +134,9 @@ Guidelines and patterns...
 
 ```yaml
 ---
-name: sibyl-knowledge
-description: Graph-RAG knowledge oracle with CLI interface
-allowed-tools: Bash
+name: sibyl
+description: Graph-RAG knowledge system with CLI interface
+allowed-tools: Bash, Grep, Glob, Read
 ---
 ```
 
@@ -174,10 +160,10 @@ This copies skills to `~/.claude/skills/`.
 
 ```bash
 # Copy skill directory
-cp -r skills/sibyl-knowledge ~/.claude/skills/
+cp -r skills/sibyl ~/.claude/skills/
 
 # Or create symlink
-ln -s /path/to/sibyl/skills/sibyl-knowledge ~/.claude/skills/
+ln -s /path/to/sibyl/skills/sibyl ~/.claude/skills/
 ```
 
 ## Skill Location
@@ -186,10 +172,10 @@ Skills are stored in:
 
 ```
 ~/.claude/skills/
-├── sibyl-knowledge/
-│   └── SKILL.md
-└── sibyl-project-manager/
-    └── SKILL.md
+└── sibyl/
+    ├── SKILL.md
+    ├── WORKFLOWS.md
+    └── EXAMPLES.md
 ```
 
 ## Creating Custom Skills
@@ -403,7 +389,7 @@ sibyl task list --project proj_api --status todo
 ```markdown
 ## Related Skills
 
-- `/sibyl-project-manager` - For task auditing
+- `/sibyl` - For all Sibyl operations (also handles auditing)
 - `/git-workflow` - For commit patterns
 ```
 

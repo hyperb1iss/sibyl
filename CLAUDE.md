@@ -22,11 +22,10 @@ task orchestration, and collaborative knowledge through a Graphiti-powered knowl
 
 ### ALWAYS Use Skills
 
-**Use `/sibyl-knowledge` and `/sibyl-project-manager` skills** for ALL Sibyl operations. These
-skills know the correct patterns and handle authentication properly.
+**Use `/sibyl`** for ALL Sibyl operations. This skill knows the correct patterns and handles
+authentication properly.
 
-- `/sibyl-knowledge` - Search, explore, add knowledge, manage tasks
-- `/sibyl-project-manager` - Project audits, task triage, sprint planning
+- `/sibyl` - Search, explore, add knowledge, manage tasks, project audits, sprint planning
 
 **Never call Sibyl MCP tools or CLI directly** without going through a skill first.
 
@@ -37,21 +36,21 @@ Every significant task follows this cycle:
 **1. RESEARCH** (before coding)
 
 ```
-/sibyl-knowledge search "topic"
-/sibyl-knowledge explore patterns
+/sibyl search "topic"
+/sibyl explore patterns
 ```
 
 **2. DO** (while coding)
 
 ```
-/sibyl-knowledge task start <id>
+/sibyl task start <id>
 ```
 
 **3. REFLECT** (after completing)
 
 ```
-/sibyl-knowledge task complete <id> --learnings "What I learned"
-/sibyl-knowledge add "Pattern Title" "What, why, how, caveats"
+/sibyl task complete <id> --learnings "What I learned"
+/sibyl add "Pattern Title" "What, why, how, caveats"
 ```
 
 ---
@@ -185,7 +184,7 @@ from sibyl.cli.common import ELECTRIC_PURPLE
 
 When working on Sibyl itself:
 
-1. **Run `/sibyl-knowledge`** at session start
+1. **Run `/sibyl`** at session start
 2. **Check current tasks:** `sibyl task list --status doing`
 3. **Start a task:** `sibyl task start <id>`
 4. **Search for context:** Query Sibyl for relevant patterns

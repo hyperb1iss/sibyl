@@ -38,7 +38,7 @@ Sibyl consists of three main components:
 
 ### 1. Skills (For Agents)
 
-Skills are documents that teach your AI agents how to work with Sibyl. When you invoke `/sibyl-knowledge` in Claude Code, the agent receives:
+Skills are documents that teach your AI agents how to work with Sibyl. When you invoke `/sibyl` in Claude Code, the agent receives:
 
 - Command reference for all CLI operations
 - Workflow patterns (when to search, when to capture)

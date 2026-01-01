@@ -7,14 +7,12 @@ type: tool
 tasks:
   install:
     command: |
-      echo "Installing Sibyl skills..."
+      echo "Installing Sibyl skill..."
       mkdir -p ~/.claude/skills ~/.codex/skills
-      rm -rf ~/.claude/skills/sibyl-knowledge ~/.claude/skills/sibyl-project-manager
-      rm -rf ~/.codex/skills/sibyl-knowledge ~/.codex/skills/sibyl-project-manager
-      cp -r sibyl-knowledge ~/.claude/skills/
-      cp -r sibyl-project-manager ~/.claude/skills/
-      cp -r sibyl-knowledge ~/.codex/skills/
-      cp -r sibyl-project-manager ~/.codex/skills/
+      rm -rf ~/.claude/skills/sibyl
+      rm -rf ~/.codex/skills/sibyl
+      cp -r sibyl ~/.claude/skills/
+      cp -r sibyl ~/.codex/skills/
       echo "✓ Installed to ~/.claude/skills and ~/.codex/skills"
     local: true
     options:
@@ -22,9 +20,9 @@ tasks:
 
   uninstall:
     command: |
-      rm -rf ~/.claude/skills/sibyl-knowledge ~/.claude/skills/sibyl-project-manager
-      rm -rf ~/.codex/skills/sibyl-knowledge ~/.codex/skills/sibyl-project-manager
-      echo "✓ Removed Sibyl skills"
+      rm -rf ~/.claude/skills/sibyl
+      rm -rf ~/.codex/skills/sibyl
+      echo "✓ Removed Sibyl skill"
     local: true
     options:
       shell: true

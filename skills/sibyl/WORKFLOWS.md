@@ -255,3 +255,92 @@ sibyl db backup
 # Check graph integrity
 sibyl db stats
 ```
+
+---
+
+## Project Management
+
+### Task Audit
+
+Verify tasks against code reality and clean up stale work.
+
+```bash
+# 1. Get the landscape - all open work
+sibyl task list --status todo,doing,blocked,review
+
+# 2. For each task, verify against codebase
+grep -r "function_name" apps/api/
+grep -r "@router.post" apps/api/routes/
+
+# 3. Archive completed tasks with evidence
+sibyl task archive task_a1b2c3d4e5f6 --reason "Completed: implemented at apps/api/routes/auth.py:42"
+sibyl task archive task_d4e5f6a1b2c3 --reason "Irrelevant: superseded by new design"
+```
+
+**Classify and Act:**
+
+| Finding                        | Action                           |
+| ------------------------------ | -------------------------------- |
+| Implementation exists, working | Archive with evidence            |
+| Partially done                 | Update description, keep open    |
+| No longer relevant             | Archive as irrelevant            |
+| Still needed                   | Keep, verify priority is correct |
+
+### Sprint Planning
+
+```bash
+# 1. Review high priority items
+sibyl task list --status todo --priority critical,high
+
+# 2. Check for blockers
+sibyl task list --status blocked
+
+# 3. Scope the sprint
+# 6-day cycle = ~4-6 meaningful tasks
+# Mix of high impact + quick wins
+# Dependencies resolved first
+```
+
+### Priority Rebalancing
+
+```bash
+# High priority should be small set
+sibyl task list --status todo --priority critical,high
+
+# Bulk of work should be here
+sibyl task list --status todo --priority medium,low
+
+# Update misclassified tasks
+sibyl task update task_a1b2c3d4e5f6 --priority medium
+```
+
+**Priority Decision Matrix:**
+
+| Impact | Urgency | Priority |
+| ------ | ------- | -------- |
+| High   | High    | critical |
+| High   | Low     | high     |
+| Low    | High    | medium   |
+| Low    | Low     | low      |
+
+### Weekly Housekeeping
+
+```bash
+# Stale work check (doing/blocked should be small)
+sibyl task list --status doing,blocked
+
+# Clean up done tasks (archive with learnings)
+sibyl task list --status done
+
+# Priority sanity (critical should be rare)
+sibyl task list --status todo --priority critical
+```
+
+### Verification Patterns
+
+| Task Area  | How to Verify                            |
+| ---------- | ---------------------------------------- |
+| Backend    | `grep -r "def func" apps/api/`           |
+| Frontend   | `ls apps/web/src/components/`            |
+| CLI        | `grep -r "@app.command" apps/cli/src/`   |
+| MCP Tools  | `ls apps/api/src/sibyl/tools/`           |

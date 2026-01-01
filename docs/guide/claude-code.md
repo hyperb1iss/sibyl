@@ -246,7 +246,7 @@ This installs skills to `~/.claude/skills/`.
 Invoke skills via slash commands:
 
 ```
-/sibyl-knowledge
+/sibyl
 ```
 
 The skill teaches Claude:
@@ -261,10 +261,10 @@ Skills are defined in `skills/` directory:
 
 ```
 skills/
-├── sibyl-knowledge/
-│   └── SKILL.md
-└── sibyl-project-manager/
-    └── SKILL.md
+└── sibyl/
+    ├── SKILL.md
+    ├── WORKFLOWS.md
+    └── EXAMPLES.md
 ```
 
 ## Agent Patterns
