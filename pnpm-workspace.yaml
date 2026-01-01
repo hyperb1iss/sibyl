@@ -1,5 +1,7 @@
 packages:
-  - .
+  - "apps/web"
+  - "docs"
+
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver

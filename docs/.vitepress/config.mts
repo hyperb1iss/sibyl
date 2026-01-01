@@ -4,6 +4,9 @@ import llmstxt from 'vitepress-plugin-llms'
 export default defineConfig({
     vite: {
         plugins: [llmstxt()],
+        build: {
+            chunkSizeWarningLimit: 1000,
+        },
     },
 
     title: 'Sibyl',

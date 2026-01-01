@@ -82,8 +82,8 @@ tasks:
     inputs:
       - "@group(sources)"
       - "@group(configs)"
-    outputs:
-      - ".next"
+    # Note: .next excluded from outputs - Next.js manages its own cache,
+    # and the directory contains symlinks that break moon's archiver
 
   start:
     command: "pnpm next start --port 3337"
@@ -114,11 +114,3 @@ tasks:
       - "@group(sources)"
     outputs:
       - "storybook-static"
-
-  # Dependencies
-  install:
-    command: "pnpm install"
-    inputs:
-      - "package.json"
-      - "pnpm-lock.yaml"
-    local: true
