@@ -12,23 +12,13 @@ fileGroups:
 
 tasks:
   install:
-    command: |
-      echo "Installing Sibyl skill..."
-      mkdir -p ~/.claude/skills ~/.codex/skills
-      rm -rf ~/.claude/skills/sibyl
-      rm -rf ~/.codex/skills/sibyl
-      cp -r sibyl ~/.claude/skills/
-      cp -r sibyl ~/.codex/skills/
-      echo "✓ Installed to ~/.claude/skills and ~/.codex/skills"
+    command: "echo 'Installing Sibyl skill...' && mkdir -p ~/.claude/skills ~/.codex/skills && rm -rf ~/.claude/skills/sibyl ~/.codex/skills/sibyl && cp -r sibyl ~/.claude/skills/ && cp -r sibyl ~/.codex/skills/ && echo '✓ Installed to ~/.claude/skills and ~/.codex/skills'"
     local: true
     options:
       shell: true
 
   uninstall:
-    command: |
-      rm -rf ~/.claude/skills/sibyl
-      rm -rf ~/.codex/skills/sibyl
-      echo "✓ Removed Sibyl skill"
+    command: "rm -rf ~/.claude/skills/sibyl ~/.codex/skills/sibyl && echo '✓ Removed Sibyl skill'"
     local: true
     options:
       shell: true
