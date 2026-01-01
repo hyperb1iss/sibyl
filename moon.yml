@@ -63,11 +63,20 @@ tasks:
       persistent: true
 
   # ==========================================================================
-  # Formatting (non-code files)
+  # Formatting (aggregates individual project tasks)
   # ==========================================================================
   fmt:
-    command: "pnpm run fmt"
+    deps:
+      - "docs:format"
+      - "skills:format"
+      - "infra:format"
     local: true
+
+  fmt-check:
+    deps:
+      - "docs:lint"
+      - "skills:lint"
+      - "infra:lint"
 
   # ==========================================================================
   # E2E Testing

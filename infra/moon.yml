@@ -1,0 +1,29 @@
+# https://moonrepo.dev/docs/config/project
+$schema: "https://moonrepo.dev/schemas/project.json"
+
+language: other
+type: configuration
+
+fileGroups:
+  sources:
+    - "**/*.yaml"
+    - "**/*.yml"
+    - "**/*.md"
+
+tasks:
+  lint:
+    command: "npx prettier --check '**/*.md' '**/*.yaml' '**/*.yml'"
+    inputs:
+      - "@group(sources)"
+
+  fix:
+    command: "npx prettier --write '**/*.md' '**/*.yaml' '**/*.yml'"
+    inputs:
+      - "@group(sources)"
+    local: true
+
+  format:
+    command: "npx prettier --write '**/*.md' '**/*.yaml' '**/*.yml'"
+    inputs:
+      - "@group(sources)"
+    local: true

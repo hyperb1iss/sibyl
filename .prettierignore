@@ -21,3 +21,6 @@ build/
 __pycache__/
 .venv/
 *.egg-info/
+
+# Moon
+.moon/cache/

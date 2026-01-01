@@ -46,3 +46,21 @@ tasks:
       - "package.json"
       - "pnpm-lock.yaml"
     local: true
+
+  # Formatting
+  lint:
+    command: "npx prettier --check '**/*.md'"
+    inputs:
+      - "@group(sources)"
+
+  fix:
+    command: "npx prettier --write '**/*.md'"
+    inputs:
+      - "@group(sources)"
+    local: true
+
+  format:
+    command: "npx prettier --write '**/*.md'"
+    inputs:
+      - "@group(sources)"
+    local: true

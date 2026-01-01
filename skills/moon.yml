@@ -4,6 +4,12 @@ $schema: "https://moonrepo.dev/schemas/project.json"
 language: other
 type: tool
 
+fileGroups:
+  sources:
+    - "**/*.md"
+    - "**/*.yaml"
+    - "**/*.yml"
+
 tasks:
   install:
     command: |
@@ -26,3 +32,20 @@ tasks:
     local: true
     options:
       shell: true
+
+  lint:
+    command: "npx prettier --check '**/*.md' '**/*.yml'"
+    inputs:
+      - "@group(sources)"
+
+  fix:
+    command: "npx prettier --write '**/*.md' '**/*.yml'"
+    inputs:
+      - "@group(sources)"
+    local: true
+
+  format:
+    command: "npx prettier --write '**/*.md' '**/*.yml'"
+    inputs:
+      - "@group(sources)"
+    local: true
