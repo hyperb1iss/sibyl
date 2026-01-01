@@ -7,15 +7,11 @@ All commands communicate with the REST API to ensure proper event broadcasting.
 All commands output table format by default. Use --json for JSON output.
 """
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
 
 from sibyl_cli.client import SibylClientError, get_client
-
-if TYPE_CHECKING:
-    from sibyl_cli.client import SibylClient
-
 from sibyl_cli.common import (
     CORAL,
     ELECTRIC_PURPLE,
@@ -58,51 +54,34 @@ def _output_response(response: dict, json_out: bool, success_msg: str | None = N
         error(f"Failed: {response.get('message', 'Unknown error')}")
 
 
-async def _resolve_task_id(client: "SibylClient", task_id: str) -> str:
-    """Resolve a short task ID prefix to a full task ID.
+def _validate_task_id(task_id: str) -> str:
+    """Validate that a task ID has the expected format.
 
-    If task_id is already a full ID (17+ chars), returns it unchanged.
-    Otherwise, searches for tasks matching the prefix.
+    Full task IDs are required - no prefix matching or guessing.
+    Format: task_<12 hex chars> (17 chars total)
 
     Args:
-        client: The Sibyl API client.
-        task_id: Full task ID or short prefix (e.g., "task_c24").
+        task_id: The task ID to validate.
 
     Returns:
-        The full task ID if found.
+        The task ID unchanged.
 
     Raises:
-        SibylClientError: If no match found or multiple matches.
+        SibylClientError: If the ID format is invalid.
     """
-    # Already a full ID (task_ + 12 hex chars = 17 chars minimum)
-    if len(task_id) >= 17:
-        return task_id
-
-    # Search for matching tasks
-    try:
-        result = await client.list_entities(entity_type="task", page_size=100)
-        entities = result.get("entities", [])
-
-        # Find all tasks matching the prefix
-        matches = [e for e in entities if e.get("id", "").startswith(task_id)]
-
-        if len(matches) == 0:
-            raise SibylClientError(
-                f"No task found matching prefix: {task_id}",
-                status_code=404,
-                detail=f"No task found matching prefix: {task_id}",
-            )
-        if len(matches) == 1:
-            return matches[0]["id"]
-        # Multiple matches - show them
-        match_ids = [m["id"] for m in matches[:5]]
-        msg = f"Multiple tasks match prefix '{task_id}': {', '.join(match_ids)}"
-        raise SibylClientError(msg, status_code=400, detail=msg)
-    except SibylClientError:
-        raise
-    except Exception:
-        # Fall back to using the ID as-is
-        return task_id
+    if not task_id.startswith("task_"):
+        raise SibylClientError(
+            f"Invalid task ID format: {task_id}. Expected format: task_<12 hex chars>",
+            status_code=400,
+            detail=f"Invalid task ID: {task_id}",
+        )
+    if len(task_id) < 17:
+        raise SibylClientError(
+            f"Task ID too short: {task_id}. Full task ID required (17 chars).",
+            status_code=400,
+            detail=f"Full task ID required, got: {task_id}",
+        )
+    return task_id
 
 
 def _apply_task_filters(
@@ -213,7 +192,7 @@ def _output_tasks_table(
     for e in entities:
         meta = e.get("metadata", {})
         table.add_row(
-            e.get("id", "")[:8] + "...",
+            e.get("id", ""),
             truncate(e.get("name", ""), 40),
             format_status(meta.get("status", "unknown")),
             format_priority(meta.get("priority", "medium")),
@@ -414,7 +393,7 @@ def list_tasks(
 
 @app.command("show")
 def show_task(
-    task_id: Annotated[str, typer.Argument(help="Task ID (full or prefix)")],
+    task_id: Annotated[str, typer.Argument(help="Task ID (full ID required)")],
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -426,8 +405,8 @@ def show_task(
         client = get_client()
 
         try:
-            # Resolve short ID prefix to full ID
-            resolved_id = await _resolve_task_id(client, task_id)
+            # Validate full task ID (no prefix matching)
+            resolved_id = _validate_task_id(task_id)
 
             if not json_out:
                 with spinner("Loading task...") as progress:
@@ -455,7 +434,7 @@ def show_task(
             if meta.get("project_id"):
                 lines.insert(
                     3,
-                    f"[{ELECTRIC_PURPLE}]Project:[/{ELECTRIC_PURPLE}] {meta['project_id'][:8]}...",
+                    f"[{ELECTRIC_PURPLE}]Project:[/{ELECTRIC_PURPLE}] {meta['project_id']}",
                 )
 
             if meta.get("assignees"):
@@ -473,7 +452,7 @@ def show_task(
             if meta.get("technologies"):
                 lines.append(f"[{CORAL}]Tech:[/{CORAL}] {', '.join(meta['technologies'])}")
 
-            panel = create_panel("\n".join(lines), title=f"Task {entity.get('id', '')[:8]}")
+            panel = create_panel("\n".join(lines), title=f"Task {entity.get('id', '')}")
             console.print(panel)
 
         except SibylClientError as e:
@@ -484,7 +463,7 @@ def show_task(
 
 @app.command("start")
 def start_task(
-    task_id: Annotated[str, typer.Argument(help="Task ID to start (full or prefix)")],
+    task_id: Annotated[str, typer.Argument(help="Task ID to start (full ID required)")],
     assignee: Annotated[str | None, typer.Option("--assignee", "-a", help="Assignee name")] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
@@ -497,8 +476,8 @@ def start_task(
         client = get_client()
 
         try:
-            # Resolve short ID prefix to full ID
-            resolved_id = await _resolve_task_id(client, task_id)
+            # Validate full task ID (no prefix matching)
+            resolved_id = _validate_task_id(task_id)
 
             if not json_out:
                 with spinner("Starting task...") as progress:
@@ -512,7 +491,7 @@ def start_task(
                 return
 
             if response.get("success"):
-                success(f"Task started: {task_id[:8]}...")
+                success(f"Task started: {task_id}")
                 if response.get("data", {}).get("branch_name"):
                     info(f"Branch: {response['data']['branch_name']}")
             else:
@@ -526,7 +505,7 @@ def start_task(
 
 @app.command("block")
 def block_task(
-    task_id: Annotated[str, typer.Argument(help="Task ID to block (full or prefix)")],
+    task_id: Annotated[str, typer.Argument(help="Task ID to block (full ID required)")],
     reason: Annotated[str, typer.Option("--reason", "-r", help="Blocker reason (required)")],
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
@@ -539,8 +518,8 @@ def block_task(
         client = get_client()
 
         try:
-            # Resolve short ID prefix to full ID
-            resolved_id = await _resolve_task_id(client, task_id)
+            # Validate full task ID (no prefix matching)
+            resolved_id = _validate_task_id(task_id)
 
             if not json_out:
                 with spinner("Blocking task...") as progress:
@@ -554,7 +533,7 @@ def block_task(
                 return
 
             if response.get("success"):
-                success(f"Task blocked: {task_id[:8]}...")
+                success(f"Task blocked: {task_id}")
             else:
                 error(f"Failed to block task: {response.get('message', 'Unknown error')}")
 
@@ -566,7 +545,7 @@ def block_task(
 
 @app.command("unblock")
 def unblock_task(
-    task_id: Annotated[str, typer.Argument(help="Task ID to unblock (full or prefix)")],
+    task_id: Annotated[str, typer.Argument(help="Task ID to unblock (full ID required)")],
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -578,8 +557,8 @@ def unblock_task(
         client = get_client()
 
         try:
-            # Resolve short ID prefix to full ID
-            resolved_id = await _resolve_task_id(client, task_id)
+            # Validate full task ID (no prefix matching)
+            resolved_id = _validate_task_id(task_id)
 
             if not json_out:
                 with spinner("Unblocking task...") as progress:
@@ -593,7 +572,7 @@ def unblock_task(
                 return
 
             if response.get("success"):
-                success(f"Task unblocked: {task_id[:8]}...")
+                success(f"Task unblocked: {task_id}")
             else:
                 error(f"Failed to unblock task: {response.get('message', 'Unknown error')}")
 
@@ -605,7 +584,7 @@ def unblock_task(
 
 @app.command("review")
 def submit_review(
-    task_id: Annotated[str, typer.Argument(help="Task ID to submit for review (full or prefix)")],
+    task_id: Annotated[str, typer.Argument(help="Task ID to submit for review (full ID required)")],
     pr_url: Annotated[str | None, typer.Option("--pr", help="Pull request URL")] = None,
     commits: Annotated[
         str | None, typer.Option("--commits", "-c", help="Comma-separated commit SHAs")
@@ -621,8 +600,8 @@ def submit_review(
         client = get_client()
 
         try:
-            # Resolve short ID prefix to full ID
-            resolved_id = await _resolve_task_id(client, task_id)
+            # Validate full task ID (no prefix matching)
+            resolved_id = _validate_task_id(task_id)
             commit_list = [c.strip() for c in commits.split(",")] if commits else None
 
             if not json_out:
@@ -637,7 +616,7 @@ def submit_review(
                 return
 
             if response.get("success"):
-                success(f"Task submitted for review: {task_id[:8]}...")
+                success(f"Task submitted for review: {task_id}")
             else:
                 error(f"Failed to submit for review: {response.get('message', 'Unknown error')}")
 
@@ -649,7 +628,7 @@ def submit_review(
 
 @app.command("complete")
 def complete_task(
-    task_id: Annotated[str, typer.Argument(help="Task ID to complete (full or prefix)")],
+    task_id: Annotated[str, typer.Argument(help="Task ID to complete (full ID required)")],
     hours: Annotated[float | None, typer.Option("--hours", "-h", help="Actual hours spent")] = None,
     learnings: Annotated[
         str | None, typer.Option("--learnings", "-l", help="Key learnings (creates episode)")
@@ -665,8 +644,8 @@ def complete_task(
         client = get_client()
 
         try:
-            # Resolve short ID prefix to full ID
-            resolved_id = await _resolve_task_id(client, task_id)
+            # Validate full task ID (no prefix matching)
+            resolved_id = _validate_task_id(task_id)
 
             if not json_out:
                 with spinner("Completing task...") as progress:
@@ -680,7 +659,7 @@ def complete_task(
                 return
 
             if response.get("success"):
-                success(f"Task completed: {task_id[:8]}...")
+                success(f"Task completed: {task_id}")
                 if learnings:
                     info("Learning episode created from task")
             else:
@@ -744,7 +723,7 @@ def archive_task(
 
         for tid in task_ids:
             try:
-                resolved_id = await _resolve_task_id(client, tid)
+                resolved_id = _validate_task_id(tid)
                 response = await client.archive_task(resolved_id, reason)
                 results.append({"id": resolved_id, **response})
                 if response.get("success"):
@@ -762,7 +741,7 @@ def archive_task(
         # Table output
         if len(task_ids) == 1:
             if results[0].get("success"):
-                success(f"Task archived: {results[0]['id'][:16]}...")
+                success(f"Task archived: {results[0]['id']}")
             else:
                 error(f"Failed: {results[0].get('message', results[0].get('error', 'Unknown'))}")
         else:
@@ -941,7 +920,7 @@ def update_task(
                 )
                 return
 
-            resolved_id = await _resolve_task_id(client, task_id)
+            resolved_id = _validate_task_id(task_id)
             assignees = [assignee] if assignee else None
             tag_list = [t.strip() for t in tags.split(",")] if tags else None
             tech_list = [t.strip() for t in technologies.split(",")] if technologies else None
@@ -982,7 +961,7 @@ def update_task(
                 return
 
             if response.get("success"):
-                success(f"Task updated: {resolved_id[:16]}...")
+                success(f"Task updated: {resolved_id}")
                 info(f"Fields: {', '.join(response.get('data', {}).keys())}")
             else:
                 error(f"Failed to update task: {response.get('message', 'Unknown error')}")
@@ -1000,7 +979,7 @@ def update_task(
 
 @app.command("note")
 def add_note(
-    task_id: Annotated[str, typer.Argument(help="Task ID (full or prefix)")],
+    task_id: Annotated[str, typer.Argument(help="Task ID (full ID required)")],
     content: Annotated[str, typer.Argument(help="Note content")],
     agent: Annotated[
         bool, typer.Option("--agent", help="Mark as agent-authored (default: user)")
@@ -1024,7 +1003,7 @@ def add_note(
         client = get_client()
 
         try:
-            resolved_id = await _resolve_task_id(client, task_id)
+            resolved_id = _validate_task_id(task_id)
             author_type = "agent" if agent else "user"
             author_name = author or ""
 
@@ -1042,7 +1021,7 @@ def add_note(
                 return
 
             if response.get("id"):
-                success(f"Note added: {response['id'][:12]}...")
+                success(f"Note added: {response['id']}")
             else:
                 error("Failed to add note")
 
@@ -1054,7 +1033,7 @@ def add_note(
 
 @app.command("notes")
 def list_notes(
-    task_id: Annotated[str, typer.Argument(help="Task ID (full or prefix)")],
+    task_id: Annotated[str, typer.Argument(help="Task ID (full ID required)")],
     limit: Annotated[int, typer.Option("-n", "--limit", help="Max results")] = 20,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
@@ -1071,7 +1050,7 @@ def list_notes(
         client = get_client()
 
         try:
-            resolved_id = await _resolve_task_id(client, task_id)
+            resolved_id = _validate_task_id(task_id)
 
             if not json_out:
                 with spinner("Loading notes...") as progress:

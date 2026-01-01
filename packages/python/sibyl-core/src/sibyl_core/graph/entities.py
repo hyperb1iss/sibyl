@@ -23,7 +23,8 @@ from sibyl_core.models.tasks import Epic, ErrorPattern, Milestone, Note, Project
 log = structlog.get_logger()
 
 # RediSearch special characters that need escaping in fulltext queries
-_REDISEARCH_SPECIAL_CHARS = re.compile(r"[|&\-@()~$:*\\]")
+# Includes / which appears in paths like "create/cleanup" or "~/.sibyl-worktrees/"
+_REDISEARCH_SPECIAL_CHARS = re.compile(r"[|&\-@()~$:*\\/]")
 
 
 def sanitize_search_query(query: str) -> str:

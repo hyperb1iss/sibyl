@@ -147,7 +147,7 @@ def list_entities(
             table = create_table(f"{entity_type.title()}s", "ID", "Name", "Description")
             for e in entities:
                 table.add_row(
-                    e.get("id", "")[:8] + "...",
+                    e.get("id", ""),
                     truncate(e.get("name", ""), 35),
                     truncate(e.get("description") or "", 50),
                 )
@@ -322,7 +322,7 @@ def delete_entity(
                 return
 
             # Table output
-            success(f"Entity deleted: {entity_id[:8]}...")
+            success(f"Entity deleted: {entity_id}")
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -377,7 +377,7 @@ def related_entities(
                 meta = e.get("metadata", {})
                 rel_type = meta.get("relationship_type", "-") if meta else "-"
                 table.add_row(
-                    e.get("id", "")[:8] + "...",
+                    e.get("id", ""),
                     truncate(e.get("name", ""), 30),
                     e.get("type", ""),
                     rel_type,

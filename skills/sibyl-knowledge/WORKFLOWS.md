@@ -21,7 +21,7 @@ sibyl task list --status todo
 sibyl search "topic from last session"
 
 # 4. Resume or start a task
-sibyl task start task_abc123
+sibyl task start task_a1b2c3d4e5f6
 ```
 
 ### Ending a Session
@@ -31,10 +31,10 @@ sibyl task start task_abc123
 # The task stays in progress for next session
 
 # If blocked, mark it with context for future you
-sibyl task block task_abc123 --reason "Need to investigate the timeout issue"
+sibyl task block task_a1b2c3d4e5f6 --reason "Need to investigate the timeout issue"
 
 # If ready for review
-sibyl task review task_abc123 --pr "github.com/org/repo/pull/42"
+sibyl task review task_a1b2c3d4e5f6 --pr "github.com/org/repo/pull/42"
 
 # ALWAYS capture learnings before leaving
 sibyl add "Session insight: Topic" "What I discovered today..."
@@ -47,10 +47,10 @@ sibyl add "Session insight: Topic" "What I discovered today..."
 sibyl task list --status blocked
 
 # See what's blocking
-sibyl task show task_abc123
+sibyl task show task_a1b2c3d4e5f6
 
 # Unblock when ready
-sibyl task unblock task_abc123
+sibyl task unblock task_a1b2c3d4e5f6
 ```
 
 ---
@@ -96,18 +96,18 @@ sibyl project create \
 
 ```bash
 # Start the first task
-sibyl task start task_abc123
+sibyl task start task_a1b2c3d4e5f6
 
 # Work on implementation...
 
 # If blocked
-sibyl task block task_abc123 --reason "Specific issue"
+sibyl task block task_a1b2c3d4e5f6 --reason "Specific issue"
 
 # When unblocked
-sibyl task unblock task_abc123
+sibyl task unblock task_a1b2c3d4e5f6
 
 # When ready for review
-sibyl task review task_abc123 \
+sibyl task review task_a1b2c3d4e5f6 \
   --pr "github.com/org/repo/pull/123" \
   --commits "abc123,def456"
 ```
@@ -116,12 +116,12 @@ sibyl task review task_abc123 \
 
 ```bash
 # Complete with learnings
-sibyl task complete task_abc123 \
+sibyl task complete task_a1b2c3d4e5f6 \
   --hours 8.5 \
   --learnings "Key insights from implementing this feature..."
 
 # Move to next task
-sibyl task list --project project_abc123 --status todo
+sibyl task list --project proj_a1b2c3d4e5f6 --status todo
 sibyl task start next_task_id --assignee you
 ```
 
@@ -167,10 +167,10 @@ Prevention: ..." \
 
 ```bash
 # Start from a known entity
-sibyl explore related pattern_abc123
+sibyl explore related ptrn_a1b2c3d4e5f6
 
 # Go deeper
-sibyl explore traverse pattern_abc123 --depth 2
+sibyl explore traverse ptrn_a1b2c3d4e5f6 --depth 2
 
 # Find connections between entities
 sibyl explore path entity_a entity_b
@@ -180,10 +180,10 @@ sibyl explore path entity_a entity_b
 
 ```bash
 # Get task dependency chain
-sibyl explore dependencies task_abc123
+sibyl explore dependencies task_a1b2c3d4e5f6
 
 # See all dependencies in a project
-sibyl explore dependencies --project project_abc123
+sibyl explore dependencies --project proj_a1b2c3d4e5f6
 ```
 
 ### Browsing by Category
@@ -210,23 +210,23 @@ sibyl entity list --type rule --category security
 sibyl project list
 
 # Tasks in a project
-sibyl task list --project project_abc123
+sibyl task list --project proj_a1b2c3d4e5f6
 
 # Just the todos
-sibyl task list --project project_abc123 --status todo
+sibyl task list --project proj_a1b2c3d4e5f6 --status todo
 
 # What's blocked?
-sibyl task list --project project_abc123 --status blocked
+sibyl task list --project proj_a1b2c3d4e5f6 --status blocked
 ```
 
 ### Export for Reports
 
 ```bash
 # Export tasks as JSON
-sibyl task list --project project_abc123 --json > tasks.json
+sibyl task list --project proj_a1b2c3d4e5f6 --json > tasks.json
 
 # Export as CSV for spreadsheets
-sibyl task list --project project_abc123 --csv > tasks.csv
+sibyl task list --project proj_a1b2c3d4e5f6 --csv > tasks.csv
 ```
 
 ---

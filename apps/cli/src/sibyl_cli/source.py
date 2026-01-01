@@ -79,7 +79,7 @@ def list_sources(
             table = create_table("Documentation Sources", "ID", "Name", "URL", "Docs", "Status")
             for s in sources:
                 table.add_row(
-                    s.get("id", "")[:12] + "...",
+                    s.get("id", ""),
                     truncate(s.get("name", ""), 25),
                     truncate(s.get("url", "-"), 30),
                     str(s.get("document_count", 0)),
@@ -320,7 +320,7 @@ def list_documents(
             for e in entities:
                 meta = e.get("metadata", {})
                 table.add_row(
-                    e.get("id", "")[:8] + "...",
+                    e.get("id", ""),
                     truncate(e.get("name", ""), 35),
                     truncate(meta.get("url", "-"), 30),
                     str(meta.get("word_count", 0)),

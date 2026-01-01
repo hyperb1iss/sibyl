@@ -8,15 +8,11 @@ than tasks: planning -> in_progress -> completed/archived.
 All commands output JSON by default for LLM consumption. Use -t for table output.
 """
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import typer
 
 from sibyl.cli.client import SibylClientError, get_client
-
-if TYPE_CHECKING:
-    from sibyl.cli.client import SibylClient
-
 from sibyl.cli.common import (
     CORAL,
     ELECTRIC_PURPLE,
@@ -60,51 +56,34 @@ def format_epic_status(status: str) -> str:
     return f"[{color}]{status}[/{color}]"
 
 
-async def _resolve_epic_id(client: "SibylClient", epic_id: str) -> str:
-    """Resolve a short epic ID prefix to a full epic ID.
+def _validate_epic_id(epic_id: str) -> str:
+    """Validate that an epic ID has the expected format.
 
-    If epic_id is already a full ID (17+ chars), returns it unchanged.
-    Otherwise, searches for epics matching the prefix.
+    Full epic IDs are required - no prefix matching or guessing.
+    Format: epic_<12 hex chars> (17 chars total)
 
     Args:
-        client: The Sibyl API client.
-        epic_id: Full epic ID or short prefix (e.g., "epic_c24").
+        epic_id: The epic ID to validate.
 
     Returns:
-        The full epic ID if found.
+        The epic ID unchanged.
 
     Raises:
-        SibylClientError: If no match found or multiple matches.
+        SibylClientError: If the ID format is invalid.
     """
-    # Already a full ID (epic_ + 12 hex chars = 17 chars minimum)
-    if len(epic_id) >= 17:
-        return epic_id
-
-    # Search for matching epics
-    try:
-        result = await client.list_entities(entity_type="epic", page_size=100)
-        entities = result.get("entities", [])
-
-        # Find all epics matching the prefix
-        matches = [e for e in entities if e.get("id", "").startswith(epic_id)]
-
-        if len(matches) == 0:
-            raise SibylClientError(
-                f"No epic found matching prefix: {epic_id}",
-                status_code=404,
-                detail=f"No epic found matching prefix: {epic_id}",
-            )
-        if len(matches) == 1:
-            return matches[0]["id"]
-        # Multiple matches - show them
-        match_ids = [m["id"] for m in matches[:5]]
-        msg = f"Multiple epics match prefix '{epic_id}': {', '.join(match_ids)}"
-        raise SibylClientError(msg, status_code=400, detail=msg)
-    except SibylClientError:
-        raise
-    except Exception:
-        # Fall back to using the ID as-is
-        return epic_id
+    if not epic_id.startswith("epic_"):
+        raise SibylClientError(
+            f"Invalid epic ID format: {epic_id}. Expected format: epic_<12 hex chars>",
+            status_code=400,
+            detail=f"Invalid epic ID: {epic_id}",
+        )
+    if len(epic_id) < 17:
+        raise SibylClientError(
+            f"Epic ID too short: {epic_id}. Full epic ID required (17 chars).",
+            status_code=400,
+            detail=f"Full epic ID required, got: {epic_id}",
+        )
+    return epic_id
 
 
 @app.command("list")
@@ -182,7 +161,7 @@ def list_epics(
                 completed = meta.get("completed_tasks", 0)
                 progress_str = f"{completed}/{total}" if total > 0 else "-"
                 table.add_row(
-                    e.get("id", "")[:12] + "...",
+                    e.get("id", ""),
                     truncate(e.get("name", ""), 40),
                     format_epic_status(meta.get("status", "planning")),
                     format_priority(meta.get("priority", "medium")),
@@ -213,7 +192,7 @@ def show_epic(
 
         try:
             # Resolve short ID prefix to full ID
-            resolved_id = await _resolve_epic_id(client, epic_id)
+            resolved_id = _validate_epic_id(epic_id)
 
             if table_out:
                 with spinner("Loading epic...") as progress:
@@ -246,7 +225,7 @@ def show_epic(
             if meta.get("project_id"):
                 lines.insert(
                     4,
-                    f"[{ELECTRIC_PURPLE}]Project:[/{ELECTRIC_PURPLE}] {meta['project_id'][:12]}...",
+                    f"[{ELECTRIC_PURPLE}]Project:[/{ELECTRIC_PURPLE}] {meta['project_id']}",
                 )
 
             if meta.get("assignees"):
@@ -261,7 +240,7 @@ def show_epic(
             if meta.get("learnings"):
                 lines.append(f"\n[{CORAL}]Learnings:[/{CORAL}] {meta['learnings']}")
 
-            panel = create_panel("\n".join(lines), title=f"Epic {entity.get('id', '')[:12]}")
+            panel = create_panel("\n".join(lines), title=f"Epic {entity.get('id', '')}")
             console.print(panel)
 
         except SibylClientError as e:
@@ -366,7 +345,7 @@ def start_epic(
         client = get_client()
 
         try:
-            resolved_id = await _resolve_epic_id(client, epic_id)
+            resolved_id = _validate_epic_id(epic_id)
 
             # Build update data
             updates: dict = {"status": "in_progress"}
@@ -385,7 +364,7 @@ def start_epic(
                 return
 
             if response.get("success") or response.get("id"):
-                success(f"Epic started: {epic_id[:12]}...")
+                success(f"Epic started: {epic_id}")
             else:
                 error(f"Failed to start epic: {response.get('message', 'Unknown error')}")
 
@@ -412,7 +391,7 @@ def complete_epic(
         client = get_client()
 
         try:
-            resolved_id = await _resolve_epic_id(client, epic_id)
+            resolved_id = _validate_epic_id(epic_id)
 
             # Build update data
             updates: dict = {"status": "completed"}
@@ -431,7 +410,7 @@ def complete_epic(
                 return
 
             if response.get("success") or response.get("id"):
-                success(f"Epic completed: {epic_id[:12]}...")
+                success(f"Epic completed: {epic_id}")
                 if learnings:
                     info("Learnings captured")
             else:
@@ -454,7 +433,7 @@ def archive_epic(
 ) -> None:
     """Archive an epic (terminal state). Default: JSON output."""
     if not yes:
-        confirm = typer.confirm(f"Archive epic {epic_id[:12]}...? This cannot be undone.")
+        confirm = typer.confirm(f"Archive epic {epic_id}? This cannot be undone.")
         if not confirm:
             info("Cancelled")
             return
@@ -464,7 +443,7 @@ def archive_epic(
         client = get_client()
 
         try:
-            resolved_id = await _resolve_epic_id(client, epic_id)
+            resolved_id = _validate_epic_id(epic_id)
 
             # Build update data
             updates: dict = {"status": "archived"}
@@ -483,7 +462,7 @@ def archive_epic(
                 return
 
             if response.get("success") or response.get("id"):
-                success(f"Epic archived: {resolved_id[:16]}...")
+                success(f"Epic archived: {resolved_id}")
             else:
                 error(f"Failed to archive epic: {response.get('message', 'Unknown error')}")
 
@@ -525,7 +504,7 @@ def update_epic(
                 )
                 return
 
-            resolved_id = await _resolve_epic_id(client, epic_id)
+            resolved_id = _validate_epic_id(epic_id)
 
             # Build update data
             updates: dict = {}
@@ -552,7 +531,7 @@ def update_epic(
                 return
 
             if response.get("success") or response.get("id"):
-                success(f"Epic updated: {resolved_id[:16]}...")
+                success(f"Epic updated: {resolved_id}")
                 info(f"Fields: {', '.join(updates.keys())}")
             else:
                 error(f"Failed to update epic: {response.get('message', 'Unknown error')}")
@@ -581,7 +560,7 @@ def list_epic_tasks(
         client = get_client()
 
         try:
-            resolved_id = await _resolve_epic_id(client, epic_id)
+            resolved_id = _validate_epic_id(epic_id)
 
             # Get all tasks and filter by epic_id
             if table_out:
@@ -614,7 +593,7 @@ def list_epic_tasks(
 
             # Table format
             if not entities:
-                info(f"No tasks found for epic {epic_id[:12]}...")
+                info(f"No tasks found for epic {epic_id}")
                 return
 
             from sibyl.cli.common import format_status
@@ -623,7 +602,7 @@ def list_epic_tasks(
             for e in entities:
                 meta = e.get("metadata", {})
                 table.add_row(
-                    e.get("id", "")[:12] + "...",
+                    e.get("id", ""),
                     truncate(e.get("name", ""), 40),
                     format_status(meta.get("status", "unknown")),
                     format_priority(meta.get("priority", "medium")),

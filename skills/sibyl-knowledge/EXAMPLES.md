@@ -66,10 +66,10 @@ sibyl search "python conventions" --all
 
 ```bash
 # All tasks in a project
-sibyl task list --project project_abc123
+sibyl task list --project proj_a1b2c3d4e5f6
 
 # Filter by status
-sibyl task list --project project_abc123 --status todo
+sibyl task list --project proj_a1b2c3d4e5f6 --status todo
 sibyl task list --status doing
 sibyl task list --status blocked
 
@@ -83,35 +83,35 @@ sibyl task list -q "authentication"
 ### Task Details
 
 ```bash
-sibyl task show task_abc123
+sibyl task show task_a1b2c3d4e5f6
 ```
 
 ### Start Task
 
 ```bash
-sibyl task start task_abc123 --assignee alice
+sibyl task start task_a1b2c3d4e5f6 --assignee alice
 # Output: Task started, branch: feature/task-abc123
 ```
 
 ### Block Task
 
 ```bash
-sibyl task block task_abc123 --reason "Waiting for design approval"
+sibyl task block task_a1b2c3d4e5f6 --reason "Waiting for design approval"
 ```
 
 ### Unblock Task
 
 ```bash
-sibyl task unblock task_abc123
+sibyl task unblock task_a1b2c3d4e5f6
 ```
 
 ### Submit for Review
 
 ```bash
-sibyl task review task_abc123 --pr "https://github.com/org/repo/pull/42"
+sibyl task review task_a1b2c3d4e5f6 --pr "https://github.com/org/repo/pull/42"
 
 # With commits
-sibyl task review task_abc123 \
+sibyl task review task_a1b2c3d4e5f6 \
   --pr "https://github.com/org/repo/pull/42" \
   --commits "abc1234,def5678,ghi9012"
 ```
@@ -120,13 +120,13 @@ sibyl task review task_abc123 \
 
 ```bash
 # Basic completion
-sibyl task complete task_abc123
+sibyl task complete task_a1b2c3d4e5f6
 
 # With time tracking
-sibyl task complete task_abc123 --hours 4.5
+sibyl task complete task_a1b2c3d4e5f6 --hours 4.5
 
 # With learnings (creates episode automatically)
-sibyl task complete task_abc123 \
+sibyl task complete task_a1b2c3d4e5f6 \
   --hours 4.5 \
   --learnings "OAuth tokens must be refreshed 5 minutes before expiry to avoid race conditions"
 ```
@@ -134,7 +134,7 @@ sibyl task complete task_abc123 \
 ### Archive Task
 
 ```bash
-sibyl task archive task_abc123 --yes
+sibyl task archive task_a1b2c3d4e5f6 --yes
 ```
 
 ---
@@ -150,7 +150,7 @@ sibyl project list
 ### Show Project
 
 ```bash
-sibyl project show project_abc123
+sibyl project show proj_a1b2c3d4e5f6
 ```
 
 ### Create Project
@@ -180,7 +180,7 @@ sibyl entity list --type rule --category security
 ### Show Entity
 
 ```bash
-sibyl entity show pattern_abc123
+sibyl entity show ptrn_a1b2c3d4e5f6
 ```
 
 ### Create Entity (Capture Learning)
@@ -206,13 +206,13 @@ sibyl entity create \
 ### Related Entities
 
 ```bash
-sibyl entity related pattern_abc123
+sibyl entity related ptrn_a1b2c3d4e5f6
 ```
 
 ### Delete Entity
 
 ```bash
-sibyl entity delete episode_abc123 --yes
+sibyl entity delete epsd_a1b2c3d4e5f6 --yes
 ```
 
 ---
@@ -228,7 +228,7 @@ sibyl explore related pattern_oauth
 ### Multi-hop Traversal
 
 ```bash
-sibyl explore traverse project_abc123 --depth 2
+sibyl explore traverse proj_a1b2c3d4e5f6 --depth 2
 ```
 
 ### Task Dependencies
@@ -238,7 +238,7 @@ sibyl explore traverse project_abc123 --depth 2
 sibyl explore dependencies task_deploy
 
 # Project-wide
-sibyl explore dependencies --project project_def456
+sibyl explore dependencies --project proj_d4e5f6a1b2c3
 ```
 
 ### Find Path
@@ -294,7 +294,7 @@ sibyl search "OAuth implementation" --type episode
 sibyl project list
 
 # 3. Project exists, list its tasks
-sibyl task list --project project_abc123 --status todo
+sibyl task list --project proj_a1b2c3d4e5f6 --status todo
 
 # 4. Start the task
 sibyl task start task_oauth_google --assignee developer
@@ -317,7 +317,7 @@ sibyl task complete task_oauth_google \
   --learnings "Google OAuth2 requires specific scopes: openid, email, profile. Token refresh should happen 5 min before expiry."
 
 # 9. Check next task
-sibyl task list --project project_abc123 --status todo
+sibyl task list --project proj_a1b2c3d4e5f6 --status todo
 ```
 
 ---

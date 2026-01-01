@@ -102,7 +102,7 @@ def explore_related(
                 meta = e.get("metadata", {})
                 rel = meta.get("relationship_type", "-") if meta else "-"
                 table.add_row(
-                    e.get("id", "")[:8] + "...",
+                    e.get("id", ""),
                     truncate(e.get("name", ""), 35),
                     e.get("type", ""),
                     rel,
@@ -173,7 +173,7 @@ def explore_traverse(
                     by_distance[dist] = []
                 by_distance[dist].append(e)
 
-            tree = create_tree(f"Traversal from {entity_id[:8]}...")
+            tree = create_tree(f"Traversal from {entity_id}")
             for dist in sorted(by_distance.keys()):
                 hop_branch = tree.add(
                     f"[{NEON_CYAN}]Hop {dist}[/{NEON_CYAN}] ({len(by_distance[dist])} entities)"
@@ -271,7 +271,7 @@ def explore_dependencies(
                 dep_str = f" [{CORAL}]({', '.join(dep_info)})[/{CORAL}]" if dep_info else ""
 
                 console.print(
-                    f"  {i:3}. [{NEON_CYAN}]{e.get('id', '')[:8]}[/{NEON_CYAN}] "
+                    f"  {i:3}. [{NEON_CYAN}]{e.get('id', '')}[/{NEON_CYAN}] "
                     f"{truncate(e.get('name', ''), 40)} "
                     f"{format_status(status)}{dep_str}"
                 )
@@ -337,22 +337,20 @@ def explore_path(
 
             # Table output
             if not entities:
-                info(
-                    f"No path found between {from_id[:8]} and {to_id[:8]} (max depth: {max_depth})"
-                )
+                info(f"No path found between {from_id} and {to_id} (max depth: {max_depth})")
                 return
 
             console.print(
                 f"\n[{ELECTRIC_PURPLE}]Path Found[/{ELECTRIC_PURPLE}] (length: {path_length})\n"
             )
-            console.print(f"  [{NEON_CYAN}]{from_id[:8]}...[/{NEON_CYAN}]")
+            console.print(f"  [{NEON_CYAN}]{from_id}[/{NEON_CYAN}]")
 
             for i in range(int(path_length)):
                 console.print("      ↓")
                 console.print(f"  [{CORAL}]hop {i + 1}[/{CORAL}]")
 
             console.print("      ↓")
-            console.print(f"  [{NEON_CYAN}]{to_id[:8]}...[/{NEON_CYAN}]")
+            console.print(f"  [{NEON_CYAN}]{to_id}[/{NEON_CYAN}]")
 
         except SibylClientError as e:
             _handle_client_error(e)

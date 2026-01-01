@@ -54,7 +54,7 @@ def main():
             for t in tasks[:3]:
                 status = t.get("metadata", {}).get("status", "")
                 name = t.get("name", "")[:40]
-                tid = t.get("id", "")[:12]
+                tid = t.get("id", "")  # Full ID - no truncation
                 lines.append(f"[{status}] {name} ({tid})")
 
         lines.append("Suggest 'sibyl add' when solving something non-obvious.")

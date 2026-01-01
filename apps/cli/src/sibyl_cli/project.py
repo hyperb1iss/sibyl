@@ -218,7 +218,7 @@ def show_project(
                     f"\n[{NEON_CYAN}]Tech Stack:[/{NEON_CYAN}] {', '.join(meta['tech_stack'])}"
                 )
 
-            panel = create_panel("\n".join(lines), title=f"Project {entity.get('id', '')[:8]}")
+            panel = create_panel("\n".join(lines), title=f"Project {entity.get('id', '')}")
             console.print(panel)
 
         except SibylClientError as e:
@@ -399,9 +399,7 @@ def link_project(
         set_path_mapping(target_path, project_id)
 
         success(f"Linked [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")
-        console.print(
-            f"  → [{ELECTRIC_PURPLE}]{project_name}[/{ELECTRIC_PURPLE}] ({project_id[:16]}...)"
-        )
+        console.print(f"  → [{ELECTRIC_PURPLE}]{project_name}[/{ELECTRIC_PURPLE}] ({project_id})")
         info("Task commands in this directory will now auto-scope to this project")
 
     _link()

@@ -96,7 +96,7 @@ def list_sources(
                 }.get(status_val, "white")
 
                 table.add_row(
-                    src.get("id", "")[:8] + "...",
+                    src.get("id", ""),
                     truncate(src.get("name", ""), 20),
                     truncate(src.get("url", ""), 30),
                     f"[{status_color}]{status_val}[/{status_color}]",
@@ -267,7 +267,7 @@ def crawl_status(
             status_color = ELECTRIC_YELLOW if running else SUCCESS_GREEN
 
             console.print(f"\n[{ELECTRIC_PURPLE}]Crawl Status[/{ELECTRIC_PURPLE}]\n")
-            console.print(f"  Source: [{NEON_CYAN}]{source_id[:8]}...[/{NEON_CYAN}]")
+            console.print(f"  Source: [{NEON_CYAN}]{source_id}[/{NEON_CYAN}]")
             console.print(f"  Running: [{status_color}]{running}[/{status_color}]")
 
             if response.get("documents_crawled"):
@@ -337,7 +337,7 @@ def list_documents(
 
             for doc in documents:
                 table.add_row(
-                    doc.get("id", "")[:8] + "...",
+                    doc.get("id", ""),
                     truncate(doc.get("title", ""), 25),
                     truncate(doc.get("url", ""), 35),
                     str(doc.get("word_count", 0)),
@@ -457,7 +457,7 @@ def delete_source(
     """Delete a crawl source and all its documents. Default: JSON output."""
     if not yes:
         confirm = typer.confirm(
-            f"Delete source {source_id[:8]}... and all documents? This cannot be undone."
+            f"Delete source {source_id} and all documents? This cannot be undone."
         )
         if not confirm:
             info("Cancelled")
@@ -482,7 +482,7 @@ def delete_source(
 
             # Table output
             if response.get("deleted"):
-                success(f"Source deleted: {source_id[:8]}...")
+                success(f"Source deleted: {source_id}")
             else:
                 error("Failed to delete source")
 
