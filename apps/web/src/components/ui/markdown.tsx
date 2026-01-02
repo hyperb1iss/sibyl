@@ -149,17 +149,19 @@ export function Markdown({ content, className = '' }: MarkdownProps) {
 
           // Lists - colored markers, better spacing
           ul: ({ children }) => (
-            <ul className="mb-4 space-y-1.5 ml-1 [&>li]:relative [&>li]:pl-5 [&>li]:before:content-['•'] [&>li]:before:absolute [&>li]:before:left-0 [&>li]:before:text-sc-purple [&>li]:before:font-bold">
+            <ul className="mb-4 space-y-1.5 pl-5 [&>li]:relative [&>li]:before:content-['•'] [&>li]:before:absolute [&>li]:before:-left-4 [&>li]:before:text-sc-purple [&>li]:before:font-bold">
               {children}
             </ul>
           ),
           ol: ({ children }) => (
-            <ol className="mb-4 space-y-1.5 ml-1 list-decimal list-inside text-sc-fg-secondary marker:text-sc-cyan marker:font-semibold">
+            <ol className="mb-4 space-y-1.5 pl-5 list-decimal marker:text-sc-cyan marker:font-semibold">
               {children}
             </ol>
           ),
           li: ({ children }) => (
-            <li className="text-sc-fg-secondary leading-relaxed">{children}</li>
+            <li className="text-sc-fg-secondary leading-relaxed [&>p]:inline [&>p]:m-0">
+              {children}
+            </li>
           ),
 
           // Links - cyan glow

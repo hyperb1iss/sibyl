@@ -419,7 +419,17 @@ async def terminate_agent(
     request: AgentActionRequest,
     org: Organization = Depends(get_current_organization),
 ) -> AgentActionResponse:
-    """Terminate an agent."""
+    """Terminate an agent.
+
+    This endpoint:
+    1. Updates the agent status in the graph to 'terminated'
+    2. Signals the worker to stop execution via Redis
+
+    The worker checks for stop signals between message iterations and will
+    gracefully terminate when it sees the signal.
+    """
+    from sibyl.api.pubsub import publish_event, request_agent_stop
+
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(org.id))
 
@@ -439,12 +449,23 @@ async def terminate_agent(
             detail=f"Agent already in terminal state: {agent_status}",
         )
 
+    # Signal the worker to stop execution
+    await request_agent_stop(agent_id)
+
+    # Update graph status
     await manager.update(
         agent_id,
         {
             "status": AgentStatus.TERMINATED.value,
             "error_message": request.reason or "user_terminated",
         },
+    )
+
+    # Broadcast termination via WebSocket for UI update
+    await publish_event(
+        "agent_status",
+        {"agent_id": agent_id, "status": "terminated"},
+        org_id=str(org.id),
     )
 
     return AgentActionResponse(
@@ -577,7 +598,8 @@ async def send_agent_message(
                 AgentMessage.agent_id == agent_id
             )
         )
-        next_num = result.scalar() + 1
+        max_num: int = result.scalar() or 0
+        next_num = max_num + 1
 
         db_message = AgentMessage(
             agent_id=agent_id,

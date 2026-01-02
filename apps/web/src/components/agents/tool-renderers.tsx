@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { codeToHtml } from 'shiki';
 import { Code, EditPencil, Folder, Page, Search } from '@/components/ui/icons';
+import { stripAnsi } from './chat-constants';
 
 // SilkCircuit theme (shared with markdown.tsx)
 const silkCircuitTheme = {
@@ -299,6 +300,8 @@ export function BashToolRenderer({
 }) {
   const command = input.command || '';
   const description = input.description;
+  // Strip ANSI escape codes from terminal output
+  const cleanResult = result ? stripAnsi(result) : undefined;
 
   return (
     <div className="rounded-lg overflow-hidden">
@@ -317,13 +320,13 @@ export function BashToolRenderer({
       </div>
 
       {/* Output */}
-      {result && (
+      {cleanResult && (
         <pre
           className={`px-3 py-2 text-xs font-mono overflow-auto max-h-64 ${
             isError ? 'bg-sc-red/5 text-sc-red' : 'bg-sc-bg-dark text-sc-fg-primary'
           }`}
         >
-          {result}
+          {cleanResult}
         </pre>
       )}
     </div>

@@ -106,6 +106,24 @@ class RedisPubSub:
             log.exception("redis_pubsub_publish_failed", ws_event=event)
             raise
 
+    async def setex(self, key: str, ttl: int, value: str) -> None:
+        """Set a key with expiry."""
+        if self._redis is None:
+            await self.connect()
+        await self._redis.setex(key, ttl, value)  # type: ignore[union-attr]
+
+    async def get(self, key: str) -> str | None:
+        """Get a key value."""
+        if self._redis is None:
+            await self.connect()
+        return await self._redis.get(key)  # type: ignore[union-attr]
+
+    async def delete(self, key: str) -> None:
+        """Delete a key."""
+        if self._redis is None:
+            return
+        await self._redis.delete(key)  # type: ignore[union-attr]
+
     async def subscribe(self, local_broadcast_callback: Any) -> None:
         """Subscribe to the Redis channel and forward messages to local broadcast.
 
@@ -198,3 +216,72 @@ async def publish_event(event: str, data: dict[str, Any], *, org_id: str | None 
     """
     pubsub = get_pubsub()
     await pubsub.publish(event, data, org_id)
+
+
+# =============================================================================
+# Agent Control Signals
+# =============================================================================
+# These functions use a Redis set to track agent control signals.
+# The worker execution loop checks this set between message iterations.
+
+AGENT_STOP_SET = "sibyl:agent:stop"
+
+
+async def request_agent_stop(agent_id: str) -> bool:
+    """Request an agent to stop execution.
+
+    Adds the agent_id to a Redis key that the worker checks.
+    The signal expires after 5 minutes to prevent stale signals.
+
+    Args:
+        agent_id: Agent ID to stop
+
+    Returns:
+        True if signal was set
+    """
+    pubsub = get_pubsub()
+    try:
+        key = f"{AGENT_STOP_SET}:{agent_id}"
+        await pubsub.setex(key, 300, "stop")
+        log.info("agent_stop_requested", agent_id=agent_id)
+        return True
+    except Exception:
+        log.exception("agent_stop_request_failed", agent_id=agent_id)
+        return False
+
+
+async def check_agent_stop(agent_id: str) -> bool:
+    """Check if an agent has been requested to stop.
+
+    Called by the worker execution loop between message iterations.
+
+    Args:
+        agent_id: Agent ID to check
+
+    Returns:
+        True if agent should stop
+    """
+    pubsub = get_pubsub()
+    try:
+        key = f"{AGENT_STOP_SET}:{agent_id}"
+        result = await pubsub.get(key)
+        return result is not None
+    except Exception:
+        log.warning("agent_stop_check_failed", agent_id=agent_id)
+        return False
+
+
+async def clear_agent_stop(agent_id: str) -> None:
+    """Clear stop signal after agent has stopped.
+
+    Called after agent execution ends to clean up the signal.
+
+    Args:
+        agent_id: Agent ID to clear
+    """
+    pubsub = get_pubsub()
+    try:
+        key = f"{AGENT_STOP_SET}:{agent_id}"
+        await pubsub.delete(key)
+    except Exception:
+        log.warning("agent_stop_clear_failed", agent_id=agent_id)

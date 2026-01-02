@@ -5,6 +5,7 @@ while agents work autonomously.
 """
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -55,6 +56,33 @@ async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | Non
         await publish_event(event, data, org_id=org_id)
     except Exception:
         log.debug("Broadcast failed (Redis unavailable)", event=event)
+
+
+async def _check_stop_signal(agent_id: str) -> bool:
+    """Check if agent should stop execution.
+
+    Called between message iterations to allow graceful termination.
+
+    Returns:
+        True if agent should stop
+    """
+    try:
+        from sibyl.api.pubsub import check_agent_stop
+
+        return await check_agent_stop(agent_id)
+    except Exception:
+        log.debug("Stop signal check failed", agent_id=agent_id)
+        return False
+
+
+async def _clear_stop_signal(agent_id: str) -> None:
+    """Clear stop signal after agent has stopped."""
+    try:
+        from sibyl.api.pubsub import clear_agent_stop
+
+        await clear_agent_stop(agent_id)
+    except Exception:
+        log.debug("Stop signal clear failed", agent_id=agent_id)
 
 
 async def _store_agent_message(
@@ -319,89 +347,132 @@ async def run_agent_execution(  # noqa: PLR0915
         )
         await _store_agent_message(agent_id, org_id, message_count, initial_message)
 
-        # Execute agent - stream messages to UI in real-time
+        # Execute agent with immediate stop support
+        # Background task watches for stop signal and sets event
         log.info("run_agent_execution_starting", agent_id=agent_id)
-        async for message in instance.execute():
-            msg_class = type(message).__name__
+        stop_event = asyncio.Event()
+        was_terminated = False
 
-            # Format message for UI (returns None for internal SDK messages)
-            formatted = format_agent_message(message)
-            if formatted is None:
-                continue  # Skip internal messages
+        async def watch_stop_signal() -> None:
+            """Background task to watch for stop signal."""
+            while not stop_event.is_set():
+                if await _check_stop_signal(agent_id):
+                    stop_event.set()
+                    return
+                await asyncio.sleep(0.2)  # Check every 200ms
 
-            message_count += 1
+        stop_watcher = asyncio.create_task(watch_stop_signal())
 
-            log.debug(
-                "run_agent_message",
-                agent_id=agent_id,
-                message_num=message_count,
-                message_type=msg_class,
-                content_preview=formatted.get("preview", "")[:100],
-            )
+        try:
+            async for message in instance.execute():
+                # Check for immediate stop
+                if stop_event.is_set():
+                    log.info("agent_stop_signal_immediate", agent_id=agent_id)
+                    was_terminated = True
+                    break
 
-            # Broadcast message to UI in real-time
-            await _safe_broadcast(
-                "agent_message",
-                {
-                    "agent_id": agent_id,
-                    "message_num": message_count,
-                    **formatted,
-                },
-                org_id=org_id,
-            )
+                msg_class = type(message).__name__
 
-            # Store summarized message to Postgres for reload persistence
-            await _store_agent_message(agent_id, org_id, message_count, formatted)
+                # Format message for UI (returns None for internal SDK messages)
+                formatted = format_agent_message(message)
+                if formatted is None:
+                    continue  # Skip internal messages
 
-            # Broadcast injected Sibyl context (once, after first response)
-            if not context_broadcasted and instance.workflow_tracker:
-                injected = instance.workflow_tracker.injected_context
-                if injected:
-                    context_broadcasted = True
-                    message_count += 1
-                    context_message = {
-                        "role": "system",
-                        "type": "sibyl_context",
-                        "content": injected,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                        "preview": "Sibyl context injected",
-                        "icon": "Sparkles",
-                    }
-                    await _safe_broadcast(
-                        "agent_message",
-                        {"agent_id": agent_id, "message_num": message_count, **context_message},
-                        org_id=org_id,
-                    )
-                    await _store_agent_message(agent_id, org_id, message_count, context_message)
+                message_count += 1
 
-            # Track session ID
-            if sid := getattr(message, "session_id", None):
-                session_id = sid
-
-            # Track tool calls for summary
-            if "ToolUse" in msg_class or formatted.get("type") == "tool_use":
-                tool_name = formatted.get("tool_name", "unknown")
-                tool_calls.append(tool_name)
-
-                # Generate and broadcast Tier 3 status hint (fire-and-forget)
-                tool_id = formatted.get("tool_id")
-                tool_input = formatted.get("input")
-                _fire_and_forget(
-                    _generate_and_broadcast_status_hint(
-                        agent_id=agent_id,
-                        tool_call_id=tool_id,
-                        tool_name=tool_name,
-                        tool_input=tool_input,
-                        task_id=task_id,
-                        agent_type=agent_type,
-                        org_id=org_id,
-                    ),
-                    name="status_hint",
+                log.debug(
+                    "run_agent_message",
+                    agent_id=agent_id,
+                    message_num=message_count,
+                    message_type=msg_class,
+                    content_preview=formatted.get("preview", "")[:100],
                 )
 
-            # Keep last meaningful content for summary
-            if formatted.get("content") and formatted.get("type") != "tool_result":
-                last_content = formatted.get("content", "")[:500]
+                # Broadcast message to UI in real-time
+                await _safe_broadcast(
+                    "agent_message",
+                    {
+                        "agent_id": agent_id,
+                        "message_num": message_count,
+                        **formatted,
+                    },
+                    org_id=org_id,
+                )
+
+                # Store summarized message to Postgres for reload persistence
+                await _store_agent_message(agent_id, org_id, message_count, formatted)
+
+                # Broadcast injected Sibyl context (once, after first response)
+                if not context_broadcasted and instance.workflow_tracker:
+                    injected = instance.workflow_tracker.injected_context
+                    if injected:
+                        context_broadcasted = True
+                        message_count += 1
+                        context_message = {
+                            "role": "system",
+                            "type": "sibyl_context",
+                            "content": injected,
+                            "timestamp": datetime.now(UTC).isoformat(),
+                            "preview": "Sibyl context injected",
+                            "icon": "Sparkles",
+                        }
+                        await _safe_broadcast(
+                            "agent_message",
+                            {"agent_id": agent_id, "message_num": message_count, **context_message},
+                            org_id=org_id,
+                        )
+                        await _store_agent_message(agent_id, org_id, message_count, context_message)
+
+                # Track session ID
+                if sid := getattr(message, "session_id", None):
+                    session_id = sid
+
+                # Track tool calls for summary
+                if "ToolUse" in msg_class or formatted.get("type") == "tool_use":
+                    tool_name = formatted.get("tool_name", "unknown")
+                    tool_calls.append(tool_name)
+
+                    # Generate and broadcast Tier 3 status hint (fire-and-forget)
+                    tool_id = formatted.get("tool_id")
+                    tool_input = formatted.get("input")
+                    _fire_and_forget(
+                        _generate_and_broadcast_status_hint(
+                            agent_id=agent_id,
+                            tool_call_id=tool_id,
+                            tool_name=tool_name,
+                            tool_input=tool_input,
+                            task_id=task_id,
+                            agent_type=agent_type,
+                            org_id=org_id,
+                        ),
+                        name="status_hint",
+                    )
+
+                # Keep last meaningful content for summary
+                if formatted.get("content") and formatted.get("type") != "tool_result":
+                    last_content = formatted.get("content", "")[:500]
+
+        finally:
+            # Clean up stop watcher
+            stop_watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stop_watcher
+
+        # Handle termination
+        if was_terminated:
+            await instance.stop("user_terminated")
+            await _clear_stop_signal(agent_id)
+            await _safe_broadcast(
+                "agent_status",
+                {"agent_id": agent_id, "status": "terminated"},
+                org_id=org_id,
+            )
+            return {
+                "agent_id": agent_id,
+                "status": "terminated",
+                "turns": message_count,
+                "reason": "user_terminated",
+            }
 
         # Check workflow completion and send follow-up if needed
         # Only for substantive work (5+ tool calls with code changes)
@@ -625,60 +696,102 @@ async def resume_agent_execution(  # noqa: PLR0915
         tool_calls: list[str] = []
         context_broadcasted = False
 
-        # Execute resumed agent - stream messages to UI
+        # Execute resumed agent with immediate stop support
         log.info("resume_agent_execution_streaming", agent_id=agent_id)
-        async for message in instance.execute():
-            msg_class = type(message).__name__
-            formatted = format_agent_message(message)
-            if formatted is None:
-                continue
+        stop_event = asyncio.Event()
+        was_terminated = False
 
-            message_count += 1
+        async def watch_stop_signal() -> None:
+            """Background task to watch for stop signal."""
+            while not stop_event.is_set():
+                if await _check_stop_signal(agent_id):
+                    stop_event.set()
+                    return
+                await asyncio.sleep(0.2)  # Check every 200ms
 
-            log.debug(
-                "resume_agent_message",
-                agent_id=agent_id,
-                message_num=message_count,
-                message_type=msg_class,
-            )
+        stop_watcher = asyncio.create_task(watch_stop_signal())
 
-            # Broadcast to UI
+        try:
+            async for message in instance.execute():
+                # Check for immediate stop
+                if stop_event.is_set():
+                    log.info("agent_stop_signal_immediate", agent_id=agent_id)
+                    was_terminated = True
+                    break
+
+                msg_class = type(message).__name__
+                formatted = format_agent_message(message)
+                if formatted is None:
+                    continue
+
+                message_count += 1
+
+                log.debug(
+                    "resume_agent_message",
+                    agent_id=agent_id,
+                    message_num=message_count,
+                    message_type=msg_class,
+                )
+
+                # Broadcast to UI
+                await _safe_broadcast(
+                    "agent_message",
+                    {"agent_id": agent_id, "message_num": message_count, **formatted},
+                    org_id=org_id,
+                )
+                await _store_agent_message(agent_id, org_id, message_count, formatted)
+
+                # Broadcast Sibyl context if available
+                if not context_broadcasted and instance.workflow_tracker:
+                    injected = instance.workflow_tracker.injected_context
+                    if injected:
+                        context_broadcasted = True
+                        message_count += 1
+                        context_message = {
+                            "role": "system",
+                            "type": "sibyl_context",
+                            "content": injected,
+                            "timestamp": datetime.now(UTC).isoformat(),
+                            "preview": "Sibyl context injected",
+                            "icon": "Sparkles",
+                        }
+                        await _safe_broadcast(
+                            "agent_message",
+                            {"agent_id": agent_id, "message_num": message_count, **context_message},
+                            org_id=org_id,
+                        )
+                        await _store_agent_message(agent_id, org_id, message_count, context_message)
+
+                # Track session ID (may update if forked)
+                if sid := getattr(message, "session_id", None):
+                    new_session_id = sid
+
+                # Track tool calls
+                if "ToolUse" in msg_class or formatted.get("type") == "tool_use":
+                    tool_name = formatted.get("tool_name", "unknown")
+                    tool_calls.append(tool_name)
+
+        finally:
+            # Clean up stop watcher
+            stop_watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stop_watcher
+
+        # Handle termination
+        if was_terminated:
+            await instance.stop("user_terminated")
+            await _clear_stop_signal(agent_id)
             await _safe_broadcast(
-                "agent_message",
-                {"agent_id": agent_id, "message_num": message_count, **formatted},
+                "agent_status",
+                {"agent_id": agent_id, "status": "terminated"},
                 org_id=org_id,
             )
-            await _store_agent_message(agent_id, org_id, message_count, formatted)
-
-            # Broadcast Sibyl context if available
-            if not context_broadcasted and instance.workflow_tracker:
-                injected = instance.workflow_tracker.injected_context
-                if injected:
-                    context_broadcasted = True
-                    message_count += 1
-                    context_message = {
-                        "role": "system",
-                        "type": "sibyl_context",
-                        "content": injected,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                        "preview": "Sibyl context injected",
-                        "icon": "Sparkles",
-                    }
-                    await _safe_broadcast(
-                        "agent_message",
-                        {"agent_id": agent_id, "message_num": message_count, **context_message},
-                        org_id=org_id,
-                    )
-                    await _store_agent_message(agent_id, org_id, message_count, context_message)
-
-            # Track session ID (may update if forked)
-            if sid := getattr(message, "session_id", None):
-                new_session_id = sid
-
-            # Track tool calls
-            if "ToolUse" in msg_class or formatted.get("type") == "tool_use":
-                tool_name = formatted.get("tool_name", "unknown")
-                tool_calls.append(tool_name)
+            return {
+                "agent_id": agent_id,
+                "status": "terminated",
+                "turns": message_count,
+                "reason": "user_terminated",
+            }
 
         # Update agent with new session_id and completion status
         await manager.update(

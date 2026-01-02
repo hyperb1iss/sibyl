@@ -5,8 +5,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Send } from '@/components/ui/icons';
 import { buildResultsMap, groupMessages } from './chat-grouping';
+import { type Attachment, ChatInput } from './chat-input';
 import { ChatMessageComponent } from './chat-messages';
 import { EmptyChatState, ThinkingIndicator } from './chat-states';
 import { ParallelAgentsBlock, SubagentBlock } from './chat-subagent';
@@ -28,8 +28,6 @@ export function ChatPanel({
   agentStatus,
   statusHints,
 }: ChatPanelProps) {
-  const [inputValue, setInputValue] = useState('');
-  const [isFocused, setIsFocused] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -74,14 +72,12 @@ export function ChatPanel({
     }
   }, [messages.length, pendingMessages.length]);
 
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!inputValue.trim()) return;
-      onSendMessage(inputValue.trim());
-      setInputValue('');
+  // Handle send from ChatInput
+  const handleSend = useCallback(
+    (message: string, _attachments: Attachment[]) => {
+      onSendMessage(message);
     },
-    [inputValue, onSendMessage]
+    [onSendMessage]
   );
 
   // Build a map of tool_id -> result message for pairing
@@ -107,14 +103,14 @@ export function ChatPanel({
   const showThinking = isAgentWorking && !hasPendingToolCalls && !recentAgentText;
 
   // Placeholder text based on agent state
-  const getPlaceholder = () => {
+  const placeholder = (() => {
     if (isAgentWorking) return 'Agent is working... you can still send messages';
-    if (agentStatus === 'paused') return 'Agent is paused. Click ▶ to resume...';
+    if (agentStatus === 'paused') return 'Agent is paused. Click \u25b6 to resume...';
     if (agentStatus === 'completed') return 'Session ended. Send a message to continue...';
     if (agentStatus === 'failed') return 'Agent failed. Send a message to retry...';
     if (agentStatus === 'terminated') return 'Session stopped. Send a message to continue...';
     return 'Send a message to the agent...';
-  };
+  })();
 
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -251,40 +247,8 @@ export function ChatPanel({
         {showThinking && <ThinkingIndicator />}
       </div>
 
-      {/* Input - always visible at bottom with enhanced styling */}
-      <form
-        onSubmit={handleSubmit}
-        className="shrink-0 p-3 border-t border-sc-fg-subtle/20 bg-sc-bg-elevated"
-      >
-        <div
-          className={`flex items-center gap-2 p-1 rounded-xl transition-all duration-300 ${
-            isFocused
-              ? 'bg-gradient-to-r from-sc-purple/10 via-sc-bg-base to-sc-cyan/10 ring-2 ring-sc-purple/30 shadow-lg shadow-sc-purple/10'
-              : 'bg-sc-bg-base'
-          }`}
-        >
-          <input
-            type="text"
-            value={inputValue}
-            onChange={e => setInputValue(e.target.value)}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => setIsFocused(false)}
-            placeholder={getPlaceholder()}
-            className="flex-1 px-3 py-2 bg-transparent border-none text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:outline-none focus-visible:outline-none"
-          />
-          <button
-            type="submit"
-            disabled={!inputValue.trim()}
-            className={`p-2.5 rounded-lg transition-all duration-200 ${
-              inputValue.trim()
-                ? 'bg-gradient-to-r from-sc-purple to-sc-purple/80 hover:from-sc-purple/90 hover:to-sc-purple/70 text-white shadow-lg shadow-sc-purple/30 hover:scale-105 active:scale-95'
-                : 'bg-sc-fg-subtle/20 text-sc-fg-muted cursor-not-allowed'
-            }`}
-          >
-            <Send width={16} height={16} />
-          </button>
-        </div>
-      </form>
+      {/* Input with paste/attachment support */}
+      <ChatInput onSend={handleSend} placeholder={placeholder} />
     </div>
   );
 }

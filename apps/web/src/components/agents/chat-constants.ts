@@ -155,3 +155,20 @@ export function formatDuration(ms: number): string {
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${(ms / 60000).toFixed(1)}m`;
 }
+
+/**
+ * Strip ANSI escape codes from a string.
+ * Handles color codes, cursor movement, and other terminal sequences.
+ */
+export function stripAnsi(str: string): string {
+  // Matches ANSI escape sequences:
+  // - ESC (0x1B) followed by [ and parameters ending in a letter
+  // - CSI (0x9B) followed by parameters
+  // Uses string-based regex to avoid biome control character warnings
+  // biome-ignore lint/complexity/useRegexLiterals: can't use literal due to noControlCharactersInRegex
+  const ansiPattern = new RegExp(
+    '[\\x1b\\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]',
+    'g'
+  );
+  return str.replace(ansiPattern, '');
+}
