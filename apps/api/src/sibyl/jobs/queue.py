@@ -496,3 +496,49 @@ async def enqueue_agent_execution(
     )
 
     return job.job_id
+
+
+async def enqueue_agent_resume(
+    agent_id: str,
+    org_id: str,
+) -> str:
+    """Enqueue an agent resume job.
+
+    Clears any completed job result and enqueues a new execution.
+    The worker will pick up from the latest checkpoint.
+
+    Args:
+        agent_id: Agent ID to resume
+        org_id: Organization ID
+
+    Returns:
+        Job ID for tracking
+    """
+    pool = await get_pool()
+
+    job_id = f"agent:{agent_id}"
+
+    # Clear old result to allow re-enqueue (like force crawl)
+    result_key = f"arq:result:{job_id}"
+    await pool.delete(result_key)
+    log.debug("Cleared old result for agent resume", job_id=job_id)
+
+    job = await pool.enqueue_job(
+        "resume_agent_execution",
+        agent_id,
+        org_id,
+        _job_id=job_id,
+    )
+
+    if job is None:
+        # Job is currently running - that's fine, it will pick up the message
+        log.info("Agent job already running", job_id=job_id, agent_id=agent_id)
+        return job_id
+
+    log.info(
+        "Enqueued agent resume job",
+        job_id=job.job_id,
+        agent_id=agent_id,
+    )
+
+    return job.job_id

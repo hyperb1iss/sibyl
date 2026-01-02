@@ -355,6 +355,8 @@ async def resume_agent(
     Allows continuing sessions even after completion, failure, or termination.
     The agent will be restarted from its last checkpoint.
     """
+    from sibyl.jobs.queue import enqueue_agent_resume
+
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(org.id))
 
@@ -387,6 +389,9 @@ async def resume_agent(
             "completed_at": None,
         },
     )
+
+    # Enqueue resume job for worker
+    await enqueue_agent_resume(agent_id, str(org.id))
 
     return AgentActionResponse(
         success=True,
@@ -526,8 +531,11 @@ async def send_agent_message(
         AgentStatus.FAILED.value,
         AgentStatus.TERMINATED.value,
     )
-    # Auto-resume terminal agents when user sends a message
-    if agent_status in terminal_states:
+    # Track if we need to enqueue resume after storing message
+    needs_resume = agent_status in terminal_states
+
+    # Update status first if resuming
+    if needs_resume:
         await manager.update(
             agent_id,
             {
@@ -596,6 +604,12 @@ async def send_agent_message(
         message_id=msg_id,
         content_length=len(request.content),
     )
+
+    # Enqueue resume job AFTER message is stored in checkpoint
+    if needs_resume:
+        from sibyl.jobs.queue import enqueue_agent_resume
+
+        await enqueue_agent_resume(agent_id, str(org.id))
 
     return SendMessageResponse(
         success=True,

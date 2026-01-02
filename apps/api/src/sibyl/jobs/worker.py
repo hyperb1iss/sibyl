@@ -1408,6 +1408,209 @@ async def run_agent_execution(  # noqa: PLR0915
         raise
 
 
+async def resume_agent_execution(
+    ctx: dict[str, Any],  # noqa: ARG001
+    agent_id: str,
+    org_id: str,
+) -> dict[str, Any]:
+    """Resume an agent from its last checkpoint.
+
+    Called when user sends a message to a terminal agent or clicks resume.
+    Loads the latest checkpoint and continues the conversation.
+
+    Args:
+        ctx: arq context
+        agent_id: Agent ID to resume
+        org_id: Organization ID
+
+    Returns:
+        Dict with execution results
+    """
+    from sibyl.agents import AgentRunner, WorktreeManager
+    from sibyl_core.graph.client import get_graph_client
+    from sibyl_core.graph.entities import EntityManager
+    from sibyl_core.models import AgentCheckpoint, AgentRecord, AgentStatus, EntityType
+
+    log.info("resume_agent_execution_started", agent_id=agent_id)
+
+    try:
+        client = await get_graph_client()
+        manager = EntityManager(client, group_id=org_id)
+
+        # Get agent record
+        agent = await manager.get(agent_id)
+        if not agent or not isinstance(agent, AgentRecord):
+            raise ValueError(f"Agent not found: {agent_id}")
+
+        project_id = agent.project_id or ""
+
+        # Get latest checkpoint for this agent
+        checkpoints = await manager.list_by_type(entity_type=EntityType.CHECKPOINT, limit=50)
+        agent_checkpoints = [
+            c
+            for c in checkpoints
+            if isinstance(c, AgentCheckpoint) and c.agent_id == agent_id
+        ]
+
+        if not agent_checkpoints:
+            raise ValueError(f"No checkpoint found for agent {agent_id}")
+
+        latest_checkpoint = max(
+            agent_checkpoints,
+            key=lambda c: c.created_at or datetime.min.replace(tzinfo=UTC),
+        )
+
+        # Extract the latest user message as the prompt
+        history = latest_checkpoint.conversation_history or []
+        user_messages = [m for m in history if m.get("role") == "user"]
+        prompt = user_messages[-1].get("content", "Continue.") if user_messages else "Continue."
+
+        # Create worktree manager and agent runner
+        worktree_manager = WorktreeManager(
+            entity_manager=manager,
+            org_id=org_id,
+            project_id=project_id,
+            repo_path=".",
+        )
+
+        runner = AgentRunner(
+            entity_manager=manager,
+            worktree_manager=worktree_manager,
+            org_id=org_id,
+            project_id=project_id,
+        )
+
+        # Resume from checkpoint
+        instance = await runner.resume_from_checkpoint(
+            checkpoint=latest_checkpoint,
+            prompt=prompt,
+            enable_approvals=True,
+        )
+
+        # Broadcast that agent is now working
+        await _safe_broadcast(
+            "agent_status",
+            {"agent_id": agent_id, "status": "working"},
+            org_id=org_id,
+        )
+
+        # Track execution state
+        message_count = 0
+        session_id = latest_checkpoint.session_id or ""
+        last_content = ""
+        tool_calls: list[str] = []
+        context_broadcasted = False
+
+        # Execute resumed agent - stream messages to UI
+        log.info("resume_agent_execution_starting", agent_id=agent_id, checkpoint=latest_checkpoint.id)
+        async for message in instance.execute():
+            message_count += 1
+            msg_class = type(message).__name__
+            formatted = _format_agent_message(message)
+
+            log.debug(
+                "resume_agent_message",
+                agent_id=agent_id,
+                message_num=message_count,
+                message_type=msg_class,
+            )
+
+            # Broadcast to UI
+            await _safe_broadcast(
+                "agent_message",
+                {"agent_id": agent_id, "message_num": message_count, **formatted},
+                org_id=org_id,
+            )
+            await _store_agent_message(agent_id, org_id, message_count, formatted)
+
+            # Broadcast Sibyl context if available
+            if not context_broadcasted and instance.workflow_tracker:
+                injected = instance.workflow_tracker.injected_context
+                if injected:
+                    context_broadcasted = True
+                    message_count += 1
+                    context_message = {
+                        "role": "system",
+                        "type": "sibyl_context",
+                        "content": injected,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "preview": "Sibyl context injected",
+                        "icon": "Sparkles",
+                    }
+                    await _safe_broadcast(
+                        "agent_message",
+                        {"agent_id": agent_id, "message_num": message_count, **context_message},
+                        org_id=org_id,
+                    )
+                    await _store_agent_message(agent_id, org_id, message_count, context_message)
+
+            # Track session ID
+            if sid := getattr(message, "session_id", None):
+                session_id = sid
+
+            # Track tool calls
+            if "ToolUse" in msg_class or formatted.get("type") == "tool_use":
+                tool_name = formatted.get("tool_name", "unknown")
+                tool_calls.append(tool_name)
+
+            # Keep last content
+            if formatted.get("content") and formatted.get("type") != "tool_result":
+                last_content = formatted.get("content", "")[:500]
+
+        # Create new checkpoint
+        from uuid import uuid4
+
+        checkpoint_id = f"chkpt_{uuid4().hex[:12]}"
+        summary = f"Resumed. {message_count} turns. Tools: {', '.join(tool_calls[-5:]) or 'none'}"
+        checkpoint = AgentCheckpoint(
+            id=checkpoint_id,
+            name=f"checkpoint-{agent_id[-8:]}",
+            agent_id=agent_id,
+            session_id=session_id,
+            conversation_history=[
+                {"role": "user", "content": prompt, "timestamp": datetime.now(UTC).isoformat(), "type": "text"},
+                {"role": "system", "content": summary, "timestamp": datetime.now(UTC).isoformat(), "type": "text"},
+            ],
+            current_step=last_content[:200] if last_content else None,
+        )
+        await manager.create_direct(checkpoint)
+
+        # Update agent status
+        await manager.update(
+            agent_id,
+            {"status": AgentStatus.COMPLETED.value, "conversation_turns": message_count},
+        )
+
+        result = {"agent_id": agent_id, "status": "completed", "turns": message_count, "resumed": True}
+
+        await _safe_broadcast(
+            "agent_status",
+            {"agent_id": agent_id, "status": "completed", "turns": message_count},
+            org_id=org_id,
+        )
+
+        log.info("resume_agent_execution_completed", **result)
+        return result
+
+    except Exception as e:
+        log.exception("resume_agent_execution_failed", agent_id=agent_id, error=str(e))
+
+        try:
+            client = await get_graph_client()
+            manager = EntityManager(client, group_id=org_id)
+            await manager.update(agent_id, {"status": AgentStatus.FAILED.value, "error_message": str(e)})
+        except Exception:
+            log.warning("Failed to update agent status on error", agent_id=agent_id)
+
+        await _safe_broadcast(
+            "agent_status",
+            {"agent_id": agent_id, "status": "failed", "error": str(e)},
+            org_id=org_id,
+        )
+
+        raise
+
+
 # Optional: Scheduled job to sync all sources
 async def sync_all_sources(ctx: dict[str, Any]) -> dict[str, Any]:
     """Sync all sources - can be run as a cron job."""
@@ -1493,6 +1696,7 @@ class WorkerSettings:
         create_learning_episode,
         update_entity,
         run_agent_execution,
+        resume_agent_execution,
         generate_status_hint,
     ]
 
