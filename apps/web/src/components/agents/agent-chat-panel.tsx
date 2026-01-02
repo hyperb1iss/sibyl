@@ -39,13 +39,27 @@ interface PendingMessage {
 const STALE_THRESHOLD_SECONDS = 120;
 
 /** Check if agent is a zombie (says working but no heartbeat) */
-function isAgentZombie(agent: { status: string; last_heartbeat: string | null }): boolean {
+function isAgentZombie(agent: {
+  status: string;
+  last_heartbeat: string | null;
+  started_at: string | null;
+}): boolean {
   const isSupposedlyActive = ['initializing', 'working', 'resuming', 'waiting_approval'].includes(
     agent.status
   );
   if (!isSupposedlyActive) return false;
 
-  if (!agent.last_heartbeat) return true; // Never heartbeated
+  // Grace period for new agents that haven't heartbeated yet
+  if (!agent.last_heartbeat) {
+    // If started recently (within grace period), not a zombie yet
+    if (agent.started_at) {
+      const startedAt = new Date(agent.started_at);
+      const secondsSinceStart = (Date.now() - startedAt.getTime()) / 1000;
+      if (secondsSinceStart < STALE_THRESHOLD_SECONDS) return false;
+    }
+    // Never heartbeated and no start time or past grace period
+    return true;
+  }
 
   const lastHeartbeat = new Date(agent.last_heartbeat);
   const secondsSince = (Date.now() - lastHeartbeat.getTime()) / 1000;

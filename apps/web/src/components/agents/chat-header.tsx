@@ -26,7 +26,13 @@ function getHeartbeatStatus(agent: Agent): 'healthy' | 'stale' | 'unresponsive' 
   if (!isSupposedlyActive) return null;
 
   if (!agent.last_heartbeat) {
-    // Never heartbeated but claims to be working - unresponsive
+    // Grace period for new agents
+    if (agent.started_at) {
+      const startedAt = new Date(agent.started_at);
+      const secondsSinceStart = (Date.now() - startedAt.getTime()) / 1000;
+      if (secondsSinceStart < STALE_THRESHOLD_SECONDS) return 'healthy';
+    }
+    // Never heartbeated and past grace period
     return 'unresponsive';
   }
 
