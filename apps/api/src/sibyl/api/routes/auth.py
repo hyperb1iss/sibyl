@@ -117,10 +117,6 @@ def _clear_auth_cookies(response: Response) -> None:
     )
 
 
-def _frontend_redirect(request: Request) -> str:
-    return request.query_params.get("redirect", config_module.settings.frontend_url)
-
-
 def _safe_frontend_redirect(redirect_value: str | None) -> str:
     target = (redirect_value or "").strip()
     if not target:
@@ -370,7 +366,8 @@ async def github_callback(
         details={"github_id": user.github_id, "email": user.email},
     )
 
-    response = RedirectResponse(url=_frontend_redirect(request), status_code=status.HTTP_302_FOUND)
+    redirect = _safe_frontend_redirect(request.query_params.get("redirect"))
+    response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
     _set_auth_cookies(
         response,
         access_token=access_token,

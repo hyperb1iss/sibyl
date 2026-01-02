@@ -6,10 +6,7 @@ REST API for managing AI agents via the AgentOrchestrator.
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
-
-if TYPE_CHECKING:
-    from sibyl_core.models.entities import Entity
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,7 +25,23 @@ from sibyl_core.models import (
     EntityType,
 )
 
+if TYPE_CHECKING:
+    from sibyl_core.models.entities import Entity
+
 log = structlog.get_logger()
+
+
+def _is_valid_uuid(value: str | None) -> bool:
+    """Check if a string is a valid UUID."""
+    if not value:
+        return False
+    try:
+        UUID(value)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 _WRITE_ROLES = (
     OrganizationRole.OWNER,
     OrganizationRole.ADMIN,
@@ -535,10 +548,17 @@ async def send_agent_message(
     )
     needs_resume = agent_status in terminal_states
 
-    if needs_resume and not session_id:
+    # Validate session_id is a proper UUID (not a placeholder like "user-initiated")
+    has_valid_session = _is_valid_uuid(session_id)
+
+    if needs_resume and not has_valid_session:
         raise HTTPException(
             status_code=400,
-            detail="Agent has no session_id - cannot resume. Start a new agent instead.",
+            detail=(
+                "Agent has no valid session_id - cannot resume. "
+                "This agent was created before session tracking was implemented. "
+                "Start a new agent instead."
+            ),
         )
 
     # Generate message ID

@@ -124,57 +124,59 @@ export function Markdown({ content, className = '' }: MarkdownProps) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          // Headings
+          // Headings - gradient accents for that electric feel
           h1: ({ children }) => (
-            <h1 className="text-2xl font-bold text-sc-fg-primary mt-6 mb-4 first:mt-0">
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-sc-purple via-sc-fg-primary to-sc-cyan bg-clip-text text-transparent mt-6 mb-4 first:mt-0">
               {children}
             </h1>
           ),
           h2: ({ children }) => (
-            <h2 className="text-xl font-bold text-sc-fg-primary mt-5 mb-3 first:mt-0">
-              {children}
-            </h2>
+            <h2 className="text-xl font-bold text-sc-purple mt-5 mb-3 first:mt-0">{children}</h2>
           ),
           h3: ({ children }) => (
-            <h3 className="text-lg font-semibold text-sc-fg-primary mt-4 mb-2 first:mt-0">
-              {children}
-            </h3>
+            <h3 className="text-lg font-semibold text-sc-cyan mt-4 mb-2 first:mt-0">{children}</h3>
           ),
           h4: ({ children }) => (
-            <h4 className="text-base font-semibold text-sc-fg-primary mt-3 mb-2 first:mt-0">
+            <h4 className="text-base font-semibold text-sc-fg-secondary mt-3 mb-2 first:mt-0">
               {children}
             </h4>
           ),
 
-          // Paragraphs
+          // Paragraphs - softer, more readable
           p: ({ children }) => (
-            <p className="text-sc-fg-muted leading-relaxed mb-4 last:mb-0">{children}</p>
+            <p className="text-sc-fg-secondary leading-relaxed mb-3 last:mb-0">{children}</p>
           ),
 
-          // Lists
+          // Lists - colored markers, better spacing
           ul: ({ children }) => (
-            <ul className="list-disc list-inside text-sc-fg-muted mb-4 space-y-1">{children}</ul>
+            <ul className="mb-4 space-y-1.5 ml-1 [&>li]:relative [&>li]:pl-5 [&>li]:before:content-['•'] [&>li]:before:absolute [&>li]:before:left-0 [&>li]:before:text-sc-purple [&>li]:before:font-bold">
+              {children}
+            </ul>
           ),
           ol: ({ children }) => (
-            <ol className="list-decimal list-inside text-sc-fg-muted mb-4 space-y-1">{children}</ol>
+            <ol className="mb-4 space-y-1.5 ml-1 list-decimal list-inside text-sc-fg-secondary marker:text-sc-cyan marker:font-semibold">
+              {children}
+            </ol>
           ),
-          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+          li: ({ children }) => (
+            <li className="text-sc-fg-secondary leading-relaxed">{children}</li>
+          ),
 
-          // Links
+          // Links - cyan glow
           a: ({ href, children }) => (
             <a
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-sc-cyan hover:text-sc-purple underline underline-offset-2 transition-colors"
+              className="text-sc-cyan hover:text-sc-purple transition-colors decoration-sc-cyan/50 hover:decoration-sc-purple underline underline-offset-2"
             >
               {children}
             </a>
           ),
 
-          // Blockquotes
+          // Blockquotes - purple accent with glow
           blockquote: ({ children }) => (
-            <blockquote className="border-l-4 border-sc-purple/50 pl-4 py-1 my-4 text-sc-fg-muted italic bg-sc-purple/5 rounded-r-lg">
+            <blockquote className="border-l-2 border-sc-purple pl-4 py-2 my-4 text-sc-fg-muted italic bg-gradient-to-r from-sc-purple/10 to-transparent rounded-r-lg">
               {children}
             </blockquote>
           ),
@@ -185,46 +187,59 @@ export function Markdown({ content, className = '' }: MarkdownProps) {
           // Pre wrapper (shiki handles its own pre, but this catches non-highlighted)
           pre: ({ children }) => <>{children}</>,
 
-          // Horizontal rules
-          hr: () => <hr className="my-6 border-sc-fg-subtle/30" />,
+          // Horizontal rules - gradient line
+          hr: () => (
+            <hr className="my-6 border-0 h-px bg-gradient-to-r from-transparent via-sc-purple/50 to-transparent" />
+          ),
 
-          // Tables
+          // Tables - glass morphism style
           table: ({ children }) => (
-            <div className="overflow-x-auto my-4">
+            <div className="overflow-x-auto my-4 rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-elevated/50">
               <table className="w-full border-collapse text-sm">{children}</table>
             </div>
           ),
           thead: ({ children }) => (
-            <thead className="border-b border-sc-fg-subtle/30">{children}</thead>
+            <thead className="bg-sc-purple/10 border-b border-sc-purple/20">{children}</thead>
           ),
-          tbody: ({ children }) => <tbody>{children}</tbody>,
-          tr: ({ children }) => <tr className="border-b border-sc-fg-subtle/10">{children}</tr>,
+          tbody: ({ children }) => (
+            <tbody className="divide-y divide-sc-fg-subtle/10">{children}</tbody>
+          ),
+          tr: ({ children }) => (
+            <tr className="hover:bg-sc-fg-subtle/5 transition-colors">{children}</tr>
+          ),
           th: ({ children }) => (
-            <th className="px-3 py-2 text-left text-sc-fg-primary font-semibold">{children}</th>
+            <th className="px-3 py-2.5 text-left text-sc-purple font-semibold text-xs uppercase tracking-wider">
+              {children}
+            </th>
           ),
-          td: ({ children }) => <td className="px-3 py-2 text-sc-fg-muted">{children}</td>,
+          td: ({ children }) => <td className="px-3 py-2.5 text-sc-fg-secondary">{children}</td>,
 
-          // Strong & emphasis
+          // Strong - coral accent for emphasis
           strong: ({ children }) => (
-            <strong className="font-semibold text-sc-fg-primary">{children}</strong>
+            <strong className="font-semibold text-sc-coral">{children}</strong>
           ),
           em: ({ children }) => <em className="italic text-sc-fg-muted">{children}</em>,
 
           // Strikethrough
           del: ({ children }) => <del className="line-through text-sc-fg-subtle">{children}</del>,
 
-          // Images (native img for external markdown content)
+          // Images
           img: ({ src, alt }) => (
             <img
               src={src}
               alt={alt || ''}
-              className="rounded-xl my-4 max-w-full border border-sc-fg-subtle/20"
+              className="rounded-xl my-4 max-w-full border border-sc-purple/20 shadow-lg shadow-sc-purple/5"
             />
           ),
 
-          // Task lists (GFM)
+          // Task lists (GFM) - purple checkboxes
           input: ({ checked }) => (
-            <input type="checkbox" checked={checked} readOnly className="mr-2 accent-sc-purple" />
+            <input
+              type="checkbox"
+              checked={checked}
+              readOnly
+              className="mr-2 accent-sc-purple rounded"
+            />
           ),
         }}
       >

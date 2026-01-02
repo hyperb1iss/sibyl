@@ -17,6 +17,17 @@ from sibyl.db import AgentMessage, AgentMessageRole, AgentMessageType, get_sessi
 log = structlog.get_logger()
 
 
+def _is_valid_uuid(value: str | None) -> bool:
+    """Check if a string is a valid UUID."""
+    if not value:
+        return False
+    try:
+        UUID(value)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | None) -> None:
     """Broadcast event via Redis pub/sub (worker runs in separate process)."""
     try:
@@ -292,11 +303,14 @@ async def run_agent_execution(  # noqa: PLR0915
         # Execute agent - stream messages to UI in real-time
         log.info("run_agent_execution_starting", agent_id=agent_id)
         async for message in instance.execute():
-            message_count += 1
             msg_class = type(message).__name__
 
-            # Format message for UI
+            # Format message for UI (returns None for internal SDK messages)
             formatted = format_agent_message(message)
+            if formatted is None:
+                continue  # Skip internal messages
+
+            message_count += 1
 
             log.debug(
                 "run_agent_message",
@@ -380,8 +394,11 @@ async def run_agent_execution(  # noqa: PLR0915
 
             # Stream follow-up responses
             async for message in instance.send_message(follow_up_prompt):
-                message_count += 1
                 formatted = format_agent_message(message)
+                if formatted is None:
+                    continue
+
+                message_count += 1
 
                 await _safe_broadcast(
                     "agent_message",
@@ -481,7 +498,7 @@ async def run_agent_execution(  # noqa: PLR0915
         raise
 
 
-async def resume_agent_execution(
+async def resume_agent_execution(  # noqa: PLR0915
     ctx: dict[str, Any],  # noqa: ARG001
     agent_id: str,
     org_id: str,
@@ -522,8 +539,12 @@ async def resume_agent_execution(
         session_id = agent_meta.get("session_id")
         project_id = agent_meta.get("project_id") or ""
 
-        if not session_id:
-            raise ValueError(f"Agent {agent_id} has no session_id - cannot resume")
+        # Validate session_id is a proper UUID (not a placeholder like "user-initiated")
+        if not _is_valid_uuid(session_id):
+            raise ValueError(
+                f"Agent {agent_id} has invalid session_id '{session_id}' - cannot resume. "
+                "This agent was created before session tracking was implemented."
+            )
 
         log.info("resume_using_session", agent_id=agent_id, session_id=session_id)
 
@@ -566,9 +587,12 @@ async def resume_agent_execution(
         # Execute resumed agent - stream messages to UI
         log.info("resume_agent_execution_streaming", agent_id=agent_id)
         async for message in instance.execute():
-            message_count += 1
             msg_class = type(message).__name__
             formatted = format_agent_message(message)
+            if formatted is None:
+                continue
+
+            message_count += 1
 
             log.debug(
                 "resume_agent_message",

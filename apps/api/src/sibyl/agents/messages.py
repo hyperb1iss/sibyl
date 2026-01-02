@@ -166,11 +166,19 @@ def format_user_message(content: Any, timestamp: str) -> dict[str, Any]:
     }
 
 
-def format_agent_message(message: Any) -> dict[str, Any]:
-    """Format a Claude SDK message for beautiful UI display."""
+def format_agent_message(message: Any) -> dict[str, Any] | None:
+    """Format a Claude SDK message for beautiful UI display.
+
+    Returns None for internal SDK messages that shouldn't be shown to users.
+    """
     msg_class = type(message).__name__
     content = getattr(message, "content", None)
     timestamp = datetime.now(UTC).isoformat()
+
+    # Skip internal SDK messages that shouldn't be displayed
+    # SystemMessage is Claude's internal system prompt - not for UI
+    if msg_class in ("SystemMessage", "StopMessage"):
+        return None
 
     # Extract parent_tool_use_id for subagent message grouping
     parent_tool_use_id = getattr(message, "parent_tool_use_id", None)
@@ -183,6 +191,10 @@ def format_agent_message(message: Any) -> dict[str, Any]:
 
     if msg_class == "UserMessage":
         result = format_user_message(content, timestamp)
+        # Skip user text messages - these are echoes of prompts we already stored
+        # Only show tool results (role="tool") from UserMessage
+        if result.get("role") == "user":
+            return None
         if parent_tool_use_id:
             result["parent_tool_use_id"] = parent_tool_use_id
         return result

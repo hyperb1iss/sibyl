@@ -89,11 +89,15 @@ export interface SubagentBlockProps {
   nestedCalls: ChatMessage[];
   resultsByToolId: Map<string, ChatMessage>;
   pollingCalls?: ChatMessage[];
+  /** When true, treat pending tasks as interrupted (parent agent terminated) */
+  isAgentTerminal?: boolean;
 }
 
 export interface ParallelAgentsBlockProps {
   subagents: SubagentData[];
   resultsByToolId: Map<string, ChatMessage>;
+  /** When true, treat pending tasks as interrupted (parent agent terminated) */
+  isAgentTerminal?: boolean;
 }
 
 export interface ChatMessageComponentProps {

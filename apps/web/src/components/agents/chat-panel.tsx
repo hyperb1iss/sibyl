@@ -36,6 +36,9 @@ export function ChatPanel({
   const prevMessageCount = useRef(messages.length);
   const isAtBottomRef = useRef(true); // Track if user is scrolled to bottom
 
+  // Check if agent is in a terminal state (spinners should stop)
+  const isAgentTerminal = ['completed', 'failed', 'terminated'].includes(agentStatus);
+
   // Track new messages for entrance animations
   const newMessageIds = useRef(new Set<string>());
   if (messages.length > prevMessageCount.current) {
@@ -131,6 +134,7 @@ export function ChatPanel({
                 key={`parallel-${group.subagents[0]?.taskCall.id ?? idx}`}
                 subagents={group.subagents}
                 resultsByToolId={group.resultsByToolId}
+                isAgentTerminal={isAgentTerminal}
               />
             );
           }
@@ -143,6 +147,7 @@ export function ChatPanel({
                 nestedCalls={group.nestedCalls}
                 resultsByToolId={group.resultsByToolId}
                 pollingCalls={group.pollingCalls}
+                isAgentTerminal={isAgentTerminal}
               />
             );
           }

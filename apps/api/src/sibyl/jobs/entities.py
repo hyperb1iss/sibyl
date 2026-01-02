@@ -102,11 +102,16 @@ async def create_entity(  # noqa: PLR0915
         for rel_data in relationships:
             try:
                 rel_type = RelationshipType(rel_data.get("type", "RELATED_TO"))
-                rel_id = rel_data.get("id") or f"rel_{rel_data.get('source_id')}_{rel_data.get('target_id')}"
+                rel_id = (
+                    rel_data.get("id")
+                    or f"rel_{rel_data.get('source_id')}_{rel_data.get('target_id')}"
+                )
                 source_id = rel_data.get("source_id") or ""
                 target_id = rel_data.get("target_id") or ""
                 if not source_id or not target_id:
-                    log.warning("Skipping relationship with missing source/target", rel_data=rel_data)
+                    log.warning(
+                        "Skipping relationship with missing source/target", rel_data=rel_data
+                    )
                     continue
                 rel = Relationship(
                     id=rel_id,

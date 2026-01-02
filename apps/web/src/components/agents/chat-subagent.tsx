@@ -22,6 +22,7 @@ export function SubagentBlock({
   nestedCalls,
   resultsByToolId,
   pollingCalls = [],
+  isAgentTerminal = false,
 }: SubagentBlockProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -48,10 +49,11 @@ export function SubagentBlock({
   // Count tool calls
   const toolCount = nestedCalls.length;
 
-  // Check status
+  // Check status - treat as interrupted if agent is terminal and no result
   const hasResult = !!taskResult;
-  const isWorking = !hasResult;
-  const isError = taskResult?.metadata?.is_error as boolean | undefined;
+  const isInterrupted = !hasResult && isAgentTerminal;
+  const isWorking = !hasResult && !isAgentTerminal;
+  const isError = isInterrupted || (taskResult?.metadata?.is_error as boolean | undefined);
 
   // Extract result metadata (cost, duration, etc.)
   const resultMeta = taskResult?.metadata as
@@ -93,6 +95,7 @@ export function SubagentBlock({
           pollStatus={pollStatus}
           isWorking={isWorking}
           isError={isError}
+          isInterrupted={isInterrupted}
         />
 
         {/* Agent type badge */}
@@ -129,6 +132,7 @@ export function SubagentBlock({
           pollStatus={pollStatus}
           isWorking={isWorking}
           isError={isError}
+          isInterrupted={isInterrupted}
         />
 
         {/* Duration (when complete) */}
@@ -205,9 +209,15 @@ export function SubagentBlock({
 // =============================================================================
 
 /** Container for multiple subagents spawned in parallel */
-export function ParallelAgentsBlock({ subagents, resultsByToolId }: ParallelAgentsBlockProps) {
-  const workingCount = subagents.filter(s => !s.taskResult).length;
-  const completedCount = subagents.length - workingCount;
+export function ParallelAgentsBlock({
+  subagents,
+  resultsByToolId,
+  isAgentTerminal = false,
+}: ParallelAgentsBlockProps) {
+  // Treat pending tasks as interrupted if agent is terminal
+  const workingCount = isAgentTerminal ? 0 : subagents.filter(s => !s.taskResult).length;
+  const interruptedCount = isAgentTerminal ? subagents.filter(s => !s.taskResult).length : 0;
+  const completedCount = subagents.length - workingCount - interruptedCount;
   const allDone = workingCount === 0;
 
   return (
@@ -232,7 +242,11 @@ export function ParallelAgentsBlock({ subagents, resultsByToolId }: ParallelAgen
         </span>
         <span className="text-[10px] text-sc-fg-subtle flex-1">
           {allDone ? (
-            <span className="text-sc-green animate-fade-in">All complete</span>
+            interruptedCount > 0 ? (
+              <span className="text-sc-yellow animate-fade-in">{interruptedCount} interrupted</span>
+            ) : (
+              <span className="text-sc-green animate-fade-in">All complete</span>
+            )
           ) : (
             <>
               <span className="text-sc-yellow animate-pulse">{workingCount} working</span>
@@ -253,6 +267,7 @@ export function ParallelAgentsBlock({ subagents, resultsByToolId }: ParallelAgen
             taskResult={subagent.taskResult}
             nestedCalls={subagent.nestedCalls}
             resultsByToolId={resultsByToolId}
+            isAgentTerminal={isAgentTerminal}
           />
         ))}
       </div>
@@ -269,9 +284,16 @@ interface StatusIconProps {
   pollStatus?: 'running' | 'completed' | 'failed';
   isWorking: boolean;
   isError?: boolean;
+  isInterrupted?: boolean;
 }
 
-function StatusIcon({ isBackground, pollStatus, isWorking, isError }: StatusIconProps) {
+function StatusIcon({
+  isBackground,
+  pollStatus,
+  isWorking,
+  isError,
+  isInterrupted,
+}: StatusIconProps) {
   if (isBackground && pollStatus) {
     if (pollStatus === 'running') {
       return <Spinner size="sm" className="text-sc-cyan shrink-0" />;
@@ -290,6 +312,10 @@ function StatusIcon({ isBackground, pollStatus, isWorking, isError }: StatusIcon
     return <Spinner size="sm" className="text-sc-purple shrink-0" />;
   }
 
+  if (isInterrupted) {
+    return <Xmark width={14} height={14} className="text-sc-yellow shrink-0" />;
+  }
+
   if (isError) {
     return <Xmark width={14} height={14} className="text-sc-red shrink-0 animate-wiggle" />;
   }
@@ -301,7 +327,13 @@ function StatusIcon({ isBackground, pollStatus, isWorking, isError }: StatusIcon
   );
 }
 
-function StatusLabel({ isBackground, pollStatus, isWorking, isError }: StatusIconProps) {
+function StatusLabel({
+  isBackground,
+  pollStatus,
+  isWorking,
+  isError,
+  isInterrupted,
+}: StatusIconProps) {
   if (isBackground && pollStatus) {
     if (pollStatus === 'running') {
       return <span className="text-[10px] text-sc-yellow font-medium animate-pulse">running</span>;
@@ -314,6 +346,10 @@ function StatusLabel({ isBackground, pollStatus, isWorking, isError }: StatusIco
 
   if (isWorking) {
     return <span className="text-[10px] text-sc-yellow font-medium animate-pulse">working</span>;
+  }
+
+  if (isInterrupted) {
+    return <span className="text-[10px] text-sc-yellow font-medium">interrupted</span>;
   }
 
   if (isError) {
