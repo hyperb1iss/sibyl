@@ -329,10 +329,14 @@ Priority: {task.priority}
         )
 
         # Create SDK options
+        # - setting_sources: Load Claude Code config from user (~/.claude) and project (.claude)
+        # - permission_mode: Auto-accept edits for autonomous agent operation
         sdk_options = ClaudeAgentOptions(
             cwd=cwd,
             system_prompt=system_prompt,
             hooks=merged_hooks,  # type: ignore[arg-type]
+            setting_sources=["user", "project"],
+            permission_mode="acceptEdits",
         )
 
         # Create instance
@@ -502,6 +506,8 @@ Priority: {task.priority}
         sdk_options = ClaudeAgentOptions(
             cwd=cwd,
             hooks=merged_hooks,  # type: ignore[arg-type]
+            setting_sources=["user", "project"],
+            permission_mode="acceptEdits",
             resume=restore_result.session_id,  # Resume from checkpoint session
         )
 
@@ -687,6 +693,8 @@ class AgentInstance:
                 cwd=self.sdk_options.cwd,
                 system_prompt=self.sdk_options.system_prompt,
                 hooks=self.sdk_options.hooks,
+                setting_sources=["user", "project"],
+                permission_mode="acceptEdits",
                 resume=self._session_id,
             )
 
