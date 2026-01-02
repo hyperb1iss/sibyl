@@ -173,15 +173,15 @@ export function SpawnAgentDialog({
                   Attach to Task
                 </Label>
                 <Select
-                  value={taskId}
-                  onValueChange={setTaskId}
+                  value={taskId || '__none__'}
+                  onValueChange={v => setTaskId(v === '__none__' ? '' : v)}
                   disabled={tasksLoading || !!defaultTaskId}
                 >
                   <SelectTrigger id="task">
                     <SelectValue placeholder="No task (standalone agent)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No task (standalone agent)</SelectItem>
+                    <SelectItem value="__none__">No task (standalone agent)</SelectItem>
                     {tasks.map(task => (
                       <SelectItem key={task.id} value={task.id}>
                         {task.name}
