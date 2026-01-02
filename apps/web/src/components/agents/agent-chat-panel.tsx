@@ -35,6 +35,23 @@ interface PendingMessage {
   timestamp: Date;
 }
 
+// Heartbeat threshold (matching backend)
+const STALE_THRESHOLD_SECONDS = 120;
+
+/** Check if agent is a zombie (says working but no heartbeat) */
+function isAgentZombie(agent: { status: string; last_heartbeat: string | null }): boolean {
+  const isSupposedlyActive = ['initializing', 'working', 'resuming', 'waiting_approval'].includes(
+    agent.status
+  );
+  if (!isSupposedlyActive) return false;
+
+  if (!agent.last_heartbeat) return true; // Never heartbeated
+
+  const lastHeartbeat = new Date(agent.last_heartbeat);
+  const secondsSince = (Date.now() - lastHeartbeat.getTime()) / 1000;
+  return secondsSince > STALE_THRESHOLD_SECONDS;
+}
+
 // =============================================================================
 // AgentChatPanel
 // =============================================================================
@@ -55,8 +72,10 @@ export function AgentChatPanel({ agent }: AgentChatPanelProps) {
   // Tier 3 status hints from Haiku (via WebSocket)
   const statusHints = useStatusHints(agent.id);
 
-  // Check if agent is actively working
-  const isAgentWorking = ['initializing', 'working', 'resuming'].includes(agent.status);
+  // Check if agent is actively working (excluding zombies)
+  const isZombie = isAgentZombie(agent);
+  const isAgentWorking =
+    ['initializing', 'working', 'resuming'].includes(agent.status) && !isZombie;
 
   // Track pending messages (queued but not yet processed by agent)
   const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);

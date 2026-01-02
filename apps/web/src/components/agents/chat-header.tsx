@@ -4,7 +4,7 @@
  * Agent header with status display and control buttons.
  */
 
-import { Pause, Play, Square } from '@/components/ui/icons';
+import { Pause, Play, Square, WarningCircle } from '@/components/ui/icons';
 import type { Agent } from '@/lib/api';
 import {
   AGENT_STATUS_CONFIG,
@@ -13,6 +13,30 @@ import {
   type AgentTypeValue,
 } from '@/lib/constants';
 import { usePauseAgent, useResumeAgent, useTerminateAgent } from '@/lib/hooks';
+
+// Heartbeat thresholds (matching backend)
+const STALE_THRESHOLD_SECONDS = 120; // 2 minutes
+const UNRESPONSIVE_THRESHOLD_SECONDS = 600; // 10 minutes
+
+/** Check if agent is a zombie (says working but no heartbeat) */
+function getHeartbeatStatus(agent: Agent): 'healthy' | 'stale' | 'unresponsive' | null {
+  const isSupposedlyActive = ['initializing', 'working', 'resuming', 'waiting_approval'].includes(
+    agent.status
+  );
+  if (!isSupposedlyActive) return null;
+
+  if (!agent.last_heartbeat) {
+    // Never heartbeated but claims to be working - unresponsive
+    return 'unresponsive';
+  }
+
+  const lastHeartbeat = new Date(agent.last_heartbeat);
+  const secondsSince = (Date.now() - lastHeartbeat.getTime()) / 1000;
+
+  if (secondsSince > UNRESPONSIVE_THRESHOLD_SECONDS) return 'unresponsive';
+  if (secondsSince > STALE_THRESHOLD_SECONDS) return 'stale';
+  return 'healthy';
+}
 
 // =============================================================================
 // AgentHeader
@@ -36,62 +60,96 @@ export function AgentHeader({ agent }: AgentHeaderProps) {
   const isPaused = agent.status === 'paused';
   const isTerminal = ['completed', 'failed', 'terminated'].includes(agent.status);
 
+  // Check for zombie state
+  const heartbeatStatus = getHeartbeatStatus(agent);
+  const isZombie = heartbeatStatus === 'unresponsive' || heartbeatStatus === 'stale';
+
   return (
-    <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-sc-fg-subtle/20 bg-sc-bg-elevated">
-      {/* Left: Icon + Name + Status */}
-      <div className="flex items-center gap-2 min-w-0">
-        <span
-          className="text-sm transition-transform duration-200 hover:scale-110"
-          style={{ color: typeConfig.color }}
-        >
-          {typeConfig.icon}
-        </span>
-        <span className="text-sm font-medium text-sc-fg-primary truncate">{agent.name}</span>
-        <span
-          className={`text-[10px] px-1.5 py-0.5 rounded transition-all duration-200 ${statusConfig.bgClass} ${statusConfig.textClass} ${
-            isActive ? 'animate-pulse-glow' : ''
-          }`}
-        >
-          {statusConfig.icon} {statusConfig.label}
-        </span>
+    <div className="shrink-0 flex flex-col border-b border-sc-fg-subtle/20 bg-sc-bg-elevated">
+      <div className="flex items-center justify-between px-3 py-2">
+        {/* Left: Icon + Name + Status */}
+        <div className="flex items-center gap-2 min-w-0">
+          <span
+            className="text-sm transition-transform duration-200 hover:scale-110"
+            style={{ color: typeConfig.color }}
+          >
+            {typeConfig.icon}
+          </span>
+          <span className="text-sm font-medium text-sc-fg-primary truncate">{agent.name}</span>
+          {isZombie ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-sc-red/20 text-sc-red flex items-center gap-1">
+              <WarningCircle width={10} height={10} />
+              {heartbeatStatus === 'unresponsive' ? 'Unresponsive' : 'Stale'}
+            </span>
+          ) : (
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded transition-all duration-200 ${statusConfig.bgClass} ${statusConfig.textClass} ${
+                isActive ? 'animate-pulse-glow' : ''
+              }`}
+            >
+              {statusConfig.icon} {statusConfig.label}
+            </span>
+          )}
+        </div>
+
+        {/* Right: Controls with micro-interactions */}
+        <div className="flex items-center gap-1 shrink-0">
+          {isActive && !isZombie && (
+            <button
+              type="button"
+              onClick={() => pauseAgent.mutate({ id: agent.id })}
+              className="p-1.5 text-sc-yellow hover:bg-sc-yellow/10 rounded transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+              disabled={pauseAgent.isPending}
+              title="Pause"
+            >
+              <Pause width={14} height={14} />
+            </button>
+          )}
+          {isPaused && (
+            <button
+              type="button"
+              onClick={() => resumeAgent.mutate(agent.id)}
+              className="p-1.5 text-sc-green hover:bg-sc-green/10 rounded transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+              disabled={resumeAgent.isPending}
+              title="Resume"
+            >
+              <Play width={14} height={14} />
+            </button>
+          )}
+          {!isTerminal && (
+            <button
+              type="button"
+              onClick={() => terminateAgent.mutate({ id: agent.id })}
+              className="p-1.5 text-sc-red hover:bg-sc-red/10 rounded transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+              disabled={terminateAgent.isPending}
+              title="Stop"
+            >
+              <Square width={14} height={14} />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Right: Controls with micro-interactions */}
-      <div className="flex items-center gap-1 shrink-0">
-        {isActive && (
+      {/* Zombie warning banner */}
+      {isZombie && (
+        <div className="px-3 py-2 bg-sc-red/10 border-t border-sc-red/20 flex items-center justify-between gap-2">
+          <span className="text-xs text-sc-red">
+            This agent appears to be dead. No heartbeat for{' '}
+            {agent.last_heartbeat
+              ? `${Math.round((Date.now() - new Date(agent.last_heartbeat).getTime()) / 60000)} min`
+              : 'unknown time'}
+            .
+          </span>
           <button
             type="button"
-            onClick={() => pauseAgent.mutate({ id: agent.id })}
-            className="p-1.5 text-sc-yellow hover:bg-sc-yellow/10 rounded transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
-            disabled={pauseAgent.isPending}
-            title="Pause"
-          >
-            <Pause width={14} height={14} />
-          </button>
-        )}
-        {isPaused && (
-          <button
-            type="button"
-            onClick={() => resumeAgent.mutate(agent.id)}
-            className="p-1.5 text-sc-green hover:bg-sc-green/10 rounded transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
-            disabled={resumeAgent.isPending}
-            title="Resume"
-          >
-            <Play width={14} height={14} />
-          </button>
-        )}
-        {!isTerminal && (
-          <button
-            type="button"
-            onClick={() => terminateAgent.mutate({ id: agent.id })}
-            className="p-1.5 text-sc-red hover:bg-sc-red/10 rounded transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+            onClick={() => terminateAgent.mutate({ id: agent.id, reason: 'zombie_cleanup' })}
             disabled={terminateAgent.isPending}
-            title="Stop"
+            className="text-xs px-2 py-1 bg-sc-red/20 hover:bg-sc-red/30 text-sc-red rounded transition-colors disabled:opacity-50"
           >
-            <Square width={14} height={14} />
+            {terminateAgent.isPending ? 'Terminating...' : 'Mark as Failed'}
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
