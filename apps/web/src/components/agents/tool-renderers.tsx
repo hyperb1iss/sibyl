@@ -3,8 +3,8 @@
 import type React from 'react';
 import { useEffect, useState } from 'react';
 import { codeToHtml } from 'shiki';
-import { silkCircuitTheme } from '@/lib/shiki-theme';
 import { Code, EditPencil, Folder, Page, Search } from '@/components/ui/icons';
+import { silkCircuitTheme } from '@/lib/shiki-theme';
 import { stripAnsi } from './chat-constants';
 import { isKnownTool, TOOLS, type ToolName } from './tool-registry';
 

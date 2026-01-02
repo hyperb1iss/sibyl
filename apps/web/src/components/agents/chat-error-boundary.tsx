@@ -7,8 +7,8 @@
  * Allows users to retry without losing the entire page.
  */
 
-import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { AlertTriangle, RefreshCcw } from 'lucide-react';
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 
 // =============================================================================
 // Types
@@ -143,7 +143,10 @@ export class MessageErrorBoundary extends Component<
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     if (process.env.NODE_ENV === 'development') {
-      console.error(`[MessageErrorBoundary${this.props.messageId ? `:${this.props.messageId}` : ''}]`, error);
+      console.error(
+        `[MessageErrorBoundary${this.props.messageId ? `:${this.props.messageId}` : ''}]`,
+        error
+      );
       console.error('Component stack:', errorInfo.componentStack);
     }
   }

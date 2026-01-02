@@ -83,7 +83,10 @@ export function AgentHeader({ agent }: AgentHeaderProps) {
           </span>
           <span className="text-sm font-medium text-sc-fg-primary truncate">{agent.name}</span>
           {isZombie ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-sc-red/20 text-sc-red flex items-center gap-1" role="status">
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded bg-sc-red/20 text-sc-red flex items-center gap-1"
+              role="status"
+            >
               <WarningCircle width={10} height={10} aria-hidden="true" />
               {heartbeatStatus === 'unresponsive' ? 'Unresponsive' : 'Stale'}
             </span>
@@ -139,7 +142,10 @@ export function AgentHeader({ agent }: AgentHeaderProps) {
 
       {/* Zombie warning banner */}
       {isZombie && (
-        <div role="alert" className="px-3 py-2 bg-sc-red/10 border-t border-sc-red/20 flex items-center justify-between gap-2">
+        <div
+          role="alert"
+          className="px-3 py-2 bg-sc-red/10 border-t border-sc-red/20 flex items-center justify-between gap-2"
+        >
           <span className="text-xs text-sc-red">
             This agent appears to be dead. No heartbeat for{' '}
             {agent.last_heartbeat
