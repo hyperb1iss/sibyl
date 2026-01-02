@@ -36,10 +36,12 @@ class TestDisableAuthSecurity:
     def test_auth_enabled_works_everywhere(self) -> None:
         """disable_auth=False should work in all environments."""
         for env in ["development", "staging", "production"]:
-            settings = Settings(
-                environment=env,  # type: ignore[arg-type]
-                disable_auth=False,
-            )
+            # Production requires non-default passwords
+            kwargs: dict[str, object] = {"environment": env, "disable_auth": False}
+            if env == "production":
+                kwargs["falkordb_password"] = "secure_falkordb_pw"
+                kwargs["postgres_password"] = "secure_postgres_pw"
+            settings = Settings(**kwargs)  # type: ignore[arg-type]
             assert settings.disable_auth is False
 
     def test_default_environment_is_development(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -63,7 +65,12 @@ class TestEnvironmentValidation:
     def test_valid_environments(self) -> None:
         """Valid environments should be accepted."""
         for env in ["development", "staging", "production"]:
-            settings = Settings(environment=env)  # type: ignore[arg-type]
+            # Production requires non-default passwords
+            kwargs: dict[str, object] = {"environment": env}
+            if env == "production":
+                kwargs["falkordb_password"] = "secure_falkordb_pw"
+                kwargs["postgres_password"] = "secure_postgres_pw"
+            settings = Settings(**kwargs)  # type: ignore[arg-type]
             assert settings.environment == env
 
     def test_invalid_environment_rejected(self) -> None:
@@ -76,3 +83,43 @@ class TestEnvironmentValidation:
 
         with pytest.raises(ValueError):
             Settings(environment="test")  # type: ignore[arg-type]
+
+
+class TestProductionPasswordSecurity:
+    """Tests for production password validation."""
+
+    def test_default_falkordb_password_forbidden_in_production(self) -> None:
+        """Default FalkorDB password should be rejected in production."""
+        with pytest.raises(ValueError, match="Default FalkorDB password"):
+            Settings(
+                environment="production",
+                falkordb_password="conventions",
+                postgres_password="secure_pw",
+            )
+
+    def test_default_postgres_password_forbidden_in_production(self) -> None:
+        """Default PostgreSQL password should be rejected in production."""
+        with pytest.raises(ValueError, match="Default PostgreSQL password"):
+            Settings(
+                environment="production",
+                falkordb_password="secure_pw",
+                postgres_password="sibyl_dev",
+            )
+
+    def test_default_passwords_allowed_in_development(self) -> None:
+        """Default passwords should be allowed in development."""
+        settings = Settings(
+            environment="development",
+            falkordb_password="conventions",
+            postgres_password="sibyl_dev",
+        )
+        assert settings.falkordb_password == "conventions"
+
+    def test_secure_passwords_work_in_production(self) -> None:
+        """Non-default passwords should work in production."""
+        settings = Settings(
+            environment="production",
+            falkordb_password="my_secure_falkordb",
+            postgres_password="my_secure_postgres",
+        )
+        assert settings.environment == "production"
