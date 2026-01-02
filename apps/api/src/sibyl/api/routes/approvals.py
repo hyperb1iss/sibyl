@@ -8,9 +8,11 @@ from datetime import UTC, datetime
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import update
 
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_role
-from sibyl.db.models import Organization, OrganizationRole, User
+from sibyl.db import get_session
+from sibyl.db.models import AgentMessage, Organization, OrganizationRole, User
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.models import ApprovalStatus, ApprovalType, EntityType
@@ -227,6 +229,26 @@ async def respond_to_approval(
 
     # Get agent info for status updates
     agent_id = (entity.metadata or {}).get("agent_id")
+
+    # Update the stored AgentMessage's status so page reload shows resolved state
+    if agent_id:
+        try:
+            async with get_session() as session:
+                # Find the approval message by matching approval_id in extra JSONB
+                stmt = (
+                    update(AgentMessage)
+                    .where(AgentMessage.agent_id == agent_id)
+                    .where(AgentMessage.extra["approval_id"].astext == approval_id)
+                    .values(
+                        extra=AgentMessage.extra.op("||")(
+                            {"status": new_status, "responded_at": datetime.now(UTC).isoformat()}
+                        )
+                    )
+                )
+                await session.execute(stmt)
+                await session.commit()
+        except Exception as e:
+            log.warning("Failed to update approval message status", error=str(e))
 
     # Publish to worker channel - this wakes up the waiting agent
     from sibyl.agents.redis_sub import publish_approval_response
