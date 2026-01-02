@@ -7,6 +7,7 @@ This worker processes:
 - sync_source: Recalculate source stats
 """
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -1015,6 +1016,61 @@ def _format_agent_message(message: Any) -> dict[str, Any]:
     }
 
 
+async def _generate_and_broadcast_status_hint(
+    agent_id: str,
+    tool_call_id: str | None,
+    tool_name: str,
+    tool_input: dict[str, Any] | None,
+    task_id: str | None,
+    agent_type: str,
+    org_id: str,
+) -> None:
+    """Generate a Tier 3 status hint using Haiku and broadcast it.
+
+    This runs as a background task to avoid blocking the main agent loop.
+    The hint provides a clever, contextual waiting message.
+    """
+    if not tool_call_id:
+        return
+
+    try:
+        from sibyl.agents.status import generate_status_hint
+
+        # Get task title if we have a task_id
+        task_title = None
+        if task_id:
+            try:
+                from sibyl_core.graph.client import get_graph_client
+                from sibyl_core.graph.entities import EntityManager
+
+                client = await get_graph_client()
+                manager = EntityManager(client, group_id=org_id)
+                task = await manager.get(task_id)
+                if task:
+                    task_title = task.name
+            except Exception:
+                pass  # Task lookup is best-effort
+
+        hint = generate_status_hint(tool_name, tool_input, task_title, agent_type)
+
+        # Broadcast the hint
+        await _safe_broadcast(
+            "status_hint",
+            {
+                "agent_id": agent_id,
+                "tool_call_id": tool_call_id,
+                "hint": hint,
+            },
+            org_id=org_id,
+        )
+
+        log.debug("Broadcast status hint", agent_id=agent_id, hint=hint)
+
+    except Exception as e:
+        # Status hints are non-critical - log and continue
+        log.debug("Failed to generate status hint", error=str(e))
+
+
 async def run_agent_execution(  # noqa: PLR0915
     ctx: dict[str, Any],  # noqa: ARG001
     agent_id: str,
@@ -1168,6 +1224,22 @@ async def run_agent_execution(  # noqa: PLR0915
                 tool_name = formatted.get("tool_name", "unknown")
                 tool_calls.append(tool_name)
 
+                # Generate and broadcast Tier 3 status hint (async, non-blocking)
+                # Run in background so we don't block the main loop
+                tool_id = formatted.get("tool_id")
+                tool_input = formatted.get("input")
+                asyncio.create_task(
+                    _generate_and_broadcast_status_hint(
+                        agent_id=agent_id,
+                        tool_call_id=tool_id,
+                        tool_name=tool_name,
+                        tool_input=tool_input,
+                        task_id=task_id,
+                        agent_type=agent_type,
+                        org_id=org_id,
+                    )
+                )
+
             # Keep last meaningful content for summary
             if formatted.get("content") and formatted.get("type") != "tool_result":
                 last_content = formatted.get("content", "")[:500]
@@ -1271,6 +1343,58 @@ async def sync_all_sources(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"synced": synced, "total": len(sources)}
 
 
+async def generate_status_hint(
+    ctx: dict[str, Any],  # noqa: ARG001
+    agent_id: str,
+    tool_call_id: str,
+    tool_name: str,
+    tool_input: dict[str, Any] | None = None,
+    task_title: str | None = None,
+    agent_type: str | None = None,
+    org_id: str | None = None,
+) -> dict[str, Any]:
+    """Generate a contextual status hint for an agent tool call.
+
+    Uses Claude Haiku to generate clever, playful status messages
+    based on the tool being used and optional task context.
+
+    Args:
+        ctx: arq context
+        agent_id: Agent making the tool call
+        tool_call_id: Unique ID of the tool call
+        tool_name: Name of the tool (Read, Edit, Grep, etc.)
+        tool_input: Tool parameters
+        task_title: Optional Sibyl task for context
+        agent_type: Optional agent type for context
+        org_id: Organization ID for broadcast scope
+
+    Returns:
+        Dict with generated hint
+    """
+    from sibyl.agents.status import generate_status_hint as gen_hint
+
+    try:
+        hint = gen_hint(tool_name, tool_input, task_title, agent_type)
+
+        # Broadcast the hint via pubsub
+        await _safe_broadcast(
+            "status_hint",
+            {
+                "agent_id": agent_id,
+                "tool_call_id": tool_call_id,
+                "hint": hint,
+            },
+            org_id=org_id,
+        )
+
+        log.debug("Generated status hint", agent_id=agent_id, hint=hint)
+        return {"success": True, "hint": hint}
+
+    except Exception as e:
+        log.warning("Failed to generate status hint", error=str(e))
+        return {"success": False, "error": str(e)}
+
+
 # Worker configuration
 class WorkerSettings:
     """arq worker settings."""
@@ -1286,6 +1410,7 @@ class WorkerSettings:
         create_learning_episode,
         update_entity,
         run_agent_execution,
+        generate_status_hint,
     ]
 
     # Lifecycle hooks
