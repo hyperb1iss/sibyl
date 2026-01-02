@@ -684,9 +684,7 @@ class AgentOrchestrator:
                 age = (now - heartbeat).total_seconds()
 
                 if age > self.STALE_HEARTBEAT_THRESHOLD:
-                    logger.warning(
-                        f"Agent {instance.id} stale (no heartbeat for {age:.0f}s)"
-                    )
+                    logger.warning(f"Agent {instance.id} stale (no heartbeat for {age:.0f}s)")
                     # Checkpoint and mark as stale
                     try:
                         await instance.checkpoint(current_step="stale_heartbeat")

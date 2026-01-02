@@ -63,9 +63,7 @@ def export_graph(
             export_data = {
                 "metadata": {
                     "exported_at": str(
-                        __import__("datetime").datetime.now(
-                            tz=__import__("datetime").timezone.utc
-                        )
+                        __import__("datetime").datetime.now(tz=__import__("datetime").timezone.utc)
                     ),
                     "entity_count": len(entities),
                     "relationship_count": len(relationships),

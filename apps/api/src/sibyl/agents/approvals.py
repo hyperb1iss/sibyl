@@ -195,9 +195,7 @@ class ApprovalService:
                     hookSpecificOutput={
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "deny",
-                        "permissionDecisionReason": response.get(
-                            "message", "Denied by human"
-                        ),
+                        "permissionDecisionReason": response.get("message", "Denied by human"),
                     },
                 )
 
@@ -259,9 +257,7 @@ class ApprovalService:
                     hookSpecificOutput={
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "deny",
-                        "permissionDecisionReason": response.get(
-                            "message", "Denied by human"
-                        ),
+                        "permissionDecisionReason": response.get("message", "Denied by human"),
                     },
                 )
 
@@ -319,9 +315,7 @@ class ApprovalService:
                     hookSpecificOutput={
                         "hookEventName": "PreToolUse",
                         "permissionDecision": "deny",
-                        "permissionDecisionReason": response.get(
-                            "message", "Denied by human"
-                        ),
+                        "permissionDecisionReason": response.get("message", "Denied by human"),
                     },
                 )
 
@@ -395,9 +389,7 @@ class ApprovalService:
         except TimeoutError:
             logger.warning(f"Approval {approval_id} timed out after {wait_timeout}s")
             # Update status to expired
-            await self.entity_manager.update(
-                approval_id, {"status": ApprovalStatus.EXPIRED.value}
-            )
+            await self.entity_manager.update(approval_id, {"status": ApprovalStatus.EXPIRED.value})
             return {"approved": False, "message": "Approval request timed out"}
         finally:
             self._waiters.pop(approval_id, None)
