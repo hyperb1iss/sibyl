@@ -18,6 +18,9 @@ from sqlmodel import col
 
 from sibyl.config import settings
 from sibyl.db import (
+    AgentMessage,
+    AgentMessageRole,
+    AgentMessageType,
     CrawledDocument,
     CrawlSource,
     CrawlStatus,
@@ -861,6 +864,72 @@ def _format_user_message(content: Any, timestamp: str) -> dict[str, Any]:
     }
 
 
+async def _store_agent_message(
+    agent_id: str,
+    org_id: str,
+    message_num: int,
+    formatted: dict[str, Any],
+) -> None:
+    """Store agent message summary to Postgres for reload persistence.
+
+    Only stores summarized content - full tool outputs are NOT saved.
+    Real-time streaming via WebSocket shows full content during execution.
+    """
+    role_str = formatted.get("role", "agent")
+    type_str = formatted.get("type", "text")
+
+    # Map to enum values
+    role_map = {"assistant": "agent", "tool": "system", "system": "system", "user": "user"}
+    role = AgentMessageRole(role_map.get(role_str, "agent"))
+
+    type_map = {"text": "text", "tool_use": "tool_call", "tool_result": "tool_result", "result": "text"}
+    msg_type = AgentMessageType(type_map.get(type_str, "text"))
+
+    # Build content - always use preview/summary, never full output
+    if type_str == "tool_use":
+        content = formatted.get("preview", formatted.get("tool_name", "Tool call"))
+    elif type_str == "tool_result":
+        # Only store success/error and brief summary
+        is_error = formatted.get("is_error", False)
+        preview = formatted.get("preview", "")[:200]
+        content = f"{'Error' if is_error else 'Success'}: {preview}"
+    elif type_str == "multi_result":
+        # Multiple results - just note the count
+        count = len(formatted.get("results", []))
+        content = f"{count} tool result(s)"
+    elif type_str == "multi_block":
+        # Multi-block message - use preview
+        content = formatted.get("preview", "Multiple content blocks")
+    else:
+        # Text content - truncate reasonably
+        content = (formatted.get("content") or formatted.get("preview", ""))[:1000]
+
+    # Build metadata (without full content)
+    extra = {
+        "icon": formatted.get("icon"),
+        "tool_name": formatted.get("tool_name"),
+        "is_error": formatted.get("is_error"),
+    }
+    # Remove None values
+    extra = {k: v for k, v in extra.items() if v is not None}
+
+    try:
+        async with get_session() as session:
+            msg = AgentMessage(
+                agent_id=agent_id,
+                organization_id=UUID(org_id),
+                message_num=message_num,
+                role=role,
+                type=msg_type,
+                content=content,
+                extra=extra,
+            )
+            session.add(msg)
+            await session.commit()
+    except Exception as e:
+        log.warning("Failed to store agent message", agent_id=agent_id, error=str(e))
+
+
 def _format_agent_message(message: Any) -> dict[str, Any]:
     """Format a Claude SDK message for beautiful UI display."""
     msg_class = type(message).__name__
@@ -1025,6 +1094,9 @@ async def run_agent_execution(
                 },
                 org_id=org_id,
             )
+
+            # Store summarized message to Postgres for reload persistence
+            await _store_agent_message(agent_id, org_id, message_count, formatted)
 
             # Track session ID
             if sid := getattr(message, "session_id", None):
