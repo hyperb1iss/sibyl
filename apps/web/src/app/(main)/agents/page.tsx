@@ -24,6 +24,7 @@ import {
   useResumeAgent,
   useTerminateAgent,
 } from '@/lib/hooks';
+import { useProjectFilter } from '@/lib/project-context';
 
 // =============================================================================
 // Agent Card Component
@@ -276,10 +277,10 @@ function AgentsEmptyState() {
       <div className="w-16 h-16 rounded-full bg-sc-purple/20 flex items-center justify-center mb-4">
         <span className="text-2xl">◎</span>
       </div>
-      <h3 className="text-lg font-medium text-sc-fg-primary mb-2">No agents running</h3>
+      <h3 className="text-lg font-medium text-sc-fg-primary mb-2">No agents yet</h3>
       <p className="text-sm text-sc-fg-muted max-w-md">
-        Agents are spawned automatically when tasks are assigned or can be created via the API.
-        Active agents will appear here with real-time status updates.
+        Click <span className="text-sc-purple font-medium">Start Agent</span> to spawn an AI agent
+        that will work autonomously on your project.
       </p>
     </div>
   );
@@ -294,7 +295,7 @@ function AgentsPageContent() {
   const searchParams = useSearchParams();
 
   const statusFilter = searchParams.get('status') as AgentStatus | null;
-  const projectFilter = searchParams.get('project') || undefined;
+  const projectFilter = useProjectFilter(); // From global selector
 
   const {
     data: agentsData,
@@ -355,19 +356,6 @@ function AgentsPageContent() {
     [router, searchParams]
   );
 
-  const handleProjectFilter = useCallback(
-    (projectId: string | null) => {
-      const params = new URLSearchParams(searchParams);
-      if (projectId) {
-        params.set('project', projectId);
-      } else {
-        params.delete('project');
-      }
-      router.push(`/agents?${params.toString()}`);
-    },
-    [router, searchParams]
-  );
-
   // Action handlers
   const handlePause = useCallback(
     (id: string) => {
@@ -413,58 +401,33 @@ function AgentsPageContent() {
       {/* Summary Bar */}
       {agents.length > 0 && <SummaryBar agents={agents} />}
 
-      {/* Filters */}
-      <div className="space-y-2">
-        {/* Status Filter */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-sc-fg-subtle font-medium">Status:</span>
-          <FilterChip active={!statusFilter} onClick={() => handleStatusFilter(null)}>
-            All
-          </FilterChip>
-          <FilterChip
-            active={statusFilter === 'working'}
-            onClick={() => handleStatusFilter('working')}
-          >
-            Active
-          </FilterChip>
-          <FilterChip
-            active={statusFilter === 'paused'}
-            onClick={() => handleStatusFilter('paused')}
-          >
-            Paused
-          </FilterChip>
-          <FilterChip
-            active={statusFilter === 'waiting_approval'}
-            onClick={() => handleStatusFilter('waiting_approval')}
-          >
-            Needs Approval
-          </FilterChip>
-          <FilterChip
-            active={statusFilter === 'completed'}
-            onClick={() => handleStatusFilter('completed')}
-          >
-            Completed
-          </FilterChip>
-        </div>
-
-        {/* Project Filter */}
-        {projects.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-sc-fg-subtle font-medium">Project:</span>
-            <FilterChip active={!projectFilter} onClick={() => handleProjectFilter(null)}>
-              All
-            </FilterChip>
-            {projects.map(project => (
-              <FilterChip
-                key={project.id}
-                active={projectFilter === project.id}
-                onClick={() => handleProjectFilter(project.id)}
-              >
-                {project.name}
-              </FilterChip>
-            ))}
-          </div>
-        )}
+      {/* Status Filter */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-sc-fg-subtle font-medium">Status:</span>
+        <FilterChip active={!statusFilter} onClick={() => handleStatusFilter(null)}>
+          All
+        </FilterChip>
+        <FilterChip
+          active={statusFilter === 'working'}
+          onClick={() => handleStatusFilter('working')}
+        >
+          Active
+        </FilterChip>
+        <FilterChip active={statusFilter === 'paused'} onClick={() => handleStatusFilter('paused')}>
+          Paused
+        </FilterChip>
+        <FilterChip
+          active={statusFilter === 'waiting_approval'}
+          onClick={() => handleStatusFilter('waiting_approval')}
+        >
+          Needs Approval
+        </FilterChip>
+        <FilterChip
+          active={statusFilter === 'completed'}
+          onClick={() => handleStatusFilter('completed')}
+        >
+          Completed
+        </FilterChip>
       </div>
 
       {/* Content */}
