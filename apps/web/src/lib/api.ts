@@ -792,6 +792,7 @@ export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'edited' | 'exp
 export type ApprovalType =
   | 'destructive_command'
   | 'sensitive_file'
+  | 'file_write'
   | 'external_api'
   | 'cost_threshold'
   | 'review_phase'

@@ -168,8 +168,9 @@ class ApprovalService:
                 log.info(f"Permission approved by {response.get('by', 'human')}")
                 return PermissionResultAllow()
 
-            log.info(f"Permission denied: {response.get('message', 'No reason')}")
-            return PermissionResultDeny()
+            deny_reason = response.get("message") or "Permission denied by user"
+            log.info(f"Permission denied: {deny_reason}")
+            return PermissionResultDeny(message=deny_reason)
 
         return can_use_tool
 
@@ -633,8 +634,8 @@ class ApprovalService:
             expires_at=expires_at,
         )
 
-        # Persist to graph
-        await self.entity_manager.create(record)
+        # Persist to graph using fast direct insert (no LLM extraction needed)
+        await self.entity_manager.create_direct(record, generate_embedding=False)
 
         # Update agent status to waiting_approval
         from sibyl_core.models import AgentStatus

@@ -55,12 +55,9 @@ export function SubagentBlock({
   const isWorking = !hasResult && !isAgentTerminal;
   const isError = isInterrupted || (taskResult?.metadata?.is_error as boolean | undefined);
 
-  // Extract result metadata (cost, duration, etc.)
-  const resultMeta = taskResult?.metadata as
-    | { duration_ms?: number; total_cost_usd?: number }
-    | undefined;
+  // Extract result metadata (duration, etc.)
+  const resultMeta = taskResult?.metadata as { duration_ms?: number } | undefined;
   const durationMs = resultMeta?.duration_ms;
-  const costUsd = resultMeta?.total_cost_usd;
 
   // Get 2 most recent tool calls for live preview (only when working)
   const recentCalls = isWorking ? nestedCalls.slice(-2) : [];
@@ -142,13 +139,6 @@ export function SubagentBlock({
           </span>
         )}
 
-        {/* Cost (when available) */}
-        {costUsd && costUsd > 0 && (
-          <span className="text-[10px] text-sc-coral shrink-0 tabular-nums animate-fade-in">
-            ${costUsd.toFixed(4)}
-          </span>
-        )}
-
         {/* Timestamp */}
         <span className="text-[10px] text-sc-fg-subtle shrink-0 tabular-nums">
           {taskCall.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -191,12 +181,7 @@ export function SubagentBlock({
 
           {/* Show final result summary if present */}
           {taskResult && (
-            <ResultSummary
-              taskResult={taskResult}
-              isError={isError}
-              durationMs={durationMs}
-              costUsd={costUsd}
-            />
+            <ResultSummary taskResult={taskResult} isError={isError} durationMs={durationMs} />
           )}
         </div>
       </div>
@@ -409,10 +394,9 @@ interface ResultSummaryProps {
   taskResult: ChatMessage;
   isError?: boolean;
   durationMs?: number;
-  costUsd?: number;
 }
 
-function ResultSummary({ taskResult, isError, durationMs, costUsd }: ResultSummaryProps) {
+function ResultSummary({ taskResult, isError, durationMs }: ResultSummaryProps) {
   return (
     <div
       className={`mt-2 p-3 rounded-lg text-xs animate-fade-in ${
@@ -433,10 +417,9 @@ function ResultSummary({ taskResult, isError, durationMs, costUsd }: ResultSumma
             </>
           )}
         </span>
-        <div className="flex items-center gap-2 text-[10px] text-sc-fg-subtle">
-          {durationMs && <span>{formatDuration(durationMs)}</span>}
-          {costUsd && costUsd > 0 && <span>${costUsd.toFixed(4)}</span>}
-        </div>
+        {durationMs && (
+          <span className="text-[10px] text-sc-fg-subtle">{formatDuration(durationMs)}</span>
+        )}
       </div>
       {taskResult.content && taskResult.content.length < 300 && (
         <p className="text-sc-fg-muted mt-2 text-[11px] leading-relaxed">{taskResult.content}</p>
