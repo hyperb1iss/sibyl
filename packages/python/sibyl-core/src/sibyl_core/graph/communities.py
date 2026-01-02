@@ -365,6 +365,7 @@ async def _get_graph_totals(
     client: GraphClient,
     organization_id: str,
     project_ids: list[str] | None = None,
+    include_neighbors: bool = True,
 ) -> tuple[int, int]:
     """Get total node and edge counts (no LIMIT) for stats display.
 
@@ -372,6 +373,7 @@ async def _get_graph_totals(
         client: Graph client.
         organization_id: Organization UUID.
         project_ids: Optional list of project IDs to filter by.
+        include_neighbors: If True, include 1-hop neighbors of project entities.
 
     Returns:
         Tuple of (total_nodes, total_edges) matching the filter criteria.
@@ -379,75 +381,112 @@ async def _get_graph_totals(
     total_nodes = 0
     total_edges = 0
 
-    # Build node filter
-    node_filters = ["(n:Episodic OR n:Entity)", "n.group_id = $group_id"]
-
     # Handle special __unassigned__ filter for entities without a project
     UNASSIGNED_ID = "__unassigned__"
     has_unassigned = project_ids and UNASSIGNED_ID in project_ids
     real_project_ids = [pid for pid in (project_ids or []) if pid != UNASSIGNED_ID]
 
-    if has_unassigned and real_project_ids:
-        # Both unassigned AND specific projects: OR condition
-        node_filters.append(
-            "(n.project_id IS NULL OR n.uuid IN $project_ids OR n.project_id IN $project_ids)"
-        )
-    elif has_unassigned:
-        # Only unassigned: nodes without project_id
-        node_filters.append("n.project_id IS NULL")
-    elif real_project_ids:
-        # Only specific projects
-        node_filters.append("(n.uuid IN $project_ids OR n.project_id IN $project_ids)")
+    # For specific projects with neighbors, use UNION query
+    # For unassigned or no filter, use simple query
+    use_transitive = include_neighbors and real_project_ids and not has_unassigned
 
-    node_where = " AND ".join(node_filters)
+    params: dict[str, str | list[str]] = {"group_id": organization_id}
+    if real_project_ids:
+        params["project_ids"] = real_project_ids
 
     try:
-        params: dict[str, str | list[str]] = {"group_id": organization_id}
-        if real_project_ids:
-            params["project_ids"] = real_project_ids
+        if use_transitive:
+            # Include nodes with direct project_id + their 1-hop neighbors
+            node_query = """
+            MATCH (n)
+            WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+              AND (n.project_id IN $project_ids OR n.uuid IN $project_ids)
+            RETURN count(DISTINCT n) AS cnt
+            UNION ALL
+            MATCH (n)-[]-(neighbor)
+            WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+              AND (neighbor.project_id IN $project_ids OR neighbor.uuid IN $project_ids)
+            RETURN count(DISTINCT n) AS cnt
+            """
+        elif has_unassigned and real_project_ids:
+            # Both unassigned AND specific projects
+            node_query = """
+            MATCH (n)
+            WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+              AND (n.project_id IS NULL OR n.uuid IN $project_ids OR n.project_id IN $project_ids)
+            RETURN count(n) AS cnt
+            """
+        elif has_unassigned:
+            # Only unassigned
+            node_query = """
+            MATCH (n)
+            WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+              AND n.project_id IS NULL
+            RETURN count(n) AS cnt
+            """
+        elif real_project_ids:
+            # Specific projects without neighbors (fallback)
+            node_query = """
+            MATCH (n)
+            WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+              AND (n.uuid IN $project_ids OR n.project_id IN $project_ids)
+            RETURN count(n) AS cnt
+            """
+        else:
+            # No filter - count all
+            node_query = """
+            MATCH (n)
+            WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+            RETURN count(n) AS cnt
+            """
 
-        result = await client.execute_read_org(
-            f"MATCH (n) WHERE {node_where} RETURN count(n) AS cnt",
-            organization_id,
-            **params,
-        )
+        result = await client.execute_read_org(node_query, organization_id, **params)
         if result:
-            record = result[0]
-            total_nodes = record[0] if isinstance(record, (list, tuple)) else record.get("cnt", 0)
+            # For UNION ALL, we get multiple rows - sum them
+            for record in result:
+                cnt = record[0] if isinstance(record, (list, tuple)) else record.get("cnt", 0)
+                total_nodes += cnt
     except Exception as e:
         log.warning("count_nodes_failed", error=str(e))
 
-    # Build edge filter - count edges where both endpoints match the node filter
-    if project_ids:  # Any filter (including __unassigned__)
-        # For project filter, count edges between matching nodes
-        # Replace both n: (labels) and n. (properties) with a/b variants
-        a_where = node_where.replace("n:", "a:").replace("n.", "a.")
-        b_where = (
-            node_where.replace("n:", "b:")
-            .replace("n.", "b.")
-            .replace("$group_id", "$group_id2")
-            .replace("$project_ids", "$project_ids2")
-        )
-        edge_query = f"""
-        MATCH (a)-[r]->(b)
-        WHERE {a_where}
-          AND {b_where}
-          AND r.group_id = $group_id
-        RETURN count(r) AS cnt
-        """
-        edge_params: dict[str, str | list[str]] = {
-            "group_id": organization_id,
-            "group_id2": organization_id,
-        }
-        if real_project_ids:
-            edge_params["project_ids"] = real_project_ids
-            edge_params["project_ids2"] = real_project_ids
-    else:
-        edge_query = "MATCH ()-[r]->() WHERE r.group_id = $group_id RETURN count(r) AS cnt"
-        edge_params = {"group_id": organization_id}
-
+    # Edge count - for transitive, count edges between matching nodes
     try:
-        result = await client.execute_read_org(edge_query, organization_id, **edge_params)
+        if use_transitive:
+            # For transitive, count edges where at least one endpoint is a seed node
+            # This is simpler and still gives a useful count
+            edge_query = """
+            MATCH (a)-[r]->(b)
+            WHERE r.group_id = $group_id
+              AND (a:Episodic OR a:Entity) AND a.group_id = $group_id
+              AND (b:Episodic OR b:Entity) AND b.group_id = $group_id
+              AND (
+                a.project_id IN $project_ids OR a.uuid IN $project_ids
+                OR b.project_id IN $project_ids OR b.uuid IN $project_ids
+              )
+            RETURN count(r) AS cnt
+            """
+        elif project_ids:
+            # Non-transitive project filter
+            if has_unassigned and real_project_ids:
+                node_filter = "(n.project_id IS NULL OR n.uuid IN $project_ids OR n.project_id IN $project_ids)"
+            elif has_unassigned:
+                node_filter = "n.project_id IS NULL"
+            else:
+                node_filter = "(n.uuid IN $project_ids OR n.project_id IN $project_ids)"
+
+            a_filter = node_filter.replace("n.", "a.")
+            b_filter = node_filter.replace("n.", "b.")
+            edge_query = f"""
+            MATCH (a)-[r]->(b)
+            WHERE (a:Episodic OR a:Entity) AND a.group_id = $group_id AND {a_filter}
+              AND (b:Episodic OR b:Entity) AND b.group_id = $group_id AND {b_filter}
+              AND r.group_id = $group_id
+            RETURN count(r) AS cnt
+            """
+        else:
+            edge_query = "MATCH ()-[r]->() WHERE r.group_id = $group_id RETURN count(r) AS cnt"
+
+        result = await client.execute_read_org(edge_query, organization_id, **params)
         if result:
             record = result[0]
             total_edges = record[0] if isinstance(record, (list, tuple)) else record.get("cnt", 0)
@@ -514,47 +553,76 @@ async def _fetch_graph_nodes(
     project_ids: list[str] | None = None,
     entity_types: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], set[str]]:
-    """Fetch nodes with cluster assignments, optionally filtered by project/type."""
-    # Build dynamic WHERE clauses
-    filters = ["(n:Episodic OR n:Entity)", "n.group_id = $group_id"]
+    """Fetch nodes with cluster assignments, optionally filtered by project/type.
 
+    When filtering by project, includes:
+    - Nodes with direct project_id matching the filter
+    - 1-hop neighbors (e.g., episodes related to tasks in the project)
+    """
     # Handle special __unassigned__ filter for entities without a project
     UNASSIGNED_ID = "__unassigned__"
     has_unassigned = project_ids and UNASSIGNED_ID in project_ids
     real_project_ids = [pid for pid in (project_ids or []) if pid != UNASSIGNED_ID]
 
-    if has_unassigned and real_project_ids:
-        # Both unassigned AND specific projects
-        filters.append(
-            "(n.project_id IS NULL OR n.uuid IN $project_ids OR n.project_id IN $project_ids)"
-        )
-    elif has_unassigned:
-        # Only unassigned
-        filters.append("n.project_id IS NULL")
-    elif real_project_ids:
-        # Only specific projects
-        filters.append("(n.uuid IN $project_ids OR n.project_id IN $project_ids)")
+    # Decide whether to use transitive (1-hop neighbor) filtering
+    use_transitive = real_project_ids and not has_unassigned
 
+    # Build entity type filter if provided
+    type_filter = ""
     if entity_types:
         type_list = ", ".join(f"'{t}'" for t in entity_types)
-        filters.append(f"n.entity_type IN [{type_list}]")
+        type_filter = f" AND n.entity_type IN [{type_list}]"
 
-    where_clause = " AND ".join(filters)
-    query = f"""
-    MATCH (n)
-    WHERE {where_clause}
-    RETURN n.uuid AS id, n.name AS name, n.entity_type AS type,
-           n.summary AS summary, n.labels AS labels, n.project_id AS project_id
-    LIMIT $limit
-    """
+    params: dict[str, Any] = {"group_id": organization_id, "limit": max_nodes}
+    if real_project_ids:
+        params["project_ids"] = real_project_ids
+
+    if use_transitive:
+        # Use UNION to get direct project members + 1-hop neighbors
+        query = f"""
+        MATCH (n)
+        WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+          AND (n.project_id IN $project_ids OR n.uuid IN $project_ids){type_filter}
+        RETURN DISTINCT n.uuid AS id, n.name AS name, n.entity_type AS type,
+               n.summary AS summary, n.labels AS labels, n.project_id AS project_id
+        UNION
+        MATCH (n)-[]-(neighbor)
+        WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+          AND (neighbor.project_id IN $project_ids OR neighbor.uuid IN $project_ids){type_filter}
+        RETURN DISTINCT n.uuid AS id, n.name AS name, n.entity_type AS type,
+               n.summary AS summary, n.labels AS labels, n.project_id AS project_id
+        LIMIT $limit
+        """
+    else:
+        # Build simple filter for unassigned or no-project case
+        filters = ["(n:Episodic OR n:Entity)", "n.group_id = $group_id"]
+
+        if has_unassigned and real_project_ids:
+            filters.append(
+                "(n.project_id IS NULL OR n.uuid IN $project_ids OR n.project_id IN $project_ids)"
+            )
+        elif has_unassigned:
+            filters.append("n.project_id IS NULL")
+        elif real_project_ids:
+            filters.append("(n.uuid IN $project_ids OR n.project_id IN $project_ids)")
+
+        if entity_types:
+            type_list = ", ".join(f"'{t}'" for t in entity_types)
+            filters.append(f"n.entity_type IN [{type_list}]")
+
+        where_clause = " AND ".join(filters)
+        query = f"""
+        MATCH (n)
+        WHERE {where_clause}
+        RETURN n.uuid AS id, n.name AS name, n.entity_type AS type,
+               n.summary AS summary, n.labels AS labels, n.project_id AS project_id
+        LIMIT $limit
+        """
+
     nodes: list[dict[str, Any]] = []
     node_ids: set[str] = set()
 
     try:
-        params: dict[str, Any] = {"group_id": organization_id, "limit": max_nodes}
-        if real_project_ids:
-            params["project_ids"] = real_project_ids
-
         result = await client.execute_read_org(query, organization_id, **params)
         for record in result:
             if isinstance(record, (list, tuple)):
