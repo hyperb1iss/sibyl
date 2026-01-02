@@ -10,12 +10,12 @@ Implements SDK-equivalent hooks for:
 """
 
 import json
-import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import structlog
 from claude_agent_sdk.types import (
     HookContext,
     HookInput,
@@ -27,7 +27,7 @@ from claude_agent_sdk.types import (
 if TYPE_CHECKING:
     from sibyl_core.graph import EntityManager
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 # Claude Code config locations
 USER_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
@@ -277,10 +277,10 @@ def load_user_hooks(
                     hooks[event] = []
                 hooks[event].extend(matchers)
 
-            logger.debug(f"Loaded hooks from {settings_path}: {list(file_hooks.keys())}")
+            log.debug(f"Loaded hooks from {settings_path}: {list(file_hooks.keys())}")
 
         except (json.JSONDecodeError, OSError) as e:
-            logger.warning(f"Failed to load hooks from {settings_path}: {e}")
+            log.warning(f"Failed to load hooks from {settings_path}: {e}")
 
     return hooks
 
@@ -448,7 +448,7 @@ class SibylContextService:
             return f"**Sibyl Context:**\n{formatted}"
 
         except Exception as e:
-            logger.warning(f"Sibyl context search failed: {e}")
+            log.warning(f"Sibyl context search failed: {e}")
             return None
 
     def create_user_prompt_hook(self) -> HookMatcher:
@@ -471,7 +471,7 @@ class SibylContextService:
             additional_context = await self.search_context(prompt)
 
             if additional_context:
-                logger.debug(f"Injecting Sibyl context for prompt: {prompt[:50]}...")
+                log.debug(f"Injecting Sibyl context for prompt: {prompt[:50]}...")
                 # Track that agent received context and store it for UI display
                 self.workflow_tracker.received_context = True
                 self.workflow_tracker.injected_context = additional_context
@@ -545,7 +545,7 @@ def create_stop_hook(workflow_tracker: WorkflowTracker) -> HookMatcher:
 
         # Log workflow summary
         summary = workflow_tracker.get_workflow_summary()
-        logger.info(f"Agent stopped. Workflow summary: {summary}")
+        log.info(f"Agent stopped. Workflow summary: {summary}")
 
         # Always continue - we handle follow-up logic externally
         return SyncHookJSONOutput(continue_=True)

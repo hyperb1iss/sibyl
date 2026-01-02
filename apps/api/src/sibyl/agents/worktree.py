@@ -8,18 +8,19 @@ Worktrees are stored at: ~/.sibyl-worktrees/{org}/{project}/{branch}/
 
 import asyncio
 import hashlib
-import logging
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import structlog
 
 from sibyl_core.models import EntityType, WorktreeRecord, WorktreeStatus
 
 if TYPE_CHECKING:
     from sibyl_core.graph import EntityManager
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 # Default base directory for worktrees
 DEFAULT_WORKTREE_BASE = Path.home() / ".sibyl-worktrees"
@@ -92,7 +93,7 @@ class WorktreeManager:
         cwd = cwd or self.repo_path
         cmd = ["git", *args]
 
-        logger.debug(f"Running: {' '.join(cmd)} in {cwd}")
+        log.debug(f"Running: {' '.join(cmd)} in {cwd}")
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -132,7 +133,7 @@ class WorktreeManager:
 
         # Check if worktree already exists
         if worktree_path.exists():
-            logger.warning(f"Worktree path already exists: {worktree_path}")
+            log.warning(f"Worktree path already exists: {worktree_path}")
             # Check if it's registered in the graph
             existing = await self._find_by_path(str(worktree_path))
             if existing:
@@ -156,7 +157,7 @@ class WorktreeManager:
             base_ref,
         )
 
-        logger.info(f"Created worktree at {worktree_path} on branch {branch_name}")
+        log.info(f"Created worktree at {worktree_path} on branch {branch_name}")
 
         # Generate deterministic ID
         worktree_id = _generate_worktree_id(self.org_id, self.project_id, branch_name)
@@ -186,7 +187,7 @@ class WorktreeManager:
             if entity and isinstance(entity, WorktreeRecord):
                 return entity
         except Exception:
-            logger.debug(f"Worktree not found: {worktree_id}")
+            log.debug(f"Worktree not found: {worktree_id}")
         return None
 
     async def _find_by_path(self, path: str) -> WorktreeRecord | None:
@@ -300,7 +301,7 @@ class WorktreeManager:
         has_conflicts = returncode != 0 and "CONFLICT" in stderr
 
         if has_conflicts:
-            logger.warning(f"Worktree {record.branch} has conflicts with {target_branch}")
+            log.warning(f"Worktree {record.branch} has conflicts with {target_branch}")
 
         return has_conflicts
 
@@ -334,14 +335,14 @@ class WorktreeManager:
         """
         record = await self.get(worktree_id)
         if not record:
-            logger.warning(f"Worktree not found: {worktree_id}")
+            log.warning(f"Worktree not found: {worktree_id}")
             return False
 
         worktree_path = Path(record.path)
 
         # Check for uncommitted changes
         if not force and await self.check_uncommitted(worktree_id):
-            logger.warning(f"Worktree has uncommitted changes: {record.path}")
+            log.warning(f"Worktree has uncommitted changes: {record.path}")
             raise WorktreeError(
                 f"Worktree {record.branch} has uncommitted changes. Use force=True to remove anyway."
             )
@@ -352,7 +353,7 @@ class WorktreeManager:
                 await self._run_git("worktree", "remove", str(worktree_path), "--force")
             except WorktreeError:
                 # Fallback to manual removal if git worktree remove fails
-                logger.warning("Git worktree remove failed, removing directory manually")
+                log.warning("Git worktree remove failed, removing directory manually")
                 shutil.rmtree(worktree_path, ignore_errors=True)
 
         # Prune worktree references
@@ -364,7 +365,7 @@ class WorktreeManager:
         # Update status in graph
         await self.entity_manager.update(worktree_id, {"status": WorktreeStatus.DELETED.value})
 
-        logger.info(f"Cleaned up worktree: {record.path}")
+        log.info(f"Cleaned up worktree: {record.path}")
         return True
 
     async def mark_merged(self, worktree_id: str) -> WorktreeRecord | None:
@@ -405,10 +406,10 @@ class WorktreeManager:
                 await self.cleanup(record.id, force=True)
                 cleaned.append(record.id)
             except Exception:
-                logger.exception(f"Failed to clean up orphaned worktree {record.id}")
+                log.exception(f"Failed to clean up orphaned worktree {record.id}")
 
         if cleaned:
-            logger.info(f"Cleaned up {len(cleaned)} orphaned worktrees")
+            log.info(f"Cleaned up {len(cleaned)} orphaned worktrees")
 
         return cleaned
 

@@ -6,9 +6,10 @@ and distributes tasks across multiple concurrent agents.
 
 import asyncio
 import contextlib
-import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+
+import structlog
 
 from sibyl.agents.runner import AgentInstance, AgentRunner
 from sibyl.agents.worktree import WorktreeManager
@@ -25,7 +26,7 @@ from sibyl_core.models import (
 if TYPE_CHECKING:
     from sibyl_core.graph import EntityManager
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 class OrchestratorError(Exception):
@@ -98,7 +99,7 @@ class AgentOrchestrator:
 
         Recovers state from the graph and begins health monitoring.
         """
-        logger.info(f"Starting orchestrator for project {self.project_id}")
+        log.info(f"Starting orchestrator for project {self.project_id}")
         self._running = True
 
         # Recover any agents that were running before restart
@@ -107,14 +108,14 @@ class AgentOrchestrator:
         # Start health check loop
         self._health_check_task = asyncio.create_task(self._health_check_loop())
 
-        logger.info("Orchestrator started")
+        log.info("Orchestrator started")
 
     async def stop(self) -> None:
         """Stop the orchestrator gracefully.
 
         Checkpoints all running agents and cleans up resources.
         """
-        logger.info("Stopping orchestrator")
+        log.info("Stopping orchestrator")
         self._running = False
 
         # Cancel health check and await cleanup
@@ -131,12 +132,12 @@ class AgentOrchestrator:
                 await agent.checkpoint(current_step="orchestrator_shutdown")
                 await agent.stop(reason="orchestrator_shutdown")
             except Exception:
-                logger.exception(f"Error stopping agent {agent.id}")
+                log.exception(f"Error stopping agent {agent.id}")
 
         # Clean up orphaned worktrees
         await self.worktree_manager.cleanup_orphaned()
 
-        logger.info("Orchestrator stopped")
+        log.info("Orchestrator stopped")
 
     # -------------------------------------------------------------------------
     # Agent Lifecycle
@@ -172,7 +173,7 @@ class AgentOrchestrator:
         # Create message queue for this agent
         self._message_queues[instance.id] = asyncio.Queue()
 
-        logger.info(f"Orchestrator spawned agent {instance.id}")
+        log.info(f"Orchestrator spawned agent {instance.id}")
         return instance
 
     async def spawn_for_task(
@@ -241,7 +242,7 @@ class AgentOrchestrator:
             try:
                 await instance.checkpoint(current_step=f"terminated: {reason}")
             except Exception:
-                logger.exception(f"Failed to checkpoint agent {agent_id}")
+                log.exception(f"Failed to checkpoint agent {agent_id}")
 
         # Clean up message queue
         self._message_queues.pop(agent_id, None)
@@ -288,7 +289,7 @@ class AgentOrchestrator:
         checkpoint = await manager.get_latest()
 
         if not checkpoint:
-            logger.warning(f"No checkpoint found for agent {agent_id}")
+            log.warning(f"No checkpoint found for agent {agent_id}")
             return None
 
         instance = await self.runner.resume_from_checkpoint(
@@ -477,7 +478,7 @@ class AgentOrchestrator:
         """
         queue = self._message_queues.get(to_agent)
         if not queue:
-            logger.warning(f"No message queue for agent {to_agent}")
+            log.warning(f"No message queue for agent {to_agent}")
             return False
 
         message = AgentMessage(
@@ -490,7 +491,7 @@ class AgentOrchestrator:
         )
 
         await queue.put(message)
-        logger.debug(f"Message queued: {from_agent} -> {to_agent}")
+        log.debug(f"Message queued: {from_agent} -> {to_agent}")
         return True
 
     async def receive_messages(
@@ -644,13 +645,13 @@ class AgentOrchestrator:
         )
         recoverable = [a for a in agents if a.status in recoverable_statuses]
 
-        logger.info(f"Found {len(recoverable)} agents to recover")
+        log.info(f"Found {len(recoverable)} agents to recover")
 
         for record in recoverable:
             try:
                 instance = await self.resume_agent(record.id)
                 if instance:
-                    logger.info(f"Recovered agent {record.id}")
+                    log.info(f"Recovered agent {record.id}")
                 else:
                     # Mark as failed if can't recover
                     await self.entity_manager.update(
@@ -661,7 +662,7 @@ class AgentOrchestrator:
                         },
                     )
             except Exception:
-                logger.exception(f"Failed to recover agent {record.id}")
+                log.exception(f"Failed to recover agent {record.id}")
 
     async def _health_check_loop(self) -> None:
         """Background task to monitor agent health."""
@@ -672,7 +673,7 @@ class AgentOrchestrator:
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("Health check failed")
+                log.exception("Health check failed")
 
     async def _check_agent_health(self) -> None:
         """Check for stale or unhealthy agents."""
@@ -688,7 +689,7 @@ class AgentOrchestrator:
                 age = (now - heartbeat).total_seconds()
 
                 if age > self.STALE_HEARTBEAT_THRESHOLD:
-                    logger.warning(f"Agent {instance.id} stale (no heartbeat for {age:.0f}s)")
+                    log.warning(f"Agent {instance.id} stale (no heartbeat for {age:.0f}s)")
                     # Checkpoint and mark as stale
                     try:
                         await instance.checkpoint(current_step="stale_heartbeat")
@@ -697,7 +698,7 @@ class AgentOrchestrator:
                             {"status": AgentStatus.FAILED.value},
                         )
                     except Exception:
-                        logger.exception(f"Failed to handle stale agent {instance.id}")
+                        log.exception(f"Failed to handle stale agent {instance.id}")
 
 
 class AgentMessage:

@@ -5,11 +5,12 @@ Uses Claude Haiku for fast, cheap generation (~200ms, ~$0.001 per call).
 """
 
 import hashlib
-import logging
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
+import structlog
+
+log = structlog.get_logger()
 
 # Cache directory for generated hints (avoid repeated API calls)
 CACHE_DIR = Path.home() / ".cache" / "sibyl" / "status_hints"
@@ -104,7 +105,7 @@ class StatusHintService:
         # Check cache first
         cached = self._get_cached(tool_name, context)
         if cached:
-            logger.debug(f"Status hint cache hit: {cached}")
+            log.debug(f"Status hint cache hit: {cached}")
             return cached
 
         # Build prompt
@@ -123,11 +124,11 @@ class StatusHintService:
                 hint = hint[:57] + "..."
 
             self._set_cached(tool_name, context, hint)
-            logger.debug(f"Generated status hint: {hint}")
+            log.debug(f"Generated status hint: {hint}")
             return hint
 
         except Exception as e:
-            logger.warning(f"Failed to generate status hint: {e}")
+            log.warning(f"Failed to generate status hint: {e}")
             return self._fallback_hint(tool_name, tool_input)
 
     def _build_prompt(

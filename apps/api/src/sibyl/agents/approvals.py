@@ -5,12 +5,12 @@ and create approval requests for human review.
 """
 
 import hashlib
-import logging
 import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+import structlog
 from claude_agent_sdk.types import (
     HookContext,
     HookInput,
@@ -32,7 +32,7 @@ from sibyl_core.models import (
 if TYPE_CHECKING:
     from sibyl_core.graph import EntityManager
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 # Patterns for dangerous operations
 DESTRUCTIVE_BASH_PATTERNS = [
@@ -171,7 +171,7 @@ class ApprovalService:
         # Check against destructive patterns
         for pattern in DESTRUCTIVE_BASH_PATTERNS:
             if re.search(pattern, command, re.IGNORECASE):
-                logger.warning(f"Destructive bash command detected: {command[:100]}")
+                log.warning(f"Destructive bash command detected: {command[:100]}")
 
                 # Create approval request
                 approval = await self._create_approval(
@@ -232,7 +232,7 @@ class ApprovalService:
         # Check against sensitive file patterns
         for pattern in SENSITIVE_FILE_PATTERNS:
             if re.search(pattern, file_path, re.IGNORECASE):
-                logger.warning(f"Sensitive file operation detected: {file_path}")
+                log.warning(f"Sensitive file operation detected: {file_path}")
 
                 # Create approval request
                 approval = await self._create_approval(
@@ -291,7 +291,7 @@ class ApprovalService:
         # Check against external API patterns
         for pattern in EXTERNAL_API_APPROVAL_DOMAINS:
             if re.search(pattern, url, re.IGNORECASE):
-                logger.warning(f"External API call detected: {url}")
+                log.warning(f"External API call detected: {url}")
 
                 # Create approval request
                 approval = await self._create_approval(
@@ -351,7 +351,7 @@ class ApprovalService:
         if not questions:
             return SyncHookJSONOutput(continue_=True)
 
-        logger.info(f"AskUserQuestion intercepted: {len(questions)} question(s)")
+        log.info(f"AskUserQuestion intercepted: {len(questions)} question(s)")
 
         # Create question record and broadcast
         question_id = await self._create_question(questions)
@@ -441,7 +441,7 @@ class ApprovalService:
                 await session.commit()
                 message_payload["message_num"] = message_num
         except Exception as e:
-            logger.warning(f"Failed to store question message: {e}")
+            log.warning(f"Failed to store question message: {e}")
 
         # Broadcast via WebSocket
         try:
@@ -456,9 +456,9 @@ class ApprovalService:
                 org_id=self.org_id,
             )
         except Exception as e:
-            logger.warning(f"Failed to broadcast question: {e}")
+            log.warning(f"Failed to broadcast question: {e}")
 
-        logger.info(f"Created user question {question_id}")
+        log.info(f"Created user question {question_id}")
         return question_id
 
     async def _wait_for_question_response(
@@ -478,7 +478,7 @@ class ApprovalService:
         response = await wait_for_question_response(question_id, wait_timeout=wait_timeout)
 
         if response is None:
-            logger.warning(f"Question {question_id} timed out after {wait_timeout}s")
+            log.warning(f"Question {question_id} timed out after {wait_timeout}s")
             return None
 
         return response
@@ -538,7 +538,7 @@ class ApprovalService:
         # Broadcast approval request to UI via WebSocket
         await self._broadcast_approval_request(record, expires_at)
 
-        logger.info(f"Created approval request {approval_id}: {title}")
+        log.info(f"Created approval request {approval_id}: {title}")
         return record
 
     async def _broadcast_approval_request(
@@ -585,7 +585,7 @@ class ApprovalService:
                 await session.commit()
                 message_payload["message_num"] = message_num
         except Exception as e:
-            logger.warning(f"Failed to store approval message: {e}")
+            log.warning(f"Failed to store approval message: {e}")
 
         # Broadcast via WebSocket for real-time display
         try:
@@ -600,7 +600,7 @@ class ApprovalService:
                 org_id=self.org_id,
             )
         except Exception as e:
-            logger.warning(f"Failed to broadcast approval request: {e}")
+            log.warning(f"Failed to broadcast approval request: {e}")
 
     async def _wait_for_approval(
         self, approval_id: str, wait_timeout: float = 300.0
@@ -624,7 +624,7 @@ class ApprovalService:
 
         if response is None:
             # Timeout
-            logger.warning(f"Approval {approval_id} timed out after {wait_timeout}s")
+            log.warning(f"Approval {approval_id} timed out after {wait_timeout}s")
             await self.entity_manager.update(approval_id, {"status": ApprovalStatus.EXPIRED.value})
             return {"approved": False, "message": "Approval request timed out"}
 
@@ -663,7 +663,7 @@ class ApprovalService:
             },
         )
 
-        logger.info(f"Approval {approval_id} responded: {'approved' if approved else 'denied'}")
+        log.info(f"Approval {approval_id} responded: {'approved' if approved else 'denied'}")
         return True
 
     async def list_pending(self) -> list[ApprovalRecord]:

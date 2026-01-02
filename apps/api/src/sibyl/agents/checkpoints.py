@@ -5,11 +5,12 @@ enabling agents to survive system restarts and resume from saved state.
 """
 
 import hashlib
-import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import structlog
 
 from sibyl_core.models import AgentCheckpoint, EntityType
 
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
     from sibyl.agents.runner import AgentInstance
     from sibyl_core.graph import EntityManager
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 def _generate_checkpoint_id(agent_id: str, timestamp: str) -> str:
@@ -108,7 +109,7 @@ class CheckpointManager:
             {"last_checkpoint": checkpoint_id},
         )
 
-        logger.info(f"Created checkpoint {checkpoint_id} for agent {self.agent_id}")
+        log.info(f"Created checkpoint {checkpoint_id} for agent {self.agent_id}")
         return checkpoint
 
     async def _get_git_state(self, worktree_path: Path) -> tuple[str, list[str]]:
@@ -205,7 +206,7 @@ class CheckpointManager:
             if entity and isinstance(entity, AgentCheckpoint):
                 return entity
         except Exception:
-            logger.debug(f"Checkpoint not found: {checkpoint_id}")
+            log.debug(f"Checkpoint not found: {checkpoint_id}")
         return None
 
     async def cleanup_old(self, keep_count: int = 5) -> int:
@@ -231,10 +232,10 @@ class CheckpointManager:
                 await self.entity_manager.delete(checkpoint.id)
                 deleted += 1
             except Exception:
-                logger.exception(f"Failed to delete checkpoint {checkpoint.id}")
+                log.exception(f"Failed to delete checkpoint {checkpoint.id}")
 
         if deleted:
-            logger.info(f"Cleaned up {deleted} old checkpoints for agent {self.agent_id}")
+            log.info(f"Cleaned up {deleted} old checkpoints for agent {self.agent_id}")
 
         return deleted
 
@@ -285,14 +286,14 @@ async def restore_from_checkpoint(
     if worktree_path_str:
         worktree_path = Path(worktree_path_str)
         if not worktree_path.exists():
-            logger.warning(f"Worktree no longer exists: {worktree_path}")
+            log.warning(f"Worktree no longer exists: {worktree_path}")
             worktree_path = None
 
     # Validate session ID
     if not checkpoint.session_id:
         raise CheckpointRestoreError("Checkpoint has no session ID - cannot resume")
 
-    logger.info(f"Prepared restore for agent {checkpoint.agent_id} from checkpoint {checkpoint.id}")
+    log.info(f"Prepared restore for agent {checkpoint.agent_id} from checkpoint {checkpoint.id}")
 
     return RestoreResult(
         checkpoint=checkpoint,
