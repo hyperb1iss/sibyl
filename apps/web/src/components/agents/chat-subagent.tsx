@@ -4,12 +4,13 @@
  * Subagent execution display components.
  */
 
-import { forwardRef, useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useRef } from 'react';
 import { Check, ChevronDown, Code, Xmark } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
 import { formatDuration } from './chat-constants';
 import { getToolIcon } from './tool-registry';
 import { ToolMessage } from './chat-tool-message';
+import { getExpandedClasses, useExpanded } from './use-expanded';
 import type {
   ParallelAgentsBlockProps,
   SubagentBlockProps,
@@ -30,8 +31,7 @@ export function SubagentBlock({
   pollingCalls = [],
   isAgentTerminal = false,
 }: SubagentBlockProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const contentRef = useRef<HTMLDivElement>(null);
+  const { isExpanded, toggle } = useExpanded();
   const previewRef = useRef<HTMLDivElement>(null);
 
   // Extract metadata from task call
@@ -84,7 +84,7 @@ export function SubagentBlock({
       {/* Header */}
       <button
         type="button"
-        onClick={() => setIsExpanded(!isExpanded)}
+        onClick={toggle}
         className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-sc-fg-subtle/5 transition-all duration-200 group"
       >
         {/* Icon - use poll status for background agents */}
@@ -158,12 +158,7 @@ export function SubagentBlock({
       )}
 
       {/* Expanded content with animation */}
-      <div
-        ref={contentRef}
-        className={`overflow-hidden transition-all duration-300 ease-in-out ${
-          isExpanded ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'
-        }`}
-      >
+      <div className={getExpandedClasses(isExpanded, 'lg')}>
         <div className="border-t border-sc-fg-subtle/10 bg-sc-bg-base/50 p-2 space-y-1 max-h-[500px] overflow-y-auto">
           {/* Show all nested tool calls */}
           {nestedCalls.length > 0 ? (

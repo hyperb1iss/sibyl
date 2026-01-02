@@ -4,12 +4,13 @@
  * Tool message component - displays tool calls with expandable results.
  */
 
-import { useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import { ChevronDown } from '@/components/ui/icons';
 import { stripAnsi } from './chat-constants';
 import type { ToolMessageProps } from './chat-types';
 import { ToolContentRenderer } from './tool-renderers';
 import { getToolIcon, getToolStatus, hasCustomRenderer } from './tool-registry';
+import { getExpandedClasses, useExpanded } from './use-expanded';
 
 // =============================================================================
 // ToolMessage
@@ -17,8 +18,7 @@ import { getToolIcon, getToolStatus, hasCustomRenderer } from './tool-registry';
 
 /** Collapsible tool execution display with result preview */
 export function ToolMessage({ message, result, isNew = false, tier3Hint }: ToolMessageProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const contentRef = useRef<HTMLDivElement>(null);
+  const { isExpanded, toggle } = useExpanded();
 
   const { name: toolName, icon: iconName, input } = message.tool;
   const Icon = getToolIcon(toolName, iconName);
@@ -71,7 +71,7 @@ export function ToolMessage({ message, result, isNew = false, tier3Hint }: ToolM
       {/* Header row with tool name and preview */}
       <button
         type="button"
-        onClick={() => hasExpandableContent && setIsExpanded(!isExpanded)}
+        onClick={() => hasExpandableContent && toggle()}
         className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-left transition-all duration-200 group ${
           hasExpandableContent ? 'cursor-pointer hover:bg-sc-fg-subtle/5' : ''
         }`}
@@ -112,12 +112,7 @@ export function ToolMessage({ message, result, isNew = false, tier3Hint }: ToolM
       </button>
 
       {/* Animated expandable content */}
-      <div
-        ref={contentRef}
-        className={`overflow-hidden transition-all duration-300 ease-out ${
-          isExpanded ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'
-        }`}
-      >
+      <div className={getExpandedClasses(isExpanded, 'md')}>
         <div className="border-t border-sc-fg-subtle/10 p-2">
           {/* Use smart renderer for tools with custom renderers, fallback to simple display */}
           {toolName && hasCustomRenderer(toolName) ? (

@@ -70,3 +70,11 @@ export {
   UserQuestionMessage,
   type UserQuestionMessageProps,
 } from './user-question-message';
+// Hooks
+export {
+  type ExpandedSize,
+  getExpandedClasses,
+  useExpanded,
+  type UseExpandedOptions,
+  type UseExpandedReturn,
+} from './use-expanded';
