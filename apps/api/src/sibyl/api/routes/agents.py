@@ -3,6 +3,7 @@
 REST API for managing AI agents via the AgentOrchestrator.
 """
 
+import contextlib
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
@@ -21,6 +22,8 @@ from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.models import (
+    AgentRecord,
+    AgentSpawnSource,
     AgentStatus,
     AgentType,
     EntityType,
@@ -287,24 +290,46 @@ async def spawn_agent(
 ) -> SpawnAgentResponse:
     """Spawn a new agent and enqueue execution.
 
-    Validates the request and enqueues agent execution in the worker process.
-    The worker creates the agent record and handles execution.
+    Creates the agent entity synchronously (so UI can poll immediately),
+    then enqueues execution in the worker process.
     """
     from sibyl.jobs.queue import enqueue_agent_execution
 
+    client = await get_graph_client()
+    manager = EntityManager(client, group_id=str(org.id))
+
     # Validate task exists if specified
     if request.task_id:
-        client = await get_graph_client()
-        manager = EntityManager(client, group_id=str(org.id))
-        entity = await manager.get(request.task_id)
-        if not entity:
-            raise HTTPException(status_code=404, detail=f"Task not found: {request.task_id}")
+        try:
+            entity = await manager.get(request.task_id)
+            if not entity:
+                raise HTTPException(status_code=404, detail=f"Task not found: {request.task_id}")
+        except EntityNotFoundError:
+            raise HTTPException(status_code=404, detail=f"Task not found: {request.task_id}") from None
 
-    # Generate agent ID upfront so we can return it immediately
+    # Generate agent ID upfront
     agent_id = f"agent_{uuid4().hex[:12]}"
 
+    # Derive name from prompt (first line, truncated)
+    name = request.prompt.split("\n")[0][:100].strip() or "Agent"
+
+    # Create agent record synchronously so UI can poll immediately
+    record = AgentRecord(
+        id=agent_id,
+        name=name,
+        organization_id=str(org.id),
+        project_id=request.project_id,
+        agent_type=request.agent_type,
+        spawn_source=AgentSpawnSource.USER,
+        task_id=request.task_id,
+        status=AgentStatus.INITIALIZING,
+        initial_prompt=request.prompt[:500],
+        created_by=str(user.id),
+    )
+    await manager.create_direct(record)
+
     try:
-        # Enqueue agent creation + execution in worker process
+        # Enqueue execution in worker process
         await enqueue_agent_execution(
             agent_id=agent_id,
             org_id=str(org.id),
@@ -322,6 +347,9 @@ async def spawn_agent(
         )
     except Exception as e:
         log.exception("Failed to enqueue agent", error=str(e))
+        # Try to clean up the entity we created
+        with contextlib.suppress(Exception):
+            await manager.delete(agent_id)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

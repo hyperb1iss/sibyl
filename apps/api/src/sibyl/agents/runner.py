@@ -32,6 +32,7 @@ from sibyl.agents.hooks import (
 )
 from sibyl.agents.worktree import WorktreeManager
 from sibyl.locks import EntityLockManager, LockAcquisitionError
+from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models import (
     AgentCheckpoint,
     AgentRecord,
@@ -297,21 +298,31 @@ Priority: {task.priority}
             timestamp = datetime.now(UTC).isoformat()
             agent_id = _generate_agent_id(self.org_id, self.project_id, timestamp)
 
-        # Create agent record with descriptive name from prompt
-        record = AgentRecord(
-            id=agent_id,
-            name=_derive_agent_name(prompt, agent_type, agent_id),
-            organization_id=self.org_id,
-            project_id=self.project_id,
-            agent_type=agent_type,
-            spawn_source=spawn_source,
-            task_id=task.id if task else None,
-            status=AgentStatus.INITIALIZING,
-            initial_prompt=prompt[:500],  # Truncate for storage
-        )
+        # Check if entity was pre-created by API (avoids race condition)
+        record: AgentRecord | None = None
+        try:
+            existing = await self.entity_manager.get(agent_id)
+            if isinstance(existing, AgentRecord):
+                record = existing
+                log.debug("Using pre-created agent record", agent_id=agent_id)
+        except EntityNotFoundError:
+            pass
 
-        # Persist to graph (use create_direct to skip LLM extraction)
-        await self.entity_manager.create_direct(record)
+        # Create agent record if not pre-created
+        if record is None:
+            record = AgentRecord(
+                id=agent_id,
+                name=_derive_agent_name(prompt, agent_type, agent_id),
+                organization_id=self.org_id,
+                project_id=self.project_id,
+                agent_type=agent_type,
+                spawn_source=spawn_source,
+                task_id=task.id if task else None,
+                status=AgentStatus.INITIALIZING,
+                initial_prompt=prompt[:500],  # Truncate for storage
+            )
+            # Persist to graph (use create_direct to skip LLM extraction)
+            await self.entity_manager.create_direct(record)
 
         # Create worktree if requested
         worktree_path: Path | None = None
