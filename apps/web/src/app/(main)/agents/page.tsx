@@ -531,7 +531,7 @@ function AgentsPageContent() {
                 bg-gradient-to-br from-sc-purple to-sc-purple/80
                 shadow-[0_2px_8px_rgba(225,53,255,0.3),0_0_16px_rgba(225,53,255,0.2)]
                 transition-all duration-300 ease-out
-                ${viewMode === 'dashboard' ? 'left-1 w-[calc(50%-0.25rem)]' : 'left-[calc(50%+0.125rem)] w-[calc(50%-0.375rem)]'}
+                ${viewMode === 'dashboard' ? 'left-1 right-[calc(50%+0.125rem)]' : 'left-[calc(50%+0.125rem)] right-1'}
               `}
             />
           </div>
