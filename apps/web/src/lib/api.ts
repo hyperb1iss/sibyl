@@ -713,6 +713,7 @@ export interface Agent {
   worktree_path: string | null;
   worktree_branch: string | null;
   error_message: string | null;
+  tags: string[];
 }
 
 export interface AgentListResponse {
@@ -2021,6 +2022,17 @@ export const api = {
       const query = searchParams.toString();
       return fetchApi<HealthOverviewResponse>(`/agents/health/overview${query ? `?${query}` : ''}`);
     },
+
+    rename: (id: string, name: string) =>
+      fetchApi<AgentActionResponse>(`/agents/${id}/rename`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name }),
+      }),
+
+    archive: (id: string) =>
+      fetchApi<AgentActionResponse>(`/agents/${id}/archive`, {
+        method: 'POST',
+      }),
   },
 
   // Approvals (Human-in-the-Loop)
@@ -2056,6 +2068,11 @@ export const api = {
       fetchApi<RespondToApprovalResponse>(`/approvals/${id}/respond`, {
         method: 'POST',
         body: JSON.stringify(request),
+      }),
+
+    dismiss: (id: string) =>
+      fetchApi<RespondToApprovalResponse>(`/approvals/${id}`, {
+        method: 'DELETE',
       }),
 
     answerQuestion: (id: string, request: AnswerQuestionRequest) =>

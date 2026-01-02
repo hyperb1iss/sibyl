@@ -91,6 +91,80 @@ def _derive_agent_name(prompt: str, agent_type: AgentType, agent_id: str) -> str
     return f"{agent_type.value}-{agent_id[-8:]}"
 
 
+# Haiku model for fast, cheap tag generation
+_HAIKU_MODEL = "claude-3-5-haiku-latest"
+
+
+def _derive_agent_tags(
+    prompt: str,
+    agent_type: AgentType,
+    task: Task | None = None,
+) -> list[str]:
+    """Derive tags automatically using Claude Haiku.
+
+    Uses LLM to intelligently extract relevant tags from prompt context.
+    Falls back to basic tags if LLM call fails.
+
+    Args:
+        prompt: Initial prompt for the agent
+        agent_type: Type of agent being spawned
+        task: Optional assigned task
+
+    Returns:
+        Sorted list of tags (max 8)
+    """
+    # Always include agent type
+    base_tags = {agent_type.value}
+
+    # Inherit from task if assigned
+    if task:
+        if task.tags:
+            base_tags.update(task.tags[:3])
+        if task.domain:
+            base_tags.add(task.domain.lower())
+
+    # Try LLM-based extraction
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic()
+
+        # Build context for tag extraction
+        context_parts = [f"Agent type: {agent_type.value}"]
+        if task:
+            context_parts.append(f"Task: {task.title}")
+            if task.technologies:
+                context_parts.append(f"Technologies: {', '.join(task.technologies)}")
+        context_parts.append(f"Prompt: {prompt[:500]}")
+
+        llm_prompt = f"""Extract 3-5 short, lowercase tags that categorize this AI agent's work.
+
+{chr(10).join(context_parts)}
+
+Good tags: fix, refactor, test, feature, api, ui, database, auth, perf, docs, migration, security
+Bad tags: the, code, work, task, agent (too generic)
+
+Reply with ONLY comma-separated tags, nothing else. Example: fix, api, auth"""
+
+        message = client.messages.create(
+            model=_HAIKU_MODEL,
+            max_tokens=50,
+            messages=[{"role": "user", "content": llm_prompt}],
+        )
+
+        # Parse response
+        response_text = message.content[0].text.strip().lower()
+        llm_tags = {t.strip() for t in response_text.split(",") if t.strip()}
+
+        # Merge with base tags
+        all_tags = base_tags | llm_tags
+        return sorted(all_tags)[:8]
+
+    except Exception as e:
+        log.warning(f"LLM tag extraction failed, using base tags: {e}")
+        return sorted(base_tags)[:8]
+
+
 class AgentRunnerError(Exception):
     """Base exception for agent runner operations."""
 
@@ -308,6 +382,9 @@ Priority: {task.priority}
         except EntityNotFoundError:
             pass
 
+        # Derive tags from context
+        tags = _derive_agent_tags(prompt, agent_type, task)
+
         # Create agent record if not pre-created
         if record is None:
             record = AgentRecord(
@@ -320,9 +397,15 @@ Priority: {task.priority}
                 task_id=task.id if task else None,
                 status=AgentStatus.INITIALIZING,
                 initial_prompt=prompt[:500],  # Truncate for storage
+                tags=tags,
             )
             # Persist to graph (use create_direct to skip LLM extraction)
             await self.entity_manager.create_direct(record)
+        else:
+            # Update pre-created record with tags if missing
+            if not record.tags:
+                record.tags = tags
+                await self.entity_manager.update(record.id, {"tags": tags})
 
         # Create worktree if requested
         worktree_path: Path | None = None

@@ -94,6 +94,9 @@ class AgentRecord(Entity):
     tokens_used: int = Field(default=0, description="Total tokens consumed")
     cost_usd: float = Field(default=0.0, description="Total cost in USD")
 
+    # Organization
+    tags: list[str] = Field(default_factory=list, description="Auto-derived and manual tags")
+
     @model_validator(mode="before")
     @classmethod
     def set_entity_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
@@ -152,6 +155,7 @@ class AgentRecord(Entity):
             conversation_turns=meta.get("conversation_turns", 0),
             tokens_used=meta.get("tokens_used", 0),
             cost_usd=meta.get("cost_usd", 0.0),
+            tags=meta.get("tags", []),
         )
 
 
@@ -264,7 +268,7 @@ class ApprovalRecord(Entity):
     @model_validator(mode="before")
     @classmethod
     def set_entity_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
-        """Set name and content from approval fields."""
+        """Set name, description, and content from approval fields."""
         if isinstance(data, dict):
             # Require organization_id
             if not data.get("organization_id"):
@@ -272,6 +276,9 @@ class ApprovalRecord(Entity):
                 raise ValueError(msg)
             if "name" not in data and "title" in data:
                 data["name"] = data["title"][:100]
+            # Set description from summary (Entity base class requires it)
+            if "description" not in data and "summary" in data:
+                data["description"] = data["summary"]
             if "content" not in data and "summary" in data:
                 data["content"] = data["summary"]
         return data

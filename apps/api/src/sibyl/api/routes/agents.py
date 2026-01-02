@@ -83,6 +83,7 @@ class AgentResponse(BaseModel):
     worktree_path: str | None = None
     worktree_branch: str | None = None
     error_message: str | None = None
+    tags: list[str] = []
 
 
 class AgentListResponse(BaseModel):
@@ -203,6 +204,7 @@ async def list_agents(
     status: AgentStatus | None = None,
     agent_type: AgentType | None = None,
     all_users: bool = False,
+    include_archived: bool = False,
     limit: int = 50,
     user: User = Depends(get_current_user),
     org: Organization = Depends(get_current_organization),
@@ -214,6 +216,7 @@ async def list_agents(
         status: Filter by agent status
         agent_type: Filter by agent type
         all_users: If True, show all agents in the org (default: only user's agents)
+        include_archived: If True, include archived agents (default: exclude)
         limit: Maximum results
         user: Current user
         org: Current organization
@@ -236,6 +239,10 @@ async def list_agents(
             for a in agents
             if (a.metadata or {}).get("created_by") == user_id_str or a.created_by == user_id_str
         ]
+
+    # Filter out archived agents (unless explicitly requested)
+    if not include_archived:
+        agents = [a for a in agents if not (a.metadata or {}).get("archived")]
 
     # Apply filters (agents are generic Entity objects - fields in metadata)
     if project:
@@ -1068,6 +1075,110 @@ async def get_activity_feed(
 
 
 # =============================================================================
+# Agent Management (Rename, Archive)
+# =============================================================================
+
+
+class RenameAgentRequest(BaseModel):
+    """Request to rename an agent."""
+
+    name: str
+
+
+@router.patch("/{agent_id}/rename", response_model=AgentActionResponse)
+async def rename_agent(
+    agent_id: str,
+    request: RenameAgentRequest,
+    org: Organization = Depends(get_current_organization),
+) -> AgentActionResponse:
+    """Rename an agent."""
+    from sibyl.api.pubsub import publish_event
+
+    client = await get_graph_client()
+    manager = EntityManager(client, group_id=str(org.id))
+
+    entity = await manager.get(agent_id)
+    if not entity or entity.entity_type != EntityType.AGENT:
+        raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+
+    # Update agent name
+    await manager.update(agent_id, {"name": request.name})
+
+    # Publish event for real-time UI updates
+    await publish_event(
+        "agent_status",
+        {
+            "agent_id": agent_id,
+            "name": request.name,
+            "timestamp": datetime.now(UTC).isoformat(),
+        },
+    )
+
+    log.info("Agent renamed", agent_id=agent_id, new_name=request.name)
+
+    return AgentActionResponse(
+        success=True,
+        agent_id=agent_id,
+        action="rename",
+        message=f"Agent renamed to '{request.name}'",
+    )
+
+
+@router.post("/{agent_id}/archive", response_model=AgentActionResponse)
+async def archive_agent(
+    agent_id: str,
+    org: Organization = Depends(get_current_organization),
+) -> AgentActionResponse:
+    """Archive an agent (soft delete).
+
+    Archived agents stay in the graph but are hidden from UI by default.
+    Only terminal states (completed, failed, terminated) can be archived.
+    """
+    from sibyl.api.pubsub import publish_event
+
+    client = await get_graph_client()
+    manager = EntityManager(client, group_id=str(org.id))
+
+    entity = await manager.get(agent_id)
+    if not entity or entity.entity_type != EntityType.AGENT:
+        raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+
+    agent_status = (entity.metadata or {}).get("status", "initializing")
+    terminal_states = (
+        AgentStatus.COMPLETED.value,
+        AgentStatus.FAILED.value,
+        AgentStatus.TERMINATED.value,
+    )
+    if agent_status not in terminal_states:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot archive agent in {agent_status} status. Only terminal states can be archived.",
+        )
+
+    # Mark as archived
+    await manager.update(agent_id, {"archived": True, "archived_at": datetime.now(UTC).isoformat()})
+
+    # Publish event for real-time UI updates
+    await publish_event(
+        "agent_status",
+        {
+            "agent_id": agent_id,
+            "archived": True,
+            "timestamp": datetime.now(UTC).isoformat(),
+        },
+    )
+
+    log.info("Agent archived", agent_id=agent_id, agent_name=entity.name)
+
+    return AgentActionResponse(
+        success=True,
+        agent_id=agent_id,
+        action="archive",
+        message="Agent archived successfully",
+    )
+
+
+# =============================================================================
 # Helpers
 # =============================================================================
 
@@ -1095,4 +1206,5 @@ def _entity_to_agent_response(entity: "Entity") -> AgentResponse:
         worktree_path=meta.get("worktree_path"),
         worktree_branch=meta.get("worktree_branch"),
         error_message=meta.get("error_message") or meta.get("paused_reason"),
+        tags=meta.get("tags", []),
     )
