@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-type SpinnerSize = 'sm' | 'md' | 'lg' | 'xl';
+export type SpinnerSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 
 interface SpinnerProps {
   size?: SpinnerSize;
@@ -12,6 +12,7 @@ interface SpinnerProps {
 }
 
 const sizes: Record<SpinnerSize, string> = {
+  xs: 'w-3 h-3 border',
   sm: 'w-4 h-4 border-2',
   md: 'w-6 h-6 border-2',
   lg: 'w-8 h-8 border-2',
@@ -56,6 +57,7 @@ export function Spinner({
 // Orbital spinner with multiple rotating dots
 function OrbitalSpinner({ size = 'md' }: { size: SpinnerSize }) {
   const sizeMap = {
+    xs: { container: 'w-3 h-3', dot: 'w-0.5 h-0.5' },
     sm: { container: 'w-4 h-4', dot: 'w-1 h-1' },
     md: { container: 'w-6 h-6', dot: 'w-1.5 h-1.5' },
     lg: { container: 'w-8 h-8', dot: 'w-2 h-2' },
@@ -88,6 +90,7 @@ function OrbitalSpinner({ size = 'md' }: { size: SpinnerSize }) {
 // Gradient spinner with animated border
 function GradientSpinner({ size = 'md' }: { size: SpinnerSize }) {
   const sizeClasses = {
+    xs: 'w-3 h-3 border',
     sm: 'w-4 h-4 border-2',
     md: 'w-6 h-6 border-2',
     lg: 'w-8 h-8 border-2',
@@ -238,6 +241,7 @@ export function ProgressSpinner({
   showPercent = true,
 }: ProgressSpinnerProps) {
   const sizeMap = {
+    xs: { container: 'w-6 h-6', text: 'text-[6px]', stroke: '2' },
     sm: { container: 'w-8 h-8', text: 'text-[8px]', stroke: '3' },
     md: { container: 'w-12 h-12', text: 'text-[10px]', stroke: '4' },
     lg: { container: 'w-16 h-16', text: 'text-xs', stroke: '4' },

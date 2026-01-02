@@ -254,6 +254,7 @@ export function useMe(options?: {
     queryFn: () => api.auth.me(),
     enabled: options?.enabled ?? true,
     retry: false,
+    staleTime: TIMING.STALE_TIME,
     initialData: options?.initialData,
   });
 }
@@ -267,6 +268,7 @@ export function useOrgs(options?: {
     queryFn: () => api.orgs.list(),
     enabled: options?.enabled ?? true,
     retry: false,
+    staleTime: TIMING.STALE_TIME,
     initialData: options?.initialData,
   });
 }
@@ -293,6 +295,7 @@ export function useOrg(slug: string, options?: { enabled?: boolean }) {
     queryFn: () => api.orgs.get(slug),
     enabled: options?.enabled ?? !!slug,
     retry: false,
+    staleTime: TIMING.STALE_TIME,
   });
 }
 
@@ -339,6 +342,7 @@ export function useOrgMembers(slug: string, options?: { enabled?: boolean }) {
     queryFn: () => api.orgs.members.list(slug),
     enabled: options?.enabled ?? !!slug,
     retry: false,
+    staleTime: TIMING.STALE_TIME,
   });
 }
 
@@ -1054,6 +1058,7 @@ export function useProjects(
   return useQuery({
     queryKey: queryKeys.projects.list(includeArchived),
     queryFn: () => api.projects.list({ includeArchived }),
+    staleTime: TIMING.STALE_TIME,
     initialData,
   });
 }
@@ -1063,6 +1068,7 @@ export function useProject(id: string) {
     queryKey: queryKeys.projects.detail(id),
     queryFn: () => api.projects.get(id),
     enabled: !!id,
+    staleTime: TIMING.STALE_TIME,
   });
 }
 
@@ -1082,6 +1088,7 @@ export function useEpics(params?: { project?: string; status?: EpicStatus }) {
   return useQuery({
     queryKey: queryKeys.epics.list(normalized),
     queryFn: () => api.epics.list(normalized),
+    staleTime: TIMING.STALE_TIME,
   });
 }
 
@@ -1090,6 +1097,7 @@ export function useEpic(id: string) {
     queryKey: queryKeys.epics.detail(id),
     queryFn: () => api.epics.get(id),
     enabled: !!id,
+    staleTime: TIMING.STALE_TIME,
   });
 }
 
@@ -1098,6 +1106,7 @@ export function useEpicTasks(epicId: string) {
     queryKey: queryKeys.epics.tasks(epicId),
     queryFn: () => api.epics.tasks(epicId),
     enabled: !!epicId,
+    staleTime: TIMING.STALE_TIME,
   });
 }
 
