@@ -9,6 +9,7 @@ import logging
 import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from claude_agent_sdk.types import (
     HookContext,
@@ -17,7 +18,10 @@ from claude_agent_sdk.types import (
     HookMatcher,
     SyncHookJSONOutput,
 )
+from sqlalchemy import func, select
 
+from sibyl.db import get_session
+from sibyl.db.models import AgentMessage, AgentMessageRole, AgentMessageType
 from sibyl_core.models import (
     ApprovalRecord,
     ApprovalStatus,
@@ -379,26 +383,52 @@ class ApprovalService:
         record: ApprovalRecord,
         expires_at: datetime,
     ) -> None:
-        """Broadcast approval request to UI for real-time display."""
+        """Broadcast approval request to UI and persist to database."""
+        # Build message payload
+        message_payload = {
+            "agent_id": self.agent_id,
+            "message_type": "approval_request",
+            "approval_id": record.id,
+            "approval_type": record.approval_type.value,
+            "title": record.title,
+            "summary": record.summary,
+            "metadata": record.metadata,
+            "actions": ["approve", "deny"],
+            "expires_at": expires_at.isoformat(),
+            "status": "pending",
+        }
+
+        # Store to database for persistence across page reloads
+        try:
+            async with get_session() as session:
+                # Get next message_num for this agent
+                result = await session.execute(
+                    select(func.coalesce(func.max(AgentMessage.message_num), 0)).where(
+                        AgentMessage.agent_id == self.agent_id
+                    )
+                )
+                message_num = (result.scalar() or 0) + 1
+
+                msg = AgentMessage(
+                    agent_id=self.agent_id,
+                    organization_id=UUID(self.org_id),
+                    message_num=message_num,
+                    role=AgentMessageRole.system,
+                    type=AgentMessageType.text,  # Use text type, metadata indicates approval
+                    content=f"🔐 **Approval Required:** {record.title}",
+                    extra=message_payload,  # Full approval data in JSONB
+                )
+                session.add(msg)
+                await session.commit()
+                message_payload["message_num"] = message_num
+        except Exception as e:
+            logger.warning(f"Failed to store approval message: {e}")
+
+        # Broadcast via WebSocket for real-time display
         try:
             from sibyl.api.pubsub import publish_event
 
-            await publish_event(
-                "agent_message",
-                {
-                    "agent_id": self.agent_id,
-                    "message_type": "approval_request",
-                    "approval_id": record.id,
-                    "approval_type": record.approval_type.value,
-                    "title": record.title,
-                    "summary": record.summary,
-                    "metadata": record.metadata,
-                    "actions": ["approve", "deny"],
-                    "expires_at": expires_at.isoformat(),
-                    "status": "pending",
-                },
-                org_id=self.org_id,
-            )
+            await publish_event("agent_message", message_payload, org_id=self.org_id)
 
             # Also broadcast agent status change
             await publish_event(
