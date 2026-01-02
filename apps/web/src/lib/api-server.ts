@@ -54,56 +54,10 @@ async function serverFetch<T>(
     },
   });
 
-  // Handle 401 - try to refresh token and retry once
-  if (response.status === 401 && endpoint !== '/auth/refresh') {
-    const refreshResponse = await fetch(`${API_BASE}/auth/refresh`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(cookieHeader ? { cookie: cookieHeader } : {}),
-      },
-    });
-
-    if (refreshResponse.ok) {
-      // Refresh succeeded - extract new tokens from set-cookie headers
-      // and use them for the retry request
-      const newCookies: string[] = [];
-      const setCookieHeaders = refreshResponse.headers.getSetCookie?.() || [];
-
-      for (const header of setCookieHeaders) {
-        // Extract cookie name=value from set-cookie header (before the first ';')
-        const cookiePart = header.split(';')[0];
-        if (cookiePart) {
-          newCookies.push(cookiePart);
-        }
-      }
-
-      const retryCookieHeader = newCookies.length > 0 ? newCookies.join('; ') : cookieHeader;
-
-      const retryResponse = await fetch(url, {
-        ...DEFAULT_OPTIONS,
-        ...options,
-        headers: {
-          ...DEFAULT_OPTIONS.headers,
-          ...options?.headers,
-          cookie: retryCookieHeader,
-        },
-      });
-
-      if (retryResponse.ok) {
-        return retryResponse.json();
-      }
-
-      // Retry also failed - throw the error
-      const error = await retryResponse.text();
-      throw new Error(error || `API error: ${retryResponse.status}`);
-    }
-
-    // Refresh failed - throw the original 401 error
-    const error = await response.text();
-    throw new Error(error || `API error: ${response.status}`);
-  }
-
+  // Don't attempt server-side token refresh. The backend rotates refresh tokens,
+  // and new cookies can't be propagated back to the browser from server components.
+  // This would invalidate the browser's refresh token, causing logout loops.
+  // Let the client-side code handle 401s and token refresh.
   if (!response.ok) {
     const error = await response.text();
     throw new Error(error || `API error: ${response.status}`);
