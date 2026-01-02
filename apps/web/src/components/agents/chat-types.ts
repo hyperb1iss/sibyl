@@ -12,7 +12,7 @@ export interface ChatMessage {
   role: 'agent' | 'user' | 'system';
   content: string;
   timestamp: Date;
-  type?: 'text' | 'tool_call' | 'tool_result' | 'error';
+  type?: 'text' | 'tool_call' | 'tool_result' | 'error' | 'sibyl_context';
   metadata?: ChatMessageMetadata;
 }
 
@@ -105,7 +105,10 @@ export interface ChatMessageComponentProps {
 
 export interface ChatPanelProps {
   messages: ChatMessage[];
+  pendingMessages: ChatMessage[];
   onSendMessage: (content: string) => void;
+  onCancelPending: (id: string) => void;
+  onEditPending: (id: string, newContent: string) => void;
   isAgentWorking: boolean;
   agentName: string;
   agentStatus: string;

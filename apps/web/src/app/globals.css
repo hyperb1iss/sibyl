@@ -424,9 +424,9 @@ body {
   background: color-mix(in oklch, var(--sc-purple) 40%, transparent);
 }
 
-/* Focus outline */
+/* Focus outline - subtle purple instead of bright cyan */
 :focus-visible {
-  outline: 2px solid var(--sc-cyan);
+  outline: 2px solid color-mix(in oklch, var(--sc-purple) 50%, transparent);
   outline-offset: 2px;
 }
 

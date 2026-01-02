@@ -1404,13 +1404,19 @@ export function useAgents(params?: {
 
 /**
  * Fetch a single agent by ID.
- * Note: No polling - use useAgentSubscription for real-time WebSocket updates.
+ * Includes polling fallback for when WebSocket is disconnected or agent status is stale.
  */
 export function useAgent(id: string) {
+  const wsStatus = useConnectionStatus();
+  const isWsConnected = wsStatus === 'connected';
+
   return useQuery({
     queryKey: queryKeys.agents.detail(id),
     queryFn: () => api.agents.get(id),
     enabled: !!id,
+    // Poll every 10s even when WS connected (catches dead agents after server restart)
+    // Poll every 5s when WS disconnected for faster recovery
+    refetchInterval: isWsConnected ? 10000 : 5000,
   });
 }
 
@@ -1476,13 +1482,18 @@ export function useTerminateAgent() {
 
 /**
  * Fetch messages for an agent.
- * Note: No polling - use useAgentSubscription for real-time WebSocket updates.
+ * Includes polling fallback when WebSocket is disconnected.
  */
 export function useAgentMessages(id: string, limit?: number) {
+  const wsStatus = useConnectionStatus();
+  const isWsConnected = wsStatus === 'connected';
+
   return useQuery({
     queryKey: queryKeys.agents.messages(id, limit),
     queryFn: () => api.agents.getMessages(id, limit),
     enabled: !!id,
+    // Poll when WS disconnected for faster recovery
+    refetchInterval: isWsConnected ? false : 5000,
   });
 }
 

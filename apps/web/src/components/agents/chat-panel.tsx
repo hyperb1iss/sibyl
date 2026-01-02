@@ -19,7 +19,10 @@ import type { ChatPanelProps } from './chat-types';
 /** Main chat panel with messages list and input form */
 export function ChatPanel({
   messages,
+  pendingMessages,
   onSendMessage,
+  onCancelPending,
+  onEditPending,
   isAgentWorking,
   agentName,
   agentStatus,
@@ -27,6 +30,8 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [inputValue, setInputValue] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const prevMessageCount = useRef(messages.length);
   const isAtBottomRef = useRef(true); // Track if user is scrolled to bottom
@@ -64,7 +69,7 @@ export function ChatPanel({
     if (container && isAtBottomRef.current) {
       container.scrollTop = container.scrollHeight;
     }
-  }, [messages.length]);
+  }, [messages.length, pendingMessages.length]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -151,6 +156,91 @@ export function ChatPanel({
           );
         })}
 
+        {/* Pending/queued user messages */}
+        {pendingMessages.length > 0 && (
+          <div className="space-y-1.5">
+            {pendingMessages.map(msg => (
+              <div key={msg.id} className="flex justify-end animate-slide-up">
+                <div className="max-w-[85%] flex flex-col items-end gap-1">
+                  {editingId === msg.id ? (
+                    /* Edit mode - biome-ignore lint/a11y/noAutofocus: intentional focus */
+                    <div className="flex items-center gap-1.5 w-full">
+                      <input
+                        type="text"
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && editValue.trim()) {
+                            onEditPending(msg.id, editValue.trim());
+                            setEditingId(null);
+                          } else if (e.key === 'Escape') {
+                            setEditingId(null);
+                          }
+                        }}
+                        // biome-ignore lint/a11y/noAutofocus: need focus on edit activation
+                        autoFocus
+                        className="flex-1 px-2 py-1 text-sm bg-sc-bg-base border border-sc-purple/50 rounded-lg text-sc-fg-primary focus:outline-none focus-visible:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (editValue.trim()) {
+                            onEditPending(msg.id, editValue.trim());
+                          }
+                          setEditingId(null);
+                        }}
+                        className="p-1 text-sc-green hover:bg-sc-green/10 rounded"
+                        title="Save"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingId(null)}
+                        className="p-1 text-sc-fg-muted hover:bg-sc-fg-subtle/10 rounded"
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    /* Display mode */
+                    <div className="group relative px-3 py-2 rounded-xl bg-sc-purple/20 text-sc-fg-primary text-sm border border-sc-purple/30 border-dashed">
+                      {msg.content}
+                      {/* Edit/cancel controls */}
+                      <div className="absolute -left-14 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingId(msg.id);
+                            setEditValue(msg.content);
+                          }}
+                          className="p-1 text-sc-fg-muted hover:text-sc-cyan hover:bg-sc-cyan/10 rounded text-xs"
+                          title="Edit"
+                        >
+                          ✎
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onCancelPending(msg.id)}
+                          className="p-1 text-sc-fg-muted hover:text-sc-red hover:bg-sc-red/10 rounded text-xs"
+                          title="Cancel"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <span className="text-[10px] text-sc-yellow flex items-center gap-1 animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sc-yellow" />
+                    Queued
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Thinking indicator when agent is working with no recent output */}
         {showThinking && <ThinkingIndicator />}
       </div>
@@ -174,7 +264,7 @@ export function ChatPanel({
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
             placeholder={getPlaceholder()}
-            className="flex-1 px-3 py-2 bg-transparent border-none text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:outline-none"
+            className="flex-1 px-3 py-2 bg-transparent border-none text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:outline-none focus-visible:outline-none"
           />
           <button
             type="submit"
