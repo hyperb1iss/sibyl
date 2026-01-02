@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useMemo, useState } from 'react';
+import { memo, Suspense, useCallback, useMemo, useState } from 'react';
 import { ActivityFeed } from '@/components/agents/activity-feed';
 import { ApprovalQueue } from '@/components/agents/approval-queue';
 import { HealthMonitor } from '@/components/agents/health-monitor';
@@ -33,7 +33,7 @@ import { useProjectFilter } from '@/lib/project-context';
 // Agent Card Component
 // =============================================================================
 
-function AgentCard({
+const AgentCard = memo(function AgentCard({
   agent,
   onPause,
   onResume,
@@ -161,13 +161,13 @@ function AgentCard({
       )}
     </Link>
   );
-}
+});
 
 // =============================================================================
 // Project Group Component
 // =============================================================================
 
-function ProjectGroup({
+const ProjectGroup = memo(function ProjectGroup({
   projectName,
   agents,
   onPause,
@@ -210,13 +210,13 @@ function ProjectGroup({
       </div>
     </div>
   );
-}
+});
 
 // =============================================================================
 // Summary Bar Component
 // =============================================================================
 
-function SummaryBar({ agents }: { agents: Agent[] }) {
+const SummaryBar = memo(function SummaryBar({ agents }: { agents: Agent[] }) {
   const counts = useMemo(() => {
     const result: Record<string, number> = {};
     for (const agent of agents) {
@@ -268,7 +268,7 @@ function SummaryBar({ agents }: { agents: Agent[] }) {
       </div>
     </div>
   );
-}
+});
 
 // =============================================================================
 // Empty State
