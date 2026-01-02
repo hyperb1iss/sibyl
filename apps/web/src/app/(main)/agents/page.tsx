@@ -8,7 +8,24 @@ import { ApprovalQueue } from '@/components/agents/approval-queue';
 import { HealthMonitor } from '@/components/agents/health-monitor';
 import { SpawnAgentDialog } from '@/components/agents/spawn-agent-dialog';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
-import { Dashboard, List, Plus } from '@/components/ui/icons';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Archive,
+  ChevronDown,
+  Dashboard,
+  EditPencil,
+  List,
+  Pause,
+  Play,
+  Plus,
+  StopCircle,
+} from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
 import { FilterChip } from '@/components/ui/toggle';
 import { ErrorState } from '@/components/ui/tooltip';
@@ -22,8 +39,10 @@ import {
 } from '@/lib/constants';
 import {
   useAgents,
+  useArchiveAgent,
   usePauseAgent,
   useProjects,
+  useRenameAgent,
   useResumeAgent,
   useTerminateAgent,
 } from '@/lib/hooks';
@@ -38,12 +57,19 @@ const AgentCard = memo(function AgentCard({
   onPause,
   onResume,
   onTerminate,
+  onRename,
+  onArchive,
 }: {
   agent: Agent;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   onTerminate: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+  onArchive: (id: string) => void;
 }) {
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [newName, setNewName] = useState(agent.name);
+
   const statusConfig =
     AGENT_STATUS_CONFIG[agent.status as AgentStatusType] ?? AGENT_STATUS_CONFIG.working;
   const typeConfig =
@@ -54,10 +80,29 @@ const AgentCard = memo(function AgentCard({
   const isWaiting = ['waiting_approval', 'waiting_dependency'].includes(agent.status);
   const isTerminal = ['completed', 'failed', 'terminated'].includes(agent.status);
 
+  const handleRename = () => {
+    setIsRenaming(true);
+  };
+
+  const handleRenameSubmit = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (newName !== agent.name) {
+      onRename(agent.id, newName);
+    }
+    setIsRenaming(false);
+  };
+
+  const handleArchive = () => {
+    if (confirm(`Archive "${agent.name}"? This cannot be undone.`)) {
+      onArchive(agent.id);
+    }
+  };
+
   return (
     <Link
       href={`/agents/${agent.id}`}
-      className="block bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg p-4 hover:border-sc-purple/30 transition-colors"
+      className="group block bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg p-4 hover:border-sc-purple/30 transition-colors"
     >
       {/* Header: Name + Status */}
       <div className="flex items-start justify-between gap-3 mb-3">
@@ -66,7 +111,26 @@ const AgentCard = memo(function AgentCard({
             <span className="text-sm font-medium" style={{ color: typeConfig.color }}>
               {typeConfig.icon}
             </span>
-            <h3 className="text-sm font-medium text-sc-fg-primary truncate">{agent.name}</h3>
+            {isRenaming ? (
+              <input
+                type="text"
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onBlur={handleRenameSubmit}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleRenameSubmit(e);
+                  if (e.key === 'Escape') {
+                    setNewName(agent.name);
+                    setIsRenaming(false);
+                  }
+                }}
+                onClick={e => e.stopPropagation()}
+                className="text-sm font-medium text-sc-fg-primary bg-sc-bg-highlight border border-sc-purple/30 rounded px-2 py-0.5 outline-none focus:border-sc-purple"
+                autoFocus
+              />
+            ) : (
+              <h3 className="text-sm font-medium text-sc-fg-primary truncate">{agent.name}</h3>
+            )}
           </div>
           <div className="flex items-center gap-2 text-xs text-sc-fg-muted">
             <span
@@ -80,48 +144,51 @@ const AgentCard = memo(function AgentCard({
           </div>
         </div>
 
-        {/* Action Buttons - stop propagation to prevent navigation */}
-        <div className="flex items-center gap-1 shrink-0" onClick={e => e.preventDefault()}>
-          {isActive && (
-            <button
-              type="button"
-              onClick={e => {
-                e.stopPropagation();
-                onPause(agent.id);
-              }}
-              className="p-1.5 text-sc-fg-muted hover:text-sc-yellow hover:bg-sc-yellow/10 rounded transition-colors"
-              title="Pause agent"
-            >
-              <span className="text-xs">‖</span>
-            </button>
-          )}
-          {isPaused && (
-            <button
-              type="button"
-              onClick={e => {
-                e.stopPropagation();
-                onResume(agent.id);
-              }}
-              className="p-1.5 text-sc-fg-muted hover:text-sc-green hover:bg-sc-green/10 rounded transition-colors"
-              title="Resume agent"
-            >
-              <span className="text-xs">▶</span>
-            </button>
-          )}
-          {!isTerminal && (
-            <button
-              type="button"
-              onClick={e => {
-                e.stopPropagation();
-                onTerminate(agent.id);
-              }}
-              className="p-1.5 text-sc-fg-muted hover:text-sc-red hover:bg-sc-red/10 rounded transition-colors"
-              title="Terminate agent"
-            >
-              <span className="text-xs">✕</span>
-            </button>
-          )}
-        </div>
+        {/* Actions Dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            onClick={e => e.preventDefault()}
+            className="p-1.5 text-sc-fg-subtle hover:text-sc-cyan hover:bg-sc-cyan/10 rounded-md transition-all duration-200 hover:scale-105"
+          >
+            <ChevronDown width={16} height={16} className="transition-transform" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" onClick={e => e.stopPropagation()} className="w-48">
+            <DropdownMenuItem onClick={handleRename} className="gap-2">
+              <EditPencil width={14} height={14} className="text-sc-cyan" />
+              <span>Rename</span>
+            </DropdownMenuItem>
+            {isActive && (
+              <DropdownMenuItem onClick={() => onPause(agent.id)} className="gap-2">
+                <Pause width={14} height={14} className="text-sc-yellow" />
+                <span>Pause</span>
+              </DropdownMenuItem>
+            )}
+            {isPaused && (
+              <DropdownMenuItem onClick={() => onResume(agent.id)} className="gap-2">
+                <Play width={14} height={14} className="text-sc-green" />
+                <span>Resume</span>
+              </DropdownMenuItem>
+            )}
+            {!isTerminal && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  destructive
+                  onClick={() => onTerminate(agent.id)}
+                  className="gap-2"
+                >
+                  <StopCircle width={14} height={14} />
+                  <span>Terminate</span>
+                </DropdownMenuItem>
+              </>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleArchive} className="gap-2">
+              <Archive width={14} height={14} className="text-sc-coral" />
+              <span>Archive</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Metrics Row */}
@@ -173,12 +240,16 @@ const ProjectGroup = memo(function ProjectGroup({
   onPause,
   onResume,
   onTerminate,
+  onRename,
+  onArchive,
 }: {
   projectName: string;
   agents: Agent[];
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   onTerminate: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+  onArchive: (id: string) => void;
 }) {
   const activeCount = agents.filter(a =>
     ['initializing', 'working', 'resuming', 'waiting_approval', 'waiting_dependency'].includes(
@@ -205,6 +276,8 @@ const ProjectGroup = memo(function ProjectGroup({
             onPause={onPause}
             onResume={onResume}
             onTerminate={onTerminate}
+            onRename={onRename}
+            onArchive={onArchive}
           />
         ))}
       </div>
@@ -316,6 +389,8 @@ function AgentsPageContent() {
   const pauseAgent = usePauseAgent();
   const resumeAgent = useResumeAgent();
   const terminateAgent = useTerminateAgent();
+  const renameAgent = useRenameAgent();
+  const archiveAgent = useArchiveAgent();
 
   const agents = agentsData?.agents ?? [];
   const projects = projectsData?.entities ?? [];
@@ -382,6 +457,20 @@ function AgentsPageContent() {
       terminateAgent.mutate({ id });
     },
     [terminateAgent]
+  );
+
+  const handleRename = useCallback(
+    (id: string, name: string) => {
+      renameAgent.mutate({ id, name });
+    },
+    [renameAgent]
+  );
+
+  const handleArchive = useCallback(
+    (id: string) => {
+      archiveAgent.mutate(id);
+    },
+    [archiveAgent]
   );
 
   return (
@@ -487,6 +576,8 @@ function AgentsPageContent() {
                       onPause={handlePause}
                       onResume={handleResume}
                       onTerminate={handleTerminate}
+                      onRename={handleRename}
+                      onArchive={handleArchive}
                     />
                   ))}
               </div>
@@ -553,6 +644,8 @@ function AgentsPageContent() {
                   onPause={handlePause}
                   onResume={handleResume}
                   onTerminate={handleTerminate}
+                  onRename={handleRename}
+                  onArchive={handleArchive}
                 />
               ))}
             </div>
