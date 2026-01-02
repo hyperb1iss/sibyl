@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from sibyl_core.errors import EntityNotFoundError, SearchError
 from sibyl_core.graph.client import GraphClient
-from sibyl_core.models.agents import AgentRecord, ApprovalRecord
+from sibyl_core.models.agents import AgentCheckpoint, AgentRecord, ApprovalRecord
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.sources import Community, Document, Source
 from sibyl_core.models.tasks import Epic, ErrorPattern, Milestone, Note, Project, Task, Team
@@ -1483,6 +1483,14 @@ class EntityManager:
                 metadata["response_action"] = entity.response_action
             if entity.response_comment:
                 metadata["response_comment"] = entity.response_comment
+
+        # Add AgentCheckpoint-specific fields
+        elif isinstance(entity, AgentCheckpoint):
+            metadata["agent_id"] = entity.agent_id
+            metadata["session_id"] = entity.session_id
+            metadata["conversation_history"] = entity.conversation_history or []
+            if entity.current_step:
+                metadata["current_step"] = entity.current_step
 
         # Common fields (use getattr since not all entity types have these)
         if languages := getattr(entity, "languages", None):

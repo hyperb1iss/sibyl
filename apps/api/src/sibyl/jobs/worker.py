@@ -1448,6 +1448,18 @@ async def resume_agent_execution(
 
         # Get latest checkpoint for this agent (list_by_type returns Entity, not typed models)
         checkpoints = await manager.list_by_type(entity_type=EntityType.CHECKPOINT, limit=50)
+
+        # Debug: log checkpoint agent_ids to find match issue
+        for c in checkpoints[:5]:
+            chk_agent_id = (c.metadata or {}).get("agent_id")
+            log.debug(
+                "checkpoint_scan",
+                checkpoint_id=c.id,
+                checkpoint_agent_id=chk_agent_id,
+                looking_for=agent_id,
+                match=chk_agent_id == agent_id,
+            )
+
         agent_checkpoints = [
             c
             for c in checkpoints
