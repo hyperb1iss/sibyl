@@ -354,6 +354,69 @@ def backfill_task_relationships(
     _backfill()
 
 
+@app.command("backfill-project-ids")
+def backfill_project_ids(
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID (required for multi-tenant graph)"),
+    ] = "",
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Preview what would be done without making changes"),
+    ] = False,
+) -> None:
+    """Backfill project_id property on nodes based on BELONGS_TO relationships.
+
+    Finds nodes that have BELONGS_TO edges to projects but are missing the
+    project_id property, and sets it based on the relationship target.
+
+    This ensures the "Unassigned" filter in the graph view works correctly.
+
+    Use --dry-run to preview what would be updated without making changes.
+    """
+    if not org_id:
+        error("--org-id is required for graph operations")
+        raise typer.Exit(code=1)
+
+    @run_async
+    async def _backfill() -> None:
+        from sibyl_core.tools.admin import backfill_project_id_from_relationships
+
+        try:
+            if dry_run:
+                warn("DRY RUN - no changes will be made")
+
+            result = await backfill_project_id_from_relationships(
+                organization_id=org_id,
+                dry_run=dry_run,
+            )
+
+            if result.success:
+                if dry_run:
+                    info(f"Would update {result.nodes_updated} nodes with project_id")
+                else:
+                    success(f"Updated {result.nodes_updated} nodes with project_id")
+            else:
+                warn("Backfill completed with errors")
+
+            info(f"Nodes already have project_id: {result.nodes_already_set}")
+            info(f"Nodes without any project relationship: {result.nodes_without_project_rel}")
+            info(f"Duration: {result.duration_seconds:.2f}s")
+
+            if result.errors:
+                warn(f"Errors: {len(result.errors)}")
+                for err in result.errors[:5]:
+                    console.print(f"  [dim]{err}[/dim]")
+                if len(result.errors) > 5:
+                    console.print(f"  [dim]...and {len(result.errors) - 5} more[/dim]")
+
+        except Exception as e:
+            error(f"Backfill failed: {e}")
+            print_db_hint()
+
+    _backfill()
+
+
 # =============================================================================
 # PostgreSQL Backup/Restore Commands
 # =============================================================================

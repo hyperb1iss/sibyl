@@ -783,3 +783,184 @@ async def backfill_task_project_relationships(
             errors=[str(e), *errors[:49]],
             duration_seconds=time.time() - start_time,
         )
+
+
+@dataclass
+class ProjectIdBackfillResult:
+    """Result of project_id property backfill."""
+
+    success: bool
+    nodes_updated: int
+    nodes_already_set: int
+    nodes_without_project_rel: int
+    errors: list[str]
+    duration_seconds: float
+
+
+async def backfill_project_id_from_relationships(
+    *,
+    organization_id: str,
+    dry_run: bool = False,
+) -> ProjectIdBackfillResult:
+    """Backfill project_id property on nodes based on BELONGS_TO relationships.
+
+    Finds nodes that have BELONGS_TO relationships to projects but are missing
+    the project_id property, and sets it based on the relationship target.
+
+    Args:
+        organization_id: Organization UUID to process.
+        dry_run: If True, only report what would be done without making changes.
+
+    Returns:
+        ProjectIdBackfillResult with statistics about what was processed/updated.
+    """
+    log.info(
+        "backfill_project_id_start",
+        organization_id=organization_id,
+        dry_run=dry_run,
+    )
+    start_time = time.time()
+
+    errors: list[str] = []
+    nodes_updated = 0
+    nodes_already_set = 0
+    nodes_without_project_rel = 0
+
+    try:
+        client = await get_graph_client()
+
+        # Query: Find nodes with BELONGS_TO -> project but missing project_id property
+        # This uses a single Cypher query for efficiency
+        query = """
+        MATCH (n)-[r:BELONGS_TO]->(p)
+        WHERE (n:Episodic OR n:Entity)
+          AND n.group_id = $group_id
+          AND p.entity_type = 'project'
+          AND (n.project_id IS NULL OR n.project_id = '')
+        RETURN n.uuid AS node_id, p.uuid AS project_id, n.name AS node_name
+        """
+
+        result = await client.execute_read_org(
+            query, organization_id, group_id=organization_id
+        )
+
+        updates_needed: list[tuple[str, str, str]] = []
+        for record in result:
+            if isinstance(record, (list, tuple)):
+                node_id, project_id, node_name = record[0], record[1], record[2]
+            else:
+                node_id = record.get("node_id")
+                project_id = record.get("project_id")
+                node_name = record.get("node_name")
+
+            if node_id and project_id:
+                updates_needed.append((node_id, project_id, node_name or ""))
+
+        log.info("backfill_nodes_found", count=len(updates_needed))
+
+        if dry_run:
+            for node_id, project_id, node_name in updates_needed:
+                log.info(
+                    "backfill_would_update",
+                    node_id=node_id,
+                    node_name=node_name,
+                    project_id=project_id,
+                )
+            nodes_updated = len(updates_needed)
+        else:
+            # Batch update for efficiency
+            for node_id, project_id, node_name in updates_needed:
+                try:
+                    update_query = """
+                    MATCH (n)
+                    WHERE n.uuid = $node_id AND n.group_id = $group_id
+                    SET n.project_id = $project_id
+                    RETURN n.uuid
+                    """
+                    await client.execute_write_org(
+                        update_query,
+                        organization_id,
+                        node_id=node_id,
+                        group_id=organization_id,
+                        project_id=project_id,
+                    )
+                    nodes_updated += 1
+                    log.debug(
+                        "backfill_node_updated",
+                        node_id=node_id,
+                        node_name=node_name,
+                        project_id=project_id,
+                    )
+                except Exception as e:
+                    errors.append(f"Node {node_id}: {e}")
+
+        # Also count nodes that already have project_id set
+        count_query = """
+        MATCH (n)
+        WHERE (n:Episodic OR n:Entity)
+          AND n.group_id = $group_id
+          AND n.project_id IS NOT NULL
+          AND n.project_id <> ''
+        RETURN count(n) AS cnt
+        """
+        count_result = await client.execute_read_org(
+            count_query, organization_id, group_id=organization_id
+        )
+        if count_result:
+            record = count_result[0]
+            nodes_already_set = (
+                record[0] if isinstance(record, (list, tuple)) else record.get("cnt", 0)
+            )
+
+        # Count nodes without any project relationship (true orphans)
+        # FalkorDB doesn't support EXISTS {} syntax, use OPTIONAL MATCH instead
+        orphan_query = """
+        MATCH (n)
+        WHERE (n:Episodic OR n:Entity)
+          AND n.group_id = $group_id
+          AND (n.project_id IS NULL OR n.project_id = '')
+        OPTIONAL MATCH (n)-[:BELONGS_TO]->(p:Entity)
+        WHERE p.entity_type = 'project'
+        WITH n, p
+        WHERE p IS NULL
+        RETURN count(n) AS cnt
+        """
+        orphan_result = await client.execute_read_org(
+            orphan_query, organization_id, group_id=organization_id
+        )
+        if orphan_result:
+            record = orphan_result[0]
+            nodes_without_project_rel = (
+                record[0] if isinstance(record, (list, tuple)) else record.get("cnt", 0)
+            )
+
+        duration = time.time() - start_time
+        log.info(
+            "backfill_project_id_complete",
+            nodes_updated=nodes_updated,
+            nodes_already_set=nodes_already_set,
+            nodes_without_project_rel=nodes_without_project_rel,
+            errors=len(errors),
+            duration=duration,
+            dry_run=dry_run,
+        )
+
+        return ProjectIdBackfillResult(
+            success=len(errors) == 0,
+            nodes_updated=nodes_updated,
+            nodes_already_set=nodes_already_set,
+            nodes_without_project_rel=nodes_without_project_rel,
+            errors=errors[:50],
+            duration_seconds=duration,
+        )
+
+    except Exception as e:
+        log.exception("backfill_project_id_failed", error=str(e))
+        return ProjectIdBackfillResult(
+            success=False,
+            nodes_updated=nodes_updated,
+            nodes_already_set=nodes_already_set,
+            nodes_without_project_rel=nodes_without_project_rel,
+            errors=[str(e), *errors[:49]],
+            duration_seconds=time.time() - start_time,
+        )
