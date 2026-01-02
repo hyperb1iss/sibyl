@@ -5,20 +5,13 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
-import { ChevronDown, Code, FileText, Plus, Send, Xmark } from '@/components/ui/icons';
+import { Plus, Send } from '@/components/ui/icons';
+import { AttachmentList } from './attachment-preview';
+import { type Attachment, useAttachments } from './use-attachments';
 
 // =============================================================================
 // Types
 // =============================================================================
-
-export interface Attachment {
-  id: string;
-  type: 'file' | 'image' | 'text';
-  name: string;
-  content: string; // base64 for images, text content for files/text
-  size?: number;
-  preview?: string; // data URL for image preview
-}
 
 interface ChatInputProps {
   onSend: (message: string, attachments: Attachment[]) => void;
@@ -28,19 +21,8 @@ interface ChatInputProps {
   onFocusChange?: (focused: boolean) => void;
 }
 
-// =============================================================================
-// Helpers
-// =============================================================================
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function generateId(): string {
-  return `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
+// Re-export Attachment type for consumers
+export type { Attachment };
 
 // =============================================================================
 // Component
@@ -54,12 +36,23 @@ export function ChatInput({
   onFocusChange,
 }: ChatInputProps) {
   const [inputValue, setInputValue] = useState('');
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [expandedAttachments, setExpandedAttachments] = useState<Set<string>>(new Set());
   const [internalFocused, setInternalFocused] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Use extracted attachment management hook
+  const {
+    attachments,
+    expandedIds,
+    isDragOver,
+    setIsDragOver,
+    removeAttachment,
+    toggleExpanded,
+    clearAll,
+    handlePaste,
+    handleFileSelect,
+    handleDrop,
+  } = useAttachments();
 
   const isFocused = externalFocused ?? internalFocused;
 
@@ -82,203 +75,22 @@ export function ChatInput({
     onFocusChange?.(false);
   }, [onFocusChange]);
 
-  // Threshold for treating pasted text as an attachment
-  const TEXT_ATTACHMENT_THRESHOLD = 150; // chars
-  const TEXT_ATTACHMENT_LINES = 3; // or more than N lines
+  // Handle drag over
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragOver(true);
+    },
+    [setIsDragOver]
+  );
 
-  // Handle paste (text, images, files)
-  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-
-    // Check for plain text first
-    const plainText = e.clipboardData.getData('text/plain');
-    const lineCount = (plainText.match(/\n/g) || []).length + 1;
-    const isLargeText =
-      plainText.length > TEXT_ATTACHMENT_THRESHOLD || lineCount > TEXT_ATTACHMENT_LINES;
-
-    // If it's large text with no files/images, treat as text attachment
-    if (isLargeText) {
-      const hasMedia = Array.from(items).some(
-        item => item.type.startsWith('image/') || (item.kind === 'file' && item.type !== '')
-      );
-
-      if (!hasMedia) {
-        e.preventDefault();
-        // Detect if it looks like code
-        const looksLikeCode =
-          /^(import |export |function |const |let |var |class |def |async |await |return |if |for |while |\{|\[|<\w+>|#include|package |use |fn |pub )/m.test(
-            plainText
-          ) || /[{}[\]();]/.test(plainText);
-
-        const name = looksLikeCode
-          ? `Code snippet (${lineCount} lines)`
-          : `Pasted text (${lineCount} lines)`;
-
-        setAttachments(prev => [
-          ...prev,
-          {
-            id: generateId(),
-            type: 'text',
-            name,
-            content: plainText,
-            size: plainText.length,
-          },
-        ]);
-        return;
-      }
-    }
-
-    for (const item of Array.from(items)) {
-      // Handle images
-      if (item.type.startsWith('image/')) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const dataUrl = reader.result as string;
-            setAttachments(prev => [
-              ...prev,
-              {
-                id: generateId(),
-                type: 'image',
-                name: 'Pasted image',
-                content: dataUrl,
-                preview: dataUrl,
-                size: file.size,
-              },
-            ]);
-          };
-          reader.readAsDataURL(file);
-        }
-      }
-      // Handle files
-      else if (item.kind === 'file') {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            setAttachments(prev => [
-              ...prev,
-              {
-                id: generateId(),
-                type: 'file',
-                name: file.name,
-                content: reader.result as string,
-                size: file.size,
-              },
-            ]);
-          };
-          reader.readAsText(file);
-        }
-      }
-    }
-  }, []);
-
-  // Handle file input change
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-
-    for (const file of Array.from(files)) {
-      const isImage = file.type.startsWith('image/');
-      const reader = new FileReader();
-
-      reader.onload = () => {
-        const content = reader.result as string;
-        setAttachments(prev => [
-          ...prev,
-          {
-            id: generateId(),
-            type: isImage ? 'image' : 'file',
-            name: file.name,
-            content,
-            preview: isImage ? content : undefined,
-            size: file.size,
-          },
-        ]);
-      };
-
-      if (isImage) {
-        reader.readAsDataURL(file);
-      } else {
-        reader.readAsText(file);
-      }
-    }
-
-    // Reset input
-    e.target.value = '';
-  }, []);
-
-  // Handle drag and drop
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-
-    const files = e.dataTransfer.files;
-    if (!files.length) return;
-
-    for (const file of Array.from(files)) {
-      const isImage = file.type.startsWith('image/');
-      const reader = new FileReader();
-
-      reader.onload = () => {
-        const content = reader.result as string;
-        setAttachments(prev => [
-          ...prev,
-          {
-            id: generateId(),
-            type: isImage ? 'image' : 'file',
-            name: file.name,
-            content,
-            preview: isImage ? content : undefined,
-            size: file.size,
-          },
-        ]);
-      };
-
-      if (isImage) {
-        reader.readAsDataURL(file);
-      } else {
-        reader.readAsText(file);
-      }
-    }
-  }, []);
-
-  // Remove attachment
-  const removeAttachment = useCallback((id: string) => {
-    setAttachments(prev => prev.filter(a => a.id !== id));
-    setExpandedAttachments(prev => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  }, []);
-
-  // Toggle text attachment expansion
-  const toggleExpanded = useCallback((id: string) => {
-    setExpandedAttachments(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
+  const handleDragLeave = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragOver(false);
+    },
+    [setIsDragOver]
+  );
 
   // Handle submit
   const handleSubmit = useCallback(
@@ -301,14 +113,14 @@ export function ChatInput({
 
       onSend(message, attachments);
       setInputValue('');
-      setAttachments([]);
+      clearAll();
 
       // Reset textarea height
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
     },
-    [inputValue, attachments, disabled, onSend]
+    [inputValue, attachments, disabled, onSend, clearAll]
   );
 
   // Handle keyboard shortcuts
@@ -331,98 +143,13 @@ export function ChatInput({
       className="shrink-0 p-3 border-t border-sc-fg-subtle/20 bg-sc-bg-elevated"
     >
       {/* Attachment previews */}
-      {attachments.length > 0 && (
-        <div className="flex flex-col gap-2 mb-2 animate-slide-up">
-          {attachments.map(att => {
-            const isExpanded = expandedAttachments.has(att.id);
-            const isTextAttachment = att.type === 'text';
-            const looksLikeCode = att.name.startsWith('Code snippet');
-
-            // For text attachments, show preview of first few lines
-            const previewLines = isTextAttachment ? att.content.split('\n').slice(0, 3) : [];
-            const hasMoreLines = isTextAttachment && att.content.split('\n').length > 3;
-
-            return (
-              <div
-                key={att.id}
-                className={`group relative rounded-lg bg-sc-bg-base border border-sc-purple/30 text-xs overflow-hidden ${
-                  isTextAttachment
-                    ? 'w-full max-w-md'
-                    : 'inline-flex items-center gap-2 px-2 py-1.5'
-                }`}
-              >
-                {/* Header row */}
-                <div className="flex items-center gap-2 px-2 py-1.5">
-                  {att.type === 'image' && att.preview ? (
-                    <img
-                      src={att.preview}
-                      alt={att.name}
-                      className="w-8 h-8 object-cover rounded"
-                    />
-                  ) : isTextAttachment ? (
-                    looksLikeCode ? (
-                      <Code width={16} height={16} className="text-sc-coral shrink-0" />
-                    ) : (
-                      <FileText width={16} height={16} className="text-sc-cyan shrink-0" />
-                    )
-                  ) : (
-                    <FileText width={16} height={16} className="text-sc-cyan shrink-0" />
-                  )}
-                  <div className="flex flex-col min-w-0 flex-1">
-                    <span className="text-sc-fg-primary truncate">{att.name}</span>
-                    {att.size && (
-                      <span className="text-sc-fg-subtle text-[10px]">
-                        {formatFileSize(att.size)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {isTextAttachment && (
-                      <button
-                        type="button"
-                        onClick={() => toggleExpanded(att.id)}
-                        className={`p-0.5 rounded hover:bg-sc-purple/20 text-sc-fg-muted hover:text-sc-purple transition-all ${
-                          isExpanded ? 'rotate-180' : ''
-                        }`}
-                        title={isExpanded ? 'Collapse' : 'Expand'}
-                      >
-                        <ChevronDown width={14} height={14} />
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(att.id)}
-                      className="p-0.5 rounded hover:bg-sc-red/20 text-sc-fg-muted hover:text-sc-red transition-colors"
-                    >
-                      <Xmark width={12} height={12} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Text preview/content */}
-                {isTextAttachment && (
-                  <div
-                    className={`border-t border-sc-fg-subtle/20 transition-all duration-200 ${
-                      isExpanded ? 'max-h-[300px]' : 'max-h-[72px]'
-                    } overflow-hidden`}
-                  >
-                    <pre
-                      className={`p-2 text-[11px] font-mono leading-relaxed overflow-x-auto ${
-                        looksLikeCode ? 'text-sc-fg-secondary' : 'text-sc-fg-muted'
-                      }`}
-                    >
-                      {isExpanded ? att.content : previewLines.join('\n')}
-                      {!isExpanded && hasMoreLines && (
-                        <span className="text-sc-fg-subtle">...</span>
-                      )}
-                    </pre>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <AttachmentList
+        attachments={attachments}
+        expandedIds={expandedIds}
+        onToggleExpanded={toggleExpanded}
+        onRemove={removeAttachment}
+        onClearAll={clearAll}
+      />
 
       {/* Drop zone overlay */}
       <div
@@ -508,7 +235,7 @@ export function ChatInput({
         {attachments.length > 0 && (
           <button
             type="button"
-            onClick={() => setAttachments([])}
+            onClick={clearAll}
             className="text-[10px] text-sc-fg-muted hover:text-sc-red transition-colors"
           >
             Clear all

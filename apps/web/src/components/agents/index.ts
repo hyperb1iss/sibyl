@@ -8,18 +8,9 @@ export {
   ApprovalRequestMessage,
   type ApprovalRequestMessageProps,
 } from './approval-request-message';
+// Attachment preview
+export { AttachmentList, AttachmentPreview } from './attachment-preview';
 export { formatDuration, pickRandomPhrase, stripAnsi, THINKING_PHRASES } from './chat-constants';
-// Tool registry - single source of truth for tool metadata
-export {
-  getToolEntry,
-  getToolIcon,
-  getToolStatus,
-  hasCustomRenderer,
-  isKnownTool,
-  TOOL_REGISTRY,
-  TOOLS,
-  type ToolName,
-} from './tool-registry';
 // Chat utilities (for testing or custom implementations)
 export { buildResultsMap, groupMessages } from './chat-grouping';
 // Chat sub-components (for advanced customization)
@@ -54,6 +45,17 @@ export {
 export { HealthMonitor } from './health-monitor';
 export { SibylContextMessage } from './sibyl-context-message';
 export { SpawnAgentDialog } from './spawn-agent-dialog';
+// Tool registry - single source of truth for tool metadata
+export {
+  getToolEntry,
+  getToolIcon,
+  getToolStatus,
+  hasCustomRenderer,
+  isKnownTool,
+  TOOL_REGISTRY,
+  TOOLS,
+  type ToolName,
+} from './tool-registry';
 // Tool renderers
 export {
   BashToolRenderer,
@@ -64,17 +66,18 @@ export {
   ToolContentRenderer,
   WriteToolRenderer,
 } from './tool-renderers';
+export { type UseAttachmentsReturn, useAttachments } from './use-attachments';
+// Hooks
+export {
+  type ExpandedSize,
+  getExpandedClasses,
+  type UseExpandedOptions,
+  type UseExpandedReturn,
+  useExpanded,
+} from './use-expanded';
 export {
   type Question,
   type QuestionOption,
   UserQuestionMessage,
   type UserQuestionMessageProps,
 } from './user-question-message';
-// Hooks
-export {
-  type ExpandedSize,
-  getExpandedClasses,
-  useExpanded,
-  type UseExpandedOptions,
-  type UseExpandedReturn,
-} from './use-expanded';
