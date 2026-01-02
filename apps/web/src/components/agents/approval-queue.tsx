@@ -38,7 +38,7 @@ import {
 } from '@/components/ui/icons';
 import { Textarea } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
-import type { Approval, ApprovalPriority, ApprovalType } from '@/lib/api';
+import type { Approval, ApprovalType } from '@/lib/api';
 import { TASK_PRIORITY_CONFIG, type TaskPriorityType } from '@/lib/constants';
 import { usePendingApprovals, useRespondToApproval } from '@/lib/hooks';
 

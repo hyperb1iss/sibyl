@@ -8,8 +8,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
 import type {
-  AgentMessage,
-  AgentMessagesResponse,
   AgentStatus,
   AgentType,
   ApprovalStatus,
@@ -20,8 +18,6 @@ import type {
   EntityCreate,
   EntityUpdate,
   EpicStatus,
-  MessageRole,
-  MessageType,
   RAGSearchParams,
   RAGSearchResponse,
   RespondToApprovalRequest,
@@ -31,18 +27,7 @@ import type {
 } from './api';
 import { api } from './api';
 import { TIMING } from './constants';
-import {
-  type AgentMessagePayload,
-  type AgentStatusPayload,
-  type AgentWorkspacePayload,
-  type ApprovalResponsePayload,
-  type ConnectionStatus,
-  type CrawlCompletePayload,
-  type CrawlProgressPayload,
-  type CrawlStartedPayload,
-  type EntityEventPayload,
-  wsClient,
-} from './websocket';
+import { type ConnectionStatus, wsClient } from './websocket';
 
 // =============================================================================
 // Query Keys
@@ -1526,44 +1511,6 @@ export function useAgentWorkspace(id: string) {
     queryFn: () => api.agents.getWorkspace(id),
     enabled: !!id,
   });
-}
-
-/**
- * Convert WebSocket message to frontend AgentMessage format.
- */
-function wsMessageToAgentMessage(data: AgentMessagePayload): AgentMessage {
-  const { message_num, role, type: msgType } = data;
-
-  // Map roles: assistant -> agent, tool -> system
-  let mappedRole: MessageRole = 'agent';
-  if (role === 'user') mappedRole = 'user';
-  else if (role === 'tool' || role === 'system') mappedRole = 'system';
-
-  // Map types: tool_use -> tool_call, multi_block -> text
-  let mappedType: MessageType = 'text';
-  if (msgType === 'tool_use') mappedType = 'tool_call';
-  else if (msgType === 'tool_result') mappedType = 'tool_result';
-  else if (msgType === 'error') mappedType = 'error';
-
-  // Extract content from various possible fields
-  const content = data.content || data.preview || (data.blocks ? JSON.stringify(data.blocks) : '');
-
-  return {
-    id: `msg_${message_num}_${Date.now()}`,
-    role: mappedRole,
-    content,
-    timestamp: data.timestamp || new Date().toISOString(),
-    type: mappedType,
-    metadata: {
-      icon: data.icon,
-      tool_name: data.tool_name,
-      tool_id: data.tool_id,
-      is_error: data.is_error,
-      blocks: data.blocks,
-      usage: data.usage,
-      cost_usd: data.cost_usd,
-    },
-  };
 }
 
 /**
