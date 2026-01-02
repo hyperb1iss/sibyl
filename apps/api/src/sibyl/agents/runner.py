@@ -357,6 +357,107 @@ Priority: {task.priority}
             await self.stop_agent(agent_id, reason)
         return len(agent_ids)
 
+    async def resume_from_checkpoint(
+        self,
+        checkpoint: AgentCheckpoint,
+        prompt: str = "Continue from where you left off.",
+        enable_approvals: bool = True,
+    ) -> "AgentInstance":
+        """Resume an agent from a checkpoint.
+
+        Uses the Claude SDK's session resume to restore conversation history
+        and continue execution from the checkpoint state.
+
+        Args:
+            checkpoint: Checkpoint to resume from
+            prompt: Prompt for the resumed session (e.g., "continue working")
+            enable_approvals: Enable human-in-the-loop approval hooks
+
+        Returns:
+            Resumed AgentInstance
+
+        Raises:
+            AgentRunnerError: If checkpoint cannot be restored
+        """
+        from sibyl.agents.checkpoints import (
+            CheckpointRestoreError,
+            restore_from_checkpoint,
+        )
+
+        logger.info(f"Resuming agent {checkpoint.agent_id} from checkpoint {checkpoint.id}")
+
+        # Validate checkpoint and get restoration data
+        try:
+            restore_result = await restore_from_checkpoint(self.entity_manager, checkpoint)
+        except CheckpointRestoreError as e:
+            raise AgentRunnerError(f"Cannot restore checkpoint: {e}") from e
+
+        # Get original agent record
+        agent = await self.entity_manager.get(checkpoint.agent_id)
+        if not agent or not isinstance(agent, AgentRecord):
+            raise AgentRunnerError(f"Agent record not found: {checkpoint.agent_id}")
+
+        # Update agent status
+        await self.entity_manager.update(
+            agent.id,
+            {
+                "status": AgentStatus.WORKING.value,
+                "resumed_from_checkpoint": checkpoint.id,
+            },
+        )
+
+        # Recreate approval service if enabled
+        approval_service: ApprovalService | None = None
+        hooks: dict[HookEvent, list[HookMatcher]] | None = None
+
+        if enable_approvals:
+            approval_service = ApprovalService(
+                entity_manager=self.entity_manager,
+                org_id=self.org_id,
+                project_id=self.project_id,
+                agent_id=agent.id,
+                task_id=agent.task_id,
+            )
+            hooks = approval_service.create_hook_matchers()  # type: ignore[assignment]
+
+        # Build SDK options with resume session
+        sdk_options = ClaudeAgentOptions(
+            cwd=str(restore_result.worktree_path) if restore_result.worktree_path else None,
+            hooks=hooks,
+            resume=restore_result.session_id,  # Resume from checkpoint session
+        )
+
+        # Get task if assigned
+        task: Task | None = None
+        if agent.task_id:
+            task_entity = await self.entity_manager.get(agent.task_id)
+            if task_entity and isinstance(task_entity, Task):
+                task = task_entity
+
+        # Create resumed instance
+        instance = AgentInstance(
+            record=agent,
+            sdk_options=sdk_options,
+            entity_manager=self.entity_manager,
+            initial_prompt=prompt,
+            worktree_path=restore_result.worktree_path,
+            task=task,
+            approval_service=approval_service,
+        )
+
+        # Restore session ID
+        instance.set_session_id(restore_result.session_id)
+
+        # Register as active
+        self._active_agents[agent.id] = instance
+
+        logger.info(
+            f"Agent {agent.id} resumed from checkpoint {checkpoint.id} "
+            f"(session: {restore_result.session_id})"
+        )
+
+        return instance
+
 
 class AgentInstance:
     """A running Claude agent instance.
@@ -421,6 +522,10 @@ class AgentInstance:
     def session_id(self) -> str | None:
         """Claude SDK session ID."""
         return self._session_id
+
+    def set_session_id(self, session_id: str) -> None:
+        """Set the session ID (used during resume)."""
+        self._session_id = session_id
 
     async def execute(self) -> AsyncIterator[Message]:
         """Execute the agent with the initial prompt.

@@ -6,6 +6,7 @@ enabling agents to survive system restarts and resume from saved state.
 
 import hashlib
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -81,9 +82,7 @@ class CheckpointManager:
         files_modified: list[str] = []
 
         if instance.worktree_path and instance.worktree_path.exists():
-            uncommitted_changes, files_modified = await self._get_git_state(
-                instance.worktree_path
-            )
+            uncommitted_changes, files_modified = await self._get_git_state(instance.worktree_path)
 
         # Build checkpoint record
         checkpoint = AgentCheckpoint(
@@ -135,11 +134,7 @@ class CheckpointManager:
         stdout, _ = await proc.communicate()
 
         # Parse modified files from git status output (format: "XY filename")
-        files_modified = [
-            line[3:].strip()
-            for line in stdout.decode().strip().split("\n")
-            if line
-        ]
+        files_modified = [line[3:].strip() for line in stdout.decode().strip().split("\n") if line]
 
         # Get diff of uncommitted changes
         proc = await asyncio.create_subprocess_exec(
@@ -188,9 +183,7 @@ class CheckpointManager:
 
         # Filter to this agent's checkpoints
         agent_checkpoints = [
-            r
-            for r in results
-            if isinstance(r, AgentCheckpoint) and r.agent_id == self.agent_id
+            r for r in results if isinstance(r, AgentCheckpoint) and r.agent_id == self.agent_id
         ]
 
         # Sort by created_at descending (most recent first)
@@ -241,11 +234,73 @@ class CheckpointManager:
                 logger.exception(f"Failed to delete checkpoint {checkpoint.id}")
 
         if deleted:
-            logger.info(
-                f"Cleaned up {deleted} old checkpoints for agent {self.agent_id}"
-            )
+            logger.info(f"Cleaned up {deleted} old checkpoints for agent {self.agent_id}")
 
         return deleted
+
+
+class CheckpointRestoreError(Exception):
+    """Error during checkpoint restoration."""
+
+
+@dataclass
+class RestoreResult:
+    """Result of restoring an agent from checkpoint."""
+
+    checkpoint: AgentCheckpoint
+    worktree_path: Path | None
+    session_id: str
+    pending_approval_id: str | None
+    has_uncommitted_changes: bool
+
+
+async def restore_from_checkpoint(
+    entity_manager: "EntityManager",
+    checkpoint: AgentCheckpoint,
+) -> RestoreResult:
+    """Prepare restoration data from a checkpoint.
+
+    This validates the checkpoint and returns the data needed
+    to resume an agent. The actual agent creation should be done
+    by AgentRunner.resume_from_checkpoint().
+
+    Args:
+        entity_manager: Graph client
+        checkpoint: Checkpoint to restore from
+
+    Returns:
+        RestoreResult with validated restoration data
+
+    Raises:
+        CheckpointRestoreError: If checkpoint cannot be restored
+    """
+    # Get the agent record
+    agent = await entity_manager.get(checkpoint.agent_id)
+    if not agent:
+        raise CheckpointRestoreError(f"Agent not found: {checkpoint.agent_id}")
+
+    # Check worktree path
+    worktree_path: Path | None = None
+    worktree_path_str = getattr(agent, "worktree_path", None)
+    if worktree_path_str:
+        worktree_path = Path(worktree_path_str)
+        if not worktree_path.exists():
+            logger.warning(f"Worktree no longer exists: {worktree_path}")
+            worktree_path = None
+
+    # Validate session ID
+    if not checkpoint.session_id:
+        raise CheckpointRestoreError("Checkpoint has no session ID - cannot resume")
+
+    logger.info(f"Prepared restore for agent {checkpoint.agent_id} from checkpoint {checkpoint.id}")
+
+    return RestoreResult(
+        checkpoint=checkpoint,
+        worktree_path=worktree_path,
+        session_id=checkpoint.session_id,
+        pending_approval_id=checkpoint.pending_approval_id,
+        has_uncommitted_changes=bool(checkpoint.uncommitted_changes),
+    )
 
 
 async def create_checkpoint_from_instance(

@@ -9,7 +9,13 @@ This module provides the runtime infrastructure for managing AI agents:
 """
 
 from sibyl.agents.approvals import ApprovalService
-from sibyl.agents.checkpoints import CheckpointManager, create_checkpoint_from_instance
+from sibyl.agents.checkpoints import (
+    CheckpointManager,
+    CheckpointRestoreError,
+    RestoreResult,
+    create_checkpoint_from_instance,
+    restore_from_checkpoint,
+)
 from sibyl.agents.runner import AgentInstance, AgentRunner, AgentRunnerError
 from sibyl.agents.worktree import WorktreeError, WorktreeManager
 
@@ -19,7 +25,10 @@ __all__ = [
     "AgentRunnerError",
     "ApprovalService",
     "CheckpointManager",
+    "CheckpointRestoreError",
+    "RestoreResult",
     "WorktreeError",
     "WorktreeManager",
     "create_checkpoint_from_instance",
+    "restore_from_checkpoint",
 ]
