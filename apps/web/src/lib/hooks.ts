@@ -8,6 +8,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
 import type {
+  AgentMessage,
+  AgentMessagesResponse,
   AgentStatus,
   AgentType,
   CodeExampleParams,
@@ -16,6 +18,8 @@ import type {
   EntityCreate,
   EntityUpdate,
   EpicStatus,
+  MessageRole,
+  MessageType,
   RAGSearchParams,
   RAGSearchResponse,
   SpawnAgentRequest,
@@ -1487,6 +1491,49 @@ export function useAgentWorkspace(id: string) {
 }
 
 /**
+ * Convert WebSocket message to frontend AgentMessage format.
+ */
+function wsMessageToAgentMessage(data: Record<string, unknown>): AgentMessage {
+  const msgNum = data.message_num as number;
+  const role = data.role as string;
+  const msgType = data.type as string;
+
+  // Map roles: assistant -> agent, tool -> system
+  let mappedRole: MessageRole = 'agent';
+  if (role === 'user') mappedRole = 'user';
+  else if (role === 'tool' || role === 'system') mappedRole = 'system';
+
+  // Map types: tool_use -> tool_call, multi_block -> text
+  let mappedType: MessageType = 'text';
+  if (msgType === 'tool_use') mappedType = 'tool_call';
+  else if (msgType === 'tool_result') mappedType = 'tool_result';
+  else if (msgType === 'error') mappedType = 'error';
+
+  // Extract content from various possible fields
+  const content =
+    (data.content as string) ||
+    (data.preview as string) ||
+    (data.blocks ? JSON.stringify(data.blocks) : '');
+
+  return {
+    id: `msg_${msgNum}_${Date.now()}`,
+    role: mappedRole,
+    content,
+    timestamp: (data.timestamp as string) || new Date().toISOString(),
+    type: mappedType,
+    metadata: {
+      icon: data.icon,
+      tool_name: data.tool_name,
+      tool_id: data.tool_id,
+      is_error: data.is_error,
+      blocks: data.blocks,
+      usage: data.usage,
+      cost_usd: data.cost_usd,
+    },
+  };
+}
+
+/**
  * Subscribe to real-time agent updates via WebSocket.
  * Automatically updates React Query cache when WebSocket events arrive.
  */
@@ -1513,8 +1560,26 @@ export function useAgentSubscription(agentId: string | undefined) {
 
     unsubMessage = wsClient.on('agent_message', data => {
       if (data.agent_id === agentId) {
-        // Invalidate messages query to refetch
-        queryClient.invalidateQueries({ queryKey: queryKeys.agents.messages(agentId) });
+        // Convert WebSocket message to AgentMessage format and add to cache
+        const newMessage = wsMessageToAgentMessage(data);
+
+        queryClient.setQueryData<AgentMessagesResponse>(
+          queryKeys.agents.messages(agentId),
+          oldData => {
+            if (!oldData) {
+              return {
+                agent_id: agentId,
+                messages: [newMessage],
+                total: 1,
+              };
+            }
+            return {
+              ...oldData,
+              messages: [...oldData.messages, newMessage],
+              total: oldData.total + 1,
+            };
+          }
+        );
       }
     });
 

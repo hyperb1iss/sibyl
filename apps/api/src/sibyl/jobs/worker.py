@@ -747,124 +747,100 @@ async def update_entity(
         raise
 
 
-def _format_agent_message(message: Any) -> dict[str, Any]:
-    """Format a Claude SDK message for beautiful UI display.
+def _get_tool_icon_and_preview(tool_name: str, tool_input: dict[str, Any]) -> tuple[str, str]:
+    """Get icon name and preview text for a tool call."""
+    if tool_name == "Read":
+        return "Page", f"Reading `{tool_input.get('file_path', 'file')}`"
+    if tool_name == "Write":
+        return "Page", f"Writing to `{tool_input.get('file_path', 'file')}`"
+    if tool_name == "Edit":
+        return "EditPencil", f"Editing `{tool_input.get('file_path', 'file')}`"
+    if tool_name == "Bash":
+        cmd = tool_input.get("command", "")
+        return "Code", f"`{cmd[:80]}{'...' if len(cmd) > 80 else ''}`"
+    if tool_name == "Grep":
+        return "Search", f"Searching for `{tool_input.get('pattern', '')}`"
+    if tool_name == "Glob":
+        return "Folder", f"Finding `{tool_input.get('pattern', '')}`"
+    if tool_name == "WebSearch":
+        return "Globe", f"Searching: {tool_input.get('query', '')}"
+    if tool_name == "WebFetch":
+        return "Globe", f"Fetching: {tool_input.get('url', '')[:60]}"
+    if tool_name == "Task":
+        return "User", f"Spawning agent: {tool_input.get('description', '')[:50]}"
+    if tool_name == "TodoWrite":
+        return "List", "Updating task list"
+    return "Settings", tool_name
 
-    Transforms raw SDK messages into rich, formatted output with:
-    - Markdown-rendered text content
-    - Beautifully formatted tool calls with syntax highlighting hints
-    - Clean tool results with collapsible previews
-    - Metadata for UI rendering (icons, colors, etc.)
-    """
-    msg_class = type(message).__name__
-    content = getattr(message, "content", None)
-    timestamp = datetime.now(UTC).isoformat()
 
-    # Handle different message types
-    if msg_class == "AssistantMessage":
-        # Assistant messages contain text or tool use blocks
-        if isinstance(content, list):
-            # Process content blocks
-            blocks = []
-            for block in content:
-                block_type = type(block).__name__
-
-                if block_type == "TextBlock":
-                    blocks.append({
-                        "type": "text",
-                        "content": getattr(block, "text", ""),
-                    })
-
-                elif block_type == "ToolUseBlock":
-                    tool_name = getattr(block, "name", "unknown")
-                    tool_input = getattr(block, "input", {})
-                    tool_id = getattr(block, "id", "")
-
-                    # Format tool input nicely
-                    if isinstance(tool_input, dict):
-                        # Special formatting for common tools
-                        if tool_name == "Read":
-                            preview = f"📖 Reading `{tool_input.get('file_path', 'file')}`"
-                        elif tool_name == "Write":
-                            preview = f"✍️ Writing to `{tool_input.get('file_path', 'file')}`"
-                        elif tool_name == "Edit":
-                            preview = f"✏️ Editing `{tool_input.get('file_path', 'file')}`"
-                        elif tool_name == "Bash":
-                            cmd = tool_input.get("command", "")
-                            preview = f"💻 `{cmd[:80]}{'...' if len(cmd) > 80 else ''}`"
-                        elif tool_name == "Grep":
-                            preview = f"🔍 Searching for `{tool_input.get('pattern', '')}`"
-                        elif tool_name == "Glob":
-                            preview = f"📁 Finding `{tool_input.get('pattern', '')}`"
-                        elif tool_name == "WebSearch":
-                            preview = f"🌐 Searching: {tool_input.get('query', '')}"
-                        elif tool_name == "WebFetch":
-                            preview = f"🔗 Fetching: {tool_input.get('url', '')[:60]}"
-                        else:
-                            preview = f"🔧 {tool_name}"
-
-                        blocks.append({
+def _format_assistant_message(content: Any, timestamp: str) -> dict[str, Any]:
+    """Format an AssistantMessage for UI display."""
+    if isinstance(content, list):
+        blocks = []
+        for block in content:
+            block_type = type(block).__name__
+            if block_type == "TextBlock":
+                blocks.append({"type": "text", "content": getattr(block, "text", "")})
+            elif block_type == "ToolUseBlock":
+                tool_name = getattr(block, "name", "unknown")
+                tool_input = getattr(block, "input", {})
+                tool_id = getattr(block, "id", "")
+                if isinstance(tool_input, dict):
+                    icon, preview = _get_tool_icon_and_preview(tool_name, tool_input)
+                    blocks.append(
+                        {
                             "type": "tool_use",
                             "tool_name": tool_name,
                             "tool_id": tool_id,
+                            "icon": icon,
                             "input": tool_input,
                             "preview": preview,
-                        })
+                        }
+                    )
 
-            # Return formatted assistant message
-            if len(blocks) == 1:
-                return {
-                    "role": "assistant",
-                    "timestamp": timestamp,
-                    **blocks[0],
-                }
-            return {
-                "role": "assistant",
-                "type": "multi_block",
-                "blocks": blocks,
-                "timestamp": timestamp,
-                "preview": blocks[0].get("preview", "") if blocks else "",
-            }
+        if len(blocks) == 1:
+            return {"role": "assistant", "timestamp": timestamp, **blocks[0]}
         return {
             "role": "assistant",
-            "type": "text",
-            "content": str(content) if content else "",
+            "type": "multi_block",
+            "blocks": blocks,
             "timestamp": timestamp,
-            "preview": str(content)[:100] if content else "",
+            "preview": blocks[0].get("preview", "") if blocks else "",
         }
+    return {
+        "role": "assistant",
+        "type": "text",
+        "content": str(content) if content else "",
+        "timestamp": timestamp,
+        "preview": str(content)[:100] if content else "",
+    }
 
-    if msg_class == "UserMessage":
-        # User messages contain tool results
-        if isinstance(content, list):
-            results = []
-            for block in content:
-                block_type = type(block).__name__
 
-                if block_type == "ToolResultBlock":
-                    tool_id = getattr(block, "tool_use_id", "")
-                    result_content = getattr(block, "content", "")
-                    is_error = getattr(block, "is_error", False)
-
-                    # Truncate long results for preview
-                    preview = str(result_content)[:200]
-                    if len(str(result_content)) > 200:
-                        preview += "..."
-
-                    results.append({
+def _format_user_message(content: Any, timestamp: str) -> dict[str, Any]:
+    """Format a UserMessage (usually tool results) for UI display."""
+    if isinstance(content, list):
+        results = []
+        for block in content:
+            if type(block).__name__ == "ToolResultBlock":
+                tool_id = getattr(block, "tool_use_id", "")
+                result_content = getattr(block, "content", "")
+                is_error = getattr(block, "is_error", False)
+                preview = str(result_content)[:200]
+                if len(str(result_content)) > 200:
+                    preview += "..."
+                results.append(
+                    {
                         "type": "tool_result",
                         "tool_id": tool_id,
                         "content": str(result_content),
                         "preview": preview,
                         "is_error": is_error,
-                        "icon": "❌" if is_error else "✅",
-                    })
-
-            if len(results) == 1:
-                return {
-                    "role": "tool",
-                    "timestamp": timestamp,
-                    **results[0],
-                }
+                        "icon": "Xmark" if is_error else "Check",
+                    }
+                )
+        if len(results) == 1:
+            return {"role": "tool", "timestamp": timestamp, **results[0]}
+        if results:
             return {
                 "role": "tool",
                 "type": "multi_result",
@@ -872,34 +848,46 @@ def _format_agent_message(message: Any) -> dict[str, Any]:
                 "timestamp": timestamp,
                 "preview": f"{len(results)} tool results",
             }
-        return {
-            "role": "user",
-            "type": "text",
-            "content": str(content) if content else "",
-            "timestamp": timestamp,
-            "preview": str(content)[:100] if content else "",
-        }
+    return {
+        "role": "user",
+        "type": "text",
+        "content": str(content) if content else "",
+        "timestamp": timestamp,
+        "preview": str(content)[:100] if content else "",
+    }
+
+
+def _format_agent_message(message: Any) -> dict[str, Any]:
+    """Format a Claude SDK message for beautiful UI display."""
+    msg_class = type(message).__name__
+    content = getattr(message, "content", None)
+    timestamp = datetime.now(UTC).isoformat()
+
+    if msg_class == "AssistantMessage":
+        return _format_assistant_message(content, timestamp)
+
+    if msg_class == "UserMessage":
+        return _format_user_message(content, timestamp)
 
     if msg_class == "ResultMessage":
-        # Final result message with usage stats
         usage = getattr(message, "usage", None)
         cost = getattr(message, "total_cost_usd", None)
-        session_id = getattr(message, "session_id", None)
-
         return {
             "role": "system",
             "type": "result",
-            "session_id": session_id,
+            "icon": "Dollar",
+            "session_id": getattr(message, "session_id", None),
             "usage": {
                 "input_tokens": getattr(usage, "input_tokens", 0) if usage else 0,
                 "output_tokens": getattr(usage, "output_tokens", 0) if usage else 0,
-            } if usage else None,
+            }
+            if usage
+            else None,
             "cost_usd": cost,
             "timestamp": timestamp,
-            "preview": f"💰 ${cost:.4f}" if cost else "Result",
+            "preview": f"${cost:.4f}" if cost else "Completed",
         }
 
-    # Unknown message type - return raw
     return {
         "role": "unknown",
         "type": msg_class.lower(),
