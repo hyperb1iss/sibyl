@@ -196,7 +196,7 @@ class ApprovalService:
                         True,
                     )
 
-        # Check for sensitive file operations
+        # Check for sensitive file operations - ONLY sensitive files need approval
         if tool_name in ("Write", "Edit", "MultiEdit"):
             file_path = tool_input.get("file_path", "") or tool_input.get("path", "")
             for pattern in SENSITIVE_FILE_PATTERNS:
@@ -207,13 +207,8 @@ class ApprovalService:
                         f"Agent wants to modify:\n\n**File:** `{file_path}`",
                         True,
                     )
-            # Regular file write - still show approval but not flagged as dangerous
-            return (
-                ApprovalType.FILE_WRITE,
-                f"File write: {file_path}",
-                f"Agent wants to write to:\n\n**File:** `{file_path}`",
-                True,  # Still require approval for writes
-            )
+            # Regular file writes - auto-approve (no approval needed)
+            # Only sensitive files matching patterns above require human approval
 
         # Check for external API calls
         if tool_name == "WebFetch":

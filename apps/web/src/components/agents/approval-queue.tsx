@@ -1,294 +1,162 @@
 'use client';
 
 /**
- * Approval Queue - Human-in-the-loop agent coordination.
+ * Approval Queue - Compact approval cards for agents page.
  *
- * Displays pending approvals that require human action before agents can proceed.
- * Supports approve, deny, and edit actions with optional response messages.
+ * Clickable cards that link to agent chat threads.
  */
 
 import { formatDistanceToNow } from 'date-fns';
-import { memo, useState } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { memo } from 'react';
 
-import { Button, IconButton } from '@/components/ui/button';
 import { Card, Section } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   AlertTriangle,
   Check,
   Clock,
   Code,
   InfoCircle,
-  MoreHoriz,
   WarningCircle,
   Xmark,
 } from '@/components/ui/icons';
-import { Textarea } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import type { Approval, ApprovalType } from '@/lib/api';
-import { TASK_PRIORITY_CONFIG, type TaskPriorityType } from '@/lib/constants';
-import { usePendingApprovals, useRespondToApproval } from '@/lib/hooks';
+import { useDismissApproval, usePendingApprovals, useRespondToApproval } from '@/lib/hooks';
+
+// Type config - minimal
+const TYPE_CONFIG: Record<ApprovalType, { icon: typeof Code; color: string }> = {
+  destructive_command: { icon: AlertTriangle, color: 'text-sc-red' },
+  sensitive_file: { icon: WarningCircle, color: 'text-sc-yellow' },
+  file_write: { icon: Code, color: 'text-sc-purple' },
+  external_api: { icon: Code, color: 'text-sc-cyan' },
+  cost_threshold: { icon: AlertTriangle, color: 'text-sc-yellow' },
+  review_phase: { icon: Check, color: 'text-sc-purple' },
+  question: { icon: InfoCircle, color: 'text-sc-cyan' },
+  scope_change: { icon: AlertTriangle, color: 'text-sc-yellow' },
+  merge_conflict: { icon: WarningCircle, color: 'text-sc-red' },
+  test_failure: { icon: WarningCircle, color: 'text-sc-red' },
+};
+
+/** Extract display text from approval */
+function getDisplayText(approval: Approval): string {
+  const metadata = approval.metadata as Record<string, unknown> | undefined;
+  if (metadata?.file_path) {
+    const path = metadata.file_path as string;
+    const parts = path.split('/');
+    return parts.length > 2 ? `.../${parts.slice(-2).join('/')}` : path;
+  }
+  if (metadata?.command) {
+    const cmd = metadata.command as string;
+    return cmd.length > 40 ? `${cmd.slice(0, 37)}...` : cmd;
+  }
+  if (metadata?.url) {
+    try {
+      return new URL(metadata.url as string).hostname;
+    } catch {
+      return (metadata.url as string).slice(0, 30);
+    }
+  }
+  return approval.title.slice(0, 40);
+}
 
 // =============================================================================
-// Type Icons & Colors
-// =============================================================================
-
-const TYPE_CONFIG: Record<ApprovalType, { icon: typeof Code; label: string; colorClass: string }> =
-  {
-    destructive_command: {
-      icon: AlertTriangle,
-      label: 'Destructive Command',
-      colorClass: 'text-sc-red',
-    },
-    sensitive_file: {
-      icon: WarningCircle,
-      label: 'Sensitive File',
-      colorClass: 'text-sc-yellow',
-    },
-    file_write: {
-      icon: WarningCircle,
-      label: 'File Write',
-      colorClass: 'text-sc-yellow',
-    },
-    external_api: {
-      icon: Code,
-      label: 'External API',
-      colorClass: 'text-sc-cyan',
-    },
-    cost_threshold: {
-      icon: AlertTriangle,
-      label: 'Cost Threshold',
-      colorClass: 'text-sc-yellow',
-    },
-    review_phase: {
-      icon: Check,
-      label: 'Review Phase',
-      colorClass: 'text-sc-purple',
-    },
-    question: {
-      icon: InfoCircle,
-      label: 'Question',
-      colorClass: 'text-sc-cyan',
-    },
-    scope_change: {
-      icon: AlertTriangle,
-      label: 'Scope Change',
-      colorClass: 'text-sc-yellow',
-    },
-    merge_conflict: {
-      icon: WarningCircle,
-      label: 'Merge Conflict',
-      colorClass: 'text-sc-red',
-    },
-    test_failure: {
-      icon: WarningCircle,
-      label: 'Test Failure',
-      colorClass: 'text-sc-red',
-    },
-  };
-
-// Priority styles use shared TASK_PRIORITY_CONFIG from constants
-
-// =============================================================================
-// Approval Card Component
+// Compact Approval Card
 // =============================================================================
 
 interface ApprovalCardProps {
   approval: Approval;
-  onRespond: (id: string, action: 'approve' | 'deny' | 'edit', message?: string) => void;
+  onRespond: (id: string, action: 'approve' | 'deny') => void;
+  onDismiss: (id: string) => void;
   isResponding: boolean;
+  isDismissing: boolean;
+  projectFilter?: string;
 }
 
 const ApprovalCard = memo(function ApprovalCard({
   approval,
   onRespond,
+  onDismiss,
   isResponding,
+  isDismissing,
+  projectFilter,
 }: ApprovalCardProps) {
-  const [showResponseDialog, setShowResponseDialog] = useState(false);
-  const [responseAction, setResponseAction] = useState<'approve' | 'deny' | 'edit'>('approve');
-  const [responseMessage, setResponseMessage] = useState('');
-
-  const typeConfig = TYPE_CONFIG[approval.approval_type] || {
-    icon: InfoCircle,
-    label: approval.approval_type,
-    colorClass: 'text-sc-fg-muted',
-  };
-  const priorityConfig =
-    TASK_PRIORITY_CONFIG[approval.priority as TaskPriorityType] ?? TASK_PRIORITY_CONFIG.medium;
-  const TypeIcon = typeConfig.icon;
-
-  const handleQuickAction = (action: 'approve' | 'deny') => {
-    onRespond(approval.id, action);
-  };
-
-  const handleDetailedResponse = () => {
-    onRespond(approval.id, responseAction, responseMessage || undefined);
-    setShowResponseDialog(false);
-    setResponseMessage('');
-  };
-
-  const openResponseDialog = (action: 'approve' | 'deny' | 'edit') => {
-    setResponseAction(action);
-    setShowResponseDialog(true);
-  };
-
+  const config = TYPE_CONFIG[approval.approval_type] || { icon: InfoCircle, color: 'text-sc-fg-muted' };
+  const Icon = config.icon;
+  const displayText = getDisplayText(approval);
   const createdAt = approval.created_at ? new Date(approval.created_at) : null;
-  const expiresAt = approval.expires_at ? new Date(approval.expires_at) : null;
+
+  // Build link to agent chat
+  const agentLink = projectFilter
+    ? `/agents/${approval.agent_id}?project=${projectFilter}`
+    : `/agents/${approval.agent_id}`;
 
   return (
-    <>
-      <Card
-        variant={
-          approval.priority === 'critical' || approval.priority === 'high' ? 'warning' : 'default'
-        }
-        className="relative"
-      >
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <TypeIcon className={`h-5 w-5 flex-shrink-0 ${typeConfig.colorClass}`} />
-            <h3 className="text-base font-semibold text-sc-fg-primary truncate">
-              {approval.title}
-            </h3>
+    <div className="group rounded-lg border border-sc-fg-subtle/30 bg-sc-bg-elevated/80 hover:bg-sc-bg-elevated hover:border-sc-purple/40 transition-all">
+      {/* Clickable header - links to agent chat */}
+      <div className="flex items-start">
+        <Link href={agentLink} className="flex-1 block px-3 py-2 min-w-0">
+          <div className="flex items-center gap-2">
+            <Icon className={`h-4 w-4 shrink-0 ${config.color}`} />
+            <code className="text-xs text-sc-fg-primary truncate flex-1">{displayText}</code>
+            {createdAt && (
+              <span className="text-[10px] text-sc-fg-subtle shrink-0">
+                {formatDistanceToNow(createdAt, { addSuffix: true })}
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <span
-              className={`px-2 py-0.5 text-xs font-medium rounded-full border ${priorityConfig.bgClass} ${priorityConfig.textClass} ${priorityConfig.borderClass}`}
-            >
-              {approval.priority}
-            </span>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton
-                  icon={<MoreHoriz className="h-4 w-4" />}
-                  label="More actions"
-                  size="sm"
-                />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => openResponseDialog('approve')}>
-                  <Check className="mr-2 h-4 w-4 text-sc-green" />
-                  Approve with message
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => openResponseDialog('deny')} destructive>
-                  <Xmark className="mr-2 h-4 w-4" />
-                  Deny with message
-                </DropdownMenuItem>
-                {approval.actions.includes('edit') && (
-                  <DropdownMenuItem onClick={() => openResponseDialog('edit')}>
-                    <Code className="mr-2 h-4 w-4 text-sc-cyan" />
-                    Edit response
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-
-        {/* Meta info */}
-        <p className="text-xs text-sc-fg-muted mb-2">
-          {approval.agent_name || 'Agent'} • {typeConfig.label}
-        </p>
-
-        {/* Summary */}
-        <p className="text-sm text-sc-fg-muted mb-3">{approval.summary}</p>
-
-        {/* Timestamps */}
-        <div className="flex items-center gap-4 text-xs text-sc-fg-subtle mb-4">
-          {createdAt && (
-            <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {formatDistanceToNow(createdAt, { addSuffix: true })}
-            </span>
+          {approval.agent_name && (
+            <p className="text-[10px] text-sc-fg-muted mt-0.5 ml-6 truncate">
+              {approval.agent_name}
+            </p>
           )}
-          {expiresAt && (
-            <span className="flex items-center gap-1 text-sc-yellow">
-              <AlertTriangle className="h-3 w-3" />
-              Expires {formatDistanceToNow(expiresAt, { addSuffix: true })}
-            </span>
-          )}
-        </div>
+        </Link>
+        {/* Dismiss button - for stale approvals */}
+        <button
+          type="button"
+          onClick={() => onDismiss(approval.id)}
+          disabled={isDismissing}
+          className="p-2 text-sc-fg-muted hover:text-sc-fg-subtle opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
+          title="Dismiss (for stale approvals)"
+        >
+          <Xmark className="h-3 w-3" />
+        </button>
+      </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="primary"
-            onClick={() => handleQuickAction('approve')}
-            disabled={isResponding}
-            className="flex-1 bg-sc-green hover:bg-sc-green/80"
-            icon={<Check className="h-4 w-4" />}
-          >
-            Approve
-          </Button>
-          <Button
-            size="sm"
-            variant="danger"
-            onClick={() => handleQuickAction('deny')}
-            disabled={isResponding}
-            className="flex-1"
-            icon={<Xmark className="h-4 w-4" />}
-          >
-            Deny
-          </Button>
-        </div>
-      </Card>
-
-      <Dialog open={showResponseDialog} onOpenChange={setShowResponseDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {responseAction === 'approve' && 'Approve Request'}
-              {responseAction === 'deny' && 'Deny Request'}
-              {responseAction === 'edit' && 'Edit Response'}
-            </DialogTitle>
-            <DialogDescription>Add an optional message to explain your decision.</DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            <Textarea
-              placeholder="Optional message..."
-              value={responseMessage}
-              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                setResponseMessage(e.target.value)
-              }
-              rows={4}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowResponseDialog(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant={responseAction === 'deny' ? 'danger' : 'primary'}
-              onClick={handleDetailedResponse}
-              disabled={isResponding}
-            >
-              {responseAction === 'approve' && 'Approve'}
-              {responseAction === 'deny' && 'Deny'}
-              {responseAction === 'edit' && 'Submit Edit'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+      {/* Action buttons */}
+      <div className="flex border-t border-sc-fg-subtle/20">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            onRespond(approval.id, 'approve');
+          }}
+          disabled={isResponding}
+          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs text-sc-green hover:bg-sc-green/10 transition-colors disabled:opacity-50 border-r border-sc-fg-subtle/20"
+        >
+          <Check className="h-3 w-3" />
+          Allow
+        </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            onRespond(approval.id, 'deny');
+          }}
+          disabled={isResponding}
+          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs text-sc-red hover:bg-sc-red/10 transition-colors disabled:opacity-50"
+        >
+          <Xmark className="h-3 w-3" />
+          Deny
+        </button>
+      </div>
+    </div>
   );
 });
 
 // =============================================================================
-// Approval Queue Component
+// Approval Queue
 // =============================================================================
 
 interface ApprovalQueueProps {
@@ -298,14 +166,19 @@ interface ApprovalQueueProps {
 }
 
 export function ApprovalQueue({ projectId, maxHeight = '400px', className }: ApprovalQueueProps) {
-  const { data, isLoading, error } = usePendingApprovals(projectId);
-  const respondMutation = useRespondToApproval();
+  const searchParams = useSearchParams();
+  const projectFilter = projectId || searchParams.get('project') || undefined;
 
-  const handleRespond = (id: string, action: 'approve' | 'deny' | 'edit', message?: string) => {
-    respondMutation.mutate({
-      id,
-      request: { action, message },
-    });
+  const { data, isLoading, error } = usePendingApprovals(projectFilter);
+  const respondMutation = useRespondToApproval();
+  const dismissMutation = useDismissApproval();
+
+  const handleRespond = (id: string, action: 'approve' | 'deny') => {
+    respondMutation.mutate({ id, request: { action } });
+  };
+
+  const handleDismiss = (id: string) => {
+    dismissMutation.mutate(id);
   };
 
   if (isLoading) {
@@ -315,8 +188,8 @@ export function ApprovalQueue({ projectId, maxHeight = '400px', className }: App
         icon={<Clock className="h-5 w-5 animate-pulse" />}
         className={className}
       >
-        <div className="flex items-center justify-center py-8">
-          <Spinner size="lg" />
+        <div className="flex items-center justify-center py-6">
+          <Spinner size="md" />
         </div>
       </Section>
     );
@@ -330,7 +203,7 @@ export function ApprovalQueue({ projectId, maxHeight = '400px', className }: App
         className={className}
       >
         <Card variant="error">
-          <p className="text-sm text-sc-red">Error loading approvals: {error.message}</p>
+          <p className="text-xs text-sc-red">Error: {error.message}</p>
         </Card>
       </Section>
     );
@@ -344,10 +217,9 @@ export function ApprovalQueue({ projectId, maxHeight = '400px', className }: App
       <Section
         title="Approval Queue"
         icon={<Check className="h-5 w-5 text-sc-green" />}
-        description="No pending approvals. All agents are running smoothly."
         className={className}
       >
-        <div className="text-center py-4 text-sc-fg-subtle">All clear</div>
+        <p className="text-xs text-sc-fg-subtle text-center py-4">No pending approvals</p>
       </Section>
     );
   }
@@ -359,21 +231,24 @@ export function ApprovalQueue({ projectId, maxHeight = '400px', className }: App
       description="Actions requiring your approval before agents can proceed."
       actions={
         pendingCount > 0 && (
-          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-sc-yellow/20 text-sc-yellow border border-sc-yellow/40">
+          <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-sc-yellow/20 text-sc-yellow">
             {pendingCount}
           </span>
         )
       }
       className={className}
     >
-      <div className="overflow-y-auto pr-1" style={{ maxHeight }}>
-        <div className="space-y-3">
-          {approvals.map(approval => (
+      <div className="overflow-y-auto" style={{ maxHeight }}>
+        <div className="space-y-2">
+          {approvals.map((approval) => (
             <ApprovalCard
               key={approval.id}
               approval={approval}
               onRespond={handleRespond}
+              onDismiss={handleDismiss}
               isResponding={respondMutation.isPending}
+              isDismissing={dismissMutation.isPending}
+              projectFilter={projectFilter}
             />
           ))}
         </div>

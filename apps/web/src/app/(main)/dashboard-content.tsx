@@ -205,13 +205,19 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                   className="text-sc-purple shrink-0 sm:w-4 sm:h-4"
                 />
                 <span className="text-xs sm:text-sm text-sc-fg-muted">
-                  <span className="text-sc-fg-primary font-medium">{projectCount}</span> Projects
+                  <span className="text-sc-fg-primary font-medium" suppressHydrationWarning>
+                    {projectCount}
+                  </span>{' '}
+                  Projects
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <ListTodo width={14} height={14} className="text-sc-coral shrink-0 sm:w-4 sm:h-4" />
                 <span className="text-xs sm:text-sm text-sc-fg-muted">
-                  <span className="text-sc-fg-primary font-medium">{taskStats.total}</span> Tasks
+                  <span className="text-sc-fg-primary font-medium" suppressHydrationWarning>
+                    {taskStats.total}
+                  </span>{' '}
+                  Tasks
                 </span>
               </div>
             </div>

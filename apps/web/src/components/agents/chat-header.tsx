@@ -20,9 +20,9 @@ const UNRESPONSIVE_THRESHOLD_SECONDS = 600; // 10 minutes
 
 /** Check if agent is a zombie (says working but no heartbeat) */
 function getHeartbeatStatus(agent: Agent): 'healthy' | 'stale' | 'unresponsive' | null {
-  const isSupposedlyActive = ['initializing', 'working', 'resuming', 'waiting_approval'].includes(
-    agent.status
-  );
+  // waiting_approval is expected to not heartbeat - worker is blocked on Redis pubsub
+  // Only check heartbeat health for actively running states
+  const isSupposedlyActive = ['initializing', 'working', 'resuming'].includes(agent.status);
   if (!isSupposedlyActive) return null;
 
   if (!agent.last_heartbeat) {

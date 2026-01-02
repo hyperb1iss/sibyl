@@ -176,6 +176,39 @@ async def get_approval(
     return _entity_to_approval_response(entity)
 
 
+@router.delete("/{approval_id}", response_model=RespondToApprovalResponse)
+async def dismiss_approval(
+    approval_id: str,
+    org: Organization = Depends(get_current_organization),
+) -> RespondToApprovalResponse:
+    """Dismiss/expire a stale approval request.
+
+    Use this to clean up orphaned approvals from dead agents.
+    Uses EntityManager.delete() which handles both Entity and Episodic nodes.
+    """
+    client = await get_graph_client()
+    manager = EntityManager(client, group_id=str(org.id))
+
+    # Use EntityManager.delete() - handles both EntityNode and EpisodicNode
+    try:
+        deleted = await manager.delete(approval_id)
+        if deleted:
+            log.info("Approval deleted from graph", approval_id=approval_id)
+        else:
+            log.warning("Approval delete returned false", approval_id=approval_id)
+    except Exception as e:
+        # EntityNotFoundError or other errors - log but don't fail
+        log.warning("Approval deletion failed", approval_id=approval_id, error=str(e))
+
+    # Always return success - user wants it gone either way
+    return RespondToApprovalResponse(
+        success=True,
+        approval_id=approval_id,
+        action="dismiss",
+        message="Approval dismissed successfully",
+    )
+
+
 @router.post("/{approval_id}/respond", response_model=RespondToApprovalResponse)
 async def respond_to_approval(
     approval_id: str,

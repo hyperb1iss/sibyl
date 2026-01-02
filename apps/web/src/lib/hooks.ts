@@ -1481,6 +1481,36 @@ export function useTerminateAgent() {
 }
 
 /**
+ * Rename an agent.
+ */
+export function useRenameAgent() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => api.agents.rename(id, name),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.all });
+    },
+  });
+}
+
+/**
+ * Archive an agent (only terminal states).
+ */
+export function useArchiveAgent() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => api.agents.archive(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.all });
+    },
+  });
+}
+
+/**
  * Fetch messages for an agent.
  * Includes polling fallback when WebSocket is disconnected.
  */
@@ -1681,6 +1711,21 @@ export function useRespondToApproval() {
       queryClient.invalidateQueries({ queryKey: queryKeys.approvals.all });
       // Also refresh agent data since approval response may unblock agent
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.all });
+    },
+  });
+}
+
+/**
+ * Dismiss/expire a stale approval (orphaned from dead agents).
+ */
+export function useDismissApproval() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => api.approvals.dismiss(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.approvals.detail(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.approvals.all });
     },
   });
 }
