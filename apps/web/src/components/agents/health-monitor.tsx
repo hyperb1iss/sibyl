@@ -9,6 +9,7 @@
  */
 
 import { formatDistanceToNow } from 'date-fns';
+import { memo } from 'react';
 
 import { Section } from '@/components/ui/card';
 import { Activity, Check, Clock, Pause, WarningCircle } from '@/components/ui/icons';
@@ -90,7 +91,7 @@ interface AgentHealthItemProps {
   agent: AgentHealth;
 }
 
-function AgentHealthItem({ agent }: AgentHealthItemProps) {
+const AgentHealthItem = memo(function AgentHealthItem({ agent }: AgentHealthItemProps) {
   const config = STATUS_CONFIG[agent.status];
   const StatusIcon = config.icon;
   const lastHeartbeat = agent.last_heartbeat ? new Date(agent.last_heartbeat) : null;
@@ -140,7 +141,7 @@ function AgentHealthItem({ agent }: AgentHealthItemProps) {
       </div>
     </div>
   );
-}
+});
 
 // =============================================================================
 // Health Monitor Component

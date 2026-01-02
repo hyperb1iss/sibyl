@@ -8,7 +8,7 @@
  */
 
 import { formatDistanceToNow } from 'date-fns';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 
 import { Button, IconButton } from '@/components/ui/button';
 import { Card, Section } from '@/components/ui/card';
@@ -111,7 +111,11 @@ interface ApprovalCardProps {
   isResponding: boolean;
 }
 
-function ApprovalCard({ approval, onRespond, isResponding }: ApprovalCardProps) {
+const ApprovalCard = memo(function ApprovalCard({
+  approval,
+  onRespond,
+  isResponding,
+}: ApprovalCardProps) {
   const [showResponseDialog, setShowResponseDialog] = useState(false);
   const [responseAction, setResponseAction] = useState<'approve' | 'deny' | 'edit'>('approve');
   const [responseMessage, setResponseMessage] = useState('');
@@ -279,7 +283,7 @@ function ApprovalCard({ approval, onRespond, isResponding }: ApprovalCardProps) 
       </Dialog>
     </>
   );
-}
+});
 
 // =============================================================================
 // Approval Queue Component

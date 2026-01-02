@@ -9,6 +9,7 @@
 
 import { formatDistanceToNow } from 'date-fns';
 import Link from 'next/link';
+import { memo } from 'react';
 
 import { Section } from '@/components/ui/card';
 import {
@@ -99,7 +100,7 @@ interface ActivityEventItemProps {
   event: ActivityEvent;
 }
 
-function ActivityEventItem({ event }: ActivityEventItemProps) {
+const ActivityEventItem = memo(function ActivityEventItem({ event }: ActivityEventItemProps) {
   const config = EVENT_CONFIG[event.event_type] || {
     icon: Activity,
     label: event.event_type,
@@ -146,7 +147,7 @@ function ActivityEventItem({ event }: ActivityEventItemProps) {
   }
 
   return content;
-}
+});
 
 // =============================================================================
 // Activity Feed Component
