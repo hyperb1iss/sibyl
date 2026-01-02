@@ -31,6 +31,7 @@ from sibyl.agents.hooks import (
     merge_hooks,
 )
 from sibyl.agents.worktree import WorktreeManager
+from sibyl.locks import EntityLockManager, LockAcquisitionError
 from sibyl_core.models import (
     AgentCheckpoint,
     AgentRecord,
@@ -167,6 +168,9 @@ Guidelines:
 
         # Active agent instances (in-memory during execution)
         self._active_agents: dict[str, AgentInstance] = {}
+
+        # Distributed lock manager for preventing race conditions
+        self._lock_manager = EntityLockManager()
 
     def _build_system_prompt(
         self,
@@ -373,7 +377,10 @@ Priority: {task.priority}
         task: Task,
         agent_type: AgentType = AgentType.IMPLEMENTER,
     ) -> "AgentInstance":
-        """Convenience method to spawn an agent for a specific task.
+        """Spawn an agent for a specific task with race condition protection.
+
+        Uses a distributed lock to prevent concurrent spawns for the same task,
+        which could create duplicate agents.
 
         Args:
             task: Task to work on
@@ -381,15 +388,42 @@ Priority: {task.priority}
 
         Returns:
             AgentInstance assigned to the task
+
+        Raises:
+            LockAcquisitionError: If another spawn is in progress for this task
+            ValueError: If an agent is already running for this task
         """
-        prompt = f"Please work on this task:\n\n{task.title}\n\n{task.description}"
-        return await self.spawn(
-            prompt=prompt,
-            agent_type=agent_type,
-            task=task,
-            spawn_source=AgentSpawnSource.ORCHESTRATOR,
-            create_worktree=True,
-        )
+        lock_key = f"spawn:task:{task.id}"
+        lock_token: str | None = None
+
+        try:
+            # Acquire lock to prevent concurrent spawns for the same task
+            lock_token = await self._lock_manager.acquire(
+                self.org_id, lock_key, blocking=False
+            )
+            if lock_token is None:
+                raise LockAcquisitionError(
+                    task.id, self.org_id, "concurrent spawn in progress"
+                )
+
+            # Check if an agent is already running for this task
+            for agent in self._active_agents.values():
+                if agent.task and agent.task.id == task.id:
+                    raise ValueError(
+                        f"Agent {agent.id} is already running for task {task.id}"
+                    )
+
+            prompt = f"Please work on this task:\n\n{task.title}\n\n{task.description}"
+            return await self.spawn(
+                prompt=prompt,
+                agent_type=agent_type,
+                task=task,
+                spawn_source=AgentSpawnSource.ORCHESTRATOR,
+                create_worktree=True,
+            )
+        finally:
+            if lock_token:
+                await self._lock_manager.release(self.org_id, lock_key, lock_token)
 
     async def get_agent(self, agent_id: str) -> "AgentInstance | None":
         """Get an active agent instance by ID."""
