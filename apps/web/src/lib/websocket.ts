@@ -4,37 +4,122 @@
 
 import { env } from 'next-dynenv';
 
-export type WebSocketEventType =
-  | 'entity_created'
-  | 'entity_updated'
-  | 'entity_deleted'
-  | 'search_complete'
-  | 'crawl_started'
-  | 'crawl_progress'
-  | 'crawl_complete'
-  | 'health_update'
-  | 'heartbeat'
-  | 'connection_status'
-  // Agent events
-  | 'agent_status'
-  | 'agent_message'
-  | 'agent_workspace'
-  // Approval events
-  | 'approval_response';
+// =============================================================================
+// Event Payload Types (Discriminated Unions)
+// =============================================================================
 
-export interface WebSocketMessage {
-  event: WebSocketEventType;
-  data: Record<string, unknown>;
+/** Entity mutation event payloads */
+export interface EntityEventPayload {
+  id: string;
+  entity_type?: string;
+  type?: string; // Alternative field name from backend
+}
+
+/** Connection status payload */
+export interface ConnectionStatusPayload {
+  status: ConnectionStatus;
+}
+
+/** Crawl lifecycle payloads */
+export interface CrawlStartedPayload {
+  source_id: string;
+}
+
+export interface CrawlProgressPayload {
+  source_id: string;
+  source_name?: string;
+  pages_crawled?: number;
+  max_pages?: number;
+  current_url?: string;
+  percentage?: number;
+  documents_crawled?: number;
+  documents_stored?: number;
+  chunks_created?: number;
+  chunks_added?: number;
+  errors?: number;
+}
+
+export interface CrawlCompletePayload {
+  source_id: string;
+  error?: string;
+}
+
+/** Agent event payloads */
+export interface AgentStatusPayload {
+  agent_id: string;
+  status: string;
+  reason?: string;
+}
+
+export interface AgentMessagePayload {
+  agent_id: string;
+  message_num: number;
+  role: string;
+  type: string;
+  content?: string;
+  preview?: string;
+  blocks?: unknown[];
+  icon?: string;
+  tool_name?: string;
+  tool_id?: string;
+  is_error?: boolean;
+  usage?: { input_tokens: number; output_tokens: number };
+  cost_usd?: number;
+  timestamp?: string;
+}
+
+export interface AgentWorkspacePayload {
+  agent_id: string;
+  worktree_path?: string;
+  branch?: string;
+  modified_files?: string[];
+}
+
+/** Approval event payload */
+export interface ApprovalResponsePayload {
+  approval_id: string;
+  agent_id?: string;
+  action: 'approve' | 'deny' | 'edit';
+  message?: string;
+}
+
+/** Map event types to their payload types */
+export interface WebSocketEventPayloadMap {
+  entity_created: EntityEventPayload;
+  entity_updated: EntityEventPayload;
+  entity_deleted: EntityEventPayload;
+  search_complete: Record<string, unknown>;
+  crawl_started: CrawlStartedPayload;
+  crawl_progress: CrawlProgressPayload;
+  crawl_complete: CrawlCompletePayload;
+  health_update: Record<string, unknown>;
+  heartbeat: Record<string, unknown>;
+  connection_status: ConnectionStatusPayload;
+  agent_status: AgentStatusPayload;
+  agent_message: AgentMessagePayload;
+  agent_workspace: AgentWorkspacePayload;
+  approval_response: ApprovalResponsePayload;
+}
+
+export type WebSocketEventType = keyof WebSocketEventPayloadMap;
+
+export interface WebSocketMessage<T extends WebSocketEventType = WebSocketEventType> {
+  event: T;
+  data: WebSocketEventPayloadMap[T];
   timestamp: string;
 }
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
 
-type EventHandler = (data: Record<string, unknown>) => void;
+/** Type-safe event handler */
+type EventHandler<T extends WebSocketEventType = WebSocketEventType> = (
+  data: WebSocketEventPayloadMap[T]
+) => void;
 
 class WebSocketClient {
   private ws: WebSocket | null = null;
-  private handlers: Map<WebSocketEventType, Set<EventHandler>> = new Map();
+  // Store handlers with loose typing internally; type safety enforced by on() signature
+  private handlers: Map<WebSocketEventType, Set<EventHandler<WebSocketEventType>>> = new Map();
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
   private reconnectDelay = 1000;
@@ -134,7 +219,11 @@ class WebSocketClient {
           return;
         }
 
-        this.dispatch(message.event, message.data);
+        // Type assertion: backend guarantees event/data pairs match
+        this.dispatch(
+          message.event,
+          message.data as WebSocketEventPayloadMap[typeof message.event]
+        );
       } catch (e) {
         console.error('[Sibyl WS] Failed to parse message:', e);
       }
@@ -198,28 +287,30 @@ class WebSocketClient {
     }, delay);
   }
 
-  on(event: WebSocketEventType, handler: EventHandler): () => void {
+  /** Subscribe to a typed WebSocket event */
+  on<T extends WebSocketEventType>(event: T, handler: EventHandler<T>): () => void {
     let handlers = this.handlers.get(event);
     if (!handlers) {
       handlers = new Set();
       this.handlers.set(event, handlers);
     }
-    handlers.add(handler);
+    // Cast needed due to Map's loose internal typing
+    handlers.add(handler as EventHandler<WebSocketEventType>);
 
     // Return unsubscribe function
     return () => this.off(event, handler);
   }
 
-  off(event: WebSocketEventType, handler: EventHandler): void {
+  off<T extends WebSocketEventType>(event: T, handler: EventHandler<T>): void {
     const handlers = this.handlers.get(event);
-    handlers?.delete(handler);
+    handlers?.delete(handler as EventHandler<WebSocketEventType>);
     // Clean up empty Sets to prevent Map accumulation
     if (handlers?.size === 0) {
       this.handlers.delete(event);
     }
   }
 
-  private dispatch(event: WebSocketEventType, data: Record<string, unknown>): void {
+  private dispatch<T extends WebSocketEventType>(event: T, data: WebSocketEventPayloadMap[T]): void {
     this.handlers.get(event)?.forEach(handler => {
       try {
         handler(data);

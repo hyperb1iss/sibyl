@@ -31,7 +31,18 @@ import type {
 } from './api';
 import { api } from './api';
 import { TIMING } from './constants';
-import { type ConnectionStatus, wsClient } from './websocket';
+import {
+  type AgentMessagePayload,
+  type AgentStatusPayload,
+  type AgentWorkspacePayload,
+  type ApprovalResponsePayload,
+  type ConnectionStatus,
+  type CrawlCompletePayload,
+  type CrawlProgressPayload,
+  type CrawlStartedPayload,
+  type EntityEventPayload,
+  wsClient,
+} from './websocket';
 
 // =============================================================================
 // Query Keys
@@ -758,37 +769,30 @@ export function useRealtimeUpdates(isAuthenticated = false) {
 
     // Entity created - smart invalidation based on entity type
     const unsubCreate = wsClient.on('entity_created', data => {
-      const entityId = data.id as string;
-      const entityType = (data.entity_type || data.type) as string | undefined;
-      invalidateByEntityType(queryClient, entityType, entityId);
-      console.log('[WS] Entity created:', entityId, entityType);
+      const entityType = data.entity_type || data.type;
+      invalidateByEntityType(queryClient, entityType, data.id);
+      console.log('[WS] Entity created:', data.id, entityType);
     });
 
     // Entity updated - smart invalidation based on entity type
     const unsubUpdate = wsClient.on('entity_updated', data => {
-      const entityId = data.id as string;
-      const entityType = (data.entity_type || data.type) as string | undefined;
+      const entityType = data.entity_type || data.type;
       // Also invalidate related entities explorer
-      if (entityId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.explore.related(entityId) });
-      }
-      invalidateByEntityType(queryClient, entityType, entityId);
-      console.log('[WS] Entity updated:', entityId, entityType);
+      queryClient.invalidateQueries({ queryKey: queryKeys.explore.related(data.id) });
+      invalidateByEntityType(queryClient, entityType, data.id);
+      console.log('[WS] Entity updated:', data.id, entityType);
     });
 
     // Entity deleted - remove from cache + smart invalidation
     const unsubDelete = wsClient.on('entity_deleted', data => {
-      const entityId = data.id as string;
-      const entityType = (data.entity_type || data.type) as string | undefined;
+      const entityType = data.entity_type || data.type;
       // Remove from cache before invalidation
-      if (entityId) {
-        queryClient.removeQueries({ queryKey: queryKeys.entities.detail(entityId) });
-        queryClient.removeQueries({ queryKey: queryKeys.tasks.detail(entityId) });
-        queryClient.removeQueries({ queryKey: queryKeys.projects.detail(entityId) });
-        queryClient.removeQueries({ queryKey: queryKeys.sources.detail(entityId) });
-      }
-      invalidateByEntityType(queryClient, entityType, entityId);
-      console.log('[WS] Entity deleted:', entityId, entityType);
+      queryClient.removeQueries({ queryKey: queryKeys.entities.detail(data.id) });
+      queryClient.removeQueries({ queryKey: queryKeys.tasks.detail(data.id) });
+      queryClient.removeQueries({ queryKey: queryKeys.projects.detail(data.id) });
+      queryClient.removeQueries({ queryKey: queryKeys.sources.detail(data.id) });
+      invalidateByEntityType(queryClient, entityType, data.id);
+      console.log('[WS] Entity deleted:', data.id, entityType);
     });
 
     // Health update
@@ -803,37 +807,35 @@ export function useRealtimeUpdates(isAuthenticated = false) {
 
     // Crawl started - refresh source to show crawling status
     const unsubCrawlStarted = wsClient.on('crawl_started', data => {
-      const sourceId = data.source_id as string;
-      queryClient.invalidateQueries({ queryKey: queryKeys.sources.detail(sourceId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sources.detail(data.source_id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
-      console.log('[WS] Crawl started:', sourceId);
+      console.log('[WS] Crawl started:', data.source_id);
     });
 
     // Crawl progress - update in real-time with merged data
     const unsubCrawlProgress = wsClient.on('crawl_progress', data => {
-      const sourceId = data.source_id as string;
-      const documentsStored = data.documents_stored as number | undefined;
+      const { source_id, documents_stored } = data;
 
       // Merge new progress with existing (we get page-level and doc-level events)
-      const existing = queryClient.getQueryData<CrawlProgressData>(['crawl_progress', sourceId]);
+      const existing = queryClient.getQueryData<CrawlProgressData>(['crawl_progress', source_id]);
       const merged: CrawlProgressData = {
         ...existing,
-        source_id: sourceId,
-        source_name: (data.source_name as string) ?? existing?.source_name,
-        pages_crawled: (data.pages_crawled as number) ?? existing?.pages_crawled ?? 0,
-        max_pages: (data.max_pages as number) ?? existing?.max_pages ?? 0,
-        current_url: (data.current_url as string) ?? existing?.current_url ?? '',
-        percentage: (data.percentage as number) ?? existing?.percentage ?? 0,
-        documents_crawled: (data.documents_crawled as number) ?? existing?.documents_crawled,
-        documents_stored: documentsStored ?? existing?.documents_stored,
-        chunks_created: (data.chunks_created as number) ?? existing?.chunks_created,
-        chunks_added: (data.chunks_added as number) ?? existing?.chunks_added,
-        errors: (data.errors as number) ?? existing?.errors,
+        source_id,
+        source_name: data.source_name ?? existing?.source_name,
+        pages_crawled: data.pages_crawled ?? existing?.pages_crawled ?? 0,
+        max_pages: data.max_pages ?? existing?.max_pages ?? 0,
+        current_url: data.current_url ?? existing?.current_url ?? '',
+        percentage: data.percentage ?? existing?.percentage ?? 0,
+        documents_crawled: data.documents_crawled ?? existing?.documents_crawled,
+        documents_stored: documents_stored ?? existing?.documents_stored,
+        chunks_created: data.chunks_created ?? existing?.chunks_created,
+        chunks_added: data.chunks_added ?? existing?.chunks_added,
+        errors: data.errors ?? existing?.errors,
       };
-      queryClient.setQueryData(['crawl_progress', sourceId], merged);
+      queryClient.setQueryData(['crawl_progress', source_id], merged);
 
       // Also update source's document_count in cache for real-time display
-      if (documentsStored !== undefined) {
+      if (documents_stored !== undefined) {
         // Update source list cache
         queryClient.setQueryData(
           queryKeys.sources.list,
@@ -844,8 +846,8 @@ export function useRealtimeUpdates(isAuthenticated = false) {
             return {
               ...old,
               entities: old.entities.map(s =>
-                s.id === sourceId
-                  ? { ...s, metadata: { ...s.metadata, document_count: documentsStored } }
+                s.id === source_id
+                  ? { ...s, metadata: { ...s.metadata, document_count: documents_stored } }
                   : s
               ),
             };
@@ -854,10 +856,10 @@ export function useRealtimeUpdates(isAuthenticated = false) {
 
         // Also update source detail cache (for source detail page)
         queryClient.setQueryData(
-          queryKeys.sources.detail(sourceId),
+          queryKeys.sources.detail(source_id),
           (old: { document_count?: number } | undefined) => {
             if (!old) return old;
-            return { ...old, document_count: documentsStored };
+            return { ...old, document_count: documents_stored };
           }
         );
       }
@@ -867,15 +869,14 @@ export function useRealtimeUpdates(isAuthenticated = false) {
 
     // Crawl complete - refresh source and documents
     const unsubCrawlComplete = wsClient.on('crawl_complete', data => {
-      const sourceId = data.source_id as string;
       // Clear the progress data
-      queryClient.removeQueries({ queryKey: ['crawl_progress', sourceId] });
+      queryClient.removeQueries({ queryKey: ['crawl_progress', data.source_id] });
       // Refresh source detail and list
-      queryClient.invalidateQueries({ queryKey: queryKeys.sources.detail(sourceId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sources.detail(data.source_id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
       // Refresh any documents/pages for this source
-      queryClient.invalidateQueries({ queryKey: queryKeys.rag.pages(sourceId) });
-      console.log('[WS] Crawl complete:', sourceId, data.error ? `(error: ${data.error})` : '');
+      queryClient.invalidateQueries({ queryKey: queryKeys.rag.pages(data.source_id) });
+      console.log('[WS] Crawl complete:', data.source_id, data.error ? `(error: ${data.error})` : '');
     });
 
     // Cleanup on unmount
@@ -1526,10 +1527,8 @@ export function useAgentWorkspace(id: string) {
 /**
  * Convert WebSocket message to frontend AgentMessage format.
  */
-function wsMessageToAgentMessage(data: Record<string, unknown>): AgentMessage {
-  const msgNum = data.message_num as number;
-  const role = data.role as string;
-  const msgType = data.type as string;
+function wsMessageToAgentMessage(data: AgentMessagePayload): AgentMessage {
+  const { message_num, role, type: msgType } = data;
 
   // Map roles: assistant -> agent, tool -> system
   let mappedRole: MessageRole = 'agent';
@@ -1543,16 +1542,13 @@ function wsMessageToAgentMessage(data: Record<string, unknown>): AgentMessage {
   else if (msgType === 'error') mappedType = 'error';
 
   // Extract content from various possible fields
-  const content =
-    (data.content as string) ||
-    (data.preview as string) ||
-    (data.blocks ? JSON.stringify(data.blocks) : '');
+  const content = data.content || data.preview || (data.blocks ? JSON.stringify(data.blocks) : '');
 
   return {
-    id: `msg_${msgNum}_${Date.now()}`,
+    id: `msg_${message_num}_${Date.now()}`,
     role: mappedRole,
     content,
-    timestamp: (data.timestamp as string) || new Date().toISOString(),
+    timestamp: data.timestamp || new Date().toISOString(),
     type: mappedType,
     metadata: {
       icon: data.icon,
@@ -1723,15 +1719,12 @@ export function useApprovalSubscription() {
     wsClient.connect();
 
     const unsubResponse = wsClient.on('approval_response', data => {
-      const approvalId = data.approval_id as string;
       // Invalidate approval queries to refetch
-      queryClient.invalidateQueries({ queryKey: queryKeys.approvals.detail(approvalId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.approvals.detail(data.approval_id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.approvals.all });
       // Agent may be unblocked, refresh agent data
       if (data.agent_id) {
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.agents.detail(data.agent_id as string),
-        });
+        queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(data.agent_id) });
       }
     });
 
