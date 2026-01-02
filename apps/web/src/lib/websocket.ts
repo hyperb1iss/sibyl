@@ -40,6 +40,7 @@ class WebSocketClient {
   private reconnectDelay = 1000;
   private _status: ConnectionStatus = 'disconnected';
   private statusDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingStatus: ConnectionStatus | null = null;
   private readonly STATUS_DEBOUNCE_MS = 100;
 
@@ -152,10 +153,30 @@ class WebSocketClient {
   }
 
   disconnect(): void {
+    // Clear reconnect timer to prevent zombie reconnections
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    // Clear status debounce timer
+    if (this.statusDebounceTimer) {
+      clearTimeout(this.statusDebounceTimer);
+      this.statusDebounceTimer = null;
+      this.pendingStatus = null;
+    }
+
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
+  }
+
+  /** Full cleanup - clears all timers and handlers */
+  destroy(): void {
+    this.disconnect();
+    this.handlers.clear();
+    this.reconnectAttempts = 0;
   }
 
   private attemptReconnect(): void {
@@ -170,7 +191,11 @@ class WebSocketClient {
     console.log(`[Sibyl WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
     this.setStatus('reconnecting');
 
-    setTimeout(() => this.connect(), delay);
+    // Store timer ID so it can be cleared on disconnect()
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   on(event: WebSocketEventType, handler: EventHandler): () => void {
@@ -182,13 +207,16 @@ class WebSocketClient {
     handlers.add(handler);
 
     // Return unsubscribe function
-    return () => {
-      this.handlers.get(event)?.delete(handler);
-    };
+    return () => this.off(event, handler);
   }
 
   off(event: WebSocketEventType, handler: EventHandler): void {
-    this.handlers.get(event)?.delete(handler);
+    const handlers = this.handlers.get(event);
+    handlers?.delete(handler);
+    // Clean up empty Sets to prevent Map accumulation
+    if (handlers?.size === 0) {
+      this.handlers.delete(event);
+    }
   }
 
   private dispatch(event: WebSocketEventType, data: Record<string, unknown>): void {
