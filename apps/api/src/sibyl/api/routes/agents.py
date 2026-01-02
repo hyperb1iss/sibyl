@@ -17,6 +17,7 @@ from sqlmodel import col
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_role
 from sibyl.db import AgentMessage as DbAgentMessage, get_session
 from sibyl.db.models import Organization, OrganizationRole, User
+from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.models import (
@@ -267,8 +268,12 @@ async def get_agent(
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(org.id))
 
-    entity = await manager.get(agent_id)
-    if not entity or entity.entity_type != EntityType.AGENT:
+    try:
+        entity = await manager.get(agent_id)
+    except EntityNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}") from None
+
+    if entity.entity_type != EntityType.AGENT:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     return _entity_to_agent_response(entity)
