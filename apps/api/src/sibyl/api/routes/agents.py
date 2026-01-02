@@ -14,8 +14,11 @@ from uuid import uuid4
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlmodel import col
 
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_role
+from sibyl.db import AgentMessage as DbAgentMessage, get_session
 from sibyl.db.models import Organization, OrganizationRole, User
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
@@ -428,7 +431,9 @@ async def get_agent_messages(
 ) -> AgentMessagesResponse:
     """Get conversation messages for an agent.
 
-    Messages are retrieved from the agent's latest checkpoint.
+    Messages are read from the agent_messages Postgres table.
+    These are summaries stored during execution - full tool outputs
+    are only available via real-time WebSocket streaming.
     """
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(org.id))
@@ -438,52 +443,31 @@ async def get_agent_messages(
     if not entity or entity.entity_type != EntityType.AGENT:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
-    # Get latest checkpoint for this agent
-    checkpoints = await manager.list_by_type(
-        entity_type=EntityType.CHECKPOINT,
-        limit=10,
-    )
-
-    # Find checkpoints for this agent (entity objects, check metadata for agent_id)
-    agent_checkpoints = [
-        c
-        for c in checkpoints
-        if c.entity_type == EntityType.CHECKPOINT and (c.metadata or {}).get("agent_id") == agent_id
-    ]
-
+    # Query messages from Postgres
     messages: list[AgentMessage] = []
-    if agent_checkpoints:
-        # Sort by created_at descending and get the latest
-        latest = max(
-            agent_checkpoints, key=lambda c: c.created_at or datetime.min.replace(tzinfo=UTC)
+    async with get_session() as session:
+        result = await session.execute(
+            select(DbAgentMessage)
+            .where(col(DbAgentMessage.agent_id) == agent_id)
+            .where(col(DbAgentMessage.organization_id) == org.id)
+            .order_by(col(DbAgentMessage.message_num))
+            .limit(limit)
         )
+        db_messages = result.scalars().all()
 
-        # Convert conversation history to messages (history is in metadata for Entity objects)
-        conversation_history = (latest.metadata or {}).get("conversation_history", [])
-        for i, msg in enumerate(conversation_history[-limit:]):
-            role_str = msg.get("role", "agent")
-            role = MessageRole.AGENT
-            if role_str == "user":
-                role = MessageRole.USER
-            elif role_str == "system":
-                role = MessageRole.SYSTEM
-
-            msg_type = MessageType.TEXT
-            if msg.get("type") == "tool_call":
-                msg_type = MessageType.TOOL_CALL
-            elif msg.get("type") == "tool_result":
-                msg_type = MessageType.TOOL_RESULT
-            elif msg.get("type") == "error":
-                msg_type = MessageType.ERROR
+        for db_msg in db_messages:
+            # Map DB enums to response enums
+            role = MessageRole(db_msg.role.value)
+            msg_type = MessageType(db_msg.type.value)
 
             messages.append(
                 AgentMessage(
-                    id=f"msg-{agent_id[-8:]}-{i}",
+                    id=str(db_msg.id),
                     role=role,
-                    content=msg.get("content", ""),
-                    timestamp=msg.get("timestamp", datetime.now(UTC).isoformat()),
+                    content=db_msg.content,
+                    timestamp=db_msg.created_at.isoformat() if db_msg.created_at else "",
                     type=msg_type,
-                    metadata=msg.get("metadata"),
+                    metadata=db_msg.extra if db_msg.extra else None,
                 )
             )
 
