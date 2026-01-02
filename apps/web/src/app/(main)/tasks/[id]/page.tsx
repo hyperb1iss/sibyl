@@ -4,14 +4,7 @@ import { use, useMemo } from 'react';
 import { EntityBreadcrumb } from '@/components/layout/breadcrumb';
 import { TaskDetailPanel, TaskDetailSkeleton } from '@/components/tasks';
 import { ErrorState } from '@/components/ui/tooltip';
-import { useProjects, useRelatedEntities, useTask } from '@/lib/hooks';
-
-interface RelatedEntity {
-  id: string;
-  type: string;
-  name: string;
-  relationship?: string;
-}
+import { useProjects, useTask } from '@/lib/hooks';
 
 interface TaskDetailPageProps {
   params: Promise<{ id: string }>;
@@ -20,7 +13,6 @@ interface TaskDetailPageProps {
 export default function TaskDetailPage({ params }: TaskDetailPageProps) {
   const { id } = use(params);
   const { data: task, isLoading, error } = useTask(id);
-  const { data: relatedData } = useRelatedEntities(id);
   const { data: projectsData } = useProjects();
 
   // Find parent project for breadcrumb
@@ -30,17 +22,6 @@ export default function TaskDetailPage({ params }: TaskDetailPageProps) {
     const project = projectsData.entities.find(p => p.id === projectId);
     return project ? { id: project.id, name: project.name } : undefined;
   }, [task, projectsData]);
-
-  // Transform related entities for display - filter out empty IDs
-  const entities = (relatedData?.entities || []) as RelatedEntity[];
-  const relatedKnowledge = entities
-    .filter(e => e.id && ['pattern', 'rule', 'template', 'topic'].includes(e.type))
-    .map(e => ({
-      id: e.id,
-      type: e.type,
-      name: e.name,
-      relationship: e.relationship || 'Related',
-    }));
 
   if (error) {
     return (
@@ -63,11 +44,7 @@ export default function TaskDetailPage({ params }: TaskDetailPageProps) {
         parentProject={parentProject}
       />
 
-      {isLoading || !task ? (
-        <TaskDetailSkeleton />
-      ) : (
-        <TaskDetailPanel task={task} relatedKnowledge={relatedKnowledge} />
-      )}
+      {isLoading || !task ? <TaskDetailSkeleton /> : <TaskDetailPanel task={task} />}
     </div>
   );
 }

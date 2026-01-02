@@ -1,14 +1,12 @@
 'use client';
 
-import Link from 'next/link';
 import { useState } from 'react';
 import { EditableTags, EditableText } from '@/components/editable';
-import { EntityBadge } from '@/components/ui/badge';
-import { CheckCircle2, ChevronRight, Hash, Pencil } from '@/components/ui/icons';
+import { RelatedEntitiesSection } from '@/components/entities/related-entities-section';
+import { CheckCircle2, Hash, Pencil } from '@/components/ui/icons';
 import { Markdown } from '@/components/ui/markdown';
 import type { Entity } from '@/lib/api';
 import type { TaskStatusType } from '@/lib/constants';
-import type { RelatedKnowledgeItem } from './task-detail-types';
 import { TaskNotesSection } from './task-notes-section';
 
 interface TaskContentSectionsProps {
@@ -17,7 +15,6 @@ interface TaskContentSectionsProps {
   technologies: string[];
   tags: string[];
   learnings: string | undefined;
-  relatedKnowledge: RelatedKnowledgeItem[];
   onUpdateField: (field: string, value: unknown, metadataField?: boolean) => Promise<void>;
 }
 
@@ -30,13 +27,10 @@ export function TaskContentSections({
   technologies,
   tags,
   learnings,
-  relatedKnowledge,
   onUpdateField,
 }: TaskContentSectionsProps) {
   const [editingContent, setEditingContent] = useState(false);
   const [editingLearnings, setEditingLearnings] = useState(false);
-
-  const validRelatedKnowledge = relatedKnowledge.filter(item => item.id?.length > 0);
 
   return (
     <div className="lg:col-span-2 space-y-6">
@@ -181,34 +175,16 @@ export function TaskContentSections({
         </div>
       )}
 
-      {/* Related Knowledge */}
-      {validRelatedKnowledge.length > 0 && (
+      {/* Related Entities */}
+      {task.related && task.related.length > 0 && (
         <div className="bg-sc-bg-base border border-sc-fg-subtle/20 rounded-2xl p-6">
-          <h2 className="text-sm font-semibold text-sc-fg-subtle uppercase tracking-wide mb-4">
-            Linked Knowledge
-          </h2>
-          <div className="space-y-2">
-            {validRelatedKnowledge.map(item => (
-              <Link
-                key={item.id}
-                href={`/entities/${item.id}`}
-                className="flex items-center gap-3 p-3 bg-sc-bg-elevated rounded-xl border border-sc-fg-subtle/10 hover:border-sc-purple/30 hover:bg-sc-bg-highlight transition-all group"
-              >
-                <EntityBadge type={item.type} size="sm" />
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm text-sc-fg-primary truncate block group-hover:text-sc-purple transition-colors">
-                    {item.name}
-                  </span>
-                  <span className="text-xs text-sc-fg-subtle">{item.relationship}</span>
-                </div>
-                <ChevronRight
-                  width={16}
-                  height={16}
-                  className="text-sc-fg-subtle group-hover:text-sc-purple transition-colors"
-                />
-              </Link>
-            ))}
-          </div>
+          <RelatedEntitiesSection
+            entityId={task.id}
+            entityName={task.name}
+            entityType="task"
+            related={task.related}
+            title="Linked Knowledge"
+          />
         </div>
       )}
     </div>

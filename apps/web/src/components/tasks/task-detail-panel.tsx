@@ -8,21 +8,19 @@ import type { Entity, TaskStatus } from '@/lib/api';
 import { TASK_STATUS_CONFIG, type TaskPriorityType, type TaskStatusType } from '@/lib/constants';
 import { useDeleteEntity, useProjects, useTaskUpdateStatus, useUpdateEntity } from '@/lib/hooks';
 import { TaskContentSections } from './task-content-sections';
-import type { RelatedKnowledgeItem } from './task-detail-types';
 import { TaskHeader } from './task-header';
 import { TaskQuickActions } from './task-quick-actions';
 import { TaskSidebar } from './task-sidebar';
 
 interface TaskDetailPanelProps {
   task: Entity;
-  relatedKnowledge?: RelatedKnowledgeItem[];
 }
 
 /**
  * Full task detail view with editable fields, status actions, and related knowledge.
  * Composed of: TaskHeader, TaskQuickActions, TaskContentSections, TaskSidebar.
  */
-export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanelProps) {
+export function TaskDetailPanel({ task }: TaskDetailPanelProps) {
   const router = useRouter();
   const updateStatus = useTaskUpdateStatus();
   const updateEntity = useUpdateEntity();
@@ -135,7 +133,6 @@ export function TaskDetailPanel({ task, relatedKnowledge = [] }: TaskDetailPanel
           technologies={technologies}
           tags={tags}
           learnings={learnings}
-          relatedKnowledge={relatedKnowledge}
           onUpdateField={updateField}
         />
 
