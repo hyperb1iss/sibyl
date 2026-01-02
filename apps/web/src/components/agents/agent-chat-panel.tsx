@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IconComponent } from '@/components/ui/icons';
 import {
   Check,
+  ChevronDown,
+  ChevronUp,
   Code,
   EditPencil,
   FileText,
@@ -146,45 +148,104 @@ function AgentHeader({ agent }: { agent: Agent }) {
   );
 }
 
+function ToolMessage({ message, isToolCall }: { message: ChatMessage; isToolCall: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const iconName = message.metadata?.icon as string | undefined;
+  const toolName = message.metadata?.tool_name as string | undefined;
+  const isError = message.metadata?.is_error as boolean | undefined;
+  const Icon = iconName ? TOOL_ICONS[iconName] : Code;
+
+  // Get first line as preview, rest as expandable content
+  const lines = message.content.split('\n');
+  const preview = lines[0]?.slice(0, 100) || '';
+  const hasMore = message.content.length > 100 || lines.length > 1;
+
+  const borderClass = isToolCall
+    ? 'border-sc-fg-subtle/20'
+    : isError
+      ? 'border-sc-red/20'
+      : 'border-sc-green/20';
+
+  const bgClass = isToolCall ? 'bg-sc-bg-elevated' : isError ? 'bg-sc-red/10' : 'bg-sc-green/10';
+
+  return (
+    <div
+      className={`rounded-lg border ${borderClass} ${bgClass} font-mono text-xs overflow-hidden`}
+    >
+      {/* Clickable header - always visible */}
+      <button
+        type="button"
+        onClick={() => hasMore && setIsExpanded(!isExpanded)}
+        className={`w-full flex items-center gap-2 p-2 text-left ${hasMore ? 'hover:bg-sc-fg-subtle/5 cursor-pointer' : ''}`}
+      >
+        <Icon
+          width={14}
+          height={14}
+          className={isToolCall ? 'text-sc-purple' : isError ? 'text-sc-red' : 'text-sc-green'}
+        />
+        <span
+          className={
+            isToolCall ? 'text-sc-purple font-medium' : isError ? 'text-sc-red' : 'text-sc-green'
+          }
+        >
+          {isToolCall ? toolName || 'Tool' : isError ? 'Error' : 'Success'}
+        </span>
+        <span className="text-sc-fg-muted truncate flex-1">{preview}</span>
+        {hasMore && (
+          <span className="text-sc-fg-subtle shrink-0">
+            {isExpanded ? (
+              <ChevronUp width={14} height={14} />
+            ) : (
+              <ChevronDown width={14} height={14} />
+            )}
+          </span>
+        )}
+      </button>
+
+      {/* Expandable content */}
+      {isExpanded && (
+        <div className="border-t border-sc-fg-subtle/10 p-2 max-h-64 overflow-y-auto">
+          <pre className="text-sc-fg-primary whitespace-pre-wrap break-words">
+            {message.content}
+          </pre>
+        </div>
+      )}
+
+      {/* Timestamp */}
+      <div className="px-2 pb-1.5 text-[10px] text-sc-fg-muted">
+        {message.timestamp.toLocaleTimeString()}
+      </div>
+    </div>
+  );
+}
+
 function ChatMessage({ message }: { message: ChatMessage }) {
   const isAgent = message.role === 'agent';
   const isSystem = message.role === 'system';
   const isToolCall = message.type === 'tool_call';
   const isToolResult = message.type === 'tool_result';
 
-  // Get icon component from metadata
-  const iconName = message.metadata?.icon as string | undefined;
-  const toolName = message.metadata?.tool_name as string | undefined;
-  const isError = message.metadata?.is_error as boolean | undefined;
-  const Icon = iconName ? TOOL_ICONS[iconName] : Code;
+  // Use collapsible component for tool messages
+  if (isToolCall || isToolResult) {
+    return (
+      <div className="max-w-[90%]">
+        <ToolMessage message={message} isToolCall={isToolCall} />
+      </div>
+    );
+  }
 
+  // Regular text messages
   return (
     <div className={`flex gap-3 ${isAgent ? '' : 'flex-row-reverse'}`}>
       <div
         className={`
           max-w-[85%] rounded-lg p-3
           ${isSystem ? 'bg-sc-bg-highlight text-sc-fg-muted text-center w-full' : ''}
-          ${isAgent && !isToolCall && !isToolResult ? 'bg-sc-purple/10 border border-sc-purple/20' : ''}
-          ${isToolCall ? 'bg-sc-bg-elevated border border-sc-fg-subtle/20 font-mono text-xs' : ''}
-          ${isToolResult && !isError ? 'bg-sc-green/10 border border-sc-green/20 font-mono text-xs' : ''}
-          ${isToolResult && isError ? 'bg-sc-red/10 border border-sc-red/20 font-mono text-xs' : ''}
+          ${isAgent ? 'bg-sc-purple/10 border border-sc-purple/20' : ''}
           ${message.role === 'user' ? 'bg-sc-cyan/10 border border-sc-cyan/20' : ''}
         `}
       >
-        {isToolCall && (
-          <div className="flex items-center gap-1.5 text-sc-fg-muted mb-1">
-            <Icon width={12} height={12} />
-            <span className="text-sc-purple">{toolName || 'Tool'}</span>
-          </div>
-        )}
-        {isToolResult && (
-          <div className="flex items-center gap-1.5 text-sc-fg-muted mb-1">
-            <Icon width={12} height={12} className={isError ? 'text-sc-red' : 'text-sc-green'} />
-            <span className={isError ? 'text-sc-red' : 'text-sc-green'}>
-              {isError ? 'Error' : 'Result'}
-            </span>
-          </div>
-        )}
         <p className="text-sm text-sc-fg-primary whitespace-pre-wrap">{message.content}</p>
         <p className="text-xs text-sc-fg-muted mt-1.5">{message.timestamp.toLocaleTimeString()}</p>
       </div>
