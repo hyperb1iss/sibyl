@@ -270,7 +270,11 @@ export function AddSourceDialog({
       }
     }, 500);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      // Abort any in-flight request to prevent setState after unmount
+      previewAbortRef.current?.abort();
+    };
   }, [url, userEditedName]);
 
   // Handle URL input change
