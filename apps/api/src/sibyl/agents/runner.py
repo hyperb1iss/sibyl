@@ -26,6 +26,7 @@ from claude_agent_sdk.types import (
 from sibyl.agents.approvals import ApprovalService
 from sibyl.agents.worktree import WorktreeManager
 from sibyl_core.models import (
+    AgentCheckpoint,
     AgentRecord,
     AgentSpawnSource,
     AgentStatus,
@@ -416,6 +417,11 @@ class AgentInstance:
         """Current agent status."""
         return self.record.status
 
+    @property
+    def session_id(self) -> str | None:
+        """Claude SDK session ID."""
+        return self._session_id
+
     async def execute(self) -> AsyncIterator[Message]:
         """Execute the agent with the initial prompt.
 
@@ -560,6 +566,29 @@ class AgentInstance:
     def get_conversation_history(self) -> list[dict[str, Any]]:
         """Get serializable conversation history for checkpointing."""
         return [self._serialize_message(m) for m in self._conversation_history]
+
+    async def checkpoint(
+        self,
+        current_step: str | None = None,
+        pending_approval_id: str | None = None,
+    ) -> "AgentCheckpoint":
+        """Create a checkpoint of the current agent state.
+
+        Args:
+            current_step: Optional description of current step
+            pending_approval_id: Optional approval blocking the agent
+
+        Returns:
+            Created AgentCheckpoint record
+        """
+        from sibyl.agents.checkpoints import CheckpointManager
+
+        manager = CheckpointManager(self.entity_manager, self.id)
+        return await manager.checkpoint(
+            self,
+            current_step=current_step,
+            pending_approval_id=pending_approval_id,
+        )
 
     def _serialize_message(self, message: Message) -> dict[str, Any]:
         """Serialize a Message for storage."""
