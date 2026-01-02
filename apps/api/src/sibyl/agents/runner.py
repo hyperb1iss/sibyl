@@ -12,18 +12,23 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from claude_agent_sdk import query
+from claude_agent_sdk import ClaudeSDKClient
 from claude_agent_sdk.types import (
     AssistantMessage,
     ClaudeAgentOptions,
-    HookEvent,
-    HookMatcher,
     Message,
     ResultMessage,
     UserMessage,
 )
 
 from sibyl.agents.approvals import ApprovalService
+from sibyl.agents.hooks import (
+    SibylContextService,
+    WorkflowTracker,
+    create_sibyl_hooks,
+    load_user_hooks,
+    merge_hooks,
+)
 from sibyl.agents.worktree import WorktreeManager
 from sibyl_core.models import (
     AgentCheckpoint,
@@ -291,7 +296,6 @@ Priority: {task.priority}
 
         # Create approval service if enabled
         approval_service: ApprovalService | None = None
-        hooks: dict[HookEvent, list[HookMatcher]] | None = None
 
         if enable_approvals:
             approval_service = ApprovalService(
@@ -301,13 +305,34 @@ Priority: {task.priority}
                 agent_id=record.id,
                 task_id=task.id if task else None,
             )
-            hooks = approval_service.create_hook_matchers()  # type: ignore[assignment]
+
+        # Create context service for Sibyl knowledge injection
+        context_service = SibylContextService(
+            entity_manager=self.entity_manager,
+            org_id=self.org_id,
+            project_id=self.project_id,
+        )
+
+        # Build hooks: load user's Claude Code hooks + merge with Sibyl hooks
+        cwd = str(worktree_path) if worktree_path else None
+        user_hooks = load_user_hooks(cwd=cwd)
+        sibyl_hooks = create_sibyl_hooks(
+            approval_service=approval_service,
+            context_service=context_service,
+        )
+        merged_hooks = merge_hooks(sibyl_hooks, user_hooks)
+
+        logger.debug(
+            f"Hooks configured for agent {record.id}: "
+            f"user={list(user_hooks.keys()) if user_hooks else []}, "
+            f"sibyl={list(sibyl_hooks.keys()) if sibyl_hooks else []}"
+        )
 
         # Create SDK options
         sdk_options = ClaudeAgentOptions(
-            cwd=str(worktree_path) if worktree_path else None,
+            cwd=cwd,
             system_prompt=system_prompt,
-            hooks=hooks,
+            hooks=merged_hooks,  # type: ignore[arg-type]
         )
 
         # Create instance
@@ -319,6 +344,7 @@ Priority: {task.priority}
             worktree_path=worktree_path,
             task=task,
             approval_service=approval_service,
+            context_service=context_service,
         )
 
         # Register as active
@@ -446,7 +472,6 @@ Priority: {task.priority}
 
         # Recreate approval service if enabled
         approval_service: ApprovalService | None = None
-        hooks: dict[HookEvent, list[HookMatcher]] | None = None
 
         if enable_approvals:
             approval_service = ApprovalService(
@@ -456,12 +481,27 @@ Priority: {task.priority}
                 agent_id=agent.id,
                 task_id=agent.task_id,
             )
-            hooks = approval_service.create_hook_matchers()  # type: ignore[assignment]
+
+        # Create context service for Sibyl knowledge injection
+        context_service = SibylContextService(
+            entity_manager=self.entity_manager,
+            org_id=self.org_id,
+            project_id=self.project_id,
+        )
+
+        # Build hooks: load user's Claude Code hooks + merge with Sibyl hooks
+        cwd = str(restore_result.worktree_path) if restore_result.worktree_path else None
+        user_hooks = load_user_hooks(cwd=cwd)
+        sibyl_hooks = create_sibyl_hooks(
+            approval_service=approval_service,
+            context_service=context_service,
+        )
+        merged_hooks = merge_hooks(sibyl_hooks, user_hooks)
 
         # Build SDK options with resume session
         sdk_options = ClaudeAgentOptions(
-            cwd=str(restore_result.worktree_path) if restore_result.worktree_path else None,
-            hooks=hooks,
+            cwd=cwd,
+            hooks=merged_hooks,  # type: ignore[arg-type]
             resume=restore_result.session_id,  # Resume from checkpoint session
         )
 
@@ -481,6 +521,7 @@ Priority: {task.priority}
             worktree_path=restore_result.worktree_path,
             task=task,
             approval_service=approval_service,
+            context_service=context_service,
         )
 
         # Restore session ID
@@ -505,6 +546,8 @@ class AgentInstance:
     - Progress tracking
     - Checkpoint management
     - Event streaming
+
+    Uses ClaudeSDKClient (not query()) to enable hooks support.
     """
 
     HEARTBEAT_INTERVAL = 30  # seconds
@@ -518,6 +561,7 @@ class AgentInstance:
         worktree_path: Path | None = None,
         task: Task | None = None,
         approval_service: ApprovalService | None = None,
+        context_service: SibylContextService | None = None,
     ):
         """Initialize agent instance.
 
@@ -529,6 +573,7 @@ class AgentInstance:
             worktree_path: Working directory
             task: Assigned task
             approval_service: Optional approval service for human-in-the-loop
+            context_service: Optional context service with workflow tracker
         """
         self.record = record
         self.sdk_options = sdk_options
@@ -537,6 +582,7 @@ class AgentInstance:
         self.worktree_path = worktree_path
         self.task = task
         self.approval_service = approval_service
+        self.context_service = context_service
 
         # Runtime state
         self._running = False
@@ -545,6 +591,7 @@ class AgentInstance:
         self._tokens_used = 0
         self._cost_usd = 0.0
         self._session_id: str | None = None
+        self._client: ClaudeSDKClient | None = None
 
     @property
     def id(self) -> str:
@@ -561,12 +608,19 @@ class AgentInstance:
         """Claude SDK session ID."""
         return self._session_id
 
+    @property
+    def workflow_tracker(self) -> WorkflowTracker | None:
+        """Workflow tracker for checking Sibyl workflow compliance."""
+        return self.context_service.workflow_tracker if self.context_service else None
+
     def set_session_id(self, session_id: str) -> None:
         """Set the session ID (used during resume)."""
         self._session_id = session_id
 
     async def execute(self) -> AsyncIterator[Message]:
         """Execute the agent with the initial prompt.
+
+        Uses ClaudeSDKClient to enable hooks support (query() doesn't support hooks).
 
         Yields:
             Message objects from the Claude SDK
@@ -577,24 +631,28 @@ class AgentInstance:
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
         try:
-            # Execute via SDK query function
-            async for message in query(
-                prompt=self.initial_prompt,
-                options=self.sdk_options,
-            ):
-                self._conversation_history.append(message)
+            # Use ClaudeSDKClient for hooks support (query() doesn't support hooks!)
+            async with ClaudeSDKClient(options=self.sdk_options) as client:
+                self._client = client
 
-                # Track usage from ResultMessage
-                if isinstance(message, ResultMessage):
-                    if message.usage:
-                        self._tokens_used += getattr(message.usage, "input_tokens", 0)
-                        self._tokens_used += getattr(message.usage, "output_tokens", 0)
-                    if message.total_cost_usd:
-                        self._cost_usd = message.total_cost_usd
-                    if message.session_id:
-                        self._session_id = message.session_id
+                # Send initial prompt
+                await client.query(self.initial_prompt)
 
-                yield message
+                # Stream responses
+                async for message in client.receive_response():
+                    self._conversation_history.append(message)
+
+                    # Track usage from ResultMessage
+                    if isinstance(message, ResultMessage):
+                        if message.usage:
+                            self._tokens_used += getattr(message.usage, "input_tokens", 0)
+                            self._tokens_used += getattr(message.usage, "output_tokens", 0)
+                        if message.total_cost_usd:
+                            self._cost_usd = message.total_cost_usd
+                        if message.session_id:
+                            self._session_id = message.session_id
+
+                    yield message
 
         except Exception as e:
             logger.exception(f"Agent {self.id} execution failed")
@@ -603,6 +661,7 @@ class AgentInstance:
 
         finally:
             self._running = False
+            self._client = None
             if self._heartbeat_task:
                 self._heartbeat_task.cancel()
 
@@ -612,18 +671,36 @@ class AgentInstance:
     async def send_message(self, content: str) -> AsyncIterator[Message]:
         """Send a follow-up message to the agent.
 
+        Creates a new client with session resume to continue conversation.
+
         Args:
             content: Message content from user
 
         Yields:
             Response messages from the agent
         """
-        async for message in query(
-            prompt=content,
-            options=self.sdk_options,
-        ):
-            self._conversation_history.append(message)
-            yield message
+        # Create options with session resume if we have a session ID
+        options = self.sdk_options
+        if self._session_id:
+            # Create new options with resume to continue conversation
+            options = ClaudeAgentOptions(
+                cwd=self.sdk_options.cwd,
+                system_prompt=self.sdk_options.system_prompt,
+                hooks=self.sdk_options.hooks,
+                resume=self._session_id,
+            )
+
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(content)
+
+            async for message in client.receive_response():
+                self._conversation_history.append(message)
+
+                # Update session ID if provided
+                if isinstance(message, ResultMessage) and message.session_id:
+                    self._session_id = message.session_id
+
+                yield message
 
     async def stop(self, reason: str = "user_request"):
         """Stop agent execution.
