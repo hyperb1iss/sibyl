@@ -73,6 +73,97 @@ router = APIRouter(
 
 
 # =============================================================================
+# Helpers
+# =============================================================================
+
+
+async def _enrich_entity_with_related(
+    entity: Any,
+    entity_id: str,
+    entity_manager: EntityManager,
+    client: Any,
+    group_id: str,
+) -> tuple[dict[str, Any], list[RelatedEntitySummary] | None]:
+    """Enrich entity metadata and fetch related entities based on entity type.
+
+    Returns (metadata dict, related entities list or None).
+    """
+    metadata = getattr(entity, "metadata", {}) or {}
+    related: list[RelatedEntitySummary] | None = None
+
+    # Enrich projects with actionable task summary
+    if entity.entity_type == "project":
+        try:
+            summary = await entity_manager.get_project_summary(entity_id)
+            metadata = {
+                **metadata,
+                "total_tasks": summary.get("total_tasks", 0),
+                "status_counts": summary.get("status_counts", {}),
+                "progress_pct": summary.get("progress_pct", 0.0),
+                "critical_tasks": summary.get("critical_tasks", []),
+                "epics": summary.get("epics", []),
+            }
+            # Return actionable tasks as "related"
+            actionable = summary.get("actionable_tasks", [])
+            if actionable:
+                related = [
+                    RelatedEntitySummary(
+                        id=task["id"],
+                        name=task["name"],
+                        entity_type="task",
+                        relationship=task["status"],
+                        direction="incoming",
+                    )
+                    for task in actionable
+                ]
+        except Exception as proj_err:
+            log.debug("Failed to fetch project summary", error=str(proj_err))
+
+    # Enrich epics with progress stats
+    elif entity.entity_type == "epic":
+        try:
+            progress = await entity_manager.get_epic_progress(entity_id)
+            metadata = {
+                **metadata,
+                "total_tasks": progress.get("total_tasks", 0),
+                "completed_tasks": progress.get("completed_tasks", 0),
+                "in_progress_tasks": progress.get("in_progress_tasks", 0),
+                "blocked_tasks": progress.get("blocked_tasks", 0),
+                "in_review_tasks": progress.get("in_review_tasks", 0),
+                "completion_pct": progress.get("completion_pct", 0.0),
+            }
+        except Exception as epic_err:
+            log.debug("Failed to fetch epic progress", error=str(epic_err))
+
+    # For non-project/epic entities, fetch generic related entities
+    if related is None:
+        try:
+            rel_manager = RelationshipManager(client, group_id=group_id)
+            related_pairs = await rel_manager.get_related_entities(entity_id, limit=5)
+            if related_pairs:
+                # Dedupe by entity ID
+                seen_ids: set[str] = set()
+                deduped: list[RelatedEntitySummary] = []
+                for rel_entity, rel in related_pairs:
+                    if rel_entity.id not in seen_ids:
+                        seen_ids.add(rel_entity.id)
+                        deduped.append(
+                            RelatedEntitySummary(
+                                id=rel_entity.id,
+                                name=rel_entity.name,
+                                entity_type=str(rel_entity.entity_type),
+                                relationship=str(rel.relationship_type),
+                                direction="outgoing" if rel.source_id == entity_id else "incoming",
+                            )
+                        )
+                related = deduped if deduped else None
+        except Exception as rel_err:
+            log.debug("Failed to fetch related entities", error=str(rel_err))
+
+    return metadata, related
+
+
+# =============================================================================
 # List / Read
 # =============================================================================
 
@@ -203,39 +294,11 @@ async def get_entity(
         # Try graph entity first
         try:
             entity = await entity_manager.get(entity_id)
-            # Enrich epics with progress stats
-            metadata = getattr(entity, "metadata", {}) or {}
-            if entity.entity_type == "epic":
-                progress = await entity_manager.get_epic_progress(entity_id)
-                metadata = {
-                    **metadata,
-                    "total_tasks": progress.get("total_tasks", 0),
-                    "completed_tasks": progress.get("completed_tasks", 0),
-                    "in_progress_tasks": progress.get("in_progress_tasks", 0),
-                    "blocked_tasks": progress.get("blocked_tasks", 0),
-                    "in_review_tasks": progress.get("in_review_tasks", 0),
-                    "completion_pct": progress.get("completion_pct", 0.0),
-                }
 
-            # Always fetch up to 5 related entities for context
-            related: list[RelatedEntitySummary] | None = None
-            try:
-                rel_manager = RelationshipManager(client, group_id=group_id)
-                related_pairs = await rel_manager.get_related_entities(entity_id, limit=5)
-                if related_pairs:
-                    related = [
-                        RelatedEntitySummary(
-                            id=rel_entity.id,
-                            name=rel_entity.name,
-                            entity_type=str(rel_entity.entity_type),
-                            relationship=str(rel.relationship_type),
-                            direction="outgoing" if rel.source_id == entity_id else "incoming",
-                        )
-                        for rel_entity, rel in related_pairs
-                    ]
-            except Exception as rel_err:
-                # Related entities are optional - don't fail the whole request
-                log.debug("Failed to fetch related entities", error=str(rel_err))
+            # Enrich with related entities based on type
+            metadata, related = await _enrich_entity_with_related(
+                entity, entity_id, entity_manager, client, group_id
+            )
 
             return EntityResponse(
                 id=entity.id,

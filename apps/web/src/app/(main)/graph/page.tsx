@@ -226,7 +226,41 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   team: 'Teams',
 };
 
-// Unified graph toolbar - zoom, search, filters, stats all in one
+// Stats overlay - shows real totals and displayed counts
+function StatsOverlay({
+  totalNodes,
+  totalEdges,
+  displayedNodes,
+  displayedEdges,
+  clusterCount,
+}: {
+  totalNodes: number;
+  totalEdges: number;
+  displayedNodes: number;
+  displayedEdges: number;
+  clusterCount: number;
+}) {
+  const showingAll = displayedNodes >= totalNodes;
+
+  return (
+    <div className="absolute top-4 right-4 z-10 bg-sc-bg-elevated/90 backdrop-blur-sm rounded-xl p-4 border border-sc-purple/20 min-w-[140px] hidden md:block">
+      <div className="text-sm text-sc-fg-muted">Total Nodes</div>
+      <div className="text-2xl font-bold text-sc-purple">{totalNodes.toLocaleString()}</div>
+      {!showingAll && (
+        <div className="text-xs text-sc-fg-subtle">showing {displayedNodes.toLocaleString()}</div>
+      )}
+      <div className="text-sm text-sc-fg-muted mt-2">Total Edges</div>
+      <div className="text-2xl font-bold text-sc-cyan">{totalEdges.toLocaleString()}</div>
+      {!showingAll && displayedEdges < totalEdges && (
+        <div className="text-xs text-sc-fg-subtle">showing {displayedEdges.toLocaleString()}</div>
+      )}
+      <div className="text-sm text-sc-fg-muted mt-2">Clusters</div>
+      <div className="text-2xl font-bold text-sc-coral">{clusterCount}</div>
+    </div>
+  );
+}
+
+// Unified graph toolbar - zoom, search, filters
 function GraphToolbar({
   onZoomIn,
   onZoomOut,
@@ -241,7 +275,6 @@ function GraphToolbar({
   matchCount,
   nodeCount,
   edgeCount,
-  clusterCount,
 }: {
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -256,7 +289,6 @@ function GraphToolbar({
   matchCount: number;
   nodeCount: number;
   edgeCount: number;
-  clusterCount: number;
 }) {
   const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -315,7 +347,7 @@ function GraphToolbar({
       </div>
 
       {/* Desktop unified toolbar */}
-      <div className="absolute top-4 left-4 right-4 z-10 hidden md:flex items-center justify-between">
+      <div className="absolute top-4 left-4 z-10 hidden md:block">
         <Card className="!p-1.5 flex items-center gap-2">
           {/* Zoom controls */}
           <div className="flex items-center gap-0.5">
@@ -494,25 +526,6 @@ function GraphToolbar({
                 </div>
               </div>
             )}
-          </div>
-
-          {/* Divider */}
-          <div className="w-px h-5 bg-sc-fg-subtle/20" />
-
-          {/* Compact stats */}
-          <div className="flex items-center gap-3 text-xs px-1">
-            <span>
-              <span className="text-sc-purple font-medium">{nodeCount.toLocaleString()}</span>
-              <span className="text-sc-fg-subtle ml-1">nodes</span>
-            </span>
-            <span>
-              <span className="text-sc-cyan font-medium">{edgeCount.toLocaleString()}</span>
-              <span className="text-sc-fg-subtle ml-1">edges</span>
-            </span>
-            <span>
-              <span className="text-sc-coral font-medium">{clusterCount}</span>
-              <span className="text-sc-fg-subtle ml-1">clusters</span>
-            </span>
           </div>
         </Card>
       </div>
@@ -1060,8 +1073,18 @@ function GraphPageContent() {
             matchCount={graphData.matchCount}
             nodeCount={nodeCount}
             edgeCount={edgeCount}
-            clusterCount={data?.clusters.length ?? 0}
           />
+
+          {/* Stats overlay - separate for detailed view */}
+          {data && (
+            <StatsOverlay
+              totalNodes={data.total_nodes}
+              totalEdges={data.total_edges}
+              displayedNodes={data.displayed_nodes ?? graphData.nodes.length}
+              displayedEdges={data.displayed_edges ?? graphData.links.length}
+              clusterCount={data.clusters.length}
+            />
+          )}
 
           {/* Loading overlay */}
           {isLoading && (

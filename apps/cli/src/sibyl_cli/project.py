@@ -13,6 +13,7 @@ from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
     CORAL,
     ELECTRIC_PURPLE,
+    ELECTRIC_YELLOW,
     NEON_CYAN,
     SUCCESS_GREEN,
     console,
@@ -135,41 +136,19 @@ def show_project(
         client = get_client()
 
         try:
+            # Entity endpoint now includes enriched project summary
             entity = await client.get_entity(project_id)
-            tasks_response = await client.explore(
-                mode="list",
-                types=["task"],
-                project=project_id,
-                limit=200,
-            )
+            meta = entity.get("metadata", {})
 
-            # JSON output (default)
             if json_out:
-                # Include task summary in output
-                tasks = tasks_response.get("entities", [])
-                status_counts: dict[str, int] = {}
-                for t in tasks:
-                    status = t.get("metadata", {}).get("status", "unknown")
-                    status_counts[status] = status_counts.get(status, 0) + 1
-
-                output = {
-                    **entity,
-                    "task_summary": {
-                        "total": len(tasks),
-                        "by_status": status_counts,
-                    },
-                }
-                print_json(output)
+                print_json(entity)
                 return
 
-            # Table output
-            tasks = tasks_response.get("entities", [])
-            status_counts: dict[str, int] = {}
-            for t in tasks:
-                status = t.get("metadata", {}).get("status", "unknown")
-                status_counts[status] = status_counts.get(status, 0) + 1
+            # Use status_counts from enriched metadata (no extra API call needed)
+            status_counts: dict[str, int] = meta.get("status_counts", {})
+            total = meta.get("total_tasks", 0)
+            pct = meta.get("progress_pct", 0.0)
 
-            meta = entity.get("metadata", {})
             lines = [
                 f"[{ELECTRIC_PURPLE}]Name:[/{ELECTRIC_PURPLE}] {entity.get('name', '')}",
                 f"[{ELECTRIC_PURPLE}]Status:[/{ELECTRIC_PURPLE}] {meta.get('status', 'active')}",
@@ -180,13 +159,15 @@ def show_project(
                 f"[{NEON_CYAN}]Task Summary:[/{NEON_CYAN}]",
             ]
 
-            for status, count in sorted(status_counts.items()):
-                lines.append(f"  {status}: {count}")
+            # Show status counts in priority order
+            status_order = ["doing", "blocked", "review", "todo", "backlog", "done", "archived"]
+            for status in status_order:
+                count = status_counts.get(status, 0)
+                if count > 0:
+                    lines.append(f"  {status}: {count}")
 
-            total = len(tasks)
-            done = status_counts.get("done", 0)
+            # Progress bar
             if total > 0:
-                pct = (done / total) * 100
                 bar_filled = int(pct / 5)
                 bar = f"[{SUCCESS_GREEN}]{'█' * bar_filled}[/{SUCCESS_GREEN}]{'░' * (20 - bar_filled)}"
                 lines.append(f"\n[{ELECTRIC_PURPLE}]Progress:[/{ELECTRIC_PURPLE}] {bar} {pct:.0f}%")
@@ -196,15 +177,44 @@ def show_project(
                     f"\n[{NEON_CYAN}]Tech Stack:[/{NEON_CYAN}] {', '.join(meta['tech_stack'])}"
                 )
 
-            # Show related entities
-            related_entities = entity.get("related", [])
-            if related_entities:
-                lines.append(f"\n[{NEON_CYAN}]Related:[/{NEON_CYAN}]")
-                for rel in related_entities:
-                    direction = "→" if rel.get("direction") == "outgoing" else "←"
+            # Show critical tasks first (high priority / CRITICAL in name)
+            critical_tasks = meta.get("critical_tasks", [])
+            if critical_tasks:
+                lines.append("\n[red]⚠ Critical:[/red]")
+                for task in critical_tasks:
+                    status = task.get("status", "")
                     lines.append(
-                        f"  [{CORAL}]{rel.get('relationship', '')}[/{CORAL}] {direction} "
-                        f"{rel.get('entity_type', '')}: {rel.get('name', '')} [{CORAL}]{rel.get('id', '')}[/{CORAL}]"
+                        f"  [red]●[/red] {task.get('name', '')} "
+                        f"[dim]{status}[/dim] [{CORAL}]{task.get('id', '')}[/{CORAL}]"
+                    )
+
+            # Show epics with progress
+            epics = meta.get("epics", [])
+            if epics:
+                lines.append(f"\n[{ELECTRIC_PURPLE}]Epics:[/{ELECTRIC_PURPLE}]")
+                for epic in epics:
+                    epic_pct = epic.get("progress_pct", 0)
+                    epic_total = epic.get("total_tasks", 0)
+                    mini_bar = "█" * int(epic_pct / 10) + "░" * (10 - int(epic_pct / 10))
+                    lines.append(
+                        f"  [{SUCCESS_GREEN}]{mini_bar}[/{SUCCESS_GREEN}] {epic_pct:.0f}% "
+                        f"{epic.get('name', '')} ({epic_total} tasks)"
+                    )
+
+            # Show actionable tasks (doing, blocked, review) - now returned as "related"
+            actionable = entity.get("related", [])
+            if actionable:
+                lines.append(f"\n[{NEON_CYAN}]Actionable:[/{NEON_CYAN}]")
+                for task in actionable:
+                    status = task.get("relationship", "")  # Status is in relationship field
+                    status_color = {
+                        "doing": SUCCESS_GREEN,
+                        "blocked": "red",
+                        "review": ELECTRIC_YELLOW,
+                    }.get(status, CORAL)
+                    lines.append(
+                        f"  [{status_color}]{status}[/{status_color}] "
+                        f"{task.get('name', '')} [{CORAL}]{task.get('id', '')}[/{CORAL}]"
                     )
 
             panel = create_panel("\n".join(lines), title=f"Project {entity.get('id', '')}")

@@ -917,6 +917,179 @@ class EntityManager:
             log.exception("Failed to get epic progress", epic_id=epic_id, error=str(e))
             return {"total_tasks": 0, "completed_tasks": 0, "completion_pct": 0.0}
 
+    async def get_project_summary(
+        self,
+        project_id: str,
+        *,
+        actionable_limit: int = 5,
+        critical_limit: int = 3,
+        epic_limit: int = 3,
+    ) -> dict[str, Any]:
+        """Get a rich summary of a project with actionable task highlights.
+
+        Returns task counts by status and curated lists of tasks that need attention,
+        prioritized by urgency: doing > blocked > review > recent.
+
+        Args:
+            project_id: The project's unique identifier.
+            actionable_limit: Max number of actionable tasks to return.
+            critical_limit: Max number of critical tasks to return.
+            epic_limit: Max number of epics to return.
+
+        Returns:
+            Dict with:
+                - status_counts: Dict of status -> count
+                - total_tasks: Total task count
+                - progress_pct: Completion percentage
+                - actionable_tasks: List of tasks needing attention (dicts with id, name, status)
+                - critical_tasks: List of critical/high priority tasks
+                - epics: List of active epics with progress
+        """
+        log.debug("Getting project summary", project_id=project_id)
+
+        try:
+            # Fetch all tasks for the project
+            result = await self._driver.execute_query(
+                """
+                MATCH (n)
+                WHERE n.entity_type = 'task'
+                  AND n.group_id = $group_id
+                  AND n.project_id = $project_id
+                RETURN n.uuid AS uuid,
+                       n.name AS name,
+                       n.metadata AS metadata,
+                       n.updated_at AS updated_at
+                ORDER BY n.updated_at DESC
+                """,
+                group_id=self._group_id,
+                project_id=project_id,
+            )
+
+            records = GraphClient.normalize_result(result)
+
+            # Count by status and collect actionable/critical tasks
+            status_counts: dict[str, int] = {}
+            doing_tasks: list[dict[str, Any]] = []
+            blocked_tasks: list[dict[str, Any]] = []
+            review_tasks: list[dict[str, Any]] = []
+            critical_tasks: list[dict[str, Any]] = []
+            recent_tasks: list[dict[str, Any]] = []
+
+            for record in records:
+                metadata = record.get("metadata")
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except json.JSONDecodeError:
+                        metadata = {}
+
+                status = (metadata.get("status") if metadata else None) or "todo"
+                priority = (metadata.get("priority") if metadata else None) or ""
+                name = record.get("name") or ""
+
+                status_counts[status] = status_counts.get(status, 0) + 1
+
+                task_info = {
+                    "id": record.get("uuid"),
+                    "name": name,
+                    "status": status,
+                    "priority": priority,
+                }
+
+                # Check if task is critical (not done/archived)
+                is_critical = (
+                    priority.lower() in ("critical", "high")
+                    or "CRITICAL" in name.upper()
+                ) and status not in ("done", "archived")
+
+                if is_critical and len(critical_tasks) < critical_limit:
+                    critical_tasks.append(task_info)
+
+                # Collect actionable tasks by priority
+                if status == "doing" and len(doing_tasks) < actionable_limit:
+                    doing_tasks.append(task_info)
+                elif status == "blocked" and len(blocked_tasks) < actionable_limit:
+                    blocked_tasks.append(task_info)
+                elif status == "review" and len(review_tasks) < actionable_limit:
+                    review_tasks.append(task_info)
+                elif len(recent_tasks) < actionable_limit:
+                    recent_tasks.append(task_info)
+
+            # Build prioritized actionable list: doing > blocked > review > recent
+            actionable: list[dict[str, Any]] = []
+            for pool in [doing_tasks, blocked_tasks, review_tasks, recent_tasks]:
+                for task in pool:
+                    if len(actionable) >= actionable_limit:
+                        break
+                    # Dedupe by ID
+                    if task["id"] not in [t["id"] for t in actionable]:
+                        actionable.append(task)
+                if len(actionable) >= actionable_limit:
+                    break
+
+            total = sum(status_counts.values())
+            done = status_counts.get("done", 0)
+
+            # Fetch epics for project
+            epics: list[dict[str, Any]] = []
+            try:
+                epic_result = await self._driver.execute_query(
+                    """
+                    MATCH (n)
+                    WHERE n.entity_type = 'epic'
+                      AND n.group_id = $group_id
+                      AND n.project_id = $project_id
+                      AND (n.status IS NULL OR n.status <> 'archived')
+                    RETURN n.uuid AS uuid,
+                           n.name AS name,
+                           n.status AS status,
+                           n.priority AS priority
+                    ORDER BY n.priority ASC, n.created_at DESC
+                    LIMIT $limit
+                    """,
+                    group_id=self._group_id,
+                    project_id=project_id,
+                    limit=epic_limit,
+                )
+                epic_records = GraphClient.normalize_result(epic_result)
+                for rec in epic_records:
+                    epic_info = {
+                        "id": rec.get("uuid"),
+                        "name": rec.get("name"),
+                        "status": rec.get("status") or "planning",
+                    }
+                    # Get epic progress
+                    try:
+                        progress = await self.get_epic_progress(epic_info["id"])
+                        epic_info["progress_pct"] = progress.get("completion_pct", 0.0)
+                        epic_info["total_tasks"] = progress.get("total_tasks", 0)
+                    except Exception:
+                        epic_info["progress_pct"] = 0.0
+                        epic_info["total_tasks"] = 0
+                    epics.append(epic_info)
+            except Exception as epic_err:
+                log.debug("Failed to fetch epics", error=str(epic_err))
+
+            return {
+                "status_counts": status_counts,
+                "total_tasks": total,
+                "progress_pct": round((done / total * 100) if total > 0 else 0, 1),
+                "actionable_tasks": actionable,
+                "critical_tasks": critical_tasks,
+                "epics": epics,
+            }
+
+        except Exception as e:
+            log.exception("Failed to get project summary", project_id=project_id, error=str(e))
+            return {
+                "status_counts": {},
+                "total_tasks": 0,
+                "progress_pct": 0.0,
+                "actionable_tasks": [],
+                "critical_tasks": [],
+                "epics": [],
+            }
+
     async def list_epics_for_project(
         self,
         project_id: str,

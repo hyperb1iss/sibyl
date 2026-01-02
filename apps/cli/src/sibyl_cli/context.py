@@ -9,8 +9,9 @@ from typing import Annotated
 
 import typer
 
-from sibyl_cli.client import clear_client_cache
+from sibyl_cli.client import SibylClientError, clear_client_cache, get_client
 from sibyl_cli.common import (
+    CORAL,
     ELECTRIC_PURPLE,
     ELECTRIC_YELLOW,
     NEON_CYAN,
@@ -20,6 +21,7 @@ from sibyl_cli.common import (
     error,
     info,
     print_json,
+    run_async,
     success,
 )
 from sibyl_cli.config_store import (
@@ -62,12 +64,29 @@ def callback(
 
     # Resolve effective project (linked > default)
     linked_project = resolve_project_from_cwd()
+    effective_project = linked_project or active.default_project
+
+    # Fetch project details if we have a project
+    project_data: dict | None = None
+    if effective_project:
+
+        @run_async
+        async def _fetch_project() -> dict | None:
+            try:
+                client = get_client()
+                return await client.get_entity(effective_project)  # type: ignore[return-value]
+            except SibylClientError:
+                return None
+
+        project_data = _fetch_project()
 
     if json_out:
         result = _context_to_dict(active)
         result["active"] = True
         if linked_project:
             result["linked_project"] = linked_project
+        if project_data:
+            result["project_details"] = project_data
         print_json(result)
         return
 
@@ -90,6 +109,85 @@ def callback(
         console.print(
             f"  [{ELECTRIC_YELLOW}]Insecure:[/{ELECTRIC_YELLOW}] SSL verification disabled"
         )
+
+    # Show project summary if we have project data
+    if project_data:
+        meta = project_data.get("metadata", {})
+        status_counts = meta.get("status_counts", {})
+        total = meta.get("total_tasks", 0)
+        pct = meta.get("progress_pct", 0.0)
+
+        console.print()
+        console.print(
+            f"  [{ELECTRIC_PURPLE}]───────────────────────────────────────[/{ELECTRIC_PURPLE}]"
+        )
+        console.print(
+            f"  [{NEON_CYAN}]{project_data.get('name', 'Unknown')}[/{NEON_CYAN}]"
+        )
+        if project_data.get("description"):
+            console.print(f"  [dim]{project_data['description']}[/dim]")
+
+        # Progress bar
+        if total > 0:
+            bar_filled = int(pct / 5)
+            bar = f"[{SUCCESS_GREEN}]{'█' * bar_filled}[/{SUCCESS_GREEN}]{'░' * (20 - bar_filled)}"
+            console.print(f"  {bar} {pct:.0f}%")
+
+        # Brief status summary
+        doing = status_counts.get("doing", 0)
+        blocked = status_counts.get("blocked", 0)
+        review = status_counts.get("review", 0)
+        todo = status_counts.get("todo", 0)
+
+        status_parts = []
+        if doing:
+            status_parts.append(f"[{SUCCESS_GREEN}]{doing} doing[/{SUCCESS_GREEN}]")
+        if blocked:
+            status_parts.append(f"[red]{blocked} blocked[/red]")
+        if review:
+            status_parts.append(f"[{ELECTRIC_YELLOW}]{review} review[/{ELECTRIC_YELLOW}]")
+        if todo:
+            status_parts.append(f"[dim]{todo} todo[/dim]")
+        if status_parts:
+            console.print(f"  {' · '.join(status_parts)}")
+
+        # Critical tasks (high priority / CRITICAL in name)
+        critical_tasks = meta.get("critical_tasks", [])
+        if critical_tasks:
+            console.print()
+            console.print("  [red]⚠ Critical:[/red]")
+            for task in critical_tasks[:2]:  # Show top 2 critical
+                console.print(
+                    f"    [red]●[/red] {task.get('name', '')} [{CORAL}]{task.get('id', '')}[/{CORAL}]"
+                )
+
+        # Epics with progress
+        epics = meta.get("epics", [])
+        if epics:
+            console.print()
+            console.print(f"  [{ELECTRIC_PURPLE}]Epics:[/{ELECTRIC_PURPLE}]")
+            for epic in epics[:2]:  # Show top 2 epics
+                epic_pct = epic.get("progress_pct", 0)
+                mini_bar = "█" * int(epic_pct / 20) + "░" * (5 - int(epic_pct / 20))
+                console.print(
+                    f"    [{SUCCESS_GREEN}]{mini_bar}[/{SUCCESS_GREEN}] {epic_pct:.0f}% {epic.get('name', '')}"
+                )
+
+        # Actionable tasks
+        actionable = project_data.get("related", [])
+        if actionable:
+            console.print()
+            for task in actionable[:3]:  # Show top 3
+                status = task.get("relationship", "")
+                status_color = {
+                    "doing": SUCCESS_GREEN,
+                    "blocked": "red",
+                    "review": ELECTRIC_YELLOW,
+                }.get(status, CORAL)
+                console.print(
+                    f"  [{status_color}]●[/{status_color}] {task.get('name', '')} [{CORAL}]{task.get('id', '')}[/{CORAL}]"
+                )
+
     console.print()
 
 
