@@ -23,6 +23,7 @@ import { LoadingState } from '@/components/ui/spinner';
 import type { HierarchicalCluster, HierarchicalEdge, HierarchicalNode } from '@/lib/api';
 import { GRAPH_DEFAULTS, getClusterColor, getEntityColor } from '@/lib/constants';
 import { useHierarchicalGraph } from '@/lib/hooks';
+import { useProjectContext } from '@/lib/project-context';
 import { useTheme } from '@/lib/theme';
 
 // Canvas requires hex colors - OKLCH CSS vars don't work directly
@@ -365,6 +366,7 @@ function GraphToolbar({
 function GraphPageContent() {
   const { theme } = useTheme();
   const colors = CANVAS_COLORS[theme];
+  const { selectedProjects } = useProjectContext();
   const graphRef = useRef<ForceGraphMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -373,6 +375,7 @@ function GraphPageContent() {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
   // Fetch hierarchical graph data with up to 1000 nodes
+  // Filter by selected projects if any are chosen
   const {
     data,
     isLoading,
@@ -380,6 +383,7 @@ function GraphPageContent() {
   } = useHierarchicalGraph({
     max_nodes: GRAPH_DEFAULTS.MAX_NODES,
     max_edges: GRAPH_DEFAULTS.MAX_EDGES,
+    projects: selectedProjects.length > 0 ? selectedProjects : undefined,
   });
 
   // Build cluster color map

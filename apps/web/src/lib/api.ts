@@ -103,14 +103,7 @@ export interface GraphNodeMetadata extends BaseMetadata {
 }
 
 /** Type for task status values */
-export type TaskStatus =
-  | 'backlog'
-  | 'todo'
-  | 'doing'
-  | 'blocked'
-  | 'review'
-  | 'done'
-  | 'archived';
+export type TaskStatus = 'backlog' | 'todo' | 'doing' | 'blocked' | 'review' | 'done' | 'archived';
 
 /** Type for task priority values */
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low' | 'someday';
@@ -1466,10 +1459,22 @@ export const api = {
     stats: () => fetchApi<GraphStatsResponse>('/graph/stats'),
 
     // Hierarchical graph with cluster assignments for rich visualization
-    hierarchical: (params?: { max_nodes?: number; max_edges?: number; refresh?: boolean }) => {
+    hierarchical: (params?: {
+      max_nodes?: number;
+      max_edges?: number;
+      projects?: string[];
+      types?: string[];
+      refresh?: boolean;
+    }) => {
       const searchParams = new URLSearchParams();
       if (params?.max_nodes) searchParams.set('max_nodes', params.max_nodes.toString());
       if (params?.max_edges) searchParams.set('max_edges', params.max_edges.toString());
+      if (params?.projects?.length) {
+        for (const p of params.projects) searchParams.append('projects', p);
+      }
+      if (params?.types?.length) {
+        for (const t of params.types) searchParams.append('types', t);
+      }
       if (params?.refresh) searchParams.set('refresh', 'true');
       const query = searchParams.toString();
       return fetchApi<HierarchicalGraphResponse>(`/graph/hierarchical${query ? `?${query}` : ''}`);

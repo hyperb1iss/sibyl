@@ -459,11 +459,8 @@ async def _fetch_graph_nodes(
 
     if project_ids:
         # Filter to nodes belonging to specified projects
-        # This matches: project nodes themselves, tasks with project_id, or entities linked to projects
-        filters.append(
-            "(n.uuid IN $project_ids OR n.project_id IN $project_ids OR "
-            "EXISTS((n)-[:BELONGS_TO]->(:Entity {entity_type: 'project', uuid: $project_ids[0]})))"
-        )
+        # This matches: project nodes themselves, or tasks with project_id in metadata
+        filters.append("(n.uuid IN $project_ids OR n.project_id IN $project_ids)")
 
     if entity_types:
         type_list = ", ".join(f"'{t}'" for t in entity_types)

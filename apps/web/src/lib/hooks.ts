@@ -727,6 +727,8 @@ export function useGraphStats() {
 export function useHierarchicalGraph(params?: {
   max_nodes?: number;
   max_edges?: number;
+  projects?: string[];
+  types?: string[];
   refresh?: boolean;
 }) {
   return useQuery({
