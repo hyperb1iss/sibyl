@@ -175,8 +175,8 @@ class WorktreeManager:
             last_used=datetime.now(UTC),
         )
 
-        # Persist to graph
-        await self.entity_manager.create(record)
+        # Persist to graph (fast direct insert, no LLM extraction needed)
+        await self.entity_manager.create_direct(record, generate_embedding=False)
 
         return record
 

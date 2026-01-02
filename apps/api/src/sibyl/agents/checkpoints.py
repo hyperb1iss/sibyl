@@ -100,8 +100,8 @@ class CheckpointManager:
             pending_approval_id=pending_approval_id,
         )
 
-        # Persist to graph
-        await self.entity_manager.create(checkpoint)
+        # Persist to graph (fast direct insert, no LLM extraction needed)
+        await self.entity_manager.create_direct(checkpoint, generate_embedding=False)
 
         # Update agent record with latest checkpoint reference
         await self.entity_manager.update(
