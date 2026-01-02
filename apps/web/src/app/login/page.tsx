@@ -2,12 +2,26 @@ import { GradientButton } from '@/components/ui/button';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Github, Sparkles } from '@/components/ui/icons';
 
+/**
+ * Validate redirect URL to prevent open redirect attacks.
+ * Only allows relative URLs (starting with /).
+ */
+function getSafeRedirect(url: string | undefined): string | null {
+  if (!url) return null;
+  // Must start with / and not // (which would be protocol-relative)
+  if (url.startsWith('/') && !url.startsWith('//')) {
+    return url;
+  }
+  return null;
+}
+
 interface PageProps {
   searchParams: Promise<{ next?: string; error?: string }>;
 }
 
 export default async function LoginPage({ searchParams }: PageProps) {
-  const { next, error } = await searchParams;
+  const { next: rawNext, error } = await searchParams;
+  const next = getSafeRedirect(rawNext);
 
   return (
     <div className="min-h-dvh flex items-center justify-center px-4">
