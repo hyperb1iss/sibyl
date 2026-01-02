@@ -361,6 +361,55 @@ def list_tasks(
     _list()
 
 
+def _display_task_panel(entity: dict) -> None:
+    """Display a task entity as a rich panel with related entities."""
+    meta = entity.get("metadata", {})
+    lines = [
+        f"[{ELECTRIC_PURPLE}]Title:[/{ELECTRIC_PURPLE}] {entity.get('name', '')}",
+        f"[{ELECTRIC_PURPLE}]Status:[/{ELECTRIC_PURPLE}] {format_status(meta.get('status', 'unknown'))}",
+        f"[{ELECTRIC_PURPLE}]Priority:[/{ELECTRIC_PURPLE}] {format_priority(meta.get('priority', 'medium'))}",
+        "",
+        f"[{NEON_CYAN}]Description:[/{NEON_CYAN}]",
+        entity.get("description") or "[dim]No description[/dim]",
+    ]
+
+    if meta.get("project_id"):
+        lines.insert(
+            3,
+            f"[{ELECTRIC_PURPLE}]Project:[/{ELECTRIC_PURPLE}] {meta['project_id']}",
+        )
+
+    if meta.get("assignees"):
+        lines.insert(
+            4,
+            f"[{ELECTRIC_PURPLE}]Assignees:[/{ELECTRIC_PURPLE}] {', '.join(meta['assignees'])}",
+        )
+
+    if meta.get("feature"):
+        lines.append(f"\n[{CORAL}]Feature:[/{CORAL}] {meta['feature']}")
+
+    if meta.get("branch_name"):
+        lines.append(f"[{CORAL}]Branch:[/{CORAL}] {meta['branch_name']}")
+
+    if meta.get("technologies"):
+        lines.append(f"[{CORAL}]Tech:[/{CORAL}] {', '.join(meta['technologies'])}")
+
+    # Show related entities
+    related_entities = entity.get("related", [])
+    if related_entities:
+        lines.append(f"\n[{NEON_CYAN}]Related:[/{NEON_CYAN}]")
+        for rel in related_entities:
+            direction = "→" if rel.get("direction") == "outgoing" else "←"
+            lines.append(
+                f"  [{CORAL}]{rel.get('relationship', '')}[/{CORAL}] {direction} "
+                f"[{ELECTRIC_PURPLE}]{rel.get('entity_type', '')}[/{ELECTRIC_PURPLE}]: "
+                f"{rel.get('name', '')} [{CORAL}]{rel.get('id', '')}[/{CORAL}]"
+            )
+
+    panel = create_panel("\n".join(lines), title=f"Task {entity.get('id', '')}")
+    console.print(panel)
+
+
 @app.command("show")
 def show_task(
     task_id: Annotated[str, typer.Argument(help="Task ID (full ID required)")],
@@ -385,52 +434,7 @@ def show_task(
                 print_json(entity)
                 return
 
-            # Table output
-            meta = entity.get("metadata", {})
-            lines = [
-                f"[{ELECTRIC_PURPLE}]Title:[/{ELECTRIC_PURPLE}] {entity.get('name', '')}",
-                f"[{ELECTRIC_PURPLE}]Status:[/{ELECTRIC_PURPLE}] {format_status(meta.get('status', 'unknown'))}",
-                f"[{ELECTRIC_PURPLE}]Priority:[/{ELECTRIC_PURPLE}] {format_priority(meta.get('priority', 'medium'))}",
-                "",
-                f"[{NEON_CYAN}]Description:[/{NEON_CYAN}]",
-                entity.get("description") or "[dim]No description[/dim]",
-            ]
-
-            if meta.get("project_id"):
-                lines.insert(
-                    3,
-                    f"[{ELECTRIC_PURPLE}]Project:[/{ELECTRIC_PURPLE}] {meta['project_id']}",
-                )
-
-            if meta.get("assignees"):
-                lines.insert(
-                    4,
-                    f"[{ELECTRIC_PURPLE}]Assignees:[/{ELECTRIC_PURPLE}] {', '.join(meta['assignees'])}",
-                )
-
-            if meta.get("feature"):
-                lines.append(f"\n[{CORAL}]Feature:[/{CORAL}] {meta['feature']}")
-
-            if meta.get("branch_name"):
-                lines.append(f"[{CORAL}]Branch:[/{CORAL}] {meta['branch_name']}")
-
-            if meta.get("technologies"):
-                lines.append(f"[{CORAL}]Tech:[/{CORAL}] {', '.join(meta['technologies'])}")
-
-            # Show related entities
-            related_entities = entity.get("related", [])
-            if related_entities:
-                lines.append(f"\n[{NEON_CYAN}]Related:[/{NEON_CYAN}]")
-                for rel in related_entities:
-                    direction = "→" if rel.get("direction") == "outgoing" else "←"
-                    lines.append(
-                        f"  [{CORAL}]{rel.get('relationship', '')}[/{CORAL}] {direction} "
-                        f"[{ELECTRIC_PURPLE}]{rel.get('entity_type', '')}[/{ELECTRIC_PURPLE}]: "
-                        f"{rel.get('name', '')} [{CORAL}]{rel.get('id', '')}[/{CORAL}]"
-                    )
-
-            panel = create_panel("\n".join(lines), title=f"Task {entity.get('id', '')}")
-            console.print(panel)
+            _display_task_panel(entity)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -464,8 +468,13 @@ def start_task(
 
             if response.get("success"):
                 success(f"Task started: {task_id}")
-                if response.get("data", {}).get("branch_name"):
-                    info(f"Branch: {response['data']['branch_name']}")
+                branch = response.get("data", {}).get("branch_name")
+                if branch:
+                    info(f"Branch: {branch}")
+                # Fetch and display the task with full context
+                entity = await client.get_entity(resolved_id)
+                console.print()
+                _display_task_panel(entity)
             else:
                 error(f"Failed to start task: {response.get('message', 'Unknown error')}")
 
