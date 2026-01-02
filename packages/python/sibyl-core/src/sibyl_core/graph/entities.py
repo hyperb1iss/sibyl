@@ -1476,14 +1476,12 @@ class EntityManager:
             metadata["title"] = entity.title
             metadata["summary"] = entity.summary
             metadata["actions"] = entity.actions
-            if entity.responded_by:
-                metadata["responded_by"] = entity.responded_by
+            if entity.response_by:
+                metadata["response_by"] = entity.response_by
             if entity.responded_at:
                 metadata["responded_at"] = entity.responded_at.isoformat()
-            if entity.response_action:
-                metadata["response_action"] = entity.response_action
-            if entity.response_comment:
-                metadata["response_comment"] = entity.response_comment
+            if entity.response_message:
+                metadata["response_message"] = entity.response_message
 
         # Add AgentCheckpoint-specific fields
         elif isinstance(entity, AgentCheckpoint):
