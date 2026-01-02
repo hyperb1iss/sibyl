@@ -1797,34 +1797,34 @@ class EntityManager:
 
         # EpisodicNode has: uuid, name, group_id, content, created_at, valid_at, source_description
 
-        # Try to extract entity_type from the name (format: "type:name")
-        entity_type_str = "episode"
+        # First, try to get entity_type from node attribute (set by _persist_entity_attributes)
+        # This is the authoritative source when available
+        entity_type: EntityType = EntityType.EPISODE
         name = node.name
 
-        if ":" in name:
+        if node_entity_type := getattr(node, "entity_type", None):
+            try:
+                entity_type = EntityType(node_entity_type)
+            except ValueError:
+                pass  # Invalid type, fall through to name parsing
+
+        # Fallback: try to extract entity_type from the name (format: "type:name")
+        if entity_type == EntityType.EPISODE and ":" in name:
             parts = name.split(":", 1)
             potential_type = parts[0].strip().lower()
             # Check if it's a valid entity type
             try:
                 entity_type = EntityType(potential_type)
-                entity_type_str = potential_type
                 name = parts[1].strip() if len(parts) > 1 else name
             except ValueError:
                 pass  # Not a valid type prefix, use full name
-
-        try:
-            entity_type = EntityType(entity_type_str)
-        except ValueError:
-            entity_type = EntityType.EPISODE
 
         # Extract content and description from node (use getattr for type safety)
         content = getattr(node, "content", "") or ""
         description = getattr(node, "source_description", "") or ""
 
-        # Try to parse metadata if stored in content as structured text
+        # Build metadata dict
         metadata: dict[str, Any] = {}
-        if node_entity_type := getattr(node, "entity_type", None):
-            metadata["entity_type"] = node_entity_type
 
         # Build entity kwargs, only including datetime fields if present
         entity_kwargs: dict[str, Any] = {
