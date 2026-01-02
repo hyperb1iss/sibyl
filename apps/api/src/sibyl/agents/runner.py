@@ -180,6 +180,7 @@ Priority: {task.priority}
         create_worktree: bool = True,
         custom_instructions: str | None = None,
         enable_approvals: bool = True,
+        agent_id: str | None = None,
     ) -> "AgentInstance":
         """Spawn a new Claude agent instance.
 
@@ -191,15 +192,17 @@ Priority: {task.priority}
             create_worktree: Whether to create an isolated worktree
             custom_instructions: Additional system prompt instructions
             enable_approvals: Enable human-in-the-loop approval hooks
+            agent_id: Optional pre-generated agent ID (generated if not provided)
 
         Returns:
             AgentInstance ready for execution
         """
         logger.info(f"Spawning {agent_type} agent for task {task.id if task else 'adhoc'}")
 
-        # Generate agent ID
-        timestamp = datetime.now(UTC).isoformat()
-        agent_id = _generate_agent_id(self.org_id, self.project_id, timestamp)
+        # Generate agent ID if not provided
+        if agent_id is None:
+            timestamp = datetime.now(UTC).isoformat()
+            agent_id = _generate_agent_id(self.org_id, self.project_id, timestamp)
 
         # Create agent record
         record = AgentRecord(

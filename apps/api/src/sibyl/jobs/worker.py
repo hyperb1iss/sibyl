@@ -747,6 +747,196 @@ async def update_entity(
         raise
 
 
+async def run_agent_execution(
+    ctx: dict[str, Any],  # noqa: ARG001
+    agent_id: str,
+    org_id: str,
+    project_id: str,
+    prompt: str,
+    *,
+    agent_type: str = "general",
+    task_id: str | None = None,
+    created_by: str | None = None,
+) -> dict[str, Any]:
+    """Execute a Claude agent in the worker process.
+
+    This job runs long-running AI agent tasks in the background worker,
+    keeping the API responsive. Creates checkpoints only at completion.
+
+    Args:
+        ctx: arq context
+        agent_id: Pre-created agent ID
+        org_id: Organization ID
+        project_id: Project ID
+        prompt: Initial prompt for the agent
+        agent_type: Type of agent
+        task_id: Optional task ID
+        created_by: User ID who spawned the agent
+
+    Returns:
+        Dict with execution results
+    """
+    from sibyl.agents import AgentRunner, WorktreeManager
+    from sibyl_core.graph.client import get_graph_client
+    from sibyl_core.graph.entities import EntityManager
+    from sibyl_core.models import AgentCheckpoint, AgentSpawnSource, AgentStatus, AgentType
+
+    log.info(
+        "run_agent_execution_started",
+        agent_id=agent_id,
+        agent_type=agent_type,
+        task_id=task_id,
+    )
+
+    try:
+        client = await get_graph_client()
+        manager = EntityManager(client, group_id=org_id)
+
+        # Create worktree manager and agent runner
+        worktree_manager = WorktreeManager(
+            entity_manager=manager,
+            org_id=org_id,
+            project_id=project_id,
+            repo_path=".",
+        )
+
+        runner = AgentRunner(
+            entity_manager=manager,
+            worktree_manager=worktree_manager,
+            org_id=org_id,
+            project_id=project_id,
+        )
+
+        # Get task if specified
+        task = None
+        if task_id:
+            from sibyl_core.models import Task
+
+            entity = await manager.get(task_id)
+            if entity and isinstance(entity, Task):
+                task = entity
+
+        # Spawn the agent instance with pre-generated ID
+        instance = await runner.spawn(
+            prompt=prompt,
+            agent_type=AgentType(agent_type),
+            task=task,
+            spawn_source=AgentSpawnSource.USER,
+            create_worktree=False,
+            enable_approvals=True,
+            agent_id=agent_id,
+        )
+
+        # Update with created_by if provided
+        if created_by:
+            await manager.update(agent_id, {"created_by": created_by})
+
+        # Track execution state (in memory only until completion)
+        message_count = 0
+        session_id = ""
+        last_content = ""
+        tool_calls: list[str] = []
+
+        # Execute agent - process messages without storing each one
+        async for message in instance.execute():
+            message_count += 1
+            msg_content = str(getattr(message, "content", ""))
+            msg_class = type(message).__name__
+
+            # Track session ID
+            if sid := getattr(message, "session_id", None):
+                session_id = sid
+
+            # Track tool calls for summary
+            if "Tool" in msg_class and msg_content:
+                tool_name = msg_content.split("(")[0] if "(" in msg_content else msg_content[:50]
+                tool_calls.append(tool_name)
+
+            # Keep last meaningful content for summary
+            if msg_content and "Result" not in msg_class:
+                last_content = msg_content[:500]
+
+        # Create checkpoint only on completion (summary, not full history)
+        from uuid import uuid4
+
+        checkpoint_id = f"chkpt_{uuid4().hex[:12]}"
+        summary = f"Completed {message_count} turns. Tools: {', '.join(tool_calls[-5:]) or 'none'}"
+        checkpoint = AgentCheckpoint(
+            id=checkpoint_id,
+            name=f"checkpoint-{agent_id[-8:]}",
+            agent_id=agent_id,
+            session_id=session_id,
+            conversation_history=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "type": "text",
+                },
+                {
+                    "role": "system",
+                    "content": summary,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "type": "text",
+                },
+            ],
+            current_step=last_content[:200] if last_content else None,
+        )
+        await manager.create_direct(checkpoint)
+
+        # Update agent status to completed
+        await manager.update(
+            agent_id,
+            {
+                "status": AgentStatus.COMPLETED.value,
+                "conversation_turns": message_count,
+            },
+        )
+
+        result = {
+            "agent_id": agent_id,
+            "status": "completed",
+            "turns": message_count,
+            "tools_used": len(tool_calls),
+        }
+
+        # Broadcast completion via WebSocket
+        await _safe_broadcast(
+            "agent_status",
+            {"agent_id": agent_id, "status": "completed", "turns": message_count},
+            org_id=org_id,
+        )
+
+        log.info("run_agent_execution_completed", **result)
+        return result
+
+    except Exception as e:
+        log.exception("run_agent_execution_failed", agent_id=agent_id, error=str(e))
+
+        # Update agent status to failed
+        try:
+            client = await get_graph_client()
+            manager = EntityManager(client, group_id=org_id)
+            await manager.update(
+                agent_id,
+                {
+                    "status": AgentStatus.FAILED.value,
+                    "error_message": str(e),
+                },
+            )
+        except Exception:
+            log.warning("Failed to update agent status on error", agent_id=agent_id)
+
+        # Broadcast failure via WebSocket
+        await _safe_broadcast(
+            "agent_status",
+            {"agent_id": agent_id, "status": "failed", "error": str(e)},
+            org_id=org_id,
+        )
+
+        raise
+
+
 # Optional: Scheduled job to sync all sources
 async def sync_all_sources(ctx: dict[str, Any]) -> dict[str, Any]:
     """Sync all sources - can be run as a cron job."""
@@ -779,6 +969,7 @@ class WorkerSettings:
         create_entity,
         create_learning_episode,
         update_entity,
+        run_agent_execution,
     ]
 
     # Lifecycle hooks

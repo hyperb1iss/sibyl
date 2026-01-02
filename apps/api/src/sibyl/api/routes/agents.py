@@ -8,12 +8,11 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from sibyl.agents import AgentInstance
     from sibyl_core.models.entities import Entity
 from uuid import uuid4
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_role
@@ -22,7 +21,6 @@ from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.models import (
     AgentCheckpoint,
-    AgentSpawnSource,
     AgentStatus,
     AgentType,
     EntityType,
@@ -264,181 +262,47 @@ async def get_agent(
 @router.post("", response_model=SpawnAgentResponse)
 async def spawn_agent(
     request: SpawnAgentRequest,
-    background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user),
     org: Organization = Depends(get_current_organization),
 ) -> SpawnAgentResponse:
-    """Spawn a new agent and start execution.
+    """Spawn a new agent and enqueue execution.
 
-    Creates an agent record and starts background execution using Claude SDK.
-    The agent will stream messages to its checkpoint for real-time updates.
+    Validates the request and enqueues agent execution in the worker process.
+    The worker creates the agent record and handles execution.
     """
-    from sibyl.agents import AgentRunner, WorktreeManager
+    from sibyl.jobs.queue import enqueue_agent_execution
 
-    client = await get_graph_client()
-    manager = EntityManager(client, group_id=str(org.id))
-    user_id = str(user.id)
-
-    # Get task if specified
-    task = None
+    # Validate task exists if specified
     if request.task_id:
-        from sibyl_core.models import Task
-
+        client = await get_graph_client()
+        manager = EntityManager(client, group_id=str(org.id))
         entity = await manager.get(request.task_id)
-        if entity and isinstance(entity, Task):
-            task = entity
+        if not entity:
+            raise HTTPException(status_code=404, detail=f"Task not found: {request.task_id}")
 
-    # Create worktree manager and agent runner
-    worktree_manager = WorktreeManager(
-        entity_manager=manager,
-        org_id=str(org.id),
-        project_id=request.project_id,
-        repo_path=".",  # Would come from project config
-    )
-
-    runner = AgentRunner(
-        entity_manager=manager,
-        worktree_manager=worktree_manager,
-        org_id=str(org.id),
-        project_id=request.project_id,
-    )
+    # Generate agent ID upfront so we can return it immediately
+    agent_id = f"agent_{uuid4().hex[:12]}"
 
     try:
-        instance = await runner.spawn(
-            prompt=request.prompt,
-            agent_type=request.agent_type,
-            task=task,
-            spawn_source=AgentSpawnSource.USER,
-            create_worktree=False,  # Don't create worktree via API
-            enable_approvals=True,
-        )
-
-        # Associate agent with current user
-        await manager.update(instance.id, {"created_by": user_id})
-
-        # Start agent execution in background
-        background_tasks.add_task(
-            _run_agent_execution,
-            instance=instance,
-            manager=manager,
+        # Enqueue agent creation + execution in worker process
+        await enqueue_agent_execution(
+            agent_id=agent_id,
             org_id=str(org.id),
+            project_id=request.project_id,
+            prompt=request.prompt,
+            agent_type=request.agent_type.value,
+            task_id=request.task_id,
+            created_by=str(user.id),
         )
 
         return SpawnAgentResponse(
             success=True,
-            agent_id=instance.id,
-            message=f"Agent {instance.id} spawned and starting execution",
-        )
-    except Exception as e:
-        log.exception("Failed to spawn agent", error=str(e))
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-async def _run_agent_execution(
-    instance: "AgentInstance",
-    manager: EntityManager,
-    org_id: str,
-) -> None:
-    """Run agent execution in background.
-
-    Only stores summary checkpoint at completion, not every message.
-    WebSocket events are emitted for status changes only.
-
-    Args:
-        instance: The spawned AgentInstance to execute
-        manager: EntityManager for persisting state
-        org_id: Organization ID for WebSocket broadcasts
-    """
-    from sibyl.api.pubsub import publish_event
-
-    agent_id = instance.id
-    log.info("Starting agent execution", agent_id=agent_id)
-
-    # Track execution state (in memory only until completion)
-    message_count = 0
-    session_id = ""
-    last_content = ""
-    tool_calls: list[str] = []
-
-    try:
-        # Execute agent - process messages without storing each one
-        async for message in instance.execute():
-            message_count += 1
-            msg_content = str(getattr(message, "content", ""))
-            msg_class = type(message).__name__
-
-            # Track session ID
-            if sid := getattr(message, "session_id", None):
-                session_id = sid
-
-            # Track tool calls for summary
-            if "Tool" in msg_class and msg_content:
-                tool_name = msg_content.split("(")[0] if "(" in msg_content else msg_content[:50]
-                tool_calls.append(tool_name)
-
-            # Keep last meaningful content for summary
-            if msg_content and "Result" not in msg_class:
-                last_content = msg_content[:500]
-
-        # Create checkpoint only on completion (with summary, not full history)
-        checkpoint_id = f"chkpt_{uuid4().hex[:12]}"
-        summary = f"Completed {message_count} turns. Tools: {', '.join(tool_calls[-5:]) or 'none'}"
-        checkpoint = AgentCheckpoint(
-            id=checkpoint_id,
-            name=f"checkpoint-{agent_id[-8:]}",
             agent_id=agent_id,
-            session_id=session_id,
-            conversation_history=[
-                {
-                    "role": "user",
-                    "content": instance.initial_prompt,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                    "type": "text",
-                },
-                {
-                    "role": "system",
-                    "content": summary,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                    "type": "text",
-                },
-            ],
-            current_step=last_content[:200] if last_content else None,
+            message=f"Agent {agent_id} queued for execution",
         )
-        await manager.create_direct(checkpoint)
-
-        # Update agent status to completed
-        await manager.update(
-            agent_id,
-            {
-                "status": AgentStatus.COMPLETED.value,
-                "conversation_turns": message_count,
-            },
-        )
-
-        # Emit completion via WebSocket
-        await publish_event(
-            "agent_status",
-            {"agent_id": agent_id, "status": "completed", "turns": message_count},
-            org_id=org_id,
-        )
-        log.info("Agent execution completed", agent_id=agent_id, turns=message_count)
-
     except Exception as e:
-        log.exception("Agent execution failed", agent_id=agent_id, error=str(e))
-        # Update agent status to failed
-        await manager.update(
-            agent_id,
-            {
-                "status": AgentStatus.FAILED.value,
-                "error_message": str(e),
-            },
-        )
-        # Emit failure via WebSocket
-        await publish_event(
-            "agent_status",
-            {"agent_id": agent_id, "status": "failed", "error": str(e)},
-            org_id=org_id,
-        )
+        log.exception("Failed to enqueue agent", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/{agent_id}/pause", response_model=AgentActionResponse)

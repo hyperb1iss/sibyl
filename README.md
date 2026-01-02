@@ -97,7 +97,8 @@ See each package's README for detailed documentation:
 ./setup-dev.sh             # Installs proto, moon, toolchain, and dependencies
 ```
 
-The setup script handles everything: proto (version manager), moon (task runner), Python 3.13, Node 24, pnpm, uv, and all project dependencies.
+The setup script handles everything: proto (version manager), moon (task runner), Python 3.13, Node
+24, pnpm, uv, and all project dependencies.
 
 ### Manual Setup
 
