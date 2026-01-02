@@ -423,8 +423,10 @@ class ApprovalService:
 
                 # Build content from questions
                 content_parts = ["🤔 **Question for you:**"]
-                for q in questions:
-                    content_parts.append(f"\n**{q.get('header', 'Question')}:** {q.get('question', '')}")
+                content_parts.extend(
+                    f"\n**{q.get('header', 'Question')}:** {q.get('question', '')}"
+                    for q in questions
+                )
 
                 msg = AgentMessage(
                     agent_id=self.agent_id,
