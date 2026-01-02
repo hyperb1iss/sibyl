@@ -68,12 +68,12 @@ export function AttachmentPreview({
           <img src={att.preview} alt={att.name} className="w-8 h-8 object-cover rounded" />
         ) : isTextAttachment ? (
           looksLikeCode ? (
-            <Code width={16} height={16} className="text-sc-coral shrink-0" />
+            <Code width={16} height={16} className="text-sc-coral shrink-0" aria-hidden="true" />
           ) : (
-            <FileText width={16} height={16} className="text-sc-cyan shrink-0" />
+            <FileText width={16} height={16} className="text-sc-cyan shrink-0" aria-hidden="true" />
           )
         ) : (
-          <FileText width={16} height={16} className="text-sc-cyan shrink-0" />
+          <FileText width={16} height={16} className="text-sc-cyan shrink-0" aria-hidden="true" />
         )}
         <div className="flex flex-col min-w-0 flex-1">
           <span className="text-sc-fg-primary truncate">{att.name}</span>
@@ -86,20 +86,22 @@ export function AttachmentPreview({
             <button
               type="button"
               onClick={onToggleExpanded}
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? 'Collapse content' : 'Expand content'}
               className={`p-0.5 rounded hover:bg-sc-purple/20 text-sc-fg-muted hover:text-sc-purple transition-all ${
                 isExpanded ? 'rotate-180' : ''
               }`}
-              title={isExpanded ? 'Collapse' : 'Expand'}
             >
-              <ChevronDown width={14} height={14} />
+              <ChevronDown width={14} height={14} aria-hidden="true" />
             </button>
           )}
           <button
             type="button"
             onClick={onRemove}
+            aria-label={`Remove ${att.name}`}
             className="p-0.5 rounded hover:bg-sc-red/20 text-sc-fg-muted hover:text-sc-red transition-colors"
           >
-            <Xmark width={12} height={12} />
+            <Xmark width={12} height={12} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -154,6 +156,7 @@ export function AttachmentList({
         <button
           type="button"
           onClick={onClearAll}
+          aria-label="Clear all attachments"
           className="self-end text-[10px] text-sc-fg-muted hover:text-sc-red transition-colors"
         >
           Clear all

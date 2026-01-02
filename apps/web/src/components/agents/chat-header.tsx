@@ -83,12 +83,13 @@ export function AgentHeader({ agent }: AgentHeaderProps) {
           </span>
           <span className="text-sm font-medium text-sc-fg-primary truncate">{agent.name}</span>
           {isZombie ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-sc-red/20 text-sc-red flex items-center gap-1">
-              <WarningCircle width={10} height={10} />
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-sc-red/20 text-sc-red flex items-center gap-1" role="status">
+              <WarningCircle width={10} height={10} aria-hidden="true" />
               {heartbeatStatus === 'unresponsive' ? 'Unresponsive' : 'Stale'}
             </span>
           ) : (
             <span
+              role="status"
               className={`text-[10px] px-1.5 py-0.5 rounded transition-all duration-200 ${statusConfig.bgClass} ${statusConfig.textClass} ${
                 isActive ? 'animate-pulse-glow' : ''
               }`}
@@ -106,9 +107,9 @@ export function AgentHeader({ agent }: AgentHeaderProps) {
               onClick={() => pauseAgent.mutate({ id: agent.id })}
               className="p-1.5 text-sc-yellow hover:bg-sc-yellow/10 rounded transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
               disabled={pauseAgent.isPending}
-              title="Pause"
+              aria-label="Pause agent"
             >
-              <Pause width={14} height={14} />
+              <Pause width={14} height={14} aria-hidden="true" />
             </button>
           )}
           {(isPaused || isTerminal) && (
@@ -117,9 +118,9 @@ export function AgentHeader({ agent }: AgentHeaderProps) {
               onClick={() => resumeAgent.mutate(agent.id)}
               className="p-1.5 text-sc-green hover:bg-sc-green/10 rounded transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
               disabled={resumeAgent.isPending}
-              title={isTerminal ? 'Continue Session' : 'Resume'}
+              aria-label={isTerminal ? 'Continue session' : 'Resume agent'}
             >
-              <Play width={14} height={14} />
+              <Play width={14} height={14} aria-hidden="true" />
             </button>
           )}
           {!isTerminal && (
@@ -128,9 +129,9 @@ export function AgentHeader({ agent }: AgentHeaderProps) {
               onClick={() => terminateAgent.mutate({ id: agent.id })}
               className="p-1.5 text-sc-red hover:bg-sc-red/10 rounded transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
               disabled={terminateAgent.isPending}
-              title="Stop"
+              aria-label="Stop agent"
             >
-              <Square width={14} height={14} />
+              <Square width={14} height={14} aria-hidden="true" />
             </button>
           )}
         </div>
@@ -138,7 +139,7 @@ export function AgentHeader({ agent }: AgentHeaderProps) {
 
       {/* Zombie warning banner */}
       {isZombie && (
-        <div className="px-3 py-2 bg-sc-red/10 border-t border-sc-red/20 flex items-center justify-between gap-2">
+        <div role="alert" className="px-3 py-2 bg-sc-red/10 border-t border-sc-red/20 flex items-center justify-between gap-2">
           <span className="text-xs text-sc-red">
             This agent appears to be dead. No heartbeat for{' '}
             {agent.last_heartbeat
@@ -150,6 +151,7 @@ export function AgentHeader({ agent }: AgentHeaderProps) {
             type="button"
             onClick={() => terminateAgent.mutate({ id: agent.id, reason: 'zombie_cleanup' })}
             disabled={terminateAgent.isPending}
+            aria-label="Mark agent as failed"
             className="text-xs px-2 py-1 bg-sc-red/20 hover:bg-sc-red/30 text-sc-red rounded transition-colors disabled:opacity-50"
           >
             {terminateAgent.isPending ? 'Terminating...' : 'Mark as Failed'}

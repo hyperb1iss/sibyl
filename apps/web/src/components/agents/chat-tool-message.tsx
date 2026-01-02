@@ -72,6 +72,8 @@ export function ToolMessage({ message, result, isNew = false, tier3Hint }: ToolM
       <button
         type="button"
         onClick={() => hasExpandableContent && toggle()}
+        aria-expanded={hasExpandableContent ? isExpanded : undefined}
+        aria-label={`${toolName || 'Tool'} ${hasResult ? (resultError ? '- failed' : '- completed') : '- running'}`}
         className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-left transition-all duration-200 group ${
           hasExpandableContent ? 'cursor-pointer hover:bg-sc-fg-subtle/5' : ''
         }`}
@@ -79,6 +81,7 @@ export function ToolMessage({ message, result, isNew = false, tier3Hint }: ToolM
         <Icon
           width={12}
           height={12}
+          aria-hidden="true"
           className={`${statusClass} shrink-0 transition-all duration-200 ${isExpanded ? 'scale-110' : ''} ${!hasResult ? 'animate-pulse' : ''}`}
         />
         <span className={`${statusClass} font-medium shrink-0 transition-colors duration-200`}>
@@ -106,6 +109,7 @@ export function ToolMessage({ message, result, isNew = false, tier3Hint }: ToolM
           <ChevronDown
             width={12}
             height={12}
+            aria-hidden="true"
             className={`text-sc-fg-subtle shrink-0 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
           />
         )}

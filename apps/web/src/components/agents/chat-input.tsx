@@ -141,6 +141,7 @@ export function ChatInput({
     <form
       onSubmit={handleSubmit}
       className="shrink-0 p-3 border-t border-sc-fg-subtle/20 bg-sc-bg-elevated"
+      aria-label="Chat message input"
     >
       {/* Attachment previews */}
       <AttachmentList
@@ -179,9 +180,9 @@ export function ChatInput({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="p-2 rounded-lg text-sc-fg-muted hover:text-sc-purple hover:bg-sc-purple/10 transition-colors"
-            title="Attach file"
+            aria-label="Attach file"
           >
-            <Plus width={18} height={18} />
+            <Plus width={18} height={18} aria-hidden="true" />
           </button>
 
           {/* Hidden file input */}
@@ -192,6 +193,7 @@ export function ChatInput({
             onChange={handleFileSelect}
             className="hidden"
             accept="*/*"
+            aria-label="Select files to attach"
           />
 
           {/* Text input */}
@@ -209,6 +211,7 @@ export function ChatInput({
             placeholder={placeholder}
             disabled={disabled}
             rows={1}
+            aria-label="Message input"
             className="flex-1 px-2 py-2 bg-transparent border-none text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:outline-none focus-visible:outline-none resize-none min-h-[36px] max-h-[200px]"
           />
 
@@ -216,13 +219,14 @@ export function ChatInput({
           <button
             type="submit"
             disabled={!hasContent || disabled}
+            aria-label="Send message"
             className={`p-2.5 rounded-lg transition-all duration-200 ${
               hasContent && !disabled
                 ? 'bg-gradient-to-r from-sc-purple to-sc-purple/80 hover:from-sc-purple/90 hover:to-sc-purple/70 text-white shadow-lg shadow-sc-purple/30 hover:scale-105 active:scale-95'
                 : 'bg-sc-fg-subtle/20 text-sc-fg-muted cursor-not-allowed'
             }`}
           >
-            <Send width={16} height={16} />
+            <Send width={16} height={16} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -236,6 +240,7 @@ export function ChatInput({
           <button
             type="button"
             onClick={clearAll}
+            aria-label="Clear all attachments"
             className="text-[10px] text-sc-fg-muted hover:text-sc-red transition-colors"
           >
             Clear all
