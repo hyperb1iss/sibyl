@@ -506,6 +506,7 @@ async def update_task(
 ) -> TaskActionResponse:
     """Update task fields directly."""
     from sibyl.locks import LockAcquisitionError, entity_lock
+    from sibyl_core.models.entities import Relationship, RelationshipType
 
     group_id = str(org.id)
 
@@ -556,6 +557,17 @@ async def update_task(
             updated = await entity_manager.update(task_id, update_data)
             if not updated:
                 raise HTTPException(status_code=500, detail="Update failed")
+
+            # Create BELONGS_TO relationship for epic (if epic_id was updated)
+            if request.epic_id is not None:
+                relationship_manager = RelationshipManager(client, group_id=group_id)
+                belongs_to_epic = Relationship(
+                    id=f"rel_{task_id}_belongs_to_{request.epic_id}",
+                    source_id=task_id,
+                    target_id=request.epic_id,
+                    relationship_type=RelationshipType.BELONGS_TO,
+                )
+                await relationship_manager.create(belongs_to_epic)
 
             await _broadcast_task_update(
                 task_id,
