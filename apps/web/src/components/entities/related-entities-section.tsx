@@ -80,11 +80,31 @@ function MiniGraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 300, height: 180 });
 
-  // Measure container
+  // Measure container with ResizeObserver for responsive sizing
   useEffect(() => {
     if (!containerRef.current) return;
+
+    const updateDimensions = (entry: ResizeObserverEntry) => {
+      const { width } = entry.contentRect;
+      if (width > 0) {
+        setDimensions({ width, height: Math.min(width * 0.5, 180) });
+      }
+    };
+
+    const observer = new ResizeObserver(entries => {
+      const entry = entries[0];
+      if (entry) updateDimensions(entry);
+    });
+
+    observer.observe(containerRef.current);
+
+    // Initial measurement
     const rect = containerRef.current.getBoundingClientRect();
-    setDimensions({ width: rect.width, height: Math.min(rect.width * 0.5, 180) });
+    if (rect.width > 0) {
+      setDimensions({ width: rect.width, height: Math.min(rect.width * 0.5, 180) });
+    }
+
+    return () => observer.disconnect();
   }, []);
 
   // Build graph data
