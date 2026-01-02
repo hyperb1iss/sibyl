@@ -368,7 +368,7 @@ def show_task(
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show detailed task information. Default: table output."""
+    """Show detailed task information with related context. Default: table output."""
 
     @run_async
     async def _show() -> None:
@@ -416,6 +416,18 @@ def show_task(
 
             if meta.get("technologies"):
                 lines.append(f"[{CORAL}]Tech:[/{CORAL}] {', '.join(meta['technologies'])}")
+
+            # Show related entities
+            related_entities = entity.get("related", [])
+            if related_entities:
+                lines.append(f"\n[{NEON_CYAN}]Related:[/{NEON_CYAN}]")
+                for rel in related_entities:
+                    direction = "→" if rel.get("direction") == "outgoing" else "←"
+                    lines.append(
+                        f"  [{CORAL}]{rel.get('relationship', '')}[/{CORAL}] {direction} "
+                        f"[{ELECTRIC_PURPLE}]{rel.get('entity_type', '')}[/{ELECTRIC_PURPLE}]: "
+                        f"{rel.get('name', '')} [{CORAL}]{rel.get('id', '')}[/{CORAL}]"
+                    )
 
             panel = create_panel("\n".join(lines), title=f"Task {entity.get('id', '')}")
             console.print(panel)

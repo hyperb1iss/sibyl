@@ -19,6 +19,7 @@ from sibyl.api.schemas import (
     EntityListResponse,
     EntityResponse,
     EntityUpdate,
+    RelatedEntitySummary,
 )
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.audit import AuditLogger
@@ -30,6 +31,7 @@ from sibyl.db.models import Organization, OrganizationRole
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
+from sibyl_core.graph.relationships import RelationshipManager
 from sibyl_core.models.entities import EntityType
 
 log = structlog.get_logger()
@@ -185,13 +187,13 @@ async def get_entity(
     entity_id: str,
     org: Organization = Depends(get_current_organization),
 ) -> EntityResponse:
-    """Get a single entity by ID.
+    """Get a single entity by ID with related context.
 
     Transparently handles both:
     - Graph entities (stored in FalkorDB)
     - Document chunks (stored in Postgres via crawler)
 
-    This provides a seamless experience for search results that may come from either source.
+    Always includes up to 5 related entities from the knowledge graph.
     """
     try:
         group_id = str(org.id)
@@ -215,6 +217,26 @@ async def get_entity(
                     "completion_pct": progress.get("completion_pct", 0.0),
                 }
 
+            # Always fetch up to 5 related entities for context
+            related: list[RelatedEntitySummary] | None = None
+            try:
+                rel_manager = RelationshipManager(client, group_id=group_id)
+                related_pairs = await rel_manager.get_related_entities(entity_id, limit=5)
+                if related_pairs:
+                    related = [
+                        RelatedEntitySummary(
+                            id=rel_entity.id,
+                            name=rel_entity.name,
+                            entity_type=str(rel_entity.entity_type),
+                            relationship=str(rel.relationship_type),
+                            direction="outgoing" if rel.source_id == entity_id else "incoming",
+                        )
+                        for rel_entity, rel in related_pairs
+                    ]
+            except Exception as rel_err:
+                # Related entities are optional - don't fail the whole request
+                log.debug("Failed to fetch related entities", error=str(rel_err))
+
             return EntityResponse(
                 id=entity.id,
                 entity_type=entity.entity_type,
@@ -230,6 +252,7 @@ async def get_entity(
                 source_file=getattr(entity, "source_file", None),
                 created_at=getattr(entity, "created_at", None),
                 updated_at=getattr(entity, "updated_at", None),
+                related=related,
             )
         except EntityNotFoundError:
             log.debug("Entity not in graph, checking document chunks", entity_id=entity_id)

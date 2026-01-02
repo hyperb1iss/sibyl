@@ -196,6 +196,17 @@ def show_project(
                     f"\n[{NEON_CYAN}]Tech Stack:[/{NEON_CYAN}] {', '.join(meta['tech_stack'])}"
                 )
 
+            # Show related entities
+            related_entities = entity.get("related", [])
+            if related_entities:
+                lines.append(f"\n[{NEON_CYAN}]Related:[/{NEON_CYAN}]")
+                for rel in related_entities:
+                    direction = "→" if rel.get("direction") == "outgoing" else "←"
+                    lines.append(
+                        f"  [{CORAL}]{rel.get('relationship', '')}[/{CORAL}] {direction} "
+                        f"{rel.get('entity_type', '')}: {rel.get('name', '')} [{CORAL}]{rel.get('id', '')}[/{CORAL}]"
+                    )
+
             panel = create_panel("\n".join(lines), title=f"Project {entity.get('id', '')}")
             console.print(panel)
 

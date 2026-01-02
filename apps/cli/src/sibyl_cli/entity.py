@@ -155,7 +155,7 @@ def show_entity(
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show detailed entity information. Default: table output."""
+    """Show detailed entity information with related context. Default: table output."""
 
     @run_async
     async def _show() -> None:
@@ -194,6 +194,18 @@ def show_entity(
                 lines.extend(["", f"[{CORAL}]Metadata:[/{CORAL}]"])
                 for k, v in list(meta.items())[:10]:
                     lines.append(f"  {k}: {truncate(str(v), 60)}")
+
+            # Show related entities
+            related_entities = entity.get("related", [])
+            if related_entities:
+                lines.extend(["", f"[{NEON_CYAN}]Related:[/{NEON_CYAN}]"])
+                for rel in related_entities:
+                    direction = "→" if rel.get("direction") == "outgoing" else "←"
+                    lines.append(
+                        f"  [{CORAL}]{rel.get('relationship', '')}[/{CORAL}] {direction} "
+                        f"[{ELECTRIC_PURPLE}]{rel.get('entity_type', '')}[/{ELECTRIC_PURPLE}]: "
+                        f"{rel.get('name', '')} [{CORAL}]{rel.get('id', '')}[/{CORAL}]"
+                    )
 
             entity_type = entity.get("entity_type", "entity")
             panel = create_panel("\n".join(lines), title=f"{entity_type.title()} Details")

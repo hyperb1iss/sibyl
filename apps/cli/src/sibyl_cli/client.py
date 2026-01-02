@@ -407,7 +407,7 @@ class SibylClient:
         return await self._request("POST", f"/orgs/{slug}/switch")
 
     async def get_entity(self, entity_id: str) -> dict[str, Any]:
-        """Get a single entity by ID."""
+        """Get a single entity by ID with related context."""
         return await self._request("GET", f"/entities/{entity_id}")
 
     async def create_entity(

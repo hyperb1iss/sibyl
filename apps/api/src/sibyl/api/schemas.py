@@ -45,6 +45,16 @@ class EntityUpdate(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class RelatedEntitySummary(BaseModel):
+    """Summary of a related entity for embedding in responses."""
+
+    id: str = Field(..., description="Entity ID")
+    name: str = Field(..., description="Entity name")
+    entity_type: str = Field(..., description="Entity type")
+    relationship: str = Field(..., description="Relationship type connecting to this entity")
+    direction: Literal["outgoing", "incoming"] = Field(..., description="Relationship direction")
+
+
 class EntityResponse(EntityBase):
     """Full entity response with all fields."""
 
@@ -53,6 +63,9 @@ class EntityResponse(EntityBase):
     source_file: str | None = Field(default=None, description="Source file path")
     created_at: datetime | None = Field(default=None, description="Creation timestamp")
     updated_at: datetime | None = Field(default=None, description="Last update timestamp")
+    related: list[RelatedEntitySummary] | None = Field(
+        default=None, description="Related entities (when requested via related_limit)"
+    )
 
     model_config = {"from_attributes": True}
 
