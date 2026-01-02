@@ -214,8 +214,8 @@ Priority: {task.priority}
             initial_prompt=prompt[:500],  # Truncate for storage
         )
 
-        # Persist to graph
-        await self.entity_manager.create(record)
+        # Persist to graph (use create_direct to skip LLM extraction)
+        await self.entity_manager.create_direct(record)
 
         # Create worktree if requested
         worktree_path: Path | None = None

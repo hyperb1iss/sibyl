@@ -335,11 +335,14 @@ async def _run_agent_execution(
     manager: EntityManager,
     org_id: str,
 ) -> None:
-    """Run agent execution in background and stream results to checkpoint.
+    """Run agent execution in background.
+
+    Only stores summary checkpoint at completion, not every message.
+    WebSocket events are emitted for status changes only.
 
     Args:
         instance: The spawned AgentInstance to execute
-        manager: EntityManager for persisting messages
+        manager: EntityManager for persisting state
         org_id: Organization ID for WebSocket broadcasts
     """
     from sibyl.api.pubsub import publish_event
@@ -347,83 +350,74 @@ async def _run_agent_execution(
     agent_id = instance.id
     log.info("Starting agent execution", agent_id=agent_id)
 
-    # Create initial checkpoint
-    checkpoint_id = f"chkpt_{uuid4().hex[:12]}"
-    checkpoint = AgentCheckpoint(
-        id=checkpoint_id,
-        name=f"checkpoint-{agent_id[-8:]}",
-        agent_id=agent_id,
-        session_id="",  # Will be set after first message
-        conversation_history=[
-            {
-                "role": "user",
-                "content": instance.initial_prompt,
-                "timestamp": datetime.now(UTC).isoformat(),
-                "type": "text",
-            }
-        ],
-    )
-    await manager.create(checkpoint)
+    # Track execution state (in memory only until completion)
+    message_count = 0
+    session_id = ""
+    last_content = ""
+    tool_calls: list[str] = []
 
     try:
-        # Execute agent and stream messages to checkpoint
+        # Execute agent - process messages without storing each one
         async for message in instance.execute():
-            # Extract message content using getattr for type safety
+            message_count += 1
             msg_content = str(getattr(message, "content", ""))
-            msg_role = "agent"
-            msg_type = "text"
-
-            # Determine message type from class name
             msg_class = type(message).__name__
-            if "Tool" in msg_class:
-                msg_type = "tool_call"
-            elif "Result" in msg_class:
-                msg_type = "tool_result"
-            elif "Error" in msg_class or "error" in msg_class.lower():
-                msg_type = "error"
 
-            # Skip empty messages
-            if not msg_content:
-                continue
+            # Track session ID
+            if sid := getattr(message, "session_id", None):
+                session_id = sid
 
-            # Append to checkpoint history
-            new_msg = {
-                "role": msg_role,
-                "content": msg_content,
-                "timestamp": datetime.now(UTC).isoformat(),
-                "type": msg_type,
-            }
+            # Track tool calls for summary
+            if "Tool" in msg_class and msg_content:
+                tool_name = msg_content.split("(")[0] if "(" in msg_content else msg_content[:50]
+                tool_calls.append(tool_name)
 
-            # Update checkpoint with new message
-            checkpoint.conversation_history.append(new_msg)
+            # Keep last meaningful content for summary
+            if msg_content and "Result" not in msg_class:
+                last_content = msg_content[:500]
 
-            # Update session_id if available (ResultMessage has it)
-            session_id = getattr(message, "session_id", None)
-            if session_id:
-                checkpoint.session_id = session_id
-
-            await manager.update(
-                checkpoint_id,
+        # Create checkpoint only on completion (with summary, not full history)
+        checkpoint_id = f"chkpt_{uuid4().hex[:12]}"
+        summary = f"Completed {message_count} turns. Tools: {', '.join(tool_calls[-5:]) or 'none'}"
+        checkpoint = AgentCheckpoint(
+            id=checkpoint_id,
+            name=f"checkpoint-{agent_id[-8:]}",
+            agent_id=agent_id,
+            session_id=session_id,
+            conversation_history=[
                 {
-                    "conversation_history": checkpoint.conversation_history,
-                    "session_id": checkpoint.session_id,
+                    "role": "user",
+                    "content": instance.initial_prompt,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "type": "text",
                 },
-            )
+                {
+                    "role": "system",
+                    "content": summary,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "type": "text",
+                },
+            ],
+            current_step=last_content[:200] if last_content else None,
+        )
+        await manager.create_direct(checkpoint)
 
-            # Emit WebSocket event for real-time updates
-            await publish_event(
-                "agent_message",
-                {"agent_id": agent_id, "message": new_msg},
-                org_id=org_id,
-            )
+        # Update agent status to completed
+        await manager.update(
+            agent_id,
+            {
+                "status": AgentStatus.COMPLETED.value,
+                "conversation_turns": message_count,
+            },
+        )
 
-        # Emit status change on completion
+        # Emit completion via WebSocket
         await publish_event(
             "agent_status",
-            {"agent_id": agent_id, "status": "completed"},
+            {"agent_id": agent_id, "status": "completed", "turns": message_count},
             org_id=org_id,
         )
-        log.info("Agent execution completed", agent_id=agent_id)
+        log.info("Agent execution completed", agent_id=agent_id, turns=message_count)
 
     except Exception as e:
         log.exception("Agent execution failed", agent_id=agent_id, error=str(e))
