@@ -527,7 +527,7 @@ function AgentsPageContent() {
             {/* Sliding background */}
             <div
               className={`
-                absolute top-1 bottom-1 rounded-md
+                absolute top-1 bottom-1 rounded-md z-0
                 bg-gradient-to-br from-sc-purple to-sc-purple/80
                 shadow-[0_2px_8px_rgba(225,53,255,0.3),0_0_16px_rgba(225,53,255,0.2)]
                 transition-all duration-300 ease-out
