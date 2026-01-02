@@ -1,7 +1,8 @@
 'use client';
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type ReactNode, Suspense, useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { ThemedToaster } from '@/components/ui/themed-toaster';
 import { printConsoleGreeting } from '@/lib/console-greeting';
 import { useMe, useRealtimeUpdates } from '@/lib/hooks';
@@ -19,6 +20,16 @@ export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
+        mutationCache: new MutationCache({
+          onError: (error: Error) => {
+            // Extract error message from API response or use generic message
+            const message =
+              error.message && error.message !== 'An error occurred'
+                ? error.message
+                : 'Something went wrong. Please try again.';
+            toast.error(message);
+          },
+        }),
         defaultOptions: {
           queries: {
             staleTime: 60 * 1000, // 1 minute
