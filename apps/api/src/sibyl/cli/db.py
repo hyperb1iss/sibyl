@@ -417,6 +417,69 @@ def backfill_project_ids(
     _backfill()
 
 
+@app.command("backfill-episode-relationships")
+def backfill_episode_relationships(
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID (required for multi-tenant graph)"),
+    ] = "",
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Preview what would be done without making changes"),
+    ] = False,
+) -> None:
+    """Backfill RELATED_TO relationships from episodes to their referenced tasks.
+
+    Finds episode nodes that have task_id in metadata but no relationship edge
+    to that task, and creates RELATED_TO edges.
+
+    This ensures episode nodes appear connected to their tasks in the graph view.
+
+    Use --dry-run to preview what would be created without making changes.
+    """
+    if not org_id:
+        error("--org-id is required for graph operations")
+        raise typer.Exit(code=1)
+
+    @run_async
+    async def _backfill() -> None:
+        from sibyl_core.tools.admin import backfill_episode_task_relationships
+
+        try:
+            if dry_run:
+                warn("DRY RUN - no changes will be made")
+
+            result = await backfill_episode_task_relationships(
+                organization_id=org_id,
+                dry_run=dry_run,
+            )
+
+            if result.success:
+                if dry_run:
+                    info(f"Would create {result.relationships_created} RELATED_TO relationships")
+                else:
+                    success(f"Created {result.relationships_created} RELATED_TO relationships")
+            else:
+                warn("Backfill completed with errors")
+
+            info(f"Episodes already linked: {result.episodes_already_linked}")
+            info(f"Episodes without valid task: {result.episodes_without_task}")
+            info(f"Duration: {result.duration_seconds:.2f}s")
+
+            if result.errors:
+                warn(f"Errors: {len(result.errors)}")
+                for err in result.errors[:5]:
+                    console.print(f"  [dim]{err}[/dim]")
+                if len(result.errors) > 5:
+                    console.print(f"  [dim]...and {len(result.errors) - 5} more[/dim]")
+
+        except Exception as e:
+            error(f"Backfill failed: {e}")
+            print_db_hint()
+
+    _backfill()
+
+
 # =============================================================================
 # PostgreSQL Backup/Restore Commands
 # =============================================================================

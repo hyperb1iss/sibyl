@@ -964,3 +964,210 @@ async def backfill_project_id_from_relationships(
             errors=[str(e), *errors[:49]],
             duration_seconds=time.time() - start_time,
         )
+
+
+# =============================================================================
+# Episode -> Task Relationship Backfill
+# =============================================================================
+
+
+@dataclass
+class EpisodeRelationshipBackfillResult:
+    """Result of episode -> task relationship backfill."""
+
+    success: bool
+    relationships_created: int
+    episodes_already_linked: int
+    episodes_without_task: int
+    errors: list[str]
+    duration_seconds: float
+
+
+async def backfill_episode_task_relationships(
+    *,
+    organization_id: str,
+    dry_run: bool = False,
+) -> EpisodeRelationshipBackfillResult:
+    """Backfill RELATED_TO relationships from episodes to their referenced tasks.
+
+    Finds episode nodes that have a task_id in their metadata but no
+    relationship to that task, and creates RELATED_TO edges.
+
+    Args:
+        organization_id: The organization UUID.
+        dry_run: If True, only report what would be done without making changes.
+
+    Returns:
+        EpisodeRelationshipBackfillResult with counts and any errors.
+    """
+    import json
+    import time
+
+    from sibyl_core.graph.client import get_graph_client
+
+    start_time = time.time()
+    relationships_created = 0
+    episodes_already_linked = 0
+    episodes_without_task = 0
+    errors: list[str] = []
+
+    log.info(
+        "backfill_episode_task_start",
+        organization_id=organization_id,
+        dry_run=dry_run,
+    )
+
+    try:
+        client = await get_graph_client()
+
+        # Find episode nodes with task_id in metadata
+        episode_query = """
+        MATCH (n)
+        WHERE (n:Episodic OR n:Entity)
+          AND n.group_id = $group_id
+          AND n.uuid STARTS WITH 'episode_'
+          AND n.metadata IS NOT NULL
+        RETURN n.uuid AS episode_id, n.metadata AS metadata
+        """
+        result = await client.execute_read_org(
+            episode_query, organization_id, group_id=organization_id
+        )
+
+        # Parse metadata and collect episodes with task references
+        episodes_to_link: list[tuple[str, str]] = []  # (episode_id, task_id)
+
+        for record in result:
+            if isinstance(record, dict):
+                episode_id = record.get("episode_id")
+                metadata_str = record.get("metadata")
+            else:
+                episode_id = record[0]
+                metadata_str = record[1]
+
+            if not episode_id or not metadata_str:
+                continue
+
+            try:
+                metadata = json.loads(metadata_str) if isinstance(metadata_str, str) else metadata_str
+                task_id = metadata.get("task_id")
+                if task_id:
+                    episodes_to_link.append((episode_id, task_id))
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        log.info("backfill_episodes_with_task_ref", count=len(episodes_to_link))
+
+        # Check which ones need relationships created
+        for episode_id, task_id in episodes_to_link:
+            # Check if relationship already exists
+            rel_check_query = """
+            MATCH (e)-[r]-(t)
+            WHERE e.uuid = $episode_id AND t.uuid = $task_id
+            RETURN count(r) AS cnt
+            """
+            rel_result = await client.execute_read_org(
+                rel_check_query,
+                organization_id,
+                episode_id=episode_id,
+                task_id=task_id,
+            )
+
+            has_rel = False
+            if rel_result:
+                r = rel_result[0]
+                cnt = r.get("cnt", 0) if isinstance(r, dict) else r[0]
+                has_rel = cnt > 0
+
+            if has_rel:
+                episodes_already_linked += 1
+                continue
+
+            # Check if target task exists
+            task_check_query = """
+            MATCH (t)
+            WHERE t.uuid = $task_id AND t.group_id = $group_id
+            RETURN t.uuid
+            """
+            task_result = await client.execute_read_org(
+                task_check_query,
+                organization_id,
+                task_id=task_id,
+                group_id=organization_id,
+            )
+
+            if not task_result:
+                episodes_without_task += 1
+                continue
+
+            # Create the relationship
+            if dry_run:
+                log.debug(
+                    "would_create_episode_task_rel",
+                    episode_id=episode_id,
+                    task_id=task_id,
+                )
+            else:
+                try:
+                    create_rel_query = """
+                    MATCH (e), (t)
+                    WHERE e.uuid = $episode_id AND t.uuid = $task_id
+                      AND e.group_id = $group_id AND t.group_id = $group_id
+                    CREATE (e)-[r:RELATED_TO {
+                        group_id: $group_id,
+                        created_at: $created_at,
+                        backfilled: true
+                    }]->(t)
+                    RETURN r
+                    """
+                    from datetime import UTC, datetime
+
+                    async with client.write_lock:
+                        await client.execute_write_org(
+                            create_rel_query,
+                            organization_id,
+                            episode_id=episode_id,
+                            task_id=task_id,
+                            group_id=organization_id,
+                            created_at=datetime.now(UTC).isoformat(),
+                        )
+                    log.debug(
+                        "created_episode_task_rel",
+                        episode_id=episode_id,
+                        task_id=task_id,
+                    )
+                except Exception as e:
+                    errors.append(f"Failed to link {episode_id} -> {task_id}: {e}")
+                    continue
+
+            relationships_created += 1
+
+        duration = time.time() - start_time
+        log.info(
+            "backfill_episode_task_complete",
+            relationships_created=relationships_created,
+            episodes_already_linked=episodes_already_linked,
+            episodes_without_task=episodes_without_task,
+            errors=len(errors),
+            duration=duration,
+            dry_run=dry_run,
+        )
+
+        return EpisodeRelationshipBackfillResult(
+            success=True,
+            relationships_created=relationships_created,
+            episodes_already_linked=episodes_already_linked,
+            episodes_without_task=episodes_without_task,
+            errors=errors[:50],
+            duration_seconds=duration,
+        )
+
+    except Exception as e:
+        log.exception("backfill_episode_task_failed", error=str(e))
+        return EpisodeRelationshipBackfillResult(
+            success=False,
+            relationships_created=relationships_created,
+            episodes_already_linked=episodes_already_linked,
+            episodes_without_task=episodes_without_task,
+            errors=[str(e), *errors[:49]],
+            duration_seconds=time.time() - start_time,
+        )
