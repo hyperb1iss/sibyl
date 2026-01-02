@@ -775,7 +775,6 @@ export function useRealtimeUpdates(isAuthenticated = false) {
     const unsubCreate = wsClient.on('entity_created', data => {
       const entityType = data.entity_type || data.type;
       invalidateByEntityType(queryClient, entityType, data.id);
-      console.log('[WS] Entity created:', data.id, entityType);
     });
 
     // Entity updated - smart invalidation based on entity type
@@ -784,7 +783,6 @@ export function useRealtimeUpdates(isAuthenticated = false) {
       // Also invalidate related entities explorer
       queryClient.invalidateQueries({ queryKey: queryKeys.explore.related(data.id) });
       invalidateByEntityType(queryClient, entityType, data.id);
-      console.log('[WS] Entity updated:', data.id, entityType);
     });
 
     // Entity deleted - remove from cache + smart invalidation
@@ -796,7 +794,6 @@ export function useRealtimeUpdates(isAuthenticated = false) {
       queryClient.removeQueries({ queryKey: queryKeys.projects.detail(data.id) });
       queryClient.removeQueries({ queryKey: queryKeys.sources.detail(data.id) });
       invalidateByEntityType(queryClient, entityType, data.id);
-      console.log('[WS] Entity deleted:', data.id, entityType);
     });
 
     // Health update
@@ -813,7 +810,6 @@ export function useRealtimeUpdates(isAuthenticated = false) {
     const unsubCrawlStarted = wsClient.on('crawl_started', data => {
       queryClient.invalidateQueries({ queryKey: queryKeys.sources.detail(data.source_id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
-      console.log('[WS] Crawl started:', data.source_id);
     });
 
     // Crawl progress - update in real-time with merged data
@@ -867,8 +863,6 @@ export function useRealtimeUpdates(isAuthenticated = false) {
           }
         );
       }
-
-      console.log('[WS] Crawl progress:', merged);
     });
 
     // Crawl complete - refresh source and documents
@@ -880,7 +874,6 @@ export function useRealtimeUpdates(isAuthenticated = false) {
       queryClient.invalidateQueries({ queryKey: queryKeys.sources.all });
       // Refresh any documents/pages for this source
       queryClient.invalidateQueries({ queryKey: queryKeys.rag.pages(data.source_id) });
-      console.log('[WS] Crawl complete:', data.source_id, data.error ? `(error: ${data.error})` : '');
     });
 
     // Cleanup on unmount

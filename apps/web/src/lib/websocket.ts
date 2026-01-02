@@ -199,12 +199,9 @@ class WebSocketClient {
     // In development: ws://localhost:3334/api/ws
     // In production: Use NEXT_PUBLIC_WS_URL or derive from API URL
     const wsUrl = this.getWebSocketUrl();
-    console.log('[Sibyl WS] Connecting to:', wsUrl);
-
     this.ws = new WebSocket(wsUrl);
 
     this.ws.onopen = () => {
-      console.log('[Sibyl WS] Connected');
       this.reconnectAttempts = 0;
       this.setStatus('connected');
     };
@@ -230,7 +227,6 @@ class WebSocketClient {
     };
 
     this.ws.onclose = () => {
-      console.log('[Sibyl WS] Disconnected');
       this.setStatus('disconnected');
       this.attemptReconnect();
     };
@@ -276,8 +272,6 @@ class WebSocketClient {
 
     this.reconnectAttempts++;
     const delay = Math.min(this.reconnectDelay * 2 ** (this.reconnectAttempts - 1), 30000);
-
-    console.log(`[Sibyl WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
     this.setStatus('reconnecting');
 
     // Store timer ID so it can be cleared on disconnect()
