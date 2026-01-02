@@ -6,7 +6,7 @@
 
 import { useMemo, useRef, useState } from 'react';
 import { ChevronDown } from '@/components/ui/icons';
-import { getToolIcon, getToolStatus } from './chat-constants';
+import { getToolIcon, getToolStatus, stripAnsi } from './chat-constants';
 import type { ToolMessageProps } from './chat-types';
 import { ToolContentRenderer } from './tool-renderers';
 
@@ -37,10 +37,10 @@ export function ToolMessage({ message, result, isNew = false, tier3Hint }: ToolM
   const resultError = result?.metadata?.is_error as boolean | undefined;
   const hasResult = !!result;
 
-  // Get result preview (short)
+  // Get result preview (short, strip ANSI codes)
   const getResultPreview = () => {
     if (!result) return null;
-    const content = result.content;
+    const content = stripAnsi(result.content);
     const firstLine = content.split('\n')[0] || '';
     // For file counts, errors, etc - show brief
     if (firstLine.length < 60) return firstLine;
@@ -48,7 +48,11 @@ export function ToolMessage({ message, result, isNew = false, tier3Hint }: ToolM
   };
 
   const resultPreview = getResultPreview();
-  const hasExpandableContent = message.content.length > 100 || (result?.content?.length ?? 0) > 100;
+  // Always expandable if there's a result (user might want to see full output)
+  // Also expandable for long content
+  const resultContentLength = result?.content?.length ?? 0;
+  const hasExpandableContent =
+    hasResult || message.content.length > 100 || resultContentLength > 100;
 
   // Status indicator color
   const statusClass = !hasResult
