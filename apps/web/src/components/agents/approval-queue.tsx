@@ -39,6 +39,7 @@ import {
 import { Textarea } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import type { Approval, ApprovalPriority, ApprovalType } from '@/lib/api';
+import { TASK_PRIORITY_CONFIG, type TaskPriorityType } from '@/lib/constants';
 import { usePendingApprovals, useRespondToApproval } from '@/lib/hooks';
 
 // =============================================================================
@@ -94,12 +95,7 @@ const TYPE_CONFIG: Record<ApprovalType, { icon: typeof Code; label: string; colo
     },
   };
 
-const PRIORITY_STYLES: Record<ApprovalPriority, { bg: string; text: string; border: string }> = {
-  critical: { bg: 'bg-sc-red/20', text: 'text-sc-red', border: 'border-sc-red/40' },
-  high: { bg: 'bg-sc-yellow/20', text: 'text-sc-yellow', border: 'border-sc-yellow/40' },
-  medium: { bg: 'bg-sc-purple/20', text: 'text-sc-purple', border: 'border-sc-purple/40' },
-  low: { bg: 'bg-sc-fg-subtle/10', text: 'text-sc-fg-muted', border: 'border-sc-fg-subtle/20' },
-};
+// Priority styles use shared TASK_PRIORITY_CONFIG from constants
 
 // =============================================================================
 // Approval Card Component
@@ -125,7 +121,8 @@ const ApprovalCard = memo(function ApprovalCard({
     label: approval.approval_type,
     colorClass: 'text-sc-fg-muted',
   };
-  const priorityStyle = PRIORITY_STYLES[approval.priority] || PRIORITY_STYLES.medium;
+  const priorityConfig =
+    TASK_PRIORITY_CONFIG[approval.priority as TaskPriorityType] ?? TASK_PRIORITY_CONFIG.medium;
   const TypeIcon = typeConfig.icon;
 
   const handleQuickAction = (action: 'approve' | 'deny') => {
@@ -164,7 +161,7 @@ const ApprovalCard = memo(function ApprovalCard({
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <span
-              className={`px-2 py-0.5 text-xs font-medium rounded-full border ${priorityStyle.bg} ${priorityStyle.text} ${priorityStyle.border}`}
+              className={`px-2 py-0.5 text-xs font-medium rounded-full border ${priorityConfig.bgClass} ${priorityConfig.textClass} ${priorityConfig.borderClass}`}
             >
               {approval.priority}
             </span>
