@@ -305,7 +305,9 @@ async def spawn_agent(
             if not entity:
                 raise HTTPException(status_code=404, detail=f"Task not found: {request.task_id}")
         except EntityNotFoundError:
-            raise HTTPException(status_code=404, detail=f"Task not found: {request.task_id}") from None
+            raise HTTPException(
+                status_code=404, detail=f"Task not found: {request.task_id}"
+            ) from None
 
     # Generate agent ID upfront
     agent_id = f"agent_{uuid4().hex[:12]}"

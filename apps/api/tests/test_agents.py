@@ -70,9 +70,7 @@ class MockWorktreeManager:
 
     _worktrees: dict[str, Any] = field(default_factory=dict)
 
-    async def create(
-        self, task_id: str, branch_name: str, agent_id: str
-    ) -> "MockWorktree":
+    async def create(self, task_id: str, branch_name: str, agent_id: str) -> "MockWorktree":
         """Create a mock worktree."""
         worktree = MockWorktree(
             path=f"/mock/worktrees/{agent_id}",  # Mock path, not real
@@ -105,9 +103,7 @@ class MockLockManager:
     _locks: dict[str, str] = field(default_factory=dict)
     _should_fail: bool = False
 
-    async def acquire(
-        self, org_id: str, entity_id: str, blocking: bool = True
-    ) -> str | None:
+    async def acquire(self, org_id: str, entity_id: str, blocking: bool = True) -> str | None:
         """Acquire a mock lock."""
         if self._should_fail:
             return None

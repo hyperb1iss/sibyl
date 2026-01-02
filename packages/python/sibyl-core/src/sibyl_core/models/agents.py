@@ -63,8 +63,7 @@ class AgentRecord(Entity):
         default=AgentSpawnSource.USER, description="How agent was created"
     )
 
-    # Organization context
-    organization_id: str = Field(..., description="Organization UUID")
+    # Organization context (organization_id inherited from Entity, validated below)
     project_id: str = Field(..., description="Project UUID")
     created_by: str | None = Field(default=None, description="User ID who spawned this agent")
 
@@ -100,6 +99,10 @@ class AgentRecord(Entity):
     def set_entity_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
         """Set name and content from agent fields."""
         if isinstance(data, dict):
+            # Require organization_id
+            if not data.get("organization_id"):
+                msg = "organization_id is required for AgentRecord"
+                raise ValueError(msg)
             # Name: agent type + truncated ID
             if "name" not in data:
                 agent_type = data.get("agent_type", "agent")
@@ -233,8 +236,7 @@ class ApprovalRecord(Entity):
 
     entity_type: EntityType = EntityType.APPROVAL
 
-    # Context
-    organization_id: str = Field(..., description="Organization UUID")
+    # Context (organization_id inherited from Entity, validated below)
     project_id: str = Field(..., description="Project UUID")
     agent_id: str = Field(..., description="Requesting agent UUID")
     task_id: str | None = Field(default=None, description="Related task UUID")
@@ -264,6 +266,10 @@ class ApprovalRecord(Entity):
     def set_entity_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
         """Set name and content from approval fields."""
         if isinstance(data, dict):
+            # Require organization_id
+            if not data.get("organization_id"):
+                msg = "organization_id is required for ApprovalRecord"
+                raise ValueError(msg)
             if "name" not in data and "title" in data:
                 data["name"] = data["title"][:100]
             if "content" not in data and "summary" in data:

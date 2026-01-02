@@ -58,6 +58,11 @@ const TYPE_CONFIG: Record<ApprovalType, { icon: typeof Code; label: string; colo
       label: 'Sensitive File',
       colorClass: 'text-sc-yellow',
     },
+    file_write: {
+      icon: WarningCircle,
+      label: 'File Write',
+      colorClass: 'text-sc-yellow',
+    },
     external_api: {
       icon: Code,
       label: 'External API',

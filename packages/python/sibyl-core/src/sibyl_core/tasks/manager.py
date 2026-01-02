@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING
 import structlog
 
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
-from sibyl_core.models.tasks import Task, TaskEstimate, TaskKnowledgeSuggestion, TaskStatus
+from sibyl_core.models.tasks import (
+    SimilarTaskInfo,
+    Task,
+    TaskEstimate,
+    TaskKnowledgeSuggestion,
+    TaskStatus,
+)
 
 if TYPE_CHECKING:
     from sibyl_core.graph.entities import EntityManager
@@ -130,9 +136,7 @@ class TaskManager:
             self._entity_manager.search(
                 query=query, entity_types=[EntityType.PATTERN], limit=limit
             ),
-            self._entity_manager.search(
-                query=query, entity_types=[EntityType.RULE], limit=limit
-            ),
+            self._entity_manager.search(query=query, entity_types=[EntityType.RULE], limit=limit),
             self._entity_manager.search(
                 query=query, entity_types=[EntityType.TEMPLATE], limit=limit
             ),
@@ -250,12 +254,12 @@ class TaskManager:
             confidence=round(confidence, 2),
             based_on_tasks=len(efforts),
             similar_tasks=[
-                {
-                    "id": e["task_id"],
-                    "title": e["task_title"],
-                    "hours": e["hours"],
-                    "similarity": e["weight"],
-                }
+                SimilarTaskInfo(
+                    task_id=e["task_id"],
+                    title=e["task_title"],
+                    actual_hours=e["hours"],
+                    similarity_score=e["weight"],
+                )
                 for e in efforts[:5]  # Top 5
             ],
         )
@@ -288,8 +292,10 @@ class TaskManager:
         # Build result, skipping any failed fetches
         dependencies = []
         for rel, entity in zip(relationships, entities, strict=True):
-            if isinstance(entity, Exception):
-                log.warning("Failed to fetch dependency", target_id=rel.target_id, error=str(entity))
+            if isinstance(entity, BaseException):
+                log.warning(
+                    "Failed to fetch dependency", target_id=rel.target_id, error=str(entity)
+                )
                 continue
             dep_task = self._entity_to_task(entity)
             dependencies.append((dep_task, rel.relationship_type.value))
@@ -324,8 +330,10 @@ class TaskManager:
         # Build result, skipping any failed fetches
         blocked_tasks = []
         for rel, entity in zip(relationships, entities, strict=True):
-            if isinstance(entity, Exception):
-                log.warning("Failed to fetch blocked task", source_id=rel.source_id, error=str(entity))
+            if isinstance(entity, BaseException):
+                log.warning(
+                    "Failed to fetch blocked task", source_id=rel.source_id, error=str(entity)
+                )
                 continue
             blocked_task = self._entity_to_task(entity)
             blocked_tasks.append(blocked_task)

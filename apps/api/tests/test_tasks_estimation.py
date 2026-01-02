@@ -37,8 +37,12 @@ class TestTaskEstimate:
             estimated_hours=5.0,
             confidence=0.75,
             similar_tasks=[
-                SimilarTaskInfo(task_id="t1", title="Task 1", similarity_score=0.9, actual_hours=4.0),
-                SimilarTaskInfo(task_id="t2", title="Task 2", similarity_score=0.8, actual_hours=6.0),
+                SimilarTaskInfo(
+                    task_id="t1", title="Task 1", similarity_score=0.9, actual_hours=4.0
+                ),
+                SimilarTaskInfo(
+                    task_id="t2", title="Task 2", similarity_score=0.8, actual_hours=6.0
+                ),
             ],
             based_on_tasks=2,
             reason="Estimated from 2 similar task(s)",
@@ -117,8 +121,12 @@ class TestEstimationAlgorithm:
         """Test weighted average calculation for estimates."""
         # Simulate: two tasks with different similarities and hours
         similar_tasks = [
-            SimilarTaskInfo(task_id="t1", title="High similarity", similarity_score=0.9, actual_hours=4.0),
-            SimilarTaskInfo(task_id="t2", title="Lower similarity", similarity_score=0.6, actual_hours=8.0),
+            SimilarTaskInfo(
+                task_id="t1", title="High similarity", similarity_score=0.9, actual_hours=4.0
+            ),
+            SimilarTaskInfo(
+                task_id="t2", title="Lower similarity", similarity_score=0.6, actual_hours=8.0
+            ),
         ]
 
         total_weight = sum(t.similarity_score for t in similar_tasks)
@@ -154,7 +162,9 @@ class TestEstimationAlgorithm:
         """Test scenario that should produce high confidence."""
         # Many samples with high similarity
         similar_tasks = [
-            SimilarTaskInfo(task_id=f"t{i}", title=f"Task {i}", similarity_score=0.9, actual_hours=5.0)
+            SimilarTaskInfo(
+                task_id=f"t{i}", title=f"Task {i}", similarity_score=0.9, actual_hours=5.0
+            )
             for i in range(10)
         ]
 
