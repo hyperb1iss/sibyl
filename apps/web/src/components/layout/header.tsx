@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { Command, Menu, Search, Sparkles } from '@/components/ui/icons';
 import { useMobileNav } from './mobile-nav-context';
+import { ProjectSelector } from './project-selector';
 import { UserMenu } from './user-menu';
 
 export function Header() {
@@ -122,8 +123,11 @@ export function Header() {
         <Search width={20} height={20} />
       </button>
 
-      {/* User Menu */}
-      <UserMenu />
+      {/* Right section: Project Selector + User Menu */}
+      <div className="flex items-center gap-2 sm:gap-3">
+        <ProjectSelector />
+        <UserMenu />
+      </div>
     </header>
   );
 }

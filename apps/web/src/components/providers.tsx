@@ -1,10 +1,11 @@
 'use client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, Suspense, useEffect, useState } from 'react';
 import { ThemedToaster } from '@/components/ui/themed-toaster';
 import { printConsoleGreeting } from '@/lib/console-greeting';
 import { useMe, useRealtimeUpdates } from '@/lib/hooks';
+import { ProjectContextProvider } from '@/lib/project-context';
 import { ThemeProvider } from '@/lib/theme';
 
 function RealtimeProvider({ children }: { children: ReactNode }) {
@@ -35,7 +36,11 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <RealtimeProvider>{children}</RealtimeProvider>
+        <Suspense fallback={null}>
+          <ProjectContextProvider>
+            <RealtimeProvider>{children}</RealtimeProvider>
+          </ProjectContextProvider>
+        </Suspense>
         <ThemedToaster />
       </QueryClientProvider>
     </ThemeProvider>
