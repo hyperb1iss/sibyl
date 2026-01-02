@@ -160,7 +160,7 @@ export const queryKeys = {
       return ['agents', 'list', normalized] as const;
     },
     detail: (id: string) => ['agents', 'detail', id] as const,
-    messages: (id: string) => ['agents', 'messages', id] as const,
+    messages: (id: string, limit?: number) => ['agents', 'messages', id, { limit }] as const,
     workspace: (id: string) => ['agents', 'workspace', id] as const,
     activityFeed: (project_id?: string) =>
       ['agents', 'activity', project_id ? { project_id } : undefined] as const,
@@ -1491,7 +1491,7 @@ export function useTerminateAgent() {
  */
 export function useAgentMessages(id: string, limit?: number) {
   return useQuery({
-    queryKey: queryKeys.agents.messages(id),
+    queryKey: queryKeys.agents.messages(id, limit),
     queryFn: () => api.agents.getMessages(id, limit),
     enabled: !!id,
   });
@@ -1589,26 +1589,11 @@ export function useAgentSubscription(agentId: string | undefined) {
 
     unsubMessage = wsClient.on('agent_message', data => {
       if (data.agent_id === agentId) {
-        // Convert WebSocket message to AgentMessage format and add to cache
-        const newMessage = wsMessageToAgentMessage(data);
-
-        queryClient.setQueryData<AgentMessagesResponse>(
-          queryKeys.agents.messages(agentId),
-          oldData => {
-            if (!oldData) {
-              return {
-                agent_id: agentId,
-                messages: [newMessage],
-                total: 1,
-              };
-            }
-            return {
-              ...oldData,
-              messages: [...oldData.messages, newMessage],
-              total: oldData.total + 1,
-            };
-          }
-        );
+        // Invalidate all message queries for this agent (regardless of limit param)
+        // This ensures any component viewing messages gets the update
+        queryClient.invalidateQueries({
+          queryKey: ['agents', 'messages', agentId],
+        });
       }
     });
 
