@@ -4,6 +4,7 @@ This module provides entity CRUD operations using Graphiti's native node APIs.
 All graph operations go through EntityNode/EpisodicNode rather than raw Cypher.
 """
 
+import contextlib
 import json
 import re
 from datetime import UTC, datetime
@@ -1803,10 +1804,8 @@ class EntityManager:
         name = node.name
 
         if node_entity_type := getattr(node, "entity_type", None):
-            try:
+            with contextlib.suppress(ValueError):
                 entity_type = EntityType(node_entity_type)
-            except ValueError:
-                pass  # Invalid type, fall through to name parsing
 
         # Fallback: try to extract entity_type from the name (format: "type:name")
         if entity_type == EntityType.EPISODE and ":" in name:
