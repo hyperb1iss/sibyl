@@ -1,10 +1,6 @@
 """Tests for CLI config store."""
 
-import tempfile
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from sibyl_cli import config_store
 

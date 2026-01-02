@@ -2,7 +2,9 @@
 
 ## Problem Statement
 
-When an agent hits a permission issue (destructive command, sensitive file, external API), it should:
+When an agent hits a permission issue (destructive command, sensitive file, external API), it
+should:
+
 1. Pause execution and request human approval
 2. Show the approval request inline in the chat thread
 3. Allow user to approve/deny directly in the thread
@@ -14,6 +16,7 @@ When an agent hits a permission issue (destructive command, sensitive file, exte
 ### What Exists
 
 **ApprovalService** (`apps/api/src/sibyl/agents/approvals.py`):
+
 - Hook matchers for PreToolUse events
 - Detects: destructive bash commands, sensitive files, external APIs
 - Creates ApprovalRecord entities in graph
@@ -21,12 +24,14 @@ When an agent hits a permission issue (destructive command, sensitive file, exte
 - Has `respond()` method to wake up waiters
 
 **API Routes** (`apps/api/src/sibyl/api/routes/approvals.py`):
+
 - GET /approvals - list with filters
 - GET /approvals/pending - convenience endpoint
 - POST /approvals/{id}/respond - respond to approval
 - Publishes `approval_response` event via pubsub
 
 **Frontend**:
+
 - `approval-queue.tsx` - exists but may need updates
 - Some hooks in `hooks.ts`
 
@@ -41,7 +46,8 @@ Worker Process (runs agent)          API Process (handles HTTP)
 └── Blocked on asyncio.Event         └── CAN'T ACCESS _waiters!
 ```
 
-The `respond_to_approval` API updates the graph and publishes an event, but **never signals the asyncio.Event** in the worker process. They don't share memory.
+The `respond_to_approval` API updates the graph and publishes an event, but **never signals the
+asyncio.Event** in the worker process. They don't share memory.
 
 ## Agent SDK Hook Behavior (Key Insights)
 
@@ -58,11 +64,15 @@ From exhaustive SDK research:
 
 ### Dual-Channel Redis Communication
 
-**Critical insight**: Current `pubsub.py` is WebSocket fan-out only—it broadcasts to browser clients via SSE/WebSocket, not to worker processes. Workers need **direct Redis subscription**.
+**Critical insight**: Current `pubsub.py` is WebSocket fan-out only—it broadcasts to browser clients
+via SSE/WebSocket, not to worker processes. Workers need **direct Redis subscription**.
 
 Two separate channels:
-1. **Worker channel**: `sibyl:approval:{id}` — API publishes approval response, worker subscribes directly via aioredis
-2. **WebSocket channel**: `sibyl:websocket:events` — Worker broadcasts approval_request for UI display
+
+1. **Worker channel**: `sibyl:approval:{id}` — API publishes approval response, worker subscribes
+   directly via aioredis
+2. **WebSocket channel**: `sibyl:websocket:events` — Worker broadcasts approval_request for UI
+   display
 
 ```
 1. PreToolUse hook triggers dangerous pattern
@@ -277,7 +287,7 @@ interface ApprovalRequestMessageProps {
   actions: string[];
   metadata?: Record<string, unknown>;
   expiresAt?: string;
-  status?: 'pending' | 'approved' | 'denied' | 'expired';
+  status?: "pending" | "approved" | "denied" | "expired";
 }
 
 export function ApprovalRequestMessage({
@@ -288,7 +298,7 @@ export function ApprovalRequestMessage({
   actions,
   metadata,
   expiresAt,
-  status = 'pending',
+  status = "pending",
 }: ApprovalRequestMessageProps) {
   const respondMutation = useRespondToApproval();
   const [isResponding, setIsResponding] = useState(false);
@@ -299,22 +309,24 @@ export function ApprovalRequestMessage({
     setIsResponding(false);
   };
 
-  const isPending = status === 'pending';
+  const isPending = status === "pending";
   const isExpired = expiresAt && new Date(expiresAt) < new Date();
 
   return (
-    <div className={`rounded-lg border p-4 ${
-      isPending
-        ? 'border-sc-yellow/50 bg-sc-yellow/5'
-        : status === 'approved'
-          ? 'border-sc-green/30 bg-sc-green/5'
-          : 'border-sc-red/30 bg-sc-red/5'
-    }`}>
+    <div
+      className={`rounded-lg border p-4 ${
+        isPending
+          ? "border-sc-yellow/50 bg-sc-yellow/5"
+          : status === "approved"
+            ? "border-sc-green/30 bg-sc-green/5"
+            : "border-sc-red/30 bg-sc-red/5"
+      }`}
+    >
       {/* Header with type badge */}
       <div className="flex items-center gap-2 mb-3">
         <span className="text-sc-yellow">⚠️</span>
         <span className="text-xs px-2 py-0.5 rounded bg-sc-yellow/20 text-sc-yellow">
-          {approvalType.replace('_', ' ')}
+          {approvalType.replace("_", " ")}
         </span>
         <span className="text-sm font-medium text-sc-fg-primary">{title}</span>
       </div>
@@ -337,25 +349,25 @@ export function ApprovalRequestMessage({
       {isPending && !isExpired ? (
         <div className="flex gap-2">
           <button
-            onClick={() => handleAction('approve')}
+            onClick={() => handleAction("approve")}
             disabled={isResponding}
             className="px-4 py-2 bg-sc-green text-white rounded hover:bg-sc-green/80"
           >
-            {isResponding ? <Spinner size="sm" /> : 'Approve'}
+            {isResponding ? <Spinner size="sm" /> : "Approve"}
           </button>
           <button
-            onClick={() => handleAction('deny')}
+            onClick={() => handleAction("deny")}
             disabled={isResponding}
             className="px-4 py-2 bg-sc-red text-white rounded hover:bg-sc-red/80"
           >
-            {isResponding ? <Spinner size="sm" /> : 'Deny'}
+            {isResponding ? <Spinner size="sm" /> : "Deny"}
           </button>
         </div>
       ) : (
         <div className="text-sm text-sc-fg-muted">
-          {status === 'approved' && '✓ Approved'}
-          {status === 'denied' && '✗ Denied'}
-          {status === 'expired' && '⏱ Expired'}
+          {status === "approved" && "✓ Approved"}
+          {status === "denied" && "✗ Denied"}
+          {status === "expired" && "⏱ Expired"}
         </div>
       )}
 
@@ -376,7 +388,7 @@ export function ApprovalRequestMessage({
 // In ChatMessageComponent or groupMessages
 
 // Detect approval_request messages
-if (message.type === 'approval_request' || message.metadata?.message_type === 'approval_request') {
+if (message.type === "approval_request" || message.metadata?.message_type === "approval_request") {
   return (
     <ApprovalRequestMessage
       approvalId={message.metadata.approval_id}
@@ -401,7 +413,11 @@ export function useRespondToApproval() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ approvalId, action, message }: {
+    mutationFn: async ({
+      approvalId,
+      action,
+      message,
+    }: {
       approvalId: string;
       action: string;
       message?: string;
@@ -414,8 +430,8 @@ export function useRespondToApproval() {
     },
     onSuccess: (_, { approvalId }) => {
       // Invalidate queries
-      queryClient.invalidateQueries({ queryKey: ['approvals'] });
-      queryClient.invalidateQueries({ queryKey: ['approval', approvalId] });
+      queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      queryClient.invalidateQueries({ queryKey: ["approval", approvalId] });
     },
   });
 }
@@ -442,9 +458,9 @@ async def get_pending_count(
 ```tsx
 export function usePendingApprovalCount() {
   return useQuery({
-    queryKey: ['approvals', 'pending', 'count'],
+    queryKey: ["approvals", "pending", "count"],
     queryFn: async () => {
-      const response = await api.get('/api/approvals/count/pending');
+      const response = await api.get("/api/approvals/count/pending");
       return response.data.count;
     },
     refetchInterval: 30000, // Poll every 30s
@@ -466,7 +482,7 @@ const { data: pendingCount } = usePendingApprovalCount();
       {pendingCount}
     </span>
   )}
-</NavItem>
+</NavItem>;
 ```
 
 **5.4 WebSocket subscription for real-time updates**
@@ -474,15 +490,15 @@ const { data: pendingCount } = usePendingApprovalCount();
 ```tsx
 // Subscribe to approval events
 useEffect(() => {
-  const unsubscribe = subscribeToEvent('approval_request', (data) => {
+  const unsubscribe = subscribeToEvent("approval_request", (data) => {
     // Show toast notification
     toast({
-      title: 'Approval Required',
+      title: "Approval Required",
       description: data.title,
       action: <Button onClick={() => navigate(`/agents/${data.agent_id}`)}>View</Button>,
     });
     // Invalidate count
-    queryClient.invalidateQueries({ queryKey: ['approvals', 'pending', 'count'] });
+    queryClient.invalidateQueries({ queryKey: ["approvals", "pending", "count"] });
   });
 
   return unsubscribe;
@@ -491,17 +507,20 @@ useEffect(() => {
 
 ### Phase 6: Edge Cases
 
-**6.1 Timeout handling** (already in _wait_for_approval)
+**6.1 Timeout handling** (already in \_wait_for_approval)
+
 - Auto-deny after 5 minutes
 - Update status to `expired`
 - Agent continues with denial
 
 **6.2 Agent terminated while waiting**
+
 - `cancel_all()` method exists
 - Call from termination handlers
 - Wake up waiters with denial
 
 **6.3 Approval status sync**
+
 - When loading approval in UI, check if still pending
 - If agent no longer waiting, update status
 
@@ -549,12 +568,15 @@ useEffect(() => {
 ## Files to Modify
 
 ### Backend
+
 1. `apps/api/src/sibyl/agents/redis_sub.py` - **NEW**: Direct Redis subscription helper for worker
 2. `apps/api/src/sibyl/agents/approvals.py` - Use redis_sub for waiting, add status updates
-3. `apps/api/src/sibyl/api/routes/approvals.py` - Publish to worker channel + WebSocket, add count endpoint
+3. `apps/api/src/sibyl/api/routes/approvals.py` - Publish to worker channel + WebSocket, add count
+   endpoint
 4. `apps/api/src/sibyl/jobs/worker.py` - Store approval_request messages as AgentMessages
 
 ### Frontend
+
 1. `apps/web/src/components/agents/approval-request-message.tsx` - NEW
 2. `apps/web/src/components/agents/agent-chat-panel.tsx` - Render approval messages
 3. `apps/web/src/lib/hooks.ts` - Add approval hooks
@@ -562,6 +584,7 @@ useEffect(() => {
 5. `apps/web/src/components/agents/approval-queue.tsx` - Update if needed
 
 ### Models
+
 1. `AgentStatus.WAITING_APPROVAL` — ✅ Already exists (line 25, agents.py)
 2. Add `AgentMessageType.APPROVAL_REQUEST` if not exists
 

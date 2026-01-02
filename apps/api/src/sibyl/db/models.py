@@ -913,7 +913,9 @@ class AgentMessage(SQLModel, table=True):
 
     message_num: int = Field(ge=0, description="Sequence number within agent session")
     role: AgentMessageRole = Field(description="Who sent the message")
-    type: AgentMessageType = Field(default=AgentMessageType.text, description="Type of message content")
+    type: AgentMessageType = Field(
+        default=AgentMessageType.text, description="Type of message content"
+    )
     content: str = Field(sa_type=Text, description="Message content (summary for tool results)")
 
     # Tool call tracking for message pairing and subagent grouping

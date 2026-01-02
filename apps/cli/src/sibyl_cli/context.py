@@ -121,9 +121,7 @@ def callback(
         console.print(
             f"  [{ELECTRIC_PURPLE}]───────────────────────────────────────[/{ELECTRIC_PURPLE}]"
         )
-        console.print(
-            f"  [{NEON_CYAN}]{project_data.get('name', 'Unknown')}[/{NEON_CYAN}]"
-        )
+        console.print(f"  [{NEON_CYAN}]{project_data.get('name', 'Unknown')}[/{NEON_CYAN}]")
         if project_data.get("description"):
             console.print(f"  [dim]{project_data['description']}[/dim]")
 

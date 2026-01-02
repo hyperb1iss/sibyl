@@ -43,7 +43,12 @@ def upgrade() -> None:
         sa.Column(
             "type",
             postgresql.ENUM(
-                "text", "tool_call", "tool_result", "error", name="agentmessagetype", create_type=False
+                "text",
+                "tool_call",
+                "tool_result",
+                "error",
+                name="agentmessagetype",
+                create_type=False,
             ),
             nullable=False,
             server_default="text",

@@ -840,9 +840,7 @@ async def backfill_project_id_from_relationships(
         RETURN n.uuid AS node_id, p.uuid AS project_id, n.name AS node_name
         """
 
-        result = await client.execute_read_org(
-            query, organization_id, group_id=organization_id
-        )
+        result = await client.execute_read_org(query, organization_id, group_id=organization_id)
 
         updates_needed: list[tuple[str, str, str]] = []
         for record in result:
@@ -1048,7 +1046,9 @@ async def backfill_episode_task_relationships(
                 continue
 
             try:
-                metadata = json.loads(metadata_str) if isinstance(metadata_str, str) else metadata_str
+                metadata = (
+                    json.loads(metadata_str) if isinstance(metadata_str, str) else metadata_str
+                )
                 task_id = metadata.get("task_id")
                 if task_id:
                     episodes_to_link.append((episode_id, task_id))

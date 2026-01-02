@@ -169,9 +169,7 @@ Be creative but relevant to what's happening.
 
 Reply with ONLY the phrase, no quotes or explanation."""
 
-    def _fallback_hint(
-        self, tool_name: str, tool_input: dict[str, Any] | None
-    ) -> str:
+    def _fallback_hint(self, tool_name: str, tool_input: dict[str, Any] | None) -> str:
         """Fallback hints when Haiku fails."""
         fallbacks = {
             "Read": "Absorbing knowledge",

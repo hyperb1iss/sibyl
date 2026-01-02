@@ -255,9 +255,7 @@ async def api_client() -> AsyncGenerator[httpx.AsyncClient]:
 async def auth_api_client(e2e_auth_token: str) -> AsyncGenerator[httpx.AsyncClient]:
     """Authenticated async HTTP client for API calls."""
     headers = {"Authorization": f"Bearer {e2e_auth_token}"}
-    async with httpx.AsyncClient(
-        base_url=API_BASE_URL, timeout=30.0, headers=headers
-    ) as client:
+    async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=30.0, headers=headers) as client:
         yield client
 
 

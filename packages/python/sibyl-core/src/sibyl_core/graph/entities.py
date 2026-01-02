@@ -998,8 +998,7 @@ class EntityManager:
 
                 # Check if task is critical (not done/archived)
                 is_critical = (
-                    priority.lower() in ("critical", "high")
-                    or "CRITICAL" in name.upper()
+                    priority.lower() in ("critical", "high") or "CRITICAL" in name.upper()
                 ) and status not in ("done", "archived")
 
                 if is_critical and len(critical_tasks) < critical_limit:
@@ -1469,7 +1468,9 @@ class EntityManager:
             metadata["project_id"] = entity.project_id
             metadata["agent_id"] = entity.agent_id
             metadata["task_id"] = entity.task_id
-            metadata["approval_type"] = entity.approval_type.value if entity.approval_type else "dangerous_operation"
+            metadata["approval_type"] = (
+                entity.approval_type.value if entity.approval_type else "dangerous_operation"
+            )
             metadata["status"] = entity.status.value if entity.status else "pending"
             metadata["priority"] = entity.priority
             metadata["title"] = entity.title

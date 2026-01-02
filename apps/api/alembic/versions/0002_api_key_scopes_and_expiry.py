@@ -35,4 +35,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_column("api_keys", "expires_at")
     op.drop_column("api_keys", "scopes")
-

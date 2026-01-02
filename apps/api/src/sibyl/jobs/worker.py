@@ -926,7 +926,13 @@ async def _store_agent_message(
     type_str = formatted.get("type", "text")
 
     # Map to enum values (use lowercase strings that match Postgres enum)
-    role_map = {"assistant": "agent", "tool": "system", "system": "system", "user": "user", "unknown": "system"}
+    role_map = {
+        "assistant": "agent",
+        "tool": "system",
+        "system": "system",
+        "user": "user",
+        "unknown": "system",
+    }
     role = role_map.get(role_str, "agent")
 
     type_map = {
@@ -1079,8 +1085,8 @@ async def _generate_and_broadcast_status_hint(
                 task = await manager.get(task_id)
                 if task:
                     task_title = task.name
-            except Exception:
-                pass  # Task lookup is best-effort
+            except Exception:  # noqa: S110 - best-effort lookup, failure is fine
+                pass
 
         hint = generate_status_hint(tool_name, tool_input, task_title, agent_type)
 
@@ -1277,11 +1283,10 @@ async def run_agent_execution(  # noqa: PLR0915
                 tool_name = formatted.get("tool_name", "unknown")
                 tool_calls.append(tool_name)
 
-                # Generate and broadcast Tier 3 status hint (async, non-blocking)
-                # Run in background so we don't block the main loop
+                # Generate and broadcast Tier 3 status hint (fire-and-forget)
                 tool_id = formatted.get("tool_id")
                 tool_input = formatted.get("input")
-                asyncio.create_task(
+                _ = asyncio.create_task(  # noqa: RUF006 - fire-and-forget intentional
                     _generate_and_broadcast_status_hint(
                         agent_id=agent_id,
                         tool_call_id=tool_id,
@@ -1408,7 +1413,7 @@ async def run_agent_execution(  # noqa: PLR0915
         raise
 
 
-async def resume_agent_execution(
+async def resume_agent_execution(  # noqa: PLR0915 - complex orchestration function
     ctx: dict[str, Any],  # noqa: ARG001
     agent_id: str,
     org_id: str,
@@ -1429,7 +1434,7 @@ async def resume_agent_execution(
     from sibyl.agents import AgentRunner, WorktreeManager
     from sibyl_core.graph.client import get_graph_client
     from sibyl_core.graph.entities import EntityManager
-    from sibyl_core.models import AgentCheckpoint, AgentRecord, AgentStatus, EntityType
+    from sibyl_core.models import AgentCheckpoint, AgentStatus, EntityType
 
     log.info("resume_agent_execution_started", agent_id=agent_id)
 
@@ -1461,9 +1466,7 @@ async def resume_agent_execution(
             )
 
         agent_checkpoints = [
-            c
-            for c in checkpoints
-            if (c.metadata or {}).get("agent_id") == agent_id
+            c for c in checkpoints if (c.metadata or {}).get("agent_id") == agent_id
         ]
 
         if not agent_checkpoints:
@@ -1518,7 +1521,9 @@ async def resume_agent_execution(
         context_broadcasted = False
 
         # Execute resumed agent - stream messages to UI
-        log.info("resume_agent_execution_starting", agent_id=agent_id, checkpoint=latest_checkpoint.id)
+        log.info(
+            "resume_agent_execution_starting", agent_id=agent_id, checkpoint=latest_checkpoint.id
+        )
         async for message in instance.execute():
             message_count += 1
             msg_class = type(message).__name__
@@ -1584,8 +1589,18 @@ async def resume_agent_execution(
             agent_id=agent_id,
             session_id=session_id,
             conversation_history=[
-                {"role": "user", "content": prompt, "timestamp": datetime.now(UTC).isoformat(), "type": "text"},
-                {"role": "system", "content": summary, "timestamp": datetime.now(UTC).isoformat(), "type": "text"},
+                {
+                    "role": "user",
+                    "content": prompt,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "type": "text",
+                },
+                {
+                    "role": "system",
+                    "content": summary,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "type": "text",
+                },
             ],
             current_step=last_content[:200] if last_content else None,
         )
@@ -1597,7 +1612,12 @@ async def resume_agent_execution(
             {"status": AgentStatus.COMPLETED.value, "conversation_turns": message_count},
         )
 
-        result = {"agent_id": agent_id, "status": "completed", "turns": message_count, "resumed": True}
+        result = {
+            "agent_id": agent_id,
+            "status": "completed",
+            "turns": message_count,
+            "resumed": True,
+        }
 
         await _safe_broadcast(
             "agent_status",
@@ -1614,7 +1634,9 @@ async def resume_agent_execution(
         try:
             client = await get_graph_client()
             manager = EntityManager(client, group_id=org_id)
-            await manager.update(agent_id, {"status": AgentStatus.FAILED.value, "error_message": str(e)})
+            await manager.update(
+                agent_id, {"status": AgentStatus.FAILED.value, "error_message": str(e)}
+            )
         except Exception:
             log.warning("Failed to update agent status on error", agent_id=agent_id)
 

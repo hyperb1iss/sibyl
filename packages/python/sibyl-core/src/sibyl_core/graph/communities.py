@@ -842,8 +842,7 @@ async def get_hierarchical_graph(
                     for member_id in community.member_ids:
                         node_to_cluster[member_id] = community.id
                 clusters_meta = [
-                    {"id": c.id, "member_count": c.member_count, "level": c.level}
-                    for c in detected
+                    {"id": c.id, "member_count": c.member_count, "level": c.level} for c in detected
                 ]
                 log.info(
                     "community_detection_success",

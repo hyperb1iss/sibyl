@@ -36,13 +36,61 @@ LOCAL_SETTINGS_FILE = ".claude/settings.local.json"
 
 # Stop words for search term extraction (same as CLI hook)
 STOP_WORDS = {
-    "about", "actually", "after", "again", "also", "been", "before", "between",
-    "class", "code", "continue", "could", "during", "file", "from", "function",
-    "further", "going", "have", "help", "here", "into", "just", "keep", "know",
-    "like", "make", "method", "more", "need", "once", "only", "other", "please",
-    "really", "should", "some", "thanks", "that", "then", "there", "think",
-    "this", "through", "very", "want", "what", "when", "where", "which", "while",
-    "will", "with", "without", "would",
+    "about",
+    "actually",
+    "after",
+    "again",
+    "also",
+    "been",
+    "before",
+    "between",
+    "class",
+    "code",
+    "continue",
+    "could",
+    "during",
+    "file",
+    "from",
+    "function",
+    "further",
+    "going",
+    "have",
+    "help",
+    "here",
+    "into",
+    "just",
+    "keep",
+    "know",
+    "like",
+    "make",
+    "method",
+    "more",
+    "need",
+    "once",
+    "only",
+    "other",
+    "please",
+    "really",
+    "should",
+    "some",
+    "thanks",
+    "that",
+    "then",
+    "there",
+    "think",
+    "this",
+    "through",
+    "very",
+    "want",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "will",
+    "with",
+    "without",
+    "would",
 }
 
 # Sibyl MCP tool patterns to track for workflow validation
@@ -129,12 +177,9 @@ class WorkflowTracker:
             return False
 
         # Check if any substantive (code-changing) tools were used
-        used_substantive = any(
-            any(sub in tool for sub in self.SUBSTANTIVE_TOOLS)
-            for tool in self.all_tool_calls
+        return any(
+            any(sub in tool for sub in self.SUBSTANTIVE_TOOLS) for tool in self.all_tool_calls
         )
-
-        return used_substantive
 
     def is_workflow_complete(self) -> bool:
         """Check if the Sibyl workflow was properly followed.
@@ -205,10 +250,12 @@ def load_user_hooks(
 
     if cwd:
         cwd_path = Path(cwd)
-        paths_to_check.extend([
-            cwd_path / PROJECT_SETTINGS_FILE,
-            cwd_path / LOCAL_SETTINGS_FILE,
-        ])
+        paths_to_check.extend(
+            [
+                cwd_path / PROJECT_SETTINGS_FILE,
+                cwd_path / LOCAL_SETTINGS_FILE,
+            ]
+        )
 
     for settings_path in paths_to_check:
         if not settings_path.exists():
@@ -289,10 +336,7 @@ def _extract_search_terms(prompt: str) -> str:
     words = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", prompt.lower())
 
     # Filter to meaningful terms
-    terms = [
-        w for w in words
-        if len(w) > 3 and w not in STOP_WORDS and not w.startswith("_")
-    ]
+    terms = [w for w in words if len(w) > 3 and w not in STOP_WORDS and not w.startswith("_")]
 
     # Take unique terms, preserving order
     seen: set[str] = set()
@@ -413,6 +457,7 @@ class SibylContextService:
         Returns:
             HookMatcher for UserPromptSubmit events
         """
+
         async def inject_context(
             hook_input: HookInput,
             _tool_use_id: str | None,
@@ -448,6 +493,7 @@ class SibylContextService:
         Returns:
             HookMatcher for PostToolUse events
         """
+
         async def track_tool_use(
             hook_input: HookInput,
             _tool_use_id: str | None,
@@ -484,6 +530,7 @@ def create_stop_hook(workflow_tracker: WorkflowTracker) -> HookMatcher:
     Returns:
         HookMatcher for Stop events
     """
+
     async def on_stop(
         hook_input: HookInput,
         _tool_use_id: str | None,
