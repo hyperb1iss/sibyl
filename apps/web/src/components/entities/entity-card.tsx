@@ -27,21 +27,20 @@ export const EntityCard = memo(function EntityCard({
 }: EntityCardProps) {
   const color = ENTITY_COLORS[entity.entity_type as EntityType] ?? '#8b85a0';
 
+  // Use CSS custom properties for dynamic colors with CSS hover states
+  const cardStyle = {
+    '--entity-color': color,
+    '--entity-color-40': `${color}40`,
+    '--entity-color-60': `${color}60`,
+    '--entity-glow': `0 4px 8px oklch(0% 0 0 / 0.3), 0 8px 20px oklch(0% 0 0 / 0.2), 0 0 24px ${color}30, inset 0 1px 0 oklch(100% 0 0 / 0.05)`,
+    background: `linear-gradient(135deg, ${color}18 0%, var(--sc-bg-base) 50%, var(--sc-bg-base) 100%)`,
+    borderColor: `${color}40`,
+  } as React.CSSProperties;
+
   return (
     <article
-      className="relative overflow-hidden rounded-xl transition-all duration-200 group hover:-translate-y-0.5 border shadow-card"
-      style={{
-        background: `linear-gradient(135deg, ${color}18 0%, var(--sc-bg-base) 50%, var(--sc-bg-base) 100%)`,
-        borderColor: `${color}40`,
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.boxShadow = `0 4px 8px oklch(0% 0 0 / 0.3), 0 8px 20px oklch(0% 0 0 / 0.2), 0 0 24px ${color}30, inset 0 1px 0 oklch(100% 0 0 / 0.05)`;
-        e.currentTarget.style.borderColor = `${color}60`;
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.boxShadow = '';
-        e.currentTarget.style.borderColor = `${color}40`;
-      }}
+      className="relative overflow-hidden rounded-xl transition-all duration-200 group hover:-translate-y-0.5 border shadow-card hover:shadow-[var(--entity-glow)] hover:border-[var(--entity-color-60)]"
+      style={cardStyle}
     >
       {/* Accent bar - entity type color */}
       <div className="absolute left-0 top-0 bottom-0 w-1" style={{ backgroundColor: color }} />

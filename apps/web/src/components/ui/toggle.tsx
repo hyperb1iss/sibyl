@@ -245,6 +245,24 @@ export function EntityTypeChip({
 }: EntityTypeChipProps) {
   const color = ENTITY_COLORS[entityType as EntityType] ?? '#8b85a0';
 
+  // Use CSS custom properties for dynamic colors with CSS hover states
+  // When not active, hover styles override via CSS; when active, hover has no effect
+  const chipStyle = {
+    '--chip-color': color,
+    '--chip-bg': active
+      ? `linear-gradient(135deg, ${color}30 0%, ${color}15 100%)`
+      : `linear-gradient(135deg, ${color}12 0%, transparent 100%)`,
+    '--chip-bg-hover': `linear-gradient(135deg, ${color}20 0%, ${color}08 100%)`,
+    '--chip-border': active ? `${color}50` : `${color}25`,
+    '--chip-border-hover': `${color}40`,
+    '--chip-shadow': active ? `0 0 16px ${color}30, 0 0 4px ${color}20` : `0 0 0 1px ${color}08`,
+    '--chip-shadow-hover': `0 0 12px ${color}20`,
+    background: 'var(--chip-bg)',
+    borderColor: 'var(--chip-border)',
+    color: active ? color : undefined,
+    boxShadow: 'var(--chip-shadow)',
+  } as React.CSSProperties;
+
   return (
     <button
       type="button"
@@ -255,29 +273,9 @@ export function EntityTypeChip({
         transition-all duration-200 border overflow-hidden
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
         ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+        ${!active ? 'hover:bg-[var(--chip-bg-hover)] hover:border-[var(--chip-border-hover)] hover:shadow-[var(--chip-shadow-hover)]' : ''}
       `}
-      style={{
-        background: active
-          ? `linear-gradient(135deg, ${color}30 0%, ${color}15 100%)`
-          : `linear-gradient(135deg, ${color}12 0%, transparent 100%)`,
-        borderColor: active ? `${color}50` : `${color}25`,
-        color: active ? color : undefined,
-        boxShadow: active ? `0 0 16px ${color}30, 0 0 4px ${color}20` : `0 0 0 1px ${color}08`,
-      }}
-      onMouseEnter={e => {
-        if (!active) {
-          e.currentTarget.style.background = `linear-gradient(135deg, ${color}20 0%, ${color}08 100%)`;
-          e.currentTarget.style.borderColor = `${color}40`;
-          e.currentTarget.style.boxShadow = `0 0 12px ${color}20`;
-        }
-      }}
-      onMouseLeave={e => {
-        if (!active) {
-          e.currentTarget.style.background = `linear-gradient(135deg, ${color}12 0%, transparent 100%)`;
-          e.currentTarget.style.borderColor = `${color}25`;
-          e.currentTarget.style.boxShadow = `0 0 0 1px ${color}08`;
-        }
-      }}
+      style={chipStyle}
     >
       <span className="relative flex items-center gap-1.5">
         <span className="transition-transform duration-200 group-hover:scale-110" style={{ color }}>
