@@ -58,6 +58,55 @@ const TOOL_ICONS: Record<string, IconComponent> = {
   Xmark,
 };
 
+// Playful status templates per tool - {file}, {pattern}, {cmd} get substituted
+const TOOL_STATUS_TEMPLATES: Record<string, string[]> = {
+  Read: [
+    'Absorbing {file}',
+    'Decoding {file}',
+    'Studying {file}',
+    'Ingesting {file}',
+    'Parsing {file}',
+  ],
+  Edit: ['Sculpting {file}', 'Refining {file}', 'Tweaking {file}', 'Polishing {file}'],
+  Write: ['Manifesting {file}', 'Conjuring {file}', 'Crafting {file}', 'Birthing {file}'],
+  Grep: [
+    'Hunting for {pattern}',
+    'Seeking {pattern}',
+    'Tracking {pattern}',
+    'Sniffing out {pattern}',
+  ],
+  Glob: ['Scouting {pattern}', 'Mapping {pattern}', 'Surveying {pattern}'],
+  Bash: [
+    'Whispering to the shell',
+    'Invoking the terminal',
+    'Casting shell magic',
+    'Running incantations',
+  ],
+  Task: ['Summoning {agent}', 'Dispatching {agent}', 'Rallying {agent}', 'Awakening {agent}'],
+  WebSearch: ['Scouring the interwebs', 'Consulting the oracle', 'Querying the web'],
+  WebFetch: ['Fetching from the void', 'Retrieving distant knowledge', 'Pulling from the ether'],
+  LSP: ['Consulting the language server', 'Asking the code oracle', 'Querying symbols'],
+};
+
+// Helper to get a playful tool status with substitution
+function getToolStatus(toolName: string, input?: Record<string, unknown>): string | null {
+  const templates = TOOL_STATUS_TEMPLATES[toolName];
+  if (!templates?.length) return null;
+
+  const template = templates[Math.floor(Math.random() * templates.length)];
+
+  // Extract substitution values from input
+  const filePath = input?.file_path as string | undefined;
+  const file = filePath ? filePath.split('/').pop() : undefined;
+  const pattern = (input?.pattern as string | undefined) ?? (input?.query as string | undefined);
+  const agent = input?.subagent_type as string | undefined;
+
+  return template
+    .replace('{file}', file ?? 'file')
+    .replace('{pattern}', pattern ? `"${pattern.slice(0, 20)}"` : 'matches')
+    .replace('{agent}', agent ?? 'agent');
+}
+
 // Clever waiting phrases - grouped by mood, picked once per waiting session
 const THINKING_PHRASES = {
   // Focused but friendly
@@ -307,6 +356,13 @@ function ToolMessage({ message, result, isNew = false }: ToolMessageProps) {
   const iconName = message.metadata?.icon as string | undefined;
   const toolName = message.metadata?.tool_name as string | undefined;
   const Icon = iconName ? TOOL_ICONS[iconName] : Code;
+  const input = message.metadata?.input as Record<string, unknown> | undefined;
+
+  // Memoize playful status so it doesn't change on re-render
+  const playfulStatus = useMemo(
+    () => (toolName ? getToolStatus(toolName, input) : null),
+    [toolName, input]
+  );
 
   // For results, check error status
   const resultError = result?.metadata?.is_error as boolean | undefined;
@@ -357,7 +413,12 @@ function ToolMessage({ message, result, isNew = false }: ToolMessageProps) {
           {toolName || 'Tool'}
         </span>
         <span className="text-sc-fg-muted truncate flex-1 min-w-0 group-hover:text-sc-fg-primary transition-colors duration-200">
-          {message.content}
+          {/* Show playful status when pending, raw content when complete */}
+          {!hasResult && playfulStatus ? (
+            <span className="italic">{playfulStatus}</span>
+          ) : (
+            message.content
+          )}
         </span>
         {/* Result indicator with entrance animation */}
         {hasResult && (
