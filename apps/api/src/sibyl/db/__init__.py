@@ -23,6 +23,9 @@ from sibyl.db.connection import (
     init_db,
 )
 from sibyl.db.models import (
+    AgentMessage,
+    AgentMessageRole,
+    AgentMessageType,
     ApiKey,
     AuditLog,
     ChunkType,
@@ -47,6 +50,7 @@ __all__ = [
     "async_session_factory",
     "check_postgres_health",
     # Models
+    "AgentMessage",
     "ApiKey",
     "AuditLog",
     "CrawlSource",
@@ -58,6 +62,8 @@ __all__ = [
     "OrganizationInvitation",
     "User",
     # Enums
+    "AgentMessageRole",
+    "AgentMessageType",
     "SourceType",
     "CrawlStatus",
     "ChunkType",

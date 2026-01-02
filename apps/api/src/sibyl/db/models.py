@@ -62,6 +62,23 @@ class ChunkType(StrEnum):
     TABLE = "table"
 
 
+class AgentMessageRole(StrEnum):
+    """Role of an agent message sender."""
+
+    AGENT = "agent"
+    USER = "user"
+    SYSTEM = "system"
+
+
+class AgentMessageType(StrEnum):
+    """Type of agent message content."""
+
+    TEXT = "text"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    ERROR = "error"
+
+
 # =============================================================================
 # Base Model
 # =============================================================================
@@ -859,6 +876,57 @@ class DocumentChunk(TimestampMixin, table=True):
 
     def __repr__(self) -> str:
         return f"<DocumentChunk {self.id} [{self.chunk_type}]>"
+
+
+# =============================================================================
+# AgentMessage - Chat history for agent sessions
+# =============================================================================
+
+
+class AgentMessage(SQLModel, table=True):
+    """A message in an agent chat session.
+
+    Stores agent execution messages for UI reconstruction after page reload.
+    Full tool outputs are NOT stored - only summaries/previews to keep size reasonable.
+    Real-time streaming uses WebSocket; this is for persistence.
+    """
+
+    __tablename__ = "agent_messages"  # type: ignore[assignment]
+    __table_args__ = (
+        Index("ix_agent_messages_agent_num", "agent_id", "message_num"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    agent_id: str = Field(
+        max_length=64,
+        index=True,
+        description="Agent entity ID from knowledge graph",
+    )
+    organization_id: UUID = Field(
+        foreign_key="organizations.id",
+        index=True,
+        description="Organization that owns this agent",
+    )
+
+    message_num: int = Field(ge=0, description="Sequence number within agent session")
+    role: AgentMessageRole = Field(description="Who sent the message")
+    type: AgentMessageType = Field(
+        default=AgentMessageType.TEXT,
+        description="Type of message content",
+    )
+    content: str = Field(sa_type=Text, description="Message content (summary for tool results)")
+
+    extra: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        description="Icon, tool_name, is_error, etc.",
+    )
+
+    created_at: datetime = Field(
+        default_factory=utcnow_naive,
+        sa_column=Column(DateTime, nullable=False, server_default=text("now()"), index=True),
+        description="When message was created",
+    )
 
 
 # =============================================================================
