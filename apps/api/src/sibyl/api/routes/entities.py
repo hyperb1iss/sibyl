@@ -29,6 +29,7 @@ from sibyl.auth.dependencies import get_auth_context, get_current_organization, 
 from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
 from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import Organization, OrganizationRole
+from sibyl.db.project_sync import sync_project_create, sync_project_delete, sync_project_update
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
@@ -550,6 +551,17 @@ async def create_entity(
         )
 
         if created.entity_type == EntityType.PROJECT:
+            # Sync to Postgres for RBAC enforcement
+            await sync_project_create(
+                session,
+                organization_id=org.id,
+                owner_user_id=ctx.user.id,
+                graph_project_id=created.id,
+                name=created.name,
+                description=created.description,
+            )
+            await session.commit()
+
             await AuditLogger(session).log(
                 action="project.create",
                 user_id=ctx.user.id,
@@ -665,6 +677,16 @@ async def update_entity(
             )
 
             if existing.entity_type == EntityType.PROJECT:
+                # Sync to Postgres for RBAC enforcement
+                await sync_project_update(
+                    session,
+                    organization_id=org.id,
+                    graph_project_id=existing.id,
+                    name=response.name,
+                    description=response.description,
+                )
+                await session.commit()
+
                 await AuditLogger(session).log(
                     action="project.update",
                     user_id=ctx.user.id,
@@ -743,10 +765,19 @@ async def delete_entity(
                     details={"project_id": existing.id, "name": existing.name},
                 )
 
-            # Delete
+            # Delete from graph
             success = await entity_manager.delete(entity_id)
             if not success:
                 raise HTTPException(status_code=500, detail="Delete failed")
+
+            # Sync delete to Postgres (cascades project_members)
+            if existing.entity_type == EntityType.PROJECT:
+                await sync_project_delete(
+                    session,
+                    organization_id=org.id,
+                    graph_project_id=existing.id,
+                )
+                await session.commit()
 
             # Broadcast deletion event (scoped to org)
             await broadcast_event(
