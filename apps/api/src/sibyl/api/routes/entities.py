@@ -23,6 +23,7 @@ from sibyl.api.schemas import (
 )
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.audit import AuditLogger
+from sibyl.auth.authorization import ProjectRole, verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
@@ -608,6 +609,12 @@ async def update_entity(
             if not existing:
                 raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
 
+            # Verify project access for entities with project_id
+            project_id = existing.metadata.get("project_id") if existing.metadata else None
+            await verify_entity_project_access(
+                session, ctx, project_id, required_role=ProjectRole.CONTRIBUTOR
+            )
+
             # Build update dict with only provided fields
             update_data: dict[str, Any] = {}
             if update.name is not None:
@@ -720,6 +727,12 @@ async def delete_entity(
             existing = await entity_manager.get(entity_id)
             if not existing:
                 raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
+
+            # Verify project access for entities with project_id (maintainer required to delete)
+            project_id = existing.metadata.get("project_id") if existing.metadata else None
+            await verify_entity_project_access(
+                session, ctx, project_id, required_role=ProjectRole.MAINTAINER
+            )
 
             if existing.entity_type == EntityType.PROJECT:
                 await AuditLogger(session).log(

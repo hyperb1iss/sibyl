@@ -9,9 +9,13 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from sibyl.api.websocket import broadcast_event
-from sibyl.auth.dependencies import get_current_organization, require_org_role
+from sibyl.auth.authorization import ProjectRole, verify_entity_project_access
+from sibyl.auth.context import AuthContext
+from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
+from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import Organization, OrganizationRole
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
@@ -90,6 +94,29 @@ async def _get_epic(entity_manager: EntityManager, epic_id: str):
         raise HTTPException(status_code=404, detail=f"Epic not found: {epic_id}") from e
 
 
+async def _verify_epic_access(
+    epic_id: str,
+    org: Organization,
+    ctx: AuthContext,
+    session: AsyncSession,
+    required_role: ProjectRole = ProjectRole.CONTRIBUTOR,
+) -> Any:
+    """Fetch an epic and verify project access.
+
+    Returns the epic entity if access is granted.
+    Raises ProjectAuthorizationError if user lacks required access.
+    """
+    client = await get_graph_client()
+    entity_manager = EntityManager(client, group_id=str(org.id))
+    epic = await _get_epic(entity_manager, epic_id)
+
+    # Extract project_id from entity metadata
+    project_id = epic.metadata.get("project_id") if epic.metadata else None
+    await verify_entity_project_access(session, ctx, project_id, required_role=required_role)
+
+    return epic
+
+
 async def _broadcast_epic_update(
     epic_id: str, action: str, data: dict[str, Any], *, org_id: str | None = None
 ) -> None:
@@ -132,14 +159,18 @@ async def _update_project_activity(entity_manager: EntityManager, epic: Any) -> 
 async def start_epic(
     epic_id: str,
     org: Organization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> EpicActionResponse:
     """Start working on an epic (moves to 'in_progress' status)."""
     try:
+        # Verify project access (contributor role required to start work)
+        epic = await _verify_epic_access(epic_id, org, ctx, session, ProjectRole.CONTRIBUTOR)
+
         group_id = str(org.id)
         client = await get_graph_client()
         entity_manager = EntityManager(client, group_id=group_id)
 
-        epic = await _get_epic(entity_manager, epic_id)
         await entity_manager.update(epic_id, {"status": "in_progress"})
         await _update_project_activity(entity_manager, epic)
 
@@ -171,15 +202,18 @@ async def start_epic(
 async def complete_epic(
     epic_id: str,
     org: Organization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
     request: CompleteEpicRequest | None = None,
 ) -> EpicActionResponse:
     """Complete an epic with optional learnings."""
     try:
+        # Verify project access (maintainer role required to complete)
+        epic = await _verify_epic_access(epic_id, org, ctx, session, ProjectRole.MAINTAINER)
+
         group_id = str(org.id)
         client = await get_graph_client()
         entity_manager = EntityManager(client, group_id=group_id)
-
-        epic = await _get_epic(entity_manager, epic_id)
 
         learnings = request.learnings if request else None
         updates = {
@@ -220,15 +254,18 @@ async def complete_epic(
 async def archive_epic(
     epic_id: str,
     org: Organization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
     request: ArchiveEpicRequest | None = None,
 ) -> EpicActionResponse:
     """Archive an epic."""
     try:
+        # Verify project access (maintainer role required to archive)
+        epic = await _verify_epic_access(epic_id, org, ctx, session, ProjectRole.MAINTAINER)
+
         group_id = str(org.id)
         client = await get_graph_client()
         entity_manager = EntityManager(client, group_id=group_id)
-
-        epic = await _get_epic(entity_manager, epic_id)
 
         reason = request.reason if request else None
         await entity_manager.update(epic_id, {"status": "archived"})
@@ -263,14 +300,17 @@ async def update_epic(
     epic_id: str,
     request: UpdateEpicRequest,
     org: Organization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> EpicActionResponse:
     """Update epic fields."""
     try:
+        # Verify project access (contributor role required to update)
+        epic = await _verify_epic_access(epic_id, org, ctx, session, ProjectRole.CONTRIBUTOR)
+
         group_id = str(org.id)
         client = await get_graph_client()
         entity_manager = EntityManager(client, group_id=group_id)
-
-        epic = await _get_epic(entity_manager, epic_id)
 
         # Build update dict from request
         updates = {}
