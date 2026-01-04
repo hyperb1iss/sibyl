@@ -275,6 +275,7 @@ For comprehensive guidance, run `/sibyl` to access the full skill documentation.
         org_id: str,
         project_id: str,
         add_dirs: list[str] | None = None,
+        permission_mode: str | None = None,
     ):
         """Initialize AgentRunner.
 
@@ -284,12 +285,14 @@ For comprehensive guidance, run `/sibyl` to access the full skill documentation.
             org_id: Organization UUID
             project_id: Project UUID
             add_dirs: Additional directories to allow for sandbox access
+            permission_mode: SDK permission mode ("default", "acceptEdits", "bypassPermissions")
         """
         self.entity_manager = entity_manager
         self.worktree_manager = worktree_manager
         self.org_id = org_id
         self.project_id = project_id
         self.add_dirs = add_dirs
+        self.permission_mode = permission_mode
 
         # Active agent instances (in-memory during execution)
         self._active_agents: dict[str, AgentInstance] = {}
@@ -492,6 +495,8 @@ Priority: {task.priority}
         }
         if self.add_dirs:
             sdk_kwargs["add_dirs"] = self.add_dirs
+        if self.permission_mode:
+            sdk_kwargs["permission_mode"] = self.permission_mode
         sdk_options = ClaudeAgentOptions(**sdk_kwargs)  # type: ignore[arg-type]
 
         # Create instance

@@ -213,6 +213,7 @@ async def agent_runner(
             org_id="test_org",
             project_id="test_project",
             add_dirs=[tempfile.gettempdir()],  # Allow temp dirs for test files
+            permission_mode="bypassPermissions",  # Auto-accept all tool usage in tests
         )
 
         # Inject cost tracking
