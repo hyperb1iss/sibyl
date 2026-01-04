@@ -1,19 +1,19 @@
 <h1 align="center">
   <br>
-  🔮 Sibyl
+  Sibyl
   <br>
 </h1>
 
 <p align="center">
-  <strong>Collective Intelligence Runtime for AI Agents</strong>
+  <strong>Persistent Memory & Agent Orchestration for Teams</strong>
 </p>
 
 <p align="center">
-  <a href="#-what-sibyl-does">
+  <a href="#-the-problem">
     <img src="https://img.shields.io/badge/Knowledge-Graph_RAG-e135ff?style=for-the-badge&logo=graphql&logoColor=white" alt="Graph-RAG">
   </a>
-  <a href="#-the-4-tool-api">
-    <img src="https://img.shields.io/badge/Interface-4_Tools-80ffea?style=for-the-badge&logo=openai&logoColor=white" alt="4 Tools">
+  <a href="#-agent-orchestration">
+    <img src="https://img.shields.io/badge/Agents-Orchestration-80ffea?style=for-the-badge&logo=openai&logoColor=white" alt="Agents">
   </a>
   <a href="#-the-cli">
     <img src="https://img.shields.io/badge/CLI-First-ff6ac1?style=for-the-badge&logo=gnubash&logoColor=white" alt="CLI First">
@@ -33,171 +33,245 @@
 </p>
 
 <p align="center">
-  <a href="#-what-sibyl-does">What It Does</a> •
+  <a href="#-the-problem">Why Sibyl?</a> •
   <a href="#-quickstart">Quickstart</a> •
-  <a href="#-monorepo-structure">Structure</a> •
+  <a href="#-agent-orchestration">Agents</a> •
   <a href="#-the-cli">CLI</a> •
-  <a href="#-the-4-tool-api">API</a>
+  <a href="#-web-ui">Web UI</a> •
+  <a href="#-faq">FAQ</a>
 </p>
 
 ---
 
-> **AI Agents:** Sibyl is your extended memory. Search before implementing. Capture what you learn.
-> Track your work. The graph should be smarter after every session.
+## The Problem
 
-## 💎 What Sibyl Does
+Your team's knowledge is scattered. Solutions live in Slack threads. Learnings die in commit
+messages. Every new team member repeats old mistakes. Your AI agents have amnesia—starting fresh
+every session, unable to build on what came before.
 
-Sibyl transforms scattered development knowledge into a queryable graph. Patterns, learnings, tasks,
-documentation—all connected, all searchable by meaning.
+**Sibyl fixes this.**
 
-| Capability            | What You Get                                   |
-| --------------------- | ---------------------------------------------- |
-| **Semantic Search**   | Find knowledge by meaning, not keywords        |
-| **Task Tracking**     | Full workflow with status, blockers, learnings |
-| **Auto-Linking**      | New knowledge connects to related entities     |
-| **Graph Traversal**   | Navigate relationships to discover connections |
-| **Doc Ingestion**     | Crawl and index external documentation         |
-| **Multi-Tenancy**     | Isolated graphs per organization               |
-| **Persistent Memory** | What you learn today helps tomorrow            |
+Sibyl is a **knowledge graph** that connects everything your team learns. A **task system** that
+tracks progress and captures insights. An **agent orchestrator** that lets AI work alongside you
+with persistent memory. Search by meaning, not keywords. Never lose an insight again.
 
-## 🏗️ Monorepo Structure
+## What You Get
 
-```
-sibyl/
-├── apps/
-│   ├── api/              # FastAPI + MCP server
-│   └── web/              # Next.js 16 frontend
-├── packages/python/
-│   ├── sibyl-core/       # Shared library (models, graph, tools)
-│   └── sibyl-cli/        # REST API client CLI
-├── skills/               # Claude Code skills
-├── charts/               # Helm charts for K8s
-└── infra/                # Local infrastructure
-```
+| Capability              | What It Means                                                                                               |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Semantic Search**     | Find knowledge by meaning—"authentication patterns" finds OAuth solutions even if "OAuth" isn't in the text |
+| **Persistent Memory**   | What you learn today helps tomorrow. AI agents remember across sessions                                     |
+| **Agent Orchestration** | Spawn Claude agents that work autonomously with human-in-the-loop approvals                                 |
+| **Task Workflow**       | Full lifecycle tracking with blockers, learnings, and automatic knowledge linking                           |
+| **Doc Ingestion**       | Crawl and index external documentation into your graph                                                      |
+| **Multi-Tenancy**       | Isolated graphs per organization. Enterprise-ready from day one                                             |
+| **Graph Visualization** | Interactive D3 visualization of your knowledge connections                                                  |
 
-**Stack:**
+<p align="center">
+  <img src="docs/images/dashboard.png" alt="Sibyl Dashboard" width="800">
+  <br>
+  <em>Dashboard — Stats, entity distribution, quick actions</em>
+</p>
 
-- **Backend:** Python 3.13 / FastMCP / FastAPI / Graphiti / FalkorDB
-- **Frontend:** Next.js 16 / React 19 / React Query / Tailwind 4
-- **Build:** moonrepo + uv (Python) + pnpm (TypeScript)
-- **Toolchain:** proto (version management)
+<p align="center">
+  <img src="docs/images/graph.png" alt="Knowledge Graph" width="800">
+  <br>
+  <em>Graph — Interactive visualization of knowledge connections</em>
+</p>
 
-See each package's README for detailed documentation:
+<p align="center">
+  <img src="docs/images/tasks.png" alt="Task Workflow" width="800">
+  <br>
+  <em>Tasks — Kanban workflow with search and quick creation</em>
+</p>
 
-- [`apps/api/README.md`](apps/api/README.md) — Server, MCP, REST API, auth
-- [`apps/web/README.md`](apps/web/README.md) — Web UI, components, design system
-- [`packages/python/sibyl-core/README.md`](packages/python/sibyl-core/README.md) — Core library
-- [`packages/python/sibyl-cli/README.md`](packages/python/sibyl-cli/README.md) — CLI client
+## Quickstart
 
-## ⚡ Quickstart
-
-### One-Line Setup
+### Docker (Fastest)
 
 ```bash
-./setup-dev.sh             # Installs proto, moon, toolchain, and dependencies
+# Clone and configure
+git clone https://github.com/hyperb1iss/sibyl.git
+cd sibyl
+cp .env.quickstart.example .env
+
+# Add your API keys to .env
+# SIBYL_OPENAI_API_KEY=sk-...     (required - for embeddings)
+# SIBYL_ANTHROPIC_API_KEY=sk-... (optional - for agents)
+
+# Start everything
+docker compose -f docker-compose.prod.yml up -d
+
+# Verify it's working
+curl http://localhost:3334/api/health
+# → {"status": "healthy", ...}
+
+# Open the web UI
+open http://localhost:3337
 ```
 
-The setup script handles everything: proto (version manager), moon (task runner), Python 3.13, Node
-24, pnpm, uv, and all project dependencies.
-
-### Manual Setup
+### Development Setup
 
 ```bash
-# Install proto (manages toolchain versions)
+# One-line setup (installs proto, moon, toolchain, dependencies)
+./setup-dev.sh
+
+# Or manually:
 curl -fsSL https://moonrepo.dev/install/proto.sh | bash
-proto use                  # Installs node, pnpm, python, uv from .prototools
-
-# Install moon
-proto plugin add moon "https://raw.githubusercontent.com/moonrepo/moon/master/proto-plugin.toml"
+proto use                  # Installs node, pnpm, python, uv
 proto install moon
-
-# Install dependencies
-uv sync                    # Python (from workspace root)
-pnpm install               # Frontend
+uv sync && pnpm install
 
 # Configure
 cp apps/api/.env.example apps/api/.env
 # Add SIBYL_OPENAI_API_KEY + SIBYL_JWT_SECRET
 
 # Launch everything
-moon run dev               # Starts API, worker, and web concurrently
+moon run dev
+
+# Verify
+curl http://localhost:3334/api/health
 ```
 
 **Ports:**
 
-| Service   | Port |
-| --------- | ---- |
-| API + MCP | 3334 |
-| Frontend  | 3337 |
-| FalkorDB  | 6380 |
+| Service   | Port | URL                   |
+| --------- | ---- | --------------------- |
+| API + MCP | 3334 | http://localhost:3334 |
+| Web UI    | 3337 | http://localhost:3337 |
+| FalkorDB  | 6380 | —                     |
 
-## 🪄 The CLI
+## Agent Orchestration
 
-**The CLI is the preferred interface.** Clean JSON output, optimized for AI agents.
+Sibyl's flagship feature: **spawn AI agents that work autonomously** while you review and approve
+their actions.
+
+### How It Works
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Web UI    │────▶│   Sibyl     │────▶│   Claude    │
+│  (approve)  │◀────│  (orchestr) │◀────│   (agent)   │
+└─────────────┘     └─────────────┘     └─────────────┘
+       │                   │                   │
+       │                   ▼                   │
+       │           ┌─────────────┐             │
+       └──────────▶│  Knowledge  │◀────────────┘
+                   │    Graph    │
+                   └─────────────┘
+```
+
+1. **Spawn agents** from the web UI or CLI with a task description
+2. **Agents work autonomously** using Claude SDK with your knowledge graph as context
+3. **Human-in-the-loop approvals** for destructive operations, sensitive files, external APIs
+4. **Progress streams** in real-time via WebSocket to the chat UI
+5. **Checkpoints save state** so agents can resume after interruptions
+
+### Agent Features
+
+- **Task Assignment** — Agents claim tasks and update status automatically
+- **Git Worktrees** — Each agent works in an isolated worktree to prevent conflicts
+- **Approval Queue** — Review and approve/deny agent actions before execution
+- **Cost Tracking** — Monitor token usage and USD cost per agent
+- **Checkpointing** — Save/restore agent state for crash recovery
+- **Multi-Agent** — Multiple agents can collaborate on related tasks
+
+### Spawning an Agent
+
+**Web UI:** Navigate to `/agents` → Click "Spawn Agent" → Describe the task
+
+**CLI:**
 
 ```bash
-# Search for knowledge
+sibyl agent spawn --task task_abc123 "Implement the OAuth flow"
+```
+
+**REST API:**
+
+```bash
+curl -X POST http://localhost:3334/api/agents \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"prompt": "Implement OAuth", "task_id": "task_abc123"}'
+```
+
+## The CLI
+
+The CLI is the power-user interface. Clean output, optimized for scripting and AI agent consumption.
+
+```bash
+# Install globally
+moon run install-cli
+
+# Or use directly
+uv tool install sibyl-cli
+```
+
+### Core Commands
+
+```bash
+# Search your knowledge
 sibyl search "authentication patterns"
 sibyl search "OAuth" --type pattern
 
-# List tasks
-sibyl task list --status todo
-sibyl task list --project proj_abc
+# Add knowledge
+sibyl add "Redis connection pooling" "Pool size must be >= concurrent requests to avoid blocking"
 
-# Capture a learning
-sibyl add "Redis insight" "Connection pool must be >= concurrent requests"
+# Task workflow
+sibyl task list --status todo,doing
+sibyl task start task_abc
+sibyl task complete task_abc --learnings "Key insight: always check TTL first"
 
-# Task lifecycle
-sibyl task start <id>
-sibyl task complete <id> --learnings "Key insight: ..."
+# Explore the graph
+sibyl explore related ent_xyz    # Find connected entities
+sibyl explore communities        # View knowledge clusters
 ```
 
 ### Task Workflow
 
 ```
-backlog ──► todo ──► doing ──► review ──► done ──► archived
+backlog ──▶ todo ──▶ doing ──▶ review ──▶ done ──▶ archived
                        │
                        ▼
                     blocked
 ```
 
-## 🔮 The 4-Tool API
+### Output Formats
 
-Sibyl exposes exactly 4 MCP tools. Simple surface, rich capabilities.
+```bash
+sibyl task list                  # JSON (default, for scripts)
+sibyl task list --table          # Human-friendly table
+sibyl task list --csv            # For spreadsheets
+```
 
-| Tool      | Purpose            | Examples                              |
-| --------- | ------------------ | ------------------------------------- |
-| `search`  | Find by meaning    | Patterns, tasks, docs, errors         |
-| `explore` | Navigate structure | List entities, traverse relationships |
-| `add`     | Create knowledge   | Episodes, patterns, tasks             |
-| `manage`  | Lifecycle & admin  | Task workflow, crawling, health       |
+## Web UI
 
-See [`apps/api/README.md`](apps/api/README.md) for complete API documentation.
+A full admin interface at `http://localhost:3337`:
 
-## 🔐 Auth
+- **Dashboard** — Stats overview, recent activity, quick actions
+- **Agents** — Spawn, monitor, and chat with AI agents
+- **Tasks** — Kanban-style workflow with inline editing
+- **Graph** — Interactive D3 visualization of knowledge connections
+- **Search** — Semantic search with filters
+- **Sources** — Configure documentation crawling
+- **Settings** — Organizations, API keys, preferences
 
-Sibyl uses JWT tokens for web auth and scoped API keys for programmatic access.
+**Built with:** Next.js 16, React 19, React Query, Tailwind CSS, SilkCircuit design system
 
-**Required:** `SIBYL_JWT_SECRET`
+## MCP Integration
 
-**Optional (GitHub OAuth):** `SIBYL_GITHUB_CLIENT_ID`, `SIBYL_GITHUB_CLIENT_SECRET`
+Connect Claude Code, Cursor, or any MCP client to Sibyl:
 
-**API Key Scopes:**
-
-- `mcp` — MCP tool access
-- `api:read` — REST GET/HEAD/OPTIONS
-- `api:write` — REST writes (implies read)
-
-## 🔌 Integration
-
-### Claude Code (MCP)
+### HTTP Mode (Recommended)
 
 ```json
 {
   "mcpServers": {
     "sibyl": {
       "type": "http",
-      "url": "http://localhost:3334/mcp"
+      "url": "http://localhost:3334/mcp",
+      "headers": {
+        "Authorization": "Bearer sk_your_api_key"
+      }
     }
   }
 }
@@ -210,69 +284,163 @@ Sibyl uses JWT tokens for web auth and scoped API keys for programmatic access.
   "mcpServers": {
     "sibyl": {
       "command": "uv",
-      "args": ["--directory", "/path/to/sibyl/apps/api", "run", "sibyl-serve", "-t", "stdio"],
+      "args": ["--directory", "/path/to/sibyl/apps/api", "run", "sibyld", "serve", "-t", "stdio"],
       "env": { "SIBYL_OPENAI_API_KEY": "sk-..." }
     }
   }
 }
 ```
 
-## 🛠️ Development
+### The 4-Tool API
 
-### moonrepo Tasks
+| Tool      | Purpose            | Examples                              |
+| --------- | ------------------ | ------------------------------------- |
+| `search`  | Find by meaning    | Patterns, tasks, docs, errors         |
+| `explore` | Navigate structure | List entities, traverse relationships |
+| `add`     | Create knowledge   | Episodes, patterns, tasks             |
+| `manage`  | Lifecycle & admin  | Task workflow, crawling, health       |
+
+## Architecture
+
+```
+sibyl/
+├── apps/
+│   ├── api/              # FastAPI + MCP server (sibyld)
+│   ├── cli/              # REST client CLI (sibyl)
+│   └── web/              # Next.js 16 frontend
+├── packages/python/
+│   └── sibyl-core/       # Shared library (models, graph, tools)
+├── skills/               # Claude Code skills
+├── charts/               # Helm charts for K8s
+└── docs/                 # Documentation
+```
+
+**Stack:**
+
+- **Backend:** Python 3.13 / FastMCP / FastAPI / Graphiti / FalkorDB
+- **Frontend:** Next.js 16 / React 19 / React Query / Tailwind 4
+- **Database:** FalkorDB (graph) + PostgreSQL (relational)
+- **Build:** moonrepo + uv (Python) + pnpm (TypeScript)
+- **Agents:** Claude SDK with human-in-the-loop approvals
+
+## Authentication
+
+### JWT Sessions (Web UI)
 
 ```bash
-# Full stack
-moon run dev              # Start everything
-moon run stop             # Stop everything
+SIBYL_JWT_SECRET=your-secret-key    # Required
+SIBYL_JWT_EXPIRY_HOURS=24            # Optional
+```
+
+### API Keys (Programmatic Access)
+
+```bash
+# Create via CLI
+sibyl auth api-key create --name "CI/CD" --scopes mcp,api:read
+
+# Scopes: mcp, api:read, api:write
+```
+
+### OAuth (GitHub)
+
+```bash
+SIBYL_GITHUB_CLIENT_ID=...
+SIBYL_GITHUB_CLIENT_SECRET=...
+```
+
+## Deployment
+
+### Docker Compose (Production)
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+### Kubernetes (Helm)
+
+```bash
+helm install sibyl ./charts/sibyl \
+  --set backend.existingSecret=sibyl-secrets \
+  --set backend.database.existingSecret=sibyl-postgres
+```
+
+See [`docs/deployment/`](docs/deployment/) for detailed guides:
+
+- [Docker Compose](docs/deployment/docker-compose.md)
+- [Kubernetes](docs/deployment/kubernetes.md)
+- [Environment Variables](docs/deployment/environment.md)
+
+## Development
+
+```bash
+# Start everything
+moon run dev
 
 # Individual services
-moon run dev-api          # API + worker only
+moon run dev-api          # API + worker
 moon run dev-web          # Frontend only
 
-# Per-project
+# Quality checks
 moon run api:test         # Run API tests
-moon run api:lint         # Lint API code
-moon run web:build        # Build frontend
-moon run core:check       # Lint + typecheck + test core
+moon run api:lint         # Lint
+moon run web:typecheck    # TypeScript check
+moon run core:check       # Full check on core library
 
-# Docker
-moon run docker-up        # Start FalkorDB
-moon run docker-down      # Stop FalkorDB
-
-# Installation
-moon run install-cli      # Install sibyl CLI globally
-moon run install-skills   # Install Claude Code skills
+# Database
+moon run docker-up        # Start FalkorDB + PostgreSQL
+moon run docker-down      # Stop databases
 ```
 
-### Direct Commands
-
-```bash
-# In apps/api/
-uv run pytest             # Run tests
-uv run ruff check src     # Lint
-uv run sibyl-serve        # Start server
-
-# In apps/web/
-pnpm dev                  # Start dev server
-pnpm build                # Production build
-pnpm biome check .        # Lint
-```
-
-## 🧪 Entity Types
+## Entity Types
 
 | Type       | What It Holds                   |
 | ---------- | ------------------------------- |
 | `pattern`  | Reusable coding patterns        |
 | `episode`  | Temporal learnings, discoveries |
-| `task`     | Work items with workflow        |
+| `task`     | Work items with full workflow   |
 | `project`  | Container for related work      |
 | `epic`     | Feature-level grouping          |
 | `rule`     | Sacred constraints, invariants  |
 | `source`   | Knowledge origins (URLs, repos) |
 | `document` | Crawled/ingested content        |
+| `agent`    | AI agent records and state      |
 
-## 💜 Philosophy
+## FAQ
+
+### Who is Sibyl for?
+
+**Teams** who want persistent, searchable knowledge. **Solo developers** building with AI who want
+agents that remember. **Anyone** tired of re-solving the same problems.
+
+### Is this just for AI agents?
+
+No. Sibyl is a knowledge management system first. AI agents are a powerful use case, but teams use
+it for documentation, task tracking, and collaborative learning without any AI involvement.
+
+### How does it compare to Mem0 / LangMem / similar?
+
+Sibyl is **self-hosted and open source**—you own your data. It includes a full **task workflow
+system**, not just memory. It has a **web UI** for humans, not just APIs for machines. And it
+provides **agent orchestration** with approvals, not just memory storage.
+
+### What LLM APIs do I need?
+
+- **OpenAI** (required): For embeddings (`text-embedding-3-small`)
+- **Anthropic** (optional): For agent orchestration and entity extraction
+
+A typical solo developer uses ~$5/month in API costs.
+
+### Can multiple people collaborate?
+
+Yes. Organizations have isolated graphs with role-based access. Multiple users can share knowledge,
+assign tasks, and collaborate on the same graph.
+
+### Is it production-ready?
+
+Sibyl is in active development (v0.1.x). The core features work well, but expect rough edges. We use
+it daily for our own development.
+
+## Philosophy
 
 ### Search Before Implementing
 
@@ -307,6 +475,19 @@ sibyl task complete <id> --learnings "Key insight: ..."
 
 The graph should be smarter after every session.
 
+## Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+```bash
+# Fork, clone, then:
+./setup-dev.sh
+moon run dev
+
+# Make changes, then:
+moon run :check           # Lint + typecheck + test
+```
+
 ## License
 
 Apache 2.0 — See [LICENSE](LICENSE)
@@ -314,14 +495,7 @@ Apache 2.0 — See [LICENSE](LICENSE)
 ---
 
 <p align="center">
-  Created by <a href="https://hyperbliss.tech">Stefanie Jane</a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/hyperb1iss">
-    <img src="https://img.shields.io/badge/GitHub-hyperb1iss-181717?style=for-the-badge&logo=github" alt="GitHub">
-  </a>
-  <a href="https://bsky.app/profile/hyperbliss.tech">
-    <img src="https://img.shields.io/badge/Bluesky-@hyperbliss.tech-1185fe?style=for-the-badge&logo=bluesky" alt="Bluesky">
-  </a>
+  <sub>
+    ✦ Built with obsession by <a href="https://hyperbliss.tech"><strong>Hyperbliss Technologies</strong></a> ✦
+  </sub>
 </p>
