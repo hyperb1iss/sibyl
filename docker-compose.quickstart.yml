@@ -1,0 +1,161 @@
+# ============================================================================
+# Sibyl Quickstart - For Individual Developers
+# ============================================================================
+#
+# Get running in 5 minutes with pre-built Docker images.
+#
+# Quick Start:
+#   1. curl -fsSL https://get.sibyl.dev | bash
+#   Or manually:
+#   2. Copy this file and create .env with your API keys
+#   3. docker compose -f docker-compose.quickstart.yml up -d
+#   4. Open http://localhost:3337
+#
+# Required Environment Variables:
+#   SIBYL_OPENAI_API_KEY      - For embeddings/semantic search
+#   SIBYL_ANTHROPIC_API_KEY   - For entity extraction and agents
+#
+# The JWT secret is auto-generated if not provided.
+#
+# ============================================================================
+
+services:
+  # ==========================================================================
+  # Sibyl Backend (API + MCP Server)
+  # ==========================================================================
+  api:
+    image: ghcr.io/hyperb1iss/sibyl-api:latest
+    container_name: sibyl-api
+    ports:
+      - "3334:3334"
+    depends_on:
+      falkordb:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database connections (internal Docker network)
+      SIBYL_POSTGRES_HOST: postgres
+      SIBYL_POSTGRES_PORT: 5432
+      SIBYL_POSTGRES_USER: sibyl
+      SIBYL_POSTGRES_PASSWORD: ${SIBYL_POSTGRES_PASSWORD:-sibyl_quickstart}
+      SIBYL_POSTGRES_DB: sibyl
+      SIBYL_FALKORDB_HOST: falkordb
+      SIBYL_FALKORDB_PORT: 6379
+      SIBYL_FALKORDB_PASSWORD: ${SIBYL_FALKORDB_PASSWORD:-sibyl_quickstart}
+      # Auth - auto-generate if not provided
+      SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET:-}
+      SIBYL_PUBLIC_URL: http://localhost:3337
+      # AI Providers (REQUIRED)
+      SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?Set SIBYL_OPENAI_API_KEY}
+      SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:?Set SIBYL_ANTHROPIC_API_KEY}
+      SIBYL_LLM_PROVIDER: anthropic
+      SIBYL_LLM_MODEL: claude-haiku-4-5
+      # Server config
+      SIBYL_SERVER_HOST: 0.0.0.0
+      SIBYL_SERVER_PORT: 3334
+      SIBYL_ENVIRONMENT: production
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:3334/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ==========================================================================
+  # Background Worker (crawling, entity extraction)
+  # ==========================================================================
+  worker:
+    image: ghcr.io/hyperb1iss/sibyl-api:latest
+    container_name: sibyl-worker
+    command: ["sibyld", "worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      SIBYL_POSTGRES_HOST: postgres
+      SIBYL_POSTGRES_PORT: 5432
+      SIBYL_POSTGRES_USER: sibyl
+      SIBYL_POSTGRES_PASSWORD: ${SIBYL_POSTGRES_PASSWORD:-sibyl_quickstart}
+      SIBYL_POSTGRES_DB: sibyl
+      SIBYL_FALKORDB_HOST: falkordb
+      SIBYL_FALKORDB_PORT: 6379
+      SIBYL_FALKORDB_PASSWORD: ${SIBYL_FALKORDB_PASSWORD:-sibyl_quickstart}
+      SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?Set SIBYL_OPENAI_API_KEY}
+      SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:?Set SIBYL_ANTHROPIC_API_KEY}
+      SIBYL_LLM_PROVIDER: anthropic
+      SIBYL_LLM_MODEL: claude-haiku-4-5
+    restart: unless-stopped
+
+  # ==========================================================================
+  # Frontend (Next.js Web UI)
+  # ==========================================================================
+  web:
+    image: ghcr.io/hyperb1iss/sibyl-web:latest
+    container_name: sibyl-web
+    ports:
+      - "3337:3337"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3334
+      NODE_ENV: production
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3337/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ==========================================================================
+  # FalkorDB (Knowledge Graph Database)
+  # ==========================================================================
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: sibyl-falkordb
+    ports:
+      - "6380:6379"   # Redis protocol
+      - "3335:3000"   # Browser UI (optional)
+    volumes:
+      - sibyl_falkordb:/data
+    environment:
+      FALKORDB_ARGS: --requirepass ${SIBYL_FALKORDB_PASSWORD:-sibyl_quickstart}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${SIBYL_FALKORDB_PASSWORD:-sibyl_quickstart}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ==========================================================================
+  # PostgreSQL (User data, embeddings, crawled documents)
+  # ==========================================================================
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: sibyl-postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - sibyl_postgres:/var/lib/postgresql
+    environment:
+      POSTGRES_USER: sibyl
+      POSTGRES_PASSWORD: ${SIBYL_POSTGRES_PASSWORD:-sibyl_quickstart}
+      POSTGRES_DB: sibyl
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sibyl -d sibyl"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  sibyl_falkordb:
+    name: sibyl_falkordb
+  sibyl_postgres:
+    name: sibyl_postgres
+
+networks:
+  default:
+    name: sibyl
