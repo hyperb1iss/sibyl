@@ -11,6 +11,7 @@
 # Environment Variables (required):
 #   SIBYL_JWT_SECRET          - Random secret for JWT signing (generate with: openssl rand -hex 32)
 #   SIBYL_OPENAI_API_KEY      - OpenAI API key for embeddings
+#   SIBYL_ANTHROPIC_API_KEY   - Anthropic API key for entity extraction and agents
 #
 # Environment Variables (optional):
 #   SIBYL_POSTGRES_PASSWORD   - PostgreSQL password (default: sibyl_dev)
@@ -43,6 +44,10 @@ services:
       SIBYL_SERVER_URL: ${SIBYL_SERVER_URL:-http://localhost:3334}
       # OpenAI (REQUIRED for embeddings)
       SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?Set SIBYL_OPENAI_API_KEY in .env}
+      # Anthropic (REQUIRED for entity extraction and agents)
+      SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:?Set SIBYL_ANTHROPIC_API_KEY in .env}
+      SIBYL_LLM_PROVIDER: anthropic
+      SIBYL_LLM_MODEL: claude-haiku-4-5
       # Server config
       SIBYL_SERVER_HOST: 0.0.0.0
       SIBYL_SERVER_PORT: 3334
@@ -72,6 +77,35 @@ services:
       # API URL for client-side requests
       NEXT_PUBLIC_API_URL: ${SIBYL_SERVER_URL:-http://localhost:3334}
       NODE_ENV: production
+    restart: unless-stopped
+
+  # ==========================================================================
+  # Background Worker (arq)
+  # ==========================================================================
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: sibyl-worker
+    command: ["sibyld", "worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      falkordb:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      # Database connections (internal network)
+      SIBYL_DATABASE_URL: postgresql://${SIBYL_POSTGRES_USER:-sibyl}:${SIBYL_POSTGRES_PASSWORD:-sibyl_dev}@postgres:5432/${SIBYL_POSTGRES_DB:-sibyl}
+      SIBYL_FALKORDB_HOST: falkordb
+      SIBYL_FALKORDB_PORT: 6379
+      SIBYL_FALKORDB_PASSWORD: ${FALKORDB_PASSWORD:-conventions}
+      # AI Providers (REQUIRED for entity extraction)
+      SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?Set SIBYL_OPENAI_API_KEY in .env}
+      SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:?Set SIBYL_ANTHROPIC_API_KEY in .env}
+      SIBYL_LLM_PROVIDER: anthropic
+      SIBYL_LLM_MODEL: claude-haiku-4-5
     restart: unless-stopped
 
   # ==========================================================================
