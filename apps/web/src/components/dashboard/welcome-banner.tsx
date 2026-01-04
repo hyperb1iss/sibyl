@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowRight,
   BookOpen,
@@ -19,6 +19,9 @@ const WELCOME_BANNER_ENTITY_THRESHOLD = 10;
 /** Duration to show "Copied!" feedback in milliseconds */
 const COPY_FEEDBACK_DURATION_MS = 2000;
 
+/** localStorage key for banner dismissal state */
+const BANNER_DISMISSED_KEY = 'sibyl:welcome-banner-dismissed';
+
 interface WelcomeBannerProps {
   totalEntities: number;
   onDismiss?: () => void;
@@ -33,6 +36,14 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
     enabled: totalEntities === 0,
   });
 
+  // Load dismissal state from localStorage on mount
+  useEffect(() => {
+    const dismissed = localStorage.getItem(BANNER_DISMISSED_KEY);
+    if (dismissed === 'true') {
+      setIsDismissed(true);
+    }
+  }, []);
+
   // Don't show if dismissed or user has sufficient entities
   if (isDismissed || totalEntities > WELCOME_BANNER_ENTITY_THRESHOLD) {
     return null;
@@ -40,6 +51,7 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
 
   const handleDismiss = () => {
     setIsDismissed(true);
+    localStorage.setItem(BANNER_DISMISSED_KEY, 'true');
     onDismiss?.();
   };
 
