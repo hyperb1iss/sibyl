@@ -13,6 +13,12 @@ import {
 } from '@/components/ui/icons';
 import { useMcpCommand, useSetupStatus } from '@/lib/hooks';
 
+/** Minimum entities before automatically hiding the welcome banner */
+const WELCOME_BANNER_ENTITY_THRESHOLD = 10;
+
+/** Duration to show "Copied!" feedback in milliseconds */
+const COPY_FEEDBACK_DURATION_MS = 2000;
+
 interface WelcomeBannerProps {
   totalEntities: number;
   onDismiss?: () => void;
@@ -27,8 +33,8 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
     enabled: totalEntities === 0,
   });
 
-  // Don't show if dismissed or user has entities
-  if (isDismissed || totalEntities > 10) {
+  // Don't show if dismissed or user has sufficient entities
+  if (isDismissed || totalEntities > WELCOME_BANNER_ENTITY_THRESHOLD) {
     return null;
   }
 
@@ -41,7 +47,7 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
     if (mcpData?.command) {
       await navigator.clipboard.writeText(mcpData.command);
       setCopiedMcp(true);
-      setTimeout(() => setCopiedMcp(false), 2000);
+      setTimeout(() => setCopiedMcp(false), COPY_FEEDBACK_DURATION_MS);
     }
   };
 

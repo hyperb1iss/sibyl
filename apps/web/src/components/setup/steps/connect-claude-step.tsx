@@ -12,6 +12,9 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { useMcpCommand } from '@/lib/hooks';
 
+/** Duration to show "Copied!" feedback in milliseconds */
+const COPY_FEEDBACK_DURATION_MS = 2000;
+
 interface ConnectClaudeStepProps {
   onFinish: () => void;
 }
@@ -24,7 +27,7 @@ export function ConnectClaudeStep({ onFinish }: ConnectClaudeStepProps) {
     if (mcpData?.command) {
       await navigator.clipboard.writeText(mcpData.command);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => setCopied(false), COPY_FEEDBACK_DURATION_MS);
     }
   };
 
