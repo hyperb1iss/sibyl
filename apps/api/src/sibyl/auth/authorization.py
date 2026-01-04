@@ -479,9 +479,7 @@ async def verify_entity_project_access(
 
     # Resolve project and check access
     try:
-        project = await resolve_project_by_graph_id(
-            session, ctx.organization.id, entity_project_id
-        )
+        project = await resolve_project_by_graph_id(session, ctx.organization.id, entity_project_id)
     except HTTPException:
         # Project not registered in Postgres yet - allow org members
         # This handles the migration period before all projects are synced

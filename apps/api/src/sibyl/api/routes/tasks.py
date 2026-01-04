@@ -58,6 +58,7 @@ async def _verify_task_access(
     project_id = entity.metadata.get("project_id") if entity.metadata else None
     await verify_entity_project_access(session, ctx, project_id, required_role=required_role)
 
+
 router = APIRouter(
     prefix="/tasks",
     tags=["tasks"],

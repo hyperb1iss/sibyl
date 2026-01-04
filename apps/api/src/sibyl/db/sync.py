@@ -100,7 +100,9 @@ async def sync_projects_from_graph(
             if suffix > 100:
                 log.error("slug_collision_limit", graph_id=graph_id, name=name)
                 result["errors"] += 1
-                result["details"].append({"graph_id": graph_id, "name": name, "error": "Slug collision"})
+                result["details"].append(
+                    {"graph_id": graph_id, "name": name, "error": "Slug collision"}
+                )
                 break
 
         if suffix > 100:
@@ -109,7 +111,9 @@ async def sync_projects_from_graph(
         if dry_run:
             log.info("dry_run_would_create", graph_id=graph_id, name=name, slug=slug)
             result["created"] += 1
-            result["details"].append({"graph_id": graph_id, "name": name, "slug": slug, "status": "would_create"})
+            result["details"].append(
+                {"graph_id": graph_id, "name": name, "slug": slug, "status": "would_create"}
+            )
             continue
 
         # Create new project
@@ -129,13 +133,15 @@ async def sync_projects_from_graph(
 
             log.info("project_synced", graph_id=graph_id, name=name, postgres_id=str(project.id))
             result["created"] += 1
-            result["details"].append({
-                "graph_id": graph_id,
-                "name": name,
-                "slug": slug,
-                "postgres_id": str(project.id),
-                "status": "created",
-            })
+            result["details"].append(
+                {
+                    "graph_id": graph_id,
+                    "name": name,
+                    "slug": slug,
+                    "postgres_id": str(project.id),
+                    "status": "created",
+                }
+            )
             existing_ids.add(graph_id)
 
         except Exception as e:

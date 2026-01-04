@@ -676,7 +676,9 @@ class Project(TimestampMixin, table=True):
     __tablename__ = "projects"  # type: ignore[assignment]
     __table_args__ = (
         Index("ix_projects_org_slug_unique", "organization_id", "slug", unique=True),
-        Index("ix_projects_org_graph_id_unique", "organization_id", "graph_project_id", unique=True),
+        Index(
+            "ix_projects_org_graph_id_unique", "organization_id", "graph_project_id", unique=True
+        ),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -782,7 +784,9 @@ class ProjectMember(TimestampMixin, table=True):
     )
 
     # Timestamps
-    joined_at: datetime = Field(default_factory=utcnow_naive, description="When user joined project")
+    joined_at: datetime = Field(
+        default_factory=utcnow_naive, description="When user joined project"
+    )
 
     project: Project = Relationship(back_populates="members")
     user: User = Relationship()
@@ -835,7 +839,9 @@ class ApiKeyProjectScope(TimestampMixin, table=True):
 
     __tablename__ = "api_key_project_scopes"  # type: ignore[assignment]
     __table_args__ = (
-        Index("ix_api_key_project_scopes_key_project_unique", "api_key_id", "project_id", unique=True),
+        Index(
+            "ix_api_key_project_scopes_key_project_unique", "api_key_id", "project_id", unique=True
+        ),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)

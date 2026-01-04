@@ -44,7 +44,9 @@ class ApiKeyValidation(BaseModel):
     openai_valid: bool = Field(description="True if OpenAI API key works")
     anthropic_valid: bool = Field(description="True if Anthropic API key works")
     openai_error: str | None = Field(default=None, description="Error message if OpenAI fails")
-    anthropic_error: str | None = Field(default=None, description="Error message if Anthropic fails")
+    anthropic_error: str | None = Field(
+        default=None, description="Error message if Anthropic fails"
+    )
 
 
 async def _check_openai_key() -> tuple[bool, str | None]:

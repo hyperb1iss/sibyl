@@ -33,12 +33,12 @@ from sibyl_cli.document import app as document_app
 from sibyl_cli.entity import app as entity_app
 from sibyl_cli.epic import app as epic_app
 from sibyl_cli.explore import app as explore_app
+from sibyl_cli.local import app as local_app
 from sibyl_cli.org import app as org_app
 from sibyl_cli.project import app as project_app
 from sibyl_cli.source import app as source_app
 from sibyl_cli.state import set_context_override
 from sibyl_cli.task import app as task_app
-from sibyl_cli.local import app as local_app
 
 # Main app
 app = typer.Typer(

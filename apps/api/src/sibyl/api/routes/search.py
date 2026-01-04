@@ -65,7 +65,11 @@ async def search(
 
         # If user specified a project, validate they have access (if filtering is active)
         project_filter = request.project
-        if project_filter and accessible_projects is not None and project_filter not in accessible_projects:
+        if (
+            project_filter
+            and accessible_projects is not None
+            and project_filter not in accessible_projects
+        ):
             raise ProjectAccessDeniedError(
                 project_id=project_filter,
                 required_role="viewer",
@@ -129,7 +133,11 @@ async def explore(
 
         # If user specified a project, validate they have access (if filtering is active)
         project_filter = request.project
-        if project_filter and accessible_projects is not None and project_filter not in accessible_projects:
+        if (
+            project_filter
+            and accessible_projects is not None
+            and project_filter not in accessible_projects
+        ):
             raise ProjectAccessDeniedError(
                 project_id=project_filter,
                 required_role="viewer",

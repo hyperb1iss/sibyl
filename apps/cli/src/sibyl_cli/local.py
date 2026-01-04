@@ -14,8 +14,6 @@ import os
 import secrets
 import shutil
 import subprocess
-import sys
-import tempfile
 import time
 import webbrowser
 from pathlib import Path
@@ -83,7 +81,12 @@ COMPOSE_CONFIG = {
                 "SIBYL_ENVIRONMENT": "production",
             },
             "healthcheck": {
-                "test": ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:3334/api/health')"],
+                "test": [
+                    "CMD",
+                    "python",
+                    "-c",
+                    "import httpx; httpx.get('http://localhost:3334/api/health')",
+                ],
                 "interval": "10s",
                 "timeout": "5s",
                 "retries": 5,
@@ -142,7 +145,13 @@ COMPOSE_CONFIG = {
                 "FALKORDB_ARGS": "--requirepass ${SIBYL_FALKORDB_PASSWORD:-sibyl_local}",
             },
             "healthcheck": {
-                "test": ["CMD", "redis-cli", "-a", "${SIBYL_FALKORDB_PASSWORD:-sibyl_local}", "ping"],
+                "test": [
+                    "CMD",
+                    "redis-cli",
+                    "-a",
+                    "${SIBYL_FALKORDB_PASSWORD:-sibyl_local}",
+                    "ping",
+                ],
                 "interval": "5s",
                 "timeout": "3s",
                 "retries": 5,
@@ -296,7 +305,9 @@ def prompt_api_keys() -> tuple[str, str]:
     console.print()
 
     # OpenAI
-    console.print(f"[{NEON_CYAN}]OpenAI API Key[/{NEON_CYAN}] [dim](https://platform.openai.com/api-keys)[/dim]")
+    console.print(
+        f"[{NEON_CYAN}]OpenAI API Key[/{NEON_CYAN}] [dim](https://platform.openai.com/api-keys)[/dim]"
+    )
     openai_key = typer.prompt("  Enter key", hide_input=False)
 
     if not openai_key:

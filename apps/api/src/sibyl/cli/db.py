@@ -1050,7 +1050,9 @@ def sync_projects(  # noqa: PLR0915
     ] = "",
     owner_id: Annotated[
         str,
-        typer.Option("--owner-id", help="User UUID to own synced projects (uses org admin if not specified)"),
+        typer.Option(
+            "--owner-id", help="User UUID to own synced projects (uses org admin if not specified)"
+        ),
     ] = "",
     dry_run: Annotated[
         bool,
@@ -1116,7 +1118,9 @@ def sync_projects(  # noqa: PLR0915
                         select(OrganizationMember.user_id)
                         .where(
                             OrganizationMember.organization_id == org_uuid,
-                            OrganizationMember.role.in_([OrganizationRole.OWNER, OrganizationRole.ADMIN]),
+                            OrganizationMember.role.in_(
+                                [OrganizationRole.OWNER, OrganizationRole.ADMIN]
+                            ),
                         )
                         .limit(1)
                     )

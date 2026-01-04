@@ -116,8 +116,8 @@ services:
     image: falkordb/falkordb:latest
     container_name: sibyl-falkordb
     ports:
-      - "6380:6379"   # Redis protocol
-      - "3335:3000"   # Browser UI (optional)
+      - "6380:6379" # Redis protocol
+      - "3335:3000" # Browser UI (optional)
     volumes:
       - sibyl_falkordb:/data
     environment:

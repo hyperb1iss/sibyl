@@ -1,7 +1,5 @@
 """Tests for structured authorization errors."""
 
-import pytest
-
 from sibyl.auth.errors import (
     AuthErrorCode,
     AuthorizationError,
