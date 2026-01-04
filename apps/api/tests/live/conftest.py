@@ -5,12 +5,13 @@ Provides fixtures and configuration for tests that call real LLM APIs.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import subprocess
+import tempfile
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, AsyncGenerator
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -89,7 +90,7 @@ class CostTracker:
         """Record a cost and check limit."""
         self.spent_usd += cost
         if self.spent_usd > self.limit_usd:
-            raise CostLimitExceeded(
+            raise CostLimitExceededError(
                 f"Test cost ${self.spent_usd:.4f} exceeds limit ${self.limit_usd:.2f}"
             )
 
@@ -98,7 +99,7 @@ class CostTracker:
         return f"Total test cost: ${self.spent_usd:.4f} / ${self.limit_usd:.2f}"
 
 
-class CostLimitExceeded(Exception):
+class CostLimitExceededError(Exception):
     """Raised when test costs exceed the configured limit."""
 
 
@@ -120,11 +121,11 @@ def cost_tracker(request: pytest.FixtureRequest) -> CostTracker:
     tracker = CostTracker(limit_usd=limit)
     yield tracker
     # Print cost summary at end of session
-    print(f"\n{tracker.report()}")
+    print(f"\n{tracker.report()}")  # noqa: T201
 
 
 @pytest.fixture
-async def tmp_git_repo(tmp_path: Path) -> AsyncGenerator[Path, None]:
+async def tmp_git_repo(tmp_path: Path) -> AsyncGenerator[Path]:
     """Create a temporary git repository for testing.
 
     Yields the path to an initialized git repo with one commit.
@@ -132,16 +133,16 @@ async def tmp_git_repo(tmp_path: Path) -> AsyncGenerator[Path, None]:
     repo_path = tmp_path / "test_repo"
     repo_path.mkdir()
 
-    # Initialize repo
-    subprocess.run(["git", "init"], cwd=repo_path, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@example.com"],
+    # Initialize repo (sync subprocess is fine for test fixtures)
+    subprocess.run(["git", "init"], cwd=repo_path, check=True, capture_output=True)  # noqa: S607, ASYNC221
+    subprocess.run(  # noqa: ASYNC221
+        ["git", "config", "user.email", "test@example.com"],  # noqa: S607
         cwd=repo_path,
         check=True,
         capture_output=True,
     )
-    subprocess.run(
-        ["git", "config", "user.name", "Test User"],
+    subprocess.run(  # noqa: ASYNC221
+        ["git", "config", "user.name", "Test User"],  # noqa: S607
         cwd=repo_path,
         check=True,
         capture_output=True,
@@ -149,19 +150,19 @@ async def tmp_git_repo(tmp_path: Path) -> AsyncGenerator[Path, None]:
 
     # Create initial commit
     (repo_path / "README.md").write_text("# Test Repo\n")
-    subprocess.run(["git", "add", "."], cwd=repo_path, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "Initial commit"],
+    subprocess.run(["git", "add", "."], cwd=repo_path, check=True, capture_output=True)  # noqa: S607, ASYNC221
+    subprocess.run(  # noqa: ASYNC221
+        ["git", "commit", "-m", "Initial commit"],  # noqa: S607
         cwd=repo_path,
         check=True,
         capture_output=True,
     )
 
-    yield repo_path
+    return repo_path
 
 
 @pytest.fixture
-async def worktree_manager(tmp_git_repo: Path) -> AsyncGenerator["WorktreeManager", None]:
+async def worktree_manager(tmp_git_repo: Path) -> AsyncGenerator[WorktreeManager]:
     """Create a WorktreeManager with a temporary repo."""
     from sibyl.agents.worktree import WorktreeManager
 
@@ -186,7 +187,7 @@ async def agent_runner(
     tmp_git_repo: Path,
     live_model_config: LiveModelConfig,
     cost_tracker: CostTracker,
-) -> AsyncGenerator["AgentRunner", None]:
+) -> AsyncGenerator[AgentRunner]:
     """Create an AgentRunner for live testing.
 
     This creates a real runner that will make API calls.
@@ -211,6 +212,7 @@ async def agent_runner(
             worktree_manager=worktree_manager,
             org_id="test_org",
             project_id="test_project",
+            add_dirs=[tempfile.gettempdir()],  # Allow temp dirs for test files
         )
 
         # Inject cost tracking

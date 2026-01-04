@@ -274,6 +274,7 @@ For comprehensive guidance, run `/sibyl` to access the full skill documentation.
         worktree_manager: WorktreeManager,
         org_id: str,
         project_id: str,
+        add_dirs: list[str] | None = None,
     ):
         """Initialize AgentRunner.
 
@@ -282,11 +283,13 @@ For comprehensive guidance, run `/sibyl` to access the full skill documentation.
             worktree_manager: Worktree manager for agent isolation
             org_id: Organization UUID
             project_id: Project UUID
+            add_dirs: Additional directories to allow for sandbox access
         """
         self.entity_manager = entity_manager
         self.worktree_manager = worktree_manager
         self.org_id = org_id
         self.project_id = project_id
+        self.add_dirs = add_dirs
 
         # Active agent instances (in-memory during execution)
         self._active_agents: dict[str, AgentInstance] = {}
@@ -477,15 +480,19 @@ Priority: {task.priority}
         # Create SDK options
         # - setting_sources: Load Claude Code config from user (~/.claude) and project (.claude)
         # - can_use_tool: Integrate with SDK's permission system via our approval UI
-        sdk_options = ClaudeAgentOptions(
-            cwd=cwd,
-            system_prompt=system_prompt,
-            hooks=merged_hooks,  # type: ignore[arg-type]
-            setting_sources=["user", "project"],
-            can_use_tool=approval_service.create_can_use_tool_callback()
+        # - add_dirs: Additional sandbox-allowed directories (e.g., temp dirs for tests)
+        sdk_kwargs: dict[str, Any] = {
+            "cwd": cwd,
+            "system_prompt": system_prompt,
+            "hooks": merged_hooks,
+            "setting_sources": ["user", "project"],
+            "can_use_tool": approval_service.create_can_use_tool_callback()
             if approval_service
             else None,
-        )
+        }
+        if self.add_dirs:
+            sdk_kwargs["add_dirs"] = self.add_dirs
+        sdk_options = ClaudeAgentOptions(**sdk_kwargs)  # type: ignore[arg-type]
 
         # Create instance
         instance = AgentInstance(
@@ -819,8 +826,9 @@ class AgentInstance:
                     # Track usage from ResultMessage
                     if isinstance(message, ResultMessage):
                         if message.usage:
-                            self._tokens_used += getattr(message.usage, "input_tokens", 0)
-                            self._tokens_used += getattr(message.usage, "output_tokens", 0)
+                            # usage is a dict with 'input_tokens' and 'output_tokens' keys
+                            self._tokens_used += message.usage.get("input_tokens", 0)
+                            self._tokens_used += message.usage.get("output_tokens", 0)
                         if message.total_cost_usd:
                             self._cost_usd = message.total_cost_usd
                         if message.session_id:
