@@ -345,6 +345,31 @@ export interface McpCommandResponse {
 }
 
 // =============================================================================
+// Settings Types
+// =============================================================================
+
+export interface SettingInfo {
+  configured: boolean;
+  source: 'database' | 'environment' | 'none';
+  is_secret: boolean;
+  masked: string | null;
+}
+
+export interface SettingsResponse {
+  settings: Record<string, SettingInfo>;
+}
+
+export interface UpdateSettingsRequest {
+  openai_api_key?: string;
+  anthropic_api_key?: string;
+}
+
+export interface UpdateSettingsResponse {
+  updated: string[];
+  validation: Record<string, { valid: boolean; error: string | null }>;
+}
+
+// =============================================================================
 // Metrics Types
 // =============================================================================
 
@@ -2169,5 +2194,16 @@ export const api = {
     validateKeys: () => fetchApi<ApiKeyValidation>('/setup/validate-keys'),
 
     mcpCommand: () => fetchApi<McpCommandResponse>('/setup/mcp-command'),
+  },
+
+  // System settings (no auth required during setup mode)
+  settings: {
+    get: () => fetchApi<SettingsResponse>('/settings'),
+
+    update: (request: UpdateSettingsRequest) =>
+      fetchApi<UpdateSettingsResponse>('/settings', {
+        method: 'PATCH',
+        body: JSON.stringify(request),
+      }),
   },
 };

@@ -24,6 +24,7 @@ import type {
   SpawnAgentRequest,
   TaskPriority,
   TaskStatus,
+  UpdateSettingsRequest,
 } from './api';
 import { api } from './api';
 import { TIMING } from './constants';
@@ -87,6 +88,9 @@ export const queryKeys = {
     status: ['setup', 'status'] as const,
     validation: ['setup', 'validation'] as const,
     mcpCommand: ['setup', 'mcp-command'] as const,
+  },
+  settings: {
+    all: ['settings'] as const,
   },
   tasks: {
     all: ['tasks'] as const,
@@ -1957,5 +1961,38 @@ export function useMcpCommand(options?: { enabled?: boolean }) {
     queryFn: () => api.setup.mcpCommand(),
     enabled: options?.enabled ?? true,
     staleTime: Infinity, // Never stale (URL doesn't change)
+  });
+}
+
+// =============================================================================
+// Settings Hooks
+// =============================================================================
+
+/**
+ * Get system settings (API key configuration status).
+ */
+export function useSettings(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.settings.all,
+    queryFn: () => api.settings.get(),
+    enabled: options?.enabled ?? true,
+    staleTime: 30000, // Cache for 30 seconds
+  });
+}
+
+/**
+ * Update system settings (save API keys to database).
+ */
+export function useUpdateSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (request: UpdateSettingsRequest) => api.settings.update(request),
+    onSuccess: () => {
+      // Invalidate settings and setup status queries
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.setup.status });
+      queryClient.invalidateQueries({ queryKey: queryKeys.setup.validation });
+    },
   });
 }
