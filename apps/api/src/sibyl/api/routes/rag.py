@@ -35,6 +35,7 @@ from sibyl.api.schemas import (
 )
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, require_org_role
+from sibyl.auth.errors import NoOrgContextError
 from sibyl.crawler.embedder import embed_text
 from sibyl.db import (
     CrawledDocument,
@@ -78,7 +79,7 @@ async def rag_search(
     Results are scoped to the user's organization.
     """
     if not auth.organization_id:
-        raise HTTPException(status_code=403, detail="Organization context required")
+        raise NoOrgContextError("access this resource")
 
     # Generate query embedding
     try:
@@ -204,7 +205,7 @@ async def search_code_examples(
     Results are scoped to the user's organization.
     """
     if not auth.organization_id:
-        raise HTTPException(status_code=403, detail="Organization context required")
+        raise NoOrgContextError("access this resource")
 
     # Generate query embedding
     try:
@@ -295,7 +296,7 @@ async def list_source_pages(
     Source must belong to the user's organization.
     """
     if not auth.organization_id:
-        raise HTTPException(status_code=403, detail="Organization context required")
+        raise NoOrgContextError("access this resource")
 
     try:
         source_uuid = UUID(source_id)
@@ -367,7 +368,7 @@ async def get_full_page(
     Document's source must belong to the user's organization.
     """
     if not auth.organization_id:
-        raise HTTPException(status_code=403, detail="Organization context required")
+        raise NoOrgContextError("access this resource")
 
     try:
         doc_uuid = UUID(document_id)
@@ -415,7 +416,7 @@ async def get_page_by_url(
     Document's source must belong to the user's organization.
     """
     if not auth.organization_id:
-        raise HTTPException(status_code=403, detail="Organization context required")
+        raise NoOrgContextError("access this resource")
 
     async with get_session() as session:
         # Join with source to filter by organization
@@ -471,7 +472,7 @@ async def hybrid_search(
     Results are scoped to the user's organization.
     """
     if not auth.organization_id:
-        raise HTTPException(status_code=403, detail="Organization context required")
+        raise NoOrgContextError("access this resource")
 
     # Generate query embedding
     try:
@@ -606,7 +607,7 @@ async def update_document(
     Document's source must belong to the user's organization.
     """
     if not auth.organization_id:
-        raise HTTPException(status_code=403, detail="Organization context required")
+        raise NoOrgContextError("access this resource")
 
     if request.title is None and request.content is None:
         raise HTTPException(
@@ -692,7 +693,7 @@ async def get_document_related_entities(
     Document's source must belong to the user's organization.
     """
     if not auth.organization_id:
-        raise HTTPException(status_code=403, detail="Organization context required")
+        raise NoOrgContextError("access this resource")
 
     try:
         doc_uuid = UUID(document_id)

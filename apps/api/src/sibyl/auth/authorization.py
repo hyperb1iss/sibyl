@@ -284,7 +284,11 @@ async def list_accessible_project_graph_ids(
 
 
 class ProjectAuthorizationError(HTTPException):
-    """Structured 403 for project authorization failures."""
+    """Structured 403 for project authorization failures.
+
+    DEPRECATED: Use ProjectAccessDeniedError from sibyl.auth.errors instead.
+    Kept for backwards compatibility.
+    """
 
     def __init__(
         self,
@@ -294,9 +298,12 @@ class ProjectAuthorizationError(HTTPException):
     ):
         detail = {
             "error": "project_access_denied",
-            "project_id": project_id,
-            "required_role": required_role.value,
-            "actual_role": actual_role.value if actual_role else None,
+            "message": f"Requires {required_role.value} access to project",
+            "details": {
+                "project_id": project_id,
+                "required_role": required_role.value,
+                "actual_role": actual_role.value if actual_role else None,
+            },
         }
         super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 

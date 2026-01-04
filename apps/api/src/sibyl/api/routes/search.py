@@ -14,6 +14,7 @@ from sibyl.api.schemas import ExploreRequest, ExploreResponse, SearchRequest, Se
 from sibyl.auth.authorization import list_accessible_project_graph_ids
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
+from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import Organization, OrganizationRole
 
@@ -65,9 +66,9 @@ async def search(
         # If user specified a project, validate they have access (if filtering is active)
         project_filter = request.project
         if project_filter and accessible_projects is not None and project_filter not in accessible_projects:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Access denied to project: {project_filter}",
+            raise ProjectAccessDeniedError(
+                project_id=project_filter,
+                required_role="viewer",
             )
 
         # Pass accessible projects to filter results
@@ -129,9 +130,9 @@ async def explore(
         # If user specified a project, validate they have access (if filtering is active)
         project_filter = request.project
         if project_filter and accessible_projects is not None and project_filter not in accessible_projects:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Access denied to project: {project_filter}",
+            raise ProjectAccessDeniedError(
+                project_id=project_filter,
+                required_role="viewer",
             )
 
         result = await core_explore(
