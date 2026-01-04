@@ -1996,3 +1996,20 @@ export function useUpdateSettings() {
     },
   });
 }
+
+/**
+ * Delete a system setting from the database.
+ */
+export function useDeleteSetting() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (key: string) => api.settings.delete(key),
+    onSuccess: () => {
+      // Invalidate settings and setup status queries
+      queryClient.invalidateQueries({ queryKey: queryKeys.settings.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.setup.status });
+      queryClient.invalidateQueries({ queryKey: queryKeys.setup.validation });
+    },
+  });
+}

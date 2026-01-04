@@ -369,6 +369,11 @@ export interface UpdateSettingsResponse {
   validation: Record<string, { valid: boolean; error: string | null }>;
 }
 
+export interface DeleteSettingResponse {
+  deleted: boolean;
+  key: string;
+}
+
 // =============================================================================
 // Metrics Types
 // =============================================================================
@@ -2204,6 +2209,11 @@ export const api = {
       fetchApi<UpdateSettingsResponse>('/settings', {
         method: 'PATCH',
         body: JSON.stringify(request),
+      }),
+
+    delete: (key: string) =>
+      fetchApi<DeleteSettingResponse>(`/settings/${key}`, {
+        method: 'DELETE',
       }),
   },
 };
