@@ -7,6 +7,7 @@ import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import {
   AddSourceDialog,
+  type CrawlProgress,
   type LocalSourceData,
   SourceCardEnhanced,
   SourceCardSkeleton,
@@ -23,6 +24,7 @@ import {
   RefreshCw,
   Search,
 } from '@/components/ui/icons';
+import { VirtualizedList } from '@/components/ui/virtualized-list';
 import type { CrawlStatusType, SourceTypeValue } from '@/lib/constants';
 import {
   useAllCrawlProgress,
@@ -579,7 +581,44 @@ export default function SourcesPage() {
             ]}
           />
         )
+      ) : viewMode === 'list' && filteredSources.length > 30 ? (
+        // Virtualized list for large datasets
+        <VirtualizedList
+          items={filteredSources}
+          estimateSize={120}
+          gap={12}
+          className="h-[calc(100vh-300px)] min-h-[400px]"
+          renderItem={source => {
+            const progressData = crawlProgressMap.get(source.id);
+            const progress: CrawlProgress | undefined = progressData
+              ? {
+                  percentage: progressData.percentage,
+                  pagesProcessed: progressData.pages_crawled,
+                  documentsCreated: progressData.documents_stored ?? progressData.pages_crawled,
+                  chunksCreated: progressData.chunks_created,
+                  errorsCount: progressData.errors,
+                  currentUrl: progressData.current_url,
+                  status: `Crawling ${progressData.pages_crawled}/${progressData.max_pages} pages`,
+                }
+              : undefined;
+
+            return (
+              <SourceCardEnhanced
+                source={source}
+                onCrawl={handleCrawl}
+                onCancel={handleCancel}
+                onDelete={handleDelete}
+                onRefresh={handleSync}
+                isCrawling={
+                  crawlingSourceIds.has(source.id) || source.metadata.crawl_status === 'in_progress'
+                }
+                progress={progress}
+              />
+            );
+          }}
+        />
       ) : (
+        // Standard animated grid/list for smaller datasets
         <motion.div
           layout
           className={
