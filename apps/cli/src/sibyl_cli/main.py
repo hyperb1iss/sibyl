@@ -38,6 +38,7 @@ from sibyl_cli.project import app as project_app
 from sibyl_cli.source import app as source_app
 from sibyl_cli.state import set_context_override
 from sibyl_cli.task import app as task_app
+from sibyl_cli.local import app as local_app
 
 # Main app
 app = typer.Typer(
@@ -61,6 +62,7 @@ app.add_typer(auth_app, name="auth")
 app.add_typer(org_app, name="org")
 app.add_typer(config_app, name="config")
 app.add_typer(context_app, name="context")
+app.add_typer(local_app, name="local")
 
 
 def _handle_client_error(e: SibylClientError) -> None:
