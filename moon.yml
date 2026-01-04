@@ -95,6 +95,33 @@ tasks:
     options:
       persistent: true
 
+  # Test instance (runs alongside dev on different ports)
+  quickstart-test:
+    command: |
+      if [ ! -f .env.quickstart ]; then
+        echo "⚠️  Create .env.quickstart with your API keys first"
+        exit 1
+      fi
+      docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml --env-file .env.quickstart up -d
+      echo ""
+      echo "🧪 Sibyl TEST instance running (separate from dev)!"
+      echo "   Web UI:   http://localhost:3347"
+      echo "   API:      http://localhost:3344"
+      echo "   Graph UI: http://localhost:3345"
+    local: true
+    options:
+      shell: true
+
+  quickstart-test-stop:
+    command: "docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml down"
+    local: true
+
+  quickstart-test-logs:
+    command: "docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml logs -f"
+    local: true
+    options:
+      persistent: true
+
   quickstart-pull:
     command: "docker compose -f docker-compose.quickstart.yml pull"
     local: true

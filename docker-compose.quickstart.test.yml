@@ -1,0 +1,47 @@
+# Sibyl Quickstart - Test Instance Override
+# Use with: docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml up -d
+#
+# Ports offset by +10 from defaults to run alongside dev environment:
+#   API:      3344 (instead of 3334)
+#   Web:      3347 (instead of 3337)
+#   FalkorDB: 6390 (instead of 6380)
+#   Postgres: 5443 (instead of 5433)
+
+services:
+  api:
+    container_name: sibyl-test-api
+    ports:
+      - "3344:3334"
+    environment:
+      SIBYL_PUBLIC_URL: http://localhost:3347
+
+  worker:
+    container_name: sibyl-test-worker
+
+  web:
+    container_name: sibyl-test-web
+    ports:
+      - "3347:3337"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3344
+
+  falkordb:
+    container_name: sibyl-test-falkordb
+    ports:
+      - "6390:6379"
+      - "3345:3000"
+
+  postgres:
+    container_name: sibyl-test-postgres
+    ports:
+      - "5443:5432"
+
+volumes:
+  sibyl_falkordb:
+    name: sibyl_test_falkordb
+  sibyl_postgres:
+    name: sibyl_test_postgres
+
+networks:
+  default:
+    name: sibyl-test
