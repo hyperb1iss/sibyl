@@ -13,6 +13,7 @@ from sibyl.api.routes.metrics import router as metrics_router
 from sibyl.api.routes.org_invitations import invitations_router, router as org_invitations_router
 from sibyl.api.routes.org_members import router as org_members_router
 from sibyl.api.routes.orgs import router as orgs_router
+from sibyl.api.routes.project_members import router as project_members_router
 from sibyl.api.routes.rag import router as rag_router
 from sibyl.api.routes.search import router as search_router
 from sibyl.api.routes.setup import router as setup_router
@@ -34,6 +35,7 @@ __all__ = [
     "org_invitations_router",
     "org_members_router",
     "orgs_router",
+    "project_members_router",
     "rag_router",
     "search_router",
     "setup_router",

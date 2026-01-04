@@ -484,6 +484,29 @@ export interface OrgMembersResponse {
   members: OrgMember[];
 }
 
+export type ProjectRole =
+  | 'project_owner'
+  | 'project_maintainer'
+  | 'project_contributor'
+  | 'project_viewer';
+
+export interface ProjectMember {
+  user: {
+    id: string;
+    email: string | null;
+    name: string | null;
+    avatar_url: string | null;
+  };
+  role: ProjectRole;
+  is_owner: boolean;
+  created_at: string;
+}
+
+export interface ProjectMembersResponse {
+  members: ProjectMember[];
+  can_manage: boolean;
+}
+
 // =============================================================================
 // Security Types (Sessions, API Keys, OAuth)
 // =============================================================================
@@ -1745,6 +1768,25 @@ export const api = {
       }),
 
     get: (id: string) => fetchApi<Entity>(`/entities/${id}`),
+
+    members: {
+      list: (projectId: string) =>
+        fetchApi<ProjectMembersResponse>(`/projects/${projectId}/members`),
+      add: (projectId: string, userId: string, role: ProjectRole) =>
+        fetchApi<{ user_id: string; role: string }>(`/projects/${projectId}/members`, {
+          method: 'POST',
+          body: JSON.stringify({ user_id: userId, role }),
+        }),
+      updateRole: (projectId: string, userId: string, role: ProjectRole) =>
+        fetchApi<{ user_id: string; role: string }>(`/projects/${projectId}/members/${userId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ role }),
+        }),
+      remove: (projectId: string, userId: string) =>
+        fetchApi<{ success: boolean }>(`/projects/${projectId}/members/${userId}`, {
+          method: 'DELETE',
+        }),
+    },
   },
 
   // Epics - feature grouping for tasks

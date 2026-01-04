@@ -24,17 +24,24 @@ import {
   Sparkles,
   Trash,
   TrendingUp,
+  User,
+  Users,
   Zap,
 } from '@/components/ui/icons';
+import { Spinner } from '@/components/ui/spinner';
 import { ErrorState, Tooltip } from '@/components/ui/tooltip';
-import type { TaskListResponse, TaskStatus, TaskSummary } from '@/lib/api';
+import type { ProjectRole, TaskListResponse, TaskStatus, TaskSummary } from '@/lib/api';
 import { TASK_STATUS_CONFIG } from '@/lib/constants';
 import {
   useDeleteEntity,
+  useMe,
+  useProjectMembers,
   useProjectMetrics,
   useProjects,
+  useRemoveProjectMember,
   useTasks,
   useUpdateEntity,
+  useUpdateProjectMemberRole,
 } from '@/lib/hooks';
 
 interface ProjectsContentProps {
@@ -973,6 +980,15 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
         />
       </div>
 
+      {/* Team Members */}
+      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-5 shadow-card">
+        <h2 className="font-semibold text-sc-fg-primary mb-3 flex items-center gap-2">
+          <Users width={16} height={16} className="text-sc-purple" />
+          Team
+        </h2>
+        <ProjectMembersList projectId={project.id} />
+      </div>
+
       {/* Empty state for no tasks */}
       {(!stats || stats.total === 0) && (
         <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-8 text-center shadow-card">
@@ -1057,6 +1073,123 @@ function ProjectDetailSkeleton() {
           <div className="h-12 w-full bg-sc-bg-elevated rounded" />
         </div>
       </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// ProjectMembersList Component
+// =============================================================================
+
+const PROJECT_ROLES: ProjectRole[] = [
+  'project_owner',
+  'project_maintainer',
+  'project_contributor',
+  'project_viewer',
+];
+
+const ROLE_DISPLAY: Record<ProjectRole, string> = {
+  project_owner: 'Owner',
+  project_maintainer: 'Maintainer',
+  project_contributor: 'Contributor',
+  project_viewer: 'Viewer',
+};
+
+function ProjectMembersList({ projectId }: { projectId: string }) {
+  const { data: me } = useMe();
+  const { data, isLoading } = useProjectMembers(projectId);
+  const updateRole = useUpdateProjectMemberRole();
+  const removeMember = useRemoveProjectMember();
+
+  const currentUserId = me?.user?.id;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-4">
+        <Spinner size="sm" />
+      </div>
+    );
+  }
+
+  if (!data?.members.length) {
+    return <p className="text-sc-fg-muted text-sm">No team members yet.</p>;
+  }
+
+  const canManage = data.can_manage;
+
+  const handleRoleChange = async (userId: string, newRole: ProjectRole) => {
+    try {
+      await updateRole.mutateAsync({ projectId, userId, role: newRole });
+      toast.success('Role updated');
+    } catch {
+      toast.error('Failed to update role');
+    }
+  };
+
+  const handleRemove = async (userId: string, userName: string | null) => {
+    if (!confirm(`Remove ${userName || 'this member'} from the project?`)) return;
+    try {
+      await removeMember.mutateAsync({ projectId, userId });
+      toast.success('Member removed');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove member');
+    }
+  };
+
+  return (
+    <div className="divide-y divide-sc-fg-subtle/10">
+      {data.members.map(member => (
+        <div key={member.user.id} className="flex items-center gap-3 py-3 px-1">
+          {member.user.avatar_url ? (
+            <img
+              src={member.user.avatar_url}
+              alt=""
+              className="w-8 h-8 rounded-full border border-sc-fg-subtle/20"
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-sc-bg-highlight flex items-center justify-center">
+              <User width={14} height={14} className="text-sc-fg-muted" />
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-sc-fg-primary truncate">
+              {member.user.name || member.user.email || 'Unknown'}
+              {member.user.id === currentUserId && (
+                <span className="ml-2 text-xs text-sc-purple">(you)</span>
+              )}
+              {member.is_owner && <span className="ml-2 text-xs text-sc-yellow">(owner)</span>}
+            </p>
+            <p className="text-xs text-sc-fg-muted truncate">{member.user.email}</p>
+          </div>
+          {canManage && !member.is_owner && member.user.id !== currentUserId ? (
+            <div className="flex items-center gap-2">
+              <select
+                value={member.role}
+                onChange={e => handleRoleChange(member.user.id, e.target.value as ProjectRole)}
+                className="text-xs bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded px-2 py-1 text-sc-fg-secondary"
+              >
+                {PROJECT_ROLES.filter(role => role !== 'project_owner').map(role => (
+                  <option key={role} value={role}>
+                    {ROLE_DISPLAY[role]}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => handleRemove(member.user.id, member.user.name)}
+                className="p-1 text-sc-fg-muted hover:text-sc-red transition-colors"
+                title="Remove member"
+              >
+                <Trash width={14} height={14} />
+              </button>
+            </div>
+          ) : (
+            <span className="text-xs text-sc-fg-muted px-2 py-1 bg-sc-bg-highlight rounded">
+              {ROLE_DISPLAY[member.role]}
+            </span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

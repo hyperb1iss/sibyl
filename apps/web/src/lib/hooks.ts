@@ -107,6 +107,7 @@ export const queryKeys = {
     all: ['projects'] as const,
     list: (includeArchived = false) => ['projects', 'list', { includeArchived }] as const,
     detail: (id: string) => ['projects', 'detail', id] as const,
+    members: (id: string) => ['projects', 'members', id] as const,
   },
   epics: {
     all: ['epics'] as const,
@@ -491,9 +492,7 @@ export function useOnboardingProgress() {
 
   const checklist = prefsData?.preferences?.onboarding_checklist ?? {};
 
-  const markComplete = (
-    item: keyof import('./api').OnboardingChecklist
-  ) => {
+  const markComplete = (item: keyof import('./api').OnboardingChecklist) => {
     if (checklist[item]) return; // Already complete
     updatePrefs.mutate({
       onboarding_checklist: {
@@ -504,9 +503,7 @@ export function useOnboardingProgress() {
   };
 
   const isAllComplete =
-    checklist.connected_claude &&
-    checklist.added_source &&
-    checklist.tried_search;
+    checklist.connected_claude && checklist.added_source && checklist.tried_search;
 
   return {
     checklist,
@@ -1101,6 +1098,66 @@ export function useProject(id: string) {
     queryFn: () => api.projects.get(id),
     enabled: !!id,
     staleTime: TIMING.STALE_TIME,
+  });
+}
+
+export function useProjectMembers(projectId: string, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.projects.members(projectId),
+    queryFn: () => api.projects.members.list(projectId),
+    enabled: options?.enabled ?? !!projectId,
+    retry: false,
+    staleTime: TIMING.STALE_TIME,
+  });
+}
+
+export function useAddProjectMember() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      userId,
+      role,
+    }: {
+      projectId: string;
+      userId: string;
+      role: import('./api').ProjectRole;
+    }) => api.projects.members.add(projectId, userId, role),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.members(variables.projectId) });
+    },
+  });
+}
+
+export function useUpdateProjectMemberRole() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      userId,
+      role,
+    }: {
+      projectId: string;
+      userId: string;
+      role: import('./api').ProjectRole;
+    }) => api.projects.members.updateRole(projectId, userId, role),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.members(variables.projectId) });
+    },
+  });
+}
+
+export function useRemoveProjectMember() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ projectId, userId }: { projectId: string; userId: string }) =>
+      api.projects.members.remove(projectId, userId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.members(variables.projectId) });
+    },
   });
 }
 
