@@ -2,22 +2,20 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { ConnectClaudeModal } from '@/components/dashboard/connect-claude-modal';
 import {
   ArrowRight,
   BookOpen,
-  Check,
   Network,
   Search,
+  Sparks,
   Sparkles,
   Xmark,
 } from '@/components/ui/icons';
-import { useMcpCommand, useSetupStatus } from '@/lib/hooks';
+import { useSetupStatus } from '@/lib/hooks';
 
 /** Minimum entities before automatically hiding the welcome banner */
 const WELCOME_BANNER_ENTITY_THRESHOLD = 10;
-
-/** Duration to show "Copied!" feedback in milliseconds */
-const COPY_FEEDBACK_DURATION_MS = 2000;
 
 /** localStorage key for banner dismissal state */
 const BANNER_DISMISSED_KEY = 'sibyl:welcome-banner-dismissed';
@@ -29,8 +27,7 @@ interface WelcomeBannerProps {
 
 export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) {
   const [isDismissed, setIsDismissed] = useState(false);
-  const [copiedMcp, setCopiedMcp] = useState(false);
-  const { data: mcpData } = useMcpCommand();
+  const [showConnectModal, setShowConnectModal] = useState(false);
   const { data: setupStatus } = useSetupStatus({
     validateKeys: false,
     enabled: totalEntities === 0,
@@ -53,14 +50,6 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
     setIsDismissed(true);
     localStorage.setItem(BANNER_DISMISSED_KEY, 'true');
     onDismiss?.();
-  };
-
-  const handleCopyMcp = async () => {
-    if (mcpData?.command) {
-      await navigator.clipboard.writeText(mcpData.command);
-      setCopiedMcp(true);
-      setTimeout(() => setCopiedMcp(false), COPY_FEEDBACK_DURATION_MS);
-    }
   };
 
   const isNewUser = totalEntities === 0;
@@ -117,17 +106,11 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
             </p>
             <button
               type="button"
-              onClick={handleCopyMcp}
+              onClick={() => setShowConnectModal(true)}
               className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-sc-purple/10 border border-sc-purple/20 text-xs font-medium text-sc-purple hover:bg-sc-purple/20 transition-colors"
             >
-              {copiedMcp ? (
-                <>
-                  <Check width={14} height={14} />
-                  Copied!
-                </>
-              ) : (
-                'Copy MCP Command'
-              )}
+              <Sparks width={14} height={14} />
+              Connect
             </button>
           </div>
 
@@ -192,6 +175,9 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
           </Link>
         </div>
       </div>
+
+      {/* Claude Code Connection Modal */}
+      <ConnectClaudeModal open={showConnectModal} onOpenChange={setShowConnectModal} />
     </div>
   );
 }
