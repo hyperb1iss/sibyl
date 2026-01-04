@@ -36,14 +36,15 @@ When using Kong or similar ingress, `SIBYL_PUBLIC_URL` is typically set to the e
 
 ## Authentication
 
-| Variable                            | Default | Description                         |
-| ----------------------------------- | ------- | ----------------------------------- |
-| `SIBYL_JWT_SECRET`                  | (empty) | **Required.** JWT signing secret    |
-| `SIBYL_JWT_ALGORITHM`               | `HS256` | JWT signing algorithm               |
-| `SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES` | `60`    | Access token TTL in minutes         |
-| `SIBYL_REFRESH_TOKEN_EXPIRE_DAYS`   | `30`    | Refresh token TTL in days           |
-| `SIBYL_DISABLE_AUTH`                | `false` | Disable auth enforcement (dev only) |
-| `SIBYL_MCP_AUTH_MODE`               | `auto`  | MCP auth: auto/on/off               |
+| Variable                            | Default | Description                                |
+| ----------------------------------- | ------- | ------------------------------------------ |
+| `SIBYL_JWT_SECRET`                  | (empty) | **Required.** JWT signing secret           |
+| `SIBYL_JWT_ALGORITHM`               | `HS256` | JWT signing algorithm                      |
+| `SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES` | `60`    | Access token TTL in minutes                |
+| `SIBYL_REFRESH_TOKEN_EXPIRE_DAYS`   | `30`    | Refresh token TTL in days                  |
+| `SIBYL_DISABLE_AUTH`                | `false` | Disable auth enforcement (dev only)        |
+| `SIBYL_MCP_AUTH_MODE`               | `auto`  | MCP auth: auto/on/off                      |
+| `SIBYL_SETTINGS_KEY`                | (auto)  | Fernet key for encrypting DB-stored secrets |
 
 ### Fallback Variables
 
@@ -138,7 +139,18 @@ installation.
 | `SIBYL_OPENAI_API_KEY`    | (empty) | OpenAI API key (required for embeddings) |
 | `SIBYL_ANTHROPIC_API_KEY` | (empty) | Anthropic API key                        |
 
-Fallbacks:
+### Lookup Priority
+
+API keys are resolved in this order:
+
+1. **Database** - Keys stored via web UI (Settings → AI Services)
+2. **Environment variables** - `SIBYL_OPENAI_API_KEY`, `SIBYL_ANTHROPIC_API_KEY`
+3. **Unprefixed fallbacks** - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`
+
+This allows zero-config deployments where API keys are entered through the onboarding wizard and
+stored encrypted in the database (using `SIBYL_SETTINGS_KEY`).
+
+### Unprefixed Fallbacks
 
 - `OPENAI_API_KEY` -> `SIBYL_OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY` -> `SIBYL_ANTHROPIC_API_KEY`
@@ -259,8 +271,9 @@ metadata:
 type: Opaque
 stringData:
   SIBYL_JWT_SECRET: "<jwt-secret>"
-  SIBYL_OPENAI_API_KEY: "sk-..."
-  SIBYL_ANTHROPIC_API_KEY: "sk-ant-..."
+  SIBYL_SETTINGS_KEY: "<fernet-key>"  # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+  SIBYL_OPENAI_API_KEY: "sk-..."       # Optional if using DB-stored keys
+  SIBYL_ANTHROPIC_API_KEY: "sk-ant-..." # Optional if using DB-stored keys
   SIBYL_POSTGRES_PASSWORD: "<db-password>"
   SIBYL_FALKORDB_PASSWORD: "<falkordb-password>"
 ```
