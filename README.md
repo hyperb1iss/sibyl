@@ -1,8 +1,6 @@
-<h1 align="center">
-  <br>
-  Sibyl
-  <br>
-</h1>
+<p align="center">
+  <img src="docs/images/sibyl-logo.png" alt="Sibyl" width="400">
+</p>
 
 <p align="center">
   <strong>Persistent Memory & Agent Orchestration for Teams</strong>
