@@ -9,6 +9,7 @@ Worktrees are stored at: ~/.sibyl-worktrees/{org}/{project}/{branch}/
 import asyncio
 import hashlib
 import shutil
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,6 +22,28 @@ if TYPE_CHECKING:
     from sibyl_core.graph import EntityManager
 
 log = structlog.get_logger()
+
+
+@dataclass
+class SetupConfig:
+    """Configuration for post-worktree-creation setup commands.
+
+    These commands make the workspace usable (install deps, generate files, etc.)
+    """
+
+    commands: list[str] = field(default_factory=list)
+    timeout_seconds: int = 300
+    continue_on_error: bool = False  # Stop on first failure by default
+
+
+@dataclass
+class SetupResult:
+    """Result of running setup commands."""
+
+    success: bool
+    outputs: list[tuple[str, str, int]]  # (command, output, returncode)
+    total_time_seconds: float
+
 
 # Default base directory for worktrees
 DEFAULT_WORKTREE_BASE = Path.home() / ".sibyl-worktrees"
@@ -117,6 +140,7 @@ class WorktreeManager:
         branch_name: str,
         base_ref: str = "HEAD",
         agent_id: str | None = None,
+        setup_config: SetupConfig | None = None,
     ) -> WorktreeRecord:
         """Create a new worktree for a task.
 
@@ -125,6 +149,7 @@ class WorktreeManager:
             branch_name: Git branch name for the worktree
             base_ref: Base commit/branch to create from (default: HEAD)
             agent_id: Optional agent ID that will use this worktree
+            setup_config: Optional setup commands to run after creation
 
         Returns:
             WorktreeRecord persisted to the graph
@@ -178,7 +203,82 @@ class WorktreeManager:
         # Persist to graph (fast direct insert, no LLM extraction needed)
         await self.entity_manager.create_direct(record, generate_embedding=False)
 
+        # Run setup commands if provided
+        if setup_config and setup_config.commands:
+            log.info(f"Running {len(setup_config.commands)} setup commands in {worktree_path}")
+            setup_result = await self.run_setup(worktree_path, setup_config)
+            if not setup_result.success:
+                log.warning(
+                    f"Setup completed with errors in {setup_result.total_time_seconds:.1f}s"
+                )
+
         return record
+
+    async def run_setup(
+        self,
+        worktree_path: Path,
+        config: SetupConfig,
+    ) -> SetupResult:
+        """Run setup commands in a worktree.
+
+        Executes each command in sequence, capturing output.
+
+        Args:
+            worktree_path: Path to the worktree
+            config: Setup configuration with commands
+
+        Returns:
+            SetupResult with success status and outputs
+        """
+        import time
+
+        start_time = time.monotonic()
+        outputs: list[tuple[str, str, int]] = []
+        success = True
+
+        for cmd in config.commands:
+            log.info(f"Running setup: {cmd}")
+            try:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd,
+                    cwd=worktree_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                stdout, _ = await asyncio.wait_for(
+                    proc.communicate(),
+                    timeout=config.timeout_seconds,
+                )
+                output = stdout.decode()
+                returncode = proc.returncode or 0
+                outputs.append((cmd, output, returncode))
+
+                if returncode != 0:
+                    log.warning(f"Setup command failed: {cmd} (exit {returncode})")
+                    success = False
+                    if not config.continue_on_error:
+                        break
+
+            except TimeoutError:
+                outputs.append((cmd, f"TIMEOUT after {config.timeout_seconds}s", -1))
+                success = False
+                if not config.continue_on_error:
+                    break
+
+            except Exception as e:
+                outputs.append((cmd, f"ERROR: {e}", -1))
+                success = False
+                if not config.continue_on_error:
+                    break
+
+        elapsed = time.monotonic() - start_time
+        log.info(f"Setup completed in {elapsed:.1f}s (success={success})")
+
+        return SetupResult(
+            success=success,
+            outputs=outputs,
+            total_time_seconds=elapsed,
+        )
 
     async def get(self, worktree_id: str) -> WorktreeRecord | None:
         """Get a worktree record by ID."""

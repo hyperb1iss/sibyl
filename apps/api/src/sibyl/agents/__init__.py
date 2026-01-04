@@ -2,6 +2,7 @@
 
 This module provides the runtime infrastructure for managing AI agents:
 - WorktreeManager: Isolated git worktrees for parallel agent development
+- IntegrationManager: Merge orchestration for worktree branches
 - AgentRunner: Claude Agent SDK integration for spawning and managing agents
 - ApprovalService: Human-in-the-loop approval hooks for dangerous operations
 - CheckpointManager: Session state persistence for agent recovery
@@ -17,6 +18,15 @@ from sibyl.agents.checkpoints import (
     create_checkpoint_from_instance,
     restore_from_checkpoint,
 )
+from sibyl.agents.integration import (
+    ConflictError,
+    IntegrationError,
+    IntegrationManager,
+    IntegrationResult,
+    IntegrationStatus,
+    TestConfig,
+    TestFailedError,
+)
 from sibyl.agents.messages import (
     format_agent_message,
     format_assistant_message,
@@ -26,7 +36,7 @@ from sibyl.agents.messages import (
 )
 from sibyl.agents.orchestrator import AgentMessage, AgentOrchestrator, OrchestratorError
 from sibyl.agents.runner import AgentInstance, AgentRunner, AgentRunnerError
-from sibyl.agents.worktree import WorktreeError, WorktreeManager
+from sibyl.agents.worktree import SetupConfig, SetupResult, WorktreeError, WorktreeManager
 
 __all__ = [
     "AgentInstance",
@@ -37,8 +47,17 @@ __all__ = [
     "ApprovalService",
     "CheckpointManager",
     "CheckpointRestoreError",
+    "ConflictError",
+    "IntegrationError",
+    "IntegrationManager",
+    "IntegrationResult",
+    "IntegrationStatus",
     "OrchestratorError",
     "RestoreResult",
+    "SetupConfig",
+    "SetupResult",
+    "TestConfig",
+    "TestFailedError",
     "WorktreeError",
     "WorktreeManager",
     "create_checkpoint_from_instance",
