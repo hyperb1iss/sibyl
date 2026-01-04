@@ -1,7 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { Check, Cube, Database, Globe, KanbanBoard, List, Search } from '@/components/ui/icons';
+import {
+  Check,
+  Cube,
+  Database,
+  Flash,
+  Globe,
+  KanbanBoard,
+  List,
+  Search,
+  Sparks,
+} from '@/components/ui/icons';
 
 interface EmptyStateAction {
   label: string;
@@ -221,6 +231,48 @@ export function GraphEmptyState() {
         { label: 'Add Knowledge', href: '/entities' },
         { label: 'Browse Entities', href: '/entities', variant: 'secondary' },
       ]}
+    />
+  );
+}
+
+export function EpicsEmptyState({
+  onCreateEpic,
+  isFiltered,
+}: {
+  onCreateEpic?: () => void;
+  isFiltered?: boolean;
+}) {
+  if (isFiltered) {
+    return (
+      <EnhancedEmptyState
+        icon={<Flash width={40} height={40} className="text-sc-yellow" />}
+        title="No epics match your filters"
+        description="Try adjusting your search or project filter to find what you're looking for."
+        variant="filtered"
+      />
+    );
+  }
+
+  return (
+    <EnhancedEmptyState
+      icon={<Flash width={40} height={40} className="text-sc-coral" />}
+      title="No epics yet"
+      description="Epics group related tasks into larger initiatives. Create an epic to organize your feature work."
+      actions={[
+        ...(onCreateEpic ? [{ label: 'Create Epic', onClick: onCreateEpic }] : []),
+        { label: 'View Tasks', href: '/tasks', variant: 'secondary' },
+      ]}
+    />
+  );
+}
+
+export function AgentsEmptyState() {
+  return (
+    <EnhancedEmptyState
+      icon={<Sparks width={40} height={40} className="text-sc-purple" />}
+      title="No agents running"
+      description="Agents are spawned when you run background tasks in Claude Code. They'll appear here with their progress and conversation history."
+      actions={[{ label: 'Learn More', href: '/docs/agents', variant: 'secondary' }]}
     />
   );
 }

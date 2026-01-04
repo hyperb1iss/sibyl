@@ -26,6 +26,7 @@ import {
   Plus,
   StopCircle,
 } from '@/components/ui/icons';
+import { AgentsEmptyState } from '@/components/ui/empty-state';
 import { LoadingState } from '@/components/ui/spinner';
 import { FilterChip } from '@/components/ui/toggle';
 import { ErrorState } from '@/components/ui/tooltip';
@@ -501,25 +502,6 @@ const SummaryBar = memo(function SummaryBar({ agents }: { agents: Agent[] }) {
     </div>
   );
 });
-
-// =============================================================================
-// Empty State
-// =============================================================================
-
-function AgentsEmptyState() {
-  return (
-    <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-      <div className="w-16 h-16 rounded-full bg-sc-purple/20 flex items-center justify-center mb-4">
-        <span className="text-2xl">◎</span>
-      </div>
-      <h3 className="text-lg font-medium text-sc-fg-primary mb-2">No agents yet</h3>
-      <p className="text-sm text-sc-fg-muted max-w-md">
-        Click <span className="text-sc-purple font-medium">Start Agent</span> to spawn an AI agent
-        that will work autonomously on your project.
-      </p>
-    </div>
-  );
-}
 
 // =============================================================================
 // Main Page Content

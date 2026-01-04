@@ -147,7 +147,7 @@ function EpicsPageContent() {
           projectNames={projectNames}
           showProject={!projectFilter}
           isLoading={isLoading}
-          emptyMessage={searchQuery ? 'No epics match your search' : 'No epics found'}
+          isFiltered={!!searchQuery || !!projectFilter}
         />
       )}
     </div>

@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import type { EpicSummary } from '@/lib/api';
+import { EpicsEmptyState } from '@/components/ui/empty-state';
 import { EpicCard, EpicCardSkeleton } from './epic-card';
 
 interface EpicListProps {
@@ -9,7 +10,8 @@ interface EpicListProps {
   projectNames?: Record<string, string>;
   showProject?: boolean;
   isLoading?: boolean;
-  emptyMessage?: string;
+  isFiltered?: boolean;
+  onCreateEpic?: () => void;
 }
 
 export function EpicList({
@@ -17,7 +19,8 @@ export function EpicList({
   projectNames = {},
   showProject = true,
   isLoading = false,
-  emptyMessage = 'No epics found',
+  isFiltered = false,
+  onCreateEpic,
 }: EpicListProps) {
   const router = useRouter();
 
@@ -32,13 +35,7 @@ export function EpicList({
   }
 
   if (epics.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <span className="text-4xl text-[#ffb86c] mb-4">◈</span>
-        <h3 className="text-lg font-medium text-sc-fg-primary mb-2">No epics yet</h3>
-        <p className="text-sm text-sc-fg-muted">{emptyMessage}</p>
-      </div>
-    );
+    return <EpicsEmptyState isFiltered={isFiltered} onCreateEpic={onCreateEpic} />;
   }
 
   return (
