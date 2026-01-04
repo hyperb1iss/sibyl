@@ -9,7 +9,6 @@ Run with:
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,7 +25,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.live_model
 
 
-async def collect_messages(async_gen) -> list["Message"]:
+async def collect_messages(async_gen) -> list[Message]:
     """Collect all messages from an async generator."""
     messages = []
     async for msg in async_gen:
@@ -210,7 +209,15 @@ class TestAgentErrorHandling:
         # Agent should acknowledge the file doesn't exist
         assert any(
             phrase in response_text.lower()
-            for phrase in ["not found", "doesn't exist", "does not exist", "couldn't", "cannot", "error", "no such"]
+            for phrase in [
+                "not found",
+                "doesn't exist",
+                "does not exist",
+                "couldn't",
+                "cannot",
+                "error",
+                "no such",
+            ]
         )
 
     async def test_agent_respects_max_turns(
@@ -295,11 +302,11 @@ class TestAgentLifecycle:
         results = await asyncio.gather(
             asyncio.wait_for(
                 get_last_text_content(instance1.execute()),
-                timeout=live_model_config.timeout_seconds
+                timeout=live_model_config.timeout_seconds,
             ),
             asyncio.wait_for(
                 get_last_text_content(instance2.execute()),
-                timeout=live_model_config.timeout_seconds
+                timeout=live_model_config.timeout_seconds,
             ),
         )
 
@@ -318,7 +325,6 @@ class TestCostTracking:
         cost_tracker: CostTracker,
     ) -> None:
         """Cost calculation matches actual token usage."""
-        from .conftest import calculate_cost
 
         instance = await agent_runner.spawn(
             prompt="Write a haiku about coding.",
