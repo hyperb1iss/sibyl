@@ -406,6 +406,34 @@ class SibylClient:
     async def switch_org(self, slug: str) -> dict[str, Any]:
         return await self._request("POST", f"/orgs/{slug}/switch")
 
+    # -------------------------------------------------------------------------
+    # Org Members
+    # -------------------------------------------------------------------------
+
+    async def list_org_members(self, slug: str) -> dict[str, Any]:
+        """List all members of an organization."""
+        return await self._request("GET", f"/orgs/{slug}/members")
+
+    async def add_org_member(
+        self, slug: str, user_id: str, role: str = "member"
+    ) -> dict[str, Any]:
+        """Add a member to an organization."""
+        return await self._request(
+            "POST", f"/orgs/{slug}/members", json={"user_id": user_id, "role": role}
+        )
+
+    async def update_org_member_role(
+        self, slug: str, user_id: str, role: str
+    ) -> dict[str, Any]:
+        """Update a member's role in an organization."""
+        return await self._request(
+            "PATCH", f"/orgs/{slug}/members/{user_id}", json={"role": role}
+        )
+
+    async def remove_org_member(self, slug: str, user_id: str) -> dict[str, Any]:
+        """Remove a member from an organization."""
+        return await self._request("DELETE", f"/orgs/{slug}/members/{user_id}")
+
     async def get_entity(self, entity_id: str) -> dict[str, Any]:
         """Get a single entity by ID with related context."""
         return await self._request("GET", f"/entities/{entity_id}")
