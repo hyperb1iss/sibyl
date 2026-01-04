@@ -48,15 +48,16 @@ Full CRUD operations with OpenAPI documentation:
 
 **OpenAPI Spec:** Available at `/api/docs` (Swagger UI) and `/api/openapi.json`
 
-## Authentication
+## Authentication & Authorization
 
-Sibyl supports multiple authentication methods:
+Sibyl supports multiple authentication methods and role-based access control:
 
-| Method         | Use Case                        | Documentation                          |
-| -------------- | ------------------------------- | -------------------------------------- |
-| JWT Sessions   | Web clients, browser-based apps | [auth-jwt.md](./auth-jwt.md)           |
-| API Keys       | Programmatic access, CI/CD      | [auth-api-keys.md](./auth-api-keys.md) |
-| OAuth (GitHub) | Social login                    | [auth-jwt.md](./auth-jwt.md)           |
+| Topic          | Description                          | Documentation                                    |
+| -------------- | ------------------------------------ | ------------------------------------------------ |
+| JWT Sessions   | Web clients, browser-based apps      | [auth-jwt.md](./auth-jwt.md)                     |
+| API Keys       | Programmatic access, CI/CD           | [auth-api-keys.md](./auth-api-keys.md)           |
+| OAuth (GitHub) | Social login                         | [auth-jwt.md](./auth-jwt.md)                     |
+| Authorization  | Roles, permissions, RLS              | [auth-authorization.md](./auth-authorization.md) |
 
 ### Quick Start
 
