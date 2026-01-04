@@ -292,7 +292,8 @@ reportUnknownVariableType = false
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-addopts = ["-ra", "--strict-markers", "--strict-config", "-v"]
+# Exclude live model tests from normal runs - they require API keys and --live-models flag
+addopts = ["-ra", "--strict-markers", "--strict-config", "-v", "--ignore=tests/live"]
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning",
@@ -304,6 +305,10 @@ markers = [
     "integration: marks tests as integration tests",
     "slow: marks tests as slow",
     "stress: marks tests as stress/load tests",
+    "live_model: tests requiring real LLM API calls (requires --live-models)",
+    "requires_worktree: tests requiring git worktree setup",
+    "requires_redis: tests requiring Redis connection",
+    "requires_falkordb: tests requiring FalkorDB connection",
 ]
 
 # =============================================================================
