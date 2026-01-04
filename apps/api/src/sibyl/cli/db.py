@@ -1040,3 +1040,134 @@ def init_schema(
     except Exception as e:
         error(f"Schema initialization failed: {e}")
         raise typer.Exit(code=1) from None
+
+
+@app.command("sync-projects")
+def sync_projects(  # noqa: PLR0915
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID (required)"),
+    ] = "",
+    owner_id: Annotated[
+        str,
+        typer.Option("--owner-id", help="User UUID to own synced projects (uses org admin if not specified)"),
+    ] = "",
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", "-n", help="Show what would be synced without making changes"),
+    ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Show details for each project"),
+    ] = False,
+) -> None:
+    """Sync projects from graph to Postgres for RBAC.
+
+    Ensures every project in the knowledge graph has a corresponding
+    row in Postgres. Required for project-level RBAC to work properly.
+
+    Projects are created with ORG visibility and VIEWER default role.
+    If --owner-id is not specified, uses the first org admin as owner.
+    """
+    from uuid import UUID
+
+    if not org_id:
+        error("--org-id is required")
+        raise typer.Exit(code=1)
+
+    try:
+        org_uuid = UUID(org_id)
+    except ValueError:
+        error(f"Invalid organization UUID: {org_id}")
+        raise typer.Exit(code=1) from None
+
+    owner_uuid: UUID | None = None
+    if owner_id:
+        try:
+            owner_uuid = UUID(owner_id)
+        except ValueError:
+            error(f"Invalid owner UUID: {owner_id}")
+            raise typer.Exit(code=1) from None
+
+    @run_async
+    async def _sync() -> None:
+        from sqlalchemy import select
+
+        from sibyl.db.connection import get_session
+        from sibyl.db.models import OrganizationMember, OrganizationRole
+        from sibyl.db.sync import get_graph_projects, sync_projects_from_graph
+
+        try:
+            # Fetch projects from graph
+            info("Fetching projects from graph...")
+            graph_projects = await get_graph_projects(org_id)
+            info(f"Found {len(graph_projects)} project(s) in graph")
+
+            if not graph_projects:
+                warn("No projects found in graph")
+                return
+
+            # Sync to Postgres
+            async with get_session() as session:
+                # Resolve owner: use provided UUID or find first org admin
+                nonlocal owner_uuid
+                if owner_uuid is None:
+                    admin_result = await session.execute(
+                        select(OrganizationMember.user_id)
+                        .where(
+                            OrganizationMember.organization_id == org_uuid,
+                            OrganizationMember.role.in_([OrganizationRole.OWNER, OrganizationRole.ADMIN]),
+                        )
+                        .limit(1)
+                    )
+                    row = admin_result.first()
+                    if row is None:
+                        error("No org admin found to set as project owner")
+                        raise typer.Exit(code=1)
+                    owner_uuid = row[0]
+                    info(f"Using org admin as owner: {owner_uuid}")
+
+                result = await sync_projects_from_graph(
+                    session,
+                    org_uuid,
+                    owner_uuid,
+                    graph_projects,
+                    dry_run=dry_run,
+                )
+
+                if not dry_run:
+                    await session.commit()
+
+                # Report results
+                console.print()
+                if dry_run:
+                    info("[bold]DRY RUN[/bold] - no changes made")
+
+                if result["created"] > 0:
+                    success(f"Created: {result['created']} project(s)")
+                if result["skipped"] > 0:
+                    info(f"Skipped: {result['skipped']} (already exist)")
+                if result["errors"] > 0:
+                    warn(f"Errors: {result['errors']}")
+
+                if verbose and result["details"]:
+                    console.print()
+                    for detail in result["details"]:
+                        status = detail.get("status", "unknown")
+                        name = detail.get("name", "?")
+                        graph_id = detail.get("graph_id", "?")
+
+                        if status in {"created", "would_create"}:
+                            console.print(f"  [green]+[/green] {name} ({graph_id})")
+                        elif status == "exists":
+                            console.print(f"  [dim]=[/dim] {name} ({graph_id})")
+                        else:
+                            err = detail.get("error", "unknown error")
+                            console.print(f"  [{ERROR_RED}]![/{ERROR_RED}] {name}: {err}")
+
+        except Exception as e:
+            error(f"Sync failed: {e}")
+            print_db_hint()
+            raise typer.Exit(code=1) from None
+
+    _sync()
