@@ -18,7 +18,7 @@ from collections.abc import AsyncGenerator
 from uuid import UUID
 
 import structlog
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -180,7 +180,7 @@ async def require_rls_session(request: Request) -> AsyncGenerator[AsyncSession]:
                 org_id=UUID(str(org_id)) if org_id else None,
             )
         except Exception as e:
-            log.error("Failed to set RLS context", error=str(e))
+            log.exception("Failed to set RLS context", error=str(e))
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to initialize security context",

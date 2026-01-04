@@ -226,7 +226,7 @@ class TestListMembers:
         role_result.scalar_one_or_none.return_value = MagicMock(role=ProjectRole.MAINTAINER)
 
         session = AsyncMock()
-        session.get.side_effect = lambda model, id: project if model.__name__ == "Project" else owner
+        session.get.side_effect = lambda model, pk: project if model.__name__ == "Project" else owner
         session.execute.side_effect = [role_result, member_result]
 
         result = await list_members(
@@ -257,7 +257,7 @@ class TestListMembers:
         member_result.all.return_value = []
 
         session = AsyncMock()
-        session.get.side_effect = lambda model, id: project if model.__name__ == "Project" else user
+        session.get.side_effect = lambda model, pk: project if model.__name__ == "Project" else user
         session.execute.return_value = member_result
 
         result = await list_members(

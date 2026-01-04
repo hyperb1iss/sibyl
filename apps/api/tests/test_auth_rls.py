@@ -173,7 +173,7 @@ class TestRequireRlsSession:
             mock_settings.disable_auth = False
             mock_resolve.return_value = None  # No claims found
 
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(HTTPException) as exc_info:  # noqa: PT012
                 gen = require_rls_session(request)
                 await gen.__anext__()
 
@@ -199,7 +199,7 @@ class TestRequireRlsSession:
             mock_settings.disable_auth = False
             mock_resolve.return_value = {"org": str(uuid4())}  # No sub
 
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(HTTPException) as exc_info:  # noqa: PT012
                 gen = require_rls_session(request)
                 await gen.__anext__()
 
