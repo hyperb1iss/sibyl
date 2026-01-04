@@ -15,7 +15,7 @@ from sqlmodel import select
 
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.audit import AuditLogger
-from sibyl.auth.dependencies import get_current_organization, get_current_user
+from sibyl.auth.dependencies import get_current_org_role, get_current_organization, get_current_user
 from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import Organization, Project, ProjectMember, ProjectRole, User
 
@@ -118,6 +118,7 @@ async def list_members(
     project_id: str,
     user: User = Depends(get_current_user),
     org: Organization = Depends(get_current_organization),
+    _org_role=Depends(get_current_org_role),  # Verifies user is org member
     session: AsyncSession = Depends(get_session_dependency),
 ):
     """List all members of a project.
@@ -188,6 +189,7 @@ async def add_member(
     background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user),
     org: Organization = Depends(get_current_organization),
+    _org_role=Depends(get_current_org_role),  # Verifies user is org member
     session: AsyncSession = Depends(get_session_dependency),
 ):
     """Add a member to a project.
@@ -264,6 +266,7 @@ async def update_member_role(
     background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user),
     org: Organization = Depends(get_current_organization),
+    _org_role=Depends(get_current_org_role),  # Verifies user is org member
     session: AsyncSession = Depends(get_session_dependency),
 ):
     """Update a member's role in a project.
@@ -336,6 +339,7 @@ async def remove_member(
     background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user),
     org: Organization = Depends(get_current_organization),
+    _org_role=Depends(get_current_org_role),  # Verifies user is org member
     session: AsyncSession = Depends(get_session_dependency),
 ):
     """Remove a member from a project.
