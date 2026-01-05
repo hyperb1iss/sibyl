@@ -43,13 +43,19 @@
 
 ## The Problem
 
-Your AI agents have amnesia. Every session starts fresh—no memory of what worked, what failed, or what you learned yesterday. And when you're running multiple agents across different features? Chaos. No visibility. No coordination.
+Your AI agents have amnesia. Every session starts fresh—no memory of what worked, what failed, or
+what you learned yesterday. And when you're running multiple agents across different features?
+Chaos. No visibility. No coordination.
 
 **What if your agents could remember—and you could orchestrate them?**
 
-Sibyl gives your AI agents **persistent memory** through a knowledge graph. Plan work as epics and tasks. Spawn agents that execute autonomously—each building on shared learnings, each tracked in one place. You stay in control: approving decisions, seeing progress across all parallel efforts, keeping the whole project moving forward.
+Sibyl gives your AI agents **persistent memory** through a knowledge graph. Plan work as epics and
+tasks. Spawn agents that execute autonomously—each building on shared learnings, each tracked in one
+place. You stay in control: approving decisions, seeing progress across all parallel efforts,
+keeping the whole project moving forward.
 
-Solo dev? Your agents become your team. Actual team? Everyone's insights compound. Either way: **search by meaning, capture what you learn, orchestrate work across all your agents.**
+Solo dev? Your agents become your team. Actual team? Everyone's insights compound. Either way:
+**search by meaning, capture what you learn, orchestrate work across all your agents.**
 
 ## What You Get
 
@@ -63,23 +69,28 @@ Solo dev? Your agents become your team. Actual team? Everyone's insights compoun
 | **Multi-Tenancy**       | Isolated graphs per organization. Enterprise-ready from day one                                             |
 | **Graph Visualization** | Interactive D3 visualization of your knowledge connections                                                  |
 
-<p align="center">
-  <img src="docs/images/dashboard.png" alt="Sibyl Dashboard" width="800">
-  <br>
-  <em>Dashboard — Stats, entity distribution, quick actions</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/graph.png" alt="Knowledge Graph" width="800">
-  <br>
-  <em>Graph — Interactive visualization of knowledge connections</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/tasks.png" alt="Task Workflow" width="800">
-  <br>
-  <em>Tasks — Kanban workflow with search and quick creation</em>
-</p>
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/images/dashboard.png" alt="Dashboard" width="400"><br>
+      <sub>Dashboard</sub>
+    </td>
+    <td align="center">
+      <img src="docs/images/projects.png" alt="Projects" width="400"><br>
+      <sub>Projects</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/images/graph.png" alt="Graph" width="400"><br>
+      <sub>Knowledge Graph</sub>
+    </td>
+    <td align="center">
+      <img src="docs/images/tasks.png" alt="Tasks" width="400"><br>
+      <sub>Task Workflow</sub>
+    </td>
+  </tr>
+</table>
 
 ## Quickstart
 
@@ -97,8 +108,8 @@ open http://localhost:3337
 # → Keys are saved securely to the database
 ```
 
-**Zero-config approach:** No `.env` file required! API keys are entered during onboarding and
-stored encrypted in the database. For advanced setup, see `.env.quickstart.example`.
+**Zero-config approach:** No `.env` file required! API keys are entered during onboarding and stored
+encrypted in the database. For advanced setup, see `.env.quickstart.example`.
 
 ### Development Setup
 
@@ -383,11 +394,15 @@ moon run docker-down      # Stop databases
 
 ### Who is Sibyl for?
 
-**Solo developers** who want a team of AI agents working on their codebase—with memory that persists. **Teams** who want shared knowledge that compounds. **Anyone** building with AI who's tired of repeating context every session.
+**Solo developers** who want a team of AI agents working on their codebase—with memory that
+persists. **Teams** who want shared knowledge that compounds. **Anyone** building with AI who's
+tired of repeating context every session.
 
 ### Do I need AI agents to use Sibyl?
 
-No. The knowledge graph and task system work great standalone—for documentation, task tracking, and capturing learnings. But agents are where Sibyl really shines: autonomous workers that share memory and coordinate through your graph.
+No. The knowledge graph and task system work great standalone—for documentation, task tracking, and
+capturing learnings. But agents are where Sibyl really shines: autonomous workers that share memory
+and coordinate through your graph.
 
 ### How does it compare to Mem0 / LangMem / similar?
 
