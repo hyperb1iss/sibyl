@@ -18,6 +18,7 @@ from sibyl.auth.authorization import (
     require_project_role,
     require_project_write,
     resolve_project_by_graph_id,
+    verify_entity_project_access,
 )
 from sibyl.db.models import (
     OrganizationRole,
@@ -488,3 +489,151 @@ class TestRequireProjectRole:
         """Can use Postgres UUID instead of graph ID."""
         dep = require_project_role(ProjectRole.VIEWER, use_graph_id=False)
         assert callable(dep)
+
+
+class TestVerifyEntityProjectAccess:
+    """Tests for verify_entity_project_access write bypass fixes."""
+
+    @pytest.fixture
+    def mock_org(self) -> MagicMock:
+        """Create a mock organization."""
+        org = MagicMock()
+        org.id = uuid4()
+        return org
+
+    @pytest.fixture
+    def mock_user(self) -> MagicMock:
+        """Create a mock user."""
+        user = MagicMock()
+        user.id = uuid4()
+        return user
+
+    @pytest.mark.asyncio
+    async def test_unassigned_entity_viewer_allowed_for_member(
+        self, mock_org: MagicMock, mock_user: MagicMock
+    ) -> None:
+        """Org member can VIEWER on unassigned entity."""
+        ctx = MagicMock()
+        ctx.organization = mock_org
+        ctx.user = mock_user
+        ctx.org_role = OrganizationRole.MEMBER
+
+        mock_session = AsyncMock()
+
+        result = await verify_entity_project_access(
+            mock_session, ctx, entity_project_id=None, required_role=ProjectRole.VIEWER
+        )
+
+        assert result == ProjectRole.VIEWER
+
+    @pytest.mark.asyncio
+    async def test_unassigned_entity_write_denied_for_member(
+        self, mock_org: MagicMock, mock_user: MagicMock
+    ) -> None:
+        """Org member cannot CONTRIBUTOR on unassigned entity."""
+        ctx = MagicMock()
+        ctx.organization = mock_org
+        ctx.user = mock_user
+        ctx.org_role = OrganizationRole.MEMBER
+
+        mock_session = AsyncMock()
+
+        with pytest.raises(ProjectAuthorizationError) as exc_info:
+            await verify_entity_project_access(
+                mock_session, ctx, entity_project_id=None, required_role=ProjectRole.CONTRIBUTOR
+            )
+
+        assert exc_info.value.detail["details"]["project_id"] == "unassigned"
+        assert exc_info.value.detail["details"]["required_role"] == "project_contributor"
+
+    @pytest.mark.asyncio
+    async def test_unassigned_entity_write_allowed_for_admin(
+        self, mock_org: MagicMock, mock_user: MagicMock
+    ) -> None:
+        """Org admin can do any operation on unassigned entity."""
+        ctx = MagicMock()
+        ctx.organization = mock_org
+        ctx.user = mock_user
+        ctx.org_role = OrganizationRole.ADMIN
+
+        mock_session = AsyncMock()
+
+        result = await verify_entity_project_access(
+            mock_session, ctx, entity_project_id=None, required_role=ProjectRole.MAINTAINER
+        )
+
+        assert result == ProjectRole.OWNER
+
+    @pytest.mark.asyncio
+    async def test_unsynced_project_viewer_allowed_for_member(
+        self, mock_org: MagicMock, mock_user: MagicMock
+    ) -> None:
+        """Org member can VIEWER on unsynced project entity."""
+        ctx = MagicMock()
+        ctx.organization = mock_org
+        ctx.user = mock_user
+        ctx.org_role = OrganizationRole.MEMBER
+
+        mock_session = AsyncMock()
+        # Make resolve_project_by_graph_id raise HTTPException (project not found)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session.execute.return_value = mock_result
+
+        result = await verify_entity_project_access(
+            mock_session, ctx, entity_project_id="project_unsynced", required_role=ProjectRole.VIEWER
+        )
+
+        assert result == ProjectRole.VIEWER
+
+    @pytest.mark.asyncio
+    async def test_unsynced_project_write_denied_for_member(
+        self, mock_org: MagicMock, mock_user: MagicMock
+    ) -> None:
+        """Org member cannot CONTRIBUTOR on unsynced project entity."""
+        ctx = MagicMock()
+        ctx.organization = mock_org
+        ctx.user = mock_user
+        ctx.org_role = OrganizationRole.MEMBER
+
+        mock_session = AsyncMock()
+        # Make resolve_project_by_graph_id raise HTTPException (project not found)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session.execute.return_value = mock_result
+
+        with pytest.raises(ProjectAuthorizationError) as exc_info:
+            await verify_entity_project_access(
+                mock_session,
+                ctx,
+                entity_project_id="project_unsynced",
+                required_role=ProjectRole.CONTRIBUTOR,
+            )
+
+        assert exc_info.value.detail["details"]["project_id"] == "project_unsynced"
+        assert exc_info.value.detail["details"]["required_role"] == "project_contributor"
+
+    @pytest.mark.asyncio
+    async def test_unsynced_project_write_allowed_for_admin(
+        self, mock_org: MagicMock, mock_user: MagicMock
+    ) -> None:
+        """Org admin can do any operation on unsynced project entity."""
+        ctx = MagicMock()
+        ctx.organization = mock_org
+        ctx.user = mock_user
+        ctx.org_role = OrganizationRole.OWNER
+
+        mock_session = AsyncMock()
+        # Make resolve_project_by_graph_id raise HTTPException (project not found)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session.execute.return_value = mock_result
+
+        result = await verify_entity_project_access(
+            mock_session,
+            ctx,
+            entity_project_id="project_unsynced",
+            required_role=ProjectRole.MAINTAINER,
+        )
+
+        assert result == ProjectRole.OWNER

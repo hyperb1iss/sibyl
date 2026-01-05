@@ -470,22 +470,63 @@ async def verify_entity_project_access(
             actual_role=None,
         )
 
-    # If entity has no project, org members can access (unassigned entities)
+    # If entity has no project, apply org-level permissions
     if entity_project_id is None:
-        # Org members can access unassigned entities
-        if ctx.org_role is not None:
+        # Org admins can do any operation on unassigned entities
+        if ctx.org_role in (OrganizationRole.OWNER, OrganizationRole.ADMIN):
+            return ProjectRole.OWNER  # Full access for admins
+
+        # Non-admins can only do VIEWER operations on unassigned entities
+        if ctx.org_role is not None and required_role == ProjectRole.VIEWER:
             return ProjectRole.VIEWER
-        return None
+
+        # Non-admins cannot do write operations on unassigned entities
+        log.warning(
+            "write_attempt_on_unassigned_entity",
+            user_id=str(ctx.user.id) if ctx.user else None,
+            required_role=required_role.value,
+        )
+        raise ProjectAuthorizationError(
+            project_id="unassigned",
+            required_role=required_role,
+            actual_role=ProjectRole.VIEWER if ctx.org_role else None,
+        )
 
     # Resolve project and check access
     try:
         project = await resolve_project_by_graph_id(session, ctx.organization.id, entity_project_id)
     except HTTPException:
-        # Project not registered in Postgres yet - allow org members
-        # This handles the migration period before all projects are synced
-        if ctx.org_role is not None:
+        # Project not registered in Postgres - same rules as unassigned
+        # Org admins can do any operation
+        if ctx.org_role in (OrganizationRole.OWNER, OrganizationRole.ADMIN):
+            log.warning(
+                "project_not_synced_admin_access",
+                project_id=entity_project_id,
+                user_id=str(ctx.user.id) if ctx.user else None,
+            )
+            return ProjectRole.OWNER
+
+        # Non-admins can only do VIEWER operations
+        if ctx.org_role is not None and required_role == ProjectRole.VIEWER:
+            log.warning(
+                "project_not_synced_viewer_access",
+                project_id=entity_project_id,
+                user_id=str(ctx.user.id) if ctx.user else None,
+            )
             return ProjectRole.VIEWER
-        return None
+
+        # Non-admins cannot do write operations on unsynced projects
+        log.warning(
+            "write_attempt_on_unsynced_project",
+            project_id=entity_project_id,
+            user_id=str(ctx.user.id) if ctx.user else None,
+            required_role=required_role.value,
+        )
+        raise ProjectAuthorizationError(
+            project_id=entity_project_id,
+            required_role=required_role,
+            actual_role=ProjectRole.VIEWER if ctx.org_role else None,
+        ) from None
 
     effective_role = await get_effective_project_role(session, ctx, project)
 
