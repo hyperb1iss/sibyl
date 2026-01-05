@@ -7,15 +7,11 @@
 </p>
 
 <p align="center">
-  <a href="#-the-problem">
-    <img src="https://img.shields.io/badge/Knowledge-Graph_RAG-e135ff?style=for-the-badge&logo=graphql&logoColor=white" alt="Graph-RAG">
-  </a>
-  <a href="#-agent-orchestration">
-    <img src="https://img.shields.io/badge/Agents-Orchestration-80ffea?style=for-the-badge&logo=openai&logoColor=white" alt="Agents">
-  </a>
-  <a href="#-the-cli">
-    <img src="https://img.shields.io/badge/CLI-First-ff6ac1?style=for-the-badge&logo=gnubash&logoColor=white" alt="CLI First">
-  </a>
+  <img src="https://img.shields.io/badge/Claude-Agents-d4a574?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude">
+  <img src="https://img.shields.io/badge/Graphiti-Memory-e135ff?style=for-the-badge&logo=neo4j&logoColor=white" alt="Graphiti">
+  <img src="https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/Next.js_16-Frontend-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js">
+  <img src="https://img.shields.io/badge/moon-Monorepo-af63d3?style=for-the-badge&logo=moonrepo&logoColor=white" alt="moon">
 </p>
 
 <p align="center">
@@ -424,7 +420,9 @@ assign tasks, and collaborate on the same graph.
 
 ### Is it production-ready?
 
-Sibyl is in active development (v0.1.x). The core features work well, but expect rough edges. **We use Sibyl to build Sibyl**—every feature, task, and learning you see here was tracked and orchestrated through the system itself.
+Sibyl is in active development (v0.1.x). The core features work well, but expect rough edges. **We
+use Sibyl to build Sibyl**—every feature, task, and learning you see here was tracked and
+orchestrated through the system itself.
 
 ## Philosophy
 
