@@ -87,8 +87,6 @@ jobs:
         with:
           path: |
             .moon/cache
-            apps/api/.venv
-            apps/web/node_modules
             apps/web/.next/cache
           key:
             moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock',
@@ -96,14 +94,39 @@ jobs:
           restore-keys: |
             moon-${{ runner.os }}-
 
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      # =========================================================================
+      # Install Dependencies (ensure complete installation after cache restore)
+      # =========================================================================
+      - name: Install dependencies
+        run: |
+          cd apps/web && pnpm install --frozen-lockfile
+          cd ../..
+          uv sync
+
       # =========================================================================
       # Lint & Typecheck (all projects in parallel via moon)
       # =========================================================================
       - name: Lint
-        run: moon ci :lint
+        run: moon run :lint
 
       - name: Typecheck
-        run: moon ci :typecheck
+        run: moon run :typecheck
 
       # =========================================================================
       # Build (all projects)
