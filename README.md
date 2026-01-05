@@ -10,6 +10,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Claude-Agents-d4a574?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude">
   <img src="https://img.shields.io/badge/Graphiti-Memory-e135ff?style=for-the-badge&logo=neo4j&logoColor=white" alt="Graphiti">
+  <img src="https://img.shields.io/badge/FalkorDB-Graph-00aaff?style=for-the-badge&logo=redis&logoColor=white" alt="FalkorDB">
+  <img src="https://img.shields.io/badge/PostgreSQL_18-Data-336791?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL">
   <img src="https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/Next.js_16-Frontend-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js">
   <img src="https://img.shields.io/badge/moon-Monorepo-af63d3?style=for-the-badge&logo=moonrepo&logoColor=white" alt="moon">
