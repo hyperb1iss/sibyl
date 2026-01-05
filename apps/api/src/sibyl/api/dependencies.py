@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from sibyl_core.graph.client import GraphClient
 
 
-async def get_graph() -> "GraphClient":
+async def get_graph() -> GraphClient:
     """Get the shared graph client.
 
     This is a thin wrapper around get_graph_client for use as a FastAPI
@@ -39,7 +39,7 @@ async def get_graph() -> "GraphClient":
 
 
 async def get_entity_manager(
-    org: "Organization" = Depends(get_current_organization),
+    org: Organization = Depends(get_current_organization),
 ) -> EntityManager:
     """Get an EntityManager scoped to the current organization.
 
@@ -67,7 +67,7 @@ async def get_entity_manager(
 
 
 async def get_relationship_manager(
-    org: "Organization" = Depends(get_current_organization),
+    org: Organization = Depends(get_current_organization),
 ) -> RelationshipManager:
     """Get a RelationshipManager scoped to the current organization.
 
@@ -84,7 +84,7 @@ async def get_relationship_manager(
 
 
 async def get_group_id(
-    org: "Organization" = Depends(get_current_organization),
+    org: Organization = Depends(get_current_organization),
 ) -> str:
     """Get the graph group_id (org ID as string) for the current organization.
 

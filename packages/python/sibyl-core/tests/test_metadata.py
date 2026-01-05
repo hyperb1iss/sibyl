@@ -9,8 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import pytest
-
 from sibyl_core.utils.metadata import (
     extract_meta,
     filter_by_meta,
@@ -410,7 +408,9 @@ class TestMetadataIntegration:
             Agent("1", "agent-1", {"status": "working", "agent_type": "general"}),
             Agent("2", "agent-2", {"status": "paused", "agent_type": "general"}),
             Agent("3", "agent-3", {"status": "working", "agent_type": "specialized"}),
-            Agent("4", "agent-4", {"status": "terminated", "agent_type": "general", "archived": True}),
+            Agent(
+                "4", "agent-4", {"status": "terminated", "agent_type": "general", "archived": True}
+            ),
         ]
 
         # Filter active, non-archived agents

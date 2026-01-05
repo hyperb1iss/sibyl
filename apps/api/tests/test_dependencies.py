@@ -6,7 +6,6 @@ for EntityManager and RelationshipManager provisioning.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -18,9 +17,6 @@ from sibyl.api.dependencies import (
     get_group_id,
     get_relationship_manager,
 )
-
-if TYPE_CHECKING:
-    from sibyl_core.graph import EntityManager, RelationshipManager
 
 
 # =============================================================================

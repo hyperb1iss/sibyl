@@ -30,7 +30,7 @@ log = structlog.get_logger()
 
 
 async def batch_create_nodes(
-    client: "GraphClient",
+    client: GraphClient,
     organization_id: str,
     nodes: list[dict[str, Any]],
     *,
@@ -85,9 +85,7 @@ async def batch_create_nodes(
     """
 
     try:
-        result = await client.execute_write_org(
-            query, organization_id, nodes=serialized_nodes
-        )
+        result = await client.execute_write_org(query, organization_id, nodes=serialized_nodes)
 
         if return_ids:
             return [record["id"] for record in result]
@@ -104,7 +102,7 @@ async def batch_create_nodes(
 
 
 async def batch_create_episodic_nodes(
-    client: "GraphClient",
+    client: GraphClient,
     organization_id: str,
     episodes: list[dict[str, Any]],
     *,
@@ -133,7 +131,7 @@ async def batch_create_episodic_nodes(
 
 
 async def batch_create_relationships(
-    client: "GraphClient",
+    client: GraphClient,
     organization_id: str,
     relationships: list[dict[str, Any]],
     *,
@@ -193,9 +191,7 @@ async def batch_create_relationships(
     """
 
     try:
-        result = await client.execute_write_org(
-            query, organization_id, rels=normalized
-        )
+        result = await client.execute_write_org(query, organization_id, rels=normalized)
         return result[0]["created"] if result else 0
 
     except Exception as e:
@@ -209,7 +205,7 @@ async def batch_create_relationships(
 
 
 async def batch_update_nodes(
-    client: "GraphClient",
+    client: GraphClient,
     organization_id: str,
     updates: list[dict[str, Any]],
     *,
@@ -263,9 +259,7 @@ async def batch_update_nodes(
     """
 
     try:
-        result = await client.execute_write_org(
-            query, organization_id, updates=serialized
-        )
+        result = await client.execute_write_org(query, organization_id, updates=serialized)
         return result[0]["updated"] if result else 0
 
     except Exception as e:
@@ -279,7 +273,7 @@ async def batch_update_nodes(
 
 
 async def batch_delete_nodes(
-    client: "GraphClient",
+    client: GraphClient,
     organization_id: str,
     uuids: list[str],
     *,

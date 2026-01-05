@@ -98,18 +98,14 @@ class TestBatchCreateNodes:
         assert len(result) == 3
 
     @pytest.mark.asyncio
-    async def test_empty_list_returns_empty(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_empty_list_returns_empty(self, mock_client: MagicMock, org_id: str) -> None:
         """Empty input returns empty list without query."""
         result = await batch_create_nodes(mock_client, org_id, [])
         assert result == []
         mock_client.execute_write_org.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_validates_required_uuid(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_validates_required_uuid(self, mock_client: MagicMock, org_id: str) -> None:
         """Raises ValueError if node missing uuid."""
         nodes = [{"name": "Missing UUID"}]
 
@@ -117,9 +113,7 @@ class TestBatchCreateNodes:
             await batch_create_nodes(mock_client, org_id, nodes)
 
     @pytest.mark.asyncio
-    async def test_validates_required_name(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_validates_required_name(self, mock_client: MagicMock, org_id: str) -> None:
         """Raises ValueError if node missing name."""
         nodes = [{"uuid": str(uuid4())}]
 
@@ -147,9 +141,7 @@ class TestBatchCreateNodes:
         """Does not include RETURN clause when return_ids=False."""
         mock_client.execute_write_org.return_value = []
 
-        result = await batch_create_nodes(
-            mock_client, org_id, sample_nodes, return_ids=False
-        )
+        result = await batch_create_nodes(mock_client, org_id, sample_nodes, return_ids=False)
 
         query = mock_client.execute_write_org.call_args[0][0]
         assert "RETURN" not in query
@@ -181,18 +173,14 @@ class TestBatchCreateRelationships:
         assert result == 2
 
     @pytest.mark.asyncio
-    async def test_empty_list_returns_zero(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_empty_list_returns_zero(self, mock_client: MagicMock, org_id: str) -> None:
         """Empty input returns 0 without query."""
         result = await batch_create_relationships(mock_client, org_id, [])
         assert result == 0
         mock_client.execute_write_org.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_validates_required_from_uuid(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_validates_required_from_uuid(self, mock_client: MagicMock, org_id: str) -> None:
         """Raises ValueError if relationship missing from_uuid."""
         rels = [{"to_uuid": "id2"}]
 
@@ -200,9 +188,7 @@ class TestBatchCreateRelationships:
             await batch_create_relationships(mock_client, org_id, rels)
 
     @pytest.mark.asyncio
-    async def test_validates_required_to_uuid(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_validates_required_to_uuid(self, mock_client: MagicMock, org_id: str) -> None:
         """Raises ValueError if relationship missing to_uuid."""
         rels = [{"from_uuid": "id1"}]
 
@@ -210,24 +196,18 @@ class TestBatchCreateRelationships:
             await batch_create_relationships(mock_client, org_id, rels)
 
     @pytest.mark.asyncio
-    async def test_uses_custom_rel_type(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_uses_custom_rel_type(self, mock_client: MagicMock, org_id: str) -> None:
         """Uses specified relationship type."""
         rels = [{"from_uuid": "id1", "to_uuid": "id2"}]
         mock_client.execute_write_org.return_value = [{"created": 1}]
 
-        await batch_create_relationships(
-            mock_client, org_id, rels, rel_type="BELONGS_TO"
-        )
+        await batch_create_relationships(mock_client, org_id, rels, rel_type="BELONGS_TO")
 
         query = mock_client.execute_write_org.call_args[0][0]
         assert "BELONGS_TO" in query
 
     @pytest.mark.asyncio
-    async def test_includes_properties(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_includes_properties(self, mock_client: MagicMock, org_id: str) -> None:
         """Includes properties on relationships."""
         rels = [
             {
@@ -253,9 +233,7 @@ class TestBatchUpdateNodes:
     """Tests for batch_update_nodes function."""
 
     @pytest.mark.asyncio
-    async def test_updates_nodes_with_unwind(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_updates_nodes_with_unwind(self, mock_client: MagicMock, org_id: str) -> None:
         """Uses UNWIND to update multiple nodes."""
         updates = [
             {"uuid": "id1", "properties": {"status": "done"}},
@@ -271,18 +249,14 @@ class TestBatchUpdateNodes:
         assert result == 2
 
     @pytest.mark.asyncio
-    async def test_empty_list_returns_zero(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_empty_list_returns_zero(self, mock_client: MagicMock, org_id: str) -> None:
         """Empty input returns 0 without query."""
         result = await batch_update_nodes(mock_client, org_id, [])
         assert result == 0
         mock_client.execute_write_org.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_validates_required_uuid(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_validates_required_uuid(self, mock_client: MagicMock, org_id: str) -> None:
         """Raises ValueError if update missing uuid."""
         updates = [{"properties": {"status": "done"}}]
 
@@ -290,9 +264,7 @@ class TestBatchUpdateNodes:
             await batch_update_nodes(mock_client, org_id, updates)
 
     @pytest.mark.asyncio
-    async def test_validates_required_properties(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_validates_required_properties(self, mock_client: MagicMock, org_id: str) -> None:
         """Raises ValueError if update missing properties."""
         updates = [{"uuid": "id1"}]
 
@@ -300,9 +272,7 @@ class TestBatchUpdateNodes:
             await batch_update_nodes(mock_client, org_id, updates)
 
     @pytest.mark.asyncio
-    async def test_uses_label_filter(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_uses_label_filter(self, mock_client: MagicMock, org_id: str) -> None:
         """Uses label filter when specified."""
         updates = [{"uuid": "id1", "properties": {"status": "done"}}]
         mock_client.execute_write_org.return_value = [{"updated": 1}]
@@ -320,9 +290,7 @@ class TestBatchDeleteNodes:
     """Tests for batch_delete_nodes function."""
 
     @pytest.mark.asyncio
-    async def test_deletes_nodes_with_unwind(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_deletes_nodes_with_unwind(self, mock_client: MagicMock, org_id: str) -> None:
         """Uses UNWIND to delete multiple nodes."""
         uuids = ["id1", "id2", "id3"]
         mock_client.execute_write_org.return_value = [{"deleted": 3}]
@@ -335,18 +303,14 @@ class TestBatchDeleteNodes:
         assert result == 3
 
     @pytest.mark.asyncio
-    async def test_empty_list_returns_zero(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_empty_list_returns_zero(self, mock_client: MagicMock, org_id: str) -> None:
         """Empty input returns 0 without query."""
         result = await batch_delete_nodes(mock_client, org_id, [])
         assert result == 0
         mock_client.execute_write_org.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_uses_detach_by_default(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_uses_detach_by_default(self, mock_client: MagicMock, org_id: str) -> None:
         """Uses DETACH DELETE by default."""
         mock_client.execute_write_org.return_value = [{"deleted": 1}]
 
@@ -356,9 +320,7 @@ class TestBatchDeleteNodes:
         assert "DETACH DELETE" in query
 
     @pytest.mark.asyncio
-    async def test_no_detach_when_disabled(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_no_detach_when_disabled(self, mock_client: MagicMock, org_id: str) -> None:
         """Uses simple DELETE when detach=False."""
         mock_client.execute_write_org.return_value = [{"deleted": 1}]
 
@@ -369,9 +331,7 @@ class TestBatchDeleteNodes:
         assert "DELETE n" in query
 
     @pytest.mark.asyncio
-    async def test_uses_label_filter(
-        self, mock_client: MagicMock, org_id: str
-    ) -> None:
+    async def test_uses_label_filter(self, mock_client: MagicMock, org_id: str) -> None:
         """Uses label filter when specified."""
         mock_client.execute_write_org.return_value = [{"deleted": 1}]
 

@@ -24,15 +24,15 @@ class TestSetRlsContext:
 
         await set_rls_context(session, user_id=user_id)
 
-        # Check that SET LOCAL was called with user_id
+        # Check that set_config was called with user_id
         calls = session.execute.call_args_list
         assert len(calls) >= 1
 
-        # Find the SET LOCAL app.user_id call
+        # Find the set_config app.user_id call
         user_call = None
         for call in calls:
             sql = str(call[0][0])
-            if "app.user_id" in sql and "SET LOCAL" in sql:
+            if "app.user_id" in sql and "set_config" in sql:
                 user_call = call
                 break
 
@@ -51,7 +51,7 @@ class TestSetRlsContext:
         org_call = None
         for call in calls:
             sql = str(call[0][0])
-            if "app.org_id" in sql and "SET LOCAL" in sql:
+            if "app.org_id" in sql and "set_config" in sql:
                 org_call = call
                 break
 
@@ -72,15 +72,20 @@ class TestSetRlsContext:
 
     @pytest.mark.asyncio
     async def test_resets_when_none(self) -> None:
-        """Resets session variables when IDs are None."""
+        """Sets empty string when IDs are None (effectively resetting)."""
         session = AsyncMock()
 
         await set_rls_context(session, user_id=None, org_id=None)
 
-        # Should call RESET for both
+        # Should call set_config with empty string for both
         calls = session.execute.call_args_list
-        reset_calls = [c for c in calls if "RESET" in str(c[0][0])]
-        assert len(reset_calls) == 2
+        assert len(calls) == 2  # One for user_id, one for org_id
+
+        # Check both params are empty strings
+        user_call = calls[0]
+        org_call = calls[1]
+        assert user_call[0][1]["user_id"] == ""
+        assert org_call[0][1]["org_id"] == ""
 
     @pytest.mark.asyncio
     async def test_accepts_string_ids(self) -> None:

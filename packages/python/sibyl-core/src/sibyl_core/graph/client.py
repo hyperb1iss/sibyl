@@ -3,7 +3,7 @@
 import asyncio
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import structlog
 from dotenv import load_dotenv
@@ -59,8 +59,8 @@ class GraphClient:
 
     # Per-org write semaphores: org_id -> Semaphore
     # Each org gets its own semaphore to prevent cross-org blocking
-    _org_semaphores: dict[str, asyncio.Semaphore] = {}
-    _semaphore_lock: asyncio.Lock | None = None  # Protects _org_semaphores access
+    _org_semaphores: ClassVar[dict[str, asyncio.Semaphore]] = {}
+    _semaphore_lock: ClassVar[asyncio.Lock | None] = None  # Protects _org_semaphores access
 
     def __init__(self) -> None:
         """Initialize the graph client."""

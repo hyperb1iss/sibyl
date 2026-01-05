@@ -32,7 +32,7 @@ def safe_meta(entity: Any, key: str) -> Any: ...
 
 
 @overload
-def safe_meta(entity: Any, key: str, default: T) -> T: ...
+def safe_meta(entity: Any, key: str, default: T) -> T: ...  # noqa: UP047
 
 
 def safe_meta(entity: Any, key: str, default: Any = None) -> Any:
@@ -61,7 +61,7 @@ def safe_attr(entity: Any, attr: str) -> Any: ...
 
 
 @overload
-def safe_attr(entity: Any, attr: str, *, default: T) -> T: ...
+def safe_attr(entity: Any, attr: str, *, default: T) -> T: ...  # noqa: UP047
 
 
 @overload
@@ -69,7 +69,7 @@ def safe_attr(entity: Any, attr: str, *, meta_key: str) -> Any: ...
 
 
 @overload
-def safe_attr(entity: Any, attr: str, *, meta_key: str, default: T) -> T: ...
+def safe_attr(entity: Any, attr: str, *, meta_key: str, default: T) -> T: ...  # noqa: UP047
 
 
 def safe_attr(
@@ -175,10 +175,7 @@ def filter_by_meta(
     """
     result = []
     for entity in entities:
-        if value is not None:
-            matches = match_meta(entity, key, value)
-        else:
-            matches = has_meta(entity, key)
+        matches = match_meta(entity, key, value) if value is not None else has_meta(entity, key)
 
         if exclude:
             if not matches:

@@ -21,21 +21,19 @@ from sibyl_core.utils.resilience import (
 )
 
 __all__ = [
-    # Metadata utilities
-    "extract_meta",
-    "filter_by_meta",
-    "get_metadata",
-    "has_meta",
-    "match_meta",
-    "safe_attr",
-    "safe_meta",
-    # Resilience utilities
     "GRAPH_RETRY",
     "SEARCH_RETRY",
     "TIMEOUTS",
     "RetryConfig",
     "calculate_delay",
+    "extract_meta",
+    "filter_by_meta",
+    "get_metadata",
+    "has_meta",
+    "match_meta",
     "retry",
+    "safe_attr",
+    "safe_meta",
     "timeout",
     "with_timeout",
 ]

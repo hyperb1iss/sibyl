@@ -108,9 +108,7 @@ class TestOrgWriteContext:
     """Tests for org_write_context context manager."""
 
     @pytest.mark.asyncio
-    async def test_acquires_and_releases_lock(
-        self, graph_client: GraphClient, org_id: str
-    ) -> None:
+    async def test_acquires_and_releases_lock(self, graph_client: GraphClient, org_id: str) -> None:
         """Context manager acquires lock on enter, releases on exit."""
         lock = await graph_client.get_org_write_lock(org_id)
         initial_value = lock._value
@@ -123,9 +121,7 @@ class TestOrgWriteContext:
         assert lock._value == initial_value
 
     @pytest.mark.asyncio
-    async def test_releases_on_exception(
-        self, graph_client: GraphClient, org_id: str
-    ) -> None:
+    async def test_releases_on_exception(self, graph_client: GraphClient, org_id: str) -> None:
         """Lock is released even if an exception occurs."""
         lock = await graph_client.get_org_write_lock(org_id)
         initial_value = lock._value
@@ -219,9 +215,7 @@ class TestOrgIsolation:
         assert org_id_2 in released_order
 
     @pytest.mark.asyncio
-    async def test_same_org_writes_serialized(
-        self, graph_client: GraphClient, org_id: str
-    ) -> None:
+    async def test_same_org_writes_serialized(self, graph_client: GraphClient, org_id: str) -> None:
         """Multiple writes to same org are serialized by the semaphore."""
         # Set semaphore to 1 for strict serialization test
         lock = await graph_client.get_org_write_lock(org_id)
@@ -263,21 +257,21 @@ class TestExecuteWriteOrgIntegration:
         mock_driver = MagicMock()
         mock_driver.execute_query = AsyncMock(return_value=([], [], {}))
 
-        with patch.object(graph_client, "get_org_driver", return_value=mock_driver):
-            with patch.object(graph_client, "_client", create=True):
-                graph_client._connected = True
+        with (
+            patch.object(graph_client, "get_org_driver", return_value=mock_driver),
+            patch.object(graph_client, "_client", create=True),
+        ):
+            graph_client._connected = True
 
-                # Get the org's semaphore and track its value
-                lock = await graph_client.get_org_write_lock(org_id)
-                initial = lock._value
+            # Get the org's semaphore and track its value
+            lock = await graph_client.get_org_write_lock(org_id)
+            initial = lock._value
 
-                # execute_write_org should acquire and release the org lock
-                await graph_client.execute_write_org(
-                    "CREATE (n:Test)", organization_id=org_id
-                )
+            # execute_write_org should acquire and release the org lock
+            await graph_client.execute_write_org("CREATE (n:Test)", organization_id=org_id)
 
-                # Lock should be released after execution
-                assert lock._value == initial
+            # Lock should be released after execution
+            assert lock._value == initial
 
 
 # =============================================================================

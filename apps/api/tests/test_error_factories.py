@@ -360,7 +360,7 @@ class TestUsagePatterns:
         """Factories work with inline conditional raises."""
         entity = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(HTTPException) as exc_info:  # noqa: PT012
             if not entity:
                 raise not_found("Entity", "ent_123")
 
@@ -371,7 +371,7 @@ class TestUsagePatterns:
         org = None
         entity = {"id": "123"}
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(HTTPException) as exc_info:  # noqa: PT012
             if not org:
                 raise no_org_context("access entity")
             if not entity:
@@ -385,7 +385,7 @@ class TestUsagePatterns:
         is_admin = False
         is_owner = False
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(HTTPException) as exc_info:  # noqa: PT012
             if not is_admin and not is_owner:
                 raise forbidden("You must be admin or owner")
 
