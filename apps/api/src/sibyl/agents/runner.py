@@ -322,7 +322,9 @@ For comprehensive guidance, run `/sibyl` to access the full skill documentation.
 
         # Add working directory context if provided
         if cwd:
-            parts.append(f"\n## Working Directory\n\nYour working directory is: `{cwd}`\n\nCreate and modify files in this directory. Use relative paths or paths within this directory.")
+            parts.append(
+                f"\n## Working Directory\n\nYour working directory is: `{cwd}`\n\nCreate and modify files in this directory. Use relative paths or paths within this directory."
+            )
 
         # Add agent-type-specific instructions
         type_prompt = self.AGENT_TYPE_PROMPTS.get(agent_type, "")

@@ -163,9 +163,7 @@ async def sync_project_update(
         updates["description"] = description[:2000] if description else None
 
     if updates:
-        await session.execute(
-            update(Project).where(Project.id == project.id).values(**updates)
-        )
+        await session.execute(update(Project).where(Project.id == project.id).values(**updates))
         log.info("project_synced_update", graph_id=graph_project_id, updates=list(updates.keys()))
 
     return True

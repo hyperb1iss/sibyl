@@ -65,7 +65,9 @@ class SettingsService:
     Encrypted values are automatically decrypted on read and encrypted on write.
     """
 
-    def __init__(self, session_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]]) -> None:
+    def __init__(
+        self, session_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]]
+    ) -> None:
         """Initialize the settings service.
 
         Args:
@@ -156,7 +158,9 @@ class SettingsService:
                     try:
                         value = decrypt_value(value)
                     except Exception as e:
-                        log.warning("Failed to decrypt setting for source lookup", key=key, error=str(e))
+                        log.warning(
+                            "Failed to decrypt setting for source lookup", key=key, error=str(e)
+                        )
                         value = None
                 return value, "database"
 
@@ -262,7 +266,11 @@ class SettingsService:
                         try:
                             value = decrypt_value(setting.value)
                         except Exception as e:
-                            log.warning("Failed to decrypt setting in get_all", key=setting.key, error=str(e))
+                            log.warning(
+                                "Failed to decrypt setting in get_all",
+                                key=setting.key,
+                                error=str(e),
+                            )
                     masked = (
                         mask_secret(decrypt_value(setting.value)) if setting.is_secret else None
                     )

@@ -53,9 +53,7 @@ async def _get_mcp_context() -> McpContext | None:
         if auth:
             # Convert project UUIDs to graph IDs (strings)
             project_ids = (
-                [str(pid) for pid in auth.project_ids]
-                if auth.project_ids is not None
-                else None
+                [str(pid) for pid in auth.project_ids] if auth.project_ids is not None else None
             )
             return McpContext(
                 org_id=str(auth.organization_id),
@@ -136,9 +134,7 @@ async def _get_accessible_projects(ctx: McpContext) -> set[str] | None:
         from sibyl.db.models import Organization, OrganizationMember, User
 
         # Get user
-        user_result = await session.execute(
-            select(User).where(User.id == UUID(ctx.user_id))
-        )
+        user_result = await session.execute(select(User).where(User.id == UUID(ctx.user_id)))
         user = user_result.scalar_one_or_none()
         if not user:
             return set()  # User not found - no access

@@ -56,7 +56,9 @@ class EmbeddingService:
             service = get_settings_service()
             api_key = await service.get_openai_key()
             if not api_key:
-                raise ValueError("OpenAI API key not configured (set via UI or SIBYL_OPENAI_API_KEY)")
+                raise ValueError(
+                    "OpenAI API key not configured (set via UI or SIBYL_OPENAI_API_KEY)"
+                )
 
             self._client = AsyncOpenAI(api_key=api_key)
 

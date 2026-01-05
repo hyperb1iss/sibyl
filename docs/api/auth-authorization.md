@@ -31,12 +31,12 @@ Organization admins implicitly have `owner` role on all projects.
 
 ### Project Roles
 
-| Role     | Permissions                                       |
-| -------- | ------------------------------------------------- |
-| `owner`  | Full access, can delete project and manage roles  |
-| `admin`  | Full access, can manage project members           |
-| `writer` | Create, update, delete entities within project    |
-| `reader` | Read-only access to project resources             |
+| Role     | Permissions                                      |
+| -------- | ------------------------------------------------ |
+| `owner`  | Full access, can delete project and manage roles |
+| `admin`  | Full access, can manage project members          |
+| `writer` | Create, update, delete entities within project   |
+| `reader` | Read-only access to project resources            |
 
 **Role Inheritance:**
 
@@ -83,16 +83,16 @@ role = await get_effective_project_role(session, user_id, project_id)
 
 ### Permission Dependencies
 
-| Action                    | Required Role |
-| ------------------------- | ------------- |
-| Read project              | `reader`      |
-| Create entities           | `writer`      |
-| Update entities           | `writer`      |
-| Delete entities           | `writer`      |
-| Manage project settings   | `admin`       |
-| Manage project members    | `admin`       |
-| Delete project            | `owner`       |
-| Transfer ownership        | `owner`       |
+| Action                  | Required Role |
+| ----------------------- | ------------- |
+| Read project            | `reader`      |
+| Create entities         | `writer`      |
+| Update entities         | `writer`      |
+| Delete entities         | `writer`      |
+| Manage project settings | `admin`       |
+| Manage project members  | `admin`       |
+| Delete project          | `owner`       |
+| Transfer ownership      | `owner`       |
 
 ## API Authorization
 
@@ -140,11 +140,11 @@ When authorization fails, a structured error is returned:
 
 **Error Codes:**
 
-| Code                    | Description                         |
-| ----------------------- | ----------------------------------- |
-| `PROJECT_ACCESS_DENIED` | User lacks required project role    |
-| `PROJECT_NOT_FOUND`     | Project doesn't exist or no access  |
-| `ORG_ACCESS_DENIED`     | User not in organization            |
+| Code                    | Description                        |
+| ----------------------- | ---------------------------------- |
+| `PROJECT_ACCESS_DENIED` | User lacks required project role   |
+| `PROJECT_NOT_FOUND`     | Project doesn't exist or no access |
+| `ORG_ACCESS_DENIED`     | User not in organization           |
 
 ## Row-Level Security (RLS)
 
@@ -153,12 +153,14 @@ PostgreSQL RLS provides database-level isolation.
 ### How It Works
 
 1. API sets session variables before each query:
+
    ```sql
    SET LOCAL app.user_id = 'user-uuid';
    SET LOCAL app.org_id = 'org-uuid';
    ```
 
 2. RLS policies filter rows automatically:
+
    ```sql
    -- Example policy on projects table
    CREATE POLICY org_isolation ON projects
@@ -219,6 +221,7 @@ POST /api/projects/{project_id}/members
 ```
 
 **Request:**
+
 ```json
 {
   "user_id": "user-uuid",
@@ -235,6 +238,7 @@ PATCH /api/projects/{project_id}/members/{member_id}
 ```
 
 **Request:**
+
 ```json
 {
   "role": "admin"
@@ -281,6 +285,7 @@ POST /api/organizations/{org_id}/teams
 ```
 
 **Request:**
+
 ```json
 {
   "name": "Engineering",
@@ -295,6 +300,7 @@ POST /api/teams/{team_id}/projects
 ```
 
 **Request:**
+
 ```json
 {
   "project_id": "proj-uuid",

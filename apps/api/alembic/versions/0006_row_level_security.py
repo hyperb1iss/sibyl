@@ -25,21 +25,24 @@ down_revision: str | None = "0005_project_permissions"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-# Tables with organization_id that need RLS
+# Tables with organization_id column that need RLS
 ORG_SCOPED_TABLES = [
     "organization_members",
     "teams",
-    "team_members",
     "projects",
     "project_members",
     "team_projects",
     "crawl_sources",
-    "crawled_documents",
-    "document_chunks",
-    "agent_messages",
     "audit_logs",
     "organization_invitations",
 ]
+
+# Tables that inherit org scope via FK (need special handling)
+# - team_members: via team_id -> teams.organization_id
+# - crawled_documents: via source_id -> crawl_sources.organization_id
+# - document_chunks: via document_id -> crawled_documents (no direct org)
+# - agent_messages: via agent_id -> graph (no org in postgres)
+# These are skipped for now - app-level filtering is sufficient
 
 # Tables with user_id but no organization_id (user-scoped)
 USER_SCOPED_TABLES = [

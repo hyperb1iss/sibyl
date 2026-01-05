@@ -81,9 +81,13 @@ class MockEntityManager:
     ) -> list[Any]:
         """Mock list_by_type - returns entities matching the type."""
         return [
-            e for e in self._entities.values()
+            e
+            for e in self._entities.values()
             if getattr(e, "entity_type", None) == entity_type
-            or (hasattr(entity_type, "value") and getattr(e, "entity_type", None) == entity_type.value)
+            or (
+                hasattr(entity_type, "value")
+                and getattr(e, "entity_type", None) == entity_type.value
+            )
         ][:limit]
 
 

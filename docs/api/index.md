@@ -52,12 +52,12 @@ Full CRUD operations with OpenAPI documentation:
 
 Sibyl supports multiple authentication methods and role-based access control:
 
-| Topic          | Description                          | Documentation                                    |
-| -------------- | ------------------------------------ | ------------------------------------------------ |
-| JWT Sessions   | Web clients, browser-based apps      | [auth-jwt.md](./auth-jwt.md)                     |
-| API Keys       | Programmatic access, CI/CD           | [auth-api-keys.md](./auth-api-keys.md)           |
-| OAuth (GitHub) | Social login                         | [auth-jwt.md](./auth-jwt.md)                     |
-| Authorization  | Roles, permissions, RLS              | [auth-authorization.md](./auth-authorization.md) |
+| Topic          | Description                     | Documentation                                    |
+| -------------- | ------------------------------- | ------------------------------------------------ |
+| JWT Sessions   | Web clients, browser-based apps | [auth-jwt.md](./auth-jwt.md)                     |
+| API Keys       | Programmatic access, CI/CD      | [auth-api-keys.md](./auth-api-keys.md)           |
+| OAuth (GitHub) | Social login                    | [auth-jwt.md](./auth-jwt.md)                     |
+| Authorization  | Roles, permissions, RLS         | [auth-authorization.md](./auth-authorization.md) |
 
 ### Quick Start
 

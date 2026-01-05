@@ -581,7 +581,10 @@ class TestVerifyEntityProjectAccess:
         mock_session.execute.return_value = mock_result
 
         result = await verify_entity_project_access(
-            mock_session, ctx, entity_project_id="project_unsynced", required_role=ProjectRole.VIEWER
+            mock_session,
+            ctx,
+            entity_project_id="project_unsynced",
+            required_role=ProjectRole.VIEWER,
         )
 
         assert result == ProjectRole.VIEWER

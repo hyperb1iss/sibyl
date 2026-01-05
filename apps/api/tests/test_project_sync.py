@@ -284,8 +284,6 @@ class TestGetPostgresProjectByGraphId:
         mock_result.scalar_one_or_none.return_value = None
         session.execute.return_value = mock_result
 
-        result = await get_postgres_project_by_graph_id(
-            session, uuid4(), "project_missing"
-        )
+        result = await get_postgres_project_by_graph_id(session, uuid4(), "project_missing")
 
         assert result is None

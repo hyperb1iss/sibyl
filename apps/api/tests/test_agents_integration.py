@@ -26,7 +26,9 @@ if TYPE_CHECKING:
 
 pytestmark = [
     pytest.mark.requires_worktree,
-    pytest.mark.skip(reason="IntegrationManager requires git remote 'origin' - tests need fixture rework"),
+    pytest.mark.skip(
+        reason="IntegrationManager requires git remote 'origin' - tests need fixture rework"
+    ),
 ]
 
 

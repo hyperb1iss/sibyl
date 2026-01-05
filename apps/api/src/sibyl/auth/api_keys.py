@@ -138,9 +138,7 @@ class ApiKeyManager:
             list[UUID]: Only these projects are allowed (empty = no access)
         """
         result = await self._session.execute(
-            select(ApiKeyProjectScope.project_id).where(
-                ApiKeyProjectScope.api_key_id == api_key_id
-            )
+            select(ApiKeyProjectScope.project_id).where(ApiKeyProjectScope.api_key_id == api_key_id)
         )
         project_ids = list(result.scalars().all())
 

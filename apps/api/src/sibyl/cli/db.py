@@ -989,14 +989,15 @@ def restore_all(
     success("Restore complete!")
 
 
-@app.command("init-schema")
-def init_schema(
+@app.command("migrate")
+@app.command("init-schema", hidden=True)  # Legacy alias
+def migrate(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
-    """Initialize database schema using Alembic migrations.
+    """Run database migrations (alembic upgrade head).
 
-    Runs 'alembic upgrade head' to create all tables.
-    Safe to run on empty database or to apply pending migrations.
+    Applies any pending Alembic migrations to bring the schema up to date.
+    Safe to run repeatedly - only applies migrations not yet applied.
     """
     if not yes:
         info("This will run Alembic migrations to create/update the schema.")
