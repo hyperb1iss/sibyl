@@ -331,6 +331,106 @@ def version() -> None:
     console.print(f"sibyl-cli version {__version__}")
 
 
+@app.command()
+def upgrade(
+    pull_images: Annotated[
+        bool,
+        typer.Option("--pull", "-p", help="Also pull latest Docker images"),
+    ] = False,
+    check_only: Annotated[
+        bool,
+        typer.Option("--check", "-c", help="Check for updates without installing"),
+    ] = False,
+) -> None:
+    """Upgrade sibyl-cli to the latest version.
+
+    Automatically detects installation method (uv, pipx, or pip) and uses
+    the appropriate upgrade command.
+    """
+    import shutil
+    import subprocess
+
+    from sibyl_cli import __version__
+
+    info(f"Current version: {__version__}")
+
+    # Detect installation method
+    install_method = None
+    upgrade_cmd = None
+
+    if shutil.which("uv"):
+        # Check if installed via uv tool
+        result = subprocess.run(
+            ["uv", "tool", "list"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if "sibyl-cli" in result.stdout:
+            install_method = "uv"
+            upgrade_cmd = ["uv", "tool", "upgrade", "sibyl-cli"]
+
+    if not install_method and shutil.which("pipx"):
+        # Check if installed via pipx
+        result = subprocess.run(
+            ["pipx", "list", "--short"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if "sibyl-cli" in result.stdout:
+            install_method = "pipx"
+            upgrade_cmd = ["pipx", "upgrade", "sibyl-cli"]
+
+    if not install_method:
+        # Fall back to pip
+        install_method = "pip"
+        upgrade_cmd = ["pip", "install", "--upgrade", "sibyl-cli"]
+
+    console.print(f"[dim]Detected installation method: {install_method}[/dim]")
+
+    if check_only:
+        # Just check PyPI for latest version
+        import httpx
+
+        try:
+            resp = httpx.get("https://pypi.org/pypi/sibyl-cli/json", timeout=10)
+            if resp.status_code == 200:
+                latest = resp.json().get("info", {}).get("version", "unknown")
+                if latest != __version__:
+                    info(f"Update available: {__version__} → {latest}")
+                    console.print("\nRun [bold]sibyl upgrade[/bold] to install")
+                else:
+                    success("Already up to date!")
+            else:
+                error("Could not check PyPI for updates")
+        except Exception as e:
+            error(f"Failed to check for updates: {e}")
+        return
+
+    # Run upgrade
+    info(f"Upgrading via {install_method}...")
+    result = subprocess.run(upgrade_cmd, check=False)
+
+    if result.returncode == 0:
+        success("CLI upgraded successfully!")
+    else:
+        error("Upgrade failed")
+        raise typer.Exit(1)
+
+    # Optionally pull Docker images
+    if pull_images:
+        console.print()
+        info("Pulling latest Docker images...")
+        from sibyl_cli.local import SIBYL_LOCAL_COMPOSE, run_compose
+
+        if SIBYL_LOCAL_COMPOSE.exists():
+            run_compose(["pull"])
+            success("Docker images updated!")
+        else:
+            console.print("[dim]No local instance configured. Skipping image pull.[/dim]")
+
+
 def main() -> None:
     """CLI entry point."""
     app()
