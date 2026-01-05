@@ -4,21 +4,120 @@ REST API for managing agent approval requests.
 """
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_role
-from sibyl.db import get_session
-from sibyl.db.models import AgentMessage, Organization, OrganizationRole, User
+from sibyl.auth.authorization import (
+    list_accessible_project_graph_ids,
+    verify_entity_project_access,
+)
+from sibyl.auth.context import AuthContext
+from sibyl.auth.dependencies import get_auth_context, require_org_role
+from sibyl.db.connection import get_session_dependency
+from sibyl.db.models import AgentMessage, OrganizationRole, ProjectRole
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.models import ApprovalStatus, ApprovalType, EntityType
 
+if TYPE_CHECKING:
+    from sibyl_core.models.entities import Entity
+
 log = structlog.get_logger()
 _WRITE_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.MEMBER)
+
+
+async def _check_approval_view_permission(
+    ctx: AuthContext,
+    session: AsyncSession,
+    entity: "Entity",
+) -> None:
+    """Verify user can view an approval.
+
+    View is allowed if:
+    - User is org admin/owner
+    - User created the agent that requested approval
+    - User has VIEWER+ access to the approval's project
+
+    Raises:
+        HTTPException 403: If user lacks view permission
+    """
+    meta = entity.metadata or {}
+    project_id = meta.get("project_id")
+    created_by = meta.get("created_by")
+
+    # Org admins can view any approval
+    if ctx.org_role in (OrganizationRole.OWNER, OrganizationRole.ADMIN):
+        return
+
+    # Agent creator can view their approval
+    if created_by and str(ctx.user.id) == created_by:
+        return
+
+    # Check project access (VIEWER+ required for read operations)
+    if project_id:
+        await verify_entity_project_access(
+            session,
+            ctx,
+            project_id,
+            required_role=ProjectRole.VIEWER,
+        )
+        return
+
+    # No project - only creator or admin can view
+    raise HTTPException(
+        status_code=403,
+        detail="You don't have permission to view this approval",
+    )
+
+
+async def _check_approval_respond_permission(
+    ctx: AuthContext,
+    session: AsyncSession,
+    entity: "Entity",
+) -> None:
+    """Verify user can respond to an approval.
+
+    Respond is allowed if:
+    - User is org admin/owner
+    - User created the agent that requested approval
+    - User has CONTRIBUTOR+ access to the approval's project
+
+    Raises:
+        HTTPException 403: If user lacks respond permission
+    """
+    meta = entity.metadata or {}
+    project_id = meta.get("project_id")
+    created_by = meta.get("created_by")
+
+    # Org admins can respond to any approval
+    if ctx.org_role in (OrganizationRole.OWNER, OrganizationRole.ADMIN):
+        return
+
+    # Agent creator can respond to their approval
+    if created_by and str(ctx.user.id) == created_by:
+        return
+
+    # Check project access (CONTRIBUTOR+ required for respond operations)
+    if project_id:
+        await verify_entity_project_access(
+            session,
+            ctx,
+            project_id,
+            required_role=ProjectRole.CONTRIBUTOR,
+        )
+        return
+
+    # No project - only creator or admin can respond
+    raise HTTPException(
+        status_code=403,
+        detail="You don't have permission to respond to this approval",
+    )
+
 
 router = APIRouter(
     prefix="/approvals",
@@ -92,7 +191,8 @@ async def list_approvals(
     agent_id: str | None = None,
     project_id: str | None = None,
     limit: int = 50,
-    org: Organization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> ApprovalListResponse:
     """List approval requests for the organization.
 
@@ -102,15 +202,38 @@ async def list_approvals(
         agent_id: Filter by specific agent
         project_id: Filter by project
         limit: Maximum results
-        org: Current organization
+
+    Results are filtered to approvals the user can access (own agent approvals + projects with VIEWER+).
     """
     client = await get_graph_client()
-    manager = EntityManager(client, group_id=str(org.id))
+    manager = EntityManager(client, group_id=str(ctx.organization.id))
+
+    # Get accessible project IDs for permission filtering
+    is_admin = ctx.org_role in (OrganizationRole.OWNER, OrganizationRole.ADMIN)
+    accessible_projects: set[str] = set()
+    if not is_admin:
+        accessible_projects = await list_accessible_project_graph_ids(session, ctx) or set()
+
+    user_id_str = str(ctx.user.id)
 
     # Get all approvals
-    results = await manager.list_by_type(entity_type=EntityType.APPROVAL, limit=limit * 2)
+    results = await manager.list_by_type(entity_type=EntityType.APPROVAL, limit=limit * 3)
 
-    approvals = list(results)
+    # Filter by access control first
+    approvals: list = []
+    for a in results:
+        meta = a.metadata or {}
+        approval_project_id = meta.get("project_id")
+        created_by = meta.get("created_by")
+
+        # Access control: skip approvals user cannot view (unless admin)
+        if not is_admin:
+            is_creator = created_by == user_id_str
+            has_project_access = approval_project_id and approval_project_id in accessible_projects
+            if not (is_creator or has_project_access):
+                continue
+
+        approvals.append(a)
 
     # Apply filters
     if status:
@@ -149,29 +272,35 @@ async def list_approvals(
 async def list_pending_approvals(
     project_id: str | None = None,
     limit: int = 50,
-    org: Organization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> ApprovalListResponse:
     """List pending approval requests - convenience endpoint for the queue."""
     return await list_approvals(
         status=ApprovalStatus.PENDING,
         project_id=project_id,
         limit=limit,
-        org=org,
+        ctx=ctx,
+        session=session,
     )
 
 
 @router.get("/{approval_id}", response_model=ApprovalResponse)
 async def get_approval(
     approval_id: str,
-    org: Organization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> ApprovalResponse:
     """Get a specific approval by ID."""
     client = await get_graph_client()
-    manager = EntityManager(client, group_id=str(org.id))
+    manager = EntityManager(client, group_id=str(ctx.organization.id))
 
     entity = await manager.get(approval_id)
     if not entity or entity.entity_type != EntityType.APPROVAL:
         raise HTTPException(status_code=404, detail=f"Approval not found: {approval_id}")
+
+    # Check view permission (creator, org admin, or project VIEWER+)
+    await _check_approval_view_permission(ctx, session, entity)
 
     return _entity_to_approval_response(entity)
 
@@ -179,7 +308,8 @@ async def get_approval(
 @router.delete("/{approval_id}", response_model=RespondToApprovalResponse)
 async def dismiss_approval(
     approval_id: str,
-    org: Organization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_session_dependency),
 ) -> RespondToApprovalResponse:
     """Dismiss/expire a stale approval request.
 
@@ -187,7 +317,13 @@ async def dismiss_approval(
     Uses EntityManager.delete() which handles both Entity and Episodic nodes.
     """
     client = await get_graph_client()
-    manager = EntityManager(client, group_id=str(org.id))
+    manager = EntityManager(client, group_id=str(ctx.organization.id))
+
+    # Check permission before deleting
+    entity = await manager.get(approval_id)
+    if entity and entity.entity_type == EntityType.APPROVAL:
+        # Check respond permission (creator, org admin, or project CONTRIBUTOR+)
+        await _check_approval_respond_permission(ctx, session, entity)
 
     # Use EntityManager.delete() - handles both EntityNode and EpisodicNode
     try:
@@ -213,16 +349,19 @@ async def dismiss_approval(
 async def respond_to_approval(
     approval_id: str,
     request: RespondToApprovalRequest,
-    user: User = Depends(get_current_user),
-    org: Organization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    db_session: AsyncSession = Depends(get_session_dependency),
 ) -> RespondToApprovalResponse:
     """Respond to an approval request (approve, deny, or edit)."""
     client = await get_graph_client()
-    manager = EntityManager(client, group_id=str(org.id))
+    manager = EntityManager(client, group_id=str(ctx.organization.id))
 
     entity = await manager.get(approval_id)
     if not entity or entity.entity_type != EntityType.APPROVAL:
         raise HTTPException(status_code=404, detail=f"Approval not found: {approval_id}")
+
+    # Check respond permission (creator, org admin, or project CONTRIBUTOR+)
+    await _check_approval_respond_permission(ctx, db_session, entity)
 
     # Check current status
     current_status = (entity.metadata or {}).get("status", "pending")
@@ -251,7 +390,7 @@ async def respond_to_approval(
     updates = {
         "status": new_status,
         "responded_at": datetime.now(UTC).isoformat(),
-        "response_by": str(user.id),
+        "response_by": str(ctx.user.id),
         "response_message": request.message,
     }
 
@@ -266,20 +405,19 @@ async def respond_to_approval(
     # Update the stored AgentMessage's status so page reload shows resolved state
     if agent_id:
         try:
-            async with get_session() as session:
-                # Find the approval message by matching approval_id in extra JSONB
-                stmt = (
-                    update(AgentMessage)
-                    .where(AgentMessage.agent_id == agent_id)
-                    .where(AgentMessage.extra["approval_id"].astext == approval_id)
-                    .values(
-                        extra=AgentMessage.extra.op("||")(
-                            {"status": new_status, "responded_at": datetime.now(UTC).isoformat()}
-                        )
+            # Find the approval message by matching approval_id in extra JSONB
+            stmt = (
+                update(AgentMessage)
+                .where(AgentMessage.agent_id == agent_id)
+                .where(AgentMessage.extra["approval_id"].astext == approval_id)
+                .values(
+                    extra=AgentMessage.extra.op("||")(
+                        {"status": new_status, "responded_at": datetime.now(UTC).isoformat()}
                     )
                 )
-                await session.execute(stmt)
-                await session.commit()
+            )
+            await db_session.execute(stmt)
+            await db_session.commit()
         except Exception as e:
             log.warning("Failed to update approval message status", error=str(e))
 
@@ -291,7 +429,7 @@ async def respond_to_approval(
         {
             "approved": request.action == "approve",
             "action": request.action,
-            "by": str(user.id),
+            "by": str(ctx.user.id),
             "message": request.message or "",
             "edited_content": request.edited_content,
         },
@@ -313,9 +451,9 @@ async def respond_to_approval(
             "agent_id": agent_id,
             "action": request.action,
             "status": new_status,
-            "response_by": str(user.id),
+            "response_by": str(ctx.user.id),
         },
-        org_id=str(org.id),
+        org_id=str(ctx.organization.id),
     )
 
     # Also broadcast agent status change to UI
@@ -323,14 +461,14 @@ async def respond_to_approval(
         await publish_event(
             "agent_status",
             {"agent_id": agent_id, "status": "working"},
-            org_id=str(org.id),
+            org_id=str(ctx.organization.id),
         )
 
     log.info(
         "Approval responded",
         approval_id=approval_id,
         action=request.action,
-        user_id=str(user.id),
+        user_id=str(ctx.user.id),
     )
 
     return RespondToApprovalResponse(
@@ -364,32 +502,33 @@ class QuestionAnswerResponse(BaseModel):
 async def answer_question(
     question_id: str,
     request: QuestionAnswerRequest,
-    user: User = Depends(get_current_user),
-    org: Organization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+    db_session: AsyncSession = Depends(get_session_dependency),
 ) -> QuestionAnswerResponse:
     """Answer an agent's question.
 
     Called when user responds to an AskUserQuestion prompt in the agent chat.
     Publishes the answer via Redis to wake up the waiting agent hook.
+
+    Authorization: Any org member can answer questions (enforced at router level).
     """
     # Update the stored AgentMessage's status
     try:
-        async with get_session() as session:
-            stmt = (
-                update(AgentMessage)
-                .where(AgentMessage.extra["question_id"].astext == question_id)
-                .values(
-                    extra=AgentMessage.extra.op("||")(
-                        {
-                            "status": "answered",
-                            "answered_at": datetime.now(UTC).isoformat(),
-                            "answers": request.answers,
-                        }
-                    )
+        stmt = (
+            update(AgentMessage)
+            .where(AgentMessage.extra["question_id"].astext == question_id)
+            .values(
+                extra=AgentMessage.extra.op("||")(
+                    {
+                        "status": "answered",
+                        "answered_at": datetime.now(UTC).isoformat(),
+                        "answers": request.answers,
+                    }
                 )
             )
-            await session.execute(stmt)
-            await session.commit()
+        )
+        await db_session.execute(stmt)
+        await db_session.commit()
     except Exception as e:
         log.warning("Failed to update question message status", error=str(e))
 
@@ -400,7 +539,7 @@ async def answer_question(
         question_id,
         {
             "answers": request.answers,
-            "by": str(user.id),
+            "by": str(ctx.user.id),
         },
     )
 
@@ -412,15 +551,15 @@ async def answer_question(
         {
             "question_id": question_id,
             "answers": request.answers,
-            "answered_by": str(user.id),
+            "answered_by": str(ctx.user.id),
         },
-        org_id=str(org.id),
+        org_id=str(ctx.organization.id),
     )
 
     log.info(
         "Question answered",
         question_id=question_id,
-        user_id=str(user.id),
+        user_id=str(ctx.user.id),
     )
 
     return QuestionAnswerResponse(
