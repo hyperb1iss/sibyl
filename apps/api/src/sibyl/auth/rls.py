@@ -265,7 +265,7 @@ async def get_auth_session(request: Request) -> AsyncGenerator[AuthSession]:
         HTTPException 401: If not authenticated
         HTTPException 500: If RLS context setup fails
     """
-    from sibyl.auth.context import get_auth_context
+    from sibyl.auth.dependencies import get_auth_context
 
     # Get auth context (raises 401 if not authenticated)
     ctx = await get_auth_context(request)
