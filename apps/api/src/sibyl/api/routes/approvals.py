@@ -17,8 +17,8 @@ from sibyl.auth.authorization import (
     verify_entity_project_access,
 )
 from sibyl.auth.context import AuthContext
-from sibyl.auth.dependencies import get_auth_context, require_org_role
-from sibyl.db.connection import get_session_dependency
+from sibyl.auth.dependencies import require_org_role
+from sibyl.auth.rls import AuthSession, get_auth_session
 from sibyl.db.models import AgentMessage, OrganizationRole, ProjectRole
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
@@ -191,8 +191,7 @@ async def list_approvals(
     agent_id: str | None = None,
     project_id: str | None = None,
     limit: int = 50,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> ApprovalListResponse:
     """List approval requests for the organization.
 
@@ -203,8 +202,10 @@ async def list_approvals(
         project_id: Filter by project
         limit: Maximum results
 
-    Results are filtered to approvals the user can access (own agent approvals + projects with VIEWER+).
+    Results are filtered to approvals the user can access
+    (own agent approvals + projects with VIEWER+).
     """
+    ctx = auth.ctx
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(ctx.organization.id))
 
@@ -212,7 +213,7 @@ async def list_approvals(
     is_admin = ctx.org_role in (OrganizationRole.OWNER, OrganizationRole.ADMIN)
     accessible_projects: set[str] = set()
     if not is_admin:
-        accessible_projects = await list_accessible_project_graph_ids(session, ctx) or set()
+        accessible_projects = await list_accessible_project_graph_ids(auth.session, ctx) or set()
 
     user_id_str = str(ctx.user.id)
 
@@ -272,26 +273,24 @@ async def list_approvals(
 async def list_pending_approvals(
     project_id: str | None = None,
     limit: int = 50,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> ApprovalListResponse:
     """List pending approval requests - convenience endpoint for the queue."""
     return await list_approvals(
         status=ApprovalStatus.PENDING,
         project_id=project_id,
         limit=limit,
-        ctx=ctx,
-        session=session,
+        auth=auth,
     )
 
 
 @router.get("/{approval_id}", response_model=ApprovalResponse)
 async def get_approval(
     approval_id: str,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> ApprovalResponse:
     """Get a specific approval by ID."""
+    ctx = auth.ctx
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(ctx.organization.id))
 
@@ -300,7 +299,7 @@ async def get_approval(
         raise HTTPException(status_code=404, detail=f"Approval not found: {approval_id}")
 
     # Check view permission (creator, org admin, or project VIEWER+)
-    await _check_approval_view_permission(ctx, session, entity)
+    await _check_approval_view_permission(ctx, auth.session, entity)
 
     return _entity_to_approval_response(entity)
 
@@ -308,14 +307,14 @@ async def get_approval(
 @router.delete("/{approval_id}", response_model=RespondToApprovalResponse)
 async def dismiss_approval(
     approval_id: str,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> RespondToApprovalResponse:
     """Dismiss/expire a stale approval request.
 
     Use this to clean up orphaned approvals from dead agents.
     Uses EntityManager.delete() which handles both Entity and Episodic nodes.
     """
+    ctx = auth.ctx
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(ctx.organization.id))
 
@@ -323,7 +322,7 @@ async def dismiss_approval(
     entity = await manager.get(approval_id)
     if entity and entity.entity_type == EntityType.APPROVAL:
         # Check respond permission (creator, org admin, or project CONTRIBUTOR+)
-        await _check_approval_respond_permission(ctx, session, entity)
+        await _check_approval_respond_permission(ctx, auth.session, entity)
 
     # Use EntityManager.delete() - handles both EntityNode and EpisodicNode
     try:
@@ -349,10 +348,10 @@ async def dismiss_approval(
 async def respond_to_approval(
     approval_id: str,
     request: RespondToApprovalRequest,
-    ctx: AuthContext = Depends(get_auth_context),
-    db_session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> RespondToApprovalResponse:
     """Respond to an approval request (approve, deny, or edit)."""
+    ctx = auth.ctx
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(ctx.organization.id))
 
@@ -361,7 +360,7 @@ async def respond_to_approval(
         raise HTTPException(status_code=404, detail=f"Approval not found: {approval_id}")
 
     # Check respond permission (creator, org admin, or project CONTRIBUTOR+)
-    await _check_approval_respond_permission(ctx, db_session, entity)
+    await _check_approval_respond_permission(ctx, auth.session, entity)
 
     # Check current status
     current_status = (entity.metadata or {}).get("status", "pending")
@@ -416,8 +415,8 @@ async def respond_to_approval(
                     )
                 )
             )
-            await db_session.execute(stmt)
-            await db_session.commit()
+            await auth.session.execute(stmt)
+            await auth.session.commit()
         except Exception as e:
             log.warning("Failed to update approval message status", error=str(e))
 
@@ -502,8 +501,7 @@ class QuestionAnswerResponse(BaseModel):
 async def answer_question(
     question_id: str,
     request: QuestionAnswerRequest,
-    ctx: AuthContext = Depends(get_auth_context),
-    db_session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> QuestionAnswerResponse:
     """Answer an agent's question.
 
@@ -512,6 +510,7 @@ async def answer_question(
 
     Authorization: Any org member can answer questions (enforced at router level).
     """
+    ctx = auth.ctx
     # Update the stored AgentMessage's status
     try:
         stmt = (
@@ -527,8 +526,8 @@ async def answer_question(
                 )
             )
         )
-        await db_session.execute(stmt)
-        await db_session.commit()
+        await auth.session.execute(stmt)
+        await auth.session.commit()
     except Exception as e:
         log.warning("Failed to update question message status", error=str(e))
 

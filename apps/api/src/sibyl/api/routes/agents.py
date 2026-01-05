@@ -21,9 +21,9 @@ from sibyl.auth.authorization import (
     verify_entity_project_access,
 )
 from sibyl.auth.context import AuthContext
-from sibyl.auth.dependencies import get_auth_context, require_org_role
+from sibyl.auth.dependencies import require_org_role
+from sibyl.auth.rls import AuthSession, get_auth_session
 from sibyl.db import AgentMessage as DbAgentMessage
-from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import OrganizationRole, ProjectRole
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.graph.client import get_graph_client
@@ -301,8 +301,7 @@ async def list_agents(
     all_users: bool = False,
     include_archived: bool = False,
     limit: int = 50,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> AgentListResponse:
     """List agents for the organization.
 
@@ -316,6 +315,7 @@ async def list_agents(
 
     Results are filtered to agents the user can access (own agents + projects with VIEWER+).
     """
+    ctx = auth.ctx
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(ctx.organization.id))
 
@@ -323,7 +323,7 @@ async def list_agents(
     is_admin = ctx.org_role in (OrganizationRole.OWNER, OrganizationRole.ADMIN)
     accessible_projects: set[str] = set()
     if not is_admin:
-        accessible_projects = await list_accessible_project_graph_ids(session, ctx) or set()
+        accessible_projects = await list_accessible_project_graph_ids(auth.session, ctx) or set()
 
     user_id_str = str(ctx.user.id)
 
@@ -387,10 +387,10 @@ async def list_agents(
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(
     agent_id: str,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> AgentResponse:
     """Get a specific agent by ID."""
+    ctx = auth.ctx
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(ctx.organization.id))
 
@@ -403,7 +403,7 @@ async def get_agent(
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     # Check view permission (creator, org admin, or project VIEWER+)
-    await _check_agent_view_permission(ctx, session, entity)
+    await _check_agent_view_permission(ctx, auth.session, entity)
 
     return _entity_to_agent_response(entity)
 
@@ -411,8 +411,7 @@ async def get_agent(
 @router.post("", response_model=SpawnAgentResponse)
 async def spawn_agent(
     request: SpawnAgentRequest,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> SpawnAgentResponse:
     """Spawn a new agent and enqueue execution.
 
@@ -423,6 +422,7 @@ async def spawn_agent(
     """
     from sibyl.jobs.queue import enqueue_agent_execution
 
+    ctx = auth.ctx
     if ctx.organization is None:
         raise HTTPException(status_code=403, detail="No organization context")
 
@@ -431,7 +431,7 @@ async def spawn_agent(
 
     # Verify project access (CONTRIBUTOR+ required to spawn agents)
     await verify_entity_project_access(
-        session, ctx, request.project_id, required_role=ProjectRole.CONTRIBUTOR
+        auth.session, ctx, request.project_id, required_role=ProjectRole.CONTRIBUTOR
     )
 
     client = await get_graph_client()
@@ -498,13 +498,13 @@ async def spawn_agent(
 async def pause_agent(
     agent_id: str,
     request: AgentActionRequest,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> AgentActionResponse:
     """Pause an agent's execution.
 
     Requires ownership or CONTRIBUTOR+ project access.
     """
+    ctx = auth.ctx
     if ctx.organization is None:
         raise HTTPException(status_code=403, detail="No organization context")
 
@@ -516,7 +516,7 @@ async def pause_agent(
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     # Check control permission
-    await _check_agent_control_permission(ctx, session, entity)
+    await _check_agent_control_permission(ctx, auth.session, entity)
 
     agent_status = (entity.metadata or {}).get("status", "initializing")
     if agent_status not in (AgentStatus.WORKING.value, AgentStatus.WAITING_APPROVAL.value):
@@ -544,8 +544,7 @@ async def pause_agent(
 @router.post("/{agent_id}/resume", response_model=AgentActionResponse)
 async def resume_agent(
     agent_id: str,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> AgentActionResponse:
     """Resume an agent from paused or terminal state.
 
@@ -556,6 +555,7 @@ async def resume_agent(
     """
     from sibyl.jobs.queue import enqueue_agent_resume
 
+    ctx = auth.ctx
     if ctx.organization is None:
         raise HTTPException(status_code=403, detail="No organization context")
 
@@ -567,7 +567,7 @@ async def resume_agent(
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     # Check control permission
-    await _check_agent_control_permission(ctx, session, entity)
+    await _check_agent_control_permission(ctx, auth.session, entity)
 
     agent_status = (entity.metadata or {}).get("status", "initializing")
 
@@ -610,8 +610,7 @@ async def resume_agent(
 async def terminate_agent(
     agent_id: str,
     request: AgentActionRequest,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> AgentActionResponse:
     """Terminate an agent.
 
@@ -626,6 +625,7 @@ async def terminate_agent(
     """
     from sibyl.api.pubsub import publish_event, request_agent_stop
 
+    ctx = auth.ctx
     if ctx.organization is None:
         raise HTTPException(status_code=403, detail="No organization context")
 
@@ -637,7 +637,7 @@ async def terminate_agent(
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     # Check control permission
-    await _check_agent_control_permission(ctx, session, entity)
+    await _check_agent_control_permission(ctx, auth.session, entity)
 
     agent_status = (entity.metadata or {}).get("status", "initializing")
     terminal_states = (
@@ -682,8 +682,7 @@ async def terminate_agent(
 async def get_agent_messages(
     agent_id: str,
     limit: int = 500,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> AgentMessagesResponse:
     """Get conversation messages for an agent.
 
@@ -691,6 +690,7 @@ async def get_agent_messages(
     These are summaries stored during execution - full tool outputs
     are only available via real-time WebSocket streaming.
     """
+    ctx = auth.ctx
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(ctx.organization.id))
 
@@ -700,11 +700,11 @@ async def get_agent_messages(
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     # Check view permission (creator, org admin, or project VIEWER+)
-    await _check_agent_view_permission(ctx, session, entity)
+    await _check_agent_view_permission(ctx, auth.session, entity)
 
     # Query messages from Postgres (use injected session)
     messages: list[AgentMessage] = []
-    result = await session.execute(
+    result = await auth.session.execute(
         select(DbAgentMessage)
         .where(col(DbAgentMessage.agent_id) == agent_id)
         .where(col(DbAgentMessage.organization_id) == ctx.organization.id)
@@ -747,8 +747,7 @@ async def get_agent_messages(
 async def send_agent_message(
     agent_id: str,
     request: SendMessageRequest,
-    ctx: AuthContext = Depends(get_auth_context),
-    db_session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> SendMessageResponse:
     """Send a message to an agent.
 
@@ -757,6 +756,7 @@ async def send_agent_message(
 
     Requires ownership or CONTRIBUTOR+ project access.
     """
+    ctx = auth.ctx
     if ctx.organization is None:
         raise HTTPException(status_code=403, detail="No organization context")
 
@@ -769,7 +769,7 @@ async def send_agent_message(
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     # Check control permission
-    await _check_agent_control_permission(ctx, db_session, entity)
+    await _check_agent_control_permission(ctx, auth.session, entity)
 
     agent_meta = entity.metadata or {}
     agent_status = agent_meta.get("status", "initializing")
@@ -805,7 +805,7 @@ async def send_agent_message(
     from sibyl.db.models import AgentMessage, AgentMessageRole, AgentMessageType
 
     # Get next message number
-    result = await db_session.execute(
+    result = await auth.session.execute(
         select(func.coalesce(func.max(AgentMessage.message_num), 0)).where(
             AgentMessage.agent_id == agent_id
         )
@@ -822,8 +822,8 @@ async def send_agent_message(
         content=request.content[:500],  # Summary only
         extra={"full_content": request.content} if len(request.content) > 500 else None,
     )
-    db_session.add(db_message)
-    await db_session.commit()
+    auth.session.add(db_message)
+    await auth.session.commit()
 
     log.info(
         "User message stored",
@@ -863,13 +863,13 @@ async def send_agent_message(
 @router.get("/{agent_id}/workspace", response_model=AgentWorkspaceResponse)
 async def get_agent_workspace(
     agent_id: str,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> AgentWorkspaceResponse:
     """Get the workspace state for an agent.
 
     Returns file changes and progress information from the latest checkpoint.
     """
+    ctx = auth.ctx
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(ctx.organization.id))
 
@@ -879,7 +879,7 @@ async def get_agent_workspace(
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     # Check view permission (creator, org admin, or project VIEWER+)
-    await _check_agent_view_permission(ctx, session, entity)
+    await _check_agent_view_permission(ctx, auth.session, entity)
 
     # Get latest checkpoint for this agent
     checkpoints = await manager.list_by_type(
@@ -975,13 +975,13 @@ class HealthOverviewResponse(BaseModel):
 async def record_heartbeat(
     agent_id: str,
     request: HeartbeatRequest,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> HeartbeatResponse:
     """Record a heartbeat from an agent.
 
     Called periodically by running agents to indicate liveness.
     """
+    ctx = auth.ctx
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(ctx.organization.id))
 
@@ -990,7 +990,7 @@ async def record_heartbeat(
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     # Check control permission (heartbeats modify agent state)
-    await _check_agent_control_permission(ctx, session, entity)
+    await _check_agent_control_permission(ctx, auth.session, entity)
 
     now = datetime.now(UTC)
     meta = entity.metadata or {}
@@ -1029,8 +1029,7 @@ HEARTBEAT_UNRESPONSIVE_THRESHOLD = 600  # 10 minutes = unresponsive
 @router.get("/health/overview", response_model=HealthOverviewResponse)
 async def get_health_overview(
     project_id: str | None = None,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> HealthOverviewResponse:
     """Get health overview for all running agents.
 
@@ -1041,6 +1040,7 @@ async def get_health_overview(
 
     Results are filtered to agents the user can access (own agents + projects with VIEWER+).
     """
+    ctx = auth.ctx
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(ctx.organization.id))
 
@@ -1048,7 +1048,7 @@ async def get_health_overview(
     is_admin = ctx.org_role in (OrganizationRole.OWNER, OrganizationRole.ADMIN)
     accessible_projects: set[str] = set()
     if not is_admin:
-        accessible_projects = await list_accessible_project_graph_ids(session, ctx) or set()
+        accessible_projects = await list_accessible_project_graph_ids(auth.session, ctx) or set()
 
     # Get all agents
     agents = await manager.list_by_type(entity_type=EntityType.AGENT, limit=100)
@@ -1182,8 +1182,7 @@ class ActivityFeedResponse(BaseModel):
 async def get_activity_feed(
     project_id: str | None = None,
     limit: int = 50,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> ActivityFeedResponse:
     """Get recent activity across all agents.
 
@@ -1192,13 +1191,14 @@ async def get_activity_feed(
 
     Results are filtered to agents the user can access (own agents + projects with VIEWER+).
     """
+    ctx = auth.ctx
     events: list[ActivityEvent] = []
 
     # Get accessible project IDs and agents for permission filtering
     is_admin = ctx.org_role in (OrganizationRole.OWNER, OrganizationRole.ADMIN)
     accessible_projects: set[str] = set()
     if not is_admin:
-        accessible_projects = await list_accessible_project_graph_ids(session, ctx) or set()
+        accessible_projects = await list_accessible_project_graph_ids(auth.session, ctx) or set()
 
     user_id_str = str(ctx.user.id)
 
@@ -1245,7 +1245,7 @@ async def get_activity_feed(
             .order_by(col(DbAgentMessage.created_at).desc())
             .limit(limit)
         )
-        result = await session.execute(stmt)
+        result = await auth.session.execute(stmt)
         db_messages = result.scalars().all()
 
         for msg in db_messages:
@@ -1335,12 +1335,12 @@ class RenameAgentRequest(BaseModel):
 async def rename_agent(
     agent_id: str,
     request: RenameAgentRequest,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> AgentActionResponse:
     """Rename an agent."""
     from sibyl.api.pubsub import publish_event
 
+    ctx = auth.ctx
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(ctx.organization.id))
 
@@ -1349,7 +1349,7 @@ async def rename_agent(
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     # Check control permission (creator, org admin, or project CONTRIBUTOR+)
-    await _check_agent_control_permission(ctx, session, entity)
+    await _check_agent_control_permission(ctx, auth.session, entity)
 
     # Update agent name
     await manager.update(agent_id, {"name": request.name})
@@ -1377,8 +1377,7 @@ async def rename_agent(
 @router.post("/{agent_id}/archive", response_model=AgentActionResponse)
 async def archive_agent(
     agent_id: str,
-    ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    auth: AuthSession = Depends(get_auth_session),
 ) -> AgentActionResponse:
     """Archive an agent (soft delete).
 
@@ -1387,6 +1386,7 @@ async def archive_agent(
     """
     from sibyl.api.pubsub import publish_event
 
+    ctx = auth.ctx
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(ctx.organization.id))
 
@@ -1395,7 +1395,7 @@ async def archive_agent(
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     # Check control permission (creator, org admin, or project CONTRIBUTOR+)
-    await _check_agent_control_permission(ctx, session, entity)
+    await _check_agent_control_permission(ctx, auth.session, entity)
 
     agent_status = (entity.metadata or {}).get("status", "initializing")
     terminal_states = (
@@ -1406,7 +1406,8 @@ async def archive_agent(
     if agent_status not in terminal_states:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot archive agent in {agent_status} status. Only terminal states can be archived.",
+            detail=f"Cannot archive agent in {agent_status} status. "
+            "Only terminal states can be archived.",
         )
 
     # Mark as archived
