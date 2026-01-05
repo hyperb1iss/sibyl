@@ -424,8 +424,7 @@ assign tasks, and collaborate on the same graph.
 
 ### Is it production-ready?
 
-Sibyl is in active development (v0.1.x). The core features work well, but expect rough edges. We use
-it daily for our own development.
+Sibyl is in active development (v0.1.x). The core features work well, but expect rough edges. **We use Sibyl to build Sibyl**—every feature, task, and learning you see here was tracked and orchestrated through the system itself.
 
 ## Philosophy
 
