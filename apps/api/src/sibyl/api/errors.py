@@ -3,6 +3,18 @@
 This module provides utilities for returning safe error messages to clients
 while logging full details for debugging. Never expose internal exceptions
 directly to API clients.
+
+Two patterns are provided:
+1. raise_* functions - Raise exceptions directly (use in helper functions)
+2. Factory functions - Return HTTPException instances (use with `raise`)
+
+Example usage:
+    # Pattern 1: Direct raise
+    raise_not_found("Agent", resource_id=agent_id)
+
+    # Pattern 2: Factory (for inline conditionals)
+    if not entity:
+        raise not_found("Agent", agent_id)
 """
 
 import uuid
@@ -19,6 +31,217 @@ VALIDATION_ERROR = "Invalid request data."
 NOT_FOUND_ERROR = "The requested resource was not found."
 CONFLICT_ERROR = "The operation conflicts with the current state."
 AUTH_ERROR = "Authentication failed."
+FORBIDDEN_ERROR = "You don't have permission to perform this action."
+NO_ORG_CONTEXT = "Organization context required."
+
+
+# =============================================================================
+# Factory Functions (return HTTPException for inline `raise`)
+# =============================================================================
+def not_found(resource: str, resource_id: str | None = None) -> HTTPException:
+    """Create a 404 exception for a missing resource.
+
+    Args:
+        resource: Type of resource (e.g., "Agent", "Task", "Entity")
+        resource_id: Optional ID to include in message
+
+    Returns:
+        HTTPException ready to be raised
+
+    Example:
+        if not entity:
+            raise not_found("Agent", agent_id)
+    """
+    detail = f"{resource} not found"
+    if resource_id:
+        detail = f"{resource} not found: {resource_id}"
+    return HTTPException(status_code=404, detail=detail)
+
+
+def bad_request(message: str) -> HTTPException:
+    """Create a 400 exception for invalid requests.
+
+    Args:
+        message: User-facing error message
+
+    Returns:
+        HTTPException ready to be raised
+
+    Example:
+        if not request.name:
+            raise bad_request("Name is required")
+    """
+    return HTTPException(status_code=400, detail=message)
+
+
+def forbidden(message: str | None = None) -> HTTPException:
+    """Create a 403 exception for permission errors.
+
+    Args:
+        message: Optional custom message (defaults to generic)
+
+    Returns:
+        HTTPException ready to be raised
+
+    Example:
+        if not is_admin:
+            raise forbidden("Admin access required")
+    """
+    return HTTPException(status_code=403, detail=message or FORBIDDEN_ERROR)
+
+
+def no_org_context(action: str | None = None) -> HTTPException:
+    """Create a 403 exception for missing organization context.
+
+    Args:
+        action: Optional action description for clearer message
+
+    Returns:
+        HTTPException ready to be raised
+
+    Example:
+        if not ctx.organization:
+            raise no_org_context("list agents")
+    """
+    if action:
+        detail = f"Organization context required to {action}"
+    else:
+        detail = NO_ORG_CONTEXT
+    return HTTPException(status_code=403, detail=detail)
+
+
+def conflict(message: str | None = None) -> HTTPException:
+    """Create a 409 exception for conflicts.
+
+    Args:
+        message: Optional custom message
+
+    Returns:
+        HTTPException ready to be raised
+
+    Example:
+        raise conflict("Resource is locked by another process")
+    """
+    return HTTPException(status_code=409, detail=message or CONFLICT_ERROR)
+
+
+def unauthorized(message: str | None = None) -> HTTPException:
+    """Create a 401 exception for auth failures.
+
+    Args:
+        message: Optional custom message
+
+    Returns:
+        HTTPException ready to be raised
+
+    Example:
+        raise unauthorized("Invalid or expired token")
+    """
+    return HTTPException(status_code=401, detail=message or AUTH_ERROR)
+
+
+def internal_error(error_id: str | None = None) -> HTTPException:
+    """Create a 500 exception with optional error reference.
+
+    Args:
+        error_id: Optional error ID for tracking
+
+    Returns:
+        HTTPException ready to be raised
+
+    Example:
+        error_id = log_error(exc)
+        raise internal_error(error_id)
+    """
+    detail = INTERNAL_ERROR
+    if error_id:
+        detail = f"{INTERNAL_ERROR} (ref: {error_id})"
+    return HTTPException(status_code=500, detail=detail)
+
+
+# =============================================================================
+# Entity-Specific Helpers
+# =============================================================================
+def agent_not_found(agent_id: str) -> HTTPException:
+    """Create 404 for missing agent."""
+    return not_found("Agent", agent_id)
+
+
+def task_not_found(task_id: str) -> HTTPException:
+    """Create 404 for missing task."""
+    return not_found("Task", task_id)
+
+
+def epic_not_found(epic_id: str) -> HTTPException:
+    """Create 404 for missing epic."""
+    return not_found("Epic", epic_id)
+
+
+def project_not_found(project_id: str) -> HTTPException:
+    """Create 404 for missing project."""
+    return not_found("Project", project_id)
+
+
+def source_not_found(source_id: str) -> HTTPException:
+    """Create 404 for missing source."""
+    return not_found("Source", source_id)
+
+
+def document_not_found(document_id: str) -> HTTPException:
+    """Create 404 for missing document."""
+    return not_found("Document", document_id)
+
+
+def entity_not_found(entity_id: str) -> HTTPException:
+    """Create 404 for missing entity."""
+    return not_found("Entity", entity_id)
+
+
+def approval_not_found(approval_id: str) -> HTTPException:
+    """Create 404 for missing approval."""
+    return not_found("Approval", approval_id)
+
+
+# =============================================================================
+# Error ID Generation
+# =============================================================================
+def generate_error_id() -> str:
+    """Generate a short error ID for tracking.
+
+    Returns:
+        8-character hex string
+    """
+    return str(uuid.uuid4())[:8]
+
+
+def log_and_raise_internal(
+    exc: Exception,
+    *,
+    context: str | None = None,
+    **extra: object,
+) -> NoReturn:
+    """Log exception details and raise safe 500 error.
+
+    Combines error logging with safe error response in one call.
+
+    Args:
+        exc: The original exception
+        context: Human-readable context for logs
+        **extra: Additional fields for structured logging
+
+    Raises:
+        HTTPException: 500 with generic message and error reference
+    """
+    error_id = generate_error_id()
+    log.error(
+        "internal_error",
+        error_id=error_id,
+        context=context,
+        error_type=type(exc).__name__,
+        error_message=str(exc),
+        **extra,
+    )
+    raise internal_error(error_id) from exc
 
 
 def raise_internal_error(
