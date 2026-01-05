@@ -410,6 +410,7 @@ def upgrade(
 
     # Run upgrade
     info(f"Upgrading via {install_method}...")
+    assert upgrade_cmd is not None  # Always set by this point
     result = subprocess.run(upgrade_cmd, check=False)
 
     if result.returncode == 0:
