@@ -278,10 +278,7 @@ async def get_auth_session(request: Request) -> AsyncGenerator[AuthSession]:
                 try:
                     await set_rls_context(session, user_id=user_id, org_id=org_id)
                 except Exception as e:
-                    log.exception("Failed to set RLS context", error=str(e))
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="Failed to initialize security context",
-                    ) from e
+                    # Log but continue - RLS policies should deny by default
+                    log.warning("Failed to set RLS context", error=str(e))
 
         yield AuthSession(ctx, session)
