@@ -106,18 +106,14 @@ class TestRlsUserIsolation:
             assert str(s.user_id) == user1_id
 
     @pytest.mark.asyncio
-    async def test_oauth_connections_isolated(
-        self, session: AsyncSession, user1_id: str
-    ) -> None:
+    async def test_oauth_connections_isolated(self, session: AsyncSession, user1_id: str) -> None:
         """OAuth connections are user-isolated."""
         await session.execute(
             text("SET LOCAL app.user_id = :user_id"),
             {"user_id": user1_id},
         )
 
-        result = await session.execute(
-            text("SELECT user_id FROM oauth_connections")
-        )
+        result = await session.execute(text("SELECT user_id FROM oauth_connections"))
         connections = result.fetchall()
 
         for conn in connections:
@@ -143,9 +139,7 @@ class TestRlsApiKeyIsolation:
         )
 
         # Query API keys - should only see keys owned by user1 in org1
-        result = await session.execute(
-            text("SELECT user_id, organization_id FROM api_keys")
-        )
+        result = await session.execute(text("SELECT user_id, organization_id FROM api_keys"))
         keys = result.fetchall()
 
         for key in keys:
@@ -166,7 +160,7 @@ class TestRlsPolicyBypass:
         # Even without setting session vars, FORCE means policies apply
         # NULL context should allow all (our policy design choice)
         result = await session.execute(text("SELECT current_user"))
-        current_user = result.scalar()
+        result.scalar()
 
         # Policy allows NULL context (for migrations), so this should work
         result = await session.execute(text("SELECT COUNT(*) FROM projects"))

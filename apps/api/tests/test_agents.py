@@ -71,6 +71,21 @@ class MockEntityManager:
         """Mock episode creation."""
         pass
 
+    async def list_by_type(
+        self,
+        entity_type: Any,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        **kwargs: Any,
+    ) -> list[Any]:
+        """Mock list_by_type - returns entities matching the type."""
+        return [
+            e for e in self._entities.values()
+            if getattr(e, "entity_type", None) == entity_type
+            or (hasattr(entity_type, "value") and getattr(e, "entity_type", None) == entity_type.value)
+        ][:limit]
+
 
 @dataclass
 class MockWorktreeManager:

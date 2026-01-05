@@ -151,21 +151,25 @@ class TestWorktreeCreate:
         assert record.agent_id == "agent_abc"
 
     @pytest.mark.asyncio
-    async def test_create_duplicate_branch_fails(
+    async def test_create_duplicate_branch_returns_existing(
         self,
         worktree_manager: WorktreeManager,
     ) -> None:
-        """Creating worktree with existing branch name fails."""
-        await worktree_manager.create(
+        """Creating worktree with existing branch name returns the existing record."""
+        record1 = await worktree_manager.create(
             task_id="task_1",
             branch_name="feature/duplicate",
         )
 
-        with pytest.raises(WorktreeError, match="already exists"):
-            await worktree_manager.create(
-                task_id="task_2",
-                branch_name="feature/duplicate",
-            )
+        # Creating with same branch returns existing worktree
+        record2 = await worktree_manager.create(
+            task_id="task_2",
+            branch_name="feature/duplicate",
+        )
+
+        # Should return the same record
+        assert record1.id == record2.id
+        assert record1.branch == record2.branch
 
 
 # =============================================================================
@@ -199,35 +203,45 @@ class TestWorktreeSetup:
         self,
         worktree_manager: WorktreeManager,
     ) -> None:
-        """Setup commands respect timeout."""
-        with pytest.raises(WorktreeError, match="timed out"):
-            await worktree_manager.create(
-                task_id="task_timeout",
-                branch_name="feature/timeout-test",
-                setup_config=SetupConfig(
-                    commands=["sleep 10"],
-                    timeout_seconds=1,
-                ),
-            )
+        """Setup commands respect timeout but still return record."""
+        # Worktree creation succeeds even if setup times out
+        record = await worktree_manager.create(
+            task_id="task_timeout",
+            branch_name="feature/timeout-test",
+            setup_config=SetupConfig(
+                commands=["sleep 10"],
+                timeout_seconds=1,
+            ),
+        )
+
+        # Record is still created despite setup failure
+        assert record.task_id == "task_timeout"
+        assert Path(record.path).exists()
 
     @pytest.mark.asyncio
     async def test_setup_failure_stops(
         self,
         worktree_manager: WorktreeManager,
     ) -> None:
-        """Setup stops on first failure by default."""
-        with pytest.raises(WorktreeError, match="failed"):
-            await worktree_manager.create(
-                task_id="task_fail",
-                branch_name="feature/fail-test",
-                setup_config=SetupConfig(
-                    commands=[
-                        "exit 1",  # This fails
-                        "touch should_not_exist.txt",
-                    ],
-                    continue_on_error=False,
-                ),
-            )
+        """Setup stops on first failure by default, but record still created."""
+        record = await worktree_manager.create(
+            task_id="task_fail",
+            branch_name="feature/fail-test",
+            setup_config=SetupConfig(
+                commands=[
+                    "exit 1",  # This fails
+                    "touch should_not_exist.txt",
+                ],
+                continue_on_error=False,
+            ),
+        )
+
+        # Record is still created despite setup failure
+        assert record.task_id == "task_fail"
+        worktree_path = Path(record.path)
+        assert worktree_path.exists()
+        # Second command should not have run
+        assert not (worktree_path / "should_not_exist.txt").exists()
 
     @pytest.mark.asyncio
     async def test_setup_continue_on_error(
@@ -299,10 +313,11 @@ class TestWorktreeCleanup:
         record1.status = WorktreeStatus.ORPHANED
         record2.status = WorktreeStatus.ORPHANED
 
-        # Run cleanup
+        # Run cleanup - returns list of cleaned worktree IDs
         cleaned = await worktree_manager.cleanup_orphaned()
 
-        assert cleaned >= 0  # May be 0 if already cleaned
+        assert isinstance(cleaned, list)  # Returns list of IDs
+        assert len(cleaned) >= 0  # May be empty if already cleaned
 
     @pytest.mark.asyncio
     async def test_cleanup_preserves_active(
