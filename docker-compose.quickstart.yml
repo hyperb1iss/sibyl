@@ -20,6 +20,10 @@
 #   SIBYL_SETTINGS_KEY        - Fernet key for settings encryption (auto-generated)
 #   SIBYL_JWT_SECRET          - JWT signing key (auto-generated)
 #
+# Running alongside existing dev setup (use different ports):
+#   SIBYL_SERVER_PORT=3344 SIBYL_WEB_PORT=3347 SIBYL_FALKORDB_PORT=6390 \
+#   SIBYL_POSTGRES_PORT=5443 docker compose -f docker-compose.quickstart.yml -p sibyl-qs up -d
+#
 # ============================================================================
 
 services:
@@ -30,7 +34,7 @@ services:
     image: ghcr.io/hyperb1iss/sibyl-api:latest
     container_name: sibyl-api
     ports:
-      - "3334:3334"
+      - "${SIBYL_SERVER_PORT:-3334}:3334"
     depends_on:
       falkordb:
         condition: service_healthy
@@ -49,7 +53,7 @@ services:
       # Auth - auto-generate if not provided
       SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET:-}
       SIBYL_SETTINGS_KEY: ${SIBYL_SETTINGS_KEY:-}
-      SIBYL_PUBLIC_URL: http://localhost:3337
+      SIBYL_PUBLIC_URL: http://localhost:${SIBYL_WEB_PORT:-3337}
       # AI Providers (optional - can be configured via UI during onboarding)
       SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:-}
       SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:-}
@@ -100,12 +104,12 @@ services:
     image: ghcr.io/hyperb1iss/sibyl-web:latest
     container_name: sibyl-web
     ports:
-      - "3337:3337"
+      - "${SIBYL_WEB_PORT:-3337}:3337"
     depends_on:
       api:
         condition: service_healthy
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:3334
+      NEXT_PUBLIC_API_URL: http://localhost:${SIBYL_SERVER_PORT:-3334}
       NODE_ENV: production
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3337/"]
@@ -121,8 +125,8 @@ services:
     image: falkordb/falkordb:latest
     container_name: sibyl-falkordb
     ports:
-      - "6380:6379" # Redis protocol
-      - "3335:3000" # Browser UI (optional)
+      - "${SIBYL_FALKORDB_PORT:-6380}:6379" # Redis protocol
+      - "${SIBYL_FALKORDB_BROWSER_PORT:-3335}:3000" # Browser UI (optional)
     volumes:
       - sibyl_falkordb:/data
     environment:
@@ -141,7 +145,7 @@ services:
     image: pgvector/pgvector:pg18
     container_name: sibyl-postgres
     ports:
-      - "5433:5432"
+      - "${SIBYL_POSTGRES_PORT:-5433}:5432"
     volumes:
       - sibyl_postgres:/var/lib/postgresql
     environment:
