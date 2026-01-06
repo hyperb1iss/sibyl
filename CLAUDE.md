@@ -29,6 +29,12 @@ authentication properly.
 
 **Never call Sibyl MCP tools or CLI directly** without going through a skill first.
 
+**Use `/uv`** before running any `uv` commands. The skill provides current best practices and
+prevents common mistakes.
+
+- **NEVER run `uv pip`** — it bypasses the project's dependency management. Use `uv add`, `uv sync`,
+  or `uv run` instead.
+
 ### Research → Do → Reflect Cycle
 
 Every significant task follows this cycle:
@@ -188,7 +194,9 @@ from sibyl.cli.common import ELECTRIC_PURPLE
 
 ### Monorepo
 
-- **Use `moon run` for everything** - lint, test, build, typecheck. No exceptions.
+- **Use `moon run` for everything** — lint, test, build, typecheck. No exceptions.
+- **Run `/uv` skill first** before any uv commands to get current best practices
+- **NEVER use `uv pip`** — always use `uv add`, `uv sync`, or `uv run` instead
 - Run from workspace root unless working on isolated package
 - `uv sync` at root syncs all Python deps
 - Raw `pnpm`/`uv` commands bypass moon's caching and dependency graph
