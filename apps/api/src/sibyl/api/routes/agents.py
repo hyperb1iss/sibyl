@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from sibyl.api.decorators import handle_not_found
 from sibyl.auth.authorization import (
     list_accessible_project_graph_ids,
     verify_entity_project_access,
@@ -397,6 +398,7 @@ async def list_agents(
 
 
 @router.get("/{agent_id}", response_model=AgentResponse)
+@handle_not_found("Agent", "agent_id")
 async def get_agent(
     agent_id: str,
     auth: AuthSession = Depends(get_auth_session),
@@ -407,10 +409,7 @@ async def get_agent(
     client = await get_graph_client()
     manager = EntityManager(client, group_id=str(org.id))
 
-    try:
-        entity = await manager.get(agent_id)
-    except EntityNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}") from None
+    entity = await manager.get(agent_id)
 
     if entity.entity_type != EntityType.AGENT:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")

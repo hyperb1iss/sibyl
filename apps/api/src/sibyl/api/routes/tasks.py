@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.authorization import ProjectRole, verify_entity_project_access
 from sibyl.auth.context import AuthContext
@@ -21,7 +22,6 @@ from sibyl.auth.dependencies import (
 )
 from sibyl.auth.rls import AuthSession, get_auth_session
 from sibyl.db.models import Organization, OrganizationRole, User
-from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.graph.relationships import RelationshipManager
@@ -269,6 +269,7 @@ async def _broadcast_task_update(
 
 
 @router.post("/{task_id}/start", response_model=TaskActionResponse)
+@handle_workflow_errors("start_task")
 async def start_task(
     task_id: str,
     org: Organization = Depends(get_current_organization),
@@ -280,43 +281,33 @@ async def start_task(
     # auth.session has RLS context set for tenant isolation
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
-    try:
-        group_id = str(org.id)
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+    group_id = str(org.id)
+    client = await get_graph_client()
+    entity_manager = EntityManager(client, group_id=group_id)
+    relationship_manager = RelationshipManager(client, group_id=group_id)
+    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
-        assignee = request.assignee if request else None
-        task = await workflow.start_task(task_id, assignee or "system")
+    assignee = request.assignee if request else None
+    task = await workflow.start_task(task_id, assignee or "system")
 
-        await _broadcast_task_update(
-            task_id,
-            "start_task",
-            {"status": task.status.value, "branch_name": task.branch_name, "name": task.name},
-            org_id=group_id,
-        )
+    await _broadcast_task_update(
+        task_id,
+        "start_task",
+        {"status": task.status.value, "branch_name": task.branch_name, "name": task.name},
+        org_id=group_id,
+    )
 
-        return TaskActionResponse(
-            success=True,
-            action="start_task",
-            task_id=task_id,
-            message="Task started",
-            data={"status": task.status.value, "branch_name": task.branch_name},
-        )
-
-    except EntityNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except InvalidTransitionError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        log.exception("start_task_failed", task_id=task_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to start task. Please try again."
-        ) from e
+    return TaskActionResponse(
+        success=True,
+        action="start_task",
+        task_id=task_id,
+        message="Task started",
+        data={"status": task.status.value, "branch_name": task.branch_name},
+    )
 
 
 @router.post("/{task_id}/block", response_model=TaskActionResponse)
+@handle_workflow_errors("block_task")
 async def block_task(
     task_id: str,
     request: BlockTaskRequest,
@@ -326,42 +317,32 @@ async def block_task(
     """Mark a task as blocked with a reason."""
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
-    try:
-        group_id = str(org.id)
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+    group_id = str(org.id)
+    client = await get_graph_client()
+    entity_manager = EntityManager(client, group_id=group_id)
+    relationship_manager = RelationshipManager(client, group_id=group_id)
+    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
-        task = await workflow.block_task(task_id, request.reason)
+    task = await workflow.block_task(task_id, request.reason)
 
-        await _broadcast_task_update(
-            task_id,
-            "block_task",
-            {"status": task.status.value, "blocker": request.reason, "name": task.name},
-            org_id=group_id,
-        )
+    await _broadcast_task_update(
+        task_id,
+        "block_task",
+        {"status": task.status.value, "blocker": request.reason, "name": task.name},
+        org_id=group_id,
+    )
 
-        return TaskActionResponse(
-            success=True,
-            action="block_task",
-            task_id=task_id,
-            message=f"Task blocked: {request.reason}",
-            data={"status": task.status.value, "reason": request.reason},
-        )
-
-    except EntityNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except InvalidTransitionError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        log.exception("block_task_failed", task_id=task_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to block task. Please try again."
-        ) from e
+    return TaskActionResponse(
+        success=True,
+        action="block_task",
+        task_id=task_id,
+        message=f"Task blocked: {request.reason}",
+        data={"status": task.status.value, "reason": request.reason},
+    )
 
 
 @router.post("/{task_id}/unblock", response_model=TaskActionResponse)
+@handle_workflow_errors("unblock_task")
 async def unblock_task(
     task_id: str,
     org: Organization = Depends(get_current_organization),
@@ -370,42 +351,32 @@ async def unblock_task(
     """Resume a blocked task (moves back to 'doing')."""
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
-    try:
-        group_id = str(org.id)
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+    group_id = str(org.id)
+    client = await get_graph_client()
+    entity_manager = EntityManager(client, group_id=group_id)
+    relationship_manager = RelationshipManager(client, group_id=group_id)
+    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
-        task = await workflow.unblock_task(task_id)
+    task = await workflow.unblock_task(task_id)
 
-        await _broadcast_task_update(
-            task_id,
-            "unblock_task",
-            {"status": task.status.value, "name": task.name},
-            org_id=group_id,
-        )
+    await _broadcast_task_update(
+        task_id,
+        "unblock_task",
+        {"status": task.status.value, "name": task.name},
+        org_id=group_id,
+    )
 
-        return TaskActionResponse(
-            success=True,
-            action="unblock_task",
-            task_id=task_id,
-            message="Task unblocked, resuming work",
-            data={"status": task.status.value},
-        )
-
-    except EntityNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except InvalidTransitionError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        log.exception("unblock_task_failed", task_id=task_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to unblock task. Please try again."
-        ) from e
+    return TaskActionResponse(
+        success=True,
+        action="unblock_task",
+        task_id=task_id,
+        message="Task unblocked, resuming work",
+        data={"status": task.status.value},
+    )
 
 
 @router.post("/{task_id}/review", response_model=TaskActionResponse)
+@handle_workflow_errors("submit_review")
 async def submit_review(
     task_id: str,
     org: Organization = Depends(get_current_organization),
@@ -415,44 +386,34 @@ async def submit_review(
     """Submit a task for review."""
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
-    try:
-        group_id = str(org.id)
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+    group_id = str(org.id)
+    client = await get_graph_client()
+    entity_manager = EntityManager(client, group_id=group_id)
+    relationship_manager = RelationshipManager(client, group_id=group_id)
+    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
-        pr_url = request.pr_url if request else None
-        commit_shas = request.commit_shas if request else []
-        task = await workflow.submit_for_review(task_id, commit_shas, pr_url)
+    pr_url = request.pr_url if request else None
+    commit_shas = request.commit_shas if request else []
+    task = await workflow.submit_for_review(task_id, commit_shas, pr_url)
 
-        await _broadcast_task_update(
-            task_id,
-            "submit_review",
-            {"status": task.status.value, "pr_url": task.pr_url, "name": task.name},
-            org_id=group_id,
-        )
+    await _broadcast_task_update(
+        task_id,
+        "submit_review",
+        {"status": task.status.value, "pr_url": task.pr_url, "name": task.name},
+        org_id=group_id,
+    )
 
-        return TaskActionResponse(
-            success=True,
-            action="submit_review",
-            task_id=task_id,
-            message="Task submitted for review",
-            data={"status": task.status.value, "pr_url": task.pr_url},
-        )
-
-    except EntityNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except InvalidTransitionError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        log.exception("submit_review_failed", task_id=task_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to submit review. Please try again."
-        ) from e
+    return TaskActionResponse(
+        success=True,
+        action="submit_review",
+        task_id=task_id,
+        message="Task submitted for review",
+        data={"status": task.status.value, "pr_url": task.pr_url},
+    )
 
 
 @router.post("/{task_id}/complete", response_model=TaskActionResponse)
+@handle_workflow_errors("complete_task")
 async def complete_task(
     task_id: str,
     org: Organization = Depends(get_current_organization),
@@ -464,55 +425,45 @@ async def complete_task(
 
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
-    try:
-        group_id = str(org.id)
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+    group_id = str(org.id)
+    client = await get_graph_client()
+    entity_manager = EntityManager(client, group_id=group_id)
+    relationship_manager = RelationshipManager(client, group_id=group_id)
+    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
-        actual_hours = request.actual_hours if request else None
-        learnings = request.learnings if request else None
+    actual_hours = request.actual_hours if request else None
+    learnings = request.learnings if request else None
 
-        # Skip sync episode creation - we'll enqueue it as a background job
-        task = await workflow.complete_task(
-            task_id, actual_hours, learnings or "", create_episode=False
+    # Skip sync episode creation - we'll enqueue it as a background job
+    task = await workflow.complete_task(
+        task_id, actual_hours, learnings or "", create_episode=False
+    )
+
+    # Enqueue learning episode creation as background job (fast response)
+    if learnings:
+        await enqueue_create_learning_episode(
+            task.model_dump(mode="json"),
+            group_id,
         )
 
-        # Enqueue learning episode creation as background job (fast response)
-        if learnings:
-            await enqueue_create_learning_episode(
-                task.model_dump(mode="json"),
-                group_id,
-            )
+    await _broadcast_task_update(
+        task_id,
+        "complete_task",
+        {"status": task.status.value, "learnings": learnings, "name": task.name},
+        org_id=group_id,
+    )
 
-        await _broadcast_task_update(
-            task_id,
-            "complete_task",
-            {"status": task.status.value, "learnings": learnings, "name": task.name},
-            org_id=group_id,
-        )
-
-        return TaskActionResponse(
-            success=True,
-            action="complete_task",
-            task_id=task_id,
-            message="Task completed" + (" with learnings captured" if learnings else ""),
-            data={"status": task.status.value, "learnings": learnings},
-        )
-
-    except EntityNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except InvalidTransitionError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        log.exception("complete_task_failed", task_id=task_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to complete task. Please try again."
-        ) from e
+    return TaskActionResponse(
+        success=True,
+        action="complete_task",
+        task_id=task_id,
+        message="Task completed" + (" with learnings captured" if learnings else ""),
+        data={"status": task.status.value, "learnings": learnings},
+    )
 
 
 @router.post("/{task_id}/archive", response_model=TaskActionResponse)
+@handle_workflow_errors("archive_task")
 async def archive_task(
     task_id: str,
     org: Organization = Depends(get_current_organization),
@@ -522,40 +473,29 @@ async def archive_task(
     """Archive a task (terminal state)."""
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
-    try:
-        group_id = str(org.id)
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+    group_id = str(org.id)
+    client = await get_graph_client()
+    entity_manager = EntityManager(client, group_id=group_id)
+    relationship_manager = RelationshipManager(client, group_id=group_id)
+    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
-        reason = request.reason if request else ""
-        task = await workflow.archive_task(task_id, reason)
+    reason = request.reason if request else ""
+    task = await workflow.archive_task(task_id, reason)
 
-        await _broadcast_task_update(
-            task_id,
-            "archive_task",
-            {"status": task.status.value, "name": task.name},
-            org_id=group_id,
-        )
+    await _broadcast_task_update(
+        task_id,
+        "archive_task",
+        {"status": task.status.value, "name": task.name},
+        org_id=group_id,
+    )
 
-        return TaskActionResponse(
-            success=True,
-            action="archive_task",
-            task_id=task_id,
-            message="Task archived",
-            data={"status": task.status.value},
-        )
-
-    except EntityNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except InvalidTransitionError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        log.exception("archive_task_failed", task_id=task_id, error=str(e))
-        raise HTTPException(
-            status_code=500, detail="Failed to archive task. Please try again."
-        ) from e
+    return TaskActionResponse(
+        success=True,
+        action="archive_task",
+        task_id=task_id,
+        message="Task archived",
+        data={"status": task.status.value},
+    )
 
 
 @router.patch("/{task_id}", response_model=TaskActionResponse)
