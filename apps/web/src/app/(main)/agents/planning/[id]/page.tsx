@@ -13,6 +13,8 @@ interface PlanningSessionDetailPageProps {
 
 export default function PlanningSessionDetailPage({ params }: PlanningSessionDetailPageProps) {
   const { id } = use(params);
+
+  // Fetch session - auto-polls during active phases
   const { data: session, isLoading, error } = usePlanningSession(id);
   const { data: projectsData } = useProjects();
 

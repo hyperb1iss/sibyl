@@ -12,7 +12,6 @@ import {
   Combine,
   InfoCircle,
   Page,
-  Play,
   Sparks,
   WarningTriangle,
 } from '@/components/ui/icons';
@@ -28,7 +27,6 @@ import {
   useMaterializePlanningSession,
   usePlanningThreadMessages,
   usePlanningThreads,
-  useRunBrainstorming,
   useRunSynthesis,
 } from '@/lib/hooks';
 import { PHASE_CONFIG } from './planning-view';
@@ -42,15 +40,10 @@ interface PhaseActionsProps {
 }
 
 function PhaseActions({ session }: PhaseActionsProps) {
-  const runBrainstorming = useRunBrainstorming();
   const runSynthesis = useRunSynthesis();
   const materialize = useMaterializePlanningSession();
 
-  const isLoading = runBrainstorming.isPending || runSynthesis.isPending || materialize.isPending;
-
-  const handleBrainstorm = () => {
-    runBrainstorming.mutate({ id: session.id });
-  };
+  const isLoading = runSynthesis.isPending || materialize.isPending;
 
   const handleSynthesize = () => {
     runSynthesis.mutate(session.id);
@@ -65,16 +58,12 @@ function PhaseActions({ session }: PhaseActionsProps) {
 
   return (
     <div className="flex items-center gap-2">
+      {/* Created phase - show starting indicator or manual start */}
       {session.phase === 'created' && (
-        <button
-          type="button"
-          onClick={handleBrainstorm}
-          disabled={isLoading}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-sc-purple text-white font-medium hover:bg-sc-purple/90 transition-colors disabled:opacity-50"
-        >
-          <Play width={16} height={16} />
-          Start Brainstorming
-        </button>
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sc-purple/20 text-sc-purple">
+          <span className="w-2 h-2 rounded-full bg-sc-purple animate-pulse" />
+          Starting...
+        </div>
       )}
 
       {session.phase === 'brainstorming' && (
@@ -340,6 +329,7 @@ function ThreadsSection({ session }: ThreadsSectionProps) {
   const { data, isLoading } = usePlanningThreads(session.id);
   const threads = data ?? [];
 
+  // Show loading when fetching threads
   if (isLoading) {
     return (
       <div className="p-8 flex items-center justify-center">
@@ -348,12 +338,25 @@ function ThreadsSection({ session }: ThreadsSectionProps) {
     );
   }
 
+  // No threads yet - show starting state for created/brainstorming phases
   if (threads.length === 0) {
+    const isStarting = session.phase === 'created' || session.phase === 'brainstorming';
     return (
       <div className="p-8 text-center">
-        <Sparks width={32} height={32} className="mx-auto mb-3 text-sc-fg-subtle opacity-50" />
-        <p className="text-sc-fg-muted">No brainstorming threads yet</p>
-        <p className="text-sm text-sc-fg-subtle mt-1">Click "Start Brainstorming" to begin</p>
+        {isStarting ? (
+          <>
+            <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-sc-purple/20 flex items-center justify-center">
+              <span className="w-3 h-3 rounded-full bg-sc-purple animate-pulse" />
+            </div>
+            <p className="text-sc-fg-primary font-medium">Starting brainstorming...</p>
+            <p className="text-sm text-sc-fg-subtle mt-1">Personas are being initialized</p>
+          </>
+        ) : (
+          <>
+            <Sparks width={32} height={32} className="mx-auto mb-3 text-sc-fg-subtle opacity-50" />
+            <p className="text-sc-fg-muted">No brainstorming threads</p>
+          </>
+        )}
       </div>
     );
   }

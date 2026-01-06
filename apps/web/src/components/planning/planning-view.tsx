@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useMemo, useState } from 'react';
 import { LightBulb, Plus, Search, Trash, X } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
@@ -13,6 +14,7 @@ import {
   useDiscardPlanningSession,
   usePlanningSessions,
   useProjects,
+  useRunBrainstorming,
 } from '@/lib/hooks';
 
 // =============================================================================
@@ -346,6 +348,7 @@ interface PlanningViewProps {
 }
 
 export function PlanningView({ projectFilter }: PlanningViewProps) {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewForm, setShowNewForm] = useState(false);
   const [selectedPhases, setSelectedPhases] = useState<Set<PlanningPhase>>(new Set());
@@ -355,6 +358,7 @@ export function PlanningView({ projectFilter }: PlanningViewProps) {
   const { data: projectsData } = useProjects();
   const createSession = useCreatePlanningSession();
   const discardSession = useDiscardPlanningSession();
+  const runBrainstorming = useRunBrainstorming();
 
   const sessions = sessionsData?.sessions ?? [];
   const projects = projectsData?.entities ?? [];
@@ -413,7 +417,7 @@ export function PlanningView({ projectFilter }: PlanningViewProps) {
     setSelectedPhases(new Set());
   }, []);
 
-  // Create session handler
+  // Create session handler - creates, navigates, and starts brainstorming
   const handleCreateSession = useCallback(
     (prompt: string, title?: string) => {
       createSession.mutate(
@@ -423,13 +427,16 @@ export function PlanningView({ projectFilter }: PlanningViewProps) {
           project_id: projectFilter || undefined,
         },
         {
-          onSuccess: _session => {
+          onSuccess: session => {
             setShowNewForm(false);
+            // Navigate immediately and start brainstorming
+            router.push(`/agents/planning/${session.id}`);
+            runBrainstorming.mutate({ id: session.id });
           },
         }
       );
     },
-    [createSession, projectFilter]
+    [createSession, projectFilter, router, runBrainstorming]
   );
 
   // Discard handler

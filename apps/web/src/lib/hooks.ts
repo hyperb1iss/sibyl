@@ -2059,14 +2059,31 @@ export function usePlanningSessions(params?: { project?: string; phase?: Plannin
   });
 }
 
+// Phases that should auto-poll for updates
+const PLANNING_ACTIVE_PHASES: PlanningPhase[] = [
+  'created',
+  'brainstorming',
+  'synthesizing',
+  'drafting',
+];
+
 /**
  * Fetch a single planning session by ID.
+ * Automatically polls every 2s while session is in an active phase.
  */
 export function usePlanningSession(id: string) {
   return useQuery({
     queryKey: queryKeys.planning.detail(id),
     queryFn: () => api.planning.get(id),
     enabled: !!id,
+    // Auto-poll during active phases, stop when complete
+    refetchInterval: query => {
+      const session = query.state.data;
+      if (session && PLANNING_ACTIVE_PHASES.includes(session.phase)) {
+        return 2000; // Poll every 2s during active phases
+      }
+      return false;
+    },
   });
 }
 
@@ -2170,6 +2187,14 @@ export function usePlanningThreads(sessionId: string, status?: 'active' | 'compl
     queryKey: queryKeys.planning.threads(sessionId, status),
     queryFn: () => api.planning.getThreads(sessionId, status),
     enabled: !!sessionId,
+    // Poll while any thread is still running
+    refetchInterval: query => {
+      const threads = query.state.data;
+      if (threads?.some(t => t.status === 'pending' || t.status === 'running')) {
+        return 2000;
+      }
+      return false;
+    },
   });
 }
 
