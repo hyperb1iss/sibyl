@@ -10,9 +10,10 @@ interface NavLinkProps {
   icon: IconComponent;
   children: React.ReactNode;
   onClick?: () => void;
+  badge?: number;
 }
 
-export function NavLink({ href, icon: Icon, children, onClick }: NavLinkProps) {
+export function NavLink({ href, icon: Icon, children, onClick, badge }: NavLinkProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isActive = pathname === href;
@@ -55,7 +56,14 @@ export function NavLink({ href, icon: Icon, children, onClick }: NavLinkProps) {
         }`}
       />
 
-      <span>{children}</span>
+      <span className="flex-1">{children}</span>
+
+      {/* Badge for counts */}
+      {badge !== undefined && badge > 0 && (
+        <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full bg-sc-purple/20 text-sc-purple">
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </Link>
   );
 }

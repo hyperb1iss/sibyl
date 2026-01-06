@@ -943,6 +943,111 @@ export interface AnswerQuestionResponse {
 }
 
 // =============================================================================
+// Planning Types
+// =============================================================================
+
+export type PlanningPhase =
+  | 'created'
+  | 'brainstorming'
+  | 'synthesizing'
+  | 'drafting'
+  | 'ready'
+  | 'materialized'
+  | 'discarded';
+
+export interface PlanningPersona {
+  role: string;
+  name?: string;
+  focus?: string;
+  system_prompt?: string;
+}
+
+export interface PlanningTaskDraft {
+  title: string;
+  description?: string;
+  priority?: string;
+  tags?: string[];
+  depends_on?: string[];
+}
+
+export interface PlanningSession {
+  id: string;
+  org_id: string;
+  project_id?: string;
+  created_by: string;
+  title?: string;
+  prompt: string;
+  phase: PlanningPhase;
+  personas?: PlanningPersona[];
+  synthesis?: string;
+  spec_draft?: string;
+  task_drafts?: PlanningTaskDraft[];
+  materialized_at?: string;
+  epic_id?: string;
+  task_ids?: string[];
+  document_id?: string;
+  episode_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlanningSessionListResponse {
+  sessions: PlanningSession[];
+  total: number;
+}
+
+export interface PlanningThread {
+  id: string;
+  session_id: string;
+  persona_role: string;
+  persona_name?: string;
+  persona_focus?: string;
+  agent_id?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+}
+
+export interface PlanningMessage {
+  id: string;
+  thread_id: string;
+  role: string;
+  content: string;
+  thinking?: string;
+  created_at: string;
+}
+
+export interface CreatePlanningSessionRequest {
+  prompt: string;
+  title?: string;
+  project_id?: string;
+}
+
+export interface RunBrainstormingRequest {
+  personas?: PlanningPersona[];
+  persona_count?: number;
+}
+
+export interface RunBrainstormingResponse {
+  session: PlanningSession;
+  threads: PlanningThread[];
+  job_id: string;
+}
+
+export interface MaterializeRequest {
+  project_id?: string;
+  epic_title?: string;
+  epic_priority?: string;
+}
+
+export interface MaterializeResponse {
+  job_id: string;
+  session_id: string;
+  message: string;
+}
+
+// =============================================================================
 // Activity Feed Types
 // =============================================================================
 
@@ -2222,5 +2327,66 @@ export const api = {
       fetchApi<DeleteSettingResponse>(`/settings/${key}`, {
         method: 'DELETE',
       }),
+  },
+
+  // Planning Studio
+  planning: {
+    list: (params?: { project_id?: string; phase?: PlanningPhase; include_archived?: boolean }) => {
+      const searchParams = new URLSearchParams();
+      if (params?.project_id) searchParams.set('project_id', params.project_id);
+      if (params?.phase) searchParams.set('phase', params.phase);
+      if (params?.include_archived) searchParams.set('include_archived', 'true');
+      const query = searchParams.toString();
+      return fetchApi<PlanningSessionListResponse>(`/planning${query ? `?${query}` : ''}`);
+    },
+
+    get: (id: string) => fetchApi<PlanningSession>(`/planning/${id}`),
+
+    create: (request: CreatePlanningSessionRequest) =>
+      fetchApi<PlanningSession>('/planning', {
+        method: 'POST',
+        body: JSON.stringify(request),
+      }),
+
+    delete: (id: string) =>
+      fetchApi<void>(`/planning/${id}`, {
+        method: 'DELETE',
+      }),
+
+    discard: (id: string) =>
+      fetchApi<{
+        success: boolean;
+        session_id: string;
+        previous_phase: string;
+        current_phase: string;
+      }>(`/planning/${id}/discard`, { method: 'POST' }),
+
+    runBrainstorming: (id: string, request?: RunBrainstormingRequest) =>
+      fetchApi<RunBrainstormingResponse>(`/planning/${id}/run-brainstorming`, {
+        method: 'POST',
+        body: JSON.stringify(request ?? {}),
+      }),
+
+    runSynthesis: (id: string) =>
+      fetchApi<{ job_id: string; session_id: string; message: string }>(
+        `/planning/${id}/run-synthesis`,
+        { method: 'POST' }
+      ),
+
+    materialize: (id: string, request?: MaterializeRequest) =>
+      fetchApi<MaterializeResponse>(`/planning/${id}/materialize`, {
+        method: 'POST',
+        body: JSON.stringify(request ?? {}),
+      }),
+
+    getThreads: (sessionId: string, status?: string) => {
+      const query = status ? `?status=${status}` : '';
+      return fetchApi<PlanningThread[]>(`/planning/${sessionId}/threads${query}`);
+    },
+
+    getThreadMessages: (sessionId: string, threadId: string) =>
+      fetchApi<{ thread: PlanningThread; messages: PlanningMessage[] }>(
+        `/planning/${sessionId}/threads/${threadId}`
+      ),
   },
 };

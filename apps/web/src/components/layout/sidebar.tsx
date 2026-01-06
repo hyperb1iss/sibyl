@@ -19,6 +19,7 @@ import {
   X,
 } from '@/components/ui/icons';
 import { APP_CONFIG } from '@/lib/constants';
+import { useActivePlanningCount } from '@/lib/hooks';
 import { useMobileNav } from './mobile-nav-context';
 import { NavLink } from './nav-link';
 
@@ -37,9 +38,10 @@ const NAVIGATION: Array<{ name: string; href: string; icon: IconComponent }> = [
 
 interface SidebarContentProps {
   onNavClick?: () => void;
+  activePlanningCount: number;
 }
 
-function SidebarContent({ onNavClick }: SidebarContentProps) {
+function SidebarContent({ onNavClick, activePlanningCount }: SidebarContentProps) {
   return (
     <>
       {/* Logo */}
@@ -66,7 +68,13 @@ function SidebarContent({ onNavClick }: SidebarContentProps) {
       {/* Navigation */}
       <nav className="flex-1 p-3 md:p-4 space-y-1 overflow-y-auto">
         {NAVIGATION.map(item => (
-          <NavLink key={item.name} href={item.href} icon={item.icon} onClick={onNavClick}>
+          <NavLink
+            key={item.name}
+            href={item.href}
+            icon={item.icon}
+            onClick={onNavClick}
+            badge={item.name === 'Agents' ? activePlanningCount : undefined}
+          >
             {item.name}
           </NavLink>
         ))}
@@ -87,6 +95,8 @@ function SidebarContent({ onNavClick }: SidebarContentProps) {
 export function Sidebar() {
   const { isOpen, close } = useMobileNav();
   const _pathname = usePathname();
+  const activePlanningCount = useActivePlanningCount();
+
   // Close mobile nav on route change
   useEffect(() => {
     close();
@@ -107,7 +117,7 @@ export function Sidebar() {
     <>
       {/* Desktop Sidebar - hidden on mobile */}
       <aside className="hidden md:flex w-64 bg-sc-bg-base border-r border-sc-fg-subtle/10 flex-col shadow-sidebar">
-        <SidebarContent />
+        <SidebarContent activePlanningCount={activePlanningCount} />
       </aside>
 
       {/* Mobile Drawer */}
@@ -143,7 +153,7 @@ export function Sidebar() {
                 <X width={20} height={20} />
               </button>
 
-              <SidebarContent onNavClick={close} />
+              <SidebarContent onNavClick={close} activePlanningCount={activePlanningCount} />
             </motion.aside>
           </>
         )}

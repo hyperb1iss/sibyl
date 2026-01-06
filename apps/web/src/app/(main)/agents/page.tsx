@@ -8,6 +8,7 @@ import { ApprovalQueue } from '@/components/agents/approval-queue';
 import { HealthMonitor } from '@/components/agents/health-monitor';
 import { SpawnAgentDialog } from '@/components/agents/spawn-agent-dialog';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
+import { PlanningView } from '@/components/planning';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +22,7 @@ import {
   ChevronDown,
   Dashboard,
   EditPencil,
+  LightBulb,
   List,
   Pause,
   Play,
@@ -507,24 +509,44 @@ const SummaryBar = memo(function SummaryBar({ agents }: { agents: Agent[] }) {
 // Main Page Content
 // =============================================================================
 
-type ViewMode = 'dashboard' | 'list';
+type ViewMode = 'dashboard' | 'list' | 'planning';
 
 const VIEW_MODE_KEY = 'agents-view-mode';
 
 function AgentsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // Initialize view mode from URL or localStorage
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    // Check URL param first (for redirects from /planning)
     if (typeof window !== 'undefined') {
+      const urlView = new URLSearchParams(window.location.search).get('view') as ViewMode;
+      if (urlView && ['dashboard', 'list', 'planning'].includes(urlView)) {
+        return urlView;
+      }
       return (localStorage.getItem(VIEW_MODE_KEY) as ViewMode) || 'dashboard';
     }
     return 'dashboard';
   });
 
-  // Persist view mode preference
+  // Persist view mode preference (but don't persist URL-driven views)
   useEffect(() => {
     localStorage.setItem(VIEW_MODE_KEY, viewMode);
   }, [viewMode]);
+
+  // Handle URL param changes (e.g., redirect from /planning)
+  useEffect(() => {
+    const urlView = searchParams.get('view') as ViewMode;
+    if (urlView && ['dashboard', 'list', 'planning'].includes(urlView) && urlView !== viewMode) {
+      setViewMode(urlView);
+      // Clean up URL param after setting view
+      const params = new URLSearchParams(searchParams);
+      params.delete('view');
+      const newUrl = params.toString() ? `/agents?${params.toString()}` : '/agents';
+      router.replace(newUrl);
+    }
+  }, [searchParams, viewMode, router]);
 
   const statusFilter = searchParams.get('status') as AgentStatus | null;
   const tagFilter = searchParams.get('tag');
@@ -663,7 +685,7 @@ function AgentsPageContent() {
         <Breadcrumb />
         <div className="flex items-center gap-3">
           {/* View Toggle */}
-          <div className="relative grid grid-cols-2 bg-sc-bg-elevated border border-sc-purple/20 rounded-lg p-1 shadow-[0_2px_8px_rgba(0,0,0,0.2),0_0_16px_rgba(225,53,255,0.08)]">
+          <div className="relative grid grid-cols-3 bg-sc-bg-elevated border border-sc-purple/20 rounded-lg p-1 shadow-[0_2px_8px_rgba(0,0,0,0.2),0_0_16px_rgba(225,53,255,0.08)]">
             <button
               type="button"
               onClick={() => setViewMode('dashboard')}
@@ -690,34 +712,54 @@ function AgentsPageContent() {
               `}
             >
               <List width={14} height={14} />
-              <span className="hidden sm:inline">List</span>
+              <span className="hidden sm:inline">Agents</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('planning')}
+              className={`
+                relative flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md
+                transition-all duration-200 z-10
+                ${viewMode === 'planning' ? 'text-white' : 'text-sc-fg-muted hover:text-sc-fg-primary'}
+              `}
+            >
+              <LightBulb width={14} height={14} />
+              <span className="hidden sm:inline">Planning</span>
             </button>
             {/* Sliding background */}
             <div
               className={`
-                absolute top-1 bottom-1 w-[calc(50%-0.125rem)] rounded-md z-0
+                absolute top-1 bottom-1 w-[calc(33.333%-0.167rem)] rounded-md z-0
                 bg-gradient-to-br from-sc-purple to-sc-purple/80
                 shadow-[0_2px_8px_rgba(225,53,255,0.3),0_0_16px_rgba(225,53,255,0.2)]
                 transition-all duration-300 ease-out
-                ${viewMode === 'dashboard' ? 'left-1' : 'left-[calc(50%+0.125rem)]'}
+                ${
+                  viewMode === 'dashboard'
+                    ? 'left-1'
+                    : viewMode === 'list'
+                      ? 'left-[calc(33.333%+0.083rem)]'
+                      : 'left-[calc(66.666%+0.167rem)]'
+                }
               `}
             />
           </div>
 
-          <SpawnAgentDialog
-            trigger={
-              <button
-                type="button"
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg transition-colors"
-              >
-                <Plus width={16} height={16} />
-                Start Agent
-              </button>
-            }
-            onSpawned={id => {
-              router.push(`/agents/${id}`);
-            }}
-          />
+          {viewMode !== 'planning' && (
+            <SpawnAgentDialog
+              trigger={
+                <button
+                  type="button"
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg transition-colors"
+                >
+                  <Plus width={16} height={16} />
+                  Start Agent
+                </button>
+              }
+              onSpawned={id => {
+                router.push(`/agents/${id}`);
+              }}
+            />
+          )}
         </div>
       </div>
 
@@ -876,6 +918,9 @@ function AgentsPageContent() {
           )}
         </>
       )}
+
+      {/* Planning View */}
+      {viewMode === 'planning' && <PlanningView projectFilter={projectFilter} />}
 
       {/* Loading indicator for mutations */}
       {(pauseAgent.isPending || resumeAgent.isPending || terminateAgent.isPending) && (

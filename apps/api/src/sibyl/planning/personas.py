@@ -94,6 +94,21 @@ Return ONLY valid JSON in this exact format:
         return _default_personas(count)
 
 
+def single_brainstormer() -> dict:
+    """Default single brainstormer for non-persona mode."""
+    return {
+        "role": "brainstormer",
+        "name": "Brainstormer",
+        "focus": "Exploring the topic thoroughly from all angles",
+        "system_prompt": (
+            "You are a thoughtful brainstormer. Explore this topic thoroughly - "
+            "consider different angles, identify challenges and opportunities, "
+            "suggest concrete approaches, and think through implications. "
+            "Be direct and specific, not abstract."
+        ),
+    }
+
+
 def _default_personas(count: int) -> list[dict]:
     """Fallback personas if generation fails."""
     defaults = [

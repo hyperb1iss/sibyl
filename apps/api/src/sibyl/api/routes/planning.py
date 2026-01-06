@@ -409,12 +409,19 @@ async def discard_session(
 
 
 class RunBrainstormingRequest(BaseModel):
-    """Request to run brainstorming (auto-generate personas or use provided)."""
+    """Request to run brainstorming.
+
+    Default: Single agent brainstorms directly on the topic.
+    Optional: Set persona_count > 0 to auto-generate diverse personas,
+              or provide custom personas list.
+    """
 
     personas: list[PersonaSchema] | None = Field(
-        None, description="Custom personas (optional - generates if not provided)"
+        None, description="Custom personas (optional - for multi-perspective mode)"
     )
-    persona_count: int = Field(4, ge=2, le=6, description="Number of personas to generate")
+    persona_count: int | None = Field(
+        None, ge=2, le=6, description="Generate N personas (optional - default is single agent)"
+    )
 
 
 class RunBrainstormingResponse(BaseModel):
@@ -457,13 +464,20 @@ async def run_brainstorming(
             detail=f"Cannot start brainstorming from {session.phase.value} phase",
         )
 
-    # Generate or use provided personas
+    # Determine brainstorming mode
     if request.personas:
+        # Custom personas provided
         personas_data = [p.model_dump() for p in request.personas]
-    else:
+    elif request.persona_count:
+        # Auto-generate N personas
         from sibyl.planning.personas import generate_personas
 
         personas_data = await generate_personas(session.prompt, count=request.persona_count)
+    else:
+        # Default: single agent mode (no personas)
+        from sibyl.planning.personas import single_brainstormer
+
+        personas_data = [single_brainstormer()]
 
     # Start brainstorming (creates threads, updates phase)
     updated_session = await service.start_brainstorming(UUID(session_id), org.id, personas_data)

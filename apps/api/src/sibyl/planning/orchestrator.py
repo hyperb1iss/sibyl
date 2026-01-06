@@ -7,7 +7,6 @@ to brainstorm on a topic concurrently.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -17,6 +16,7 @@ from claude_agent_sdk.types import (
     AssistantMessage,
     ClaudeAgentOptions,
     ResultMessage,
+    TextBlock,
 )
 
 from sibyl.api.pubsub import publish_event
@@ -111,7 +111,12 @@ class BrainstormAgent:
             async for message in client.receive_response():
                 if isinstance(message, AssistantMessage):
                     if message.content:
-                        response_parts.append(message.content)
+                        # Extract text from content blocks
+                        response_parts.extend(
+                            block.text
+                            for block in message.content
+                            if isinstance(block, TextBlock)
+                        )
 
                 elif isinstance(message, ResultMessage):
                     # Track usage
@@ -143,7 +148,7 @@ class BrainstormOrchestrator:
 
     def __init__(
         self,
-        db_session: "AsyncSession",
+        db_session: AsyncSession,
         org_id: UUID,
     ):
         """Initialize orchestrator.
@@ -334,7 +339,7 @@ class BrainstormOrchestrator:
 
             return response
 
-        except Exception as e:
+        except Exception:
             log.exception(
                 "Agent execution failed",
                 thread_id=str(thread_id),

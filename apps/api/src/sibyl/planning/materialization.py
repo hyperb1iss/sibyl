@@ -47,7 +47,7 @@ def _parse_priority(priority_str: str) -> TaskPriority:
     return mapping.get(priority_str.lower(), TaskPriority.MEDIUM)
 
 
-async def materialize_planning_session(
+async def materialize_planning_session(  # noqa: PLR0915
     session_id: UUID,
     org_id: UUID,
     *,

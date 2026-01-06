@@ -15,12 +15,16 @@ import type {
   CodeExampleParams,
   CodeExampleResponse,
   CreateNoteRequest,
+  CreatePlanningSessionRequest,
   EntityCreate,
   EntityUpdate,
   EpicStatus,
+  MaterializeRequest,
+  PlanningPhase,
   RAGSearchParams,
   RAGSearchResponse,
   RespondToApprovalRequest,
+  RunBrainstormingRequest,
   SpawnAgentRequest,
   TaskPriority,
   TaskStatus,
@@ -184,6 +188,24 @@ export const queryKeys = {
     pending: (project_id?: string) =>
       ['approvals', 'pending', project_id ? { project_id } : undefined] as const,
     detail: (id: string) => ['approvals', 'detail', id] as const,
+  },
+  planning: {
+    all: ['planning'] as const,
+    list: (params?: { project?: string; phase?: PlanningPhase }) => {
+      const normalized =
+        params && (params.project || params.phase)
+          ? {
+              ...(params.project ? { project: params.project } : {}),
+              ...(params.phase ? { phase: params.phase } : {}),
+            }
+          : undefined;
+      return ['planning', 'list', normalized] as const;
+    },
+    detail: (id: string) => ['planning', 'detail', id] as const,
+    threads: (sessionId: string, status?: 'active' | 'completed' | 'failed') =>
+      ['planning', 'threads', sessionId, status] as const,
+    threadMessages: (sessionId: string, threadId: string) =>
+      ['planning', 'thread-messages', sessionId, threadId] as const,
   },
 };
 
@@ -2012,4 +2034,168 @@ export function useDeleteSetting() {
       queryClient.invalidateQueries({ queryKey: queryKeys.setup.validation });
     },
   });
+}
+
+// =============================================================================
+// Planning Hooks
+// =============================================================================
+
+/**
+ * Fetch planning sessions with optional filtering.
+ */
+export function usePlanningSessions(params?: { project?: string; phase?: PlanningPhase }) {
+  const normalized =
+    params && (params.project || params.phase)
+      ? {
+          ...(params.project ? { project: params.project } : {}),
+          ...(params.phase ? { phase: params.phase } : {}),
+        }
+      : undefined;
+
+  return useQuery({
+    queryKey: queryKeys.planning.list(normalized),
+    queryFn: () => api.planning.list(normalized),
+    staleTime: TIMING.STALE_TIME,
+  });
+}
+
+/**
+ * Fetch a single planning session by ID.
+ */
+export function usePlanningSession(id: string) {
+  return useQuery({
+    queryKey: queryKeys.planning.detail(id),
+    queryFn: () => api.planning.get(id),
+    enabled: !!id,
+  });
+}
+
+/**
+ * Create a new planning session.
+ */
+export function useCreatePlanningSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (request: CreatePlanningSessionRequest) => api.planning.create(request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.planning.all });
+    },
+  });
+}
+
+/**
+ * Delete a planning session.
+ */
+export function useDeletePlanningSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => api.planning.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.planning.all });
+    },
+  });
+}
+
+/**
+ * Discard a planning session (set phase to 'discarded').
+ */
+export function useDiscardPlanningSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => api.planning.discard(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.planning.detail(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.planning.all });
+    },
+  });
+}
+
+/**
+ * Run brainstorming phase for a planning session.
+ */
+export function useRunBrainstorming() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, request }: { id: string; request?: RunBrainstormingRequest }) =>
+      api.planning.runBrainstorming(id, request),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.planning.detail(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.planning.threads(id) });
+    },
+  });
+}
+
+/**
+ * Run synthesis phase for a planning session.
+ */
+export function useRunSynthesis() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => api.planning.runSynthesis(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.planning.detail(id) });
+    },
+  });
+}
+
+/**
+ * Materialize a planning session (create Epic + Tasks).
+ */
+export function useMaterializePlanningSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, request }: { id: string; request?: MaterializeRequest }) =>
+      api.planning.materialize(id, request),
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.planning.detail(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.planning.all });
+      // Also invalidate epics and tasks since materialization creates them
+      queryClient.invalidateQueries({ queryKey: queryKeys.epics.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
+    },
+  });
+}
+
+/**
+ * Fetch threads for a planning session.
+ */
+export function usePlanningThreads(sessionId: string, status?: 'active' | 'completed' | 'failed') {
+  return useQuery({
+    queryKey: queryKeys.planning.threads(sessionId, status),
+    queryFn: () => api.planning.getThreads(sessionId, status),
+    enabled: !!sessionId,
+  });
+}
+
+/**
+ * Fetch messages for a specific thread in a planning session.
+ */
+export function usePlanningThreadMessages(sessionId: string, threadId: string) {
+  return useQuery({
+    queryKey: queryKeys.planning.threadMessages(sessionId, threadId),
+    queryFn: () => api.planning.getThreadMessages(sessionId, threadId),
+    enabled: !!sessionId && !!threadId,
+  });
+}
+
+/**
+ * Count active planning sessions (for nav badge).
+ */
+export function useActivePlanningCount() {
+  const { data } = usePlanningSessions();
+  const activePhases: PlanningPhase[] = [
+    'created',
+    'brainstorming',
+    'synthesizing',
+    'drafting',
+    'ready',
+  ];
+
+  return data?.sessions.filter(s => activePhases.includes(s.phase)).length ?? 0;
 }
