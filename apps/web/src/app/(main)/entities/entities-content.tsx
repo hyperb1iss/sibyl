@@ -22,6 +22,7 @@ import { EntityTypeChip, FilterChip } from '@/components/ui/toggle';
 import { ErrorState } from '@/components/ui/tooltip';
 import type { EntityListResponse, EntitySortField, SortOrder, StatsResponse } from '@/lib/api';
 import { useDeleteEntity, useEntities, useStats } from '@/lib/hooks';
+import { useProjectContext } from '@/lib/project-context';
 
 interface EntitiesContentProps {
   initialEntities: EntityListResponse;
@@ -55,6 +56,9 @@ export function EntitiesContent({
   const router = useRouter();
   const searchParams = useSearchParams();
   const limit = 20;
+
+  // Project context for filtering
+  const { selectedProjects, isAll } = useProjectContext();
 
   // Local state for input (synced from URL, debounced to URL)
   const [searchInput, setSearchInput] = useState(search);
@@ -102,6 +106,7 @@ export function EntitiesContent({
     {
       entity_type: typeFilter,
       search: search || undefined,
+      project_ids: isAll ? undefined : selectedProjects,
       page,
       page_size: limit,
       sort_by: sortBy,

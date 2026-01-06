@@ -15,6 +15,7 @@ interface PageProps {
   searchParams: Promise<{
     type?: string;
     search?: string;
+    projects?: string; // Comma-separated project IDs from project context
     page?: string;
     sort_by?: EntitySortField;
     sort_order?: SortOrder;
@@ -28,6 +29,7 @@ export default async function EntitiesPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const typeFilter = params.type;
   const search = params.search || '';
+  const projectIds = params.projects ? params.projects.split(',').filter(Boolean) : undefined;
   const page = parseInt(params.page || '1', 10);
   const limit = 20;
 
@@ -44,6 +46,7 @@ export default async function EntitiesPage({ searchParams }: PageProps) {
     fetchEntities({
       entity_type: typeFilter,
       search: search || undefined,
+      project_ids: projectIds,
       page,
       page_size: limit,
       sort_by: sortBy,

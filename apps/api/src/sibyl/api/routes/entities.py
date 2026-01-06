@@ -177,6 +177,9 @@ async def list_entities(
     language: str | None = Query(default=None, description="Filter by programming language"),
     category: str | None = Query(default=None, description="Filter by category"),
     search: str | None = Query(default=None, description="Search in name and description"),
+    project_ids: list[str] | None = Query(
+        default=None, description="Filter by project IDs (use '__unassigned__' for entities without project)"
+    ),
     page: int = Query(default=1, ge=1, description="Page number"),
     page_size: int = Query(default=50, ge=1, le=200, description="Items per page"),
     sort_by: SortField = Query(default=SortField.UPDATED_AT, description="Field to sort by"),
@@ -185,6 +188,12 @@ async def list_entities(
     """List entities with optional filters and pagination."""
     try:
         group_id = str(org.id)
+        log.debug(
+            "Listing entities with filters",
+            entity_type=entity_type,
+            project_ids=project_ids,
+            page=page,
+        )
         client = await get_graph_client()
         entity_manager = EntityManager(client, group_id=group_id)
 
@@ -196,7 +205,31 @@ async def list_entities(
 
         # Apply filters
         filtered = []
+
+        # Prepare project filter
+        unassigned_marker = "__unassigned__"
+        has_unassigned = project_ids and unassigned_marker in project_ids
+        real_project_ids = [pid for pid in (project_ids or []) if pid != unassigned_marker]
+
         for entity in all_entities:
+            # Project filter
+            if project_ids:
+                entity_project = (
+                    getattr(entity, "project_id", None)
+                    or (entity.metadata.get("project_id") if entity.metadata else None)
+                )
+                # Check if entity matches filter criteria
+                if entity_project:
+                    # Entity has a project - check if it's in the filter list
+                    if real_project_ids and entity_project not in real_project_ids:
+                        continue
+                    # If only unassigned is selected, skip entities with projects
+                    if has_unassigned and not real_project_ids:
+                        continue
+                elif not has_unassigned:
+                    # Entity has no project - only include if unassigned is selected
+                    continue
+
             # Language filter
             if language:
                 entity_langs = getattr(entity, "languages", []) or []

@@ -1419,6 +1419,7 @@ export const api = {
       language?: string;
       category?: string;
       search?: string;
+      project_ids?: string[];
       page?: number;
       page_size?: number;
       sort_by?: 'name' | 'created_at' | 'updated_at' | 'entity_type';
@@ -1429,6 +1430,12 @@ export const api = {
       if (params?.language) searchParams.set('language', params.language);
       if (params?.category) searchParams.set('category', params.category);
       if (params?.search) searchParams.set('search', params.search);
+      if (params?.project_ids?.length) {
+        // FastAPI expects repeated query params for list
+        for (const id of params.project_ids) {
+          searchParams.append('project_ids', id);
+        }
+      }
       if (params?.page) searchParams.set('page', params.page.toString());
       if (params?.page_size) searchParams.set('page_size', params.page_size.toString());
       if (params?.sort_by) searchParams.set('sort_by', params.sort_by);
