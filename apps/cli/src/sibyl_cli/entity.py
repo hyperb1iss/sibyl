@@ -336,3 +336,124 @@ def related_entities(
             _handle_client_error(e)
 
     _related()
+
+
+@app.command("history")
+def entity_history(
+    entity_id: Annotated[str, typer.Argument(help="Entity ID")],
+    as_of: Annotated[
+        str | None,
+        typer.Option("--as-of", "-d", help="Point-in-time (ISO date, e.g. 2025-03-15)"),
+    ] = None,
+    mode: Annotated[
+        str,
+        typer.Option("--mode", "-m", help="history|timeline|conflicts"),
+    ] = "history",
+    include_expired: Annotated[
+        bool, typer.Option("--include-expired", "-e", help="Include expired edges")
+    ] = False,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 50,
+    json_out: Annotated[
+        bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
+    ] = False,
+) -> None:
+    """Query bi-temporal history for an entity.
+
+    Modes:
+      history  - Edges as they existed at a point in time (use --as-of)
+      timeline - All versions of edges over time (shows evolution)
+      conflicts - Find invalidated/superseded facts
+
+    Examples:
+      sibyl entity history <id>                          # Current edges
+      sibyl entity history <id> --as-of 2025-03-15      # As of March 15
+      sibyl entity history <id> --mode timeline         # Full history
+      sibyl entity history <id> --mode conflicts        # Superseded facts
+    """
+
+    @run_async
+    async def _history() -> None:
+        client = get_client()
+
+        try:
+            response = await client.temporal_query(
+                mode=mode,
+                entity_id=entity_id,
+                as_of=as_of,
+                include_expired=include_expired,
+                limit=limit,
+            )
+
+            edges = response.get("edges", [])
+            message = response.get("message")
+
+            if json_out:
+                print_json(response)
+                return
+
+            if not edges:
+                if message:
+                    info(message)
+                else:
+                    info(f"No edges found for {entity_id}")
+                return
+
+            # Build table based on mode
+            if mode == "conflicts":
+                table = create_table(
+                    "Invalidated Facts",
+                    "Source",
+                    "Relationship",
+                    "Target",
+                    "Expired At",
+                )
+                for e in edges:
+                    expired = e.get("expired_at") or e.get("invalid_at") or "-"
+                    if isinstance(expired, str) and len(expired) > 10:
+                        expired = expired[:10]  # Just date part
+                    table.add_row(
+                        truncate(e.get("source_name", ""), 20),
+                        e.get("name", ""),
+                        truncate(e.get("target_name", ""), 20),
+                        str(expired),
+                    )
+            else:
+                table = create_table(
+                    f"Temporal History ({mode})",
+                    "Source",
+                    "Relationship",
+                    "Target",
+                    "Created",
+                    "Status",
+                )
+                for e in edges:
+                    created = e.get("created_at") or "-"
+                    if isinstance(created, str) and len(created) > 10:
+                        created = created[:10]
+                    status = (
+                        f"[green]current[/green]"
+                        if e.get("is_current")
+                        else f"[dim]expired[/dim]"
+                    )
+                    table.add_row(
+                        truncate(e.get("source_name", ""), 18),
+                        e.get("name", ""),
+                        truncate(e.get("target_name", ""), 18),
+                        str(created),
+                        status,
+                    )
+
+            console.print(table)
+
+            if message:
+                console.print(f"\n[dim]{message}[/dim]")
+            else:
+                console.print(f"\n[dim]Found {len(edges)} edge(s)[/dim]")
+
+            if as_of:
+                console.print(f"[dim]Point-in-time: {as_of}[/dim]")
+
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    _history()

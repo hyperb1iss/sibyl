@@ -93,3 +93,41 @@ class DependencyNode:
     status: str
     blocking: list[str]
     blocked_by: list[str]
+
+
+@dataclass
+class TemporalEdge:
+    """An edge with bi-temporal metadata.
+
+    Bi-temporal model:
+    - created_at/expired_at: System time (when we learned/invalidated this)
+    - valid_at/invalid_at: Real-world time (when fact was/ceased to be true)
+    """
+
+    id: str
+    name: str  # Relationship name / fact
+    source_id: str
+    source_name: str
+    target_id: str
+    target_name: str
+    # System time: when we knew about this
+    created_at: datetime | None = None
+    expired_at: datetime | None = None  # If set, this edge has been invalidated
+    # Real-world time: when the fact was true
+    valid_at: datetime | None = None
+    invalid_at: datetime | None = None
+    # Additional context
+    fact: str | None = None
+    is_current: bool = True  # False if superseded by newer info
+
+
+@dataclass
+class TemporalResponse:
+    """Response from temporal query operations."""
+
+    mode: Literal["history", "timeline", "conflicts"]
+    entity_id: str | None
+    edges: list[TemporalEdge]
+    total: int
+    as_of: datetime | None = None  # Point-in-time filter if used
+    message: str | None = None

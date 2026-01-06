@@ -1,7 +1,8 @@
-"""Unified search and explore endpoints.
+"""Unified search, explore, and temporal query endpoints.
 
 Search endpoint searches both knowledge graph AND crawled documentation,
-merging results by relevance score.
+merging results by relevance score. Temporal queries expose bi-temporal
+edge metadata for point-in-time queries and conflict detection.
 """
 
 from dataclasses import asdict
@@ -10,7 +11,15 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sibyl.api.schemas import ExploreRequest, ExploreResponse, SearchRequest, SearchResponse
+from sibyl.api.schemas import (
+    ExploreRequest,
+    ExploreResponse,
+    SearchRequest,
+    SearchResponse,
+    TemporalEdgeSchema,
+    TemporalRequest,
+    TemporalResponse,
+)
 from sibyl.auth.authorization import list_accessible_project_graph_ids
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
@@ -190,3 +199,75 @@ async def explore(
     except Exception as e:
         log.exception("explore_failed", mode=request.mode, error=str(e))
         raise HTTPException(status_code=500, detail="Explore failed. Please try again.") from e
+
+
+@router.post("/temporal", response_model=TemporalResponse)
+async def temporal_query(
+    request: TemporalRequest,
+    org: Organization = Depends(get_current_organization),
+) -> TemporalResponse:
+    """Query bi-temporal history of edges.
+
+    Exposes Graphiti's bi-temporal model for point-in-time queries,
+    timeline exploration, and conflict detection.
+
+    Modes:
+    - history: Edges as they existed at a point in time (use as_of param)
+    - timeline: All versions of edges over time (shows knowledge evolution)
+    - conflicts: Find invalidated/superseded facts
+
+    Examples:
+    - "What did we know about X in March?" -> mode=history, as_of=2025-03-15
+    - "How has knowledge about X evolved?" -> mode=timeline
+    - "What facts have been superseded?" -> mode=conflicts
+    """
+    try:
+        from sibyl_core.tools.temporal import temporal_query as core_temporal_query
+
+        group_id = str(org.id)
+
+        result = await core_temporal_query(
+            mode=request.mode,
+            entity_id=request.entity_id,
+            as_of=request.as_of,
+            include_expired=request.include_expired,
+            limit=request.limit,
+            organization_id=group_id,
+        )
+
+        # Convert dataclass edges to schema objects
+        edges_list = []
+        for edge in result.edges:
+            edges_list.append(
+                TemporalEdgeSchema(
+                    id=edge.id,
+                    name=edge.name,
+                    source_id=edge.source_id,
+                    source_name=edge.source_name,
+                    target_id=edge.target_id,
+                    target_name=edge.target_name,
+                    created_at=edge.created_at.isoformat() if edge.created_at else None,
+                    expired_at=edge.expired_at.isoformat() if edge.expired_at else None,
+                    valid_at=edge.valid_at.isoformat() if edge.valid_at else None,
+                    invalid_at=edge.invalid_at.isoformat() if edge.invalid_at else None,
+                    fact=edge.fact,
+                    is_current=edge.is_current,
+                )
+            )
+
+        return TemporalResponse(
+            mode=result.mode,
+            entity_id=result.entity_id,
+            edges=edges_list,
+            total=result.total,
+            as_of=result.as_of.isoformat() if result.as_of else None,
+            message=result.message,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("temporal_query_failed", mode=request.mode, error=str(e))
+        raise HTTPException(
+            status_code=500, detail="Temporal query failed. Please try again."
+        ) from e

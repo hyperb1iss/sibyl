@@ -682,6 +682,31 @@ class SibylClient:
 
         return await self._request("POST", "/search/explore", json=data)
 
+    async def temporal_query(
+        self,
+        mode: str = "history",
+        entity_id: str | None = None,
+        as_of: str | None = None,
+        include_expired: bool = False,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Query bi-temporal history of edges.
+
+        Modes:
+        - history: Edges as they existed at a point in time
+        - timeline: All versions of edges over time
+        - conflicts: Find invalidated/superseded facts
+        """
+        data: dict[str, Any] = {"mode": mode, "limit": limit}
+        if entity_id:
+            data["entity_id"] = entity_id
+        if as_of:
+            data["as_of"] = as_of
+        if include_expired:
+            data["include_expired"] = True
+
+        return await self._request("POST", "/search/temporal", json=data)
+
     # =========================================================================
     # Admin Operations
     # =========================================================================
