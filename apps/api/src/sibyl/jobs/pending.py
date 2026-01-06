@@ -131,7 +131,7 @@ async def queue_pending_operation(
         "queued_at": datetime.now(UTC).isoformat(),
     }
 
-    await pool.rpush(key, json.dumps(op_data))
+    await pool.rpush(key, json.dumps(op_data))  # type: ignore[misc]
     await pool.expire(key, int(PENDING_TTL.total_seconds()))
 
     log.info(
@@ -156,7 +156,7 @@ async def get_pending_operations(entity_id: str) -> list[dict[str, Any]]:
     pool = await get_pool()
     key = f"{PENDING_OPS_PREFIX}{entity_id}"
 
-    ops = await pool.lrange(key, 0, -1)
+    ops = await pool.lrange(key, 0, -1)  # type: ignore[misc]
     return [json.loads(op) for op in ops]
 
 
@@ -175,7 +175,7 @@ async def clear_pending_operations(entity_id: str) -> int:
     key = f"{PENDING_OPS_PREFIX}{entity_id}"
 
     # Get count before deleting
-    count = await pool.llen(key)
+    count = await pool.llen(key)  # type: ignore[misc]
     if count > 0:
         await pool.delete(key)
         log.debug("clear_pending_operations", entity_id=entity_id, count=count)
@@ -266,11 +266,15 @@ async def _process_add_note(
 
     note_id = payload.get("note_id", f"note_{uuid.uuid4()}")
     created_at = datetime.fromisoformat(payload["created_at"]) if payload.get("created_at") else datetime.now(UTC)
+    content = payload["content"]
+    # Generate name from content (matches Note validator logic)
+    name = content[:50] + ("..." if len(content) > 50 else "")
 
     note = Note(
         id=note_id,
+        name=name,
         task_id=task_id,
-        content=payload["content"],
+        content=content,
         author_type=AuthorType(payload.get("author_type", "user")),
         author_name=payload.get("author_name", ""),
         created_at=created_at,

@@ -1226,13 +1226,13 @@ async def backfill_shared_project(
         entity_manager = EntityManager(client, group_id=organization_id)
 
         # Step 1: Create or get the shared project graph entity
+        import contextlib
+
         from sibyl_core.errors import EntityNotFoundError
 
         existing_project = None
-        try:
+        with contextlib.suppress(EntityNotFoundError):
             existing_project = await entity_manager.get(shared_project_graph_id)
-        except EntityNotFoundError:
-            pass  # Project doesn't exist yet, will create below
 
         if existing_project:
             log.info(
@@ -1252,7 +1252,7 @@ async def backfill_shared_project(
                     id=shared_project_graph_id,
                     name=SHARED_PROJECT_NAME,
                     entity_type=EntityType.PROJECT,
-                    summary=SHARED_PROJECT_DESCRIPTION,
+                    description=SHARED_PROJECT_DESCRIPTION,
                     content=SHARED_PROJECT_DESCRIPTION,
                     metadata={
                         "is_shared": True,
