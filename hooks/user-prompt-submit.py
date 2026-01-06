@@ -196,8 +196,12 @@ def generate_query_with_haiku(context: str, prompt: str) -> str | None:
         if content and len(content) > 0:
             query = content[0].get("text", "").strip()
 
-            # Check for skip signal
-            if query.upper() == "SKIP" or len(query) < 5:
+            # Check for skip signal (Haiku sometimes adds explanations after SKIP)
+            if query.upper().startswith("SKIP") or len(query) < 5:
+                if os.environ.get("SIBYL_HOOK_DEBUG"):
+                    # Log skip reason on one line (replace newlines)
+                    reason = query.replace("\n", " ").strip()[:100]
+                    print(f"[sibyl-hook] SKIP: {reason}", file=sys.stderr)
                 return None
 
             # Clean up query (remove quotes, etc)
