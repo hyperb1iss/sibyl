@@ -18,6 +18,7 @@ from sibyl_core.models.tasks import (
     TaskPriority,
     TaskStatus,
 )
+from sibyl_core.tools.conflicts import detect_conflicts
 from sibyl_core.tools.helpers import (
     MAX_CONTENT_LENGTH,
     MAX_TITLE_LENGTH,
@@ -26,7 +27,7 @@ from sibyl_core.tools.helpers import (
     auto_tag_task,
     get_project_tags,
 )
-from sibyl_core.tools.responses import AddResponse
+from sibyl_core.tools.responses import AddResponse, ConflictWarning
 
 log = structlog.get_logger()
 
@@ -54,6 +55,9 @@ async def add(
     repository_url: str | None = None,
     # Sync mode - wait for Graphiti processing instead of returning immediately
     sync: bool = False,
+    # Conflict detection - check for contradicting/duplicate knowledge
+    check_conflicts: bool = True,
+    conflict_threshold: float = 0.70,
 ) -> AddResponse:
     """Add new knowledge to the Sibyl knowledge graph.
 
@@ -97,9 +101,13 @@ async def add(
         repository_url: Repository URL for projects.
         sync: If True, wait for Graphiti processing (slower but entity exists immediately).
               If False (default), return immediately and process in background.
+        check_conflicts: If True (default), check for semantically similar existing entities
+              that may contradict or duplicate this knowledge. Warnings returned in response.
+        conflict_threshold: Minimum similarity score (0.0-1.0) to flag as potential conflict.
+              Default 0.70. Higher = fewer false positives, lower = catch more conflicts.
 
     Returns:
-        AddResponse with created entity ID, auto-discovered links, and timestamp.
+        AddResponse with created entity ID, auto-discovered links, conflicts, and timestamp.
 
     EXAMPLES:
         add("OAuth redirect bug", "Fixed issue where...", category="debugging", languages=["python"])
@@ -164,6 +172,31 @@ async def add(
 
         # Generate deterministic ID
         entity_id = _generate_id(entity_type, title, category or "general")
+
+        # Detect potential conflicts (duplicates, contradictions) before creating
+        conflicts: list[ConflictWarning] = []
+        if check_conflicts and entity_type in ("episode", "pattern", "rule", "template"):
+            # Only check for knowledge types, not workflow items (tasks/projects/epics)
+            try:
+                conflicts = await detect_conflicts(
+                    title=title,
+                    content=content,
+                    organization_id=org_id,
+                    entity_types=[entity_type] if entity_type else None,
+                    exclude_id=entity_id,  # Exclude self for updates
+                    max_conflicts=3,
+                    min_similarity=conflict_threshold,
+                )
+                if conflicts:
+                    log.info(
+                        "conflicts_detected",
+                        entity_id=entity_id,
+                        count=len(conflicts),
+                        types=[c.conflict_type for c in conflicts],
+                    )
+            except Exception as conflict_err:
+                # Don't fail creation if conflict detection fails
+                log.warning("conflict_detection_failed", error=str(conflict_err))
 
         # Merge metadata
         full_metadata = {
@@ -443,12 +476,15 @@ async def add(
             message = f"Added: {title}"
             if relationships_to_create:
                 message += f" (linked: {len(relationships_to_create)})"
+            if conflicts:
+                message += f" (⚠️ {len(conflicts)} potential conflict(s) detected)"
 
             return AddResponse(
                 success=True,
                 id=created_id,
                 message=message,
                 timestamp=datetime.now(UTC),
+                conflicts=conflicts,
             )
 
         # Async mode (default): queue arq job, return immediately
@@ -492,19 +528,27 @@ async def add(
                 except Exception as rel_e:
                     log.warning("relationship_creation_failed", error=str(rel_e))
 
+            fallback_message = f"Added (sync fallback): {title}"
+            if conflicts:
+                fallback_message += f" (⚠️ {len(conflicts)} potential conflict(s) detected)"
             return AddResponse(
                 success=True,
                 id=created_id,
-                message=f"Added (sync fallback): {title}",
+                message=fallback_message,
                 timestamp=datetime.now(UTC),
+                conflicts=conflicts,
             )
 
         # Return immediately with the entity ID - entity will be created in background
+        queued_message = f"Queued: {title} (processing in background)"
+        if conflicts:
+            queued_message += f" (⚠️ {len(conflicts)} potential conflict(s) detected)"
         return AddResponse(
             success=True,
             id=entity_id,
-            message=f"Queued: {title} (processing in background)",
+            message=queued_message,
             timestamp=datetime.now(UTC),
+            conflicts=conflicts,
         )
 
     except Exception as e:

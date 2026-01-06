@@ -75,6 +75,22 @@ class ExploreResponse:
 
 
 @dataclass
+class ConflictWarning:
+    """A potential contradiction detected during ingest.
+
+    When adding new knowledge, we check for semantically similar existing facts
+    that may contradict the new information.
+    """
+
+    existing_id: str
+    existing_name: str
+    existing_content: str
+    similarity_score: float
+    conflict_type: Literal["semantic_overlap", "potential_contradiction", "duplicate"]
+    explanation: str | None = None
+
+
+@dataclass
 class AddResponse:
     """Response from add operation."""
 
@@ -82,6 +98,7 @@ class AddResponse:
     id: str | None
     message: str
     timestamp: datetime
+    conflicts: list[ConflictWarning] = field(default_factory=list)
 
 
 @dataclass

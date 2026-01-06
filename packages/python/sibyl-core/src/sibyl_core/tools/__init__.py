@@ -20,6 +20,7 @@ from sibyl_core.tools.admin import (
     mark_server_started,
     rebuild_indices,
 )
+from sibyl_core.tools.conflicts import detect_conflicts, find_similar_entities
 from sibyl_core.tools.core import (
     AddResponse,
     EntitySummary,
@@ -38,15 +39,19 @@ from sibyl_core.tools.core import (
 from sibyl_core.tools.core import (
     get_stats as get_unified_stats,
 )
-from sibyl_core.tools.responses import TemporalEdge, TemporalResponse
+from sibyl_core.tools.responses import ConflictWarning, TemporalEdge, TemporalResponse
 from sibyl_core.tools.temporal import (
-    find_conflicts,
+    find_conflicts as find_temporal_conflicts,
+)
+from sibyl_core.tools.temporal import (
     get_entity_history,
     temporal_query,
 )
 
 __all__ = [
     "AddResponse",
+    # Conflict detection
+    "ConflictWarning",
     "EntitySummary",
     "ExploreResponse",
     # Admin (CLI only)
@@ -60,9 +65,12 @@ __all__ = [
     "TemporalEdge",
     "TemporalResponse",
     "add",
+    # Conflict detection functions
+    "detect_conflicts",
     "explore",
-    # Temporal queries
-    "find_conflicts",
+    # Temporal queries (renamed to avoid collision)
+    "find_similar_entities",
+    "find_temporal_conflicts",
     # Resources
     "get_entity_history",
     "get_health",
