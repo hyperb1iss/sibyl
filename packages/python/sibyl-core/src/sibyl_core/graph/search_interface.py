@@ -140,11 +140,19 @@ class FalkorDBSearchInterface(SearchInterface):
         limit: int = 100,
         min_score: float = 0.7,
     ) -> list[Any]:
-        """Delegate to default implementation for now."""
-        # Edge similarity search is less frequently called and the default
-        # implementation may be acceptable. If it becomes a bottleneck,
-        # we can optimize it similarly.
-        raise NotImplementedError("Using default Graphiti implementation")
+        """Delegate to default Graphiti implementation."""
+        from graphiti_core.search import search_utils
+
+        # Temporarily clear search_interface to use default implementation
+        original = driver.search_interface
+        driver.search_interface = None
+        try:
+            return await search_utils.edge_similarity_search(
+                driver, search_vector, source_node_uuid, target_node_uuid,
+                search_filter, group_ids, limit, min_score
+            )
+        finally:
+            driver.search_interface = original
 
     async def node_fulltext_search(
         self,
@@ -154,8 +162,17 @@ class FalkorDBSearchInterface(SearchInterface):
         group_ids: list[str] | None = None,
         limit: int = 100,
     ) -> list[Any]:
-        """Delegate to default implementation."""
-        raise NotImplementedError("Using default Graphiti implementation")
+        """Delegate to default Graphiti implementation."""
+        from graphiti_core.search import search_utils
+
+        original = driver.search_interface
+        driver.search_interface = None
+        try:
+            return await search_utils.node_fulltext_search(
+                driver, query, search_filter, group_ids, limit
+            )
+        finally:
+            driver.search_interface = original
 
     async def node_similarity_search(
         self,
@@ -166,8 +183,17 @@ class FalkorDBSearchInterface(SearchInterface):
         limit: int = 100,
         min_score: float = 0.7,
     ) -> list[Any]:
-        """Delegate to default implementation."""
-        raise NotImplementedError("Using default Graphiti implementation")
+        """Delegate to default Graphiti implementation."""
+        from graphiti_core.search import search_utils
+
+        original = driver.search_interface
+        driver.search_interface = None
+        try:
+            return await search_utils.node_similarity_search(
+                driver, search_vector, search_filter, group_ids, limit, min_score
+            )
+        finally:
+            driver.search_interface = original
 
     async def episode_fulltext_search(
         self,
@@ -177,13 +203,22 @@ class FalkorDBSearchInterface(SearchInterface):
         group_ids: list[str] | None = None,
         limit: int = 100,
     ) -> list[Any]:
-        """Delegate to default implementation."""
-        raise NotImplementedError("Using default Graphiti implementation")
+        """Delegate to default Graphiti implementation."""
+        from graphiti_core.search import search_utils
+
+        original = driver.search_interface
+        driver.search_interface = None
+        try:
+            return await search_utils.episode_fulltext_search(
+                driver, query, search_filter, group_ids, limit
+            )
+        finally:
+            driver.search_interface = original
 
     def build_node_search_filters(self, search_filters: Any) -> Any:
-        """Delegate to default implementation."""
-        raise NotImplementedError("Using default Graphiti implementation")
+        """Not used - Graphiti handles filter building internally."""
+        return search_filters
 
     def build_edge_search_filters(self, search_filters: Any) -> Any:
-        """Delegate to default implementation."""
-        raise NotImplementedError("Using default Graphiti implementation")
+        """Not used - Graphiti handles filter building internally."""
+        return search_filters

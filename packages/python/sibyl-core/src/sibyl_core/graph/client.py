@@ -29,6 +29,40 @@ if not os.getenv("EMBEDDING_DIM"):
 # Disable Graphiti's PostHog telemetry (noisy retry errors when offline)
 os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
 
+
+def _patch_falkordb_driver() -> None:
+    """Monkey-patch FalkorDriver to skip index rebuilding on clone().
+
+    Graphiti's FalkorDriver auto-runs build_indices_and_constraints() on every __init__,
+    including when clone() creates a new driver for a different database. This causes
+    44+ second blocks on every clone() as FalkorDB re-verifies all indexes.
+
+    This patch replaces clone() with the base class's with_database() approach,
+    which uses copy.copy() instead of creating a new instance. This avoids __init__
+    entirely, eliminating redundant index rebuilds while preserving the shared connection.
+
+    Upstream PR: https://github.com/getzep/graphiti/pull/XXX
+    """
+    import copy
+
+    from graphiti_core.driver.falkordb_driver import FalkorDriver
+
+    def patched_clone(self, database: str):
+        """Clone using shallow copy to avoid triggering __init__ and index rebuilding."""
+        if database == self._database:
+            return self
+
+        # Use copy.copy() like the base class with_database() method
+        # This creates a shallow copy without calling __init__, avoiding index rebuilds
+        cloned = copy.copy(self)
+        cloned._database = database
+        return cloned
+
+    FalkorDriver.clone = patched_clone
+
+
+_patch_falkordb_driver()
+
 from sibyl_core.errors import GraphConnectionError  # noqa: E402
 from sibyl_core.utils.resilience import GRAPH_RETRY, TIMEOUTS, retry, with_timeout  # noqa: E402
 
