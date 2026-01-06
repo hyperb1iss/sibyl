@@ -514,13 +514,17 @@ function AgentsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Initialize view mode from storage
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    if (typeof window !== 'undefined') {
-      return readStorage<ViewMode>('agents:viewMode') || 'dashboard';
+  // Initialize view mode - always start with 'dashboard' for SSR consistency
+  const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
+
+  // Sync view mode from localStorage after hydration
+  useEffect(() => {
+    const stored = readStorage<ViewMode>('agents:viewMode');
+    if (stored && stored !== viewMode) {
+      setViewMode(stored);
     }
-    return 'dashboard';
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on mount
+  }, []);
 
   // Persist view mode preference
   useEffect(() => {
