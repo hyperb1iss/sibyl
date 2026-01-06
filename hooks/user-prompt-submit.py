@@ -101,10 +101,12 @@ def parse_transcript(transcript_path: str) -> dict[str, Any]:
                     content = " ".join(text_parts)
 
                 if content and len(content) > 10:
-                    context["recent_messages"].append({
-                        "role": role,
-                        "content": content[:500]  # Truncate long messages
-                    })
+                    context["recent_messages"].append(
+                        {
+                            "role": role,
+                            "content": content[:500],  # Truncate long messages
+                        }
+                    )
 
             # Extract tool usage
             elif entry_type == "tool_use":
@@ -158,22 +160,23 @@ def generate_query_with_haiku(context: str, prompt: str) -> str | None:
     Returns:
         Search query string, or None if should skip
     """
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         return None
 
     try:
-        payload = json.dumps({
-            "model": HAIKU_MODEL,
-            "max_tokens": 50,
-            "messages": [{
-                "role": "user",
-                "content": QUERY_PROMPT.format(context=context, prompt=prompt)
-            }]
-        }).encode()
+        payload = json.dumps(
+            {
+                "model": HAIKU_MODEL,
+                "max_tokens": 50,
+                "messages": [
+                    {"role": "user", "content": QUERY_PROMPT.format(context=context, prompt=prompt)}
+                ],
+            }
+        ).encode()
 
         req = urllib.request.Request(
             "https://api.anthropic.com/v1/messages",
@@ -198,7 +201,7 @@ def generate_query_with_haiku(context: str, prompt: str) -> str | None:
                 return None
 
             # Clean up query (remove quotes, etc)
-            query = query.strip('"\'')
+            query = query.strip("\"'")
             return query
 
     except (urllib.error.URLError, json.JSONDecodeError, KeyError):
@@ -230,14 +233,61 @@ def fallback_extract_terms(prompt: str) -> str | None:
     import re
 
     stop_words = {
-        "about", "actually", "after", "again", "also", "been", "before",
-        "between", "class", "code", "continue", "could", "during", "file",
-        "from", "function", "further", "going", "have", "help", "here",
-        "into", "just", "keep", "know", "like", "make", "method", "more",
-        "need", "once", "only", "other", "please", "really", "should",
-        "some", "thanks", "that", "then", "there", "think", "this",
-        "through", "very", "want", "what", "when", "where", "which",
-        "while", "will", "with", "without", "would",
+        "about",
+        "actually",
+        "after",
+        "again",
+        "also",
+        "been",
+        "before",
+        "between",
+        "class",
+        "code",
+        "continue",
+        "could",
+        "during",
+        "file",
+        "from",
+        "function",
+        "further",
+        "going",
+        "have",
+        "help",
+        "here",
+        "into",
+        "just",
+        "keep",
+        "know",
+        "like",
+        "make",
+        "method",
+        "more",
+        "need",
+        "once",
+        "only",
+        "other",
+        "please",
+        "really",
+        "should",
+        "some",
+        "thanks",
+        "that",
+        "then",
+        "there",
+        "think",
+        "this",
+        "through",
+        "very",
+        "want",
+        "what",
+        "when",
+        "where",
+        "which",
+        "while",
+        "will",
+        "with",
+        "without",
+        "would",
     }
 
     words = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", prompt.lower())

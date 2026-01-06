@@ -28,6 +28,19 @@ tasks:
       - "@group(sources)"
     local: true
 
+  typecheck:
+    command: "uv run pyright ."
+    deps:
+      - "root:sync"
+    inputs:
+      - "@group(sources)"
+
+  check:
+    command: "noop"
+    deps:
+      - "~:lint"
+      - "~:typecheck"
+
   install:
     command: "echo 'Installing Claude Code hooks...' && mkdir -p ~/.claude/hooks/sibyl && cp ./*.py ~/.claude/hooks/sibyl/ && chmod +x ~/.claude/hooks/sibyl/*.py && python3 configure.py && echo '✓ Hooks installed - restart Claude Code to activate'"
     local: true
