@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { EpicList } from '@/components/epics';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { ChevronDown, Search, X } from '@/components/ui/icons';
@@ -12,6 +12,7 @@ import type { EpicStatus } from '@/lib/api';
 import { EPIC_STATUS_CONFIG } from '@/lib/constants';
 import { useEpics, useProjects } from '@/lib/hooks';
 import { useProjectFilter } from '@/lib/project-context';
+import { readStorage, writeStorage } from '@/lib/storage';
 
 const EPIC_STATUSES: EpicStatus[] = ['planning', 'in_progress', 'blocked', 'completed', 'archived'];
 
@@ -53,6 +54,39 @@ function EpicsPageContent() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isSortOpen, setIsSortOpen] = useState(false);
+  const [hasRestoredFromStorage, setHasRestoredFromStorage] = useState(false);
+
+  // Restore filters from localStorage on mount (only if URL has no filter params)
+  useEffect(() => {
+    if (hasRestoredFromStorage) return;
+    setHasRestoredFromStorage(true);
+
+    // If URL already has params, don't override with stored values
+    if (searchParams.get('status') || searchParams.get('sort')) return;
+
+    const stored = readStorage<{ status?: string; sort?: string }>('epics:filters');
+    if (stored) {
+      const params = new URLSearchParams();
+      if (stored.status) params.set('status', stored.status);
+      if (stored.sort && stored.sort !== 'updated_desc') params.set('sort', stored.sort);
+      if (params.toString()) {
+        router.replace(`/epics?${params.toString()}`);
+      }
+    }
+  }, [hasRestoredFromStorage, router, searchParams]);
+
+  // Save filters to localStorage when they change
+  useEffect(() => {
+    if (!hasRestoredFromStorage) return; // Don't save during initial restore
+    const toStore =
+      statusParam || sortOption !== 'updated_desc'
+        ? {
+            status: statusParam || undefined,
+            sort: sortOption !== 'updated_desc' ? sortOption : undefined,
+          }
+        : undefined;
+    writeStorage('epics:filters', toStore);
+  }, [hasRestoredFromStorage, statusParam, sortOption]);
 
   // Fetch all epics (filtering done client-side for multi-status)
   const { data: epicsData, isLoading, error } = useEpics({ project: projectFilter });
@@ -257,32 +291,38 @@ function EpicsPageContent() {
         </div>
 
         {/* Status Filter (Multi-select) */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-sc-fg-subtle font-medium">Status:</span>
+        <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 flex-1">
+            <span className="text-xs text-sc-fg-subtle font-medium">Status:</span>
+            {EPIC_STATUSES.map(status => {
+              const config = EPIC_STATUS_CONFIG[status];
+              const isActive = selectedStatuses.has(status);
+              return (
+                <FilterChip
+                  key={status}
+                  active={isActive}
+                  onClick={() => handleStatusToggle(status)}
+                >
+                  <span className="flex items-center gap-1">
+                    <span>{config?.icon}</span>
+                    {config?.label ?? status}
+                  </span>
+                </FilterChip>
+              );
+            })}
+            {selectedStatuses.size === 0 && (
+              <span className="text-xs text-sc-fg-subtle italic">All</span>
+            )}
+          </div>
           {selectedStatuses.size > 0 && (
             <button
               type="button"
               onClick={handleClearStatuses}
-              className="text-xs text-sc-fg-muted hover:text-sc-fg-primary flex items-center gap-1 px-2 py-0.5 rounded bg-sc-bg-elevated hover:bg-sc-bg-highlight transition-colors"
+              className="text-xs text-sc-fg-muted hover:text-sc-fg-primary flex items-center gap-1 px-2 py-1 rounded bg-sc-bg-elevated hover:bg-sc-bg-highlight transition-colors shrink-0"
             >
               <X width={12} height={12} />
               Clear
             </button>
-          )}
-          {EPIC_STATUSES.map(status => {
-            const config = EPIC_STATUS_CONFIG[status];
-            const isActive = selectedStatuses.has(status);
-            return (
-              <FilterChip key={status} active={isActive} onClick={() => handleStatusToggle(status)}>
-                <span className="flex items-center gap-1">
-                  <span>{config?.icon}</span>
-                  {config?.label ?? status}
-                </span>
-              </FilterChip>
-            );
-          })}
-          {selectedStatuses.size === 0 && (
-            <span className="text-xs text-sc-fg-subtle italic ml-1">All statuses</span>
           )}
         </div>
       </div>
