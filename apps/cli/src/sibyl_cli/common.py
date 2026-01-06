@@ -121,12 +121,13 @@ def print_db_hint() -> None:
     console.print(f"  [{NEON_CYAN}]docker compose up -d[/{NEON_CYAN}]")
 
 
-def create_table(title: str | None = None, *columns: str) -> Table:
+def create_table(title: str | None = None, *columns: str, expand: bool = True) -> Table:
     """Create a styled table with SilkCircuit colors.
 
     Uses SIMPLE_HEAD box style - just a header underline, no heavy frames.
+    Set expand=True (default) to use full terminal width.
     """
-    table = Table(title=title, box=box.SIMPLE_HEAD, header_style=f"bold {NEON_CYAN}")
+    table = Table(title=title, box=box.SIMPLE_HEAD, header_style=f"bold {NEON_CYAN}", expand=expand)
     for i, col in enumerate(columns):
         style = ELECTRIC_PURPLE if i == 0 else None
         justify = (

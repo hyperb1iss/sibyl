@@ -143,6 +143,12 @@ def list_epics(
                 return
 
             table = create_table("Epics", "ID", "Title", "Status", "Priority", "Progress")
+            # ID, Status, Priority, Progress are fixed-width; Title gets the rest
+            table.columns[0].no_wrap = True  # ID
+            table.columns[2].no_wrap = True  # Status
+            table.columns[3].no_wrap = True  # Priority
+            table.columns[4].no_wrap = True  # Progress
+            # Title column auto-sizes and can wrap if needed
             for e in entities:
                 meta = e.get("metadata", {})
                 total = meta.get("total_tasks", 0)
@@ -150,7 +156,7 @@ def list_epics(
                 progress_str = f"{completed}/{total}" if total > 0 else "-"
                 table.add_row(
                     e.get("id", ""),
-                    truncate(e.get("name", ""), 40),
+                    e.get("name", ""),  # Full title, no truncation
                     format_epic_status(meta.get("status", "planning")),
                     format_priority(meta.get("priority", "medium")),
                     progress_str,
