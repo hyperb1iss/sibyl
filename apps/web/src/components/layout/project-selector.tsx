@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, Circle, Folder, X } from '@/components/ui/icons';
+import { Check, ChevronDown, Folder, X } from '@/components/ui/icons';
 import { useProjects } from '@/lib/hooks';
-import { UNASSIGNED_PROJECT_ID, useProjectContext } from '@/lib/project-context';
+import { useProjectContext } from '@/lib/project-context';
 
 /**
  * Global project context selector.
@@ -56,10 +56,6 @@ export function ProjectSelector() {
   const displayInfo = useMemo(() => {
     if (isAll || selectedProjects.length === 0) {
       return { name: 'All Projects', count: 0 };
-    }
-    // Handle unassigned special case
-    if (selectedProjects[0] === UNASSIGNED_PROJECT_ID) {
-      return { name: 'Unassigned', count: selectedProjects.length - 1 };
     }
     const firstProject = projects.find(p => p.id === selectedProjects[0]);
     const firstName = firstProject?.name ?? 'Project';
@@ -201,44 +197,6 @@ export function ProjectSelector() {
                   </div>
                 );
               })
-            )}
-
-            {/* Unassigned Option - entities without a project */}
-            {projects.length > 0 && (
-              <>
-                <div className="border-t border-sc-fg-subtle/10 my-1" />
-                <div
-                  className={`
-                    flex items-center gap-3 px-4 py-2.5 text-sm cursor-pointer
-                    transition-colors
-                    ${selectedProjects.includes(UNASSIGNED_PROJECT_ID) ? 'bg-sc-fg-subtle/5' : 'hover:bg-sc-bg-elevated'}
-                  `}
-                  onClick={() => handleQuickSelect(UNASSIGNED_PROJECT_ID)}
-                  onKeyDown={e => e.key === 'Enter' && handleQuickSelect(UNASSIGNED_PROJECT_ID)}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <button
-                    type="button"
-                    onClick={e => handleToggle(e, UNASSIGNED_PROJECT_ID)}
-                    className={`
-                      w-4 h-4 rounded border flex items-center justify-center
-                      transition-colors
-                      ${selectedProjects.includes(UNASSIGNED_PROJECT_ID) ? 'bg-sc-fg-muted border-sc-fg-muted' : 'border-sc-fg-subtle/40 hover:border-sc-fg-muted'}
-                    `}
-                  >
-                    {selectedProjects.includes(UNASSIGNED_PROJECT_ID) && (
-                      <Check width={10} height={10} className="text-white" />
-                    )}
-                  </button>
-                  <Circle width={14} height={14} className="text-sc-fg-subtle" />
-                  <span
-                    className={`font-medium ${selectedProjects.includes(UNASSIGNED_PROJECT_ID) ? 'text-sc-fg-primary' : 'text-sc-fg-muted'}`}
-                  >
-                    Unassigned
-                  </span>
-                </div>
-              </>
             )}
           </div>
 
