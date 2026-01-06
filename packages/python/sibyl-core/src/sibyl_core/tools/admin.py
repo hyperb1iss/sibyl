@@ -1226,7 +1226,13 @@ async def backfill_shared_project(
         entity_manager = EntityManager(client, group_id=organization_id)
 
         # Step 1: Create or get the shared project graph entity
-        existing_project = await entity_manager.get(shared_project_graph_id)
+        from sibyl_core.errors import EntityNotFoundError
+
+        existing_project = None
+        try:
+            existing_project = await entity_manager.get(shared_project_graph_id)
+        except EntityNotFoundError:
+            pass  # Project doesn't exist yet, will create below
 
         if existing_project:
             log.info(
@@ -1272,14 +1278,14 @@ async def backfill_shared_project(
         """
 
         orphan_rows = await client.execute_read_org(
-            organization_id, orphan_query, org_id=organization_id
+            orphan_query, organization_id, org_id=organization_id
         )
         log.info("orphan_entities_found", count=len(orphan_rows))
 
         # Step 3: Update orphan entities to use shared project
         for row in orphan_rows:
-            entity_id = row[0]
-            entity_type = row[1]
+            entity_id = row["id"]
+            entity_type = row["type"]
 
             if dry_run:
                 log.debug(
@@ -1298,8 +1304,8 @@ async def backfill_shared_project(
                     SET n.project_id = $project_id
                     """
                     await client.execute_write_org(
-                        organization_id,
                         update_query,
+                        organization_id,
                         entity_id=entity_id,
                         org_id=organization_id,
                         project_id=shared_project_graph_id,
@@ -1314,8 +1320,8 @@ async def backfill_shared_project(
                         MERGE (n)-[:BELONGS_TO]->(p)
                         """
                         await client.execute_write_org(
-                            organization_id,
                             rel_query,
+                            organization_id,
                             entity_id=entity_id,
                             project_id=shared_project_graph_id,
                             org_id=organization_id,
@@ -1347,9 +1353,9 @@ async def backfill_shared_project(
         RETURN count(n) AS count
         """
         count_rows = await client.execute_read_org(
-            organization_id, count_query, org_id=organization_id
+            count_query, organization_id, org_id=organization_id
         )
-        entities_already_set = count_rows[0][0] if count_rows else 0
+        entities_already_set = count_rows[0]["count"] if count_rows else 0
 
         duration = time.time() - start_time
         log.info(

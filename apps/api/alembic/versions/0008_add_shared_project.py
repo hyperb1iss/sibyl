@@ -75,7 +75,7 @@ def upgrade() -> None:
             sa.text("""
                 SELECT u.id FROM users u
                 JOIN organization_members om ON om.user_id = u.id
-                WHERE om.organization_id = :org_id AND om.role = 'org_owner'
+                WHERE om.organization_id = :org_id AND om.role = 'owner'
                 LIMIT 1
             """),
             {"org_id": org_id},
@@ -87,7 +87,7 @@ def upgrade() -> None:
                 sa.text("""
                     SELECT u.id FROM users u
                     JOIN organization_members om ON om.user_id = u.id
-                    WHERE om.organization_id = :org_id AND om.role = 'org_admin'
+                    WHERE om.organization_id = :org_id AND om.role = 'admin'
                     LIMIT 1
                 """),
                 {"org_id": org_id},
