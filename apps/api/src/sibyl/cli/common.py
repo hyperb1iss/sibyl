@@ -213,7 +213,6 @@ def handle_client_error(e: SibylClientError) -> None:
     """
     if "Cannot connect" in str(e):
         error(str(e))
-        info("Start the server with: sibyl serve")
     elif e.status_code == 404:
         error(f"Not found: {e.detail}")
     elif e.status_code == 400:

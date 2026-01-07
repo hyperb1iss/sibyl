@@ -4,7 +4,7 @@ This shows how to connect to a running Sibyl MCP server
 and call tools programmatically.
 
 Prerequisites:
-  1. Start Sibyl server: uv run sibyl serve
+  1. Start Sibyl server: uv run sibyld serve
   2. Run this script: uv run python examples/mcp_client_example.py
 """
 
@@ -62,7 +62,7 @@ async def main():
     print("SIBYL MCP CLIENT EXAMPLE")
     print("=" * 60)
     print("\nConnecting to http://localhost:3334/mcp")
-    print("Make sure Sibyl server is running: uv run sibyl serve\n")
+    print("Make sure Sibyl server is running: uv run sibyld serve\n")
 
     try:
         # -----------------------------------------------------------------
@@ -124,7 +124,7 @@ async def main():
 
     except httpx.ConnectError:
         print("ERROR: Could not connect to Sibyl server")
-        print("Start it with: uv run sibyl serve")
+        print("Start it with: uv run sibyld serve")
     except Exception as e:
         print(f"ERROR: {e}")
 

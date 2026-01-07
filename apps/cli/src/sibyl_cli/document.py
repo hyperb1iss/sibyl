@@ -31,7 +31,6 @@ def _handle_client_error(e: SibylClientError) -> None:
     """Handle client errors with helpful messages and exit with code 1."""
     if "Cannot connect" in str(e):
         error(str(e))
-        info("Start the server with: sibyld serve")
     elif e.status_code == 404:
         error(f"Document not found: {e.detail}")
     elif e.status_code == 400:
