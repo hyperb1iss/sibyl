@@ -219,18 +219,28 @@ def show_epic(
             # HEADER
             # ══════════════════════════════════════════════════════════════════
             console.print()
-            console.print(f"[bold {ELECTRIC_PURPLE}]═══ Epic: {entity.get('name', '')} ═══[/bold {ELECTRIC_PURPLE}]")
+            console.print(
+                f"[bold {ELECTRIC_PURPLE}]═══ Epic: {entity.get('name', '')} ═══[/bold {ELECTRIC_PURPLE}]"
+            )
             console.print()
             console.print(f"[{NEON_CYAN}]ID:[/{NEON_CYAN}]       {resolved_id}")
-            console.print(f"[{NEON_CYAN}]Status:[/{NEON_CYAN}]   {format_epic_status(meta.get('status', 'planning'))}")
-            console.print(f"[{NEON_CYAN}]Priority:[/{NEON_CYAN}] {format_priority(meta.get('priority', 'medium'))}")
-            console.print(f"[{NEON_CYAN}]Progress:[/{NEON_CYAN}] {completed}/{total} tasks ({pct}%)")
+            console.print(
+                f"[{NEON_CYAN}]Status:[/{NEON_CYAN}]   {format_epic_status(meta.get('status', 'planning'))}"
+            )
+            console.print(
+                f"[{NEON_CYAN}]Priority:[/{NEON_CYAN}] {format_priority(meta.get('priority', 'medium'))}"
+            )
+            console.print(
+                f"[{NEON_CYAN}]Progress:[/{NEON_CYAN}] {completed}/{total} tasks ({pct}%)"
+            )
 
             if meta.get("project_id"):
                 console.print(f"[{NEON_CYAN}]Project:[/{NEON_CYAN}]  {meta['project_id']}")
 
             if meta.get("assignees"):
-                console.print(f"[{NEON_CYAN}]Leads:[/{NEON_CYAN}]    {', '.join(meta['assignees'])}")
+                console.print(
+                    f"[{NEON_CYAN}]Leads:[/{NEON_CYAN}]    {', '.join(meta['assignees'])}"
+                )
 
             if meta.get("tags"):
                 console.print(f"[{NEON_CYAN}]Tags:[/{NEON_CYAN}]     {', '.join(meta['tags'])}")
@@ -287,7 +297,9 @@ def show_epic(
                 }
 
                 console.print()
-                console.print(f"[bold {ELECTRIC_PURPLE}]═══ Tasks ({len(tasks)} total) ═══[/bold {ELECTRIC_PURPLE}]")
+                console.print(
+                    f"[bold {ELECTRIC_PURPLE}]═══ Tasks ({len(tasks)} total) ═══[/bold {ELECTRIC_PURPLE}]"
+                )
 
                 for status in status_order:
                     task_list = by_status.get(status, [])
@@ -346,7 +358,9 @@ def show_epic(
 
                 if filtered:
                     console.print()
-                    console.print(f"[bold {ELECTRIC_PURPLE}]═══ Related Knowledge ═══[/bold {ELECTRIC_PURPLE}]")
+                    console.print(
+                        f"[bold {ELECTRIC_PURPLE}]═══ Related Knowledge ═══[/bold {ELECTRIC_PURPLE}]"
+                    )
 
                     # Group by type
                     by_type: dict[str, list] = {}
@@ -371,8 +385,14 @@ def show_epic(
                             e_id = e.get("id", "")
                             e_name = e.get("name", "")
                             # Show cross-project indicator if relevant
-                            cross_proj = "" if e.get("_same_project", True) else " [dim](other project)[/dim]"
-                            console.print(f"  [{NEON_CYAN}]{e_id}[/{NEON_CYAN}]  {e_name}{cross_proj}")
+                            cross_proj = (
+                                ""
+                                if e.get("_same_project", True)
+                                else " [dim](other project)[/dim]"
+                            )
+                            console.print(
+                                f"  [{NEON_CYAN}]{e_id}[/{NEON_CYAN}]  {e_name}{cross_proj}"
+                            )
 
                         if len(entities) > 10:
                             console.print(f"  [dim]... and {len(entities) - 10} more[/dim]")
