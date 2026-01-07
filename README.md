@@ -481,8 +481,8 @@ orchestrated through the system itself.
 **Where we're headed:**
 
 - **Multi-vendor agents** — Orchestrate Claude, Codex, Gemini, and future models from one place
-- **Meta-orchestrator** — A higher-order agent that manages your fleet: distributing tasks, monitoring
-  progress, responding to your plans
+- **Meta-orchestrator** — A higher-order agent that manages your fleet: distributing tasks,
+  monitoring progress, responding to your plans
 - **Brainstorming spaces** — Dedicated areas for ideation before execution
 - **External data connectors** — Feed more sources into the collective intelligence
 - **Deeper reasoning** — Multi-hop graph traversal, community-based retrieval, agentic reflection

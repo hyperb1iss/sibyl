@@ -31,14 +31,13 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Build sibyl-core
-        run: uv build --package sibyl-core --out-dir dist/
-        working-directory: packages/python/sibyl-core
+        run: uv build --package sibyl-core --out-dir dist/sibyl-core
 
       - name: Publish sibyl-core to PyPI
         if: ${{ !inputs.dry_run }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: packages/python/sibyl-core/dist/
+          packages-dir: dist/sibyl-core/
 
   publish-cli:
     name: Publish sibyl-dev
@@ -72,14 +71,13 @@ jobs:
           done
 
       - name: Build sibyl-dev
-        run: uv build --package sibyl-dev --out-dir dist/
-        working-directory: apps/cli
+        run: uv build --package sibyl-dev --out-dir dist/sibyl-dev
 
       - name: Publish sibyl-dev to PyPI
         if: ${{ !inputs.dry_run }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: apps/cli/dist/
+          packages-dir: dist/sibyl-dev/
 
   update-release:
     name: Update Release Notes

@@ -1,0 +1,183 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (leave empty for patch bump)"
+        required: false
+        default: ""
+      bump:
+        description: "Version bump type (if version not specified)"
+        required: false
+        type: choice
+        default: "patch"
+        options:
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: "Dry run (skip tag, publish, and release)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: "◆ Checkout"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "◇ Setup Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: "◇ Install uv"
+        uses: astral-sh/setup-uv@v6
+
+      - name: "◇ Configure git"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: "△ Determine version"
+        id: version
+        run: |
+          # Get current version from latest tag
+          CURRENT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [[ -n "$CURRENT_TAG" ]]; then
+            CURRENT="${CURRENT_TAG#v}"
+          else
+            # Fallback to pyproject.toml
+            CURRENT=$(grep '^version = ' packages/python/sibyl-core/pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          fi
+          echo "Current version: $CURRENT (from tag: ${CURRENT_TAG:-none})"
+
+          if [[ -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT%%-*}"
+            case "${{ inputs.bump }}" in
+              major) VERSION="$((MAJOR + 1)).0.0" ;;
+              minor) VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
+              patch) VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+            esac
+          fi
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            exit 1
+          fi
+
+          if git tag -l "v$VERSION" | grep -q "v$VERSION"; then
+            echo "::error::Tag v$VERSION already exists"
+            exit 1
+          fi
+
+          echo "current=$CURRENT" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Releasing: $CURRENT → $VERSION"
+
+      - name: "△ Update versions → ${{ steps.version.outputs.version }}"
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Update sibyl-core
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" packages/python/sibyl-core/pyproject.toml
+
+          # Update sibyl-dev (CLI)
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" apps/cli/pyproject.toml
+
+          # Update sibyl-server (API)
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" apps/api/pyproject.toml
+
+          echo "Updated versions to $VERSION"
+
+      - name: "◈ Sync dependencies"
+        run: uv sync
+
+      - name: "● Lint"
+        run: |
+          uv run ruff check packages/python/sibyl-core/src apps/api/src apps/cli/src
+          uv run ruff format --check packages/python/sibyl-core/src apps/api/src apps/cli/src
+
+      - name: "● Type check"
+        run: |
+          uv run pyright packages/python/sibyl-core/src
+          uv run pyright apps/api/src
+          uv run pyright apps/cli/src
+
+      - name: "◈ Generate release notes"
+        if: ${{ !inputs.dry_run }}
+        id: release_notes
+        uses: hyperb1iss/git-iris@v2
+        with:
+          command: release-notes
+          from: v${{ steps.version.outputs.current }}
+          to: HEAD
+          version-name: ${{ steps.version.outputs.version }}
+          provider: anthropic
+          model: claude-sonnet-4-5-20250929
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: "◆ Commit version bump"
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git add packages/python/sibyl-core/pyproject.toml
+          git add apps/cli/pyproject.toml
+          git add apps/api/pyproject.toml
+          git commit -m "🔖 v${{ steps.version.outputs.version }}"
+
+      - name: "◆ Create and push tag"
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+          git push origin HEAD:${{ github.ref_name }}
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: "◆ Create GitHub Release"
+        if: ${{ !inputs.dry_run }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          body: ${{ steps.release_notes.outputs.content }}
+
+      - name: "► Summary"
+        run: |
+          echo "## Release ${{ inputs.dry_run && '[DRY RUN] ' || '' }}v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            echo "✓ Build and checks passed. Ready to release." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✓ Released: ${{ steps.version.outputs.current }} → ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Published Packages" >> $GITHUB_STEP_SUMMARY
+            echo "- [sibyl-core on PyPI](https://pypi.org/project/sibyl-core/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
+            echo "- [sibyl-dev on PyPI](https://pypi.org/project/sibyl-dev/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
+            echo "- [Docker Images on GHCR](https://github.com/hyperb1iss/sibyl/pkgs/container/sibyl-api)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "---" >> $GITHUB_STEP_SUMMARY
+            echo "### Release Notes" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          ${{ steps.release_notes.outputs.content }}
+          EOF
+          fi
