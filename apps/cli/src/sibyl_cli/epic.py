@@ -18,7 +18,6 @@ from sibyl_cli.common import (
     ELECTRIC_PURPLE,
     NEON_CYAN,
     console,
-    create_panel,
     create_table,
     error,
     format_priority,
@@ -170,6 +169,26 @@ def list_epics(
     _list()
 
 
+def _format_task_line(task: dict, include_id: bool = True) -> str:
+    """Format a single task line with priority marker and full details."""
+    meta = task.get("metadata", {})
+    priority = meta.get("priority", "medium")
+    task_id = task.get("id", "")
+    name = task.get("name", "")
+
+    priority_marker = {
+        "critical": "[#ff6363]●[/#ff6363]",
+        "high": f"[{CORAL}]●[/{CORAL}]",
+        "medium": f"[{ELECTRIC_PURPLE}]○[/{ELECTRIC_PURPLE}]",
+        "low": "[dim]○[/dim]",
+        "someday": "[dim]·[/dim]",
+    }.get(priority, "○")
+
+    if include_id:
+        return f"  {priority_marker} [{NEON_CYAN}]{task_id}[/{NEON_CYAN}]  {name}"
+    return f"  {priority_marker} {name}"
+
+
 @app.command("show")
 def show_epic(
     epic_id: Annotated[str, typer.Argument(help="Epic ID (full or prefix)")],
@@ -177,63 +196,64 @@ def show_epic(
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
 ) -> None:
-    """Show detailed epic information including progress. Default: table output."""
+    """Show detailed epic information with all tasks and related entities."""
 
     @run_async
     async def _show() -> None:
         client = get_client()
 
         try:
-            # Resolve short ID prefix to full ID
             resolved_id = _validate_epic_id(epic_id)
-
             entity = await client.get_entity(resolved_id)
 
-            # JSON output (default)
             if json_out:
                 print_json(entity)
                 return
 
-            # Table output
             meta = entity.get("metadata", {})
             total = meta.get("total_tasks", 0)
             completed = meta.get("completed_tasks", 0)
             pct = round((completed / total * 100) if total > 0 else 0, 1)
 
-            lines = [
-                f"[{ELECTRIC_PURPLE}]Title:[/{ELECTRIC_PURPLE}] {entity.get('name', '')}",
-                f"[{ELECTRIC_PURPLE}]Status:[/{ELECTRIC_PURPLE}] {format_epic_status(meta.get('status', 'planning'))}",
-                f"[{ELECTRIC_PURPLE}]Priority:[/{ELECTRIC_PURPLE}] {format_priority(meta.get('priority', 'medium'))}",
-                f"[{ELECTRIC_PURPLE}]Progress:[/{ELECTRIC_PURPLE}] {completed}/{total} tasks ({pct}%)",
-                "",
-                f"[{NEON_CYAN}]Description:[/{NEON_CYAN}]",
-                entity.get("description") or "[dim]No description[/dim]",
-            ]
+            # ══════════════════════════════════════════════════════════════════
+            # HEADER
+            # ══════════════════════════════════════════════════════════════════
+            console.print()
+            console.print(f"[bold {ELECTRIC_PURPLE}]═══ Epic: {entity.get('name', '')} ═══[/bold {ELECTRIC_PURPLE}]")
+            console.print()
+            console.print(f"[{NEON_CYAN}]ID:[/{NEON_CYAN}]       {resolved_id}")
+            console.print(f"[{NEON_CYAN}]Status:[/{NEON_CYAN}]   {format_epic_status(meta.get('status', 'planning'))}")
+            console.print(f"[{NEON_CYAN}]Priority:[/{NEON_CYAN}] {format_priority(meta.get('priority', 'medium'))}")
+            console.print(f"[{NEON_CYAN}]Progress:[/{NEON_CYAN}] {completed}/{total} tasks ({pct}%)")
 
             if meta.get("project_id"):
-                lines.insert(
-                    4,
-                    f"[{ELECTRIC_PURPLE}]Project:[/{ELECTRIC_PURPLE}] {meta['project_id']}",
-                )
+                console.print(f"[{NEON_CYAN}]Project:[/{NEON_CYAN}]  {meta['project_id']}")
 
             if meta.get("assignees"):
-                lines.insert(
-                    5,
-                    f"[{ELECTRIC_PURPLE}]Leads:[/{ELECTRIC_PURPLE}] {', '.join(meta['assignees'])}",
-                )
+                console.print(f"[{NEON_CYAN}]Leads:[/{NEON_CYAN}]    {', '.join(meta['assignees'])}")
 
             if meta.get("tags"):
-                lines.append(f"\n[{CORAL}]Tags:[/{CORAL}] {', '.join(meta['tags'])}")
+                console.print(f"[{NEON_CYAN}]Tags:[/{NEON_CYAN}]     {', '.join(meta['tags'])}")
+
+            # Description
+            console.print()
+            desc = entity.get("description") or "[dim]No description[/dim]"
+            console.print(f"[{CORAL}]Description:[/{CORAL}]")
+            console.print(f"  {desc}")
 
             if meta.get("learnings"):
-                lines.append(f"\n[{CORAL}]Learnings:[/{CORAL}] {meta['learnings']}")
+                console.print()
+                console.print(f"[{CORAL}]Learnings:[/{CORAL}]")
+                console.print(f"  {meta['learnings']}")
 
-            # Fetch tasks for this epic
+            # ══════════════════════════════════════════════════════════════════
+            # TASKS - Full list with IDs
+            # ══════════════════════════════════════════════════════════════════
             tasks_response = await client.explore(
                 mode="list",
                 types=["task"],
                 epic=resolved_id,
-                limit=100,
+                limit=200,
             )
             tasks = tasks_response.get("entities", [])
 
@@ -246,57 +266,90 @@ def show_epic(
                         by_status[t_status] = []
                     by_status[t_status].append(t)
 
-                # Status order for display
-                status_order = ["doing", "blocked", "review", "todo", "done", "archived"]
-                status_labels = {
-                    "doing": "🔨 In Progress",
-                    "blocked": "🚫 Blocked",
-                    "review": "👀 Review",
-                    "todo": "📝 Todo",
-                    "done": "✅ Done",
-                    "archived": "📦 Archived",
-                }
-
-                lines.append(f"\n[{NEON_CYAN}]Tasks:[/{NEON_CYAN}]")
-                for status in status_order:
-                    if status in by_status:
-                        task_list = by_status[status]
-                        label = status_labels.get(status, status)
-                        lines.append(f"  {label}: {len(task_list)}")
-                        # Show up to 3 task titles for active statuses
-                        if status in ("doing", "blocked", "review"):
-                            for t in task_list[:3]:
-                                lines.append(f"    • {t.get('name', '')}")
-                            if len(task_list) > 3:
-                                lines.append(f"    [dim]... and {len(task_list) - 3} more[/dim]")
-
-                # Show todo tasks sorted by priority (higher priority first)
-                todo_tasks = by_status.get("todo", [])
-                if todo_tasks:
-                    priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "someday": 4}
-                    todo_tasks.sort(
+                # Sort each group by priority
+                priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "someday": 4}
+                for status_tasks in by_status.values():
+                    status_tasks.sort(
                         key=lambda t: priority_order.get(
                             t.get("metadata", {}).get("priority", "medium"), 2
                         )
                     )
 
-                    lines.append(f"\n[{NEON_CYAN}]Todo Queue (by priority):[/{NEON_CYAN}]")
-                    for t in todo_tasks[:20]:
-                        t_meta = t.get("metadata", {})
-                        t_priority = t_meta.get("priority", "medium")
-                        priority_marker = {
-                            "critical": "[#ff6363]●[/#ff6363]",
-                            "high": f"[{CORAL}]●[/{CORAL}]",
-                            "medium": f"[{ELECTRIC_PURPLE}]○[/{ELECTRIC_PURPLE}]",
-                            "low": "[dim]○[/dim]",
-                            "someday": "[dim]·[/dim]",
-                        }.get(t_priority, "○")
-                        lines.append(f"  {priority_marker} {t.get('name', '')}")
-                    if len(todo_tasks) > 20:
-                        lines.append(f"  [dim]... and {len(todo_tasks) - 20} more[/dim]")
+                # Status display order and labels
+                status_order = ["doing", "blocked", "review", "todo", "done", "archived"]
+                status_labels = {
+                    "doing": f"[bold {ELECTRIC_PURPLE}]🔨 IN PROGRESS[/bold {ELECTRIC_PURPLE}]",
+                    "blocked": "[bold #ff6363]🚫 BLOCKED[/bold #ff6363]",
+                    "review": f"[bold {CORAL}]👀 IN REVIEW[/bold {CORAL}]",
+                    "todo": f"[bold {NEON_CYAN}]📝 TODO[/bold {NEON_CYAN}]",
+                    "done": "[bold #50fa7b]✅ DONE[/bold #50fa7b]",
+                    "archived": "[dim]📦 ARCHIVED[/dim]",
+                }
 
-            panel = create_panel("\n".join(lines), title=f"Epic {entity.get('id', '')}")
-            console.print(panel)
+                console.print()
+                console.print(f"[bold {ELECTRIC_PURPLE}]═══ Tasks ({len(tasks)} total) ═══[/bold {ELECTRIC_PURPLE}]")
+
+                for status in status_order:
+                    task_list = by_status.get(status, [])
+                    if not task_list:
+                        continue
+
+                    console.print()
+                    console.print(f"{status_labels.get(status, status)} ({len(task_list)})")
+
+                    # Show all tasks - NO TRUNCATION
+                    for t in task_list:
+                        console.print(_format_task_line(t))
+
+            # ══════════════════════════════════════════════════════════════════
+            # RELATED ENTITIES - From graph traversal
+            # ══════════════════════════════════════════════════════════════════
+            try:
+                related_response = await client.explore(
+                    mode="related",
+                    entity_id=resolved_id,
+                    depth=1,
+                    limit=50,
+                )
+                related = related_response.get("entities", [])
+
+                # Filter out tasks (already shown) and the epic itself
+                task_ids = {t.get("id") for t in tasks}
+                related = [
+                    r for r in related
+                    if r.get("id") != resolved_id
+                    and r.get("id") not in task_ids
+                    and r.get("type") != "task"
+                ]
+
+                if related:
+                    console.print()
+                    console.print(f"[bold {ELECTRIC_PURPLE}]═══ Related Entities ═══[/bold {ELECTRIC_PURPLE}]")
+
+                    # Group by type
+                    by_type: dict[str, list] = {}
+                    for r in related:
+                        r_type = r.get("type", "unknown")
+                        if r_type not in by_type:
+                            by_type[r_type] = []
+                        by_type[r_type].append(r)
+
+                    for r_type, entities in sorted(by_type.items()):
+                        console.print()
+                        console.print(f"[{CORAL}]{r_type.upper()}[/{CORAL}]")
+                        for e in entities:
+                            e_id = e.get("id", "")
+                            e_name = e.get("name", "")
+                            relationship = e.get("relationship", "")
+                            direction = e.get("direction", "")
+                            rel_info = f" [dim]({relationship} {direction})[/dim]" if relationship else ""
+                            console.print(f"  [{NEON_CYAN}]{e_id}[/{NEON_CYAN}]  {e_name}{rel_info}")
+
+            except Exception:
+                # Related lookup failed - not critical
+                pass
+
+            console.print()
 
         except SibylClientError as e:
             _handle_client_error(e)
