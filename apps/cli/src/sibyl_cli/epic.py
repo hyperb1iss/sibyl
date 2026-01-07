@@ -270,6 +270,31 @@ def show_epic(
                             if len(task_list) > 3:
                                 lines.append(f"    [dim]... and {len(task_list) - 3} more[/dim]")
 
+                # Show todo tasks sorted by priority (higher priority first)
+                todo_tasks = by_status.get("todo", [])
+                if todo_tasks:
+                    priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "someday": 4}
+                    todo_tasks.sort(
+                        key=lambda t: priority_order.get(
+                            t.get("metadata", {}).get("priority", "medium"), 2
+                        )
+                    )
+
+                    lines.append(f"\n[{NEON_CYAN}]Todo Queue (by priority):[/{NEON_CYAN}]")
+                    for t in todo_tasks[:20]:
+                        t_meta = t.get("metadata", {})
+                        t_priority = t_meta.get("priority", "medium")
+                        priority_marker = {
+                            "critical": "[#ff6363]●[/#ff6363]",
+                            "high": f"[{CORAL}]●[/{CORAL}]",
+                            "medium": f"[{ELECTRIC_PURPLE}]○[/{ELECTRIC_PURPLE}]",
+                            "low": "[dim]○[/dim]",
+                            "someday": "[dim]·[/dim]",
+                        }.get(t_priority, "○")
+                        lines.append(f"  {priority_marker} {t.get('name', '')}")
+                    if len(todo_tasks) > 20:
+                        lines.append(f"  [dim]... and {len(todo_tasks) - 20} more[/dim]")
+
             panel = create_panel("\n".join(lines), title=f"Epic {entity.get('id', '')}")
             console.print(panel)
 
