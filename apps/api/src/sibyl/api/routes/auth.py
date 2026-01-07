@@ -331,7 +331,11 @@ async def github_callback(
     github_token = await _github_exchange_code(code=code, redirect_uri=redirect_uri)
     identity = await _github_fetch_identity(github_token)
 
-    user = await UserManager(session).upsert_from_github(identity)
+    user_mgr = UserManager(session)
+    # First user becomes admin
+    is_first_user = not await user_mgr.has_any_users()
+
+    user = await user_mgr.upsert_from_github(identity, is_admin=is_first_user)
     org = await OrganizationManager(session).create_personal_for_user(user)
     await OrganizationMembershipManager(session).add_member(
         organization_id=org.id,
@@ -389,11 +393,16 @@ async def local_signup(
     data = await _read_auth_payload(request)
     body = LocalSignupRequest.model_validate(data)
 
+    user_mgr = UserManager(session)
+    # First user becomes admin
+    is_first_user = not await user_mgr.has_any_users()
+
     try:
-        user = await UserManager(session).create_local_user(
+        user = await user_mgr.create_local_user(
             email=body.email,
             password=body.password,
             name=body.name,
+            is_admin=is_first_user,
         )
     except ValueError as e:
         if body.redirect is not None or request.query_params.get("redirect") is not None:
@@ -1373,6 +1382,7 @@ async def me(
             "email": user.email,
             "name": user.name,
             "avatar_url": user.avatar_url,
+            "is_admin": user.is_admin,
         },
         "organization": ({"id": str(org.id), "slug": org.slug, "name": org.name} if org else None),
         "org_role": role,

@@ -18,6 +18,7 @@ def test_user_table_shape() -> None:
         "password_salt",
         "password_hash",
         "password_iterations",
+        "is_admin",
         "created_at",
         "updated_at",
     }

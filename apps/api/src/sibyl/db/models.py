@@ -166,6 +166,12 @@ class User(TimestampMixin, table=True):
         description="PBKDF2 iteration count used for password hash",
     )
 
+    # System admin flag (first user becomes admin)
+    is_admin: bool = Field(
+        default=False,
+        description="System administrator - can manage server settings and all orgs",
+    )
+
     def __repr__(self) -> str:
         return f"<User github_id={self.github_id!r} email={self.email!r}>"
 

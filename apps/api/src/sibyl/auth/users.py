@@ -41,6 +41,13 @@ class UserManager:
     async def get_by_id(self, user_id: UUID) -> User | None:
         return await self._session.get(User, user_id)
 
+    async def has_any_users(self) -> bool:
+        """Check if any users exist in the system."""
+        from sqlalchemy import func
+
+        result = await self._session.execute(select(func.count(User.id)))
+        return (result.scalar() or 0) > 0
+
     async def get_by_github_id(self, github_id: int) -> User | None:
         result = await self._session.execute(select(User).where(User.github_id == github_id))
         return result.scalar_one_or_none()
@@ -52,8 +59,14 @@ class UserManager:
         result = await self._session.execute(select(User).where(User.email == normalized))
         return result.scalar_one_or_none()
 
-    async def upsert_from_github(self, identity: GitHubUserIdentity) -> User:
+    async def upsert_from_github(
+        self, identity: GitHubUserIdentity, *, is_admin: bool = False
+    ) -> User:
         """Create or update a user from a GitHub identity payload.
+
+        Args:
+            identity: GitHub user data.
+            is_admin: If True, set is_admin flag on new users (first user becomes admin).
 
         Does not commit; caller controls transaction scope.
         """
@@ -64,6 +77,7 @@ class UserManager:
                 email=identity.email.lower() if identity.email else None,
                 name=identity.name or identity.login,
                 avatar_url=identity.avatar_url,
+                is_admin=is_admin,
             )
             self._session.add(user)
             return user
@@ -73,7 +87,9 @@ class UserManager:
         existing.avatar_url = identity.avatar_url or existing.avatar_url
         return existing
 
-    async def create_local_user(self, *, email: str, password: str, name: str) -> User:
+    async def create_local_user(
+        self, *, email: str, password: str, name: str, is_admin: bool = False
+    ) -> User:
         normalized = email.strip().lower()
         if not normalized:
             raise ValueError("Email is required")
@@ -93,6 +109,7 @@ class UserManager:
             password_salt=pw.salt_hex,
             password_hash=pw.hash_hex,
             password_iterations=pw.iterations,
+            is_admin=is_admin,
         )
         self._session.add(user)
         await self._session.flush()
