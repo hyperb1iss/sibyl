@@ -1527,9 +1527,8 @@ export function useAgent(id: string) {
     queryKey: queryKeys.agents.detail(id),
     queryFn: () => api.agents.get(id),
     enabled: !!id,
-    // Poll every 10s even when WS connected (catches dead agents after server restart)
-    // Poll every 5s when WS disconnected for faster recovery
-    refetchInterval: isWsConnected ? 10000 : 5000,
+    // Rely on WebSocket for real-time updates, fall back to polling when disconnected
+    refetchInterval: isWsConnected ? false : 5000,
   });
 }
 
