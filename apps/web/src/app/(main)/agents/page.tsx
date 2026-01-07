@@ -512,12 +512,12 @@ function AgentsPageContent() {
   const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
 
   // Sync view mode from localStorage after hydration
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only run on mount to restore stored preference
   useEffect(() => {
     const stored = readStorage<ViewMode>('agents:viewMode');
     if (stored && stored !== viewMode) {
       setViewMode(stored);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on mount
   }, []);
 
   // Persist view mode preference
