@@ -371,12 +371,6 @@ const AgentCard = memo(function AgentCard({
                 {agent.tokens_used.toLocaleString()}
               </span>
             )}
-            {agent.cost_usd > 0 && (
-              <span className="flex items-center gap-1" title="Cost">
-                <span className="opacity-60">$</span>
-                {agent.cost_usd.toFixed(3)}
-              </span>
-            )}
           </div>
 
           {/* Time indicator */}
