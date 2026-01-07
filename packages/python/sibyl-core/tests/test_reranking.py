@@ -181,10 +181,7 @@ class TestCrossEncoderRerank:
 
     def test_respects_top_k(self) -> None:
         """Only reranks top_k candidates."""
-        entities = [
-            ({"id": f"e{i}", "content": f"Content {i}"}, 1.0 - i * 0.1)
-            for i in range(10)
-        ]
+        entities = [({"id": f"e{i}", "content": f"Content {i}"}, 1.0 - i * 0.1) for i in range(10)]
 
         mock_model = MagicMock()
         # Only 3 candidates will be reranked (top_k=3)
@@ -217,9 +214,7 @@ class TestCrossEncoderRerank:
         mock_model = MagicMock()
         mock_model.predict.return_value = [0.8, 0.4, 0.6]  # e2 below threshold
 
-        result = cross_encoder_rerank(
-            "query", entities, mock_model, top_k=10, min_score=0.5
-        )
+        result = cross_encoder_rerank("query", entities, mock_model, top_k=10, min_score=0.5)
 
         # e2 (score 0.4) should be filtered
         ids = [e.id for e, _ in result]

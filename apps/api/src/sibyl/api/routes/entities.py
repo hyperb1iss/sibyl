@@ -178,7 +178,8 @@ async def list_entities(
     category: str | None = Query(default=None, description="Filter by category"),
     search: str | None = Query(default=None, description="Search in name and description"),
     project_ids: list[str] | None = Query(
-        default=None, description="Filter by project IDs (use '__unassigned__' for entities without project)"
+        default=None,
+        description="Filter by project IDs (use '__unassigned__' for entities without project)",
     ),
     page: int = Query(default=1, ge=1, description="Page number"),
     page_size: int = Query(default=50, ge=1, le=200, description="Items per page"),
@@ -214,9 +215,8 @@ async def list_entities(
         for entity in all_entities:
             # Project filter
             if project_ids:
-                entity_project = (
-                    getattr(entity, "project_id", None)
-                    or (entity.metadata.get("project_id") if entity.metadata else None)
+                entity_project = getattr(entity, "project_id", None) or (
+                    entity.metadata.get("project_id") if entity.metadata else None
                 )
                 # Check if entity matches filter criteria
                 if entity_project:

@@ -236,24 +236,23 @@ async def temporal_query(
         )
 
         # Convert dataclass edges to schema objects
-        edges_list = []
-        for edge in result.edges:
-            edges_list.append(
-                TemporalEdgeSchema(
-                    id=edge.id,
-                    name=edge.name,
-                    source_id=edge.source_id,
-                    source_name=edge.source_name,
-                    target_id=edge.target_id,
-                    target_name=edge.target_name,
-                    created_at=edge.created_at.isoformat() if edge.created_at else None,
-                    expired_at=edge.expired_at.isoformat() if edge.expired_at else None,
-                    valid_at=edge.valid_at.isoformat() if edge.valid_at else None,
-                    invalid_at=edge.invalid_at.isoformat() if edge.invalid_at else None,
-                    fact=edge.fact,
-                    is_current=edge.is_current,
-                )
+        edges_list = [
+            TemporalEdgeSchema(
+                id=edge.id,
+                name=edge.name,
+                source_id=edge.source_id,
+                source_name=edge.source_name,
+                target_id=edge.target_id,
+                target_name=edge.target_name,
+                created_at=edge.created_at.isoformat() if edge.created_at else None,
+                expired_at=edge.expired_at.isoformat() if edge.expired_at else None,
+                valid_at=edge.valid_at.isoformat() if edge.valid_at else None,
+                invalid_at=edge.invalid_at.isoformat() if edge.invalid_at else None,
+                fact=edge.fact,
+                is_current=edge.is_current,
             )
+            for edge in result.edges
+        ]
 
         return TemporalResponse(
             mode=result.mode,

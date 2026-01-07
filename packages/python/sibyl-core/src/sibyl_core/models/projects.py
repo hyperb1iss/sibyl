@@ -10,9 +10,7 @@ from __future__ import annotations
 # Shared project constants
 SHARED_PROJECT_SLUG = "_shared"
 SHARED_PROJECT_NAME = "Shared"
-SHARED_PROJECT_DESCRIPTION = (
-    "Org-wide knowledge: conventions, crawled docs, and shared learnings"
-)
+SHARED_PROJECT_DESCRIPTION = "Org-wide knowledge: conventions, crawled docs, and shared learnings"
 
 
 def is_shared_project_slug(slug: str) -> bool:

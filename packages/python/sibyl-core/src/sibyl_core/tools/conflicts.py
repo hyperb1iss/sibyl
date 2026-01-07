@@ -69,9 +69,7 @@ async def find_similar_entities(
             query=query,
             entity_types=[
                 # Import EntityType to convert strings if needed
-                __import__(
-                    "sibyl_core.models.entities", fromlist=["EntityType"]
-                ).EntityType(t)
+                __import__("sibyl_core.models.entities", fromlist=["EntityType"]).EntityType(t)
                 for t in (entity_types or [])
             ]
             if entity_types
@@ -118,14 +116,20 @@ def classify_conflict(
     """
     # Check for near-duplicates
     if similarity_score >= DUPLICATE_THRESHOLD:
-        return "duplicate", f"Very high similarity ({similarity_score:.0%}) suggests duplicate content."
+        return (
+            "duplicate",
+            f"Very high similarity ({similarity_score:.0%}) suggests duplicate content.",
+        )
 
     # Check for high overlap
     if similarity_score >= HIGH_OVERLAP_THRESHOLD:
         # Check if titles are very similar (case-insensitive)
         title_similarity = _simple_title_similarity(new_title, existing_name)
         if title_similarity > 0.8:
-            return "duplicate", f"Titles and content are very similar ({similarity_score:.0%}). Likely duplicate."
+            return (
+                "duplicate",
+                f"Titles and content are very similar ({similarity_score:.0%}). Likely duplicate.",
+            )
         return (
             "semantic_overlap",
             f"High semantic overlap ({similarity_score:.0%}). Consider if this adds new information.",

@@ -52,12 +52,14 @@ class TestIsPending:
     async def test_is_pending_returns_data_when_pending(self) -> None:
         """is_pending should return pending info if entity is pending."""
         mock_pool = AsyncMock()
-        mock_pool.get.return_value = json.dumps({
-            "job_id": "create_entity:task_123",
-            "entity_type": "task",
-            "group_id": "org_456",
-            "created_at": datetime.now(UTC).isoformat(),
-        })
+        mock_pool.get.return_value = json.dumps(
+            {
+                "job_id": "create_entity:task_123",
+                "entity_type": "task",
+                "group_id": "org_456",
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+        )
 
         with patch("sibyl.jobs.pending.get_pool", return_value=mock_pool):
             from sibyl.jobs.pending import is_pending
@@ -224,17 +226,19 @@ class TestProcessPendingOperations:
         """process_pending_operations should process add_note operations."""
         mock_pool = AsyncMock()
         mock_pool.lrange.return_value = [
-            json.dumps({
-                "op_id": "op_1",
-                "operation": "add_note",
-                "payload": {
-                    "note_id": "note_xyz",
-                    "content": "Test note",
-                    "author_type": "user",
-                    "author_name": "Test User",
-                    "created_at": datetime.now(UTC).isoformat(),
-                },
-            }),
+            json.dumps(
+                {
+                    "op_id": "op_1",
+                    "operation": "add_note",
+                    "payload": {
+                        "note_id": "note_xyz",
+                        "content": "Test note",
+                        "author_type": "user",
+                        "author_name": "Test User",
+                        "created_at": datetime.now(UTC).isoformat(),
+                    },
+                }
+            ),
         ]
         mock_pool.llen.return_value = 1  # For clear_pending_operations
 
@@ -246,7 +250,10 @@ class TestProcessPendingOperations:
             patch("sibyl.jobs.pending.get_pool", return_value=mock_pool),
             patch("sibyl_core.graph.client.get_graph_client", return_value=mock_client),
             patch("sibyl_core.graph.entities.EntityManager", return_value=mock_entity_manager),
-            patch("sibyl_core.graph.relationships.RelationshipManager", return_value=mock_relationship_manager),
+            patch(
+                "sibyl_core.graph.relationships.RelationshipManager",
+                return_value=mock_relationship_manager,
+            ),
         ):
             from sibyl.jobs.pending import process_pending_operations
 
@@ -267,11 +274,13 @@ class TestProcessPendingOperations:
         """process_pending_operations should handle unknown operations gracefully."""
         mock_pool = AsyncMock()
         mock_pool.lrange.return_value = [
-            json.dumps({
-                "op_id": "op_1",
-                "operation": "unknown_op",
-                "payload": {},
-            }),
+            json.dumps(
+                {
+                    "op_id": "op_1",
+                    "operation": "unknown_op",
+                    "payload": {},
+                }
+            ),
         ]
         mock_pool.llen.return_value = 1  # For clear_pending_operations
 
@@ -283,7 +292,10 @@ class TestProcessPendingOperations:
             patch("sibyl.jobs.pending.get_pool", return_value=mock_pool),
             patch("sibyl_core.graph.client.get_graph_client", return_value=mock_client),
             patch("sibyl_core.graph.entities.EntityManager", return_value=mock_entity_manager),
-            patch("sibyl_core.graph.relationships.RelationshipManager", return_value=mock_relationship_manager),
+            patch(
+                "sibyl_core.graph.relationships.RelationshipManager",
+                return_value=mock_relationship_manager,
+            ),
         ):
             from sibyl.jobs.pending import process_pending_operations
 
@@ -336,11 +348,13 @@ class TestCreateNoteChecksPending:
 
         # Mock dependencies
         mock_pool = AsyncMock()
-        mock_pool.get.return_value = json.dumps({
-            "job_id": "create_entity:task_123",
-            "entity_type": "task",
-            "group_id": "org_456",
-        })
+        mock_pool.get.return_value = json.dumps(
+            {
+                "job_id": "create_entity:task_123",
+                "entity_type": "task",
+                "group_id": "org_456",
+            }
+        )
 
         mock_org = MagicMock()
         mock_org.id = "org_456"

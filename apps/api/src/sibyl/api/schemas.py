@@ -233,9 +233,7 @@ class TemporalRequest(BaseModel):
         default=None,
         description="Point-in-time for history query (ISO date, e.g. 2025-03-15)",
     )
-    include_expired: bool = Field(
-        default=False, description="Include expired/invalidated edges"
-    )
+    include_expired: bool = Field(default=False, description="Include expired/invalidated edges")
     limit: int = Field(default=50, ge=1, le=200, description="Maximum edges to return")
 
 

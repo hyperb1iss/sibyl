@@ -152,8 +152,14 @@ class FalkorDBSearchInterface(SearchInterface):
         driver.search_interface = None
         try:
             return await search_utils.edge_similarity_search(
-                driver, search_vector, source_node_uuid, target_node_uuid,
-                search_filter, group_ids, limit, min_score
+                driver,
+                search_vector,
+                source_node_uuid,
+                target_node_uuid,
+                search_filter,
+                group_ids,
+                limit,
+                min_score,
             )
         finally:
             driver.search_interface = original

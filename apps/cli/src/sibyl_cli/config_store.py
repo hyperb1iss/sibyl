@@ -253,7 +253,7 @@ def _resolve_worktree_main_repo(start_path: Path) -> Path | None:
                         if "worktrees" in gitdir_path.parts:
                             # Find the .git directory (parent of worktrees)
                             worktrees_idx = gitdir_path.parts.index("worktrees")
-                            main_git = Path(*gitdir_path.parts[: worktrees_idx])
+                            main_git = Path(*gitdir_path.parts[:worktrees_idx])
                             if main_git.name == ".git":
                                 return main_git.parent
                 except (OSError, ValueError):

@@ -431,9 +431,7 @@ def entity_history(
                     if isinstance(created, str) and len(created) > 10:
                         created = created[:10]
                     status = (
-                        f"[green]current[/green]"
-                        if e.get("is_current")
-                        else f"[dim]expired[/dim]"
+                        "[green]current[/green]" if e.get("is_current") else "[dim]expired[/dim]"
                     )
                     table.add_row(
                         truncate(e.get("source_name", ""), 18),

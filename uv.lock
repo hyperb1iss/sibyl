@@ -8,8 +8,8 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "sibyl-cli",
     "sibyl-core",
+    "sibyl-dev",
     "sibyld",
 ]
 constraints = [
@@ -2921,47 +2921,6 @@ wheels = [
 ]
 
 [[package]]
-name = "sibyl-cli"
-version = "0.1.0"
-source = { editable = "apps/cli" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pyjwt" },
-    { name = "pyyaml" },
-    { name = "rich" },
-    { name = "sibyl-core" },
-    { name = "tomli-w" },
-    { name = "typer" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "pyjwt", specifier = ">=2.10" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "rich", specifier = ">=13.0" },
-    { name = "sibyl-core", editable = "packages/python/sibyl-core" },
-    { name = "tomli-w", specifier = ">=1.2.0" },
-    { name = "typer", specifier = ">=0.20.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-
-[[package]]
 name = "sibyl-core"
 version = "0.1.0"
 source = { editable = "packages/python/sibyl-core" }
@@ -3002,6 +2961,47 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "python-louvain", specifier = ">=0.16" },
     { name = "structlog", specifier = ">=24.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[[package]]
+name = "sibyl-dev"
+version = "0.1.0"
+source = { editable = "apps/cli" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pyjwt" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "sibyl-core" },
+    { name = "tomli-w" },
+    { name = "typer" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pyjwt", specifier = ">=2.10" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rich", specifier = ">=13.0" },
+    { name = "sibyl-core", editable = "packages/python/sibyl-core" },
+    { name = "tomli-w", specifier = ">=1.2.0" },
+    { name = "typer", specifier = ">=0.20.0" },
 ]
 
 [package.metadata.requires-dev]

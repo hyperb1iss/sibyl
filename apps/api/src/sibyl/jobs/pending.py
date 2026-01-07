@@ -227,9 +227,7 @@ async def process_pending_operations(
             elif operation == "update":
                 result = await _process_update(entity_id, payload, entity_manager)
             elif operation == "add_relationship":
-                result = await _process_add_relationship(
-                    entity_id, payload, relationship_manager
-                )
+                result = await _process_add_relationship(entity_id, payload, relationship_manager)
             else:
                 log.warning("unknown_pending_operation", operation=operation, op_id=op_id)
                 result = {"error": f"Unknown operation: {operation}"}
@@ -238,8 +236,12 @@ async def process_pending_operations(
             log.debug("pending_operation_processed", op_id=op_id, operation=operation)
 
         except Exception as e:
-            log.exception("pending_operation_failed", op_id=op_id, operation=operation, error=str(e))
-            results.append({"op_id": op_id, "operation": operation, "success": False, "error": str(e)})
+            log.exception(
+                "pending_operation_failed", op_id=op_id, operation=operation, error=str(e)
+            )
+            results.append(
+                {"op_id": op_id, "operation": operation, "success": False, "error": str(e)}
+            )
 
     # Clear processed operations
     await clear_pending_operations(entity_id)
@@ -265,7 +267,11 @@ async def _process_add_note(
     from sibyl_core.models.tasks import AuthorType, Note
 
     note_id = payload.get("note_id", f"note_{uuid.uuid4()}")
-    created_at = datetime.fromisoformat(payload["created_at"]) if payload.get("created_at") else datetime.now(UTC)
+    created_at = (
+        datetime.fromisoformat(payload["created_at"])
+        if payload.get("created_at")
+        else datetime.now(UTC)
+    )
     content = payload["content"]
     # Generate name from content (matches Note validator logic)
     name = content[:50] + ("..." if len(content) > 50 else "")
