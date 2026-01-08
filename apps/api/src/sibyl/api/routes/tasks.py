@@ -268,6 +268,43 @@ async def _broadcast_task_update(
     )
 
 
+async def _maybe_start_epic(
+    entity_manager: "EntityManager",
+    task_id: str,
+    epic_id: str | None,
+    task_status: str,
+) -> bool:
+    """Auto-start epic if task moves to forward-progress state.
+
+    Args:
+        entity_manager: Entity manager for graph operations
+        task_id: Task ID for logging
+        epic_id: Epic ID to potentially start
+        task_status: New task status
+
+    Returns:
+        True if epic was auto-started
+    """
+    from datetime import UTC, datetime
+
+    from sibyl_core.models.tasks import EpicStatus
+
+    forward_progress_states = {"doing", "review", "blocked"}
+    if task_status not in forward_progress_states or not epic_id:
+        return False
+
+    epic = await entity_manager.get(epic_id)
+    if not epic or epic.metadata.get("status") != "planning":
+        return False
+
+    await entity_manager.update(
+        epic_id,
+        {"status": EpicStatus.IN_PROGRESS, "started_at": datetime.now(UTC)},
+    )
+    log.info("Epic auto-started", epic_id=epic_id, task_id=task_id, task_status=task_status)
+    return True
+
+
 @router.post("/{task_id}/start", response_model=TaskActionResponse)
 @handle_workflow_errors("start_task")
 async def start_task(
@@ -572,6 +609,11 @@ async def update_task(
                     relationship_type=RelationshipType.BELONGS_TO,
                 )
                 await relationship_manager.create(belongs_to_epic)
+
+            # Auto-start epic if task moves to forward-progress state
+            if request.status:
+                epic_id = request.epic_id or updated.metadata.get("epic_id")
+                await _maybe_start_epic(entity_manager, task_id, epic_id, request.status)
 
             await _broadcast_task_update(
                 task_id,

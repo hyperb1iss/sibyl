@@ -203,6 +203,11 @@ class TaskWorkflowEngine:
         if task.project_id:
             await self.update_project_activity(task.project_id)
 
+        # Auto-start epic if still in planning
+        epic_started = await self._maybe_start_epic(updated_task)
+        if epic_started:
+            log.info("Epic auto-started", epic_id=task.epic_id, task_id=task_id)
+
         log.info("Task started successfully", task_id=task_id, branch=updated_task.branch_name)
         return updated_task
 
@@ -244,6 +249,11 @@ class TaskWorkflowEngine:
         # Update project activity timestamp
         if task.project_id:
             await self.update_project_activity(task.project_id)
+
+        # Auto-start epic if still in planning
+        epic_started = await self._maybe_start_epic(updated_task)
+        if epic_started:
+            log.info("Epic auto-started", epic_id=task.epic_id, task_id=task_id)
 
         log.info("Task submitted for review", task_id=task_id, commits=len(commit_shas))
         return updated_task
@@ -345,6 +355,11 @@ class TaskWorkflowEngine:
         # Update project activity timestamp
         if task.project_id:
             await self.update_project_activity(task.project_id)
+
+        # Auto-start epic if still in planning (blocked = still working on it)
+        epic_started = await self._maybe_start_epic(updated_task)
+        if epic_started:
+            log.info("Epic auto-started", epic_id=task.epic_id, task_id=task_id)
 
         log.info("Task blocked", task_id=task_id, blocker=blocker_description)
         return updated_task
@@ -609,6 +624,53 @@ class TaskWorkflowEngine:
                 doing=doing,
                 last_activity_at=now.isoformat(),
             )
+
+    async def _maybe_start_epic(self, task: Task) -> bool:
+        """Auto-start epic if a task moves to a forward-progress state.
+
+        Epics should transition from 'planning' to 'in_progress' when any
+        task starts active work (doing, review, blocked).
+
+        Args:
+            task: The task that just transitioned to a forward-progress state
+
+        Returns:
+            True if epic was auto-started, False otherwise
+        """
+        epic_id = task.epic_id
+        if not epic_id:
+            return False
+
+        # Only trigger on forward-progress states
+        forward_progress_states = {TaskStatus.DOING, TaskStatus.REVIEW, TaskStatus.BLOCKED}
+        if task.status not in forward_progress_states:
+            return False
+
+        log.debug("Checking epic auto-start", epic_id=epic_id, task_id=task.id)
+
+        # Get epic's current status
+        epic = await self._entity_manager.get(epic_id)
+        current_status = epic.metadata.get("status", "planning")
+
+        # Only auto-start if epic is in planning
+        if current_status != "planning":
+            return False
+
+        log.info(
+            "Auto-starting epic - task in progress",
+            epic_id=epic_id,
+            task_id=task.id,
+            task_status=task.status.value,
+        )
+
+        await self._entity_manager.update(
+            epic_id,
+            {
+                "status": EpicStatus.IN_PROGRESS,
+                "started_at": datetime.now(UTC),
+            },
+        )
+        return True
 
     async def _maybe_complete_epic(self, task: Task) -> bool:
         """Auto-complete epic if all its tasks are done.
