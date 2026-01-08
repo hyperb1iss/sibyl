@@ -82,3 +82,8 @@ logs/
 # moon
 .moon/cache
 .moon/docker
+
+# Backups and database dumps
+backups/
+*.sql
+!docs/schemas/*.sql
