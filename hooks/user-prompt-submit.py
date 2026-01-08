@@ -391,10 +391,12 @@ def main():
             debug_info = f"\n_Query: `{search_query}` ({elapsed:.2f}s)_"
 
         # Output as additional context
+        # Include a reminder about the /sibyl skill for agents that haven't loaded it
+        sibyl_hint = "Sibyl is your knowledge graph. Run `/sibyl` for full CLI instructions."
         response = {
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
-                "additionalContext": f"**Sibyl Context:**\n{formatted}{debug_info}",
+                "additionalContext": f"**Sibyl Context:** _{sibyl_hint}_\n{formatted}{debug_info}",
             }
         }
         print(json.dumps(response))
