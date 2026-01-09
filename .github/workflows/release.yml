@@ -110,19 +110,7 @@ jobs:
 
           echo "Updated versions to $VERSION"
 
-      - name: "◈ Sync dependencies"
-        run: uv sync
-
-      - name: "● Lint"
-        run: |
-          uv run ruff check packages/python/sibyl-core/src apps/api/src apps/cli/src
-          uv run ruff format --check packages/python/sibyl-core/src apps/api/src apps/cli/src
-
-      - name: "● Type check"
-        run: |
-          uv run pyright packages/python/sibyl-core/src
-          uv run pyright apps/api/src
-          uv run pyright apps/cli/src
+      # Note: Lint/typecheck skipped - CI already validates on main
 
       - name: "◈ Generate release notes"
         if: ${{ !inputs.dry_run }}

@@ -3,14 +3,6 @@ name: Publish Docker Images
 on:
   release:
     types: [published]
-  push:
-    branches: [main]
-    paths:
-      - "apps/api/**"
-      - "apps/web/**"
-      - "packages/python/sibyl-core/**"
-      - "docker-compose*.yml"
-      - ".github/workflows/docker-publish.yml"
   workflow_dispatch:
     inputs:
       tag:
