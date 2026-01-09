@@ -174,11 +174,4 @@ tasks:
     command: "docker compose -f compose.e2e.yml down -v"
     local: true
 
-  # ==========================================================================
-  # Python Environment
-  # ==========================================================================
-  sync:
-    # Create venv if missing/corrupt, then sync
-    command: "uv sync"
-    options:
-      shell: true
+  # Python: No sync task needed - uv run handles deps automatically

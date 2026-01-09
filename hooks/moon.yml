@@ -11,8 +11,6 @@ fileGroups:
 tasks:
   lint:
     command: "uv run ruff check ."
-    deps:
-      - "root:sync"
     inputs:
       - "@group(sources)"
 
@@ -30,8 +28,6 @@ tasks:
 
   typecheck:
     command: "uv run pyright ."
-    deps:
-      - "root:sync"
     inputs:
       - "@group(sources)"
 

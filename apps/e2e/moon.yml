@@ -22,8 +22,6 @@ tasks:
   # Run all e2e tests
   test:
     command: "uv run pytest"
-    deps:
-      - "root:sync"
     inputs:
       - "@group(tests)"
     local: true
@@ -56,8 +54,6 @@ tasks:
   # Lint test code
   lint:
     command: "uv run ruff check tests"
-    deps:
-      - "root:sync"
     inputs:
       - "@group(tests)"
 

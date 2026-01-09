@@ -26,8 +26,6 @@ tasks:
 
   lint:
     command: "uv run ruff check src/"
-    deps:
-      - "root:sync"
     inputs:
       - "@group(sources)"
 
@@ -50,23 +48,17 @@ tasks:
 
   typecheck:
     command: "uv run pyright src/"
-    deps:
-      - "root:sync"
     inputs:
       - "@group(sources)"
 
   test:
     command: "uv run pytest tests/ -v"
-    deps:
-      - "root:sync"
     inputs:
       - "@group(sources)"
       - "@group(tests)"
 
   test-cov:
     command: "uv run pytest tests/ --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml"
-    deps:
-      - "root:sync"
     inputs:
       - "@group(sources)"
       - "@group(tests)"

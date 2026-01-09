@@ -111,13 +111,11 @@ jobs:
             uv-${{ runner.os }}-
 
       # =========================================================================
-      # Install Dependencies (ensure complete installation after cache restore)
+      # Install Dependencies
       # =========================================================================
-      - name: Install dependencies
-        run: |
-          cd apps/web && pnpm install --frozen-lockfile
-          cd ../..
-          uv sync
+      - name: Install Node dependencies
+        run: cd apps/web && pnpm install --frozen-lockfile
+      # Python deps: uv run handles this automatically, no explicit sync needed
 
       # =========================================================================
       # Lint & Typecheck (all projects in parallel via moon)

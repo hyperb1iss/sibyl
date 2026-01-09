@@ -10,7 +10,5 @@ node:
   # Use pnpm as package manager
   packageManager: pnpm
 
-python:
-  version: "3.13"
-  # Only sync deps from workspace root, not per-package
-  rootRequirementsOnly: true
+# Python toolchain disabled - uv run handles environments automatically
+# Having moon manage venv conflicts with uv's own venv management
