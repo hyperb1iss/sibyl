@@ -84,7 +84,7 @@ _cross_encoder_cache: dict[str, Any] = {}
 def _check_sentence_transformers_available() -> bool:
     """Check if sentence-transformers is available."""
     try:
-        import sentence_transformers  # noqa: F401
+        import sentence_transformers  # type: ignore[import-not-found]  # noqa: F401
 
         return True
     except ImportError:
@@ -115,7 +115,7 @@ def get_cross_encoder(model_name: str, use_gpu: bool = False) -> Any:
             "Install with: pip install sentence-transformers"
         )
 
-    from sentence_transformers import CrossEncoder
+    from sentence_transformers import CrossEncoder  # type: ignore[import-not-found]
 
     device = "cuda" if use_gpu else "cpu"
     log.info("loading_cross_encoder", model=model_name, device=device)
@@ -360,7 +360,7 @@ async def cohere_rerank[T](
         )
 
     try:
-        import cohere
+        import cohere  # type: ignore[import-not-found]
 
         client = cohere.Client(api_key)
 
