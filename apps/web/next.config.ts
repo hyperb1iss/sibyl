@@ -12,24 +12,28 @@ function getVersion(): string {
   try {
     const baseVersion = readFileSync(join(__dirname, '../../VERSION'), 'utf8').trim();
 
-    // Check if we're on a release tag
+    // Check if we're on a release tag (silent - no git in Docker)
     try {
-      const tag = execSync('git describe --tags --exact-match HEAD 2>/dev/null', {
+      const tag = execSync('git describe --tags --exact-match HEAD', {
         encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'], // Suppress stderr
       }).trim();
       if (tag.startsWith('v')) {
         return baseVersion; // Release build
       }
     } catch {
-      // Not on a tag - dev build
+      // Not on a tag or git not available - dev build
     }
 
-    // Dev build: append git hash
+    // Dev build: append git hash (silent - no git in Docker)
     try {
-      const hash = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+      const hash = execSync('git rev-parse --short HEAD', {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'], // Suppress stderr
+      }).trim();
       return `${baseVersion}+g${hash}`;
     } catch {
-      return baseVersion;
+      return baseVersion; // No git available, use base version
     }
   } catch {
     return '0.0.0';

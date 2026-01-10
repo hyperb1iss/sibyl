@@ -1,56 +1,47 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-.venv/
-venv/
-env/
-.eggs/
-*.egg-info/
-*.egg
+# =============================================================================
+# Whitelist-first .dockerignore
+# Start by ignoring everything, then allow only what's needed
+# =============================================================================
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
+# Ignore everything
+*
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Git
-.git/
-.gitignore
-
-# Docker
-Dockerfile
-docker-compose*.yml
-
-# Web (separate image)
-web/
-
-# Development
-.env
-.env.*
-*.log
-*.tmp
-.DS_Store
-
-# Documentation
-docs/
-*.md
+# -----------------------------------------------------------------------------
+# API Image (apps/api/Dockerfile)
+# -----------------------------------------------------------------------------
+!pyproject.toml
+!uv.lock
+!VERSION
 !README.md
 
-# CI/CD
-.github/
-.gitlab-ci.yml
+# Core library
+!packages/python/sibyl-core/pyproject.toml
+!packages/python/sibyl-core/README.md
+!packages/python/sibyl-core/src/
 
-# Other
-*.bak
-*.orig
+# API app
+!apps/api/pyproject.toml
+!apps/api/README.md
+!apps/api/src/
+!apps/api/alembic/
+!apps/api/alembic.ini
+
+# -----------------------------------------------------------------------------
+# Web Image (apps/web/Dockerfile)
+# -----------------------------------------------------------------------------
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/web/
+
+# -----------------------------------------------------------------------------
+# Re-exclude build artifacts in allowed directories
+# -----------------------------------------------------------------------------
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/node_modules/
+**/.next/
+**/.venv/
+**/.turbo/
+**/dist/
+**/.cache/
