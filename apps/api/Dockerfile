@@ -12,7 +12,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 
 # Copy workspace config for dependency resolution
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock VERSION ./
 COPY packages/python/sibyl-core/pyproject.toml packages/python/sibyl-core/README.md packages/python/sibyl-core/
 COPY packages/python/sibyl-core/src packages/python/sibyl-core/src
 

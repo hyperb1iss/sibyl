@@ -32,6 +32,9 @@ COPY --from=deps /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/
 COPY --from=deps /app/node_modules /app/node_modules
 COPY --from=deps /app/apps/web/node_modules ./node_modules
 
+# Copy VERSION file for build-time version injection
+COPY VERSION /app/
+
 # Copy app source
 COPY apps/web .
 
