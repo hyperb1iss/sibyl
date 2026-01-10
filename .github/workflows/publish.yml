@@ -1,0 +1,145 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g., v0.1.2)"
+        required: true
+        type: string
+      dry_run:
+        description: "Dry run (build but don't publish)"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  publish:
+    name: Build & Publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: write
+      id-token: write  # PyPI trusted publishing
+
+    steps:
+      - name: "◆ Checkout"
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: "◇ Setup Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: "◇ Install uv"
+        uses: astral-sh/setup-uv@v6
+
+      - name: "◇ Setup Docker Buildx"
+        uses: docker/setup-buildx-action@v3
+
+      - name: "◇ Setup QEMU"
+        uses: docker/setup-qemu-action@v3
+
+      - name: "◇ Login to GHCR"
+        if: ${{ !inputs.dry_run }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # =========================================================================
+      # Build Everything
+      # =========================================================================
+      - name: "△ Build Python packages"
+        run: |
+          echo "Building sibyl-core..."
+          uv build --package sibyl-core --out-dir dist/
+          echo "Building sibyl-dev..."
+          uv build --package sibyl-dev --out-dir dist/
+          ls -la dist/
+
+      # =========================================================================
+      # Publish Python Packages
+      # =========================================================================
+      - name: "► Publish to PyPI"
+        if: ${{ !inputs.dry_run }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+      # =========================================================================
+      # Build & Push Docker Images
+      # =========================================================================
+      - name: "△ Extract version from tag"
+        id: version
+        run: echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+        env:
+          TAG: ${{ inputs.tag }}
+
+      - name: "► Build & push API image"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ !inputs.dry_run }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-api:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-api:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: "► Build & push Web image"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ !inputs.dry_run }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-web:latest
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/sibyl-web:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # =========================================================================
+      # Update Release
+      # =========================================================================
+      - name: "◆ Update release with install instructions"
+        if: ${{ !inputs.dry_run }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          append_body: |
+
+            ## Install
+
+            **CLI (recommended)**
+            ```bash
+            uv tool install sibyl-dev
+            ```
+
+            **Docker**
+            ```bash
+            docker pull ghcr.io/hyperb1iss/sibyl-api:${{ steps.version.outputs.version }}
+            docker pull ghcr.io/hyperb1iss/sibyl-web:${{ steps.version.outputs.version }}
+            ```
+
+      - name: "► Summary"
+        run: |
+          echo "## Publish ${{ inputs.dry_run && '[DRY RUN] ' || '' }}${{ inputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Python Packages" >> $GITHUB_STEP_SUMMARY
+          echo "- [sibyl-core](https://pypi.org/project/sibyl-core/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
+          echo "- [sibyl-dev](https://pypi.org/project/sibyl-dev/${{ steps.version.outputs.version }}/)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Images" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/hyperb1iss/sibyl-api:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/hyperb1iss/sibyl-web:${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
