@@ -12,6 +12,7 @@ from typing import Annotated
 import typer
 
 from sibyl.cli.common import (
+    ELECTRIC_PURPLE,
     ERROR_RED,
     NEON_CYAN,
     console,
@@ -1275,3 +1276,313 @@ def sync_projects(  # noqa: PLR0915
             raise typer.Exit(code=1) from None
 
     _sync()
+
+
+# =============================================================================
+# API-Based Backup Management
+# =============================================================================
+
+
+def _get_api_url() -> str:
+    """Get API base URL from settings."""
+    from sibyl.config import settings
+
+    host = settings.server_host
+    if host in {"0.0.0.0", "::"}:  # noqa: S104
+        host = "localhost"
+    return f"http://{host}:{settings.server_port}"
+
+
+def _api_request(
+    method: str,
+    path: str,
+    *,
+    json_data: dict | None = None,
+    stream: bool = False,
+) -> dict | bytes:
+    """Make an API request to the backup endpoints.
+
+    Note: This requires the API server to be running and assumes local access.
+    For production, you'd use proper auth headers.
+    """
+    import httpx
+
+    url = f"{_get_api_url()}{path}"
+
+    try:
+        with httpx.Client(timeout=300) as client:  # 5 min timeout for backups
+            if method == "GET":
+                if stream:
+                    response = client.get(url)
+                    response.raise_for_status()
+                    return response.content
+                response = client.get(url)
+            elif method == "POST":
+                response = client.post(url, json=json_data or {})
+            elif method == "DELETE":
+                response = client.delete(url)
+            else:
+                raise ValueError(f"Unsupported method: {method}")
+
+            response.raise_for_status()
+            return response.json()
+
+    except httpx.ConnectError:
+        error("Cannot connect to Sibyl API. Is 'sibyld serve' running?")
+        raise typer.Exit(code=1) from None
+    except httpx.HTTPStatusError as e:
+        error(f"API error: {e.response.status_code} - {e.response.text}")
+        raise typer.Exit(code=1) from None
+
+
+@app.command("backup-create")
+def backup_create(
+    include_postgres: Annotated[
+        bool,
+        typer.Option("--postgres/--no-postgres", help="Include PostgreSQL dump"),
+    ] = True,
+    include_graph: Annotated[
+        bool,
+        typer.Option("--graph/--no-graph", help="Include graph export"),
+    ] = True,
+    wait: Annotated[
+        bool,
+        typer.Option("--wait", "-w", help="Wait for backup to complete"),
+    ] = False,
+) -> None:
+    """Create a backup via the API (async job).
+
+    Triggers a backup job on the server that creates a compressed archive
+    containing PostgreSQL dump and FalkorDB graph export.
+
+    Use --wait to block until the backup completes.
+
+    Example:
+        sibyld db backup-create              # Queue backup job
+        sibyld db backup-create --wait       # Wait for completion
+        sibyld db backup-create --no-graph   # PostgreSQL only
+    """
+    import time
+
+    info("Triggering backup job via API...")
+
+    result = _api_request(
+        "POST",
+        "/backups",
+        json_data={
+            "include_postgres": include_postgres,
+            "include_graph": include_graph,
+        },
+    )
+
+    if not isinstance(result, dict):
+        error("Unexpected response from API")
+        raise typer.Exit(code=1)
+
+    job_id = result.get("job_id", "unknown")
+    success(f"Backup job queued: {job_id}")
+
+    if wait:
+        info("Waiting for backup to complete...")
+
+        # Poll for completion
+        while True:
+            status_result = _api_request("GET", f"/backups/jobs/{job_id}")
+            if not isinstance(status_result, dict):
+                break
+
+            status = status_result.get("status", "unknown")
+
+            if status == "complete":
+                job_result = status_result.get("result", {})
+                if job_result.get("success"):
+                    archive_path = job_result.get("archive_path", "unknown")
+                    size_kb = job_result.get("archive_size_bytes", 0) / 1024
+                    duration = job_result.get("duration_seconds", 0)
+                    entities = job_result.get("entity_count", 0)
+                    relationships = job_result.get("relationship_count", 0)
+
+                    console.print()
+                    success("Backup complete!")
+                    info(f"  Archive: {archive_path}")
+                    info(f"  Size: {size_kb:.1f} KB")
+                    info(f"  Entities: {entities}, Relationships: {relationships}")
+                    info(f"  Duration: {duration:.2f}s")
+                else:
+                    error(f"Backup failed: {job_result.get('error', 'unknown')}")
+                break
+
+            if status == "not_found":
+                error("Job not found (may have been cleaned up)")
+                break
+
+            console.print(".", end="", style="dim")
+            time.sleep(2)
+
+        console.print()  # Newline after dots
+
+
+@app.command("backup-list")
+def backup_list(
+    json_output: Annotated[bool, typer.Option("--json", "-j", help="Output as JSON")] = False,
+) -> None:
+    """List all available backup archives.
+
+    Shows backups sorted by creation time (newest first).
+
+    Example:
+        sibyld db backup-list
+        sibyld db backup-list --json
+    """
+    result = _api_request("GET", "/backups")
+
+    if not isinstance(result, dict):
+        error("Unexpected response from API")
+        raise typer.Exit(code=1)
+
+    backups = result.get("backups", [])
+    backup_dir = result.get("backup_dir", "unknown")
+
+    if json_output:
+        import json as json_module
+
+        console.print(json_module.dumps(result, indent=2))
+        return
+
+    if not backups:
+        info(f"No backups found in {backup_dir}")
+        return
+
+    console.print(f"\n[{NEON_CYAN}]Available Backups[/{NEON_CYAN}] ({backup_dir})\n")
+
+    for b in backups:
+        backup_id = b.get("backup_id", "unknown")
+        size_kb = b.get("size_bytes", 0) / 1024
+        created = b.get("created_at", "unknown")
+        metadata = b.get("metadata", {})
+
+        entities = metadata.get("graph_entities", "?") if metadata else "?"
+        relationships = metadata.get("graph_relationships", "?") if metadata else "?"
+
+        console.print(f"  [{ELECTRIC_PURPLE}]{backup_id}[/{ELECTRIC_PURPLE}]")
+        console.print(f"    Created: {created}")
+        console.print(f"    Size: {size_kb:.1f} KB")
+        console.print(f"    Graph: {entities} entities, {relationships} relationships")
+        console.print()
+
+
+@app.command("backup-download")
+def backup_download(
+    backup_id: Annotated[str, typer.Argument(help="Backup ID to download")],
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
+) -> None:
+    """Download a backup archive.
+
+    Example:
+        sibyld db backup-download backup_20260110_153045
+        sibyld db backup-download backup_20260110_153045 -o /tmp/backup.tar.gz
+    """
+    info(f"Downloading backup: {backup_id}...")
+
+    # First get backup details for filename
+    details = _api_request("GET", f"/backups/{backup_id}")
+    if not isinstance(details, dict):
+        error("Backup not found")
+        raise typer.Exit(code=1)
+
+    filename = details.get("filename", f"sibyl_{backup_id}.tar.gz")
+
+    # Download the archive
+    content = _api_request("GET", f"/backups/{backup_id}/download", stream=True)
+    if not isinstance(content, bytes):
+        error("Failed to download backup")
+        raise typer.Exit(code=1)
+
+    # Save to file
+    output_path = output or Path(filename)
+    output_path.write_bytes(content)
+
+    size_kb = len(content) / 1024
+    success(f"Downloaded: {output_path} ({size_kb:.1f} KB)")
+
+
+@app.command("backup-delete")
+def backup_delete(
+    backup_id: Annotated[str, typer.Argument(help="Backup ID to delete")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+) -> None:
+    """Delete a backup archive.
+
+    This action cannot be undone.
+
+    Example:
+        sibyld db backup-delete backup_20260110_153045
+        sibyld db backup-delete backup_20260110_153045 -y
+    """
+    if not yes:
+        warn(f"This will permanently delete backup: {backup_id}")
+        if not typer.confirm("Continue?"):
+            info("Cancelled")
+            return
+
+    info(f"Deleting backup: {backup_id}...")
+
+    result = _api_request("DELETE", f"/backups/{backup_id}")
+
+    if isinstance(result, dict) and result.get("deleted"):
+        success(f"Backup deleted: {backup_id}")
+    else:
+        error("Failed to delete backup")
+        raise typer.Exit(code=1)
+
+
+@app.command("backup-cleanup")
+def backup_cleanup(
+    retention_days: Annotated[
+        int | None,
+        typer.Option("--retention", "-r", help="Override retention period (days)"),
+    ] = None,
+) -> None:
+    """Trigger backup cleanup job.
+
+    Removes backup archives older than the retention period.
+
+    Example:
+        sibyld db backup-cleanup                # Use default retention
+        sibyld db backup-cleanup --retention 7  # Keep only 7 days
+    """
+    info("Triggering backup cleanup job...")
+
+    json_data = {}
+    if retention_days is not None:
+        json_data["retention_days"] = retention_days
+
+    result = _api_request("POST", "/backups/cleanup", json_data=json_data)
+
+    if isinstance(result, dict):
+        job_id = result.get("job_id", "unknown")
+        success(f"Cleanup job queued: {job_id}")
+    else:
+        error("Failed to queue cleanup job")
+        raise typer.Exit(code=1)
+
+
+@app.command("backup-settings")
+def backup_settings() -> None:
+    """Show backup configuration settings.
+
+    Example:
+        sibyld db backup-settings
+    """
+    result = _api_request("GET", "/backups/settings")
+
+    if not isinstance(result, dict):
+        error("Failed to get backup settings")
+        raise typer.Exit(code=1)
+
+    console.print(f"\n[{NEON_CYAN}]Backup Settings[/{NEON_CYAN}]\n")
+    console.print(f"  Enabled: {result.get('backup_enabled', False)}")
+    console.print(f"  Schedule: {result.get('backup_schedule', 'unknown')}")
+    console.print(f"  Directory: {result.get('backup_dir', 'unknown')}")
+    console.print(f"  Retention: {result.get('retention_days', 'unknown')} days")
+    console.print()

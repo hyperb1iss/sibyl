@@ -1244,6 +1244,77 @@ export interface RestoreResponse {
   duration_seconds: number;
 }
 
+// Backup Management Types (per-org backup settings and archives)
+export type BackupStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+export interface BackupSettingsResponse {
+  enabled: boolean;
+  schedule: string;
+  retention_days: number;
+  include_postgres: boolean;
+  include_graph: boolean;
+  last_backup_at: string | null;
+  last_backup_id: string | null;
+}
+
+export interface BackupSettingsUpdate {
+  enabled?: boolean;
+  schedule?: string;
+  retention_days?: number;
+  include_postgres?: boolean;
+  include_graph?: boolean;
+}
+
+export interface BackupInfo {
+  id: string;
+  backup_id: string;
+  status: BackupStatus;
+  filename: string | null;
+  size_bytes: number;
+  entity_count: number;
+  relationship_count: number;
+  duration_seconds: number;
+  triggered_by: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  error: string | null;
+}
+
+export interface BackupListResponse {
+  backups: BackupInfo[];
+  total: number;
+}
+
+export interface CreateBackupRequest {
+  include_postgres?: boolean;
+  include_graph?: boolean;
+}
+
+export interface CreateBackupResponse {
+  id: string;
+  backup_id: string;
+  job_id: string;
+  status: string;
+  message: string;
+}
+
+export interface BackupJobStatus {
+  job_id: string;
+  function: string;
+  status: string;
+  enqueue_time: string | null;
+  start_time: string | null;
+  finish_time: string | null;
+  result: unknown;
+  error: string | null;
+}
+
+export interface CleanupResponse {
+  job_id: string;
+  message: string;
+}
+
 // =============================================================================
 // API Functions
 // =============================================================================
@@ -1607,6 +1678,37 @@ export const api = {
           skip_existing: skipExisting,
         }),
       }),
+  },
+
+  // Backup Management (per-org backup settings and archives)
+  backups: {
+    settings: {
+      get: () => fetchApi<BackupSettingsResponse>('/backups/settings'),
+      update: (data: BackupSettingsUpdate) =>
+        fetchApi<BackupSettingsResponse>('/backups/settings', {
+          method: 'PATCH',
+          body: JSON.stringify(data),
+        }),
+    },
+    list: (limit = 50, offset = 0) =>
+      fetchApi<BackupListResponse>(`/backups?limit=${limit}&offset=${offset}`),
+    get: (backupId: string) => fetchApi<BackupInfo>(`/backups/${backupId}`),
+    create: (data?: CreateBackupRequest) =>
+      fetchApi<CreateBackupResponse>('/backups', {
+        method: 'POST',
+        body: JSON.stringify(data ?? {}),
+      }),
+    delete: (backupId: string) =>
+      fetchApi<{ deleted: boolean; backup_id: string }>(`/backups/${backupId}`, {
+        method: 'DELETE',
+      }),
+    download: (backupId: string) => `/api/backups/${backupId}/download`,
+    cleanup: (retentionDays?: number) =>
+      fetchApi<CleanupResponse>('/backups/cleanup', {
+        method: 'POST',
+        body: JSON.stringify(retentionDays ? { retention_days: retentionDays } : {}),
+      }),
+    jobStatus: (jobId: string) => fetchApi<BackupJobStatus>(`/backups/jobs/${jobId}`),
   },
 
   auth: {

@@ -1152,6 +1152,130 @@ class SystemSetting(TimestampMixin, table=True):
 
 
 # =============================================================================
+# BackupSettings - Per-organization backup configuration
+# =============================================================================
+
+
+class BackupSettings(TimestampMixin, table=True):
+    """Per-organization backup configuration.
+
+    Stores backup schedule, retention, and preferences for each organization.
+    Only one BackupSettings row per organization.
+    """
+
+    __tablename__ = "backup_settings"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(
+        foreign_key="organizations.id",
+        unique=True,
+        index=True,
+        description="Organization this setting belongs to",
+    )
+
+    # Enable/disable scheduled backups
+    enabled: bool = Field(default=True, description="Enable scheduled automatic backups")
+
+    # Schedule (cron expression)
+    schedule: str = Field(
+        default="0 2 * * *",
+        max_length=64,
+        description="Cron schedule for automatic backups (default: 2 AM daily)",
+    )
+
+    # Retention policy
+    retention_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Number of days to retain backups before auto-cleanup",
+    )
+
+    # Backup options
+    include_postgres: bool = Field(default=True, description="Include PostgreSQL in backups")
+    include_graph: bool = Field(default=True, description="Include knowledge graph in backups")
+
+    # Last backup info (denormalized for quick access)
+    last_backup_at: datetime | None = Field(default=None, description="When last backup completed")
+    last_backup_id: str | None = Field(
+        default=None, max_length=64, description="ID of last completed backup"
+    )
+
+    def __repr__(self) -> str:
+        return f"<BackupSettings org={self.organization_id} enabled={self.enabled}>"
+
+
+class BackupStatus(StrEnum):
+    """Status of a backup operation."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class Backup(TimestampMixin, table=True):
+    """Record of a backup archive.
+
+    Tracks individual backup archives with metadata for UI display
+    and lifecycle management.
+    """
+
+    __tablename__ = "backups"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(
+        foreign_key="organizations.id",
+        index=True,
+        description="Organization this backup belongs to",
+    )
+
+    # Backup identification
+    backup_id: str = Field(
+        max_length=64,
+        unique=True,
+        index=True,
+        description="Unique backup identifier (e.g., backup_20260110_153045)",
+    )
+
+    # Status (stored as VARCHAR, use BackupStatus.X.value when setting)
+    status: str = Field(
+        default=BackupStatus.PENDING.value,
+        sa_column=Column(String(32), nullable=False, server_default=text("'pending'")),
+        description="Current backup status (pending, in_progress, completed, failed)",
+    )
+    job_id: str | None = Field(default=None, max_length=128, description="arq job ID for tracking")
+
+    # Archive details
+    filename: str | None = Field(default=None, max_length=255, description="Archive filename")
+    file_path: str | None = Field(default=None, max_length=1024, description="Full path to archive")
+    size_bytes: int = Field(default=0, ge=0, description="Archive size in bytes")
+
+    # Backup contents
+    include_postgres: bool = Field(default=True, description="Includes PostgreSQL dump")
+    include_graph: bool = Field(default=True, description="Includes knowledge graph")
+    entity_count: int = Field(default=0, ge=0, description="Number of graph entities")
+    relationship_count: int = Field(default=0, ge=0, description="Number of graph relationships")
+
+    # Timing
+    started_at: datetime | None = Field(default=None, description="When backup started")
+    completed_at: datetime | None = Field(default=None, description="When backup completed")
+    duration_seconds: float = Field(default=0.0, ge=0, description="Backup duration")
+
+    # Metadata
+    error: str | None = Field(default=None, sa_type=Text, description="Error message if failed")
+    triggered_by: str | None = Field(
+        default=None, max_length=64, description="How backup was triggered (scheduled, manual)"
+    )
+    created_by_user_id: UUID | None = Field(
+        default=None, foreign_key="users.id", description="User who triggered manual backup"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Backup {self.backup_id} status={self.status}>"
+
+
+# =============================================================================
 # AgentMessage - Chat history for agent sessions
 # =============================================================================
 

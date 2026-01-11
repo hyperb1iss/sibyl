@@ -582,8 +582,9 @@ class RelationshipManager:
 
         try:
             # Sanitize pagination to prevent injection
+            # Note: max_value for limit increased to support backup exports
             safe_offset = _sanitize_pagination(offset, max_value=100000)
-            safe_limit = _sanitize_pagination(limit, max_value=1000)
+            safe_limit = _sanitize_pagination(limit, max_value=100000)
 
             # Direct Cypher query to get edges (Graphiti's EntityEdge.get_by_group_ids
             # expects ENTITY_EDGE label but our edges have RELATES_TO, MENTIONS, etc.)

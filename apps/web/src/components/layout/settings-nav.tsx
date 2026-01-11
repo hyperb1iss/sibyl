@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { IconComponent } from '@/components/ui/icons';
-import { Activity, Database, Flash, Settings, User, Users } from '@/components/ui/icons';
+import { Activity, Archive, Database, Flash, Settings, User, Users } from '@/components/ui/icons';
 import { useMe } from '@/lib/hooks';
 
 interface SettingsNavItem {
@@ -58,6 +58,12 @@ const ADMIN_NAVIGATION: SettingsNavItem[] = [
     href: '/settings/admin/ai',
     icon: Flash,
     description: 'API keys and LLM settings',
+  },
+  {
+    name: 'Backups',
+    href: '/settings/admin/backups',
+    icon: Archive,
+    description: 'Backup management and archives',
   },
   {
     name: 'System',

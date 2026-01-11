@@ -278,6 +278,26 @@ class Settings(BaseSettings):
         description="Token overlap between chunks",
     )
 
+    # Backup configuration
+    backup_dir: Path = Field(
+        default=Path("./backups"),
+        description="Directory to store backup archives",
+    )
+    backup_retention_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Number of days to retain backups before auto-cleanup",
+    )
+    backup_schedule: str = Field(
+        default="0 2 * * *",
+        description="Cron schedule for automatic backups (default: 2 AM daily)",
+    )
+    backup_enabled: bool = Field(
+        default=True,
+        description="Enable scheduled automatic backups",
+    )
+
     @property
     def falkordb_url(self) -> str:
         """Construct FalkorDB connection URL."""

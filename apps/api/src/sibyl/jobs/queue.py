@@ -551,3 +551,99 @@ async def enqueue_agent_resume(
     )
 
     return job.job_id
+
+
+async def enqueue_backup(
+    organization_id: str,
+    *,
+    include_postgres: bool = True,
+    include_graph: bool = True,
+    backup_id: str | None = None,
+) -> str:
+    """Enqueue a backup job.
+
+    Creates a complete backup archive containing PostgreSQL dump
+    and graph data export.
+
+    Args:
+        organization_id: Organization UUID to backup
+        include_postgres: Include PostgreSQL dump
+        include_graph: Include graph export
+        backup_id: Pre-generated backup ID (optional, for API-triggered backups)
+
+    Returns:
+        Job ID for tracking
+    """
+    from datetime import UTC, datetime
+
+    pool = await get_pool()
+
+    # Use timestamp in job ID to allow multiple backups
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    job_id = f"backup:{organization_id}:{timestamp}"
+
+    job = await pool.enqueue_job(
+        "run_backup",
+        organization_id,
+        include_postgres=include_postgres,
+        include_graph=include_graph,
+        backup_id=backup_id,
+        _job_id=job_id,
+    )
+
+    if job is None:
+        # Shouldn't happen with timestamped IDs, but handle gracefully
+        log.info("Backup job already exists", job_id=job_id)
+        return job_id
+
+    log.info(
+        "Enqueued backup job",
+        job_id=job.job_id,
+        organization_id=organization_id,
+        include_postgres=include_postgres,
+        include_graph=include_graph,
+        backup_id=backup_id,
+    )
+
+    return job.job_id
+
+
+async def enqueue_backup_cleanup(
+    *,
+    retention_days: int | None = None,
+) -> str:
+    """Enqueue a backup cleanup job.
+
+    Removes backup archives older than the retention period.
+
+    Args:
+        retention_days: Override retention period (default: from settings)
+
+    Returns:
+        Job ID for tracking
+    """
+    pool = await get_pool()
+
+    job_id = "backup_cleanup"
+
+    # Clear old result to allow re-run
+    result_key = f"arq:result:{job_id}"
+    await pool.delete(result_key)
+
+    kwargs = {}
+    if retention_days is not None:
+        kwargs["retention_days"] = retention_days
+
+    job = await pool.enqueue_job(
+        "cleanup_old_backups",
+        **kwargs,
+        _job_id=job_id,
+    )
+
+    if job is None:
+        log.info("Backup cleanup job already running", job_id=job_id)
+        return job_id
+
+    log.info("Enqueued backup cleanup job", job_id=job.job_id, retention_days=retention_days)
+
+    return job.job_id

@@ -23,6 +23,7 @@ from sibyl.api.routes import (
     agents_router,
     approvals_router,
     auth_router,
+    backups_router,
     crawler_router,
     entities_router,
     epics_router,
@@ -179,6 +180,7 @@ def create_api_app() -> FastAPI:
     # Register routers
     app.include_router(agents_router)
     app.include_router(approvals_router)
+    app.include_router(backups_router)
     app.include_router(entities_router)
     app.include_router(tasks_router)
     app.include_router(epics_router)

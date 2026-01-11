@@ -185,6 +185,13 @@ export const queryKeys = {
       ['approvals', 'pending', project_id ? { project_id } : undefined] as const,
     detail: (id: string) => ['approvals', 'detail', id] as const,
   },
+  backups: {
+    all: ['backups'] as const,
+    settings: ['backups', 'settings'] as const,
+    list: ['backups', 'list'] as const,
+    detail: (id: string) => ['backups', 'detail', id] as const,
+    jobStatus: (jobId: string) => ['backups', 'job', jobId] as const,
+  },
 };
 
 // =============================================================================
@@ -2009,6 +2016,124 @@ export function useDeleteSetting() {
       queryClient.invalidateQueries({ queryKey: queryKeys.settings.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.setup.status });
       queryClient.invalidateQueries({ queryKey: queryKeys.setup.validation });
+    },
+  });
+}
+
+// =============================================================================
+// Backup Management Hooks
+// =============================================================================
+
+/**
+ * Get backup settings for the current organization.
+ */
+export function useBackupSettings(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.backups.settings,
+    queryFn: () => api.backups.settings.get(),
+    enabled: options?.enabled ?? true,
+    staleTime: 30000,
+  });
+}
+
+/**
+ * Update backup settings for the current organization.
+ */
+export function useUpdateBackupSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: Parameters<typeof api.backups.settings.update>[0]) =>
+      api.backups.settings.update(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.backups.settings });
+    },
+  });
+}
+
+/**
+ * List all backups for the current organization.
+ */
+export function useBackups(options?: { enabled?: boolean; limit?: number; offset?: number }) {
+  return useQuery({
+    queryKey: queryKeys.backups.list,
+    queryFn: () => api.backups.list(options?.limit ?? 50, options?.offset ?? 0),
+    enabled: options?.enabled ?? true,
+    staleTime: 10000,
+    refetchInterval: 30000, // Auto-refresh every 30 seconds
+  });
+}
+
+/**
+ * Get details of a specific backup.
+ */
+export function useBackup(backupId: string, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.backups.detail(backupId),
+    queryFn: () => api.backups.get(backupId),
+    enabled: (options?.enabled ?? true) && !!backupId,
+    staleTime: 10000,
+  });
+}
+
+/**
+ * Create a new backup.
+ */
+export function useCreateBackup() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data?: Parameters<typeof api.backups.create>[0]) => api.backups.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.backups.list });
+    },
+  });
+}
+
+/**
+ * Delete a backup.
+ */
+export function useDeleteBackup() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (backupId: string) => api.backups.delete(backupId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.backups.list });
+    },
+  });
+}
+
+/**
+ * Trigger backup cleanup.
+ */
+export function useBackupCleanup() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (retentionDays?: number) => api.backups.cleanup(retentionDays),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.backups.list });
+    },
+  });
+}
+
+/**
+ * Get status of a backup job.
+ */
+export function useBackupJobStatus(jobId: string, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.backups.jobStatus(jobId),
+    queryFn: () => api.backups.jobStatus(jobId),
+    enabled: (options?.enabled ?? true) && !!jobId,
+    staleTime: 2000,
+    refetchInterval: query => {
+      // Stop polling if job is complete
+      const status = query.state.data?.status;
+      if (status === 'complete' || status === 'not_found') {
+        return false;
+      }
+      return 3000; // Poll every 3 seconds while job is running
     },
   });
 }
