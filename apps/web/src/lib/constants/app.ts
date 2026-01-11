@@ -3,7 +3,7 @@
 // =============================================================================
 
 export const APP_CONFIG = {
-  VERSION: '0.1.0',
+  VERSION: process.env.NEXT_PUBLIC_VERSION || '0.0.0',
   NAME: 'Sibyl',
   TAGLINE: 'Knowledge Oracle',
 } as const;

@@ -207,9 +207,11 @@ def create_api_app() -> FastAPI:
     @app.get("/")
     async def root() -> dict[str, str]:
         """API root - basic info."""
+        from sibyl import __version__
+
         return {
             "name": "Sibyl API",
-            "version": "0.1.0",
+            "version": __version__,
             "docs": "/api/docs",
             "websocket": "/api/ws",
         }
@@ -221,6 +223,8 @@ def create_api_app() -> FastAPI:
         Used by load balancers, monitoring, and frontend connection checks.
         For detailed stats, use /admin/health (requires auth).
         """
-        return {"status": "healthy"}
+        from sibyl import __version__
+
+        return {"status": "healthy", "version": __version__}
 
     return app
