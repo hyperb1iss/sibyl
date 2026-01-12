@@ -114,12 +114,10 @@ export function TaskDetailPanel({ task }: TaskDetailPanelProps) {
         handleStatusChange={handleStatusChange}
         isUpdating={updateStatus.isPending}
       >
-        {/* Quick Actions inside header card */}
+        {/* Blocker alert (when blocked) */}
         <TaskQuickActions
           status={status}
           blockerReason={blockerReason}
-          isUpdating={updateStatus.isPending}
-          onStatusChange={handleStatusChange}
           onUpdateField={updateField}
         />
       </TaskHeader>
