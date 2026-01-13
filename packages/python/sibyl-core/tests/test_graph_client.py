@@ -291,14 +291,10 @@ class TestWriteLockBackwardCompat:
         lock2 = graph_client.write_lock
         assert lock1 is lock2
 
-    def test_write_lock_separate_from_org_locks(
+    async def test_write_lock_separate_from_org_locks(
         self, graph_client: GraphClient, org_id: str
     ) -> None:
         """Global write_lock is separate from per-org locks."""
         global_lock = graph_client.write_lock
-
-        async def get_org_lock() -> asyncio.Semaphore:
-            return await graph_client.get_org_write_lock(org_id)
-
-        org_lock = asyncio.get_event_loop().run_until_complete(get_org_lock())
+        org_lock = await graph_client.get_org_write_lock(org_id)
         assert global_lock is not org_lock

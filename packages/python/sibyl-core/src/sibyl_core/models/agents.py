@@ -73,6 +73,15 @@ class AgentRecord(Entity):
     worktree_path: str | None = Field(default=None, description="Path to isolated worktree")
     worktree_branch: str | None = Field(default=None, description="Git branch name")
 
+    # Orchestration (three-tier model)
+    task_orchestrator_id: str | None = Field(
+        default=None, description="TaskOrchestrator managing this worker, if any"
+    )
+    standalone: bool = Field(
+        default=True,
+        description="True if created directly by user, False if managed by TaskOrchestrator",
+    )
+
     # Lifecycle
     status: AgentStatus = Field(default=AgentStatus.INITIALIZING, description="Current state")
     started_at: datetime | None = Field(default=None, description="When agent started working")
@@ -151,6 +160,8 @@ class AgentRecord(Entity):
             worktree_id=meta.get("worktree_id"),
             worktree_path=meta.get("worktree_path"),
             worktree_branch=meta.get("worktree_branch"),
+            task_orchestrator_id=meta.get("task_orchestrator_id"),
+            standalone=meta.get("standalone", True),
             initial_prompt=meta.get("initial_prompt", ""),
             created_by=meta.get("created_by"),
             checkpoint_id=meta.get("checkpoint_id"),

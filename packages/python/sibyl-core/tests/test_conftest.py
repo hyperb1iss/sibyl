@@ -152,15 +152,14 @@ class TestMockEntityManager:
         results = await mock_entity_manager.list_by_type(EntityType.TASK, status="todo")
         assert len(results) == 2
 
-    def test_operation_tracking(self, mock_entity_manager, entity_factory) -> None:
+    @pytest.mark.asyncio
+    async def test_operation_tracking(self, mock_entity_manager, entity_factory) -> None:
         """Operations are tracked in history."""
         entity = entity_factory()
         mock_entity_manager.add_entity(entity)
 
-        # Synchronous add doesn't track, but we can check get operations
-        import asyncio
-
-        asyncio.get_event_loop().run_until_complete(mock_entity_manager.get(entity.id))
+        # Check get operations are tracked
+        await mock_entity_manager.get(entity.id)
         assert any(op["op"] == "get" for op in mock_entity_manager.operation_history)
 
 
