@@ -250,10 +250,12 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
         </div>
       </div>
 
-      {/* Main Grid - Single grid for all dashboard cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        {/* Task Overview - Takes 2 cols */}
-        <div className="lg:col-span-2 bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+      {/* Main Layout - Two independent columns */}
+      <div className="flex flex-col lg:flex-row gap-4 sm:gap-6">
+        {/* Left Column - Main content */}
+        <div className="flex-1 space-y-4 sm:space-y-6">
+          {/* Task Overview */}
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
           <div className="flex items-center justify-between mb-4 sm:mb-6 gap-2">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-coral/10 border border-sc-coral/20 flex items-center justify-center shrink-0">
@@ -345,10 +347,93 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               </div>
             </div>
           )}
+          </div>
+
+          {/* Velocity Chart */}
+          {orgMetrics && (
+            <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-green/10 border border-sc-green/20 flex items-center justify-center shrink-0">
+                    <TrendingUp width={16} height={16} className="text-sc-green sm:w-5 sm:h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">
+                      Completion Velocity
+                    </h2>
+                    <p className="text-xs text-sc-fg-muted">Tasks completed per day (14-day trend)</p>
+                  </div>
+                </div>
+              </div>
+              <VelocityLineChart data={orgMetrics.velocity_trend} />
+            </div>
+          )}
+
+          {/* Knowledge Distribution */}
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+            <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center shrink-0">
+                <Layers width={16} height={16} className="text-sc-cyan sm:w-5 sm:h-5" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary truncate">
+                  Knowledge Distribution
+                </h2>
+                <p className="text-xs sm:text-sm text-sc-fg-muted">
+                  {stats?.total_entities ?? 0} total entities
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2.5 sm:space-y-3">
+              {Object.entries(stats?.entity_counts ?? {})
+                .filter(([_, count]) => count > 0)
+                .sort((a, b) => b[1] - a[1])
+                .map(([type, count]) => {
+                  const total = stats?.total_entities ?? 1;
+                  const percentage = (count / total) * 100;
+                  const color = ENTITY_COLORS[type as keyof typeof ENTITY_COLORS] ?? '#8b85a0';
+
+                  return (
+                    <div key={type} className="group">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: color }}
+                          />
+                          <span className="text-xs sm:text-sm font-medium text-sc-fg-primary capitalize">
+                            {type.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                        <span className="text-xs sm:text-sm text-sc-fg-muted">
+                          {count}{' '}
+                          <span className="text-sc-fg-subtle hidden xs:inline">
+                            ({percentage.toFixed(1)}%)
+                          </span>
+                        </span>
+                      </div>
+                      <div className="h-1.5 sm:h-2 bg-sc-bg-dark rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500 group-hover:opacity-80"
+                          style={{
+                            width: `${percentage}%`,
+                            backgroundColor: color,
+                            boxShadow: `0 0 8px ${color}40`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
         </div>
 
-        {/* Quick Actions */}
-        <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+        {/* Right Column - Sidebar */}
+        <div className="lg:w-80 shrink-0 space-y-4 sm:space-y-6">
+          {/* Quick Actions */}
+          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
           <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
             <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
               <Zap width={16} height={16} className="text-sc-purple sm:w-5 sm:h-5" />
@@ -455,28 +540,8 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
           </div>
         </div>
 
-        {/* Velocity Chart - in same grid, flows under Task Overview */}
-        {orgMetrics && (
-          <div className="lg:col-span-2 bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2 sm:gap-3">
-                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-green/10 border border-sc-green/20 flex items-center justify-center shrink-0">
-                  <TrendingUp width={16} height={16} className="text-sc-green sm:w-5 sm:h-5" />
-                </div>
-                <div>
-                  <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">
-                    Completion Velocity
-                  </h2>
-                  <p className="text-xs text-sc-fg-muted">Tasks completed per day (14-day trend)</p>
-                </div>
-              </div>
-            </div>
-            <VelocityLineChart data={orgMetrics.velocity_trend} />
-          </div>
-        )}
-
-        {/* This Week Stats - in same grid */}
-        {orgMetrics && (
+          {/* This Week Stats */}
+          {orgMetrics && (
           <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
             <div className="flex items-center gap-2 sm:gap-3 mb-3">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
@@ -520,65 +585,6 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
             </div>
           </div>
         )}
-      </div>
-
-      {/* Entity Breakdown - Full Width Bar Chart Style */}
-      <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
-        <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
-          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-cyan/10 border border-sc-cyan/20 flex items-center justify-center shrink-0">
-            <Layers width={16} height={16} className="text-sc-cyan sm:w-5 sm:h-5" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary truncate">
-              Knowledge Distribution
-            </h2>
-            <p className="text-xs sm:text-sm text-sc-fg-muted">
-              {stats?.total_entities ?? 0} total entities
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-2.5 sm:space-y-3">
-          {Object.entries(stats?.entity_counts ?? {})
-            .filter(([_, count]) => count > 0)
-            .sort((a, b) => b[1] - a[1])
-            .map(([type, count]) => {
-              const total = stats?.total_entities ?? 1;
-              const percentage = (count / total) * 100;
-              const color = ENTITY_COLORS[type as keyof typeof ENTITY_COLORS] ?? '#8b85a0';
-
-              return (
-                <div key={type} className="group">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: color }}
-                      />
-                      <span className="text-xs sm:text-sm font-medium text-sc-fg-primary capitalize">
-                        {type.replace(/_/g, ' ')}
-                      </span>
-                    </div>
-                    <span className="text-xs sm:text-sm text-sc-fg-muted">
-                      {count}{' '}
-                      <span className="text-sc-fg-subtle hidden xs:inline">
-                        ({percentage.toFixed(1)}%)
-                      </span>
-                    </span>
-                  </div>
-                  <div className="h-1.5 sm:h-2 bg-sc-bg-dark rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500 group-hover:opacity-80"
-                      style={{
-                        width: `${percentage}%`,
-                        backgroundColor: color,
-                        boxShadow: `0 0 8px ${color}40`,
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
         </div>
       </div>
 
