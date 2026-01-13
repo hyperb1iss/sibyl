@@ -125,7 +125,8 @@ COMPOSE_CONFIG = {
                 "api": {"condition": "service_healthy"},
             },
             "environment": {
-                "NEXT_PUBLIC_API_URL": "http://localhost:3334",
+                "SIBYL_API_URL": "http://api:3334",  # Server-side (SSR) fetches
+                "NEXT_PUBLIC_API_URL": "http://localhost:3334",  # Client-side fetches
                 "NODE_ENV": "production",
             },
             "healthcheck": {
