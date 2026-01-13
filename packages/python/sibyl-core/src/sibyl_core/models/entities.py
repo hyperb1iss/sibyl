@@ -46,6 +46,10 @@ class EntityType(StrEnum):
     APPROVAL = "approval"  # A human approval request
     CHECKPOINT = "checkpoint"  # Agent session checkpoint for resume
 
+    # Orchestration types (three-tier model)
+    TASK_ORCHESTRATOR = "task_orchestrator"  # Per-task build loop coordinator
+    META_ORCHESTRATOR = "meta_orchestrator"  # Project-level coordination singleton
+
 
 class RelationshipType(StrEnum):
     """Types of relationships between entities."""
@@ -87,6 +91,11 @@ class RelationshipType(StrEnum):
     CHECKPOINTED_AS = "CHECKPOINTED_AS"  # Agent -> Checkpoint
     REQUESTED_BY = "REQUESTED_BY"  # Approval -> Agent
     HANDED_OFF_TO = "HANDED_OFF_TO"  # Agent -> Agent (task handoff)
+
+    # Orchestration relationships
+    ORCHESTRATES = "ORCHESTRATES"  # TaskOrchestrator -> Agent (worker)
+    MANAGED_BY = "MANAGED_BY"  # TaskOrchestrator -> MetaOrchestrator
+    COORDINATES = "COORDINATES"  # MetaOrchestrator -> TaskOrchestrator
 
 
 class Entity(BaseModel):

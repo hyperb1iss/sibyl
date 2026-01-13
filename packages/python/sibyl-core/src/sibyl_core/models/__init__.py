@@ -9,6 +9,10 @@ from sibyl_core.models.agents import (
     ApprovalRecord,
     ApprovalStatus,
     ApprovalType,
+    QualityGateType,
+    TaskOrchestratorPhase,
+    TaskOrchestratorRecord,
+    TaskOrchestratorStatus,
     WorktreeRecord,
     WorktreeStatus,
 )
@@ -94,6 +98,11 @@ __all__ = [
     "ApprovalRecord",
     "ApprovalStatus",
     "ApprovalType",
+    # Orchestration (three-tier model)
+    "QualityGateType",
+    "TaskOrchestratorPhase",
+    "TaskOrchestratorRecord",
+    "TaskOrchestratorStatus",
     # Notes
     "AuthorType",
     # Documentation crawling
