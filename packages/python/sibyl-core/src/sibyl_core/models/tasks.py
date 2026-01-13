@@ -150,6 +150,7 @@ class Project(Entity):
 
     # Organization
     repository_url: str | None = Field(default=None, description="GitHub repo URL")
+    repo_path: str | None = Field(default=None, description="Local filesystem path to repository")
     features: list[str] = Field(default_factory=list, description="Major feature areas")
     tech_stack: list[str] = Field(default_factory=list, description="Technologies used")
 

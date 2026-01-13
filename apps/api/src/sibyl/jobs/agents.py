@@ -243,6 +243,8 @@ async def run_agent_execution(  # noqa: PLR0915
     agent_type: str = "general",
     task_id: str | None = None,
     created_by: str | None = None,
+    create_worktree: bool = True,
+    repo_path: str | None = None,
 ) -> dict[str, Any]:
     """Execute a Claude agent in the worker process.
 
@@ -258,6 +260,8 @@ async def run_agent_execution(  # noqa: PLR0915
         agent_type: Type of agent
         task_id: Optional task ID
         created_by: User ID who spawned the agent
+        create_worktree: Whether to create isolated git worktree
+        repo_path: Path to git repository (default: cwd)
 
     Returns:
         Dict with execution results
@@ -278,12 +282,15 @@ async def run_agent_execution(  # noqa: PLR0915
         client = await get_graph_client()
         manager = EntityManager(client, group_id=org_id)
 
+        # Use configured repo_path or fall back to cwd
+        effective_repo_path = repo_path or "."
+
         # Create worktree manager and agent runner
         worktree_manager = WorktreeManager(
             entity_manager=manager,
             org_id=org_id,
             project_id=project_id,
-            repo_path=".",
+            repo_path=effective_repo_path,
         )
 
         runner = AgentRunner(
@@ -308,7 +315,7 @@ async def run_agent_execution(  # noqa: PLR0915
             agent_type=AgentType(agent_type),
             task=task,
             spawn_source=AgentSpawnSource.USER,
-            create_worktree=False,
+            create_worktree=create_worktree,
             enable_approvals=True,
             agent_id=agent_id,
         )
@@ -545,6 +552,22 @@ async def run_agent_execution(  # noqa: PLR0915
             },
         )
 
+        # Mark worktree as merged (preserves branch for review/merge)
+        if instance.record.worktree_id:
+            try:
+                await worktree_manager.mark_merged(instance.record.worktree_id)
+                log.info(
+                    "worktree_marked_merged",
+                    agent_id=agent_id,
+                    worktree_id=instance.record.worktree_id,
+                )
+            except Exception as wt_err:
+                log.warning(
+                    "worktree_cleanup_failed",
+                    agent_id=agent_id,
+                    error=str(wt_err),
+                )
+
         result = {
             "agent_id": agent_id,
             "status": "completed",
@@ -565,10 +588,20 @@ async def run_agent_execution(  # noqa: PLR0915
     except Exception as e:
         log.exception("run_agent_execution_failed", agent_id=agent_id, error=str(e))
 
-        # Update agent status to failed
+        # Update agent status to failed and mark worktree as orphaned
         try:
             client = await get_graph_client()
             manager = EntityManager(client, group_id=org_id)
+
+            # Get agent record to find worktree_id
+            agent_record = await manager.get(agent_id)
+            worktree_id = None
+            if agent_record:
+                meta = getattr(agent_record, "metadata", {}) or {}
+                worktree_id = meta.get("worktree_id") or getattr(
+                    agent_record, "worktree_id", None
+                )
+
             await manager.update(
                 agent_id,
                 {
@@ -576,6 +609,30 @@ async def run_agent_execution(  # noqa: PLR0915
                     "error_message": str(e),
                 },
             )
+
+            # Mark worktree as orphaned for later cleanup
+            if worktree_id:
+                try:
+                    from sibyl.agents import WorktreeManager
+
+                    wt_manager = WorktreeManager(
+                        entity_manager=manager,
+                        org_id=org_id,
+                        project_id=project_id,
+                        repo_path=repo_path or ".",
+                    )
+                    await wt_manager.mark_orphaned(worktree_id)
+                    log.info(
+                        "worktree_marked_orphaned",
+                        agent_id=agent_id,
+                        worktree_id=worktree_id,
+                    )
+                except Exception as wt_err:
+                    log.warning(
+                        "worktree_orphan_failed",
+                        agent_id=agent_id,
+                        error=str(wt_err),
+                    )
         except Exception:
             log.warning("Failed to update agent status on error", agent_id=agent_id)
 

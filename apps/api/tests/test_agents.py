@@ -99,6 +99,7 @@ class MockWorktreeManager:
     async def create(self, task_id: str, branch_name: str, agent_id: str) -> "MockWorktree":
         """Create a mock worktree."""
         worktree = MockWorktree(
+            id=f"worktree_{agent_id[-12:]}",  # Mock ID
             path=f"/mock/worktrees/{agent_id}",  # Mock path, not real
             branch=branch_name,
             task_id=task_id,
@@ -116,6 +117,7 @@ class MockWorktreeManager:
 class MockWorktree:
     """Mock worktree data."""
 
+    id: str
     path: str
     branch: str
     task_id: str

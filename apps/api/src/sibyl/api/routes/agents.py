@@ -209,6 +209,7 @@ class SpawnAgentRequest(BaseModel):
     agent_type: AgentType = AgentType.GENERAL
     project_id: str
     task_id: str | None = None
+    create_worktree: bool = True  # Enable git worktree isolation
 
 
 class SpawnAgentResponse(BaseModel):
@@ -482,6 +483,15 @@ async def spawn_agent(
     await manager.create_direct(record)
 
     try:
+        # Get project repo_path if available
+        repo_path: str | None = None
+        try:
+            project = await manager.get(request.project_id)
+            if project and hasattr(project, "repo_path"):
+                repo_path = project.repo_path
+        except Exception:
+            pass  # Fallback to cwd
+
         # Enqueue execution in worker process
         await enqueue_agent_execution(
             agent_id=agent_id,
@@ -491,6 +501,8 @@ async def spawn_agent(
             agent_type=request.agent_type.value,
             task_id=request.task_id,
             created_by=str(user.id),
+            create_worktree=request.create_worktree,
+            repo_path=repo_path,
         )
 
         return SpawnAgentResponse(

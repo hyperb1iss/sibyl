@@ -440,10 +440,12 @@ Priority: {task.priority}
             await self.entity_manager.update(
                 record.id,
                 {
+                    "worktree_id": worktree.id,
                     "worktree_path": worktree.path,
                     "worktree_branch": worktree.branch,
                 },
             )
+            record.worktree_id = worktree.id
             record.worktree_path = worktree.path
             record.worktree_branch = worktree.branch
 

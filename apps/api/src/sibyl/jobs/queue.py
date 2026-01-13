@@ -455,6 +455,8 @@ async def enqueue_agent_execution(
     agent_type: str = "general",
     task_id: str | None = None,
     created_by: str | None = None,
+    create_worktree: bool = True,
+    repo_path: str | None = None,
 ) -> str:
     """Enqueue an agent execution job.
 
@@ -469,6 +471,8 @@ async def enqueue_agent_execution(
         agent_type: Type of agent (general, planner, implementer, etc.)
         task_id: Optional task ID the agent is working on
         created_by: User ID who spawned the agent
+        create_worktree: Whether to create isolated git worktree
+        repo_path: Path to git repository (default: cwd)
 
     Returns:
         Job ID for tracking
@@ -487,6 +491,8 @@ async def enqueue_agent_execution(
         agent_type=agent_type,
         task_id=task_id,
         created_by=created_by,
+        create_worktree=create_worktree,
+        repo_path=repo_path,
         _job_id=job_id,
     )
 

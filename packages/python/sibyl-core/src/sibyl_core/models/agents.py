@@ -69,6 +69,7 @@ class AgentRecord(Entity):
 
     # Assignment
     task_id: str | None = Field(default=None, description="Assigned task UUID")
+    worktree_id: str | None = Field(default=None, description="WorktreeRecord ID for cleanup")
     worktree_path: str | None = Field(default=None, description="Path to isolated worktree")
     worktree_branch: str | None = Field(default=None, description="Git branch name")
 
@@ -147,6 +148,7 @@ class AgentRecord(Entity):
             project_id=meta.get("project_id", ""),
             task_id=meta.get("task_id"),
             session_id=meta.get("session_id"),
+            worktree_id=meta.get("worktree_id"),
             worktree_path=meta.get("worktree_path"),
             worktree_branch=meta.get("worktree_branch"),
             initial_prompt=meta.get("initial_prompt", ""),
