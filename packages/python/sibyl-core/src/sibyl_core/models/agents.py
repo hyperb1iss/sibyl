@@ -173,6 +173,146 @@ class AgentRecord(Entity):
 
 
 # =============================================================================
+# MetaOrchestrator - Project-level coordination singleton (Tier 1)
+# =============================================================================
+
+
+class MetaOrchestratorStatus(StrEnum):
+    """MetaOrchestrator lifecycle states."""
+
+    IDLE = "idle"  # No active tasks
+    RUNNING = "running"  # Coordinating tasks
+    PAUSED = "paused"  # User-initiated pause
+    FAILED = "failed"  # Critical error
+
+
+class SprintStrategy(StrEnum):
+    """Strategy for spawning TaskOrchestrators."""
+
+    SEQUENTIAL = "sequential"  # One task at a time
+    PARALLEL = "parallel"  # Multiple concurrent tasks
+    PRIORITY = "priority"  # Highest priority first
+
+
+class MetaOrchestratorRecord(Entity):
+    """Project-level coordination singleton (Tier 1).
+
+    Manages the overall project development by:
+    - Maintaining sprint context (epics, priorities)
+    - Spawning TaskOrchestrators for selected tasks
+    - Aggregating cross-task dependencies
+    - Tracking project-wide cost budgets
+
+    Part of the three-tier orchestration model:
+    - Tier 1: MetaOrchestrator (project-level coordination) <- THIS
+    - Tier 2: TaskOrchestrator (per-task build loop)
+    - Tier 3: Worker Agents (actual implementation)
+    """
+
+    entity_type: EntityType = EntityType.META_ORCHESTRATOR
+
+    # Ownership
+    project_id: str = Field(..., description="Project UUID this orchestrator manages")
+
+    # Sprint context
+    current_epic_id: str | None = Field(default=None, description="Active epic being worked")
+    task_queue: list[str] = Field(
+        default_factory=list, description="Task IDs queued for processing"
+    )
+    active_orchestrators: list[str] = Field(
+        default_factory=list, description="TaskOrchestrator IDs currently running"
+    )
+
+    # Strategy
+    status: MetaOrchestratorStatus = Field(
+        default=MetaOrchestratorStatus.IDLE, description="Current state"
+    )
+    strategy: SprintStrategy = Field(
+        default=SprintStrategy.SEQUENTIAL, description="How to spawn orchestrators"
+    )
+    max_concurrent: int = Field(
+        default=3, description="Max concurrent TaskOrchestrators (for parallel)"
+    )
+
+    # Cost controls
+    budget_usd: float = Field(default=100.0, description="Sprint budget in USD")
+    spent_usd: float = Field(default=0.0, description="Total spent this sprint")
+    cost_alert_threshold: float = Field(
+        default=0.8, description="Alert at this % of budget"
+    )
+
+    # Timing
+    sprint_started_at: datetime | None = Field(
+        default=None, description="When sprint started"
+    )
+    sprint_ends_at: datetime | None = Field(
+        default=None, description="Sprint deadline"
+    )
+
+    # Metrics
+    tasks_completed: int = Field(default=0, description="Tasks completed this sprint")
+    tasks_failed: int = Field(default=0, description="Tasks failed this sprint")
+    total_rework_cycles: int = Field(
+        default=0, description="Total rework cycles across all tasks"
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def set_entity_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Set name and content from orchestrator fields."""
+        if isinstance(data, dict):
+            # Require organization_id
+            if not data.get("organization_id"):
+                msg = "organization_id is required for MetaOrchestratorRecord"
+                raise ValueError(msg)
+            # Name: project-based
+            if "name" not in data:
+                project_id = data.get("project_id", "unknown")
+                data["name"] = f"metaorch-{project_id[-8:]}"
+            # Content: status summary
+            if "content" not in data:
+                parts = [
+                    f"Status: {data.get('status', 'idle')}",
+                    f"Queue: {len(data.get('task_queue', []))} tasks",
+                    f"Active: {len(data.get('active_orchestrators', []))}",
+                ]
+                data["content"] = " | ".join(parts)
+        return data
+
+    @classmethod
+    def from_entity(cls, entity: Entity, org_id: str) -> "MetaOrchestratorRecord":
+        """Construct MetaOrchestratorRecord from a generic Entity.
+
+        Args:
+            entity: Generic Entity from EntityManager.get()
+            org_id: Organization ID (fallback if not in entity)
+
+        Returns:
+            Typed MetaOrchestratorRecord with all fields populated.
+        """
+        meta = entity.metadata or {}
+        return cls(
+            id=entity.id,
+            name=entity.name,
+            organization_id=entity.organization_id or org_id,
+            entity_type=EntityType.META_ORCHESTRATOR,
+            project_id=meta.get("project_id", ""),
+            current_epic_id=meta.get("current_epic_id"),
+            task_queue=meta.get("task_queue", []),
+            active_orchestrators=meta.get("active_orchestrators", []),
+            status=MetaOrchestratorStatus(meta.get("status", "idle")),
+            strategy=SprintStrategy(meta.get("strategy", "sequential")),
+            max_concurrent=meta.get("max_concurrent", 3),
+            budget_usd=meta.get("budget_usd", 100.0),
+            spent_usd=meta.get("spent_usd", 0.0),
+            cost_alert_threshold=meta.get("cost_alert_threshold", 0.8),
+            tasks_completed=meta.get("tasks_completed", 0),
+            tasks_failed=meta.get("tasks_failed", 0),
+            total_rework_cycles=meta.get("total_rework_cycles", 0),
+        )
+
+
+# =============================================================================
 # TaskOrchestrator - Per-task build loop coordinator (Tier 2)
 # =============================================================================
 
