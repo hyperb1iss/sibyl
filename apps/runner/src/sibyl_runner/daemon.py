@@ -7,6 +7,7 @@ import structlog
 
 from sibyl_runner.config import RunnerConfig
 from sibyl_runner.connection import RunnerClient
+from sibyl_runner.project_registry import ProjectRegistry
 
 log = structlog.get_logger()
 
@@ -37,13 +38,18 @@ class RunnerDaemon:
     def __init__(self, config: RunnerConfig) -> None:
         self.config = config
         self.client = RunnerClient(config)
+        self.registry = ProjectRegistry(config.worktree_base)
         self._executions: dict[str, AgentExecution] = {}
         self._background_tasks: set[asyncio.Task] = set()
         self._shutdown_requested = False
+        self._connected_event = asyncio.Event()
 
         # Register message handlers
         self.client.register_handler("task_assign", self._handle_task_assign)
         self.client.register_handler("task_cancel", self._handle_task_cancel)
+
+        # Register connection callback to signal connected event
+        self.client.on_connect(self._connected_event.set)
 
     @property
     def current_agent_count(self) -> int:
@@ -68,6 +74,33 @@ class RunnerDaemon:
             runner_id=self.config.runner_id,
             max_agents=self.config.max_concurrent_agents,
         )
+
+        # Load projects from config
+        project_count = self.registry.load_from_config()
+        log.info("projects_loaded", count=project_count)
+
+        # Register project registrations as a background task after connecting
+        async def _register_projects() -> None:
+            """Register warm projects with server after connection established."""
+            # Wait for connection using event instead of polling
+            await self._connected_event.wait()
+
+            if self._shutdown_requested:
+                return
+
+            # Register each project's worktree with the server
+            for project_id, project in self.registry.projects.items():
+                if project.worktree_path:
+                    await self.client.send_project_register(
+                        project_id=project_id,
+                        worktree_path=str(project.worktree_path),
+                        worktree_branch=project.worktree_branch,
+                    )
+
+        # Start project registration in background
+        task = asyncio.create_task(_register_projects())
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
         # Start connection with reconnect handling
         await self.client.run_with_reconnect()

@@ -37,6 +37,7 @@ class RunnerClient:
         self._shutdown_requested = False
         self._reconnect_count = 0
         self._last_heartbeat = datetime.now(UTC)
+        self._on_connect: Callable[[], None] | None = None
 
     @property
     def connected(self) -> bool:
@@ -51,6 +52,10 @@ class RunnerClient:
             handler: Async function to call with message data.
         """
         self._handlers[msg_type] = handler
+
+    def on_connect(self, callback: Callable[[], None]) -> None:
+        """Register a callback to be called when connection is established."""
+        self._on_connect = callback
 
     async def connect(self) -> bool:
         """Establish WebSocket connection to server.
@@ -71,6 +76,8 @@ class RunnerClient:
             self._connected = True
             self._reconnect_count = 0
             log.info("connected_to_server", url=ws_url)
+            if self._on_connect:
+                self._on_connect()
             return True
         except Exception as e:
             log.warning("connection_failed", url=ws_url, error=str(e))
