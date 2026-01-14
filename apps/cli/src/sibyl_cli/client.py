@@ -863,6 +863,121 @@ class SibylClient:
         """
         return await self._request("GET", "/sources/link-graph/status")
 
+    # =========================================================================
+    # Inter-Agent Messaging
+    # =========================================================================
+
+    async def send_agent_message(
+        self,
+        from_agent_id: str,
+        message_type: str,
+        subject: str,
+        content: str,
+        *,
+        to_agent_id: str | None = None,
+        requires_response: bool = False,
+        priority: int = 0,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Send an inter-agent message.
+
+        Args:
+            from_agent_id: Sender agent ID
+            message_type: Type of message (progress, query, blocker, etc.)
+            subject: Short subject line
+            content: Full message content
+            to_agent_id: Target agent (None = orchestrator)
+            requires_response: True if sender waits for response
+            priority: 0-10, higher = more urgent
+            context: Additional context data
+        """
+        data = {
+            "from_agent_id": from_agent_id,
+            "message_type": message_type,
+            "subject": subject,
+            "content": content,
+            "requires_response": requires_response,
+            "priority": priority,
+        }
+        if to_agent_id:
+            data["to_agent_id"] = to_agent_id
+        if context:
+            data["context"] = context
+        return await self._request("POST", "/agent-messages", json=data)
+
+    async def get_pending_messages(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 50,
+        include_read: bool = False,
+    ) -> dict[str, Any]:
+        """Get pending messages for an agent.
+
+        Args:
+            agent_id: Agent to get messages for
+            limit: Max messages to return
+            include_read: Include already-read messages
+        """
+        params = {"limit": limit, "include_read": str(include_read).lower()}
+        return await self._request("GET", f"/agent-messages/pending/{agent_id}", params=params)
+
+    async def get_message_digest(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Get pending messages formatted as digest for injection.
+
+        Args:
+            agent_id: Agent to get messages for
+            limit: Max messages to return
+        """
+        params = {"limit": limit}
+        return await self._request("GET", f"/agent-messages/pending/{agent_id}/digest", params=params)
+
+    async def respond_to_message(
+        self,
+        message_id: str,
+        from_agent_id: str,
+        content: str,
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Respond to an inter-agent message.
+
+        Args:
+            message_id: Message to respond to
+            from_agent_id: Agent sending response
+            content: Response content
+            context: Additional context
+        """
+        data = {
+            "from_agent_id": from_agent_id,
+            "content": content,
+        }
+        if context:
+            data["context"] = context
+        return await self._request("POST", f"/agent-messages/{message_id}/respond", json=data)
+
+    async def mark_message_read(self, message_id: str) -> dict[str, Any]:
+        """Mark a message as read."""
+        return await self._request("POST", f"/agent-messages/{message_id}/read")
+
+    async def get_agent_conversation(
+        self,
+        agent_id: str,
+        other_agent_id: str,
+        *,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Get conversation history between two agents."""
+        params = {"limit": limit}
+        return await self._request(
+            "GET", f"/agent-messages/conversation/{agent_id}/{other_agent_id}", params=params
+        )
+
 
 # Client cache by context name (None = default/active context)
 _clients: dict[str | None, SibylClient] = {}

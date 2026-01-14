@@ -10,6 +10,8 @@ from typing import Annotated
 
 import typer
 
+# Import subcommand apps
+from sibyl_cli.agent import app as agent_app
 from sibyl_cli.auth import app as auth_app
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
@@ -23,8 +25,6 @@ from sibyl_cli.common import (
     run_async,
     success,
 )
-
-# Import subcommand apps
 from sibyl_cli.config_cmd import app as config_app
 from sibyl_cli.config_store import resolve_project_from_cwd
 from sibyl_cli.context import app as context_app
@@ -50,6 +50,7 @@ app = typer.Typer(
 
 
 # Register subcommand groups
+app.add_typer(agent_app, name="agent")
 app.add_typer(task_app, name="task")
 app.add_typer(epic_app, name="epic")
 app.add_typer(project_app, name="project")
