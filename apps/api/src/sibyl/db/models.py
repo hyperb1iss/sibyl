@@ -81,6 +81,31 @@ class AgentMessageType(StrEnum):
     error = "error"
 
 
+class InterAgentMessageType(StrEnum):
+    """Types of inter-agent messages for the message bus.
+
+    These enable agent-to-agent communication during distributed execution.
+    """
+
+    # Progress updates (non-blocking, broadcast)
+    progress = "progress"
+
+    # Query/response pair (can be blocking)
+    query = "query"
+    response = "response"
+
+    # Code review workflow
+    review_request = "review_request"
+    review_result = "review_result"
+
+    # Status signals
+    blocker = "blocker"
+    delegation = "delegation"
+
+    # System messages
+    system = "system"
+
+
 # =============================================================================
 # Base Model
 # =============================================================================
@@ -1337,6 +1362,101 @@ class AgentMessage(SQLModel, table=True):
         default_factory=utcnow_naive,
         sa_column=Column(DateTime, nullable=False, server_default=text("now()"), index=True),
         description="When message was created",
+    )
+
+
+# =============================================================================
+# Inter-Agent Message Bus
+# =============================================================================
+
+
+class InterAgentMessage(TimestampMixin, table=True):
+    """A message in the inter-agent message bus.
+
+    Enables agent-to-agent communication for distributed execution:
+    - Progress updates (broadcast to orchestrator/UI)
+    - Query/response (blocking asks between agents)
+    - Review requests (code review workflow)
+    - Blockers and delegations
+
+    Messages are persisted for audit trail and async pickup.
+    Real-time delivery uses Redis pub/sub.
+    """
+
+    __tablename__ = "inter_agent_messages"  # type: ignore[assignment]
+    __table_args__ = (
+        Index("ix_inter_agent_to_agent", "to_agent_id", "read_at"),
+        Index("ix_inter_agent_response", "response_to_id"),
+        Index("ix_inter_agent_org_created", "organization_id", "created_at"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(
+        foreign_key="organizations.id",
+        index=True,
+        description="Organization context",
+    )
+
+    # Sender/receiver
+    from_agent_id: str = Field(
+        max_length=64,
+        index=True,
+        description="Agent that sent this message",
+    )
+    to_agent_id: str | None = Field(
+        default=None,
+        max_length=64,
+        index=True,
+        description="Target agent (None = broadcast to orchestrator)",
+    )
+
+    # Message type and content
+    message_type: str = Field(
+        max_length=32,
+        index=True,
+        description="Type of message (see InterAgentMessageType)",
+    )
+    subject: str = Field(
+        max_length=255,
+        description="Short subject line for UI display",
+    )
+    content: str = Field(
+        sa_type=Text,
+        description="Full message content",
+    )
+
+    # Response tracking for query/response pattern
+    response_to_id: UUID | None = Field(
+        default=None,
+        foreign_key="inter_agent_messages.id",
+        description="If this is a response, the original message ID",
+    )
+    requires_response: bool = Field(
+        default=False,
+        description="True if sender is waiting for response (blocking query)",
+    )
+
+    # Priority and context
+    priority: int = Field(
+        default=0,
+        ge=0,
+        le=10,
+        description="0=normal, 10=critical (for ordering)",
+    )
+    context: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        description="Additional context (file paths, line numbers, etc.)",
+    )
+
+    # Delivery tracking
+    read_at: datetime | None = Field(
+        default=None,
+        description="When the target agent read this message",
+    )
+    responded_at: datetime | None = Field(
+        default=None,
+        description="When a response was received (for blocking queries)",
     )
 
 

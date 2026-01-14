@@ -27,6 +27,11 @@ from sibyl.agents.integration import (
     TestConfig,
     TestFailedError,
 )
+from sibyl.agents.message_bus import (
+    MessageBus,
+    format_message_for_injection,
+    format_messages_digest,
+)
 from sibyl.agents.messages import (
     format_agent_message,
     format_assistant_message,
@@ -52,6 +57,7 @@ __all__ = [
     "IntegrationManager",
     "IntegrationResult",
     "IntegrationStatus",
+    "MessageBus",
     "OrchestratorError",
     "RestoreResult",
     "SetupConfig",
@@ -63,6 +69,8 @@ __all__ = [
     "create_checkpoint_from_instance",
     "format_agent_message",
     "format_assistant_message",
+    "format_message_for_injection",
+    "format_messages_digest",
     "format_user_message",
     "generate_workflow_reminder",
     "get_tool_icon_and_preview",
