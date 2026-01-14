@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sibyl.agents.task_router import RoutingResult, RunnerScore, TaskRouter
 from sibyl.auth.dependencies import require_org_role
 from sibyl.auth.http import extract_bearer_token
 from sibyl.auth.jwt import JwtError, verify_access_token
@@ -105,6 +106,82 @@ class RunnerUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     capabilities: list[str] | None = None
     max_concurrent_agents: int | None = Field(default=None, ge=1, le=20)
+
+
+class RouteTaskRequest(BaseModel):
+    """Request to route a task to an optimal runner."""
+
+    project_id: UUID | None = Field(default=None, description="Project ID for affinity scoring")
+    required_capabilities: list[str] = Field(
+        default_factory=list, description="Capabilities the runner must have"
+    )
+    preferred_runner_id: UUID | None = Field(
+        default=None, description="Prefer this runner if available"
+    )
+    exclude_runners: list[UUID] = Field(
+        default_factory=list, description="Runner IDs to exclude"
+    )
+
+
+class RunnerScoreResponse(BaseModel):
+    """Score breakdown for a runner."""
+
+    runner_id: UUID
+    runner_name: str
+    total_score: float
+    affinity_score: float
+    capability_score: float
+    load_score: float
+    health_penalty: float
+    available_slots: int
+    has_warm_worktree: bool
+    missing_capabilities: list[str] | None
+
+    @classmethod
+    def from_score(cls, score: RunnerScore) -> "RunnerScoreResponse":
+        return cls(
+            runner_id=score.runner_id,
+            runner_name=score.runner_name,
+            total_score=score.total_score,
+            affinity_score=score.affinity_score,
+            capability_score=score.capability_score,
+            load_score=score.load_score,
+            health_penalty=score.health_penalty,
+            available_slots=score.available_slots,
+            has_warm_worktree=score.has_warm_worktree,
+            missing_capabilities=score.missing_capabilities,
+        )
+
+
+class RouteTaskResponse(BaseModel):
+    """Result of task routing decision."""
+
+    success: bool
+    runner_id: UUID | None = None
+    runner_name: str | None = None
+    score: RunnerScoreResponse | None = None
+    all_scores: list[RunnerScoreResponse] | None = None
+    reason: str | None = None
+
+    @classmethod
+    def from_result(cls, result: RoutingResult) -> "RouteTaskResponse":
+        return cls(
+            success=result.success,
+            runner_id=result.runner_id,
+            runner_name=result.runner_name,
+            score=RunnerScoreResponse.from_score(result.score) if result.score else None,
+            all_scores=[
+                RunnerScoreResponse.from_score(s) for s in result.all_scores
+            ] if result.all_scores else None,
+            reason=result.reason,
+        )
+
+
+class RunnerScoresResponse(BaseModel):
+    """Response containing runner scores."""
+
+    scores: list[RunnerScoreResponse]
+    total: int
 
 
 # =============================================================================
@@ -331,6 +408,66 @@ async def list_runner_projects(
     projects = result.scalars().all()
 
     return [RunnerProjectResponse.model_validate(p) for p in projects]
+
+
+@router.post("/route", response_model=RouteTaskResponse)
+async def route_task(
+    request: RouteTaskRequest,
+    auth: AuthSession = Depends(get_auth_session),
+) -> RouteTaskResponse:
+    """Route a task to the optimal runner.
+
+    Scores runners based on:
+    - Project affinity (warm worktrees = 50 points)
+    - Capability match (30 points if all required capabilities present)
+    - Current load (0-20 points based on available capacity)
+    - Health (stale heartbeat = -100 penalty)
+
+    Returns the best runner and full scoring breakdown for transparency.
+    """
+    org = _require_org(auth)
+
+    task_router = TaskRouter(auth.session, org.id)
+    result = await task_router.route_task(
+        project_id=request.project_id,
+        required_capabilities=request.required_capabilities,
+        preferred_runner_id=request.preferred_runner_id,
+        exclude_runners=request.exclude_runners,
+    )
+
+    return RouteTaskResponse.from_result(result)
+
+
+@router.get("/scores", response_model=RunnerScoresResponse)
+async def get_runner_scores(
+    project_id: UUID | None = None,
+    capabilities: str | None = None,
+    auth: AuthSession = Depends(get_auth_session),
+) -> RunnerScoresResponse:
+    """Get routing scores for all runners.
+
+    Useful for debugging and UI display of runner availability.
+
+    Query params:
+        project_id: Optional project for affinity scoring
+        capabilities: Comma-separated list of required capabilities
+    """
+    org = _require_org(auth)
+
+    required_caps = []
+    if capabilities:
+        required_caps = [c.strip() for c in capabilities.split(",") if c.strip()]
+
+    task_router = TaskRouter(auth.session, org.id)
+    scores = await task_router.get_runner_scores(
+        project_id=project_id,
+        required_capabilities=required_caps,
+    )
+
+    return RunnerScoresResponse(
+        scores=[RunnerScoreResponse.from_score(s) for s in scores],
+        total=len(scores),
+    )
 
 
 # =============================================================================
