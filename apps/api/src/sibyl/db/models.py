@@ -1484,14 +1484,20 @@ class RunnerProject(TimestampMixin, table=True):
 
 
 class AgentOperationalStatus(StrEnum):
-    """Operational status of an agent."""
+    """Operational status of an agent.
 
-    INITIALIZING = "initializing"
-    WORKING = "working"
-    WAITING_INPUT = "waiting_input"
-    PAUSED = "paused"
-    COMPLETED = "completed"
-    FAILED = "failed"
+    Aligned with AgentStatus from sibyl_core.models for consistency.
+    """
+
+    INITIALIZING = "initializing"  # Setting up worktree and environment
+    WORKING = "working"  # Actively executing tasks
+    PAUSED = "paused"  # User-initiated pause
+    WAITING_APPROVAL = "waiting_approval"  # Blocked on human approval
+    WAITING_DEPENDENCY = "waiting_dependency"  # Blocked on another task
+    RESUMING = "resuming"  # Recovering after restart
+    COMPLETED = "completed"  # Finished successfully
+    FAILED = "failed"  # Error state
+    TERMINATED = "terminated"  # User stopped the agent
 
 
 class AgentState(TimestampMixin, table=True):
@@ -1539,19 +1545,12 @@ class AgentState(TimestampMixin, table=True):
         description="Parent orchestrator ID if worker agent",
     )
 
-    # Status
-    status: AgentOperationalStatus = Field(
-        default=AgentOperationalStatus.INITIALIZING,
-        sa_column=Column(
-            Enum(
-                AgentOperationalStatus,
-                name="agentoperationalstatus",
-                values_callable=lambda enum: [e.value for e in enum],
-            ),
-            nullable=False,
-            server_default=text("'initializing'"),
-        ),
-        description="Current operational status",
+    # Status - using String to match migration and avoid enum issues
+    status: str = Field(
+        default="initializing",
+        max_length=32,
+        index=True,
+        description="Current operational status (see AgentOperationalStatus)",
     )
     last_heartbeat: datetime | None = Field(
         default=None,

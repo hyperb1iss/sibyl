@@ -24,7 +24,7 @@ from sibyl.auth.authorization import (
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import require_org_role
 from sibyl.auth.rls import AuthSession, get_auth_session
-from sibyl.db import AgentMessage as DbAgentMessage
+from sibyl.db import AgentMessage as DbAgentMessage, AgentState
 from sibyl.db.models import Organization, OrganizationRole, ProjectRole
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.graph.client import get_graph_client
@@ -327,6 +327,7 @@ async def list_agents(
         limit: Maximum results
 
     Results are filtered to agents the user can access (own agents + projects with VIEWER+).
+    Identity comes from graph (name, type, project), operational state from Postgres.
     """
     ctx = auth.ctx
     org = _require_org(ctx)
@@ -341,11 +342,17 @@ async def list_agents(
 
     user_id_str = str(ctx.user.id)
 
-    # Get all agents (returns generic Entity objects)
+    # Get all agents from graph (identity data)
     results = await manager.list_by_type(
         entity_type=EntityType.AGENT,
         limit=limit * 3,  # Fetch extra for filtering
     )
+
+    # Get all AgentState records from Postgres (operational data)
+    state_result = await auth.session.execute(
+        select(AgentState).where(col(AgentState.organization_id) == org.id)
+    )
+    states_by_id = {s.graph_agent_id: s for s in state_result.scalars().all()}
 
     # Filter agents based on access control and preferences
     agents: list = []
@@ -373,25 +380,31 @@ async def list_agents(
     if not include_archived:
         agents = [a for a in agents if not (a.metadata or {}).get("archived")]
 
-    # Apply filters (agents are generic Entity objects - fields in metadata)
+    # Apply filters - use AgentState for status, graph for other fields
     if project:
         agents = [a for a in agents if (a.metadata or {}).get("project_id") == project]
     if status:
-        agents = [a for a in agents if (a.metadata or {}).get("status") == status.value]
+        # Use AgentState status if available, fall back to graph metadata
+        agents = [
+            a for a in agents
+            if (states_by_id.get(a.id) and states_by_id[a.id].status == status.value)
+            or (a.id not in states_by_id and (a.metadata or {}).get("status") == status.value)
+        ]
     if agent_type:
         agents = [a for a in agents if (a.metadata or {}).get("agent_type") == agent_type.value]
 
-    # Calculate stats
+    # Calculate stats using AgentState for status
     by_status: dict[str, int] = {}
     by_type: dict[str, int] = {}
     for agent in agents:
-        s = (agent.metadata or {}).get("status") or "initializing"
+        state = states_by_id.get(agent.id)
+        s = state.status if state else (agent.metadata or {}).get("status") or "initializing"
         by_status[s] = by_status.get(s, 0) + 1
         t = (agent.metadata or {}).get("agent_type") or "general"
         by_type[t] = by_type.get(t, 0) + 1
 
     return AgentListResponse(
-        agents=[_entity_to_agent_response(a) for a in agents[:limit]],
+        agents=[_entity_to_agent_response(a, states_by_id.get(a.id)) for a in agents[:limit]],
         total=len(agents),
         by_status=by_status,
         by_type=by_type,
@@ -404,7 +417,10 @@ async def get_agent(
     agent_id: str,
     auth: AuthSession = Depends(get_auth_session),
 ) -> AgentResponse:
-    """Get a specific agent by ID."""
+    """Get a specific agent by ID.
+
+    Identity comes from graph, operational state from Postgres.
+    """
     ctx = auth.ctx
     org = _require_org(ctx)
     client = await get_graph_client()
@@ -418,7 +434,13 @@ async def get_agent(
     # Check view permission (creator, org admin, or project VIEWER+)
     await _check_agent_view_permission(ctx, auth.session, entity)
 
-    return _entity_to_agent_response(entity)
+    # Fetch AgentState for operational data
+    state_result = await auth.session.execute(
+        select(AgentState).where(col(AgentState.graph_agent_id) == agent_id)
+    )
+    state = state_result.scalar_one_or_none()
+
+    return _entity_to_agent_response(entity, state)
 
 
 @router.post("", response_model=SpawnAgentResponse)
@@ -467,7 +489,7 @@ async def spawn_agent(
     # Derive name from prompt (first line, truncated)
     name = request.prompt.split("\n")[0][:100].strip() or "Agent"
 
-    # Create agent record synchronously so UI can poll immediately
+    # Create agent record in graph (identity)
     record = AgentRecord(
         id=agent_id,
         name=name,
@@ -481,6 +503,16 @@ async def spawn_agent(
         created_by=str(user.id),
     )
     await manager.create_direct(record)
+
+    # Create AgentState in Postgres (operational state)
+    agent_state = AgentState(
+        organization_id=org.id,
+        graph_agent_id=agent_id,
+        task_id=request.task_id,
+        status="initializing",
+    )
+    auth.session.add(agent_state)
+    await auth.session.commit()
 
     try:
         # Get project repo_path if available
@@ -512,9 +544,12 @@ async def spawn_agent(
         )
     except Exception as e:
         log.exception("Failed to enqueue agent", error=str(e))
-        # Try to clean up the entity we created
+        # Try to clean up the records we created
         with contextlib.suppress(Exception):
             await manager.delete(agent_id)
+        with contextlib.suppress(Exception):
+            await auth.session.delete(agent_state)
+            await auth.session.commit()
         raise HTTPException(status_code=500, detail="Failed to spawn agent") from e
 
 
@@ -527,6 +562,7 @@ async def pause_agent(
     """Pause an agent's execution.
 
     Requires ownership or CONTRIBUTOR+ project access.
+    Updates AgentState in Postgres (primary) and graph metadata (for legacy compatibility).
     """
     ctx = auth.ctx
     org = _require_org(ctx)
@@ -541,13 +577,26 @@ async def pause_agent(
     # Check control permission
     await _check_agent_control_permission(ctx, auth.session, entity)
 
-    agent_status = (entity.metadata or {}).get("status", "initializing")
+    # Get AgentState from Postgres (primary) or fall back to graph
+    state_result = await auth.session.execute(
+        select(AgentState).where(col(AgentState.graph_agent_id) == agent_id)
+    )
+    state = state_result.scalar_one_or_none()
+    agent_status = state.status if state else (entity.metadata or {}).get("status", "initializing")
+
     if agent_status not in (AgentStatus.WORKING.value, AgentStatus.WAITING_APPROVAL.value):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot pause agent in {agent_status} status",
         )
 
+    # Update AgentState in Postgres (primary source of truth)
+    if state:
+        state.status = AgentStatus.PAUSED.value
+        state.error_message = request.reason or "user_request"
+        await auth.session.commit()
+
+    # Also update graph metadata for legacy compatibility
     await manager.update(
         agent_id,
         {
@@ -575,6 +624,7 @@ async def resume_agent(
     The agent will be restarted from its last checkpoint.
 
     Requires ownership or CONTRIBUTOR+ project access.
+    Updates AgentState in Postgres (primary) and graph metadata (for legacy compatibility).
     """
     from sibyl.jobs.queue import enqueue_agent_resume
 
@@ -591,7 +641,12 @@ async def resume_agent(
     # Check control permission
     await _check_agent_control_permission(ctx, auth.session, entity)
 
-    agent_status = (entity.metadata or {}).get("status", "initializing")
+    # Get AgentState from Postgres (primary) or fall back to graph
+    state_result = await auth.session.execute(
+        select(AgentState).where(col(AgentState.graph_agent_id) == agent_id)
+    )
+    state = state_result.scalar_one_or_none()
+    agent_status = state.status if state else (entity.metadata or {}).get("status", "initializing")
 
     # Allow resuming from paused or terminal states
     resumable_states = (
@@ -606,7 +661,14 @@ async def resume_agent(
             detail=f"Cannot resume agent in {agent_status} status",
         )
 
-    # Clear terminal/paused state fields when resuming
+    # Update AgentState in Postgres (primary source of truth)
+    if state:
+        state.status = AgentStatus.RESUMING.value
+        state.error_message = None
+        state.completed_at = None
+        await auth.session.commit()
+
+    # Also update graph metadata for legacy compatibility
     await manager.update(
         agent_id,
         {
@@ -637,9 +699,10 @@ async def terminate_agent(
     """Terminate an agent.
 
     Requires ownership or CONTRIBUTOR+ project access.
+    Updates AgentState in Postgres (primary) and graph metadata (for legacy compatibility).
 
     This endpoint:
-    1. Updates the agent status in the graph to 'terminated'
+    1. Updates the agent status to 'terminated'
     2. Signals the worker to stop execution via Redis
 
     The worker checks for stop signals between message iterations and will
@@ -660,7 +723,13 @@ async def terminate_agent(
     # Check control permission
     await _check_agent_control_permission(ctx, auth.session, entity)
 
-    agent_status = (entity.metadata or {}).get("status", "initializing")
+    # Get AgentState from Postgres (primary) or fall back to graph
+    state_result = await auth.session.execute(
+        select(AgentState).where(col(AgentState.graph_agent_id) == agent_id)
+    )
+    state = state_result.scalar_one_or_none()
+    agent_status = state.status if state else (entity.metadata or {}).get("status", "initializing")
+
     terminal_states = (
         AgentStatus.COMPLETED.value,
         AgentStatus.FAILED.value,
@@ -675,7 +744,14 @@ async def terminate_agent(
     # Signal the worker to stop execution
     await request_agent_stop(agent_id)
 
-    # Update graph status
+    # Update AgentState in Postgres (primary source of truth)
+    if state:
+        state.status = AgentStatus.TERMINATED.value
+        state.error_message = request.reason or "user_terminated"
+        state.completed_at = datetime.now(UTC)
+        await auth.session.commit()
+
+    # Also update graph metadata for legacy compatibility
     await manager.update(
         agent_id,
         {
@@ -1002,6 +1078,7 @@ async def record_heartbeat(
     """Record a heartbeat from an agent.
 
     Called periodically by running agents to indicate liveness.
+    Updates AgentState in Postgres (primary) and graph metadata (for legacy compatibility).
     """
     ctx = auth.ctx
     org = _require_org(ctx)
@@ -1016,9 +1093,22 @@ async def record_heartbeat(
     await _check_agent_control_permission(ctx, auth.session, entity)
 
     now = datetime.now(UTC)
-    meta = entity.metadata or {}
 
-    # Update heartbeat and accumulate usage metrics
+    # Update AgentState in Postgres (primary source of truth)
+    state_result = await auth.session.execute(
+        select(AgentState).where(col(AgentState.graph_agent_id) == agent_id)
+    )
+    state = state_result.scalar_one_or_none()
+    if state:
+        state.last_heartbeat = now
+        state.tokens_used += request.tokens_delta
+        state.cost_usd += request.cost_delta
+        if request.current_step:
+            state.current_activity = request.current_step
+        await auth.session.commit()
+
+    # Also update graph metadata for legacy compatibility
+    meta = entity.metadata or {}
     updates = {
         "last_heartbeat": now.isoformat(),
         "tokens_used": meta.get("tokens_used", 0) + request.tokens_delta,
@@ -1049,6 +1139,52 @@ HEARTBEAT_STALE_THRESHOLD = 120  # 2 minutes without heartbeat = stale
 HEARTBEAT_UNRESPONSIVE_THRESHOLD = 600  # 10 minutes = unresponsive
 
 
+def _calculate_health_status(
+    state: AgentState | None,
+    meta: dict,
+    agent_status: str,
+    now: datetime,
+) -> tuple[AgentHealthStatus, str | None, int | None]:
+    """Calculate agent health status from heartbeat data.
+
+    Returns: (health_status, last_heartbeat_str, seconds_since_heartbeat)
+    """
+    active_states = (
+        AgentStatus.WORKING.value,
+        AgentStatus.WAITING_APPROVAL.value,
+        AgentStatus.RESUMING.value,
+    )
+
+    # Get heartbeat from AgentState (primary) or graph metadata (fallback)
+    last_heartbeat_dt: datetime | None = None
+    last_heartbeat_str: str | None = None
+    if state and state.last_heartbeat:
+        last_heartbeat_dt = state.last_heartbeat
+        last_heartbeat_str = state.last_heartbeat.isoformat()
+    elif meta.get("last_heartbeat"):
+        last_heartbeat_str = str(meta["last_heartbeat"])
+        last_heartbeat_dt = datetime.fromisoformat(last_heartbeat_str)
+
+    seconds_since: int | None = None
+    health_status = AgentHealthStatus.UNRESPONSIVE
+
+    if last_heartbeat_dt:
+        seconds_since = int((now - last_heartbeat_dt).total_seconds())
+
+        if seconds_since <= HEARTBEAT_STALE_THRESHOLD:
+            health_status = AgentHealthStatus.HEALTHY
+        elif seconds_since <= HEARTBEAT_UNRESPONSIVE_THRESHOLD:
+            health_status = AgentHealthStatus.STALE
+        else:
+            health_status = AgentHealthStatus.UNRESPONSIVE
+    # No heartbeat ever recorded - check if agent is supposed to be active
+    elif agent_status not in active_states:
+        # Initializing/paused agents without heartbeat are considered healthy
+        health_status = AgentHealthStatus.HEALTHY
+
+    return health_status, last_heartbeat_str, seconds_since
+
+
 @router.get("/health/overview", response_model=HealthOverviewResponse)
 async def get_health_overview(
     project_id: str | None = None,
@@ -1062,6 +1198,7 @@ async def get_health_overview(
     - unresponsive: no heartbeat for 10+ minutes
 
     Results are filtered to agents the user can access (own agents + projects with VIEWER+).
+    Uses AgentState from Postgres for heartbeat data (primary) with graph metadata fallback.
     """
     ctx = auth.ctx
     org = _require_org(ctx)
@@ -1074,73 +1211,48 @@ async def get_health_overview(
     if not is_admin:
         accessible_projects = await list_accessible_project_graph_ids(auth.session, ctx) or set()
 
-    # Get all agents
+    # Get all agents from graph and states from Postgres
     agents = await manager.list_by_type(entity_type=EntityType.AGENT, limit=100)
-    now = datetime.now(UTC)
-
-    agent_healths: list[AgentHealth] = []
-    healthy = 0
-    stale = 0
-    unresponsive = 0
-
-    # Only check agents that are in active states
-    active_states = (
-        AgentStatus.WORKING.value,
-        AgentStatus.WAITING_APPROVAL.value,
-        AgentStatus.RESUMING.value,
+    state_result = await auth.session.execute(
+        select(AgentState).where(col(AgentState.organization_id) == org.id)
     )
+    states_by_id = {s.graph_agent_id: s for s in state_result.scalars().all()}
+
+    now = datetime.now(UTC)
+    agent_healths: list[AgentHealth] = []
+    healthy, stale, unresponsive = 0, 0, 0
+    terminal_states = (AgentStatus.COMPLETED.value, AgentStatus.FAILED.value, AgentStatus.TERMINATED.value)
     user_id_str = str(ctx.user.id)
 
     for agent in agents:
         meta = agent.metadata or {}
-        agent_status = meta.get("status", "initializing")
         agent_project_id = meta.get("project_id")
         agent_created_by = meta.get("created_by") or agent.created_by
+        state = states_by_id.get(agent.id)
+        agent_status = state.status if state else meta.get("status", "initializing")
 
-        # Access control: skip agents user cannot view
+        # Access control and filtering
         if not is_admin:
             is_owner = agent_created_by == user_id_str
-            has_project_access = agent_project_id and agent_project_id in accessible_projects
-            if not (is_owner or has_project_access):
+            if not (is_owner or (agent_project_id and agent_project_id in accessible_projects)):
                 continue
-
-        # Filter by project if specified
         if project_id and agent_project_id != project_id:
             continue
-
-        # Skip terminal states for health monitoring
-        terminal_states = (
-            AgentStatus.COMPLETED.value,
-            AgentStatus.FAILED.value,
-            AgentStatus.TERMINATED.value,
-        )
         if agent_status in terminal_states:
             continue
 
-        last_heartbeat_str = meta.get("last_heartbeat")
-        seconds_since: int | None = None
-        health_status = AgentHealthStatus.UNRESPONSIVE
+        # Calculate health status
+        health_status, last_heartbeat_str, seconds_since = _calculate_health_status(
+            state, meta, agent_status, now
+        )
 
-        if last_heartbeat_str:
-            last_heartbeat = datetime.fromisoformat(last_heartbeat_str)
-            seconds_since = int((now - last_heartbeat).total_seconds())
-
-            if seconds_since <= HEARTBEAT_STALE_THRESHOLD:
-                health_status = AgentHealthStatus.HEALTHY
-                healthy += 1
-            elif seconds_since <= HEARTBEAT_UNRESPONSIVE_THRESHOLD:
-                health_status = AgentHealthStatus.STALE
-                stale += 1
-            else:
-                health_status = AgentHealthStatus.UNRESPONSIVE
-                unresponsive += 1
-        # No heartbeat ever recorded - check if agent is supposed to be active
-        elif agent_status in active_states:
-            unresponsive += 1
-        else:
-            # Initializing/paused agents without heartbeat are considered healthy
-            health_status = AgentHealthStatus.HEALTHY
+        # Count health states
+        if health_status == AgentHealthStatus.HEALTHY:
             healthy += 1
+        elif health_status == AgentHealthStatus.STALE:
+            stale += 1
+        else:
+            unresponsive += 1
 
         agent_healths.append(
             AgentHealth(
@@ -1150,16 +1262,12 @@ async def get_health_overview(
                 agent_status=agent_status,
                 last_heartbeat=last_heartbeat_str,
                 seconds_since_heartbeat=seconds_since,
-                project_id=meta.get("project_id"),
+                project_id=agent_project_id,
             )
         )
 
     return HealthOverviewResponse(
-        agents=agent_healths,
-        total=len(agent_healths),
-        healthy=healthy,
-        stale=stale,
-        unresponsive=unresponsive,
+        agents=agent_healths, total=len(agent_healths), healthy=healthy, stale=stale, unresponsive=unresponsive
     )
 
 
@@ -1465,28 +1573,53 @@ async def archive_agent(
 # =============================================================================
 
 
-def _entity_to_agent_response(entity: "Entity") -> AgentResponse:
-    """Convert Entity to AgentResponse by extracting attributes from metadata.
+def _entity_to_agent_response(
+    entity: "Entity",
+    state: AgentState | None = None,
+) -> AgentResponse:
+    """Convert Entity to AgentResponse, merging with AgentState.
 
-    Agents stored via create_direct() have their fields in metadata.
+    Identity (name, type, project) comes from graph entity metadata.
+    Operational state (status, heartbeat, metrics) comes from AgentState if available.
+    Falls back to graph metadata for agents without AgentState (legacy).
     """
     meta = entity.metadata or {}
+
+    # Use AgentState for operational fields if available
+    if state:
+        status = state.status
+        last_heartbeat = state.last_heartbeat.isoformat() if state.last_heartbeat else None
+        started_at = state.started_at.isoformat() if state.started_at else None
+        completed_at = state.completed_at.isoformat() if state.completed_at else None
+        tokens_used = state.tokens_used
+        cost_usd = state.cost_usd
+        error_message = state.error_message
+    else:
+        # Fall back to graph metadata for legacy agents
+        status = meta.get("status", "initializing")
+        last_heartbeat = meta.get("last_heartbeat")
+        started_at = meta.get("started_at")
+        completed_at = meta.get("completed_at")
+        tokens_used = meta.get("tokens_used", 0)
+        cost_usd = meta.get("cost_usd", 0.0)
+        error_message = meta.get("error_message") or meta.get("paused_reason")
+
     return AgentResponse(
         id=entity.id,
         name=entity.name,
         agent_type=meta.get("agent_type", "general"),
-        status=meta.get("status", "initializing"),
+        status=status,
         task_id=meta.get("task_id"),
         project_id=meta.get("project_id"),
         created_by=meta.get("created_by") or entity.created_by,
         spawn_source=meta.get("spawn_source"),
-        started_at=meta.get("started_at"),
-        completed_at=meta.get("completed_at"),
-        last_heartbeat=meta.get("last_heartbeat"),
-        tokens_used=meta.get("tokens_used", 0),
-        cost_usd=meta.get("cost_usd", 0.0),
+        started_at=started_at,
+        completed_at=completed_at,
+        last_heartbeat=last_heartbeat,
+        tokens_used=tokens_used,
+        cost_usd=cost_usd,
         worktree_path=meta.get("worktree_path"),
         worktree_branch=meta.get("worktree_branch"),
-        error_message=meta.get("error_message") or meta.get("paused_reason"),
+        error_message=error_message,
         tags=meta.get("tags", []),
     )
