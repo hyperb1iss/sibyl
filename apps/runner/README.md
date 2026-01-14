@@ -5,11 +5,17 @@ Distributed agent execution daemon for Sibyl. Runs on host machines to execute A
 ## Installation
 
 ```bash
+# Via Homebrew (macOS)
+brew tap hyperb1iss/sibyl
+brew install sibyl-runner
+
+# Via pip/uv (any platform)
+pip install sibyl-runner
+# or
+uv tool install sibyl-runner
+
 # From source (development)
 uv pip install -e apps/runner
-
-# Via Homebrew (coming soon)
-brew install sibyl-runner
 ```
 
 ## Quick Start
