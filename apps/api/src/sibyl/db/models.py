@@ -1341,6 +1341,404 @@ class AgentMessage(SQLModel, table=True):
 
 
 # =============================================================================
+# Runner - Distributed agent execution hosts
+# =============================================================================
+
+
+class RunnerStatus(StrEnum):
+    """Status of a runner."""
+
+    ONLINE = "online"
+    OFFLINE = "offline"
+    BUSY = "busy"
+    DRAINING = "draining"  # Finishing current work, accepting no new
+
+
+class Runner(TimestampMixin, table=True):
+    """A registered runner that executes agents.
+
+    Runners connect to Sibyl Core via WebSocket, receive task assignments,
+    and spawn Claude Code agents with filesystem access. Each runner
+    tracks its capabilities, current load, and project affinity.
+
+    Architecture note: Runner IDENTITY (who it is) stays in the graph.
+    This table is for OPERATIONAL STATE only (heartbeat, status, load).
+    """
+
+    __tablename__ = "runners"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(
+        foreign_key="organizations.id",
+        index=True,
+        description="Organization this runner belongs to",
+    )
+    user_id: UUID = Field(
+        foreign_key="users.id",
+        index=True,
+        description="User who registered this runner (OAuth identity)",
+    )
+
+    # Identity (links to graph entity)
+    graph_runner_id: str = Field(
+        max_length=64,
+        unique=True,
+        index=True,
+        description="Entity ID in knowledge graph (e.g., runner_abc123)",
+    )
+    name: str = Field(max_length=255, description="Runner display name")
+    hostname: str = Field(max_length=255, description="Host machine name")
+
+    # Capabilities
+    capabilities: list[str] = Field(
+        default_factory=list,
+        sa_type=ARRAY(String),
+        description="Runner capabilities (e.g., docker, gpu, large_context)",
+    )
+    max_concurrent_agents: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description="Max agents this runner can execute simultaneously",
+    )
+    current_agent_count: int = Field(
+        default=0,
+        ge=0,
+        description="Current number of active agents on this runner",
+    )
+
+    # Status
+    status: RunnerStatus = Field(
+        default=RunnerStatus.OFFLINE,
+        sa_column=Column(
+            Enum(
+                RunnerStatus,
+                name="runnerstatus",
+                values_callable=lambda enum: [e.value for e in enum],
+            ),
+            nullable=False,
+            server_default=text("'offline'"),
+        ),
+        description="Current runner status",
+    )
+    last_heartbeat: datetime | None = Field(
+        default=None,
+        index=True,
+        description="Last heartbeat timestamp",
+    )
+
+    # Connection info
+    websocket_session_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Current WebSocket session ID",
+    )
+    client_version: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Runner client version (e.g., 0.1.0)",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Runner {self.name} status={self.status}>"
+
+
+class RunnerProject(TimestampMixin, table=True):
+    """Links a runner to projects it has warm worktrees for.
+
+    When a runner has a warm worktree for a project, it can be
+    preferentially assigned tasks for that project (project affinity).
+    """
+
+    __tablename__ = "runner_projects"  # type: ignore[assignment]
+    __table_args__ = (
+        Index("ix_runner_projects_runner_project_unique", "runner_id", "project_id", unique=True),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    runner_id: UUID = Field(foreign_key="runners.id", index=True)
+    project_id: UUID = Field(foreign_key="projects.id", index=True)
+
+    # Worktree info
+    worktree_path: str = Field(
+        max_length=1024,
+        description="Local path to worktree on runner",
+    )
+    worktree_branch: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Current branch in worktree",
+    )
+    last_used_at: datetime | None = Field(
+        default=None,
+        description="When this worktree was last used",
+    )
+
+    def __repr__(self) -> str:
+        return f"<RunnerProject runner={self.runner_id} project={self.project_id}>"
+
+
+# =============================================================================
+# AgentState - Operational state for agents (identity in graph)
+# =============================================================================
+
+
+class AgentOperationalStatus(StrEnum):
+    """Operational status of an agent."""
+
+    INITIALIZING = "initializing"
+    WORKING = "working"
+    WAITING_INPUT = "waiting_input"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class AgentState(TimestampMixin, table=True):
+    """Operational state for an agent.
+
+    Agent IDENTITY (name, type, task assignment, work history) lives in
+    the knowledge graph as an Entity. This table stores ephemeral
+    operational state that changes frequently during execution.
+    """
+
+    __tablename__ = "agent_states"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(
+        foreign_key="organizations.id",
+        index=True,
+        description="Organization that owns this agent",
+    )
+
+    # Link to graph entity
+    graph_agent_id: str = Field(
+        max_length=64,
+        unique=True,
+        index=True,
+        description="Agent entity ID in knowledge graph",
+    )
+
+    # Execution context
+    runner_id: UUID | None = Field(
+        default=None,
+        foreign_key="runners.id",
+        index=True,
+        description="Runner executing this agent (null if not assigned)",
+    )
+    task_id: str | None = Field(
+        default=None,
+        max_length=64,
+        index=True,
+        description="Task entity ID being worked on",
+    )
+    orchestrator_id: str | None = Field(
+        default=None,
+        max_length=64,
+        index=True,
+        description="Parent orchestrator ID if worker agent",
+    )
+
+    # Status
+    status: AgentOperationalStatus = Field(
+        default=AgentOperationalStatus.INITIALIZING,
+        sa_column=Column(
+            Enum(
+                AgentOperationalStatus,
+                name="agentoperationalstatus",
+                values_callable=lambda enum: [e.value for e in enum],
+            ),
+            nullable=False,
+            server_default=text("'initializing'"),
+        ),
+        description="Current operational status",
+    )
+    last_heartbeat: datetime | None = Field(
+        default=None,
+        index=True,
+        description="Last heartbeat from agent process",
+    )
+    progress_percent: int = Field(
+        default=0,
+        ge=0,
+        le=100,
+        description="Estimated progress (0-100)",
+    )
+    current_activity: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Current activity description for UI",
+    )
+
+    # Metrics
+    tokens_used: int = Field(default=0, ge=0, description="Total tokens consumed")
+    cost_usd: float = Field(default=0.0, ge=0, description="Estimated cost in USD")
+    started_at: datetime | None = Field(default=None, description="When execution started")
+    completed_at: datetime | None = Field(default=None, description="When execution completed")
+
+    # Error tracking
+    error_message: str | None = Field(
+        default=None,
+        sa_type=Text,
+        description="Error message if failed",
+    )
+    error_count: int = Field(default=0, ge=0, description="Number of errors encountered")
+
+    def __repr__(self) -> str:
+        return f"<AgentState {self.graph_agent_id} status={self.status}>"
+
+
+# =============================================================================
+# OrchestratorState - Operational state for task orchestrators
+# =============================================================================
+
+
+class OrchestratorPhase(StrEnum):
+    """Phase of the orchestrator build loop."""
+
+    IMPLEMENT = "implement"
+    REVIEW = "review"
+    REWORK = "rework"
+    HUMAN_REVIEW = "human_review"
+    MERGE = "merge"
+
+
+class OrchestratorOperationalStatus(StrEnum):
+    """Operational status of an orchestrator."""
+
+    PENDING = "pending"
+    IMPLEMENTING = "implementing"
+    REVIEWING = "reviewing"
+    REWORKING = "reworking"
+    HUMAN_REVIEW = "human_review"
+    PAUSED = "paused"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class OrchestratorState(TimestampMixin, table=True):
+    """Operational state for a task orchestrator.
+
+    Orchestrator IDENTITY (config, task assignment) lives in the graph.
+    This table stores the evolving state of the build loop.
+    """
+
+    __tablename__ = "orchestrator_states"  # type: ignore[assignment]
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(
+        foreign_key="organizations.id",
+        index=True,
+        description="Organization that owns this orchestrator",
+    )
+
+    # Link to graph entity
+    graph_orchestrator_id: str = Field(
+        max_length=64,
+        unique=True,
+        index=True,
+        description="Orchestrator entity ID in knowledge graph",
+    )
+    task_id: str = Field(
+        max_length=64,
+        index=True,
+        description="Task entity ID being orchestrated",
+    )
+    project_id: UUID = Field(
+        foreign_key="projects.id",
+        index=True,
+        description="Project this orchestrator belongs to",
+    )
+
+    # Build loop state
+    current_phase: OrchestratorPhase = Field(
+        default=OrchestratorPhase.IMPLEMENT,
+        sa_column=Column(
+            Enum(
+                OrchestratorPhase,
+                name="orchestratorphase",
+                values_callable=lambda enum: [e.value for e in enum],
+            ),
+            nullable=False,
+            server_default=text("'implement'"),
+        ),
+        description="Current phase in build loop",
+    )
+    status: OrchestratorOperationalStatus = Field(
+        default=OrchestratorOperationalStatus.PENDING,
+        sa_column=Column(
+            Enum(
+                OrchestratorOperationalStatus,
+                name="orchestratoroperationalstatus",
+                values_callable=lambda enum: [e.value for e in enum],
+            ),
+            nullable=False,
+            server_default=text("'pending'"),
+        ),
+        description="Current operational status",
+    )
+
+    # Quality gate config (from graph, cached here for quick access)
+    gate_config: list[str] = Field(
+        default_factory=list,
+        sa_type=ARRAY(String),
+        description="Quality gates to run (lint, typecheck, test, ai_review, security_scan, human_review)",
+    )
+
+    # Iteration tracking
+    rework_count: int = Field(default=0, ge=0, description="Number of rework iterations")
+    max_rework_attempts: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description="Max rework attempts before escalation",
+    )
+
+    # Current worker
+    current_worker_id: str | None = Field(
+        default=None,
+        max_length=64,
+        index=True,
+        description="Current worker agent entity ID",
+    )
+
+    # Gate results
+    gate_results: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        description="Results from each quality gate run",
+    )
+
+    # Review state
+    review_feedback: str | None = Field(
+        default=None,
+        sa_type=Text,
+        description="Feedback from AI or human review",
+    )
+    human_reviewer_id: UUID | None = Field(
+        default=None,
+        foreign_key="users.id",
+        description="User assigned for human review",
+    )
+
+    # Metrics
+    total_tokens: int = Field(default=0, ge=0, description="Total tokens across all iterations")
+    total_cost_usd: float = Field(default=0.0, ge=0, description="Total cost in USD")
+    started_at: datetime | None = Field(default=None, description="When orchestration started")
+    completed_at: datetime | None = Field(default=None, description="When orchestration completed")
+
+    # Error tracking
+    error_message: str | None = Field(
+        default=None,
+        sa_type=Text,
+        description="Error message if failed",
+    )
+
+    def __repr__(self) -> str:
+        return f"<OrchestratorState {self.graph_orchestrator_id} phase={self.current_phase}>"
+
+
+# =============================================================================
 # Utility functions
 # =============================================================================
 

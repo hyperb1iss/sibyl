@@ -1,0 +1,80 @@
+# sibyl-runner package tasks
+$schema: "https://moonrepo.dev/schemas/project.json"
+
+type: application
+language: python
+platform: system
+
+tags:
+  - python
+  - runner
+
+fileGroups:
+  sources:
+    - "src/**/*.py"
+  tests:
+    - "tests/**/*.py"
+  configs:
+    - "pyproject.toml"
+    - "moon.yml"
+
+tasks:
+  sync:
+    command: "uv sync"
+    inputs:
+      - "@group(configs)"
+
+  lint:
+    command: "uv run ruff check src/"
+    inputs:
+      - "@group(sources)"
+
+  format:
+    command: "uv run ruff format src/"
+    inputs:
+      - "@group(sources)"
+
+  fix:
+    command: "uv run ruff check --fix src/ && uv run ruff format src/"
+    inputs:
+      - "@group(sources)"
+    local: true
+
+  fix-all:
+    command: "uv run ruff check --fix --unsafe-fixes src/ && uv run ruff format src/"
+    inputs:
+      - "@group(sources)"
+    local: true
+
+  typecheck:
+    command: "uv run pyright src/"
+    inputs:
+      - "@group(sources)"
+
+  test:
+    command: "uv run pytest tests/ -v"
+    inputs:
+      - "@group(sources)"
+      - "@group(tests)"
+
+  test-cov:
+    command: "uv run pytest tests/ --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml"
+    inputs:
+      - "@group(sources)"
+      - "@group(tests)"
+    outputs:
+      - "coverage.xml"
+
+  check:
+    deps:
+      - "~:lint"
+      - "~:typecheck"
+      - "~:test"
+
+  install:
+    command: "uv tool install . --force"
+    local: true
+
+  install-dev:
+    command: "uv tool install . --editable --force"
+    local: true

@@ -10,6 +10,7 @@ resolution-markers = [
 members = [
     "sibyl-core",
     "sibyl-dev",
+    "sibyl-runner",
     "sibyld",
 ]
 constraints = [
@@ -3000,6 +3001,48 @@ requires-dist = [
     { name = "sibyl-core", editable = "packages/python/sibyl-core" },
     { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "typer", specifier = ">=0.20.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[[package]]
+name = "sibyl-runner"
+source = { editable = "apps/runner" }
+dependencies = [
+    { name = "anyio" },
+    { name = "httpx" },
+    { name = "pyjwt" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "sibyl-core" },
+    { name = "typer" },
+    { name = "websockets" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anyio", specifier = ">=4.7" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pyjwt", specifier = ">=2.10" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rich", specifier = ">=13.0" },
+    { name = "sibyl-core", editable = "packages/python/sibyl-core" },
+    { name = "typer", specifier = ">=0.20.0" },
+    { name = "websockets", specifier = ">=15.0" },
 ]
 
 [package.metadata.requires-dev]

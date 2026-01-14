@@ -28,6 +28,7 @@ constraint-dependencies = [
 members = [
     "apps/api",
     "apps/cli",
+    "apps/runner",
     "packages/python/sibyl-core",
 ]
 
@@ -40,6 +41,7 @@ members = [
 # Local packages - workspace members reference each other
 sibyl-core = { workspace = true }
 sibyl-cli = { workspace = true }
+sibyl-runner = { workspace = true }
 sibyld = { workspace = true }
 
 # =============================================================================
