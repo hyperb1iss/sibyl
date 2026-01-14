@@ -107,3 +107,57 @@ export const AGENT_TYPE_CONFIG: Record<
   integrator: { label: 'Integrator', color: '#ffb86c', icon: '⬡' },
   orchestrator: { label: 'Orchestrator', color: '#ff6363', icon: '◆' },
 };
+
+// =============================================================================
+// Orchestrator Phase Styling
+// =============================================================================
+
+export const ORCHESTRATOR_PHASES = [
+  'implement',
+  'review',
+  'rework',
+  'human_review',
+  'merge',
+] as const;
+export type OrchestratorPhaseType = (typeof ORCHESTRATOR_PHASES)[number];
+
+export const ORCHESTRATOR_PHASE_CONFIG: Record<
+  OrchestratorPhaseType,
+  { label: string; color: string; bgClass: string; textClass: string; icon: string }
+> = {
+  implement: {
+    label: 'Implementing',
+    color: '#e135ff',
+    bgClass: 'bg-[#e135ff]/20',
+    textClass: 'text-[#e135ff]',
+    icon: '🔨',
+  },
+  review: {
+    label: 'Reviewing',
+    color: '#80ffea',
+    bgClass: 'bg-[#80ffea]/20',
+    textClass: 'text-[#80ffea]',
+    icon: '🔍',
+  },
+  rework: {
+    label: 'Reworking',
+    color: '#f1fa8c',
+    bgClass: 'bg-[#f1fa8c]/20',
+    textClass: 'text-[#f1fa8c]',
+    icon: '🔄',
+  },
+  human_review: {
+    label: 'Human Review',
+    color: '#ff6ac1',
+    bgClass: 'bg-[#ff6ac1]/20',
+    textClass: 'text-[#ff6ac1]',
+    icon: '👤',
+  },
+  merge: {
+    label: 'Merging',
+    color: '#50fa7b',
+    bgClass: 'bg-[#50fa7b]/20',
+    textClass: 'text-[#50fa7b]',
+    icon: '✓',
+  },
+};

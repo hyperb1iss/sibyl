@@ -256,97 +256,99 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
         <div className="flex-1 space-y-4 sm:space-y-6">
           {/* Task Overview */}
           <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
-          <div className="flex items-center justify-between mb-4 sm:mb-6 gap-2">
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-coral/10 border border-sc-coral/20 flex items-center justify-center shrink-0">
-                <ListTodo width={16} height={16} className="text-sc-coral sm:w-5 sm:h-5" />
+            <div className="flex items-center justify-between mb-4 sm:mb-6 gap-2">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-coral/10 border border-sc-coral/20 flex items-center justify-center shrink-0">
+                  <ListTodo width={16} height={16} className="text-sc-coral sm:w-5 sm:h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary truncate">
+                    Task Overview
+                  </h2>
+                  <p className="text-xs sm:text-sm text-sc-fg-muted">
+                    {taskStats.doing} in progress
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary truncate">
-                  Task Overview
-                </h2>
-                <p className="text-xs sm:text-sm text-sc-fg-muted">{taskStats.doing} in progress</p>
-              </div>
+              <Link
+                href="/tasks"
+                className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm text-sc-purple hover:text-sc-purple/80 transition-colors shrink-0"
+              >
+                <span className="hidden xs:inline">View all</span>
+                <ArrowRight width={14} height={14} />
+              </Link>
             </div>
-            <Link
-              href="/tasks"
-              className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm text-sc-purple hover:text-sc-purple/80 transition-colors shrink-0"
-            >
-              <span className="hidden xs:inline">View all</span>
-              <ArrowRight width={14} height={14} />
-            </Link>
-          </div>
 
-          {/* Task Status Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
-            <Link
-              href="/tasks"
-              className="bg-sc-bg-elevated rounded-lg sm:rounded-xl p-3 sm:p-4 border border-sc-fg-subtle/10 hover:border-sc-cyan/30 transition-all group"
-            >
-              <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
-                <Target width={14} height={14} className="text-sc-cyan sm:w-4 sm:h-4" />
-                <span className="text-xs sm:text-sm text-sc-fg-muted">To Do</span>
-              </div>
-              <p className="text-xl sm:text-2xl font-bold text-sc-fg-primary group-hover:text-sc-cyan transition-colors">
-                {taskStats.todo}
-              </p>
-            </Link>
+            {/* Task Status Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
+              <Link
+                href="/tasks"
+                className="bg-sc-bg-elevated rounded-lg sm:rounded-xl p-3 sm:p-4 border border-sc-fg-subtle/10 hover:border-sc-cyan/30 transition-all group"
+              >
+                <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
+                  <Target width={14} height={14} className="text-sc-cyan sm:w-4 sm:h-4" />
+                  <span className="text-xs sm:text-sm text-sc-fg-muted">To Do</span>
+                </div>
+                <p className="text-xl sm:text-2xl font-bold text-sc-fg-primary group-hover:text-sc-cyan transition-colors">
+                  {taskStats.todo}
+                </p>
+              </Link>
 
-            <Link
-              href="/tasks"
-              className="bg-sc-bg-elevated rounded-lg sm:rounded-xl p-3 sm:p-4 border border-sc-fg-subtle/10 hover:border-sc-purple/30 transition-all group"
-            >
-              <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
-                <Play width={14} height={14} className="text-sc-purple sm:w-4 sm:h-4" />
-                <span className="text-xs sm:text-sm text-sc-fg-muted">In Progress</span>
-              </div>
-              <p className="text-xl sm:text-2xl font-bold text-sc-fg-primary group-hover:text-sc-purple transition-colors">
-                {taskStats.doing}
-              </p>
-            </Link>
+              <Link
+                href="/tasks"
+                className="bg-sc-bg-elevated rounded-lg sm:rounded-xl p-3 sm:p-4 border border-sc-fg-subtle/10 hover:border-sc-purple/30 transition-all group"
+              >
+                <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
+                  <Play width={14} height={14} className="text-sc-purple sm:w-4 sm:h-4" />
+                  <span className="text-xs sm:text-sm text-sc-fg-muted">In Progress</span>
+                </div>
+                <p className="text-xl sm:text-2xl font-bold text-sc-fg-primary group-hover:text-sc-purple transition-colors">
+                  {taskStats.doing}
+                </p>
+              </Link>
 
-            <Link
-              href="/tasks"
-              className="bg-sc-bg-elevated rounded-lg sm:rounded-xl p-3 sm:p-4 border border-sc-fg-subtle/10 hover:border-sc-yellow/30 transition-all group"
-            >
-              <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
-                <Clock width={14} height={14} className="text-sc-yellow sm:w-4 sm:h-4" />
-                <span className="text-xs sm:text-sm text-sc-fg-muted">In Review</span>
-              </div>
-              <p className="text-xl sm:text-2xl font-bold text-sc-fg-primary group-hover:text-sc-yellow transition-colors">
-                {taskStats.review}
-              </p>
-            </Link>
+              <Link
+                href="/tasks"
+                className="bg-sc-bg-elevated rounded-lg sm:rounded-xl p-3 sm:p-4 border border-sc-fg-subtle/10 hover:border-sc-yellow/30 transition-all group"
+              >
+                <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
+                  <Clock width={14} height={14} className="text-sc-yellow sm:w-4 sm:h-4" />
+                  <span className="text-xs sm:text-sm text-sc-fg-muted">In Review</span>
+                </div>
+                <p className="text-xl sm:text-2xl font-bold text-sc-fg-primary group-hover:text-sc-yellow transition-colors">
+                  {taskStats.review}
+                </p>
+              </Link>
 
-            <Link
-              href="/tasks"
-              className="bg-sc-bg-elevated rounded-lg sm:rounded-xl p-3 sm:p-4 border border-sc-fg-subtle/10 hover:border-sc-green/30 transition-all group"
-            >
-              <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
-                <CheckCircle2 width={14} height={14} className="text-sc-green sm:w-4 sm:h-4" />
-                <span className="text-xs sm:text-sm text-sc-fg-muted">Completed</span>
-              </div>
-              <p className="text-xl sm:text-2xl font-bold text-sc-fg-primary group-hover:text-sc-green transition-colors">
-                {taskStats.done}
-              </p>
-            </Link>
-          </div>
-
-          {/* Task Progress Bar */}
-          {taskStats.total > 0 && (
-            <div className="mt-4 sm:mt-6">
-              <div className="flex items-center justify-between text-[10px] sm:text-xs text-sc-fg-muted mb-1.5 sm:mb-2">
-                <span>Progress</span>
-                <span>{Math.round((taskStats.done / taskStats.total) * 100)}% complete</span>
-              </div>
-              <div className="h-1.5 sm:h-2 bg-sc-bg-dark rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-sc-green rounded-full transition-all duration-500"
-                  style={{ width: `${(taskStats.done / taskStats.total) * 100}%` }}
-                />
-              </div>
+              <Link
+                href="/tasks"
+                className="bg-sc-bg-elevated rounded-lg sm:rounded-xl p-3 sm:p-4 border border-sc-fg-subtle/10 hover:border-sc-green/30 transition-all group"
+              >
+                <div className="flex items-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
+                  <CheckCircle2 width={14} height={14} className="text-sc-green sm:w-4 sm:h-4" />
+                  <span className="text-xs sm:text-sm text-sc-fg-muted">Completed</span>
+                </div>
+                <p className="text-xl sm:text-2xl font-bold text-sc-fg-primary group-hover:text-sc-green transition-colors">
+                  {taskStats.done}
+                </p>
+              </Link>
             </div>
-          )}
+
+            {/* Task Progress Bar */}
+            {taskStats.total > 0 && (
+              <div className="mt-4 sm:mt-6">
+                <div className="flex items-center justify-between text-[10px] sm:text-xs text-sc-fg-muted mb-1.5 sm:mb-2">
+                  <span>Progress</span>
+                  <span>{Math.round((taskStats.done / taskStats.total) * 100)}% complete</span>
+                </div>
+                <div className="h-1.5 sm:h-2 bg-sc-bg-dark rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-sc-green rounded-full transition-all duration-500"
+                    style={{ width: `${(taskStats.done / taskStats.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Velocity Chart */}
@@ -361,7 +363,9 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                     <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">
                       Completion Velocity
                     </h2>
-                    <p className="text-xs text-sc-fg-muted">Tasks completed per day (14-day trend)</p>
+                    <p className="text-xs text-sc-fg-muted">
+                      Tasks completed per day (14-day trend)
+                    </p>
                   </div>
                 </div>
               </div>
@@ -434,157 +438,159 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
         <div className="lg:w-80 shrink-0 space-y-4 sm:space-y-6">
           {/* Quick Actions */}
           <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
-          <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
-            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
-              <Zap width={16} height={16} className="text-sc-purple sm:w-5 sm:h-5" />
+            <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
+                <Zap width={16} height={16} className="text-sc-purple sm:w-5 sm:h-5" />
+              </div>
+              <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">
+                Quick Actions
+              </h2>
             </div>
-            <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">Quick Actions</h2>
-          </div>
 
-          <div className="space-y-2 sm:space-y-3">
-            <Link
-              href="/search"
-              className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-cyan/30 hover:bg-sc-bg-highlight transition-all group"
-            >
-              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-cyan/10 flex items-center justify-center shrink-0">
-                <Search width={16} height={16} className="text-sc-cyan sm:w-[18px] sm:h-[18px]" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-cyan transition-colors truncate">
-                  Search Knowledge
+            <div className="space-y-2 sm:space-y-3">
+              <Link
+                href="/search"
+                className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-cyan/30 hover:bg-sc-bg-highlight transition-all group"
+              >
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-cyan/10 flex items-center justify-center shrink-0">
+                  <Search width={16} height={16} className="text-sc-cyan sm:w-[18px] sm:h-[18px]" />
                 </div>
-                <div className="text-[10px] sm:text-xs text-sc-fg-subtle truncate">
-                  Find patterns & insights
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-cyan transition-colors truncate">
+                    Search Knowledge
+                  </div>
+                  <div className="text-[10px] sm:text-xs text-sc-fg-subtle truncate">
+                    Find patterns & insights
+                  </div>
                 </div>
-              </div>
-              <ArrowRight
-                width={14}
-                height={14}
-                className="text-sc-fg-subtle group-hover:text-sc-cyan transition-colors shrink-0 sm:w-4 sm:h-4"
-              />
-            </Link>
-
-            <Link
-              href="/graph"
-              className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-purple/30 hover:bg-sc-bg-highlight transition-all group"
-            >
-              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-purple/10 flex items-center justify-center shrink-0">
-                <Network
-                  width={16}
-                  height={16}
-                  className="text-sc-purple sm:w-[18px] sm:h-[18px]"
+                <ArrowRight
+                  width={14}
+                  height={14}
+                  className="text-sc-fg-subtle group-hover:text-sc-cyan transition-colors shrink-0 sm:w-4 sm:h-4"
                 />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-purple transition-colors truncate">
-                  Explore Graph
-                </div>
-                <div className="text-[10px] sm:text-xs text-sc-fg-subtle truncate">
-                  Visualize connections
-                </div>
-              </div>
-              <ArrowRight
-                width={14}
-                height={14}
-                className="text-sc-fg-subtle group-hover:text-sc-purple transition-colors shrink-0 sm:w-4 sm:h-4"
-              />
-            </Link>
+              </Link>
 
-            <Link
-              href="/entities"
-              className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-coral/30 hover:bg-sc-bg-highlight transition-all group"
-            >
-              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-coral/10 flex items-center justify-center shrink-0">
-                <Boxes width={16} height={16} className="text-sc-coral sm:w-[18px] sm:h-[18px]" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-coral transition-colors truncate">
-                  Browse Entities
+              <Link
+                href="/graph"
+                className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-purple/30 hover:bg-sc-bg-highlight transition-all group"
+              >
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-purple/10 flex items-center justify-center shrink-0">
+                  <Network
+                    width={16}
+                    height={16}
+                    className="text-sc-purple sm:w-[18px] sm:h-[18px]"
+                  />
                 </div>
-                <div className="text-[10px] sm:text-xs text-sc-fg-subtle truncate">
-                  View all knowledge
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-purple transition-colors truncate">
+                    Explore Graph
+                  </div>
+                  <div className="text-[10px] sm:text-xs text-sc-fg-subtle truncate">
+                    Visualize connections
+                  </div>
                 </div>
-              </div>
-              <ArrowRight
-                width={14}
-                height={14}
-                className="text-sc-fg-subtle group-hover:text-sc-coral transition-colors shrink-0 sm:w-4 sm:h-4"
-              />
-            </Link>
-
-            <Link
-              href="/sources"
-              className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-green/30 hover:bg-sc-bg-highlight transition-all group"
-            >
-              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-green/10 flex items-center justify-center shrink-0">
-                <BookOpen
-                  width={16}
-                  height={16}
-                  className="text-sc-green sm:w-[18px] sm:h-[18px]"
+                <ArrowRight
+                  width={14}
+                  height={14}
+                  className="text-sc-fg-subtle group-hover:text-sc-purple transition-colors shrink-0 sm:w-4 sm:h-4"
                 />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-green transition-colors truncate">
-                  Add Source
+              </Link>
+
+              <Link
+                href="/entities"
+                className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-coral/30 hover:bg-sc-bg-highlight transition-all group"
+              >
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-coral/10 flex items-center justify-center shrink-0">
+                  <Boxes width={16} height={16} className="text-sc-coral sm:w-[18px] sm:h-[18px]" />
                 </div>
-                <div className="text-[10px] sm:text-xs text-sc-fg-subtle truncate">
-                  Documentation &amp; knowledge
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-coral transition-colors truncate">
+                    Browse Entities
+                  </div>
+                  <div className="text-[10px] sm:text-xs text-sc-fg-subtle truncate">
+                    View all knowledge
+                  </div>
                 </div>
-              </div>
-              <ArrowRight
-                width={14}
-                height={14}
-                className="text-sc-fg-subtle group-hover:text-sc-green transition-colors shrink-0 sm:w-4 sm:h-4"
-              />
-            </Link>
+                <ArrowRight
+                  width={14}
+                  height={14}
+                  className="text-sc-fg-subtle group-hover:text-sc-coral transition-colors shrink-0 sm:w-4 sm:h-4"
+                />
+              </Link>
+
+              <Link
+                href="/sources"
+                className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-green/30 hover:bg-sc-bg-highlight transition-all group"
+              >
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-green/10 flex items-center justify-center shrink-0">
+                  <BookOpen
+                    width={16}
+                    height={16}
+                    className="text-sc-green sm:w-[18px] sm:h-[18px]"
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-green transition-colors truncate">
+                    Add Source
+                  </div>
+                  <div className="text-[10px] sm:text-xs text-sc-fg-subtle truncate">
+                    Documentation &amp; knowledge
+                  </div>
+                </div>
+                <ArrowRight
+                  width={14}
+                  height={14}
+                  className="text-sc-fg-subtle group-hover:text-sc-green transition-colors shrink-0 sm:w-4 sm:h-4"
+                />
+              </Link>
+            </div>
           </div>
-        </div>
 
           {/* This Week Stats */}
           {orgMetrics && (
-          <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
-            <div className="flex items-center gap-2 sm:gap-3 mb-3">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
-                <BarChart3 width={16} height={16} className="text-sc-purple sm:w-5 sm:h-5" />
-              </div>
-              <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">This Week</h2>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 bg-sc-bg-elevated rounded-lg">
-                <span className="text-sm text-sc-fg-muted">Completion Rate</span>
-                <span className="text-lg font-bold text-sc-green">
-                  {orgMetrics.completion_rate}%
-                </span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-sc-bg-elevated rounded-lg">
-                <span className="text-sm text-sc-fg-muted">Tasks Created</span>
-                <span className="text-lg font-bold text-sc-fg-primary">
-                  {orgMetrics.tasks_created_last_7d}
-                </span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-sc-bg-elevated rounded-lg">
-                <span className="text-sm text-sc-fg-muted">Tasks Completed</span>
-                <span className="text-lg font-bold text-sc-green">
-                  {orgMetrics.tasks_completed_last_7d}
-                </span>
-              </div>
-              {orgMetrics.top_assignees.length > 0 && (
-                <div className="pt-2 border-t border-sc-fg-subtle/10">
-                  <p className="text-xs text-sc-fg-subtle mb-2">Top Contributors</p>
-                  <div className="space-y-1">
-                    {orgMetrics.top_assignees.slice(0, 3).map(a => (
-                      <div key={a.name} className="flex items-center justify-between text-sm">
-                        <span className="text-sc-fg-muted truncate">{a.name}</span>
-                        <span className="text-sc-green font-medium">{a.completed}</span>
-                      </div>
-                    ))}
-                  </div>
+            <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-card">
+              <div className="flex items-center gap-2 sm:gap-3 mb-3">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-sc-purple/10 border border-sc-purple/20 flex items-center justify-center">
+                  <BarChart3 width={16} height={16} className="text-sc-purple sm:w-5 sm:h-5" />
                 </div>
-              )}
+                <h2 className="text-base sm:text-lg font-semibold text-sc-fg-primary">This Week</h2>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-sc-bg-elevated rounded-lg">
+                  <span className="text-sm text-sc-fg-muted">Completion Rate</span>
+                  <span className="text-lg font-bold text-sc-green">
+                    {orgMetrics.completion_rate}%
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-sc-bg-elevated rounded-lg">
+                  <span className="text-sm text-sc-fg-muted">Tasks Created</span>
+                  <span className="text-lg font-bold text-sc-fg-primary">
+                    {orgMetrics.tasks_created_last_7d}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-sc-bg-elevated rounded-lg">
+                  <span className="text-sm text-sc-fg-muted">Tasks Completed</span>
+                  <span className="text-lg font-bold text-sc-green">
+                    {orgMetrics.tasks_completed_last_7d}
+                  </span>
+                </div>
+                {orgMetrics.top_assignees.length > 0 && (
+                  <div className="pt-2 border-t border-sc-fg-subtle/10">
+                    <p className="text-xs text-sc-fg-subtle mb-2">Top Contributors</p>
+                    <div className="space-y-1">
+                      {orgMetrics.top_assignees.slice(0, 3).map(a => (
+                        <div key={a.name} className="flex items-center justify-between text-sm">
+                          <span className="text-sc-fg-muted truncate">{a.name}</span>
+                          <span className="text-sc-green font-medium">{a.completed}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
         </div>
       </div>
 

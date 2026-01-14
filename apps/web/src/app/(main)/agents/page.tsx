@@ -6,6 +6,7 @@ import { memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react
 import { ActivityFeed } from '@/components/agents/activity-feed';
 import { ApprovalQueue } from '@/components/agents/approval-queue';
 import { HealthMonitor } from '@/components/agents/health-monitor';
+import { OrchestratorGroupCard } from '@/components/agents/orchestrator-group';
 import { SpawnAgentDialog } from '@/components/agents/spawn-agent-dialog';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
 import {
@@ -30,21 +31,28 @@ import {
 import { LoadingState } from '@/components/ui/spinner';
 import { FilterChip } from '@/components/ui/toggle';
 import { ErrorState } from '@/components/ui/tooltip';
-import type { Agent, AgentStatus } from '@/lib/api';
+import type { Agent, AgentStatus, TaskOrchestrator } from '@/lib/api';
 import {
   AGENT_STATUS_CONFIG,
   AGENT_TYPE_CONFIG,
   type AgentStatusType,
   type AgentTypeValue,
   formatDistanceToNow,
+  ORCHESTRATOR_PHASE_CONFIG,
+  type OrchestratorPhaseType,
 } from '@/lib/constants';
 import {
   useAgents,
   useArchiveAgent,
+  useOrchestratorReview,
+  useOrchestrators,
   usePauseAgent,
+  usePauseOrchestrator,
   useProjects,
   useRenameAgent,
   useResumeAgent,
+  useResumeOrchestrator,
+  useTasks,
   useTerminateAgent,
 } from '@/lib/hooks';
 import { useProjectFilter } from '@/lib/project-context';
@@ -151,6 +159,7 @@ function getTagStyle(tag: string): string {
 
 const AgentCard = memo(function AgentCard({
   agent,
+  orchestrator,
   onPause,
   onResume,
   onTerminate,
@@ -158,6 +167,7 @@ const AgentCard = memo(function AgentCard({
   onArchive,
 }: {
   agent: Agent;
+  orchestrator?: TaskOrchestrator;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   onTerminate: (id: string) => void;
@@ -244,6 +254,23 @@ const AgentCard = memo(function AgentCard({
             >
               {statusConfig.icon} {statusConfig.label}
             </span>
+
+            {/* Orchestrator phase badge */}
+            {orchestrator && (
+              <span
+                className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${ORCHESTRATOR_PHASE_CONFIG[orchestrator.current_phase as OrchestratorPhaseType]?.bgClass ?? 'bg-sc-fg-subtle/20'} ${ORCHESTRATOR_PHASE_CONFIG[orchestrator.current_phase as OrchestratorPhaseType]?.textClass ?? 'text-sc-fg-muted'}`}
+              >
+                {
+                  ORCHESTRATOR_PHASE_CONFIG[orchestrator.current_phase as OrchestratorPhaseType]
+                    ?.icon
+                }{' '}
+                {
+                  ORCHESTRATOR_PHASE_CONFIG[orchestrator.current_phase as OrchestratorPhaseType]
+                    ?.label
+                }
+                {orchestrator.rework_count > 0 && ` #${orchestrator.rework_count}`}
+              </span>
+            )}
           </div>
 
           {/* Actions Dropdown */}
@@ -392,6 +419,7 @@ const AgentCard = memo(function AgentCard({
 const ProjectGroup = memo(function ProjectGroup({
   projectName,
   agents,
+  orchestratorsByWorker,
   onPause,
   onResume,
   onTerminate,
@@ -400,6 +428,7 @@ const ProjectGroup = memo(function ProjectGroup({
 }: {
   projectName: string;
   agents: Agent[];
+  orchestratorsByWorker: Map<string, TaskOrchestrator>;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   onTerminate: (id: string) => void;
@@ -428,6 +457,7 @@ const ProjectGroup = memo(function ProjectGroup({
           <AgentCard
             key={agent.id}
             agent={agent}
+            orchestrator={orchestratorsByWorker.get(agent.id)}
             onPause={onPause}
             onResume={onResume}
             onTerminate={onTerminate}
@@ -538,15 +568,47 @@ function AgentsPageContent() {
     status: statusFilter ?? undefined,
   });
   const { data: projectsData } = useProjects();
+  const { data: orchestratorsData } = useOrchestrators(projectFilter);
+  const { data: tasksData } = useTasks({ project: projectFilter });
 
+  // Create maps for quick lookups
+  const orchestratorsByWorker = useMemo(() => {
+    const map = new Map<string, TaskOrchestrator>();
+    if (orchestratorsData?.orchestrators) {
+      for (const orch of orchestratorsData.orchestrators) {
+        if (orch.worker_id) {
+          map.set(orch.worker_id, orch);
+        }
+      }
+    }
+    return map;
+  }, [orchestratorsData]);
+
+  const taskNamesById = useMemo(() => {
+    const map = new Map<string, string>();
+    if (tasksData?.entities) {
+      for (const task of tasksData.entities) {
+        map.set(task.id, task.name);
+      }
+    }
+    return map;
+  }, [tasksData]);
+
+  // Agent mutations
   const pauseAgent = usePauseAgent();
   const resumeAgent = useResumeAgent();
   const terminateAgent = useTerminateAgent();
   const renameAgent = useRenameAgent();
   const archiveAgent = useArchiveAgent();
 
+  // Orchestrator mutations
+  const pauseOrchestrator = usePauseOrchestrator();
+  const resumeOrchestrator = useResumeOrchestrator();
+  const reviewOrchestrator = useOrchestratorReview();
+
   const agents = agentsData?.agents ?? [];
   const projects = projectsData?.entities ?? [];
+  const orchestrators = orchestratorsData?.orchestrators ?? [];
 
   // Extract unique tags from all agents for filter chips
   const allTags = useMemo(() => {
@@ -565,11 +627,31 @@ function AgentsPageContent() {
     return agents.filter(a => a.tags?.includes(tagFilter));
   }, [agents, tagFilter]);
 
-  // Group agents by project
-  const agentsByProject = useMemo(() => {
+  // Separate orchestrated agents from standalone agents
+  const standaloneAgents = useMemo(() => {
+    const orchestratedIds = new Set<string>();
+    for (const orch of orchestrators) {
+      if (orch.worker_id) {
+        orchestratedIds.add(orch.worker_id);
+      }
+    }
+    return filteredAgents.filter(a => !orchestratedIds.has(a.id));
+  }, [filteredAgents, orchestrators]);
+
+  // Create agent lookup for orchestrator groups
+  const agentsById = useMemo(() => {
+    const map = new Map<string, Agent>();
+    for (const agent of filteredAgents) {
+      map.set(agent.id, agent);
+    }
+    return map;
+  }, [filteredAgents]);
+
+  // Group standalone agents by project
+  const standaloneByProject = useMemo(() => {
     const groups: Record<string, { name: string; agents: Agent[] }> = {};
 
-    for (const agent of filteredAgents) {
+    for (const agent of standaloneAgents) {
       const projectId = agent.project_id || 'no-project';
       if (!groups[projectId]) {
         const project = projects.find(p => p.id === projectId);
@@ -591,7 +673,7 @@ function AgentsPageContent() {
       ).length;
       return bActive - aActive;
     });
-  }, [filteredAgents, projects]);
+  }, [standaloneAgents, projects]);
 
   // Filter handlers
   const handleStatusFilter = useCallback(
@@ -654,6 +736,35 @@ function AgentsPageContent() {
       archiveAgent.mutate(id);
     },
     [archiveAgent]
+  );
+
+  // Orchestrator action handlers
+  const handlePauseOrchestrator = useCallback(
+    (id: string) => {
+      pauseOrchestrator.mutate(id);
+    },
+    [pauseOrchestrator]
+  );
+
+  const handleResumeOrchestrator = useCallback(
+    (id: string) => {
+      resumeOrchestrator.mutate(id);
+    },
+    [resumeOrchestrator]
+  );
+
+  const handleApproveOrchestrator = useCallback(
+    (id: string) => {
+      reviewOrchestrator.mutate({ id, request: { approved: true } });
+    },
+    [reviewOrchestrator]
+  );
+
+  const handleRejectOrchestrator = useCallback(
+    (id: string) => {
+      reviewOrchestrator.mutate({ id, request: { approved: false } });
+    },
+    [reviewOrchestrator]
   );
 
   return (
@@ -770,6 +881,7 @@ function AgentsPageContent() {
                     <AgentCard
                       key={agent.id}
                       agent={agent}
+                      orchestrator={orchestratorsByWorker.get(agent.id)}
                       onPause={handlePause}
                       onResume={handleResume}
                       onTerminate={handleTerminate}
@@ -858,19 +970,55 @@ function AgentsPageContent() {
               No agents match the selected filters
             </div>
           ) : (
-            <div className="space-y-6">
-              {agentsByProject.map(([projectId, { name, agents: projectAgents }]) => (
-                <ProjectGroup
-                  key={projectId}
-                  projectName={name}
-                  agents={projectAgents}
-                  onPause={handlePause}
-                  onResume={handleResume}
-                  onTerminate={handleTerminate}
-                  onRename={handleRename}
-                  onArchive={handleArchive}
-                />
-              ))}
+            <div className="space-y-8">
+              {/* Orchestrated Agent Groups */}
+              {orchestrators.length > 0 && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-medium text-sc-fg-primary">Orchestrated Tasks</h2>
+                    <span className="text-xs text-sc-fg-muted">({orchestrators.length})</span>
+                  </div>
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    {orchestrators.map(orch => (
+                      <OrchestratorGroupCard
+                        key={orch.id}
+                        orchestrator={orch}
+                        worker={orch.worker_id ? (agentsById.get(orch.worker_id) ?? null) : null}
+                        taskName={taskNamesById.get(orch.task_id)}
+                        onPause={handlePauseOrchestrator}
+                        onResume={handleResumeOrchestrator}
+                        onApprove={handleApproveOrchestrator}
+                        onReject={handleRejectOrchestrator}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Standalone Agents */}
+              {standaloneByProject.length > 0 && (
+                <div className="space-y-4">
+                  {orchestrators.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-sm font-medium text-sc-fg-primary">Standalone Agents</h2>
+                      <span className="text-xs text-sc-fg-muted">({standaloneAgents.length})</span>
+                    </div>
+                  )}
+                  {standaloneByProject.map(([projectId, { name, agents: projectAgents }]) => (
+                    <ProjectGroup
+                      key={projectId}
+                      projectName={orchestrators.length > 0 ? name : name}
+                      agents={projectAgents}
+                      orchestratorsByWorker={orchestratorsByWorker}
+                      onPause={handlePause}
+                      onResume={handleResume}
+                      onTerminate={handleTerminate}
+                      onRename={handleRename}
+                      onArchive={handleArchive}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </>

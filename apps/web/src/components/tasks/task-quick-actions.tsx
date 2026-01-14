@@ -14,11 +14,7 @@ interface TaskQuickActionsProps {
  * Contextual alerts for task status (e.g., blocker reason when blocked).
  * Status changes are handled via the status badge dropdown in TaskHeader.
  */
-export function TaskQuickActions({
-  status,
-  blockerReason,
-  onUpdateField,
-}: TaskQuickActionsProps) {
+export function TaskQuickActions({ status, blockerReason, onUpdateField }: TaskQuickActionsProps) {
   if (status !== 'blocked') return null;
 
   return (

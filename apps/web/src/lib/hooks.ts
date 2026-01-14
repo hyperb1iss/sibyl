@@ -15,9 +15,11 @@ import type {
   CodeExampleParams,
   CodeExampleResponse,
   CreateNoteRequest,
+  CreateOrchestratorRequest,
   EntityCreate,
   EntityUpdate,
   EpicStatus,
+  HumanReviewRequest,
   RAGSearchParams,
   RAGSearchResponse,
   RespondToApprovalRequest,
@@ -161,6 +163,11 @@ export const queryKeys = {
       ['agents', 'activity', project_id ? { project_id } : undefined] as const,
     healthOverview: (project_id?: string) =>
       ['agents', 'health', project_id ? { project_id } : undefined] as const,
+  },
+  orchestrators: {
+    all: ['orchestrators'] as const,
+    list: (project_id: string) => ['orchestrators', 'list', { project_id }] as const,
+    detail: (id: string) => ['orchestrators', 'detail', id] as const,
   },
   approvals: {
     all: ['approvals'] as const,
@@ -1536,6 +1543,95 @@ export function useAgent(id: string) {
     enabled: !!id,
     // Rely on WebSocket for real-time updates, fall back to polling when disconnected
     refetchInterval: isWsConnected ? false : 5000,
+  });
+}
+
+/**
+ * Fetch orchestrators for a project.
+ * Returns a map of worker_id -> orchestrator for easy lookup.
+ */
+export function useOrchestrators(projectId: string | undefined) {
+  return useQuery({
+    queryKey: projectId ? queryKeys.orchestrators.list(projectId) : ['orchestrators', 'disabled'],
+    queryFn: () => (projectId ? api.orchestrators.list({ project_id: projectId }) : null),
+    enabled: !!projectId,
+    staleTime: 30000,
+  });
+}
+
+/**
+ * Create a new orchestrator for a task.
+ */
+export function useCreateOrchestrator() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (request: CreateOrchestratorRequest) => api.orchestrators.create(request),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.orchestrators.list(variables.project_id),
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.all });
+    },
+  });
+}
+
+/**
+ * Start an orchestrator.
+ */
+export function useStartOrchestrator() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => api.orchestrators.start(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orchestrators'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.all });
+    },
+  });
+}
+
+/**
+ * Pause an orchestrator.
+ */
+export function usePauseOrchestrator() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => api.orchestrators.pause(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orchestrators'] });
+    },
+  });
+}
+
+/**
+ * Resume an orchestrator.
+ */
+export function useResumeOrchestrator() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => api.orchestrators.resume(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orchestrators'] });
+    },
+  });
+}
+
+/**
+ * Submit human review for an orchestrator.
+ */
+export function useOrchestratorReview() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, request }: { id: string; request: HumanReviewRequest }) =>
+      api.orchestrators.review(id, request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orchestrators'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.all });
+    },
   });
 }
 

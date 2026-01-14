@@ -874,6 +874,62 @@ export interface AgentWorkspaceResponse {
 }
 
 // =============================================================================
+// TaskOrchestrator Types (Build Loop)
+// =============================================================================
+
+export type OrchestratorPhase = 'implement' | 'review' | 'rework' | 'human_review' | 'merge';
+export type OrchestratorStatus =
+  | 'initializing'
+  | 'implementing'
+  | 'reviewing'
+  | 'reworking'
+  | 'human_review'
+  | 'paused'
+  | 'complete'
+  | 'failed';
+
+export interface TaskOrchestrator {
+  id: string;
+  task_id: string;
+  project_id: string;
+  status: OrchestratorStatus;
+  current_phase: OrchestratorPhase;
+  worker_id: string | null;
+  rework_count: number;
+  max_rework_attempts: number;
+  gate_config: string[];
+  pending_approval_id: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface TaskOrchestratorListResponse {
+  orchestrators: TaskOrchestrator[];
+  total: number;
+}
+
+export interface CreateOrchestratorRequest {
+  task_id: string;
+  project_id: string;
+  gate_config?: string[];
+  max_rework_attempts?: number;
+  auto_start?: boolean;
+}
+
+export interface OrchestratorActionResponse {
+  success: boolean;
+  orchestrator_id: string;
+  action: string;
+  message: string;
+}
+
+export interface HumanReviewRequest {
+  approved: boolean;
+  feedback?: string;
+}
+
+// =============================================================================
 // Approval Types (Human-in-the-Loop)
 // =============================================================================
 
@@ -2248,6 +2304,48 @@ export const api = {
     archive: (id: string) =>
       fetchApi<AgentActionResponse>(`/agents/${id}/archive`, {
         method: 'POST',
+      }),
+  },
+
+  // TaskOrchestrators (Build Loop)
+  orchestrators: {
+    list: (params: { project_id: string; status?: OrchestratorStatus; limit?: number }) => {
+      const searchParams = new URLSearchParams();
+      searchParams.set('project_id', params.project_id);
+      if (params.status) searchParams.set('status', params.status);
+      if (params.limit) searchParams.set('limit', params.limit.toString());
+      return fetchApi<TaskOrchestratorListResponse>(
+        `/task-orchestrators?${searchParams.toString()}`
+      );
+    },
+
+    get: (id: string) => fetchApi<TaskOrchestrator>(`/task-orchestrators/${id}`),
+
+    create: (request: CreateOrchestratorRequest) =>
+      fetchApi<TaskOrchestrator>('/task-orchestrators', {
+        method: 'POST',
+        body: JSON.stringify(request),
+      }),
+
+    start: (id: string) =>
+      fetchApi<OrchestratorActionResponse>(`/task-orchestrators/${id}/start`, {
+        method: 'POST',
+      }),
+
+    pause: (id: string) =>
+      fetchApi<OrchestratorActionResponse>(`/task-orchestrators/${id}/pause`, {
+        method: 'POST',
+      }),
+
+    resume: (id: string) =>
+      fetchApi<OrchestratorActionResponse>(`/task-orchestrators/${id}/resume`, {
+        method: 'POST',
+      }),
+
+    review: (id: string, request: HumanReviewRequest) =>
+      fetchApi<OrchestratorActionResponse>(`/task-orchestrators/${id}/review`, {
+        method: 'POST',
+        body: JSON.stringify(request),
       }),
   },
 

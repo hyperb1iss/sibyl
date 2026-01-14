@@ -29,6 +29,7 @@ import {
   EditPencil,
   Expand,
   Eye,
+  FastArrowRight,
   Filter,
   FireFlame,
   Flash,
@@ -74,6 +75,7 @@ import {
   Sparks,
   Square,
   Star,
+  Timer,
   Trash,
   Undo,
   Upload,
@@ -219,6 +221,9 @@ export {
   LightBulb,
   ClipboardCheck,
   HelpCircle,
+  // Orchestration icons
+  Timer,
+  FastArrowRight,
 };
 
 // =============================================================================
