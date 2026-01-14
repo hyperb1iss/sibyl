@@ -1,0 +1,31 @@
+# Docker Compose for local runner testing
+# Build and run a Sibyl runner container
+
+services:
+  runner:
+    build:
+      context: ../..
+      dockerfile: apps/runner/Dockerfile
+    container_name: sibyl-runner
+    environment:
+      # Override these for your Sibyl server
+      SIBYL_SERVER_URL: ${SIBYL_SERVER_URL:-http://host.docker.internal:3334}
+      # Runner config injected via env or volume
+      SIBYL_RUNNER_NAME: ${SIBYL_RUNNER_NAME:-docker-runner}
+      SIBYL_MAX_AGENTS: ${SIBYL_MAX_AGENTS:-3}
+    volumes:
+      # Persistent worktrees
+      - runner-worktrees:/var/sibyl/worktrees
+      # Config (mount your runner.yaml here)
+      - runner-config:/var/sibyl/config
+      # Optional: Mount local git credentials
+      # - ~/.gitconfig:/home/sibyl/.gitconfig:ro
+      # - ~/.ssh:/home/sibyl/.ssh:ro
+    restart: unless-stopped
+    # Extra hosts for Docker Desktop (macOS/Windows)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  runner-worktrees:
+  runner-config:

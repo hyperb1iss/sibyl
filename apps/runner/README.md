@@ -71,6 +71,47 @@ worktree_base: ~/.sibyl/worktrees
 | `run` | Start the runner daemon |
 | `status` | Show runner status |
 
+## Docker Deployment
+
+```bash
+# Build the image (from repo root)
+docker build -f apps/runner/Dockerfile -t sibyl-runner .
+
+# Run with docker-compose (from apps/runner)
+cd apps/runner
+docker-compose up -d
+
+# Or run directly
+docker run -d \
+  --name sibyl-runner \
+  -e SIBYL_SERVER_URL=https://sibyl.example.com \
+  -v sibyl-worktrees:/var/sibyl/worktrees \
+  -v sibyl-config:/var/sibyl/config \
+  sibyl-runner
+```
+
+### Docker Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SIBYL_SERVER_URL` | - | Sibyl server URL (required) |
+| `SIBYL_WORKTREE_BASE` | `/var/sibyl/worktrees` | Base directory for git worktrees |
+| `SIBYL_CONFIG_DIR` | `/var/sibyl/config` | Config directory (runner.yaml) |
+
+### First-time Setup
+
+The runner must be registered before it can connect:
+
+```bash
+# Register the runner (creates runner.yaml)
+docker exec -it sibyl-runner sibyl-runner register \
+  --server https://sibyl.example.com \
+  --name "cloud-runner-1"
+
+# Restart to apply registration
+docker restart sibyl-runner
+```
+
 ## Development
 
 ```bash
