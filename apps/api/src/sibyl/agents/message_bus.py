@@ -22,7 +22,6 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
-from sibyl.api.pubsub import publish_event
 from sibyl.db import InterAgentMessage, InterAgentMessageType
 
 log = structlog.get_logger()
@@ -112,6 +111,9 @@ class MessageBus:
         await self.session.refresh(message)
 
         # Publish real-time event for instant delivery
+        # Import here to avoid circular dependency (api -> routes -> message_bus -> api)
+        from sibyl.api.pubsub import publish_event
+
         await publish_event(
             "inter_agent_message",
             {
@@ -192,6 +194,9 @@ class MessageBus:
         await self.session.refresh(response)
 
         # Publish real-time event
+        # Import here to avoid circular dependency
+        from sibyl.api.pubsub import publish_event
+
         await publish_event(
             "inter_agent_message",
             {
