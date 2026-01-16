@@ -1137,6 +1137,7 @@ async def record_heartbeat(
 # Note: Claude API calls can take several minutes for complex tasks
 HEARTBEAT_STALE_THRESHOLD = 120  # 2 minutes without heartbeat = stale
 HEARTBEAT_UNRESPONSIVE_THRESHOLD = 600  # 10 minutes = unresponsive
+STARTUP_GRACE_PERIOD = 60  # 60 seconds grace period for agent startup
 
 
 def _calculate_health_status(
@@ -1148,6 +1149,9 @@ def _calculate_health_status(
     """Calculate agent health status from heartbeat data.
 
     Returns: (health_status, last_heartbeat_str, seconds_since_heartbeat)
+
+    Handles startup grace period: newly started agents without heartbeat
+    are considered healthy for the first 60 seconds.
     """
     active_states = (
         AgentStatus.WORKING.value,
@@ -1165,6 +1169,17 @@ def _calculate_health_status(
         last_heartbeat_str = str(meta["last_heartbeat"])
         last_heartbeat_dt = datetime.fromisoformat(last_heartbeat_str)
 
+    # Get started_at for grace period calculation
+    started_at_dt: datetime | None = None
+    if state and state.started_at:
+        started_at_dt = state.started_at
+    elif meta.get("started_at"):
+        started_at_str = str(meta["started_at"])
+        try:
+            started_at_dt = datetime.fromisoformat(started_at_str)
+        except ValueError:
+            pass
+
     seconds_since: int | None = None
     health_status = AgentHealthStatus.UNRESPONSIVE
 
@@ -1177,9 +1192,22 @@ def _calculate_health_status(
             health_status = AgentHealthStatus.STALE
         else:
             health_status = AgentHealthStatus.UNRESPONSIVE
-    # No heartbeat ever recorded - check if agent is supposed to be active
+    # No heartbeat ever recorded - check startup grace period
+    elif started_at_dt:
+        # Agent just started - give it time to initialize
+        seconds_since_start = int((now - started_at_dt).total_seconds())
+        if seconds_since_start <= STARTUP_GRACE_PERIOD:
+            # Within startup grace period - agent is starting up
+            health_status = AgentHealthStatus.HEALTHY
+        elif agent_status == AgentStatus.INITIALIZING.value:
+            # Still initializing but past grace period - getting slow
+            health_status = AgentHealthStatus.STALE
+        elif agent_status not in active_states:
+            # Paused/completed agents without heartbeat are healthy
+            health_status = AgentHealthStatus.HEALTHY
+        # else: active but no heartbeat past grace = UNRESPONSIVE (default)
     elif agent_status not in active_states:
-        # Initializing/paused agents without heartbeat are considered healthy
+        # No started_at, no heartbeat, but not active = healthy
         health_status = AgentHealthStatus.HEALTHY
 
     return health_status, last_heartbeat_str, seconds_since
