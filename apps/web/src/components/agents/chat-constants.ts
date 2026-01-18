@@ -16,6 +16,7 @@ export const THINKING_PHRASES = {
     'Tracing the threads',
     'Connecting the pieces',
     'Following the breadcrumbs',
+    'Synthesizing thoughts',
   ],
   playful: [
     'Consulting the cosmic wiki',
@@ -25,6 +26,17 @@ export const THINKING_PHRASES = {
     'Brewing some magic',
     'Spinning up neurons',
     'Wrangling electrons',
+    'Flibbertigibbeting',
+    'Cogitating intensely',
+    'Percolating ideas',
+  ],
+  claude: [
+    'Clauding away',
+    'Doing that Claude thing',
+    'Being helpful',
+    'Contemplating elegantly',
+    'Weaving thoughts together',
+    'Crafting a response',
   ],
   mystical: [
     'Reading the tea leaves',
@@ -32,6 +44,7 @@ export const THINKING_PHRASES = {
     'Peering into the matrix',
     'Tapping the akashic records',
     'Communing with the codebase',
+    'Consulting the oracle',
   ],
   cheeky: [
     'Hold my coffee',
@@ -39,6 +52,8 @@ export const THINKING_PHRASES = {
     'Trust the process',
     'Working some magic here',
     'Doing the thing',
+    'Just a moment',
+    'Pondering ponderously',
   ],
 } as const;
 
@@ -46,6 +61,7 @@ export const THINKING_PHRASES = {
 export const ALL_THINKING_PHRASES = [
   ...THINKING_PHRASES.focused,
   ...THINKING_PHRASES.playful,
+  ...THINKING_PHRASES.claude,
   ...THINKING_PHRASES.mystical,
   ...THINKING_PHRASES.cheeky,
 ];

@@ -101,6 +101,7 @@ class MetaOrchestratorService:
         # Create new
         record = MetaOrchestratorRecord(
             id=str(uuid4()),
+            name=f"MetaOrchestrator: {self.project_id[:8]}",
             organization_id=self.org_id,
             project_id=self.project_id,
             status=MetaOrchestratorStatus.IDLE,
@@ -389,9 +390,7 @@ class MetaOrchestratorService:
         total_rework = record.total_rework_cycles + rework_cycles
 
         # Remove from active list
-        active_orchestrators = [
-            o for o in record.active_orchestrators if o != task_orchestrator_id
-        ]
+        active_orchestrators = [o for o in record.active_orchestrators if o != task_orchestrator_id]
 
         await self.entity_manager.update(
             orchestrator_id,
@@ -414,7 +413,9 @@ class MetaOrchestratorService:
             )
 
         # Spawn next task if queue not empty and still running
-        record = await self.get(orchestrator_id)  # type: ignore[assignment]
+        record = await self.get(orchestrator_id)
+        if not record:
+            raise MetaOrchestratorError(f"MetaOrchestrator not found: {orchestrator_id}")
         if record.status == MetaOrchestratorStatus.RUNNING and record.task_queue:
             await self._spawn_orchestrators(
                 orchestrator_id,
@@ -485,7 +486,9 @@ class MetaOrchestratorService:
         )
 
         # Spawn if there's capacity
-        record = await self.get(orchestrator_id)  # type: ignore[assignment]
+        record = await self.get(orchestrator_id)
+        if not record:
+            raise MetaOrchestratorError(f"MetaOrchestrator not found: {orchestrator_id}")
         if record.task_queue:
             available_slots = record.max_concurrent - len(record.active_orchestrators)
             if available_slots > 0:
@@ -587,7 +590,9 @@ class MetaOrchestratorService:
             "budget_usd": record.budget_usd,
             "spent_usd": record.spent_usd,
             "budget_remaining": record.budget_usd - record.spent_usd,
-            "budget_utilization": record.spent_usd / record.budget_usd if record.budget_usd > 0 else 0,
+            "budget_utilization": record.spent_usd / record.budget_usd
+            if record.budget_usd > 0
+            else 0,
         }
 
 

@@ -416,9 +416,7 @@ class MessageBus:
         while asyncio.get_event_loop().time() < deadline:
             # Check for response
             result = await self.session.execute(
-                select(InterAgentMessage).where(
-                    col(InterAgentMessage.response_to_id) == message_id
-                )
+                select(InterAgentMessage).where(col(InterAgentMessage.response_to_id) == message_id)
             )
             response = result.scalar_one_or_none()
 

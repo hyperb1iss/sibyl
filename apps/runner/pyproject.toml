@@ -42,8 +42,9 @@ dependencies = [
     "pyyaml>=6.0",
     # Async utilities
     "anyio>=4.7",
-    # Shared library
+    # Shared libraries
     "sibyl-core",
+    "sibyl-dev",  # For auth store (shared token storage)
 ]
 
 # =============================================================================
@@ -96,3 +97,4 @@ typeCheckingMode = "standard"
 
 [tool.uv.sources]
 sibyl-core = { workspace = true }
+sibyl-dev = { workspace = true }

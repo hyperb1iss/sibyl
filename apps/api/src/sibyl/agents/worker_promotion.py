@@ -18,13 +18,17 @@ from sibyl_core.models import (
     AgentRecord,
     AgentStatus,
     QualityGateType,
+    Task,
     TaskOrchestratorPhase,
     TaskOrchestratorRecord,
     TaskOrchestratorStatus,
 )
 
 if TYPE_CHECKING:
+    from sibyl.agents.runner import AgentRunner
+    from sibyl.agents.worktree import WorktreeManager
     from sibyl_core.graph import EntityManager
+    from sibyl_core.graph.relationships import RelationshipManager
 
 log = structlog.get_logger()
 
@@ -54,6 +58,9 @@ class WorkerPromotionService:
         entity_manager: "EntityManager",
         org_id: str,
         project_id: str,
+        relationship_manager: "RelationshipManager | None" = None,
+        agent_runner: "AgentRunner | None" = None,
+        worktree_manager: "WorktreeManager | None" = None,
     ):
         """Initialize promotion service.
 
@@ -61,10 +68,16 @@ class WorkerPromotionService:
             entity_manager: Graph client for persistence
             org_id: Organization UUID
             project_id: Project UUID
+            relationship_manager: For creating relationships (optional, created if needed)
+            agent_runner: For spawning agents (optional, created if needed)
+            worktree_manager: For managing worktrees (optional, created if needed)
         """
         self.entity_manager = entity_manager
         self.org_id = org_id
         self.project_id = project_id
+        self._relationship_manager = relationship_manager
+        self._agent_runner = agent_runner
+        self._worktree_manager = worktree_manager
 
     async def can_promote(self, agent_id: str) -> tuple[bool, str]:
         """Check if an agent can be promoted.
@@ -185,9 +198,7 @@ class WorkerPromotionService:
             TaskOrchestratorStatus.COMPLETE,
             TaskOrchestratorStatus.FAILED,
         ):
-            raise WorkerPromotionError(
-                f"Orchestrator in terminal status: {entity.status.value}"
-            )
+            raise WorkerPromotionError(f"Orchestrator in terminal status: {entity.status.value}")
 
         return entity
 
@@ -199,17 +210,30 @@ class WorkerPromotionService:
         """Create new orchestrator for the agent's task."""
         from sibyl.agents.task_orchestrator import TaskOrchestratorService
 
+        if not agent.task_id:
+            raise WorkerPromotionError("Agent has no task to orchestrate")
+
+        # Get managers (lazy-create if not provided)
+        relationship_manager = await self._get_relationship_manager()
+        agent_runner = await self._get_agent_runner()
+        worktree_manager = await self._get_worktree_manager()
+
         service = TaskOrchestratorService(
             entity_manager=self.entity_manager,
+            relationship_manager=relationship_manager,
+            agent_runner=agent_runner,
+            worktree_manager=worktree_manager,
             org_id=self.org_id,
             project_id=self.project_id,
         )
 
-        if not agent.task_id:
-            raise WorkerPromotionError("Agent has no task to orchestrate")
+        # Fetch the task
+        task_entity = await self.entity_manager.get(agent.task_id)
+        if not isinstance(task_entity, Task):
+            raise WorkerPromotionError(f"Task not found: {agent.task_id}")
 
         orchestrator = await service.create(
-            task_id=agent.task_id,
+            task=task_entity,
             gate_config=gate_config,
         )
 
@@ -220,6 +244,42 @@ class WorkerPromotionService:
         )
 
         return orchestrator
+
+    async def _get_relationship_manager(self) -> "RelationshipManager":
+        """Get or create relationship manager."""
+        if self._relationship_manager:
+            return self._relationship_manager
+
+        from sibyl_core.graph.client import get_graph_client
+        from sibyl_core.graph.relationships import RelationshipManager
+
+        client = await get_graph_client()
+        return RelationshipManager(client, group_id=self.org_id)
+
+    async def _get_agent_runner(self) -> "AgentRunner":
+        """Get or create agent runner."""
+        if self._agent_runner:
+            return self._agent_runner
+
+        from sibyl.agents.runner import AgentRunner
+
+        worktree_manager = await self._get_worktree_manager()
+        return AgentRunner(
+            entity_manager=self.entity_manager,
+            worktree_manager=worktree_manager,
+            org_id=self.org_id,
+            project_id=self.project_id,
+        )
+
+    async def _get_worktree_manager(self) -> "WorktreeManager":
+        """Get or create worktree manager."""
+        if self._worktree_manager:
+            return self._worktree_manager
+
+        raise WorkerPromotionError(
+            "WorktreeManager required but not provided. "
+            "Pass worktree_manager to WorkerPromotionService constructor."
+        )
 
     async def _update_agent_as_managed(
         self,
@@ -251,13 +311,7 @@ class WorkerPromotionService:
         Uses WorktreeManager to create a git worktree for isolation.
         """
         try:
-            from sibyl.agents.worktrees import WorktreeManager
-
-            manager = WorktreeManager(
-                entity_manager=self.entity_manager,
-                org_id=self.org_id,
-                project_id=self.project_id,
-            )
+            manager = await self._get_worktree_manager()
 
             worktree = await manager.create_worktree(
                 agent_id=agent.id,

@@ -18,6 +18,9 @@ import { isToolCallMessage } from './chat-types';
 // =============================================================================
 
 /** Main chat panel with messages list and input form */
+/** Grace period before showing thinking indicator after agent text (ms) */
+const THINKING_GRACE_PERIOD = 1200;
+
 export function ChatPanel({
   messages,
   pendingMessages,
@@ -34,6 +37,10 @@ export function ChatPanel({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const prevMessageCount = useRef(messages.length);
   const isAtBottomRef = useRef(true); // Track if user is scrolled to bottom
+
+  // Track when grace period passes to show thinking indicator
+  const [thinkingReady, setThinkingReady] = useState(false);
+  const lastMessageIdRef = useRef<string | null>(null);
 
   // Check if agent is in a terminal state (spinners should stop)
   const isAgentTerminal = ['completed', 'failed', 'terminated'].includes(agentStatus);
@@ -125,12 +132,34 @@ export function ChatPanel({
     msg => isToolCallMessage(msg) && !resultsByToolId.has(msg.tool.id)
   );
   const lastMessage = messages[messages.length - 1];
-  const lastMessageAge = lastMessage ? Date.now() - lastMessage.timestamp.getTime() : Infinity;
-  // Don't show thinking immediately after agent sends a text response
-  const recentAgentText =
-    lastMessage?.role === 'agent' && lastMessage?.kind === 'text' && lastMessageAge < 1000;
-  // Show thinking when: agent is working, no tools have spinners, and not just responded
-  const showThinking = isAgentWorking && !hasPendingToolCalls && !recentAgentText;
+  const isLastMessageAgentText = lastMessage?.role === 'agent' && lastMessage?.kind === 'text';
+
+  // Timer-based grace period for showing thinking indicator
+  // Resets when last message changes, then fires after THINKING_GRACE_PERIOD
+  useEffect(() => {
+    const lastId = lastMessage?.id ?? null;
+
+    // If message changed, reset thinking ready state
+    if (lastId !== lastMessageIdRef.current) {
+      lastMessageIdRef.current = lastId;
+      setThinkingReady(false);
+    }
+
+    // Only start timer if agent is working and last message is agent text
+    if (!isAgentWorking || !isLastMessageAgentText) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setThinkingReady(true);
+    }, THINKING_GRACE_PERIOD);
+
+    return () => clearTimeout(timer);
+  }, [lastMessage?.id, isAgentWorking, isLastMessageAgentText]);
+
+  // Show thinking when: agent is working, no tools have spinners, and grace period passed
+  const showThinking =
+    isAgentWorking && !hasPendingToolCalls && (thinkingReady || !isLastMessageAgentText);
 
   // Placeholder text based on agent state
   const placeholder = (() => {

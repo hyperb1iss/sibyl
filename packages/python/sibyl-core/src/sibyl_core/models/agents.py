@@ -237,24 +237,16 @@ class MetaOrchestratorRecord(Entity):
     # Cost controls
     budget_usd: float = Field(default=100.0, description="Sprint budget in USD")
     spent_usd: float = Field(default=0.0, description="Total spent this sprint")
-    cost_alert_threshold: float = Field(
-        default=0.8, description="Alert at this % of budget"
-    )
+    cost_alert_threshold: float = Field(default=0.8, description="Alert at this % of budget")
 
     # Timing
-    sprint_started_at: datetime | None = Field(
-        default=None, description="When sprint started"
-    )
-    sprint_ends_at: datetime | None = Field(
-        default=None, description="Sprint deadline"
-    )
+    sprint_started_at: datetime | None = Field(default=None, description="When sprint started")
+    sprint_ends_at: datetime | None = Field(default=None, description="Sprint deadline")
 
     # Metrics
     tasks_completed: int = Field(default=0, description="Tasks completed this sprint")
     tasks_failed: int = Field(default=0, description="Tasks failed this sprint")
-    total_rework_cycles: int = Field(
-        default=0, description="Total rework cycles across all tasks"
-    )
+    total_rework_cycles: int = Field(default=0, description="Total rework cycles across all tasks")
 
     @model_validator(mode="before")
     @classmethod

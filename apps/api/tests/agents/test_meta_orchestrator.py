@@ -12,7 +12,6 @@ from sibyl.agents.meta_orchestrator import (
 from sibyl_core.models import (
     MetaOrchestratorRecord,
     MetaOrchestratorStatus,
-    QualityGateType,
     SprintStrategy,
     TaskOrchestratorRecord,
 )
@@ -156,7 +155,9 @@ class TestStart:
         mock_entity_manager.get.return_value = meta_orchestrator
 
         # Mock _spawn_orchestrators to avoid complex dependencies
-        with patch.object(meta_service, "_spawn_orchestrators", new_callable=AsyncMock) as mock_spawn:
+        with patch.object(
+            meta_service, "_spawn_orchestrators", new_callable=AsyncMock
+        ) as mock_spawn:
             await meta_service.start("meta-111")
 
             # Should update status to running
@@ -171,7 +172,9 @@ class TestStart:
             mock_spawn.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_raises_if_already_running(self, meta_service, mock_entity_manager, meta_orchestrator):
+    async def test_raises_if_already_running(
+        self, meta_service, mock_entity_manager, meta_orchestrator
+    ):
         """Raises error if already running."""
         meta_orchestrator.status = MetaOrchestratorStatus.RUNNING
         mock_entity_manager.get.return_value = meta_orchestrator
@@ -268,7 +271,9 @@ class TestPauseResume:
         )
 
     @pytest.mark.asyncio
-    async def test_resume_updates_status(self, meta_service, mock_entity_manager, meta_orchestrator):
+    async def test_resume_updates_status(
+        self, meta_service, mock_entity_manager, meta_orchestrator
+    ):
         """Resume updates status to running."""
         meta_orchestrator.status = MetaOrchestratorStatus.PAUSED
         mock_entity_manager.get.return_value = meta_orchestrator

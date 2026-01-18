@@ -1527,15 +1527,11 @@ class Runner(TimestampMixin, table=True):
         description="Current number of active agents on this runner",
     )
 
-    # Status
-    status: RunnerStatus = Field(
-        default=RunnerStatus.OFFLINE,
+    # Status - stored as string to avoid async enum issues
+    status: str = Field(
+        default=RunnerStatus.OFFLINE.value,
         sa_column=Column(
-            Enum(
-                RunnerStatus,
-                name="runnerstatus",
-                values_callable=lambda enum: [e.value for e in enum],
-            ),
+            String(32),
             nullable=False,
             server_default=text("'offline'"),
         ),

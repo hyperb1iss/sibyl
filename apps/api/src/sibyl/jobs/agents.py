@@ -598,9 +598,7 @@ async def run_agent_execution(  # noqa: PLR0915
             worktree_id = None
             if agent_record:
                 meta = getattr(agent_record, "metadata", {}) or {}
-                worktree_id = meta.get("worktree_id") or getattr(
-                    agent_record, "worktree_id", None
-                )
+                worktree_id = meta.get("worktree_id") or getattr(agent_record, "worktree_id", None)
 
             await manager.update(
                 agent_id,

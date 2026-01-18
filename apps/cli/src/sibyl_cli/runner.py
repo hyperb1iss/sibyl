@@ -55,6 +55,7 @@ def list_runners(
         sibyl runner list
         sibyl runner list --status online
     """
+
     async def _list_runners() -> None:
         async with get_client() as client:
             params: dict[str, Any] = {}
@@ -100,10 +101,16 @@ def list_runners(
 
 @app.command()
 def route(
-    project_id: Annotated[str | None, typer.Option("--project", "-p", help="Project ID for affinity scoring")] = None,
-    capabilities: Annotated[str | None, typer.Option("--caps", "-c", help="Required capabilities (comma-separated)")] = None,
+    project_id: Annotated[
+        str | None, typer.Option("--project", "-p", help="Project ID for affinity scoring")
+    ] = None,
+    capabilities: Annotated[
+        str | None, typer.Option("--caps", "-c", help="Required capabilities (comma-separated)")
+    ] = None,
     prefer: Annotated[str | None, typer.Option("--prefer", help="Preferred runner ID")] = None,
-    exclude: Annotated[str | None, typer.Option("--exclude", "-x", help="Runner IDs to exclude (comma-separated)")] = None,
+    exclude: Annotated[
+        str | None, typer.Option("--exclude", "-x", help="Runner IDs to exclude (comma-separated)")
+    ] = None,
     json_out: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ) -> None:
     """Route a task to the optimal runner.
@@ -117,6 +124,7 @@ def route(
     Example:
         sibyl runner route --project proj_abc123 --caps docker,gpu
     """
+
     async def _route_task() -> None:
         async with get_client() as client:
             payload: dict[str, Any] = {}
@@ -175,8 +183,12 @@ def route(
 
 @app.command()
 def scores(
-    project_id: Annotated[str | None, typer.Option("--project", "-p", help="Project ID for affinity scoring")] = None,
-    capabilities: Annotated[str | None, typer.Option("--caps", "-c", help="Required capabilities (comma-separated)")] = None,
+    project_id: Annotated[
+        str | None, typer.Option("--project", "-p", help="Project ID for affinity scoring")
+    ] = None,
+    capabilities: Annotated[
+        str | None, typer.Option("--caps", "-c", help="Required capabilities (comma-separated)")
+    ] = None,
     json_out: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ) -> None:
     """Show routing scores for all runners.
@@ -187,6 +199,7 @@ def scores(
         sibyl runner scores
         sibyl runner scores --project proj_abc123 --caps docker
     """
+
     async def _get_scores() -> None:
         async with get_client() as client:
             params: dict[str, Any] = {}
@@ -227,13 +240,23 @@ def scores(
                 slots = s.get("available_slots", 0)
 
                 # Color total based on viability
-                total_str = f"[{SUCCESS_GREEN}]{total:.0f}[/{SUCCESS_GREEN}]" if total >= 0 else f"[red]{total:.0f}[/red]"
+                total_str = (
+                    f"[{SUCCESS_GREEN}]{total:.0f}[/{SUCCESS_GREEN}]"
+                    if total >= 0
+                    else f"[red]{total:.0f}[/red]"
+                )
 
                 # Color affinity if has warm worktree
-                affinity_str = f"[{SUCCESS_GREEN}]{affinity:.0f}[/{SUCCESS_GREEN}]" if s.get("has_warm_worktree") else f"{affinity:.0f}"
+                affinity_str = (
+                    f"[{SUCCESS_GREEN}]{affinity:.0f}[/{SUCCESS_GREEN}]"
+                    if s.get("has_warm_worktree")
+                    else f"{affinity:.0f}"
+                )
 
                 # Color caps if missing
-                caps_str = f"[red]{caps:.0f}[/red]" if s.get("missing_capabilities") else f"{caps:.0f}"
+                caps_str = (
+                    f"[red]{caps:.0f}[/red]" if s.get("missing_capabilities") else f"{caps:.0f}"
+                )
 
                 # Color health penalty
                 health_str = f"[red]{health:.0f}[/red]" if health < 0 else f"{health:.0f}"
@@ -252,7 +275,9 @@ def scores(
             console.print(f"\n[dim]Total: {result.get('total', 0)} runners[/dim]")
 
             # Legend
-            console.print("[dim]Scoring: affinity(50) + caps(30) + load(0-20) + health(-100 if stale)[/dim]")
+            console.print(
+                "[dim]Scoring: affinity(50) + caps(30) + load(0-20) + health(-100 if stale)[/dim]"
+            )
 
     try:
         asyncio.run(_get_scores())

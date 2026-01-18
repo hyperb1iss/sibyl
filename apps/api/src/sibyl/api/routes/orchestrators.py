@@ -22,6 +22,8 @@ from sibyl_core.graph.relationships import RelationshipManager
 from sibyl_core.models import (
     EntityType,
     QualityGateType,
+    Relationship,
+    RelationshipType,
     TaskOrchestratorPhase,
     TaskOrchestratorRecord,
     TaskOrchestratorStatus,
@@ -201,8 +203,12 @@ async def create_orchestrator(
     orchestrator_id = f"taskorch_{uuid4().hex[:16]}"
     now = datetime.now(UTC)
 
+    # Get task name for orchestrator
+    task_name = task_entity.name if hasattr(task_entity, "name") else "Task"
+
     record = TaskOrchestratorRecord(
         id=orchestrator_id,
+        name=f"TaskOrchestrator: {task_name[:50]}",
         organization_id=str(org.id),
         project_id=request.project_id,
         task_id=request.task_id,
@@ -222,10 +228,13 @@ async def create_orchestrator(
     await entity_manager.create_direct(record)
 
     # Create relationship to task
-    await relationship_manager.create_relationship(
-        source_id=orchestrator_id,
-        target_id=request.task_id,
-        relationship_type="WORKS_ON",
+    await relationship_manager.create(
+        Relationship(
+            id=f"rel_{uuid4().hex[:16]}",
+            source_id=orchestrator_id,
+            target_id=request.task_id,
+            relationship_type=RelationshipType.WORKS_ON,
+        )
     )
 
     log.info(
@@ -311,7 +320,9 @@ async def get_orchestrator(
     try:
         entity = await entity_manager.get(orchestrator_id)
         if not entity or entity.entity_type != EntityType.TASK_ORCHESTRATOR:
-            raise HTTPException(status_code=404, detail=f"Orchestrator not found: {orchestrator_id}")
+            raise HTTPException(
+                status_code=404, detail=f"Orchestrator not found: {orchestrator_id}"
+            )
     except EntityNotFoundError:
         raise HTTPException(
             status_code=404, detail=f"Orchestrator not found: {orchestrator_id}"
@@ -349,7 +360,9 @@ async def start_orchestrator(
     try:
         entity = await entity_manager.get(orchestrator_id)
         if not entity or entity.entity_type != EntityType.TASK_ORCHESTRATOR:
-            raise HTTPException(status_code=404, detail=f"Orchestrator not found: {orchestrator_id}")
+            raise HTTPException(
+                status_code=404, detail=f"Orchestrator not found: {orchestrator_id}"
+            )
     except EntityNotFoundError:
         raise HTTPException(
             status_code=404, detail=f"Orchestrator not found: {orchestrator_id}"
@@ -411,7 +424,9 @@ async def pause_orchestrator(
     try:
         entity = await entity_manager.get(orchestrator_id)
         if not entity or entity.entity_type != EntityType.TASK_ORCHESTRATOR:
-            raise HTTPException(status_code=404, detail=f"Orchestrator not found: {orchestrator_id}")
+            raise HTTPException(
+                status_code=404, detail=f"Orchestrator not found: {orchestrator_id}"
+            )
     except EntityNotFoundError:
         raise HTTPException(
             status_code=404, detail=f"Orchestrator not found: {orchestrator_id}"
@@ -473,7 +488,9 @@ async def resume_orchestrator(
     try:
         entity = await entity_manager.get(orchestrator_id)
         if not entity or entity.entity_type != EntityType.TASK_ORCHESTRATOR:
-            raise HTTPException(status_code=404, detail=f"Orchestrator not found: {orchestrator_id}")
+            raise HTTPException(
+                status_code=404, detail=f"Orchestrator not found: {orchestrator_id}"
+            )
     except EntityNotFoundError:
         raise HTTPException(
             status_code=404, detail=f"Orchestrator not found: {orchestrator_id}"
@@ -541,7 +558,9 @@ async def respond_to_review(
     try:
         entity = await entity_manager.get(orchestrator_id)
         if not entity or entity.entity_type != EntityType.TASK_ORCHESTRATOR:
-            raise HTTPException(status_code=404, detail=f"Orchestrator not found: {orchestrator_id}")
+            raise HTTPException(
+                status_code=404, detail=f"Orchestrator not found: {orchestrator_id}"
+            )
     except EntityNotFoundError:
         raise HTTPException(
             status_code=404, detail=f"Orchestrator not found: {orchestrator_id}"
@@ -585,7 +604,9 @@ async def respond_to_review(
                 {"status": TaskOrchestratorStatus.FAILED.value},
             )
             action = "rejected_failed"
-            message = f"Review rejected, max rework attempts ({record.max_rework_attempts}) exceeded"
+            message = (
+                f"Review rejected, max rework attempts ({record.max_rework_attempts}) exceeded"
+            )
         else:
             await entity_manager.update(
                 orchestrator_id,

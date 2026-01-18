@@ -13,6 +13,7 @@ from sibyl_core.models import (
     AgentRecord,
     AgentStatus,
     QualityGateType,
+    Task,
     TaskOrchestratorPhase,
     TaskOrchestratorRecord,
     TaskOrchestratorStatus,
@@ -30,12 +31,40 @@ def mock_entity_manager():
 
 
 @pytest.fixture
-def promotion_service(mock_entity_manager):
+def mock_relationship_manager():
+    """Create mock relationship manager."""
+    manager = AsyncMock()
+    manager.create = AsyncMock()
+    return manager
+
+
+@pytest.fixture
+def mock_agent_runner():
+    """Create mock agent runner."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def mock_worktree_manager():
+    """Create mock worktree manager."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def promotion_service(
+    mock_entity_manager,
+    mock_relationship_manager,
+    mock_agent_runner,
+    mock_worktree_manager,
+):
     """Create WorkerPromotionService with mocked dependencies."""
     return WorkerPromotionService(
         entity_manager=mock_entity_manager,
         org_id="org-123",
         project_id="proj-456",
+        relationship_manager=mock_relationship_manager,
+        agent_runner=mock_agent_runner,
+        worktree_manager=mock_worktree_manager,
     )
 
 
@@ -65,6 +94,18 @@ def managed_agent():
         standalone=False,
         task_orchestrator_id="orch-111",
         status=AgentStatus.WORKING,
+    )
+
+
+@pytest.fixture
+def task():
+    """Create a Task for promotion."""
+    return Task(
+        id="task-789",
+        name="Test Task",
+        organization_id="org-123",
+        title="Implement feature X",
+        project_id="proj-456",
     )
 
 
@@ -105,7 +146,7 @@ class TestCanPromote:
         standalone_agent.status = AgentStatus.PAUSED
         mock_entity_manager.get.return_value = standalone_agent
 
-        can_promote, reason = await promotion_service.can_promote("agent-123")
+        can_promote, _reason = await promotion_service.can_promote("agent-123")
 
         assert can_promote is True
 
@@ -117,7 +158,7 @@ class TestCanPromote:
         standalone_agent.status = AgentStatus.WORKING
         mock_entity_manager.get.return_value = standalone_agent
 
-        can_promote, reason = await promotion_service.can_promote("agent-123")
+        can_promote, _reason = await promotion_service.can_promote("agent-123")
 
         assert can_promote is True
 
@@ -160,9 +201,7 @@ class TestCanPromote:
         assert "invalid state" in reason.lower()
 
     @pytest.mark.asyncio
-    async def test_cannot_promote_nonexistent_agent(
-        self, promotion_service, mock_entity_manager
-    ):
+    async def test_cannot_promote_nonexistent_agent(self, promotion_service, mock_entity_manager):
         """Non-existent agent cannot be promoted."""
         mock_entity_manager.get.return_value = None
 
@@ -177,24 +216,23 @@ class TestPromote:
 
     @pytest.mark.asyncio
     async def test_promote_creates_orchestrator(
-        self, promotion_service, mock_entity_manager, standalone_agent, orchestrator
+        self, promotion_service, mock_entity_manager, standalone_agent, orchestrator, task
     ):
         """Promote creates new orchestrator when not provided."""
         mock_entity_manager.get.side_effect = [
-            standalone_agent,  # Initial get
-            standalone_agent,  # can_promote check
-            standalone_agent,  # After update
-            orchestrator,  # Orchestrator refresh
+            standalone_agent,  # can_promote: get agent
+            standalone_agent,  # promote: get agent
+            task,  # _create_orchestrator: get task
+            standalone_agent,  # promote: refresh agent
+            orchestrator,  # promote: refresh orchestrator
         ]
 
-        with patch(
-            "sibyl.agents.task_orchestrator.TaskOrchestratorService"
-        ) as MockService:
+        with patch("sibyl.agents.task_orchestrator.TaskOrchestratorService") as MockService:
             mock_service = AsyncMock()
             mock_service.create.return_value = orchestrator
             MockService.return_value = mock_service
 
-            agent, orch = await promotion_service.promote(
+            _agent, _orch = await promotion_service.promote(
                 "agent-123",
                 create_worktree=False,
             )
@@ -214,7 +252,7 @@ class TestPromote:
             orchestrator,  # Refresh orchestrator
         ]
 
-        agent, orch = await promotion_service.promote(
+        _agent, orch = await promotion_service.promote(
             "agent-123",
             orchestrator_id="orch-111",
             create_worktree=False,
@@ -306,7 +344,7 @@ class TestDemote:
             ),  # After update
         ]
 
-        agent = await promotion_service.demote("agent-456")
+        await promotion_service.demote("agent-456")
 
         # Verify update was called with standalone=True
         update_call = mock_entity_manager.update.call_args

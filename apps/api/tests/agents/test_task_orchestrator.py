@@ -77,9 +77,13 @@ def mock_relationship_manager():
     """Mock RelationshipManager."""
     manager = MagicMock()
 
+    async def mock_create(relationship):
+        return relationship
+
     async def mock_create_rel(**kwargs):
         return f"rel_{uuid4().hex[:8]}"
 
+    manager.create = mock_create
     manager.create_relationship = mock_create_rel
     return manager
 
@@ -478,9 +482,7 @@ class TestHumanReview:
         assert updated.status == TaskOrchestratorStatus.COMPLETE
 
     @pytest.mark.asyncio
-    async def test_human_rejection_triggers_rework(
-        self, service, sample_task, mock_agent_runner
-    ):
+    async def test_human_rejection_triggers_rework(self, service, sample_task, mock_agent_runner):
         """Human rejection triggers rework cycle."""
         record = await service.create(sample_task)
         record.status = TaskOrchestratorStatus.HUMAN_REVIEW

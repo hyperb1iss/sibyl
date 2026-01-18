@@ -25,7 +25,7 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import require_org_role
 from sibyl.auth.rls import AuthSession, get_auth_session
 from sibyl.db import AgentMessage as DbAgentMessage, AgentState
-from sibyl.db.models import Organization, OrganizationRole, ProjectRole
+from sibyl.db.models import Organization, OrganizationRole, ProjectRole, utcnow_naive
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
@@ -386,7 +386,8 @@ async def list_agents(
     if status:
         # Use AgentState status if available, fall back to graph metadata
         agents = [
-            a for a in agents
+            a
+            for a in agents
             if (states_by_id.get(a.id) and states_by_id[a.id].status == status.value)
             or (a.id not in states_by_id and (a.metadata or {}).get("status") == status.value)
         ]
@@ -520,9 +521,9 @@ async def spawn_agent(
         try:
             project = await manager.get(request.project_id)
             if project and hasattr(project, "repo_path"):
-                repo_path = project.repo_path
-        except Exception:
-            pass  # Fallback to cwd
+                repo_path = getattr(project, "repo_path", None)
+        except Exception:  # noqa: S110
+            pass  # Fallback to cwd if project lookup fails
 
         # Enqueue execution in worker process
         await enqueue_agent_execution(
@@ -748,7 +749,7 @@ async def terminate_agent(
     if state:
         state.status = AgentStatus.TERMINATED.value
         state.error_message = request.reason or "user_terminated"
-        state.completed_at = datetime.now(UTC)
+        state.completed_at = utcnow_naive()
         await auth.session.commit()
 
     # Also update graph metadata for legacy compatibility
@@ -904,7 +905,7 @@ async def send_agent_message(
     # Get next message number
     result = await auth.session.execute(
         select(func.coalesce(func.max(AgentMessage.message_num), 0)).where(
-            AgentMessage.agent_id == agent_id
+            AgentMessage.agent_id == agent_id  # type: ignore[arg-type]
         )
     )
     max_num: int = result.scalar() or 0
@@ -917,7 +918,7 @@ async def send_agent_message(
         role=AgentMessageRole.user,
         type=AgentMessageType.text,
         content=request.content[:500],  # Summary only
-        extra={"full_content": request.content} if len(request.content) > 500 else None,
+        extra={"full_content": request.content} if len(request.content) > 500 else {},
     )
     auth.session.add(db_message)
     await auth.session.commit()
@@ -1092,7 +1093,7 @@ async def record_heartbeat(
     # Check control permission (heartbeats modify agent state)
     await _check_agent_control_permission(ctx, auth.session, entity)
 
-    now = datetime.now(UTC)
+    now = utcnow_naive()
 
     # Update AgentState in Postgres (primary source of truth)
     state_result = await auth.session.execute(
@@ -1167,7 +1168,7 @@ def _calculate_health_status(
         last_heartbeat_str = state.last_heartbeat.isoformat()
     elif meta.get("last_heartbeat"):
         last_heartbeat_str = str(meta["last_heartbeat"])
-        last_heartbeat_dt = datetime.fromisoformat(last_heartbeat_str)
+        last_heartbeat_dt = datetime.fromisoformat(last_heartbeat_str).replace(tzinfo=None)
 
     # Get started_at for grace period calculation
     started_at_dt: datetime | None = None
@@ -1175,10 +1176,10 @@ def _calculate_health_status(
         started_at_dt = state.started_at
     elif meta.get("started_at"):
         started_at_str = str(meta["started_at"])
-        try:
-            started_at_dt = datetime.fromisoformat(started_at_str)
+        try:  # noqa: SIM105
+            started_at_dt = datetime.fromisoformat(started_at_str).replace(tzinfo=None)
         except ValueError:
-            pass
+            pass  # Malformed timestamp - leave as None
 
     seconds_since: int | None = None
     health_status = AgentHealthStatus.UNRESPONSIVE
@@ -1246,10 +1247,14 @@ async def get_health_overview(
     )
     states_by_id = {s.graph_agent_id: s for s in state_result.scalars().all()}
 
-    now = datetime.now(UTC)
+    now = utcnow_naive()
     agent_healths: list[AgentHealth] = []
     healthy, stale, unresponsive = 0, 0, 0
-    terminal_states = (AgentStatus.COMPLETED.value, AgentStatus.FAILED.value, AgentStatus.TERMINATED.value)
+    terminal_states = (
+        AgentStatus.COMPLETED.value,
+        AgentStatus.FAILED.value,
+        AgentStatus.TERMINATED.value,
+    )
     user_id_str = str(ctx.user.id)
 
     for agent in agents:
@@ -1295,7 +1300,11 @@ async def get_health_overview(
         )
 
     return HealthOverviewResponse(
-        agents=agent_healths, total=len(agent_healths), healthy=healthy, stale=stale, unresponsive=unresponsive
+        agents=agent_healths,
+        total=len(agent_healths),
+        healthy=healthy,
+        stale=stale,
+        unresponsive=unresponsive,
     )
 
 

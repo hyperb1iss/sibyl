@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sibyl.agents.approval_queue import ApprovalQueue, create_approval_queue
-from sibyl_core.models import ApprovalRecord, ApprovalStatus, ApprovalType
+from sibyl_core.models import ApprovalStatus, ApprovalType
 
 
 @pytest.fixture
@@ -249,7 +249,10 @@ class TestApprovalQueueReattach:
     @pytest.mark.asyncio
     async def test_reattach_returns_existing_response(self, approval_queue):
         """Reattach returns response if it was stored while we were down."""
-        pending = {"id": "approval-123", "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat()}
+        pending = {
+            "id": "approval-123",
+            "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+        }
         existing = {"approved": True, "message": "Done", "by": "alice"}
 
         with (
@@ -310,7 +313,6 @@ class TestApprovalQueueListPending:
     @pytest.mark.asyncio
     async def test_list_pending_returns_approvals(self, approval_queue, mock_redis):
         """List pending returns stored approvals."""
-        approval_data = {"id": "approval-123", "title": "Test"}
 
         async def scan_with_results(pattern):
             yield "sibyl:pending_approvals:agent-789:approval-123"
@@ -357,7 +359,11 @@ class TestApprovalQueueExpireStale:
             yield "sibyl:pending_approvals:agent-789:approval-old"
 
         mock_redis.scan_iter = scan_with_expired
-        mock_redis.get = AsyncMock(return_value='{"id": "approval-old", "expires_at": "' + expired_data["expires_at"] + '"}')
+        mock_redis.get = AsyncMock(
+            return_value='{"id": "approval-old", "expires_at": "'
+            + expired_data["expires_at"]
+            + '"}'
+        )
 
         with patch.object(approval_queue, "_handle_timeout") as mock_timeout:
             count = await approval_queue.expire_stale()

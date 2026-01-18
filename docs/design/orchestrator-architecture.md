@@ -1,17 +1,19 @@
 # Sibyl Orchestrator Architecture
 
-**Status**: Planning
-**Last Updated**: 2026-01-12
+**Status**: Planning **Last Updated**: 2026-01-12
 
 ## Executive Summary
 
-Sibyl's agent orchestration follows a **flexible three-tier pattern** with manual creation at every level:
+Sibyl's agent orchestration follows a **flexible three-tier pattern** with manual creation at every
+level:
 
-1. **MetaOrchestrator** - ONE per project (singleton), persists across sessions, coordinates big picture
+1. **MetaOrchestrator** - ONE per project (singleton), persists across sessions, coordinates big
+   picture
 2. **TaskOrchestrator** - Per-task coordinator, manages build loop, can be created manually
 3. **Worker Agents** - Execute actual work, can be created manually, can be "promoted" to tasks
 
 **Key Principles:**
+
 - **Every tier is directly accessible** - Users can create at any level
 - **Association is optional** - Entities can exist independently, be linked later
 - **Promotion model** - Workers can become Tasks, Tasks report to Meta
@@ -125,23 +127,27 @@ Entities created independently can be linked later:
 ## Design Principles
 
 ### 1. Hierarchical Control with Direct Access
+
 - Meta-orchestrator coordinates the big picture (1 per project)
 - Task orchestrators own individual task lifecycles
 - Users can create workers directly for quick help
 - Clear accountability at each level, but no forced path
 
 ### 2. Quality-First Execution
+
 - Every implementation passes through review gates
 - TaskOrchestrator owns the review → rework loop
 - Heavy UI features require human review checkpoint
 - Test coverage gates before merge
 
 ### 3. Intelligent Parallelism
+
 - Independent tasks run in parallel (worktree isolation)
 - Each TaskOrchestrator operates independently
 - Meta-orchestrator handles cross-task coordination
 
 ### 4. Persistent Memory
+
 - All decisions logged to knowledge graph
 - Cross-session continuity
 - Pattern learning from completed work
@@ -209,6 +215,7 @@ Entities created independently can be linked later:
 The MetaOrchestrator handles high-level coordination across multiple tasks.
 
 ### Phase 1: Request Decomposition
+
 ```
 INPUT:  User request (natural language)
 OUTPUT: Task breakdown with dependencies
@@ -221,6 +228,7 @@ OUTPUT: Task breakdown with dependencies
 5. Estimate complexity (for parallelism decisions)
 
 ### Phase 2: TaskOrchestrator Spawning
+
 ```
 INPUT:  Task breakdown
 OUTPUT: Running TaskOrchestrators for each task
@@ -232,6 +240,7 @@ OUTPUT: Running TaskOrchestrators for each task
 4. Establish inter-task dependencies
 
 ### Phase 3: Cross-Task Coordination
+
 ```
 INPUT:  Running TaskOrchestrators
 OUTPUT: Coordinated progress, resolved conflicts
@@ -243,6 +252,7 @@ OUTPUT: Coordinated progress, resolved conflicts
 4. Manage resource allocation across tasks
 
 ### Phase 4: Merge Coordination
+
 ```
 INPUT:  Completed tasks
 OUTPUT: Merged, integrated codebase
@@ -308,7 +318,9 @@ back into the model until success. This carries known risks we must mitigate:
 
 #### The Problem: Iterative Safety Degradation
 
-Research shows that pure LLM feedback loops can cause **code quality to degrade** after ~3 iterations:
+Research shows that pure LLM feedback loops can cause **code quality to degrade** after ~3
+iterations:
+
 - Initially secure code may introduce vulnerabilities (auth bypasses, SQL injection)
 - "Context rot" - LLMs get worse as context fills up
 - "Over-optimizing" or "direction drift" beyond the sweet spot
@@ -361,6 +373,7 @@ Iteration 4+: BLOCKED - requires human intervention
 #### Why 3 Iterations?
 
 Studies show most tasks converge within 1-3 iterations. Beyond that:
+
 - Diminishing returns
 - Increased risk of degradation
 - Cost inefficiency
@@ -437,6 +450,7 @@ USER ──▶ "Hey, can you explain that auth check?"
 ## Quality Gates (Run by TaskOrchestrator)
 
 Quality gates are configurable per task type:
+
 - **Lint/Type check**: Automatic, blocking
 - **Test suite**: Automatic, blocking
 - **AI Code Review**: Automatic, may trigger rework
@@ -489,19 +503,19 @@ IMPLEMENT ──▶ SECURITY SCAN ──▶ AI REVIEW ──▶ HUMAN REVIEW ─
 
 ### Orchestration Layer (No Worktree)
 
-| Type | Purpose | Spawned By |
-|------|---------|------------|
-| **MetaOrchestrator** | Decompose requests, spawn tasks, merge | User request |
-| **TaskOrchestrator** | Manage single task through build loop | MetaOrchestrator |
+| Type                 | Purpose                                | Spawned By       |
+| -------------------- | -------------------------------------- | ---------------- |
+| **MetaOrchestrator** | Decompose requests, spawn tasks, merge | User request     |
+| **TaskOrchestrator** | Manage single task through build loop  | MetaOrchestrator |
 
 ### Worker Layer (Isolated Worktree)
 
-| Type | Purpose | Spawned By | User Interaction |
-|------|---------|------------|------------------|
-| **Implementer** | Write code | TaskOrchestrator | Direct chat OK |
-| **Tester** | Write/run tests | TaskOrchestrator | Direct chat OK |
-| **Investigator** | Debug, analyze | TaskOrchestrator | Direct chat OK |
-| **Reviewer** | AI code review | TaskOrchestrator | View results |
+| Type             | Purpose         | Spawned By       | User Interaction |
+| ---------------- | --------------- | ---------------- | ---------------- |
+| **Implementer**  | Write code      | TaskOrchestrator | Direct chat OK   |
+| **Tester**       | Write/run tests | TaskOrchestrator | Direct chat OK   |
+| **Investigator** | Debug, analyze  | TaskOrchestrator | Direct chat OK   |
+| **Reviewer**     | AI code review  | TaskOrchestrator | View results     |
 
 ---
 
@@ -632,35 +646,35 @@ ORCHESTRATOR:
 
 ### What Orchestrator Stores
 
-| Event | Stored As | Purpose |
-|-------|-----------|---------|
-| Task completion | Episode | Future reference |
-| Review feedback | Episode | Pattern learning |
-| Bug root cause | Pattern | Prevent recurrence |
-| Architecture decision | Pattern | Consistency |
-| User preference | Entity | Personalization |
+| Event                 | Stored As | Purpose            |
+| --------------------- | --------- | ------------------ |
+| Task completion       | Episode   | Future reference   |
+| Review feedback       | Episode   | Pattern learning   |
+| Bug root cause        | Pattern   | Prevent recurrence |
+| Architecture decision | Pattern   | Consistency        |
+| User preference       | Entity    | Personalization    |
 
 ### What Orchestrator Queries
 
-| Phase | Query | Example |
-|-------|-------|---------|
-| Planning | Similar tasks | "authentication implementations" |
-| Execution | Known gotchas | "OAuth token refresh issues" |
-| Review | Past feedback | "code style preferences" |
-| Merge | Conflict patterns | "package.json merge strategies" |
+| Phase     | Query             | Example                          |
+| --------- | ----------------- | -------------------------------- |
+| Planning  | Similar tasks     | "authentication implementations" |
+| Execution | Known gotchas     | "OAuth token refresh issues"     |
+| Review    | Past feedback     | "code style preferences"         |
+| Merge     | Conflict patterns | "package.json merge strategies"  |
 
 ---
 
 ## SOTA Comparison
 
-| Feature | AutoClaude | Devin | Cursor | **Sibyl** |
-|---------|------------|-------|--------|-----------|
-| Multi-agent | Limited | Yes | No | **Yes** |
-| Worktree isolation | No | Unknown | No | **Yes** |
-| Persistent memory | Partial | Partial | No | **Yes (Graph)** |
-| Human-in-loop | Basic | Yes | Yes | **Yes (Rich)** |
-| Quality gates | No | Basic | No | **Configurable** |
-| Self-hosted | No | No | No | **Yes** |
+| Feature            | AutoClaude | Devin   | Cursor | **Sibyl**        |
+| ------------------ | ---------- | ------- | ------ | ---------------- |
+| Multi-agent        | Limited    | Yes     | No     | **Yes**          |
+| Worktree isolation | No         | Unknown | No     | **Yes**          |
+| Persistent memory  | Partial    | Partial | No     | **Yes (Graph)**  |
+| Human-in-loop      | Basic      | Yes     | Yes    | **Yes (Rich)**   |
+| Quality gates      | No         | Basic   | No     | **Configurable** |
+| Self-hosted        | No         | No      | No     | **Yes**          |
 
 ### Sibyl's Differentiators
 
@@ -874,6 +888,7 @@ class AgentRecord(Entity):
 ## Implementation Phases
 
 ### Phase 1: Worker Foundation (Current)
+
 - [x] WorktreeManager activation
 - [x] Approval system
 - [x] Basic agent spawning
@@ -881,6 +896,7 @@ class AgentRecord(Entity):
 - [ ] Worker thread view in UI
 
 ### Phase 2: TaskOrchestrator
+
 - [ ] TaskOrchestratorRecord model
 - [ ] Build loop state machine (implement → review → rework)
 - [ ] Quality gate runner
@@ -889,6 +905,7 @@ class AgentRecord(Entity):
 - [ ] TaskOrchestrator view in UI
 
 ### Phase 3: MetaOrchestrator
+
 - [ ] MetaOrchestratorRecord model (1 per project)
 - [ ] Request decomposition engine
 - [ ] TaskOrchestrator spawning
@@ -897,6 +914,7 @@ class AgentRecord(Entity):
 - [ ] Project-level pattern learning
 
 ### Phase 4: Integration & Polish
+
 - [ ] Seamless tier transitions in UI
 - [ ] Real-time status across all tiers
 - [ ] Resource management
@@ -909,7 +927,8 @@ class AgentRecord(Entity):
 1. **MetaOrchestrator Activation**: Auto-create on first use, or explicit "enable orchestration"?
 2. **Worker Promotion UX**: What happens to existing conversation when promoting?
 3. **Cross-Task Dependencies**: How does MetaOrchestrator handle blocked tasks?
-4. **Standalone Worker Merge**: Can a standalone worker's changes be merged without TaskOrchestrator?
+4. **Standalone Worker Merge**: Can a standalone worker's changes be merged without
+   TaskOrchestrator?
 5. **Cost Attribution**: How to track costs across all tiers?
 
 ---

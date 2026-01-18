@@ -459,7 +459,9 @@ class QualityGateRunner:
         """Parse test output for failure details."""
         if project_type == ProjectType.PYTHON:
             # Pytest FAILED lines
-            errors = [line.strip() for line in output.split("\n") if line.strip().startswith("FAILED")]
+            errors = [
+                line.strip() for line in output.split("\n") if line.strip().startswith("FAILED")
+            ]
         else:
             errors = []
 

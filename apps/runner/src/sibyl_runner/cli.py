@@ -176,7 +176,19 @@ async def _register_runner(
     """Register runner with server via REST API."""
     import httpx
 
+    from sibyl_cli.auth_store import get_access_token, normalize_api_url
+
     url = f"{server_url.rstrip('/')}/api/runners/register"
+    api_url = normalize_api_url(f"{server_url.rstrip('/')}/api")
+
+    # Load auth token from CLI's auth store
+    token = get_access_token(api_url)
+    if not token:
+        raise RuntimeError(
+            "Not authenticated. Run 'sibyl auth login' first to authenticate with the server."
+        )
+
+    headers = {"Authorization": f"Bearer {token}"}
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -187,6 +199,7 @@ async def _register_runner(
                 "max_concurrent_agents": max_agents,
                 "capabilities": ["docker"],  # TODO: detect capabilities
             },
+            headers=headers,
             timeout=30,
         )
         response.raise_for_status()

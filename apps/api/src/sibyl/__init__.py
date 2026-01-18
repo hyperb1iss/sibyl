@@ -18,7 +18,8 @@ def _read_version() -> str:
     """Read version from VERSION file in repo root."""
     # Try multiple locations for VERSION file
     for path in [
-        Path(__file__).parent.parent.parent.parent.parent / "VERSION",  # From src/sibyl/__init__.py → repo root
+        Path(__file__).parent.parent.parent.parent.parent
+        / "VERSION",  # From src/sibyl/__init__.py → repo root
         Path("/app/VERSION"),  # Docker container
         Path.cwd() / "VERSION",  # Current working directory
     ]:

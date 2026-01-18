@@ -40,7 +40,7 @@ members = [
 [tool.uv.sources]
 # Local packages - workspace members reference each other
 sibyl-core = { workspace = true }
-sibyl-cli = { workspace = true }
+sibyl-dev = { workspace = true }
 sibyl-runner = { workspace = true }
 sibyld = { workspace = true }
 

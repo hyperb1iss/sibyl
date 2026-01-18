@@ -1,9 +1,5 @@
 """Tests for quality gate runner framework."""
 
-import asyncio
-from pathlib import Path
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
 from sibyl.agents.quality_gates import (
@@ -309,11 +305,13 @@ class TestQualityGateRunnerRunAll:
         """Run all gates executes multiple gates."""
         runner = QualityGateRunner(temp_worktree)
 
-        results = await runner.run_all_gates([
-            QualityGateType.LINT,
-            QualityGateType.TYPECHECK,
-            QualityGateType.TEST,
-        ])
+        results = await runner.run_all_gates(
+            [
+                QualityGateType.LINT,
+                QualityGateType.TYPECHECK,
+                QualityGateType.TEST,
+            ]
+        )
 
         assert len(results) == 3
         assert results[0].gate_type == QualityGateType.LINT
@@ -325,10 +323,12 @@ class TestQualityGateRunnerRunAll:
         """Human review is skipped in automated gates."""
         runner = QualityGateRunner(temp_worktree)
 
-        results = await runner.run_all_gates([
-            QualityGateType.LINT,
-            QualityGateType.HUMAN_REVIEW,
-        ])
+        results = await runner.run_all_gates(
+            [
+                QualityGateType.LINT,
+                QualityGateType.HUMAN_REVIEW,
+            ]
+        )
 
         # Only lint should have a result
         assert len(results) == 1

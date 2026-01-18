@@ -20,6 +20,7 @@ from sibyl_core.models import (
     AgentType,
     EntityType,
     QualityGateType,
+    Relationship,
     RelationshipType,
     Task,
     TaskOrchestratorPhase,
@@ -150,6 +151,7 @@ class TaskOrchestratorService:
 
         record = TaskOrchestratorRecord(
             id=orchestrator_id,
+            name=f"TaskOrchestrator: {task.name[:50]}",
             organization_id=self.org_id,
             project_id=self.project_id,
             meta_orchestrator_id=meta_orchestrator_id,
@@ -165,18 +167,24 @@ class TaskOrchestratorService:
 
         # Create relationships
         # TaskOrchestrator -> Task (WORKS_ON)
-        await self.relationship_manager.create_relationship(
-            source_id=orchestrator_id,
-            target_id=task.id,
-            relationship_type=RelationshipType.WORKS_ON,
+        await self.relationship_manager.create(
+            Relationship(
+                id=f"rel_{uuid4().hex[:16]}",
+                source_id=orchestrator_id,
+                target_id=task.id,
+                relationship_type=RelationshipType.WORKS_ON,
+            )
         )
 
         # If managed by MetaOrchestrator, create relationship
         if meta_orchestrator_id:
-            await self.relationship_manager.create_relationship(
-                source_id=orchestrator_id,
-                target_id=meta_orchestrator_id,
-                relationship_type=RelationshipType.MANAGED_BY,
+            await self.relationship_manager.create(
+                Relationship(
+                    id=f"rel_{uuid4().hex[:16]}",
+                    source_id=orchestrator_id,
+                    target_id=meta_orchestrator_id,
+                    relationship_type=RelationshipType.MANAGED_BY,
+                )
             )
 
         log.info(
@@ -261,9 +269,7 @@ class TaskOrchestratorService:
             raise TaskOrchestratorError(f"Orchestrator not found: {orchestrator_id}")
 
         if record.status != TaskOrchestratorStatus.INITIALIZING:
-            raise TaskOrchestratorError(
-                f"Cannot start orchestrator in state: {record.status}"
-            )
+            raise TaskOrchestratorError(f"Cannot start orchestrator in state: {record.status}")
 
         # Get the task
         task = await self.entity_manager.get(record.task_id)
@@ -290,10 +296,13 @@ class TaskOrchestratorService:
         )
 
         # Create orchestration relationship
-        await self.relationship_manager.create_relationship(
-            source_id=orchestrator_id,
-            target_id=worker.id,
-            relationship_type=RelationshipType.ORCHESTRATES,
+        await self.relationship_manager.create(
+            Relationship(
+                id=f"rel_{uuid4().hex[:16]}",
+                source_id=orchestrator_id,
+                target_id=worker.id,
+                relationship_type=RelationshipType.ORCHESTRATES,
+            )
         )
 
         log.info(
@@ -327,9 +336,7 @@ class TaskOrchestratorService:
             TaskOrchestratorStatus.IMPLEMENTING,
             TaskOrchestratorStatus.REWORKING,
         ):
-            raise TaskOrchestratorError(
-                f"Worker completion in unexpected state: {record.status}"
-            )
+            raise TaskOrchestratorError(f"Worker completion in unexpected state: {record.status}")
 
         # Transition to reviewing
         await self._update_status(
@@ -487,9 +494,7 @@ class TaskOrchestratorService:
             raise TaskOrchestratorError(f"Orchestrator not found: {orchestrator_id}")
 
         if record.status != TaskOrchestratorStatus.HUMAN_REVIEW:
-            raise TaskOrchestratorError(
-                f"Human approval in unexpected state: {record.status}"
-            )
+            raise TaskOrchestratorError(f"Human approval in unexpected state: {record.status}")
 
         if approved:
             await self._complete(orchestrator_id)
@@ -845,6 +850,7 @@ Focus on clean, well-tested implementation. You have up to {record.max_rework_at
 
         approval = ApprovalRecord(
             id=f"approval_{uuid4().hex[:16]}",
+            name=f"Review task {record.task_id[-8:]}",
             organization_id=self.org_id,
             project_id=self.project_id,
             agent_id=record.worker_id or record.id,
@@ -878,6 +884,7 @@ Focus on clean, well-tested implementation. You have up to {record.max_rework_at
 
         approval = ApprovalRecord(
             id=f"approval_{uuid4().hex[:16]}",
+            name=f"Escalation: task {record.task_id[-8:]}",
             organization_id=self.org_id,
             project_id=self.project_id,
             agent_id=record.worker_id or record.id,

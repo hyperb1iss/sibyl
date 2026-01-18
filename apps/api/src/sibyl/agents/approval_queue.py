@@ -522,7 +522,9 @@ class ApprovalQueue:
                         "by": getattr(entity, "response_by", "unknown"),
                     }
         except Exception as e:
-            log.debug("Could not check graph for existing response", approval_id=approval_id, error=str(e))
+            log.debug(
+                "Could not check graph for existing response", approval_id=approval_id, error=str(e)
+            )
 
         return None
 

@@ -73,7 +73,7 @@ class TaskRouter:
     """Routes tasks to optimal runners based on scoring.
 
     Usage:
-        router = TaskRouter(session, org_id)
+        router = TaskRouter(session, org_id, user_id)
 
         # Route a task
         result = await router.route_task(
@@ -89,15 +89,17 @@ class TaskRouter:
             print(result.reason)
     """
 
-    def __init__(self, session: AsyncSession, org_id: UUID) -> None:
+    def __init__(self, session: AsyncSession, org_id: UUID, user_id: UUID) -> None:
         """Initialize the task router.
 
         Args:
             session: SQLAlchemy async session
             org_id: Organization context for multi-tenancy
+            user_id: User who owns the runners to route to
         """
         self.session = session
         self.org_id = org_id
+        self.user_id = user_id
 
     async def route_task(
         self,
@@ -160,9 +162,7 @@ class TaskRouter:
             rejection_reasons = []
             for s in scores:
                 if s.missing_capabilities:
-                    rejection_reasons.append(
-                        f"{s.runner_name}: missing {s.missing_capabilities}"
-                    )
+                    rejection_reasons.append(f"{s.runner_name}: missing {s.missing_capabilities}")
                 elif s.health_penalty < 0:
                     rejection_reasons.append(f"{s.runner_name}: unhealthy (stale heartbeat)")
                 elif s.available_slots == 0:
@@ -224,14 +224,13 @@ class TaskRouter:
         scores.sort()
         return scores
 
-    async def _get_available_runners(
-        self, exclude_runners: list[UUID]
-    ) -> list[Runner]:
-        """Get runners that could potentially accept tasks."""
+    async def _get_available_runners(self, exclude_runners: list[UUID]) -> list[Runner]:
+        """Get runners owned by this user that could potentially accept tasks."""
         query = (
             select(Runner)
             .where(col(Runner.organization_id) == self.org_id)
-            .where(col(Runner.status).in_([RunnerStatus.ONLINE, RunnerStatus.BUSY]))
+            .where(col(Runner.user_id) == self.user_id)
+            .where(col(Runner.status).in_([RunnerStatus.ONLINE.value, RunnerStatus.BUSY.value]))
         )
 
         if exclude_runners:
@@ -240,9 +239,7 @@ class TaskRouter:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def _get_warm_worktrees(
-        self, project_id: UUID
-    ) -> dict[UUID, RunnerProject]:
+    async def _get_warm_worktrees(self, project_id: UUID) -> dict[UUID, RunnerProject]:
         """Get runners with warm worktrees for a project."""
         result = await self.session.execute(
             select(RunnerProject).where(col(RunnerProject.project_id) == project_id)
@@ -306,10 +303,7 @@ class TaskRouter:
 
         # Calculate total
         score.total_score = (
-            score.affinity_score
-            + score.capability_score
-            + score.load_score
-            + score.health_penalty
+            score.affinity_score + score.capability_score + score.load_score + score.health_penalty
         )
 
         return score
@@ -323,6 +317,7 @@ class TaskRouter:
 async def route_task_to_runner(
     session: AsyncSession,
     org_id: UUID,
+    user_id: UUID,
     project_id: UUID | None = None,
     required_capabilities: list[str] | None = None,
 ) -> RoutingResult:
@@ -331,13 +326,14 @@ async def route_task_to_runner(
     Args:
         session: Database session
         org_id: Organization ID
+        user_id: User ID (routes to this user's runners only)
         project_id: Optional project for affinity scoring
         required_capabilities: Required runner capabilities
 
     Returns:
         RoutingResult with selected runner or failure reason
     """
-    router = TaskRouter(session, org_id)
+    router = TaskRouter(session, org_id, user_id)
     return await router.route_task(
         project_id=project_id,
         required_capabilities=required_capabilities,

@@ -118,9 +118,7 @@ class RouteTaskRequest(BaseModel):
     preferred_runner_id: UUID | None = Field(
         default=None, description="Prefer this runner if available"
     )
-    exclude_runners: list[UUID] = Field(
-        default_factory=list, description="Runner IDs to exclude"
-    )
+    exclude_runners: list[UUID] = Field(default_factory=list, description="Runner IDs to exclude")
 
 
 class RunnerScoreResponse(BaseModel):
@@ -170,9 +168,9 @@ class RouteTaskResponse(BaseModel):
             runner_id=result.runner_id,
             runner_name=result.runner_name,
             score=RunnerScoreResponse.from_score(result.score) if result.score else None,
-            all_scores=[
-                RunnerScoreResponse.from_score(s) for s in result.all_scores
-            ] if result.all_scores else None,
+            all_scores=[RunnerScoreResponse.from_score(s) for s in result.all_scores]
+            if result.all_scores
+            else None,
             reason=result.reason,
         )
 
@@ -236,7 +234,7 @@ async def register_runner(
         capabilities=request.capabilities,
         max_concurrent_agents=request.max_concurrent_agents,
         client_version=request.client_version,
-        status=RunnerStatus.OFFLINE,
+        status=RunnerStatus.OFFLINE.value,
     )
 
     session.add(runner)
@@ -373,7 +371,7 @@ async def delete_runner(
         raise HTTPException(status_code=403, detail="Cannot delete runner you don't own")
 
     # Must be offline
-    if runner.status != RunnerStatus.OFFLINE:
+    if runner.status != RunnerStatus.OFFLINE.value:
         raise HTTPException(
             status_code=400, detail="Runner must be offline before deletion. Disconnect it first."
         )
@@ -427,7 +425,8 @@ async def route_task(
     """
     org = _require_org(auth)
 
-    task_router = TaskRouter(auth.session, org.id)
+    # Route to the current user's runners only
+    task_router = TaskRouter(auth.session, org.id, auth.ctx.user.id)
     result = await task_router.route_task(
         project_id=request.project_id,
         required_capabilities=request.required_capabilities,
@@ -458,7 +457,8 @@ async def get_runner_scores(
     if capabilities:
         required_caps = [c.strip() for c in capabilities.split(",") if c.strip()]
 
-    task_router = TaskRouter(auth.session, org.id)
+    # Show scores for the current user's runners only
+    task_router = TaskRouter(auth.session, org.id, auth.ctx.user.id)
     scores = await task_router.get_runner_scores(
         project_id=project_id,
         required_capabilities=required_caps,
@@ -537,7 +537,7 @@ class RunnerConnectionManager:
                 update(Runner)
                 .where(Runner.id == runner_id)
                 .values(
-                    status=RunnerStatus.ONLINE,
+                    status=RunnerStatus.ONLINE.value,
                     last_heartbeat=datetime.now(UTC),
                     websocket_session_id=str(id(websocket)),
                 )
@@ -568,7 +568,7 @@ class RunnerConnectionManager:
                 update(Runner)
                 .where(Runner.id == runner_id)
                 .values(
-                    status=RunnerStatus.OFFLINE,
+                    status=RunnerStatus.OFFLINE.value,
                     websocket_session_id=None,
                 )
             )
@@ -590,9 +590,7 @@ class RunnerConnectionManager:
             return [c for c in self.connections.values() if c.org_id == org_id]
         return list(self.connections.values())
 
-    async def send_to_runner(
-        self, runner_id: UUID, message: dict
-    ) -> bool:
+    async def send_to_runner(self, runner_id: UUID, message: dict) -> bool:
         """Send a message to a specific runner."""
         conn = self.connections.get(runner_id)
         if not conn:
@@ -626,10 +624,12 @@ class RunnerConnectionManager:
 
                     # Send heartbeat
                     try:
-                        await conn.websocket.send_json({
-                            "type": "heartbeat",
-                            "server_time": now.isoformat(),
-                        })
+                        await conn.websocket.send_json(
+                            {
+                                "type": "heartbeat",
+                                "server_time": now.isoformat(),
+                            }
+                        )
                     except Exception:
                         dead_runners.append(runner_id)
 
@@ -682,9 +682,7 @@ def _extract_runner_auth(websocket: WebSocket) -> tuple[UUID, UUID] | None:
     return None
 
 
-async def _handle_heartbeat(
-    conn: RunnerConnection, runner_id: UUID, session: AsyncSession
-) -> None:
+async def _handle_heartbeat(conn: RunnerConnection, runner_id: UUID, session: AsyncSession) -> None:
     """Handle heartbeat acknowledgment from runner."""
     conn.last_heartbeat = datetime.now(UTC)
     await session.execute(
@@ -757,9 +755,7 @@ async def _handle_agent_update(data: dict, org_id: UUID) -> None:
     )
 
 
-async def _handle_task_complete(
-    conn: RunnerConnection, runner_id: UUID, data: dict
-) -> None:
+async def _handle_task_complete(conn: RunnerConnection, runner_id: UUID, data: dict) -> None:
     """Handle task completion from runner."""
     task_id = data.get("task_id")
     result = data.get("result", {})

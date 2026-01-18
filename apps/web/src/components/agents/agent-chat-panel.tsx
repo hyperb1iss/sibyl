@@ -29,37 +29,6 @@ import { AgentHeader } from './chat-header';
 import { ChatPanel } from './chat-panel';
 import { createPendingMessage, type PendingMessage, transformApiMessages } from './chat-types';
 
-// Heartbeat threshold (matching backend)
-const STALE_THRESHOLD_SECONDS = 120;
-
-/** Check if agent is a zombie (says working but no heartbeat) */
-function isAgentZombie(agent: {
-  status: string;
-  last_heartbeat: string | null;
-  started_at: string | null;
-}): boolean {
-  // waiting_approval is expected to not heartbeat - worker is blocked on Redis
-  // Only check for zombies on actively running states
-  const isSupposedlyActive = ['initializing', 'working', 'resuming'].includes(agent.status);
-  if (!isSupposedlyActive) return false;
-
-  // Grace period for new agents that haven't heartbeated yet
-  if (!agent.last_heartbeat) {
-    // If started recently (within grace period), not a zombie yet
-    if (agent.started_at) {
-      const startedAt = new Date(agent.started_at);
-      const secondsSinceStart = (Date.now() - startedAt.getTime()) / 1000;
-      if (secondsSinceStart < STALE_THRESHOLD_SECONDS) return false;
-    }
-    // Never heartbeated and no start time or past grace period
-    return true;
-  }
-
-  const lastHeartbeat = new Date(agent.last_heartbeat);
-  const secondsSince = (Date.now() - lastHeartbeat.getTime()) / 1000;
-  return secondsSince > STALE_THRESHOLD_SECONDS;
-}
-
 // =============================================================================
 // AgentChatPanel
 // =============================================================================
@@ -80,10 +49,8 @@ export function AgentChatPanel({ agent }: AgentChatPanelProps) {
   // Tier 3 status hints from Haiku (via WebSocket)
   const statusHints = useStatusHints(agent.id);
 
-  // Check if agent is actively working (excluding zombies)
-  const isZombie = isAgentZombie(agent);
-  const isAgentWorking =
-    ['initializing', 'working', 'resuming'].includes(agent.status) && !isZombie;
+  // Check if agent is actively working
+  const isAgentWorking = ['initializing', 'working', 'resuming'].includes(agent.status);
 
   // Track pending messages (queued but not yet processed by agent)
   const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>([]);

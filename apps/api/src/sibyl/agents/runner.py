@@ -153,7 +153,8 @@ Reply with ONLY comma-separated tags, nothing else. Example: fix, api, auth"""
         )
 
         # Parse response
-        response_text = message.content[0].text.strip().lower()
+        content_block = message.content[0]
+        response_text = getattr(content_block, "text", "").strip().lower()
         llm_tags = {t.strip() for t in response_text.split(",") if t.strip()}
 
         # Merge with base tags
@@ -238,33 +239,56 @@ Follow this cycle for effective work:
 - **Be specific**: Good learnings include the what, why, and gotchas
 
 For comprehensive guidance, run `/sibyl` to access the full skill documentation.
+
+## Using Subagents
+
+You have access to Claude Code's Task tool for spawning subagents. **Use it freely** for:
+
+- **Research**: Spawn exploration agents to search codebases, read files, gather context
+- **Specialized work**: Delegate to test-writers, documentation agents, etc.
+- **Parallel research**: Launch multiple search agents simultaneously
+
+Example:
+```
+Use the Task tool to explore the authentication module structure
+```
+
+This is different from Sibyl's MetaOrchestrator (which spawns you). You're a worker agent—
+use subagents for subtasks within your work, while Sibyl orchestrates across tasks.
 """
 
     AGENT_TYPE_PROMPTS = {
-        AgentType.GENERAL: "You are a general-purpose agent.",
+        AgentType.GENERAL: (
+            "You are a general-purpose agent. Use subagents (via Task tool) to parallelize "
+            "research and delegate specialized subtasks."
+        ),
         AgentType.PLANNER: (
-            "You are a senior software architect. Break features into "
-            "implementable tasks with clear scope and dependencies."
+            "You are a senior software architect. Break features into implementable tasks "
+            "with clear scope and dependencies. Use exploration agents to analyze existing "
+            "code structure before planning."
         ),
         AgentType.IMPLEMENTER: (
-            "You are a senior developer. Write clean, tested code that follows "
-            "existing patterns in the codebase."
+            "You are a senior developer. Write clean, tested code that follows existing "
+            "patterns. Use subagents for research (finding similar patterns, understanding "
+            "dependencies) before implementing. Spawn test-writer agents for coverage."
         ),
         AgentType.TESTER: (
-            "You are a QA engineer. Write comprehensive tests that cover edge cases "
-            "and ensure code correctness."
+            "You are a QA engineer. Write comprehensive tests covering edge cases. Use "
+            "exploration agents to understand the code under test before writing tests."
         ),
         AgentType.REVIEWER: (
-            "You are a code reviewer. Analyze code for bugs, security issues, "
-            "performance problems, and style violations."
+            "You are a code reviewer. Analyze code for bugs, security issues, performance "
+            "problems, and style violations. Spawn exploration agents to check similar "
+            "patterns in the codebase."
         ),
         AgentType.INTEGRATOR: (
-            "You are a git expert. Merge branches, resolve conflicts, and ensure "
-            "clean integration of parallel work."
+            "You are a git expert. Merge branches, resolve conflicts, and ensure clean "
+            "integration. Use subagents to analyze conflicting changes before resolving."
         ),
         AgentType.ORCHESTRATOR: (
-            "You are a project coordinator. Manage multiple agents, track dependencies, "
-            "and ensure work completes efficiently."
+            "You are a project coordinator. Manage work across tasks using Sibyl's "
+            "orchestration commands (`sibyl agent dispatch`, `sibyl agent orchestrate`). "
+            "For within-task work, use subagents via the Task tool."
         ),
     }
 
@@ -306,6 +330,7 @@ For comprehensive guidance, run `/sibyl` to access the full skill documentation.
         task: Task | None = None,
         custom_instructions: str | None = None,
         cwd: str | None = None,
+        agent_id: str | None = None,
     ) -> str:
         """Build the system prompt for an agent.
 
@@ -314,11 +339,27 @@ For comprehensive guidance, run `/sibyl` to access the full skill documentation.
             task: Optional task for context
             custom_instructions: Additional instructions
             cwd: Working directory for the agent
+            agent_id: Agent's unique identifier for communication
 
         Returns:
             Complete system prompt string
         """
         parts = [self.SYSTEM_PROMPT_PREAMBLE]
+
+        # Add agent identity for inter-agent communication
+        if agent_id:
+            parts.append(f"""
+## Your Identity
+
+**Agent ID:** `{agent_id}`
+
+Use this ID for inter-agent communication:
+```bash
+sibyl agent progress {agent_id} "Made progress on X"
+sibyl agent blocker {agent_id} "Blocked by Y" "Details..."
+sibyl agent inbox {agent_id}   # Check messages from other agents
+```
+""")
 
         # Add working directory context if provided
         if cwd:
@@ -335,16 +376,31 @@ For comprehensive guidance, run `/sibyl` to access the full skill documentation.
         if task:
             task_context = f"""
 ## Current Task
-Title: {task.title}
-Description: {task.description}
-Status: {task.status}
-Priority: {task.priority}
+
+**ID:** `{task.id}`
+**Title:** {task.title}
+**Status:** {task.status}
+**Priority:** {task.priority}
+
+### Description
+{task.description}
 """
             if task.technologies:
-                task_context += f"Technologies: {', '.join(task.technologies)}\n"
+                task_context += f"\n**Technologies:** {', '.join(task.technologies)}"
             if task.domain:
-                task_context += f"Domain: {task.domain}\n"
+                task_context += f"\n**Domain:** {task.domain}"
 
+            task_context += f"""
+
+### Task Commands
+```bash
+sibyl task show {task.id}              # View full task details
+sibyl task note {task.id} "progress"   # Add progress note
+sibyl task complete {task.id} --learnings "what I learned"
+```
+
+When done, complete with learnings to capture insights for future agents.
+"""
             parts.append(task_context)
 
         # Add custom instructions
@@ -458,6 +514,7 @@ Priority: {task.priority}
             task=task,
             custom_instructions=custom_instructions,
             cwd=cwd,
+            agent_id=record.id,
         )
 
         # Create approval service if enabled
