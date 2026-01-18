@@ -384,7 +384,9 @@ async def search(
                     if status_val not in status_list:
                         continue
 
-                if project and _get_field(entity, "project_id") != project:
+                # Filter by specific project - but always include general knowledge (no project)
+                entity_project = _get_field(entity, "project_id")
+                if project and entity_project is not None and entity_project != project:
                     continue
 
                 # Filter by accessible projects (RBAC)
