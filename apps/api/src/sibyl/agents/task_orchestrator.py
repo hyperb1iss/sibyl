@@ -10,7 +10,7 @@ Part of the three-tier orchestration model:
 """
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 import structlog
@@ -206,14 +206,10 @@ class TaskOrchestratorService:
             TaskOrchestratorRecord or None if not found
         """
         entity = await self.entity_manager.get(orchestrator_id)
-        if not entity:
+        if not entity or entity.entity_type != EntityType.TASK_ORCHESTRATOR:
             return None
 
-        # If already a TaskOrchestratorRecord, return directly
-        if isinstance(entity, TaskOrchestratorRecord):
-            return entity
-
-        return TaskOrchestratorRecord.from_entity(entity, self.org_id)
+        return cast("TaskOrchestratorRecord", entity)
 
     async def list_for_project(
         self,
@@ -235,12 +231,11 @@ class TaskOrchestratorService:
         )
 
         # Convert to TaskOrchestratorRecord if needed
-        records = []
-        for e in entities:
-            if isinstance(e, TaskOrchestratorRecord):
-                records.append(e)
-            else:
-                records.append(TaskOrchestratorRecord.from_entity(e, self.org_id))
+        records = [
+            cast("TaskOrchestratorRecord", e)
+            for e in entities
+            if e.entity_type == EntityType.TASK_ORCHESTRATOR
+        ]
 
         # Filter by project
         records = [r for r in records if r.project_id == self.project_id]
@@ -846,22 +841,33 @@ Focus on clean, well-tested implementation. You have up to {record.max_rework_at
         Returns:
             Approval request ID
         """
-        from sibyl_core.models import ApprovalRecord, ApprovalType
+        from sibyl.agents.approval_queue import create_approval_queue
+        from sibyl_core.models import ApprovalType
 
-        approval = ApprovalRecord(
-            id=f"approval_{uuid4().hex[:16]}",
-            name=f"Review task {record.task_id[-8:]}",
-            organization_id=self.org_id,
+        agent_id = record.worker_id or record.id
+        queue = await create_approval_queue(
+            entity_manager=self.entity_manager,
+            org_id=self.org_id,
             project_id=self.project_id,
-            agent_id=record.worker_id or record.id,
+            agent_id=agent_id,
             task_id=record.task_id,
-            approval_type=ApprovalType.REVIEW_PHASE,
-            priority="high",
-            title=f"Review task {record.task_id[-8:]} implementation",
-            summary=f"All automated gates passed. Rework count: {record.rework_count}",
         )
 
-        await self.entity_manager.create(approval)
+        approval = await queue.enqueue(
+            approval_type=ApprovalType.REVIEW_PHASE,
+            title=f"Review task {record.task_id[-8:]} implementation",
+            summary=f"All automated gates passed. Rework count: {record.rework_count}",
+            metadata={
+                "tool_name": "human_review",
+                "orchestrator_id": record.id,
+                "task_id": record.task_id,
+                "project_id": record.project_id,
+                "rework_count": record.rework_count,
+                "max_rework_attempts": record.max_rework_attempts,
+            },
+            priority="high",
+        )
+
         return approval.id
 
     async def _fail_with_escalation(

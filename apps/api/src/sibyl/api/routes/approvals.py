@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sibyl.agents.approval_queue import create_approval_queue
+from sibyl.agents.state_sync import update_agent_state
 from sibyl.auth.authorization import (
     list_accessible_project_graph_ids,
     verify_entity_project_access,
@@ -22,7 +24,16 @@ from sibyl.auth.rls import AuthSession, get_auth_session
 from sibyl.db.models import AgentMessage, Organization, OrganizationRole, ProjectRole
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
-from sibyl_core.models import ApprovalStatus, ApprovalType, EntityType
+from sibyl_core.models import (
+    AgentStatus,
+    ApprovalStatus,
+    ApprovalType,
+    EntityType,
+    TaskOrchestratorPhase,
+    TaskOrchestratorRecord,
+    TaskOrchestratorStatus,
+    TaskStatus,
+)
 
 if TYPE_CHECKING:
     from sibyl_core.models.entities import Entity
@@ -128,6 +139,101 @@ async def _check_approval_respond_permission(
         status_code=403,
         detail="You don't have permission to respond to this approval",
     )
+
+
+async def _apply_review_phase_response(
+    *,
+    entity_manager: EntityManager,
+    org_id: str,
+    orchestrator_id: str,
+    approved: bool,
+) -> AgentStatus | None:
+    """Apply a review-phase approval to the TaskOrchestrator and task."""
+    try:
+        orch_entity = await entity_manager.get(orchestrator_id)
+    except Exception as e:
+        log.warning(
+            "Failed to load orchestrator for review approval",
+            orchestrator_id=orchestrator_id,
+            error=str(e),
+        )
+        return None
+
+    if not orch_entity or orch_entity.entity_type != EntityType.TASK_ORCHESTRATOR:
+        log.warning(
+            "Approval orchestrator is not a TaskOrchestrator",
+            orchestrator_id=orchestrator_id,
+        )
+        return None
+
+    record = (
+        orch_entity
+        if isinstance(orch_entity, TaskOrchestratorRecord)
+        else TaskOrchestratorRecord.from_entity(orch_entity, org_id)
+    )
+    metadata = {**(record.metadata or {}), "pending_approval_id": None}
+
+    if approved:
+        completed_at = datetime.now(UTC).isoformat()
+        metadata.update(
+            {
+                "status": TaskOrchestratorStatus.COMPLETE.value,
+                "current_phase": TaskOrchestratorPhase.MERGE.value,
+                "completed_at": completed_at,
+            }
+        )
+        await entity_manager.update(
+            orchestrator_id,
+            {
+                "status": TaskOrchestratorStatus.COMPLETE.value,
+                "current_phase": TaskOrchestratorPhase.MERGE.value,
+                "completed_at": completed_at,
+                "pending_approval_id": None,
+                "metadata": metadata,
+            },
+        )
+        await entity_manager.update(
+            record.task_id,
+            {"status": TaskStatus.REVIEW.value},
+        )
+        return AgentStatus.COMPLETED
+
+    new_rework_count = record.rework_count + 1
+    if new_rework_count >= record.max_rework_attempts:
+        metadata.update(
+            {
+                "status": TaskOrchestratorStatus.FAILED.value,
+                "failure_reason": "max_rework_exceeded",
+            }
+        )
+        await entity_manager.update(
+            orchestrator_id,
+            {
+                "status": TaskOrchestratorStatus.FAILED.value,
+                "pending_approval_id": None,
+                "metadata": metadata,
+            },
+        )
+        return AgentStatus.FAILED
+
+    metadata.update(
+        {
+            "status": TaskOrchestratorStatus.REWORKING.value,
+            "current_phase": TaskOrchestratorPhase.REWORK.value,
+            "rework_count": new_rework_count,
+        }
+    )
+    await entity_manager.update(
+        orchestrator_id,
+        {
+            "status": TaskOrchestratorStatus.REWORKING.value,
+            "current_phase": TaskOrchestratorPhase.REWORK.value,
+            "rework_count": new_rework_count,
+            "pending_approval_id": None,
+            "metadata": metadata,
+        },
+    )
+    return AgentStatus.WORKING
 
 
 router = APIRouter(
@@ -399,22 +505,49 @@ async def respond_to_approval(
         )
 
     new_status = action_to_status[request.action]
+    approval_meta = entity.metadata or {}
+    approval_type = approval_meta.get("approval_type")
+    approval_project_id = approval_meta.get("project_id")
+    approval_agent_id = approval_meta.get("agent_id")
+    approval_task_id = approval_meta.get("task_id")
+    orchestrator_id = approval_meta.get("orchestrator_id")
+    responded_at = datetime.now(UTC).isoformat()
 
-    # Update the approval
-    updates = {
-        "status": new_status,
-        "responded_at": datetime.now(UTC).isoformat(),
-        "response_by": str(ctx.user.id),
-        "response_message": request.message,
-    }
+    use_queue = (
+        request.action in ("approve", "deny")
+        and approval_type == ApprovalType.REVIEW_PHASE.value
+        and approval_project_id
+        and approval_agent_id
+    )
 
-    if request.action == "edit" and request.edited_content:
-        updates["edited_content"] = request.edited_content
+    if request.action == "edit" or not use_queue:
+        updates = {
+            "status": new_status,
+            "responded_at": responded_at,
+            "response_by": str(ctx.user.id),
+            "response_message": request.message,
+        }
 
-    await manager.update(approval_id, updates)
+        if request.action == "edit" and request.edited_content:
+            updates["edited_content"] = request.edited_content
 
-    # Get agent info for status updates
-    agent_id = (entity.metadata or {}).get("agent_id")
+        await manager.update(approval_id, updates)
+    else:
+        queue = await create_approval_queue(
+            entity_manager=manager,
+            org_id=str(org.id),
+            project_id=approval_project_id,
+            agent_id=approval_agent_id,
+            task_id=approval_task_id,
+        )
+        await queue.respond(
+            approval_id,
+            approved=request.action == "approve",
+            message=request.message or "",
+            responded_by=str(ctx.user.id),
+        )
+
+    agent_id = approval_agent_id
 
     # Update the stored AgentMessage's status so page reload shows resolved state
     if agent_id:
@@ -426,7 +559,7 @@ async def respond_to_approval(
                 .where(AgentMessage.extra["approval_id"].astext == approval_id)
                 .values(
                     extra=AgentMessage.extra.op("||")(
-                        {"status": new_status, "responded_at": datetime.now(UTC).isoformat()}
+                        {"status": new_status, "responded_at": responded_at}
                     )
                 )
             )
@@ -435,25 +568,48 @@ async def respond_to_approval(
         except Exception as e:
             log.warning("Failed to update approval message status", error=str(e))
 
-    # Publish to worker channel - this wakes up the waiting agent
-    from sibyl.agents.redis_sub import publish_approval_response
+    agent_status = AgentStatus.WORKING
+    if approval_type == ApprovalType.REVIEW_PHASE.value and request.action in ("approve", "deny"):
+        if not orchestrator_id:
+            log.warning(
+                "Review approval missing orchestrator_id",
+                approval_id=approval_id,
+                agent_id=agent_id,
+            )
+        else:
+            updated_status = await _apply_review_phase_response(
+                entity_manager=manager,
+                org_id=str(org.id),
+                orchestrator_id=orchestrator_id,
+                approved=request.action == "approve",
+            )
+            if updated_status is not None:
+                agent_status = updated_status
 
-    await publish_approval_response(
-        approval_id,
-        {
-            "approved": request.action == "approve",
-            "action": request.action,
-            "by": str(ctx.user.id),
-            "message": request.message or "",
-            "edited_content": request.edited_content,
-        },
-    )
+    should_publish_response = not use_queue
+    if should_publish_response:
+        # Publish to worker channel - this wakes up the waiting agent
+        from sibyl.agents.redis_sub import publish_approval_response
 
-    # Update agent status back to working
+        await publish_approval_response(
+            approval_id,
+            {
+                "approved": request.action == "approve",
+                "action": request.action,
+                "by": str(ctx.user.id),
+                "message": request.message or "",
+                "edited_content": request.edited_content,
+            },
+        )
+
+    # Update agent status after approval response
     if agent_id:
-        from sibyl_core.models import AgentStatus
-
-        await manager.update(agent_id, {"status": AgentStatus.WORKING.value})
+        await manager.update(agent_id, {"status": agent_status.value})
+        await update_agent_state(
+            org_id=str(org.id),
+            agent_id=agent_id,
+            status=agent_status.value,
+        )
 
     # Broadcast approval response event to UI
     from sibyl.api.pubsub import publish_event
@@ -474,7 +630,7 @@ async def respond_to_approval(
     if agent_id:
         await publish_event(
             "agent_status",
-            {"agent_id": agent_id, "status": "working"},
+            {"agent_id": agent_id, "status": agent_status.value},
             org_id=str(org.id),
         )
 

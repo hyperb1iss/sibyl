@@ -10,7 +10,7 @@ import hashlib
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 from claude_agent_sdk import ClaudeSDKClient
@@ -30,7 +30,9 @@ from sibyl.agents.hooks import (
     load_user_hooks,
     merge_hooks,
 )
+from sibyl.agents.state_sync import update_agent_state
 from sibyl.agents.worktree import WorktreeManager
+from sibyl.db.models import utcnow_naive
 from sibyl.locks import EntityLockManager, LockAcquisitionError
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models import (
@@ -409,6 +411,95 @@ When done, complete with learnings to capture insights for future agents.
 
         return "\n".join(parts)
 
+    async def _resolve_agent_record(
+        self,
+        agent_id: str,
+        prompt: str,
+        agent_type: AgentType,
+        task: Task | None,
+        spawn_source: AgentSpawnSource,
+    ) -> AgentRecord:
+        """Fetch or create the agent record, merging metadata when pre-created."""
+        record: AgentRecord | None = None
+        try:
+            existing = await self.entity_manager.get(agent_id)
+            if existing and existing.entity_type == EntityType.AGENT:
+                record = cast("AgentRecord", existing)
+                log.debug("Using pre-created agent record", agent_id=agent_id)
+        except EntityNotFoundError:
+            pass
+
+        tags = _derive_agent_tags(prompt, agent_type, task)
+
+        if record is None:
+            record = AgentRecord(
+                id=agent_id,
+                name=_derive_agent_name(prompt, agent_type, agent_id),
+                organization_id=self.org_id,
+                project_id=self.project_id,
+                agent_type=agent_type,
+                spawn_source=spawn_source,
+                task_id=task.id if task else None,
+                status=AgentStatus.INITIALIZING,
+                initial_prompt=prompt[:500],
+                tags=tags,
+            )
+            await self.entity_manager.create_direct(record)
+            return record
+
+        updates: dict[str, Any] = {}
+        merged_tags = sorted({*record.tags, *tags})
+        if merged_tags != record.tags:
+            updates["tags"] = merged_tags
+        if task and not record.task_id:
+            updates["task_id"] = task.id
+        if not record.initial_prompt:
+            updates["initial_prompt"] = prompt[:500]
+        if not record.project_id:
+            updates["project_id"] = self.project_id
+
+        if updates:
+            await self.entity_manager.update(record.id, updates)
+            refreshed = await self.entity_manager.get(record.id)
+            if refreshed and refreshed.entity_type == EntityType.AGENT:
+                record = cast("AgentRecord", refreshed)
+
+        return record
+
+    async def _maybe_create_worktree(
+        self,
+        record: AgentRecord,
+        task: Task | None,
+        create_worktree: bool,
+    ) -> Path | None:
+        """Create a worktree and persist linkage when requested."""
+        if not create_worktree:
+            return None
+
+        branch_name = f"agent/{record.id[-12:]}"
+        if task:
+            safe_title = task.title[:30].lower().replace(" ", "-")
+            branch_name = f"agent/{record.id[-8:]}-{safe_title}"
+
+        worktree = await self.worktree_manager.create(
+            task_id=task.id if task else record.id,
+            branch_name=branch_name,
+            agent_id=record.id,
+        )
+
+        await self.entity_manager.update(
+            record.id,
+            {
+                "worktree_id": worktree.id,
+                "worktree_path": worktree.path,
+                "worktree_branch": worktree.branch,
+            },
+        )
+        record.worktree_id = worktree.id
+        record.worktree_path = worktree.path
+        record.worktree_branch = worktree.branch
+        return Path(worktree.path)
+
     async def spawn(
         self,
         prompt: str,
@@ -442,68 +533,18 @@ When done, complete with learnings to capture insights for future agents.
             timestamp = datetime.now(UTC).isoformat()
             agent_id = _generate_agent_id(self.org_id, self.project_id, timestamp)
 
-        # Check if entity was pre-created by API (avoids race condition)
-        record: AgentRecord | None = None
-        try:
-            existing = await self.entity_manager.get(agent_id)
-            if isinstance(existing, AgentRecord):
-                record = existing
-                log.debug("Using pre-created agent record", agent_id=agent_id)
-        except EntityNotFoundError:
-            pass
-
-        # Derive tags from context
-        tags = _derive_agent_tags(prompt, agent_type, task)
-
-        # Create agent record if not pre-created
-        if record is None:
-            record = AgentRecord(
-                id=agent_id,
-                name=_derive_agent_name(prompt, agent_type, agent_id),
-                organization_id=self.org_id,
-                project_id=self.project_id,
-                agent_type=agent_type,
-                spawn_source=spawn_source,
-                task_id=task.id if task else None,
-                status=AgentStatus.INITIALIZING,
-                initial_prompt=prompt[:500],  # Truncate for storage
-                tags=tags,
-            )
-            # Persist to graph (use create_direct to skip LLM extraction)
-            await self.entity_manager.create_direct(record)
-        # Update pre-created record with tags if missing
-        elif not record.tags:
-            record.tags = tags
-            await self.entity_manager.update(record.id, {"tags": tags})
-
-        # Create worktree if requested
-        worktree_path: Path | None = None
-        if create_worktree:
-            branch_name = f"agent/{record.id[-12:]}"
-            if task:
-                # Use task-derived branch name
-                safe_title = task.title[:30].lower().replace(" ", "-")
-                branch_name = f"agent/{record.id[-8:]}-{safe_title}"
-
-            worktree = await self.worktree_manager.create(
-                task_id=task.id if task else record.id,
-                branch_name=branch_name,
-                agent_id=record.id,
-            )
-            worktree_path = Path(worktree.path)
-
-            # Update record with worktree info
-            await self.entity_manager.update(
-                record.id,
-                {
-                    "worktree_id": worktree.id,
-                    "worktree_path": worktree.path,
-                    "worktree_branch": worktree.branch,
-                },
-            )
-            record.worktree_id = worktree.id
-            record.worktree_path = worktree.path
-            record.worktree_branch = worktree.branch
+        record = await self._resolve_agent_record(
+            agent_id=agent_id,
+            prompt=prompt,
+            agent_type=agent_type,
+            task=task,
+            spawn_source=spawn_source,
+        )
+        worktree_path = await self._maybe_create_worktree(
+            record=record,
+            task=task,
+            create_worktree=create_worktree,
+        )
 
         # Determine working directory
         cwd = str(worktree_path) if worktree_path else None
@@ -591,6 +632,14 @@ When done, complete with learnings to capture insights for future agents.
                 "status": AgentStatus.WORKING.value,
                 "started_at": datetime.now(UTC).isoformat(),
             },
+        )
+        await update_agent_state(
+            org_id=self.org_id,
+            agent_id=record.id,
+            status=AgentStatus.WORKING.value,
+            started_at=utcnow_naive(),
+            task_id=record.task_id,
+            orchestrator_id=record.task_orchestrator_id,
         )
 
         log.info(f"Agent {record.id} spawned and ready")
@@ -721,6 +770,11 @@ When done, complete with learnings to capture insights for future agents.
             agent.id,
             {"status": AgentStatus.WORKING.value},
         )
+        await update_agent_state(
+            org_id=self.org_id,
+            agent_id=agent.id,
+            status=AgentStatus.WORKING.value,
+        )
 
         # Recreate approval service if enabled
         approval_service: ApprovalService | None = None
@@ -772,8 +826,8 @@ When done, complete with learnings to capture insights for future agents.
         task: Task | None = None
         if agent.task_id:
             task_entity = await self.entity_manager.get(agent.task_id)
-            if task_entity and isinstance(task_entity, Task):
-                task = task_entity
+            if task_entity and task_entity.entity_type == EntityType.TASK:
+                task = cast("Task", task_entity)
 
         # Create resumed instance
         instance = AgentInstance(
@@ -1011,10 +1065,17 @@ class AgentInstance:
                     await self.entity_manager.update(
                         self.record.id,
                         {
-                            "heartbeat_at": datetime.now(UTC).isoformat(),
+                            "last_heartbeat": datetime.now(UTC).isoformat(),
                             "tokens_used": self._tokens_used,
                             "cost_usd": self._cost_usd,
                         },
+                    )
+                    await update_agent_state(
+                        org_id=self.record.organization_id,
+                        agent_id=self.record.id,
+                        last_heartbeat=utcnow_naive(),
+                        tokens_used=self._tokens_used,
+                        cost_usd=self._cost_usd,
                     )
             except asyncio.CancelledError:
                 break
@@ -1045,6 +1106,20 @@ class AgentInstance:
             updates.update(metadata)
 
         await self.entity_manager.update(self.record.id, updates)
+
+        state_updates: dict[str, Any] = {"status": status.value}
+        if status == AgentStatus.COMPLETED:
+            state_updates["completed_at"] = utcnow_naive()
+            state_updates["tokens_used"] = self._tokens_used
+            state_updates["cost_usd"] = self._cost_usd
+        if error is not None:
+            state_updates["error_message"] = error
+
+        await update_agent_state(
+            org_id=self.record.organization_id,
+            agent_id=self.record.id,
+            **state_updates,
+        )
         self.record.status = status
 
     def get_conversation_history(self) -> list[dict[str, Any]]:

@@ -12,12 +12,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import structlog
 
 from sibyl.agents.worktree import WorktreeManager
-from sibyl_core.models import Task, WorktreeRecord, WorktreeStatus
+from sibyl_core.models import EntityType, Task, WorktreeRecord, WorktreeStatus
 
 if TYPE_CHECKING:
     from sibyl_core.graph import EntityManager
@@ -483,8 +483,8 @@ class IntegrationManager:
             task = None
             if record.task_id:
                 task_entity = await self.entity_manager.get(record.task_id)
-                if task_entity and isinstance(task_entity, Task):
-                    task = task_entity
+                if task_entity and task_entity.entity_type == EntityType.TASK:
+                    task = cast("Task", task_entity)
 
             worktrees.append((record, task))
 
@@ -574,8 +574,6 @@ class IntegrationManager:
         Returns:
             List of (WorktreeRecord, IntegrationResult) tuples
         """
-        from sibyl_core.models import EntityType
-
         results: list[tuple[WorktreeRecord, IntegrationResult]] = []
 
         # Get all active worktrees for this project
@@ -585,8 +583,9 @@ class IntegrationManager:
         )
 
         for record in worktrees:
-            if not isinstance(record, WorktreeRecord):
+            if record.entity_type != EntityType.WORKTREE:
                 continue
+            record = cast("WorktreeRecord", record)
 
             if record.status != WorktreeStatus.ACTIVE:
                 continue

@@ -7,7 +7,7 @@ Routes permission requests through our UI for human approval.
 import hashlib
 import re
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import structlog
@@ -23,6 +23,7 @@ from claude_agent_sdk.types import (
 )
 from sqlalchemy import func, select
 
+from sibyl.agents.state_sync import update_agent_state
 from sibyl.db import get_session
 from sibyl.db.models import AgentMessage, AgentMessageRole, AgentMessageType
 from sibyl_core.models import (
@@ -639,6 +640,11 @@ class ApprovalService:
             self.agent_id,
             {"status": AgentStatus.WAITING_APPROVAL.value},
         )
+        await update_agent_state(
+            org_id=self.org_id,
+            agent_id=self.agent_id,
+            status=AgentStatus.WAITING_APPROVAL.value,
+        )
 
         # Broadcast approval request to UI via WebSocket
         await self._broadcast_approval_request(record, expires_at)
@@ -781,13 +787,14 @@ class ApprovalService:
             entity_type=EntityType.APPROVAL,
             limit=100,
         )
-        return [
-            r
-            for r in results
-            if isinstance(r, ApprovalRecord)
-            and r.agent_id == self.agent_id
-            and r.status == ApprovalStatus.PENDING
-        ]
+        pending: list[ApprovalRecord] = []
+        for record in results:
+            if record.entity_type != EntityType.APPROVAL:
+                continue
+            approval = cast("ApprovalRecord", record)
+            if approval.agent_id == self.agent_id and approval.status == ApprovalStatus.PENDING:
+                pending.append(approval)
+        return pending
 
     async def cancel_all(self, reason: str = "agent_stopped") -> int:
         """Cancel all pending approvals for this agent.

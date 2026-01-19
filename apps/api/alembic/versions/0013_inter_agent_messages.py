@@ -1,7 +1,7 @@
 """Add inter-agent message bus table.
 
-Revision ID: 0013
-Revises: 0012
+Revision ID: 0013_inter_agent_messages
+Revises: 0012_runner_and_agent_state
 Create Date: 2025-01-14
 
 """
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "0013"
-down_revision: str | None = "0012"
+revision: str = "0013_inter_agent_messages"
+down_revision: str | None = "0012_runner_and_agent_state"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -42,7 +42,7 @@ def upgrade() -> None:
             "context",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
-            server_default="'{}'::jsonb",
+            server_default=sa.text("'{}'"),
         ),
         # Delivery tracking
         sa.Column("read_at", sa.DateTime(), nullable=True),

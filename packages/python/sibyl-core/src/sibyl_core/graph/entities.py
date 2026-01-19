@@ -8,7 +8,8 @@ import contextlib
 import json
 import re
 from datetime import UTC, datetime
-from typing import Any
+from enum import Enum
+from typing import Any, TypeVar
 
 import structlog
 from graphiti_core.nodes import EntityNode, EpisodicNode
@@ -17,13 +18,36 @@ from pydantic import BaseModel
 
 from sibyl_core.errors import EntityNotFoundError, SearchError
 from sibyl_core.graph.client import GraphClient
-from sibyl_core.models.agents import AgentCheckpoint, AgentRecord, ApprovalRecord
+from sibyl_core.models.agents import (
+    AgentCheckpoint,
+    AgentRecord,
+    ApprovalRecord,
+    ApprovalStatus,
+    ApprovalType,
+    MetaOrchestratorRecord,
+    TaskOrchestratorRecord,
+    WorktreeRecord,
+    WorktreeStatus,
+)
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.sources import Community, Document, Source
-from sibyl_core.models.tasks import Epic, ErrorPattern, Milestone, Note, Project, Task, Team
+from sibyl_core.models.tasks import (
+    Epic,
+    ErrorPattern,
+    Milestone,
+    Note,
+    Project,
+    Task,
+    TaskComplexity,
+    TaskPriority,
+    TaskStatus,
+    Team,
+)
 
 log = structlog.get_logger()
 
+# Generic enum type for coercion
+TEnum = TypeVar("TEnum", bound=Enum)
 # RediSearch special characters that need escaping in fulltext queries
 # Includes / which appears in paths like "create/cleanup" or "~/.sibyl-worktrees/"
 _REDISEARCH_SPECIAL_CHARS = re.compile(r"[|&\-@()~$:*\\/]")
@@ -260,7 +284,7 @@ class EntityManager:
                         entity_id=entity_id,
                         entity_type=entity.entity_type,
                     )
-                    return entity
+                    return self._coerce_entity(entity)
             except Exception as e:
                 log.debug(
                     "EntityNode lookup failed, trying EpisodicNode",
@@ -280,7 +304,7 @@ class EntityManager:
                         entity_id=entity_id,
                         entity_type=entity.entity_type,
                     )
-                    return entity
+                    return self._coerce_entity(entity)
             except Exception as e:
                 log.debug("EpisodicNode lookup failed", entity_id=entity_id, error=str(e))
 
@@ -626,6 +650,7 @@ class EntityManager:
             for record in records:
                 try:
                     entity = self._record_to_entity(record)
+                    entity = self._coerce_entity(entity)
 
                     # Parse metadata for filtering (stored as JSON string)
                     metadata = entity.metadata or {}
@@ -1322,6 +1347,19 @@ class EntityManager:
             "source_file": entity.source_file,
         }
 
+        def add_fields(fields: tuple[str, ...]) -> None:
+            for field in fields:
+                value = getattr(entity, field, None)
+                if value is None:
+                    value = entity.metadata.get(field)
+                if value is not None:
+                    if isinstance(value, datetime):
+                        props[field] = value.isoformat()
+                    elif hasattr(value, "value"):
+                        props[field] = value.value
+                    else:
+                        props[field] = value
+
         # Common optional fields
         for field in (
             "category",
@@ -1365,19 +1403,73 @@ class EntityManager:
             "completed_at",
             "reviewed_at",
         )
-        for field in task_fields:
-            value = getattr(entity, field, None)
-            if value is None:
-                value = entity.metadata.get(field)
-            if value is not None:
-                # Serialize datetimes to isoformat for storage
-                if isinstance(value, datetime):
-                    props[field] = value.isoformat()
-                # Serialize enums to their string value
-                elif hasattr(value, "value"):
-                    props[field] = value.value
-                else:
-                    props[field] = value
+        add_fields(task_fields)
+
+        if isinstance(entity, AgentRecord):
+            add_fields(
+                (
+                    "agent_type",
+                    "spawn_source",
+                    "status",
+                    "project_id",
+                    "task_id",
+                    "worktree_id",
+                    "worktree_path",
+                    "worktree_branch",
+                    "task_orchestrator_id",
+                    "standalone",
+                    "started_at",
+                    "last_heartbeat",
+                    "completed_at",
+                )
+            )
+        elif isinstance(entity, TaskOrchestratorRecord):
+            add_fields(
+                (
+                    "project_id",
+                    "meta_orchestrator_id",
+                    "task_id",
+                    "worker_id",
+                    "worktree_id",
+                    "status",
+                    "current_phase",
+                    "pending_approval_id",
+                )
+            )
+        elif isinstance(entity, MetaOrchestratorRecord):
+            add_fields(
+                (
+                    "project_id",
+                    "current_epic_id",
+                    "status",
+                    "strategy",
+                    "max_concurrent",
+                )
+            )
+        elif isinstance(entity, WorktreeRecord):
+            add_fields(
+                (
+                    "task_id",
+                    "agent_id",
+                    "path",
+                    "branch",
+                    "base_commit",
+                    "status",
+                    "last_used",
+                    "has_uncommitted",
+                    "last_commit",
+                )
+            )
+        elif isinstance(entity, AgentCheckpoint):
+            add_fields(
+                (
+                    "agent_id",
+                    "session_id",
+                    "pending_approval_id",
+                    "waiting_for_task_id",
+                    "current_step",
+                )
+            )
 
         return props
 
@@ -1459,9 +1551,21 @@ class EntityManager:
             metadata["status"] = entity.status.value if entity.status else "initializing"
             metadata["project_id"] = entity.project_id
             metadata["task_id"] = entity.task_id
+            metadata["worktree_id"] = entity.worktree_id
             metadata["created_by"] = entity.created_by
             metadata["worktree_path"] = entity.worktree_path
             metadata["worktree_branch"] = entity.worktree_branch
+            metadata["task_orchestrator_id"] = entity.task_orchestrator_id
+            metadata["standalone"] = entity.standalone
+            metadata["session_id"] = entity.session_id
+            metadata["checkpoint_id"] = entity.checkpoint_id
+            metadata["conversation_turns"] = entity.conversation_turns
+            metadata["tokens_used"] = entity.tokens_used
+            metadata["cost_usd"] = entity.cost_usd
+            if entity.initial_prompt:
+                metadata["initial_prompt"] = entity.initial_prompt
+            if entity.system_prompt_hash:
+                metadata["system_prompt_hash"] = entity.system_prompt_hash
             if entity.started_at:
                 metadata["started_at"] = entity.started_at.isoformat()
             if entity.last_heartbeat:
@@ -1470,6 +1574,57 @@ class EntityManager:
                 metadata["completed_at"] = entity.completed_at.isoformat()
             if entity.paused_reason:
                 metadata["paused_reason"] = entity.paused_reason
+
+        # Add TaskOrchestrator-specific fields
+        elif isinstance(entity, TaskOrchestratorRecord):
+            metadata["project_id"] = entity.project_id
+            metadata["meta_orchestrator_id"] = entity.meta_orchestrator_id
+            metadata["task_id"] = entity.task_id
+            metadata["worker_id"] = entity.worker_id
+            metadata["worktree_id"] = entity.worktree_id
+            metadata["status"] = entity.status.value if entity.status else "initializing"
+            metadata["current_phase"] = (
+                entity.current_phase.value if entity.current_phase else "implement"
+            )
+            metadata["rework_count"] = entity.rework_count
+            metadata["max_rework_attempts"] = entity.max_rework_attempts
+            metadata["gate_config"] = [gate.value for gate in entity.gate_config or []]
+            metadata["gate_results"] = entity.gate_results
+            metadata["pending_approval_id"] = entity.pending_approval_id
+            metadata["total_tokens"] = entity.total_tokens
+            metadata["total_cost_usd"] = entity.total_cost_usd
+
+        # Add MetaOrchestrator-specific fields
+        elif isinstance(entity, MetaOrchestratorRecord):
+            metadata["project_id"] = entity.project_id
+            metadata["current_epic_id"] = entity.current_epic_id
+            metadata["task_queue"] = entity.task_queue
+            metadata["active_orchestrators"] = entity.active_orchestrators
+            metadata["status"] = entity.status.value if entity.status else "idle"
+            metadata["strategy"] = entity.strategy.value if entity.strategy else "sequential"
+            metadata["max_concurrent"] = entity.max_concurrent
+            metadata["budget_usd"] = entity.budget_usd
+            metadata["spent_usd"] = entity.spent_usd
+            metadata["cost_alert_threshold"] = entity.cost_alert_threshold
+            if entity.sprint_started_at:
+                metadata["sprint_started_at"] = entity.sprint_started_at.isoformat()
+            if entity.sprint_ends_at:
+                metadata["sprint_ends_at"] = entity.sprint_ends_at.isoformat()
+            metadata["tasks_completed"] = entity.tasks_completed
+            metadata["tasks_failed"] = entity.tasks_failed
+            metadata["total_rework_cycles"] = entity.total_rework_cycles
+
+        # Add WorktreeRecord-specific fields
+        elif isinstance(entity, WorktreeRecord):
+            metadata["task_id"] = entity.task_id
+            metadata["agent_id"] = entity.agent_id
+            metadata["path"] = entity.path
+            metadata["branch"] = entity.branch
+            metadata["base_commit"] = entity.base_commit
+            metadata["status"] = entity.status.value if entity.status else "active"
+            metadata["last_used"] = entity.last_used.isoformat()
+            metadata["has_uncommitted"] = entity.has_uncommitted
+            metadata["last_commit"] = entity.last_commit
 
         # Add ApprovalRecord-specific fields
         elif isinstance(entity, ApprovalRecord):
@@ -1496,8 +1651,17 @@ class EntityManager:
             metadata["agent_id"] = entity.agent_id
             metadata["session_id"] = entity.session_id
             metadata["conversation_history"] = entity.conversation_history or []
+            metadata["pending_tool_calls"] = entity.pending_tool_calls or []
+            metadata["files_modified"] = entity.files_modified or []
+            metadata["uncommitted_changes"] = entity.uncommitted_changes
             if entity.current_step:
                 metadata["current_step"] = entity.current_step
+            if entity.completed_steps:
+                metadata["completed_steps"] = entity.completed_steps
+            if entity.pending_approval_id:
+                metadata["pending_approval_id"] = entity.pending_approval_id
+            if entity.waiting_for_task_id:
+                metadata["waiting_for_task_id"] = entity.waiting_for_task_id
 
         # Common fields (use getattr since not all entity types have these)
         if languages := getattr(entity, "languages", None):
@@ -1508,6 +1672,217 @@ class EntityManager:
             metadata["category"] = category
 
         return self._serialize_metadata(metadata)
+
+    def _coerce_enum(self, enum_type: type[TEnum], value: Any, default: TEnum) -> TEnum:
+        """Coerce a value into an enum, falling back to default on mismatch."""
+        if value is None:
+            return default
+        if isinstance(value, enum_type):
+            return value
+        try:
+            return enum_type(value)
+        except (ValueError, TypeError):
+            return default
+
+    def _coerce_entity(self, entity: Entity) -> Entity:
+        """Convert generic entities into their typed models when possible."""
+        if isinstance(
+            entity,
+            (
+                Task,
+                AgentRecord,
+                TaskOrchestratorRecord,
+                MetaOrchestratorRecord,
+                WorktreeRecord,
+                AgentCheckpoint,
+                ApprovalRecord,
+            ),
+        ):
+            return entity
+
+        try:
+            if entity.entity_type == EntityType.TASK:
+                return self._entity_to_task(entity)
+            if entity.entity_type == EntityType.AGENT:
+                return AgentRecord.from_entity(entity, self._group_id)
+            if entity.entity_type == EntityType.TASK_ORCHESTRATOR:
+                return TaskOrchestratorRecord.from_entity(entity, self._group_id)
+            if entity.entity_type == EntityType.META_ORCHESTRATOR:
+                return MetaOrchestratorRecord.from_entity(entity, self._group_id)
+            if entity.entity_type == EntityType.WORKTREE:
+                return self._entity_to_worktree(entity)
+            if entity.entity_type == EntityType.CHECKPOINT:
+                return AgentCheckpoint.from_entity(entity)
+            if entity.entity_type == EntityType.APPROVAL:
+                return self._entity_to_approval(entity)
+        except Exception as exc:
+            log.debug(
+                "Failed to coerce entity",
+                entity_id=entity.id,
+                entity_type=entity.entity_type,
+                error=str(exc),
+            )
+
+        return entity
+
+    def _entity_to_task(self, entity: Entity) -> Task:
+        """Hydrate a Task from a generic entity + metadata."""
+        meta = entity.metadata or {}
+        return Task(
+            id=entity.id,
+            entity_type=EntityType.TASK,
+            name=entity.name,
+            title=meta.get("title") or entity.name,
+            description=entity.description or meta.get("description") or "",
+            content=entity.content or meta.get("content") or "",
+            organization_id=entity.organization_id,
+            created_by=entity.created_by,
+            modified_by=entity.modified_by,
+            metadata=meta,
+            created_at=entity.created_at,
+            updated_at=entity.updated_at,
+            source_file=entity.source_file,
+            embedding=entity.embedding,
+            status=self._coerce_enum(TaskStatus, meta.get("status"), TaskStatus.TODO),
+            priority=self._coerce_enum(TaskPriority, meta.get("priority"), TaskPriority.MEDIUM),
+            task_order=meta.get("task_order", 0),
+            project_id=meta.get("project_id"),
+            epic_id=meta.get("epic_id"),
+            feature=meta.get("feature"),
+            sprint=meta.get("sprint"),
+            assignees=meta.get("assignees", []),
+            due_date=meta.get("due_date"),
+            estimated_hours=meta.get("estimated_hours"),
+            actual_hours=meta.get("actual_hours"),
+            domain=meta.get("domain"),
+            technologies=meta.get("technologies", []),
+            complexity=self._coerce_enum(
+                TaskComplexity,
+                meta.get("complexity"),
+                TaskComplexity.MEDIUM,
+            ),
+            tags=meta.get("tags", []),
+            branch_name=meta.get("branch_name"),
+            commit_shas=meta.get("commit_shas", []),
+            pr_url=meta.get("pr_url"),
+            learnings=meta.get("learnings", ""),
+            blockers_encountered=meta.get("blockers_encountered", []),
+            started_at=meta.get("started_at"),
+            completed_at=meta.get("completed_at"),
+            reviewed_at=meta.get("reviewed_at"),
+            assigned_agent=meta.get("assigned_agent"),
+            claimed_at=meta.get("claimed_at"),
+            heartbeat_at=meta.get("heartbeat_at"),
+            worktree_path=meta.get("worktree_path"),
+            worktree_branch=meta.get("worktree_branch"),
+            collaborators=meta.get("collaborators", []),
+            handoff_history=meta.get("handoff_history", []),
+            last_checkpoint=meta.get("last_checkpoint"),
+        )
+
+    def _entity_to_worktree(self, entity: Entity) -> Entity:
+        """Hydrate a WorktreeRecord when required fields are present."""
+        meta = entity.metadata or {}
+        path = meta.get("path") or meta.get("worktree_path")
+        branch = meta.get("branch") or meta.get("worktree_branch") or entity.name
+        base_commit = meta.get("base_commit")
+        task_id = meta.get("task_id")
+
+        if not path or not branch or not base_commit or not task_id:
+            return entity
+
+        return WorktreeRecord(
+            id=entity.id,
+            entity_type=EntityType.WORKTREE,
+            name=entity.name,
+            description=entity.description,
+            content=entity.content,
+            organization_id=entity.organization_id or self._group_id,
+            created_by=entity.created_by,
+            modified_by=entity.modified_by,
+            metadata=meta,
+            created_at=entity.created_at,
+            updated_at=entity.updated_at,
+            source_file=entity.source_file,
+            task_id=task_id,
+            agent_id=meta.get("agent_id"),
+            path=path,
+            branch=branch,
+            base_commit=base_commit,
+            status=self._coerce_enum(
+                WorktreeStatus,
+                meta.get("status"),
+                WorktreeStatus.ACTIVE,
+            ),
+            last_used=meta.get("last_used") or datetime.now(UTC),
+            has_uncommitted=meta.get("has_uncommitted", False),
+            last_commit=meta.get("last_commit"),
+        )
+
+    def _entity_to_approval(self, entity: Entity) -> Entity:
+        """Hydrate an ApprovalRecord when required fields are present."""
+        meta = entity.metadata or {}
+        project_id = meta.get("project_id")
+        agent_id = meta.get("agent_id")
+        if not project_id or not agent_id:
+            return entity
+
+        approval_metadata = meta.get("metadata")
+        if not isinstance(approval_metadata, dict):
+            excluded_keys = {
+                "project_id",
+                "agent_id",
+                "task_id",
+                "approval_type",
+                "priority",
+                "title",
+                "summary",
+                "actions",
+                "status",
+                "expires_at",
+                "responded_at",
+                "response_by",
+                "response_message",
+                "created_by",
+                "modified_by",
+            }
+            approval_metadata = {k: v for k, v in meta.items() if k not in excluded_keys}
+
+        return ApprovalRecord(
+            id=entity.id,
+            entity_type=EntityType.APPROVAL,
+            name=entity.name,
+            description=entity.description,
+            content=entity.content,
+            organization_id=entity.organization_id or self._group_id,
+            created_by=entity.created_by,
+            modified_by=entity.modified_by,
+            metadata=approval_metadata,
+            created_at=entity.created_at,
+            updated_at=entity.updated_at,
+            source_file=entity.source_file,
+            project_id=project_id,
+            agent_id=agent_id,
+            task_id=meta.get("task_id"),
+            approval_type=self._coerce_enum(
+                ApprovalType,
+                meta.get("approval_type"),
+                ApprovalType.DESTRUCTIVE_COMMAND,
+            ),
+            priority=meta.get("priority") or "medium",
+            title=meta.get("title") or entity.name,
+            summary=meta.get("summary") or entity.description or "",
+            actions=meta.get("actions", ["approve", "deny"]),
+            status=self._coerce_enum(
+                ApprovalStatus,
+                meta.get("status"),
+                ApprovalStatus.PENDING,
+            ),
+            expires_at=meta.get("expires_at"),
+            responded_at=meta.get("responded_at"),
+            response_by=meta.get("response_by"),
+            response_message=meta.get("response_message"),
+        )
 
     async def bulk_create_direct(
         self,

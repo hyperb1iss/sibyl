@@ -7,11 +7,12 @@ and distributes tasks across multiple concurrent agents.
 import asyncio
 import contextlib
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
 from sibyl.agents.runner import AgentInstance, AgentRunner
+from sibyl.agents.state_sync import update_agent_state
 from sibyl.agents.worktree import WorktreeManager
 from sibyl_core.models import (
     AgentRecord,
@@ -327,7 +328,11 @@ class AgentOrchestrator:
             limit=limit * 2,  # Fetch extra for filtering
         )
 
-        agents = [r for r in results if isinstance(r, AgentRecord)]
+        agents = [
+            cast("AgentRecord", r)
+            for r in results
+            if r.entity_type == EntityType.AGENT
+        ]
 
         # Filter by project
         agents = [a for a in agents if a.project_id == self.project_id]
@@ -351,8 +356,9 @@ class AgentOrchestrator:
 
         # Get record from graph
         record = await self.entity_manager.get(agent_id)
-        if not record or not isinstance(record, AgentRecord):
+        if not record or record.entity_type != EntityType.AGENT:
             raise OrchestratorError(f"Agent not found: {agent_id}")
+        record = cast("AgentRecord", record)
 
         return {
             "id": agent_id,
@@ -402,8 +408,9 @@ class AgentOrchestrator:
             True if task was unassigned
         """
         task = await self.entity_manager.get(task_id)
-        if not task or not isinstance(task, Task):
+        if not task or task.entity_type != EntityType.TASK:
             return False
+        task = cast("Task", task)
 
         if task.assigned_agent:
             # Stop the agent working on this task
@@ -615,6 +622,12 @@ class AgentOrchestrator:
                 "status": AgentStatus.WORKING.value,
             },
         )
+        await update_agent_state(
+            org_id=self.org_id,
+            agent_id=instance.id,
+            status=AgentStatus.WORKING.value,
+            task_id=task.id,
+        )
 
         # Update task
         await self.entity_manager.update(
@@ -661,6 +674,12 @@ class AgentOrchestrator:
                             "error_message": "Failed to recover after restart",
                         },
                     )
+                    await update_agent_state(
+                        org_id=self.org_id,
+                        agent_id=record.id,
+                        status=AgentStatus.FAILED.value,
+                        error_message="Failed to recover after restart",
+                    )
             except Exception:
                 log.exception(f"Failed to recover agent {record.id}")
 
@@ -696,6 +715,11 @@ class AgentOrchestrator:
                         await self.entity_manager.update(
                             instance.id,
                             {"status": AgentStatus.FAILED.value},
+                        )
+                        await update_agent_state(
+                            org_id=self.org_id,
+                            agent_id=instance.id,
+                            status=AgentStatus.FAILED.value,
                         )
                     except Exception:
                         log.exception(f"Failed to handle stale agent {instance.id}")

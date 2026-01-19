@@ -12,7 +12,7 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import structlog
 
@@ -284,8 +284,8 @@ class WorktreeManager:
         """Get a worktree record by ID."""
         try:
             entity = await self.entity_manager.get(worktree_id)
-            if entity and isinstance(entity, WorktreeRecord):
-                return entity
+            if entity and entity.entity_type == EntityType.WORKTREE:
+                return cast("WorktreeRecord", entity)
         except Exception:
             log.debug(f"Worktree not found: {worktree_id}")
         return None
@@ -298,8 +298,11 @@ class WorktreeManager:
             limit=100,
         )
         for record in results:
-            if isinstance(record, WorktreeRecord) and record.path == path:
-                return record
+            if record.entity_type != EntityType.WORKTREE:
+                continue
+            worktree = cast("WorktreeRecord", record)
+            if getattr(worktree, "path", None) == path:
+                return worktree
         return None
 
     async def list_for_task(self, task_id: str) -> list[WorktreeRecord]:
@@ -308,7 +311,14 @@ class WorktreeManager:
             entity_type=EntityType.WORKTREE,
             limit=100,
         )
-        return [r for r in results if isinstance(r, WorktreeRecord) and r.task_id == task_id]
+        worktrees: list[WorktreeRecord] = []
+        for record in results:
+            if record.entity_type != EntityType.WORKTREE:
+                continue
+            worktree = cast("WorktreeRecord", record)
+            if getattr(worktree, "task_id", None) == task_id:
+                worktrees.append(worktree)
+        return worktrees
 
     async def update_status(
         self, worktree_id: str, status: WorktreeStatus
@@ -324,9 +334,9 @@ class WorktreeManager:
             {"status": status.value, "last_used": datetime.now(UTC).isoformat()},
         )
 
-        if updated and isinstance(updated, WorktreeRecord):
-            return updated
-        return record
+        if updated and updated.entity_type == EntityType.WORKTREE:
+            return cast("WorktreeRecord", updated)
+        return await self.get(worktree_id) or record
 
     async def check_uncommitted(self, worktree_id: str) -> bool:
         """Check if worktree has uncommitted changes."""
@@ -491,8 +501,9 @@ class WorktreeManager:
         now = datetime.now(UTC)
 
         for record in results:
-            if not isinstance(record, WorktreeRecord):
+            if record.entity_type != EntityType.WORKTREE:
                 continue
+            record = cast("WorktreeRecord", record)
 
             if record.status != WorktreeStatus.ORPHANED:
                 continue
@@ -538,8 +549,9 @@ class WorktreeManager:
         registered_paths: set[str] = set()
 
         for record in results:
-            if not isinstance(record, WorktreeRecord):
+            if record.entity_type != EntityType.WORKTREE:
                 continue
+            record = cast("WorktreeRecord", record)
 
             registered_paths.add(record.path)
             worktree_path = Path(record.path)

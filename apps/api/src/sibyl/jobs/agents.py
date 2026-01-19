@@ -7,7 +7,7 @@ while agents work autonomously.
 import asyncio
 import contextlib
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import structlog
@@ -306,8 +306,8 @@ async def run_agent_execution(  # noqa: PLR0915
             from sibyl_core.models import Task
 
             entity = await manager.get(task_id)
-            if entity and isinstance(entity, Task):
-                task = entity
+            if entity and entity.entity_type == Task.entity_type:
+                task = cast("Task", entity)
 
         # Spawn the agent instance with pre-generated ID
         instance = await runner.spawn(

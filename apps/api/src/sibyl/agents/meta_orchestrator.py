@@ -10,7 +10,7 @@ Part of the three-tier orchestration model:
 """
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import structlog
@@ -126,9 +126,11 @@ class MetaOrchestratorService:
         )
 
         for entity in results:
-            if isinstance(entity, MetaOrchestratorRecord):
-                if entity.project_id == self.project_id:
-                    return entity
+            if entity.entity_type != EntityType.META_ORCHESTRATOR:
+                continue
+            record = cast("MetaOrchestratorRecord", entity)
+            if record.project_id == self.project_id:
+                return record
 
         return None
 
@@ -142,9 +144,9 @@ class MetaOrchestratorService:
             MetaOrchestratorRecord or None if not found
         """
         entity = await self.entity_manager.get(orchestrator_id)
-        if isinstance(entity, MetaOrchestratorRecord):
-            return entity
-        return MetaOrchestratorRecord.from_entity(entity, self.org_id) if entity else None
+        if not entity or entity.entity_type != EntityType.META_ORCHESTRATOR:
+            return None
+        return cast("MetaOrchestratorRecord", entity)
 
     async def queue_task(
         self,
@@ -328,13 +330,13 @@ class MetaOrchestratorService:
 
             # Fetch the Task object
             task_entity = await self.entity_manager.get(task_id)
-            if not isinstance(task_entity, Task):
+            if not task_entity or task_entity.entity_type != EntityType.TASK:
                 log.warning("Task not found, skipping", task_id=task_id)
                 continue
 
             # Spawn TaskOrchestrator
             task_orch = await task_service.create(
-                task=task_entity,
+                task=cast("Task", task_entity),
                 meta_orchestrator_id=orchestrator_id,
                 gate_config=gate_config,
             )

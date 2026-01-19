@@ -6,27 +6,41 @@ TaskOrchestrators manage the implement → review → rework cycle for individua
 tasks, with quality gates and Ralph Loop safety controls.
 """
 
+import contextlib
 from datetime import UTC, datetime
+from typing import cast
+from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import update
 
+from sibyl.agents.approval_queue import create_approval_queue
+from sibyl.agents.state_sync import update_agent_state
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.rls import AuthSession, get_auth_session
-from sibyl.db.models import Organization, ProjectRole
+from sibyl.db.models import AgentMessage, Organization, ProjectRole
+from sibyl.jobs.queue import enqueue_agent_execution, enqueue_agent_resume
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.graph.relationships import RelationshipManager
 from sibyl_core.models import (
+    AgentRecord,
+    AgentSpawnSource,
+    AgentStatus,
+    AgentType,
+    ApprovalStatus,
     EntityType,
     QualityGateType,
     Relationship,
     RelationshipType,
+    Task,
     TaskOrchestratorPhase,
     TaskOrchestratorRecord,
     TaskOrchestratorStatus,
+    TaskStatus,
 )
 
 log = structlog.get_logger()
@@ -130,6 +144,230 @@ def _record_to_response(record: TaskOrchestratorRecord) -> OrchestratorResponse:
         started_at=record.started_at,
         completed_at=record.completed_at,
     )
+
+
+async def _respond_to_review_approval(
+    *,
+    entity_manager: EntityManager,
+    org_id: str,
+    auth: AuthSession,
+    record: TaskOrchestratorRecord,
+    approved: bool,
+    feedback: str | None,
+) -> tuple[str | None, str]:
+    """Respond to the pending approval request for human review."""
+    approval_id = record.pending_approval_id
+    approval_status = ApprovalStatus.APPROVED.value if approved else ApprovalStatus.DENIED.value
+    responded_at = datetime.now(UTC).isoformat()
+
+    if approval_id:
+        queue = await create_approval_queue(
+            entity_manager=entity_manager,
+            org_id=org_id,
+            project_id=record.project_id,
+            agent_id=record.worker_id or record.id,
+            task_id=record.task_id,
+        )
+        try:
+            await queue.respond(
+                approval_id,
+                approved=approved,
+                message=feedback or "",
+                responded_by=str(auth.ctx.user.id),
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to respond to approval request",
+            ) from exc
+    else:
+        log.warning("Human review missing pending approval id", orchestrator_id=record.id)
+
+    if approval_id and record.worker_id:
+        try:
+            stmt = (
+                update(AgentMessage)
+                .where(AgentMessage.agent_id == record.worker_id)
+                .where(AgentMessage.extra["approval_id"].astext == approval_id)
+                .values(
+                    extra=AgentMessage.extra.op("||")(
+                        {"status": approval_status, "responded_at": responded_at}
+                    )
+                )
+            )
+            await auth.session.execute(stmt)
+            await auth.session.commit()
+        except Exception as e:
+            log.warning("Failed to update approval message status", error=str(e))
+
+    return approval_id, approval_status
+
+
+async def _apply_review_outcome(
+    *,
+    entity_manager: EntityManager,
+    record: TaskOrchestratorRecord,
+    approved: bool,
+) -> tuple[str, str, AgentStatus]:
+    """Apply a human review decision to the TaskOrchestrator."""
+    metadata = {**(record.metadata or {}), "pending_approval_id": None}
+
+    if approved:
+        completed_at = datetime.now(UTC).isoformat()
+        metadata.update(
+            {
+                "status": TaskOrchestratorStatus.COMPLETE.value,
+                "current_phase": TaskOrchestratorPhase.MERGE.value,
+                "completed_at": completed_at,
+            }
+        )
+        await entity_manager.update(
+            record.id,
+            {
+                "status": TaskOrchestratorStatus.COMPLETE.value,
+                "current_phase": TaskOrchestratorPhase.MERGE.value,
+                "completed_at": completed_at,
+                "pending_approval_id": None,
+                "metadata": metadata,
+            },
+        )
+        await entity_manager.update(
+            record.task_id,
+            {"status": TaskStatus.REVIEW.value},
+        )
+        return "approved", "Review approved, orchestrator complete", AgentStatus.COMPLETED
+
+    new_rework_count = record.rework_count + 1
+    if new_rework_count >= record.max_rework_attempts:
+        metadata.update(
+            {
+                "status": TaskOrchestratorStatus.FAILED.value,
+                "failure_reason": "max_rework_exceeded",
+            }
+        )
+        await entity_manager.update(
+            record.id,
+            {
+                "status": TaskOrchestratorStatus.FAILED.value,
+                "pending_approval_id": None,
+                "metadata": metadata,
+            },
+        )
+        message = (
+            f"Review rejected, max rework attempts ({record.max_rework_attempts}) exceeded"
+        )
+        return "rejected_failed", message, AgentStatus.FAILED
+
+    metadata.update(
+        {
+            "status": TaskOrchestratorStatus.REWORKING.value,
+            "current_phase": TaskOrchestratorPhase.REWORK.value,
+            "rework_count": new_rework_count,
+        }
+    )
+    await entity_manager.update(
+        record.id,
+        {
+            "status": TaskOrchestratorStatus.REWORKING.value,
+            "current_phase": TaskOrchestratorPhase.REWORK.value,
+            "rework_count": new_rework_count,
+            "pending_approval_id": None,
+            "metadata": metadata,
+        },
+    )
+    return (
+        "rejected_rework",
+        f"Review rejected, rework iteration {new_rework_count}",
+        AgentStatus.WORKING,
+    )
+
+
+def _build_worker_prompt(task: Task, record: TaskOrchestratorRecord) -> str:
+    """Build the worker prompt for the TaskOrchestrator."""
+    gates_desc = ", ".join(g.value for g in record.gate_config)
+
+    return f"""You are implementing a task as part of an orchestrated build loop.
+
+## Task
+**{task.title}**
+
+{task.description}
+
+## Quality Gates
+Your implementation will be reviewed by these automated gates: {gates_desc}
+
+## Instructions
+1. Implement the task completely
+2. Ensure all quality gates can pass (lint, types, tests)
+3. When finished, signal completion so gates can run
+"""
+
+
+async def _resolve_repo_path(
+    entity_manager: EntityManager,
+    project_id: str,
+) -> str | None:
+    """Resolve repo_path from project metadata when available."""
+    with contextlib.suppress(Exception):
+        project = await entity_manager.get(project_id)
+        if project and hasattr(project, "repo_path"):
+            return getattr(project, "repo_path", None)
+    return None
+
+
+async def _ensure_worker_record(
+    *,
+    entity_manager: EntityManager,
+    org_id: str,
+    project_id: str,
+    record: TaskOrchestratorRecord,
+    task: Task,
+    prompt: str,
+    worker_id: str | None = None,
+) -> tuple[str, bool]:
+    """Ensure a worker AgentRecord exists for the orchestrator."""
+    if worker_id is None:
+        worker_id = f"agent_{uuid4().hex[:12]}"
+
+    created = False
+    try:
+        existing = await entity_manager.get(worker_id)
+    except EntityNotFoundError:
+        existing = None
+
+    if existing:
+        if existing.entity_type != EntityType.AGENT:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Worker ID {worker_id} is not an agent entity",
+            )
+        updates = {
+            "task_id": task.id,
+            "project_id": project_id,
+            "task_orchestrator_id": record.id,
+            "standalone": False,
+        }
+        if prompt:
+            updates["initial_prompt"] = prompt[:500]
+        await entity_manager.update(worker_id, updates)
+    else:
+        worker_record = AgentRecord(
+            id=worker_id,
+            name=f"Worker: {(task.title or 'Task')[:50]}",
+            organization_id=org_id,
+            project_id=project_id,
+            agent_type=AgentType.IMPLEMENTER,
+            spawn_source=AgentSpawnSource.ORCHESTRATOR,
+            task_id=task.id,
+            status=AgentStatus.INITIALIZING,
+            initial_prompt=prompt[:500],
+            task_orchestrator_id=record.id,
+            standalone=False,
+        )
+        await entity_manager.create_direct(worker_record)
+        created = True
+
+    return worker_id, created
 
 
 def _parse_gate_config(gates: list[str] | None) -> list[QualityGateType] | None:
@@ -244,8 +482,82 @@ async def create_orchestrator(
         auto_start=request.auto_start,
     )
 
-    # TODO: If auto_start, enqueue worker spawn in job queue
-    # This will be implemented when we add the job queue integration
+    if request.auto_start:
+        task = cast("Task", task_entity)
+        prompt = _build_worker_prompt(task, record)
+        worker_id, created = await _ensure_worker_record(
+            entity_manager=entity_manager,
+            org_id=str(org.id),
+            project_id=request.project_id,
+            record=record,
+            task=task,
+            prompt=prompt,
+            worker_id=record.worker_id,
+        )
+        repo_path = await _resolve_repo_path(entity_manager, request.project_id)
+
+        try:
+            await enqueue_agent_execution(
+                agent_id=worker_id,
+                org_id=str(org.id),
+                project_id=request.project_id,
+                prompt=prompt,
+                agent_type=AgentType.IMPLEMENTER.value,
+                task_id=request.task_id,
+                created_by=str(auth.ctx.user.id) if auth.ctx.user else None,
+                create_worktree=True,
+                repo_path=repo_path,
+            )
+        except Exception as exc:
+            if created:
+                with contextlib.suppress(Exception):
+                    await entity_manager.delete(worker_id)
+            raise HTTPException(
+                status_code=500, detail="Failed to enqueue worker"
+            ) from exc
+
+        await update_agent_state(
+            org_id=str(org.id),
+            agent_id=worker_id,
+            status=AgentStatus.INITIALIZING.value,
+            task_id=request.task_id,
+            orchestrator_id=orchestrator_id,
+        )
+
+        with contextlib.suppress(Exception):
+            await relationship_manager.create(
+                Relationship(
+                    id=f"rel_{uuid4().hex[:16]}",
+                    source_id=orchestrator_id,
+                    target_id=worker_id,
+                    relationship_type=RelationshipType.ORCHESTRATES,
+                )
+            )
+
+        started_at = record.started_at or datetime.now(UTC)
+        metadata = {
+            **(record.metadata or {}),
+            "worker_id": worker_id,
+            "status": TaskOrchestratorStatus.IMPLEMENTING.value,
+            "current_phase": TaskOrchestratorPhase.IMPLEMENT.value,
+            "started_at": started_at.isoformat(),
+        }
+        await entity_manager.update(
+            orchestrator_id,
+            {
+                "worker_id": worker_id,
+                "status": TaskOrchestratorStatus.IMPLEMENTING.value,
+                "current_phase": TaskOrchestratorPhase.IMPLEMENT.value,
+                "started_at": started_at.isoformat(),
+                "metadata": metadata,
+            },
+        )
+
+        record.worker_id = worker_id
+        record.status = TaskOrchestratorStatus.IMPLEMENTING
+        record.current_phase = TaskOrchestratorPhase.IMPLEMENT
+        record.started_at = started_at
+        record.metadata = metadata
 
     return _record_to_response(record)
 
@@ -384,16 +696,79 @@ async def start_orchestrator(
             detail=f"Cannot start orchestrator in state: {record.status.value}",
         )
 
-    # Update status
+    relationship_manager = RelationshipManager(client, group_id=str(org.id))
+
+    task_entity = await entity_manager.get(record.task_id)
+    if not task_entity:
+        raise HTTPException(status_code=404, detail=f"Task not found: {record.task_id}")
+    task = cast("Task", task_entity)
+
+    prompt = _build_worker_prompt(task, record)
+    worker_id, created = await _ensure_worker_record(
+        entity_manager=entity_manager,
+        org_id=str(org.id),
+        project_id=record.project_id,
+        record=record,
+        task=task,
+        prompt=prompt,
+        worker_id=record.worker_id,
+    )
+    repo_path = await _resolve_repo_path(entity_manager, record.project_id)
+
+    try:
+        await enqueue_agent_execution(
+            agent_id=worker_id,
+            org_id=str(org.id),
+            project_id=record.project_id,
+            prompt=prompt,
+            agent_type=AgentType.IMPLEMENTER.value,
+            task_id=record.task_id,
+            created_by=str(auth.ctx.user.id) if auth.ctx.user else None,
+            create_worktree=True,
+            repo_path=repo_path,
+        )
+    except Exception as exc:
+        if created:
+            with contextlib.suppress(Exception):
+                await entity_manager.delete(worker_id)
+        raise HTTPException(status_code=500, detail="Failed to enqueue worker") from exc
+
+    await update_agent_state(
+        org_id=str(org.id),
+        agent_id=worker_id,
+        status=AgentStatus.INITIALIZING.value,
+        task_id=record.task_id,
+        orchestrator_id=orchestrator_id,
+    )
+
+    with contextlib.suppress(Exception):
+        await relationship_manager.create(
+            Relationship(
+                id=f"rel_{uuid4().hex[:16]}",
+                source_id=orchestrator_id,
+                target_id=worker_id,
+                relationship_type=RelationshipType.ORCHESTRATES,
+            )
+        )
+
+    started_at = record.started_at or datetime.now(UTC)
+    metadata = {
+        **(record.metadata or {}),
+        "worker_id": worker_id,
+        "status": TaskOrchestratorStatus.IMPLEMENTING.value,
+        "current_phase": TaskOrchestratorPhase.IMPLEMENT.value,
+        "started_at": started_at.isoformat(),
+    }
     await entity_manager.update(
         orchestrator_id,
         {
+            "worker_id": worker_id,
             "status": TaskOrchestratorStatus.IMPLEMENTING.value,
-            "started_at": datetime.now(UTC).isoformat(),
+            "current_phase": TaskOrchestratorPhase.IMPLEMENT.value,
+            "started_at": started_at.isoformat(),
+            "metadata": metadata,
         },
     )
-
-    # TODO: Enqueue worker spawn job
 
     log.info("Started TaskOrchestrator", orchestrator_id=orchestrator_id)
 
@@ -521,12 +896,36 @@ async def resume_orchestrator(
     }
     new_status = status_map.get(record.current_phase, TaskOrchestratorStatus.IMPLEMENTING)
 
+    if not record.worker_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot resume orchestrator without a worker",
+        )
+
+    try:
+        await enqueue_agent_resume(
+            agent_id=record.worker_id,
+            org_id=str(org.id),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to enqueue worker resume",
+        ) from exc
+
+    metadata = {
+        **(record.metadata or {}),
+        "worker_id": record.worker_id,
+        "status": new_status.value,
+        "current_phase": record.current_phase.value,
+    }
     await entity_manager.update(
         orchestrator_id,
-        {"status": new_status.value},
+        {
+            "status": new_status.value,
+            "metadata": metadata,
+        },
     )
-
-    # TODO: Signal worker to resume
 
     log.info("Resumed TaskOrchestrator", orchestrator_id=orchestrator_id)
 
@@ -582,44 +981,51 @@ async def respond_to_review(
             detail=f"Orchestrator not awaiting review: {record.status.value}",
         )
 
-    if request.approved:
-        # Complete the orchestrator
-        await entity_manager.update(
-            orchestrator_id,
-            {
-                "status": TaskOrchestratorStatus.COMPLETE.value,
-                "current_phase": TaskOrchestratorPhase.MERGE.value,
-                "completed_at": datetime.now(UTC).isoformat(),
-            },
-        )
-        action = "approved"
-        message = "Review approved, orchestrator complete"
-    else:
-        # Trigger rework
-        new_rework_count = record.rework_count + 1
-        if new_rework_count >= record.max_rework_attempts:
-            # Failed - max rework exceeded
-            await entity_manager.update(
-                orchestrator_id,
-                {"status": TaskOrchestratorStatus.FAILED.value},
-            )
-            action = "rejected_failed"
-            message = (
-                f"Review rejected, max rework attempts ({record.max_rework_attempts}) exceeded"
-            )
-        else:
-            await entity_manager.update(
-                orchestrator_id,
-                {
-                    "status": TaskOrchestratorStatus.REWORKING.value,
-                    "current_phase": TaskOrchestratorPhase.REWORK.value,
-                    "rework_count": new_rework_count,
-                },
-            )
-            action = "rejected_rework"
-            message = f"Review rejected, rework iteration {new_rework_count}"
+    approval_id, approval_status = await _respond_to_review_approval(
+        entity_manager=entity_manager,
+        org_id=str(org.id),
+        auth=auth,
+        record=record,
+        approved=request.approved,
+        feedback=request.feedback,
+    )
 
-            # TODO: Send feedback to worker
+    action, message, agent_status = await _apply_review_outcome(
+        entity_manager=entity_manager,
+        record=record,
+        approved=request.approved,
+    )
+
+
+    if record.worker_id:
+        await entity_manager.update(record.worker_id, {"status": agent_status.value})
+        await update_agent_state(
+            org_id=str(org.id),
+            agent_id=record.worker_id,
+            status=agent_status.value,
+        )
+
+    from sibyl.api.pubsub import publish_event
+
+    if approval_id:
+        await publish_event(
+            "approval_response",
+            {
+                "approval_id": approval_id,
+                "agent_id": record.worker_id,
+                "action": "approve" if request.approved else "deny",
+                "status": approval_status,
+                "response_by": str(auth.ctx.user.id),
+            },
+            org_id=str(org.id),
+        )
+
+    if record.worker_id:
+        await publish_event(
+            "agent_status",
+            {"agent_id": record.worker_id, "status": agent_status.value},
+            org_id=str(org.id),
+        )
 
     log.info(
         "Human review response",

@@ -10,13 +10,14 @@ reviewed by a TaskOrchestrator, this module handles the promotion process:
 5. Trigger orchestrator review of the work
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import structlog
 
 from sibyl_core.models import (
     AgentRecord,
     AgentStatus,
+    EntityType,
     QualityGateType,
     Task,
     TaskOrchestratorPhase,
@@ -90,10 +91,10 @@ class WorkerPromotionService:
         """
         try:
             entity = await self.entity_manager.get(agent_id)
-            if not isinstance(entity, AgentRecord):
+            if not entity or entity.entity_type != EntityType.AGENT:
                 return False, "Agent not found"
 
-            agent = entity
+            agent = cast("AgentRecord", entity)
 
             # Must be standalone
             if not agent.standalone:
@@ -147,9 +148,9 @@ class WorkerPromotionService:
 
         # Get the agent
         entity = await self.entity_manager.get(agent_id)
-        agent = entity if isinstance(entity, AgentRecord) else None
-        if not agent:
+        if not entity or entity.entity_type != EntityType.AGENT:
             raise WorkerPromotionError("Agent not found")
+        agent = cast("AgentRecord", entity)
 
         # Get or create orchestrator
         if orchestrator_id:
@@ -174,9 +175,9 @@ class WorkerPromotionService:
         agent_entity = await self.entity_manager.get(agent_id)
         orch_entity = await self.entity_manager.get(orchestrator.id)
 
-        if not isinstance(agent_entity, AgentRecord):
+        if not agent_entity or agent_entity.entity_type != EntityType.AGENT:
             raise WorkerPromotionError("Failed to refresh agent")
-        if not isinstance(orch_entity, TaskOrchestratorRecord):
+        if not orch_entity or orch_entity.entity_type != EntityType.TASK_ORCHESTRATOR:
             raise WorkerPromotionError("Failed to refresh orchestrator")
 
         log.info(
@@ -185,12 +186,12 @@ class WorkerPromotionService:
             orchestrator_id=orchestrator.id,
         )
 
-        return agent_entity, orch_entity
+        return cast("AgentRecord", agent_entity), cast("TaskOrchestratorRecord", orch_entity)
 
     async def _get_orchestrator(self, orchestrator_id: str) -> TaskOrchestratorRecord:
         """Get existing orchestrator."""
         entity = await self.entity_manager.get(orchestrator_id)
-        if not isinstance(entity, TaskOrchestratorRecord):
+        if not entity or entity.entity_type != EntityType.TASK_ORCHESTRATOR:
             raise WorkerPromotionError(f"Orchestrator not found: {orchestrator_id}")
 
         # Validate orchestrator status
@@ -200,7 +201,7 @@ class WorkerPromotionService:
         ):
             raise WorkerPromotionError(f"Orchestrator in terminal status: {entity.status.value}")
 
-        return entity
+        return cast("TaskOrchestratorRecord", entity)
 
     async def _create_orchestrator(
         self,
@@ -229,11 +230,11 @@ class WorkerPromotionService:
 
         # Fetch the task
         task_entity = await self.entity_manager.get(agent.task_id)
-        if not isinstance(task_entity, Task):
+        if not task_entity or task_entity.entity_type != EntityType.TASK:
             raise WorkerPromotionError(f"Task not found: {agent.task_id}")
 
         orchestrator = await service.create(
-            task=task_entity,
+            task=cast("Task", task_entity),
             gate_config=gate_config,
         )
 
@@ -377,10 +378,10 @@ class WorkerPromotionService:
             WorkerPromotionError: If demotion fails
         """
         entity = await self.entity_manager.get(agent_id)
-        if not isinstance(entity, AgentRecord):
+        if not entity or entity.entity_type != EntityType.AGENT:
             raise WorkerPromotionError("Agent not found")
 
-        agent = entity
+        agent = cast("AgentRecord", entity)
 
         if agent.standalone:
             raise WorkerPromotionError("Agent is already standalone")
@@ -397,10 +398,10 @@ class WorkerPromotionService:
         log.info("Agent demoted to standalone", agent_id=agent_id)
 
         entity = await self.entity_manager.get(agent_id)
-        if not isinstance(entity, AgentRecord):
+        if not entity or entity.entity_type != EntityType.AGENT:
             raise WorkerPromotionError("Failed to refresh agent")
 
-        return entity
+        return cast("AgentRecord", entity)
 
 
 async def create_promotion_service(

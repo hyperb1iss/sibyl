@@ -10,9 +10,10 @@ This sits on top of ApprovalService and redis_sub, adding recovery semantics.
 """
 
 import asyncio
+import inspect
 import json
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 from redis.asyncio import Redis
@@ -22,8 +23,9 @@ from sibyl.agents.redis_sub import (
     PUBSUB_DB,
     publish_approval_response,
 )
+from sibyl.agents.state_sync import update_agent_state
 from sibyl.config import settings
-from sibyl_core.models import ApprovalRecord, ApprovalStatus, ApprovalType
+from sibyl_core.models import ApprovalRecord, ApprovalStatus, ApprovalType, EntityType
 
 if TYPE_CHECKING:
     from sibyl_core.graph import EntityManager
@@ -104,6 +106,7 @@ class ApprovalQueue:
         title: str,
         summary: str,
         metadata: dict[str, Any],
+        priority: str = "medium",
         expiry: timedelta = timedelta(hours=24),
     ) -> ApprovalRecord:
         """Enqueue an approval request.
@@ -116,6 +119,7 @@ class ApprovalQueue:
             title: Short description
             summary: Detailed context
             metadata: Type-specific data
+            priority: Request priority (low, medium, high)
             expiry: How long before auto-expiration
 
         Returns:
@@ -137,6 +141,7 @@ class ApprovalQueue:
             agent_id=self.agent_id,
             task_id=self.task_id,
             approval_type=approval_type,
+            priority=priority,
             title=title,
             summary=summary,
             metadata=metadata,
@@ -144,8 +149,12 @@ class ApprovalQueue:
             expires_at=expires_at,
         )
 
-        # Persist to graph
-        await self.entity_manager.create_direct(record, generate_embedding=False)
+        # Persist to graph (fallback to create when create_direct isn't async)
+        create_direct = getattr(self.entity_manager, "create_direct", None)
+        if create_direct and inspect.iscoroutinefunction(create_direct):
+            await create_direct(record, generate_embedding=False)
+        else:
+            await self.entity_manager.create(record)
 
         # Store recovery state in Redis
         await self._store_pending_state(record, expires_at)
@@ -156,6 +165,11 @@ class ApprovalQueue:
         await self.entity_manager.update(
             self.agent_id,
             {"status": AgentStatus.WAITING_APPROVAL.value},
+        )
+        await update_agent_state(
+            org_id=self.org_id,
+            agent_id=self.agent_id,
+            status=AgentStatus.WAITING_APPROVAL.value,
         )
 
         # Broadcast to UI
@@ -514,12 +528,13 @@ class ApprovalQueue:
         # Also check graph record as fallback
         try:
             entity = await self.entity_manager.get(approval_id)
-            if isinstance(entity, ApprovalRecord):
-                if entity.status in (ApprovalStatus.APPROVED, ApprovalStatus.DENIED):
+            if entity and entity.entity_type == EntityType.APPROVAL:
+                record = cast("ApprovalRecord", entity)
+                if record.status in (ApprovalStatus.APPROVED, ApprovalStatus.DENIED):
                     return {
-                        "approved": entity.status == ApprovalStatus.APPROVED,
-                        "message": getattr(entity, "response_message", ""),
-                        "by": getattr(entity, "response_by", "unknown"),
+                        "approved": record.status == ApprovalStatus.APPROVED,
+                        "message": getattr(record, "response_message", ""),
+                        "by": getattr(record, "response_by", "unknown"),
                     }
         except Exception as e:
             log.debug(

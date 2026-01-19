@@ -9,6 +9,16 @@ from graphiti_core.nodes import EntityNode, EpisodicNode
 
 from sibyl_core.errors import EntityCreationError, EntityNotFoundError, SearchError
 from sibyl_core.graph.entities import EntityManager, sanitize_search_query
+from sibyl_core.models.agents import (
+    AgentCheckpoint,
+    AgentRecord,
+    AgentStatus,
+    AgentType,
+    TaskOrchestratorRecord,
+    TaskOrchestratorStatus,
+    WorktreeRecord,
+    WorktreeStatus,
+)
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.tasks import (
     Epic,
@@ -429,6 +439,210 @@ class TestEntityGet:
             pytest.raises(EntityNotFoundError),
         ):
             await entity_manager.get("entity-001")
+
+
+# =============================================================================
+# Typed Hydration Tests
+# =============================================================================
+
+
+class TestTypedHydration:
+    """Test typed hydration for EntityManager get/list_by_type."""
+
+    @pytest.mark.asyncio
+    async def test_get_hydrates_task_record(
+        self,
+        entity_manager: EntityManager,
+    ) -> None:
+        """get() returns Task when entity_type is task."""
+        task_node = EntityNode(
+            uuid="task-typed-001",
+            name="Typed Task",
+            group_id="test-org-123",
+            labels=["Entity", "task"],
+            created_at=datetime.now(UTC),
+            summary="",
+            attributes={
+                "entity_type": "task",
+                "description": "Task description",
+                "content": "Task description",
+                "metadata": json.dumps(
+                    {
+                        "status": "doing",
+                        "priority": "high",
+                        "project_id": "project-typed-001",
+                    }
+                ),
+            },
+        )
+
+        with patch.object(
+            EntityNode,
+            "get_by_uuid",
+            new_callable=AsyncMock,
+            return_value=task_node,
+        ):
+            result = await entity_manager.get("task-typed-001")
+
+        assert isinstance(result, Task)
+        assert result.title == "Typed Task"
+        assert result.status == TaskStatus.DOING
+        assert result.priority == TaskPriority.HIGH
+        assert result.project_id == "project-typed-001"
+
+    @pytest.mark.asyncio
+    async def test_get_hydrates_agent_record(
+        self,
+        entity_manager: EntityManager,
+    ) -> None:
+        """get() returns AgentRecord when entity_type is agent."""
+        agent_node = EntityNode(
+            uuid="agent-typed-001",
+            name="Planner Agent",
+            group_id="test-org-123",
+            labels=["Entity", "agent"],
+            created_at=datetime.now(UTC),
+            summary="",
+            attributes={
+                "entity_type": "agent",
+                "description": "Agent description",
+                "content": "Agent description",
+                "metadata": json.dumps(
+                    {
+                        "project_id": "project-typed-001",
+                        "agent_type": "planner",
+                        "status": "working",
+                        "task_id": "task-typed-001",
+                        "worktree_id": "worktree-typed-001",
+                        "last_heartbeat": datetime.now(UTC).isoformat(),
+                    }
+                ),
+            },
+        )
+
+        with patch.object(
+            EntityNode,
+            "get_by_uuid",
+            new_callable=AsyncMock,
+            return_value=agent_node,
+        ):
+            result = await entity_manager.get("agent-typed-001")
+
+        assert isinstance(result, AgentRecord)
+        assert result.agent_type == AgentType.PLANNER
+        assert result.status == AgentStatus.WORKING
+        assert result.task_id == "task-typed-001"
+        assert result.worktree_id == "worktree-typed-001"
+
+    @pytest.mark.asyncio
+    async def test_list_by_type_hydrates_task_orchestrator(
+        self,
+        entity_manager: EntityManager,
+        mock_driver: MagicMock,
+    ) -> None:
+        """list_by_type() returns TaskOrchestratorRecord instances."""
+        mock_driver.execute_query.return_value = (
+            [
+                {
+                    "uuid": "orch-typed-001",
+                    "name": "Task Orchestrator",
+                    "entity_type": "task_orchestrator",
+                    "group_id": "test-org-123",
+                    "metadata": json.dumps(
+                        {
+                            "project_id": "project-typed-001",
+                            "task_id": "task-typed-001",
+                            "worker_id": "agent-typed-001",
+                            "worktree_id": "worktree-typed-001",
+                            "status": "reviewing",
+                            "current_phase": "review",
+                        }
+                    ),
+                }
+            ],
+            None,
+            None,
+        )
+
+        results = await entity_manager.list_by_type(EntityType.TASK_ORCHESTRATOR)
+
+        assert len(results) == 1
+        assert isinstance(results[0], TaskOrchestratorRecord)
+        assert results[0].worker_id == "agent-typed-001"
+        assert results[0].status == TaskOrchestratorStatus.REVIEWING
+
+    @pytest.mark.asyncio
+    async def test_list_by_type_hydrates_worktree_record(
+        self,
+        entity_manager: EntityManager,
+        mock_driver: MagicMock,
+    ) -> None:
+        """list_by_type() returns WorktreeRecord instances."""
+        mock_driver.execute_query.return_value = (
+            [
+                {
+                    "uuid": "worktree-typed-001",
+                    "name": "feature/typed",
+                    "entity_type": "worktree",
+                    "group_id": "test-org-123",
+                    "metadata": json.dumps(
+                        {
+                            "task_id": "task-typed-001",
+                            "agent_id": "agent-typed-001",
+                            "path": "/tmp/worktrees/feature-typed",
+                            "branch": "feature/typed",
+                            "base_commit": "abc123",
+                            "status": "active",
+                            "last_used": datetime.now(UTC).isoformat(),
+                        }
+                    ),
+                }
+            ],
+            None,
+            None,
+        )
+
+        results = await entity_manager.list_by_type(EntityType.WORKTREE)
+
+        assert len(results) == 1
+        assert isinstance(results[0], WorktreeRecord)
+        assert results[0].branch == "feature/typed"
+        assert results[0].status == WorktreeStatus.ACTIVE
+
+    @pytest.mark.asyncio
+    async def test_list_by_type_hydrates_checkpoint(
+        self,
+        entity_manager: EntityManager,
+        mock_driver: MagicMock,
+    ) -> None:
+        """list_by_type() returns AgentCheckpoint instances."""
+        mock_driver.execute_query.return_value = (
+            [
+                {
+                    "uuid": "checkpoint-typed-001",
+                    "name": "checkpoint-agent",
+                    "entity_type": "checkpoint",
+                    "group_id": "test-org-123",
+                    "metadata": json.dumps(
+                        {
+                            "agent_id": "agent-typed-001",
+                            "session_id": "session-typed-001",
+                            "current_step": "review",
+                            "pending_approval_id": "approval-typed-001",
+                        }
+                    ),
+                }
+            ],
+            None,
+            None,
+        )
+
+        results = await entity_manager.list_by_type(EntityType.CHECKPOINT)
+
+        assert len(results) == 1
+        assert isinstance(results[0], AgentCheckpoint)
+        assert results[0].current_step == "review"
+        assert results[0].pending_approval_id == "approval-typed-001"
 
 
 # =============================================================================
