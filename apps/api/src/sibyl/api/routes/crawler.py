@@ -265,13 +265,15 @@ async def get_document(
     org: Organization = Depends(get_current_organization),
 ) -> CrawlDocumentResponse:
     """Get a crawled document by ID with full content (org-scoped)."""
+    # Strip 'doc:' prefix if present
+    uuid_str = document_id.removeprefix("doc:")
     async with get_session() as session:
         # Query with org check via source join
         result = await session.execute(
             select(CrawledDocument)
             .join(CrawlSource)
             .where(
-                col(CrawledDocument.id) == UUID(document_id),
+                col(CrawledDocument.id) == UUID(uuid_str),
                 col(CrawlSource.organization_id) == org.id,
             )
         )
