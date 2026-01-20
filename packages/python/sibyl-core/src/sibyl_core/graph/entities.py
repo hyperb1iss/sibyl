@@ -4,8 +4,10 @@ This module provides entity CRUD operations using Graphiti's native node APIs.
 All graph operations go through EntityNode/EpisodicNode rather than raw Cypher.
 """
 
+import asyncio
 import contextlib
 import json
+import random
 import re
 from datetime import UTC, datetime
 from enum import Enum
@@ -43,6 +45,7 @@ from sibyl_core.models.tasks import (
     TaskStatus,
     Team,
 )
+from sibyl_core.utils.resilience import GRAPHITI_RETRY
 
 log = structlog.get_logger()
 
@@ -86,6 +89,64 @@ class EntityManager:
         # This enables multi-tenancy: each org has its own isolated graph
         self._driver = client.client.driver.clone(group_id)
 
+    async def _add_episode_with_retry(
+        self,
+        name: str,
+        episode_body: str,
+        source_description: str,
+        reference_time: datetime,
+        entity_types: dict[str, type[BaseModel]],
+    ) -> Any:
+        """Call Graphiti add_episode with retry on transient failures.
+
+        This is separated out to apply retry logic - add_episode can take 60-90s
+        under load and may fail with Redis timeouts during edge_fulltext_search.
+        """
+        # Import here to get RedisTimeoutError for type annotation
+        try:
+            from redis.exceptions import TimeoutError as RedisTimeoutError
+        except ImportError:
+            RedisTimeoutError = TimeoutError  # type: ignore[misc,assignment]
+
+        # Retry wrapper - applied inline since @retry decorator doesn't work well with methods
+        last_error: Exception | None = None
+        for attempt in range(GRAPHITI_RETRY.max_attempts):
+            try:
+                return await self._client.client.add_episode(
+                    name=name,
+                    episode_body=episode_body,
+                    source_description=source_description,
+                    reference_time=reference_time,
+                    group_id=self._group_id,
+                    entity_types=entity_types,
+                )
+            except (ConnectionError, TimeoutError, OSError, RedisTimeoutError) as e:
+                last_error = e
+                if attempt < GRAPHITI_RETRY.max_attempts - 1:
+                    delay = min(
+                        GRAPHITI_RETRY.base_delay * (2**attempt),
+                        GRAPHITI_RETRY.max_delay,
+                    )
+                    if GRAPHITI_RETRY.jitter:
+                        delay += random.uniform(-delay * 0.25, delay * 0.25)
+                    log.warning(
+                        "add_episode failed, retrying",
+                        attempt=attempt + 1,
+                        max_attempts=GRAPHITI_RETRY.max_attempts,
+                        delay=f"{delay:.1f}s",
+                        error=str(e),
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    log.error(
+                        "add_episode exhausted retries",
+                        attempts=GRAPHITI_RETRY.max_attempts,
+                        error=str(e),
+                    )
+        if last_error:
+            raise last_error
+        raise RuntimeError("Retry logic error in add_episode")
+
     async def create(self, entity: Entity) -> str:
         """Create a new entity in the graph.
 
@@ -114,12 +175,12 @@ class EntityManager:
             safe_name = re.sub(r"[`\[\]{}()|@#$%^&+=<>/:\"']", "", safe_name)
             safe_name = re.sub(r"\s+", " ", safe_name).strip()
 
-            result = await self._client.client.add_episode(
+            # Call add_episode with retry logic for transient failures
+            result = await self._add_episode_with_retry(
                 name=f"{entity.entity_type}:{safe_name}",
                 episode_body=episode_body,
                 source_description=f"MCP Entity: {entity.entity_type}",
                 reference_time=entity.created_at or datetime.now(UTC),
-                group_id=self._group_id,
                 entity_types=entity_types,
             )
 

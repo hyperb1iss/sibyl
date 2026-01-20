@@ -151,6 +151,7 @@ class AgentRecord(Entity):
             name=entity.name,
             organization_id=entity.organization_id or org_id,
             entity_type=EntityType.AGENT,
+            metadata=meta,  # Preserve metadata for filtering in list_by_type
             agent_type=AgentType(meta.get("agent_type", "general")),
             status=AgentStatus(meta.get("status", "initializing")),
             spawn_source=AgentSpawnSource(meta.get("spawn_source", "user")),
@@ -293,6 +294,7 @@ class MetaOrchestratorRecord(Entity):
             name=entity.name,
             organization_id=entity.organization_id or org_id,
             entity_type=EntityType.META_ORCHESTRATOR,
+            metadata=meta,  # Preserve metadata for filtering in list_by_type
             project_id=meta.get("project_id", ""),
             current_epic_id=meta.get("current_epic_id"),
             task_queue=meta.get("task_queue", []),
@@ -457,6 +459,7 @@ class TaskOrchestratorRecord(Entity):
             name=entity.name,
             organization_id=entity.organization_id or org_id,
             entity_type=EntityType.TASK_ORCHESTRATOR,
+            metadata=meta,  # Preserve metadata for filtering in list_by_type
             project_id=meta.get("project_id", ""),
             meta_orchestrator_id=meta.get("meta_orchestrator_id"),
             task_id=meta.get("task_id", ""),
@@ -666,6 +669,7 @@ class AgentCheckpoint(Entity):
         return cls(
             id=entity.id,
             name=entity.name,
+            metadata=meta,  # Preserve metadata for filtering in list_by_type
             agent_id=meta.get("agent_id", ""),
             session_id=meta.get("session_id", ""),
             conversation_history=meta.get("conversation_history", []),

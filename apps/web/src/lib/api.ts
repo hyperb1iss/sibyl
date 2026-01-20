@@ -2232,12 +2232,15 @@ export const api = {
       status?: AgentStatus;
       agent_type?: AgentType;
       limit?: number;
+      all_users?: boolean;
     }) => {
       const searchParams = new URLSearchParams();
       if (params?.project) searchParams.set('project', params.project);
       if (params?.status) searchParams.set('status', params.status);
       if (params?.agent_type) searchParams.set('agent_type', params.agent_type);
       if (params?.limit) searchParams.set('limit', params.limit.toString());
+      // Default to showing all accessible agents (not just user's own)
+      searchParams.set('all_users', params?.all_users !== false ? 'true' : 'false');
       const query = searchParams.toString();
       return fetchApi<AgentListResponse>(`/agents${query ? `?${query}` : ''}`);
     },

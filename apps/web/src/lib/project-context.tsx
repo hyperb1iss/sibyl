@@ -44,49 +44,61 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
   // Check if current page should show all projects
   const contextEnabled = !CROSS_PROJECT_PATHS.some(path => pathname.startsWith(path));
 
-  // Initialize from URL or localStorage
-  const [selectedProjects, setSelectedProjectsState] = useState<string[]>(() => {
-    // First check URL params
-    const urlProjects = searchParams.get('projects');
-    if (urlProjects) {
-      return urlProjects.split(',').filter(Boolean);
-    }
+  // Track whether we've completed initial hydration
+  const isHydrated = useRef(false);
+  const prevProjectsRef = useRef<string[] | null>(null);
 
-    // Then check localStorage
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed)) {
-            return parsed;
-          }
-        }
-      } catch {
-        // Ignore parse errors
-      }
-    }
-
-    return [];
-  });
+  // Initialize with empty array - proper value set in effect after hydration
+  const [selectedProjects, setSelectedProjectsState] = useState<string[]>([]);
 
   const isAll = selectedProjects.length === 0;
 
-  // Sync to localStorage when selection changes
+  // Initial hydration: sync from URL (primary) or localStorage (fallback)
+  // This runs once after mount to ensure searchParams is available
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(selectedProjects));
-    }
-  }, [selectedProjects]);
+    if (isHydrated.current) return;
+    isHydrated.current = true;
 
-  // Sync URL when selection changes (separate effect to avoid loop)
-  const prevProjectsRef = useRef<string[]>(selectedProjects);
-  useEffect(() => {
-    // Only update URL if state actually changed (not from URL sync)
-    if (JSON.stringify(prevProjectsRef.current) === JSON.stringify(selectedProjects)) {
+    // URL is source of truth
+    const urlProjects = searchParams.get('projects');
+    if (urlProjects) {
+      const projects = urlProjects.split(',').filter(Boolean);
+      prevProjectsRef.current = projects;
+      setSelectedProjectsState(projects);
       return;
     }
-    prevProjectsRef.current = selectedProjects;
+
+    // Fall back to localStorage if no URL param
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          prevProjectsRef.current = parsed;
+          setSelectedProjectsState(parsed);
+          return;
+        }
+      }
+    } catch {
+      // Ignore parse errors
+    }
+
+    // No URL and no localStorage - stay with empty (all projects)
+    prevProjectsRef.current = [];
+  }, [searchParams]);
+
+  // Sync to localStorage when selection changes (after hydration)
+  useEffect(() => {
+    if (!isHydrated.current) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(selectedProjects));
+  }, [selectedProjects]);
+
+  // Sync URL when USER changes selection (not from URL navigation)
+  const userChangedSelection = useRef(false);
+  useEffect(() => {
+    if (!isHydrated.current) return;
+    if (!userChangedSelection.current) return;
+    userChangedSelection.current = false;
 
     const params = new URLSearchParams(searchParams);
     params.delete('project'); // Remove legacy single 'project' param
@@ -101,35 +113,49 @@ export function ProjectContextProvider({ children }: { children: ReactNode }) {
     router.replace(newUrl, { scroll: false });
   }, [selectedProjects, pathname, router, searchParams]);
 
-  const setProjects = useCallback((projectIds: string[]) => {
-    setSelectedProjectsState(projectIds);
-  }, []);
-
-  const selectProject = useCallback((projectId: string) => {
-    setSelectedProjectsState([projectId]);
-  }, []);
-
-  const toggleProject = useCallback((projectId: string) => {
-    setSelectedProjectsState(prev => {
-      return prev.includes(projectId) ? prev.filter(id => id !== projectId) : [...prev, projectId];
-    });
-  }, []);
-
-  const clearProjects = useCallback(() => {
-    setSelectedProjectsState([]);
-  }, []);
-
-  // Sync from URL on navigation (when URL changes externally)
+  // Sync from URL on external navigation (e.g., back/forward, link click)
   useEffect(() => {
+    if (!isHydrated.current) return;
+
     const urlProjects = searchParams.get('projects');
     const projects = urlProjects ? urlProjects.split(',').filter(Boolean) : [];
 
-    // Only sync if URL projects differ from our tracked state (use ref to avoid deps)
+    // Only sync if URL differs from what we have
     if (JSON.stringify(projects) !== JSON.stringify(prevProjectsRef.current)) {
       prevProjectsRef.current = projects;
       setSelectedProjectsState(projects);
     }
   }, [searchParams]);
+
+  // Wrapped setters that mark user-initiated changes
+  const setProjects = useCallback((projectIds: string[]) => {
+    userChangedSelection.current = true;
+    prevProjectsRef.current = projectIds;
+    setSelectedProjectsState(projectIds);
+  }, []);
+
+  const selectProject = useCallback((projectId: string) => {
+    userChangedSelection.current = true;
+    prevProjectsRef.current = [projectId];
+    setSelectedProjectsState([projectId]);
+  }, []);
+
+  const toggleProject = useCallback((projectId: string) => {
+    userChangedSelection.current = true;
+    setSelectedProjectsState(prev => {
+      const next = prev.includes(projectId)
+        ? prev.filter(id => id !== projectId)
+        : [...prev, projectId];
+      prevProjectsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const clearProjects = useCallback(() => {
+    userChangedSelection.current = true;
+    prevProjectsRef.current = [];
+    setSelectedProjectsState([]);
+  }, []);
 
   const value = useMemo(
     () => ({

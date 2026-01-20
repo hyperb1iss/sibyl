@@ -6,14 +6,12 @@ Requires OWNER role (super admin equivalent).
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketException, status
 
 from sibyl.auth.dependencies import require_org_role
-from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import JwtError, verify_access_token
 from sibyl.db.models import OrganizationRole
 from sibyl_core.logging import LogBuffer

@@ -560,7 +560,7 @@ function AgentsPageContent() {
     project: projectFilter,
     status: statusFilter ?? undefined,
   });
-  const { data: projectsData } = useProjects();
+  const { data: projectsData, isLoading: projectsLoading } = useProjects();
   const { data: orchestratorsData } = useOrchestrators(projectFilter);
   const { data: tasksData } = useTasks({ project: projectFilter });
 
@@ -684,8 +684,23 @@ function AgentsPageContent() {
       const projectId = agent.project_id || 'no-project';
       if (!groups[projectId]) {
         const project = projects.find(p => p.id === projectId);
+        // Determine the display name:
+        // - If project found: use project name
+        // - If no project_id: "No Project"
+        // - If projects still loading and has project_id: "Loading..."
+        // - If projects loaded but not found: "Unknown Project"
+        let groupName = 'No Project';
+        if (projectId !== 'no-project') {
+          if (project) {
+            groupName = project.name;
+          } else if (projectsLoading) {
+            groupName = 'Loading...';
+          } else {
+            groupName = 'Unknown Project';
+          }
+        }
         groups[projectId] = {
-          name: project?.name || 'No Project',
+          name: groupName,
           agents: [],
         };
       }
@@ -698,7 +713,7 @@ function AgentsPageContent() {
       const bActive = b[1].agents.filter(isAgentActive).length;
       return bActive - aActive;
     });
-  }, [sortedAgents, projects, isAgentActive]);
+  }, [sortedAgents, projects, projectsLoading, isAgentActive]);
 
   // Filter handlers
   const handleStatusFilter = useCallback(

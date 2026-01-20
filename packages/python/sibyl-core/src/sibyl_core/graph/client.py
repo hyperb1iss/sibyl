@@ -178,14 +178,18 @@ class GraphClient:
             # BlockingConnectionPool waits for a connection to become available.
             # This prevents "connection reset by peer" errors under concurrent load.
             # See: https://redis.io/docs/latest/develop/clients/pools-and-muxing/
+            #
+            # NOTE: Graphiti's add_episode() can take 60-90s under heavy load
+            # (edge_fulltext_search, LLM extraction, embedding). Set socket_timeout
+            # high enough to accommodate these operations without timing out.
             connection_pool = BlockingConnectionPool(
                 host=settings.falkordb_host,
                 port=settings.falkordb_port,
                 password=settings.falkordb_password or None,
                 max_connections=50,  # Pool size (BlockingConnectionPool default)
-                timeout=30,  # Wait up to 30s for a connection
-                socket_timeout=30.0,  # 30s timeout for operations
-                socket_connect_timeout=10.0,  # 10s timeout for connect
+                timeout=60,  # Wait up to 60s for a connection from pool
+                socket_timeout=120.0,  # 120s timeout for operations (Graphiti needs time)
+                socket_connect_timeout=15.0,  # 15s timeout for initial connect
                 socket_keepalive=True,  # Keep connections alive
                 health_check_interval=15,  # Check connection health every 15s
                 decode_responses=True,  # FalkorDB expects decoded responses

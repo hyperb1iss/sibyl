@@ -687,10 +687,11 @@ def _register_tools(mcp: FastMCP) -> None:
             logs(service="worker")    # Worker logs only
             logs(level="error")       # Errors only
         """
+        from sqlmodel import select
+
         from sibyl.db.connection import get_session
         from sibyl.db.models import OrganizationMember, OrganizationRole
         from sibyl_core.logging import LogBuffer
-        from sqlmodel import select
 
         # Require auth context
         ctx = await _require_mcp_context()

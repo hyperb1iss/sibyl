@@ -139,7 +139,7 @@ export function SpawnAgentDialog({ trigger, onSpawned }: SpawnAgentDialogProps) 
   const [manualProjectId, setManualProjectId] = useState<string | null>(null);
 
   const { selectedProjects, isAll } = useProjectContext();
-  const { data: projectsData } = useProjects();
+  const { data: projectsData, isLoading: projectsLoading, error: projectsError } = useProjects();
   const spawnAgent = useSpawnAgent();
 
   // Sort projects by recency
@@ -221,11 +221,21 @@ export function SpawnAgentDialog({ trigger, onSpawned }: SpawnAgentDialogProps) 
             {needsProjectSelector && (
               <div>
                 <span className="block text-sm font-medium text-sc-fg-muted mb-2">Project</span>
-                <ProjectSelect
-                  projects={projects}
-                  selectedId={manualProjectId}
-                  onSelect={setManualProjectId}
-                />
+                {projectsLoading ? (
+                  <div className="w-full px-3 py-2.5 rounded-lg text-sm bg-sc-bg-elevated text-sc-fg-muted border border-sc-fg-subtle/20">
+                    Loading projects...
+                  </div>
+                ) : projectsError ? (
+                  <div className="w-full px-3 py-2.5 rounded-lg text-sm bg-sc-red/10 text-sc-red border border-sc-red/20">
+                    Failed to load projects
+                  </div>
+                ) : (
+                  <ProjectSelect
+                    projects={projects}
+                    selectedId={manualProjectId}
+                    onSelect={setManualProjectId}
+                  />
+                )}
               </div>
             )}
 

@@ -8,6 +8,13 @@ from typing import ParamSpec, TypeVar
 
 import structlog
 
+# Import Redis timeout error for retry handling
+try:
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+except ImportError:
+    # Fallback if redis not installed
+    RedisTimeoutError = TimeoutError  # type: ignore[misc,assignment]
+
 log = structlog.get_logger()
 
 P = ParamSpec("P")
@@ -49,18 +56,28 @@ class RetryConfig:
 
 
 # Default configurations for different scenarios
+# Note: RedisTimeoutError is a subclass of redis.exceptions.RedisError, not TimeoutError
 GRAPH_RETRY = RetryConfig(
     max_attempts=3,
-    base_delay=0.5,
-    max_delay=5.0,
-    retryable_exceptions=(ConnectionError, TimeoutError, OSError),
+    base_delay=1.0,  # Longer initial delay for graph ops under load
+    max_delay=10.0,  # More time between retries for heavy operations
+    retryable_exceptions=(ConnectionError, TimeoutError, OSError, RedisTimeoutError),
 )
 
 SEARCH_RETRY = RetryConfig(
     max_attempts=2,
-    base_delay=0.3,
-    max_delay=2.0,
-    retryable_exceptions=(ConnectionError, TimeoutError),
+    base_delay=0.5,
+    max_delay=3.0,
+    retryable_exceptions=(ConnectionError, TimeoutError, RedisTimeoutError),
+)
+
+# Configuration for Graphiti add_episode - these can take 60-90s and should be
+# retried with longer delays on transient failures
+GRAPHITI_RETRY = RetryConfig(
+    max_attempts=2,  # Only 2 attempts - each can be 60-90s
+    base_delay=5.0,  # Wait 5s before retry
+    max_delay=15.0,  # Max 15s wait
+    retryable_exceptions=(ConnectionError, TimeoutError, OSError, RedisTimeoutError),
 )
 
 
@@ -213,10 +230,12 @@ def timeout(
 
 
 # Timeout defaults for different operations
+# NOTE: Graphiti add_episode can take 60-90s under load (LLM + embedding + graph ops)
 TIMEOUTS = {
-    "graph_connect": 10.0,
-    "graph_query": 30.0,
-    "search": 15.0,
-    "embedding": 20.0,
-    "ingestion_file": 60.0,
+    "graph_connect": 15.0,
+    "graph_query": 60.0,  # Increased for complex queries under load
+    "search": 30.0,  # Increased for fulltext search under load
+    "embedding": 30.0,  # Increased for batch embeddings
+    "ingestion_file": 120.0,  # Increased for large file processing
+    "add_episode": 180.0,  # 3 min for full add_episode cycle (LLM + embedding + edges)
 }
