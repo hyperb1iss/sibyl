@@ -707,11 +707,13 @@ async def terminate_agent(
     This endpoint:
     1. Updates the agent status to 'terminated'
     2. Signals the worker to stop execution via Redis
+    3. Deletes the arq job from Redis to prevent restart
 
     The worker checks for stop signals between message iterations and will
     gracefully terminate when it sees the signal.
     """
     from sibyl.api.pubsub import publish_event, request_agent_stop
+    from sibyl.jobs.queue import delete_agent_job
 
     ctx = auth.ctx
     org = _require_org(ctx)
@@ -746,6 +748,9 @@ async def terminate_agent(
 
     # Signal the worker to stop execution
     await request_agent_stop(agent_id)
+
+    # Delete the arq job from Redis to prevent restart on worker restart
+    await delete_agent_job(agent_id)
 
     # Update AgentState in Postgres (primary source of truth)
     if state:

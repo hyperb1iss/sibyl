@@ -1007,6 +1007,104 @@ async def resume_agent_execution(  # noqa: PLR0915
         raise
 
 
+async def run_orchestrator_spawn(
+    ctx: dict[str, Any],  # noqa: ARG001
+    orchestrator_id: str,
+    org_id: str,
+    project_id: str,
+    gate_config: list[str] | None = None,
+) -> dict[str, Any]:
+    """Spawn TaskOrchestrators for a MetaOrchestrator.
+
+    This job runs in the worker where we have access to all dependencies
+    needed for spawning (agent_runner, worktree_manager, etc.).
+
+    Args:
+        ctx: arq context
+        orchestrator_id: MetaOrchestrator ID
+        org_id: Organization ID
+        project_id: Project ID
+        gate_config: Quality gate types (strings)
+
+    Returns:
+        Dict with spawn results
+    """
+    from sibyl.agents import AgentRunner, WorktreeManager
+    from sibyl.agents.meta_orchestrator import MetaOrchestratorService
+    from sibyl_core.graph.client import get_graph_client
+    from sibyl_core.graph.entities import EntityManager
+    from sibyl_core.graph.relationships import RelationshipManager
+    from sibyl_core.models import QualityGateType
+
+    log.info(
+        "run_orchestrator_spawn_started",
+        orchestrator_id=orchestrator_id,
+        project_id=project_id,
+    )
+
+    try:
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=org_id)
+        relationship_manager = RelationshipManager(client, group_id=org_id)
+
+        worktree_manager = WorktreeManager(
+            entity_manager=entity_manager,
+            org_id=org_id,
+            project_id=project_id,
+            repo_path=".",
+        )
+
+        agent_runner = AgentRunner(
+            entity_manager=entity_manager,
+            worktree_manager=worktree_manager,
+            org_id=org_id,
+            project_id=project_id,
+        )
+
+        # Create service with all dependencies
+        service = MetaOrchestratorService(
+            entity_manager=entity_manager,
+            org_id=org_id,
+            project_id=project_id,
+            relationship_manager=relationship_manager,
+            agent_runner=agent_runner,
+            worktree_manager=worktree_manager,
+        )
+
+        # Parse gate config strings to enums
+        parsed_gates = None
+        if gate_config:
+            parsed_gates = [QualityGateType(g.lower()) for g in gate_config]
+
+        # Get current record and spawn
+        record = await service.get(orchestrator_id)
+        if not record:
+            raise ValueError(f"MetaOrchestrator not found: {orchestrator_id}")
+
+        await service._spawn_orchestrators(  # noqa: SLF001
+            orchestrator_id,
+            record,
+            parsed_gates or [],
+        )
+
+        result = {
+            "orchestrator_id": orchestrator_id,
+            "status": "spawned",
+            "queue_size": len(record.task_queue),
+        }
+
+        log.info("run_orchestrator_spawn_completed", **result)
+        return result
+
+    except Exception as e:
+        log.exception(
+            "run_orchestrator_spawn_failed",
+            orchestrator_id=orchestrator_id,
+            error=str(e),
+        )
+        raise
+
+
 async def generate_status_hint(
     ctx: dict[str, Any],  # noqa: ARG001
     agent_id: str,

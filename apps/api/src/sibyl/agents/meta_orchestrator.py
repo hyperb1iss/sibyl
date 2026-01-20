@@ -120,17 +120,18 @@ class MetaOrchestratorService:
 
     async def _find_existing(self) -> MetaOrchestratorRecord | None:
         """Find existing MetaOrchestrator for this project."""
+        # Use project_id filter to find the singleton for this project
         results = await self.entity_manager.list_by_type(
             entity_type=EntityType.META_ORCHESTRATOR,
-            limit=10,
+            project_id=self.project_id,
+            limit=1,
         )
 
-        for entity in results:
-            if entity.entity_type != EntityType.META_ORCHESTRATOR:
-                continue
-            record = cast("MetaOrchestratorRecord", entity)
-            if record.project_id == self.project_id:
-                return record
+        if results:
+            entity = results[0]
+            if isinstance(entity, MetaOrchestratorRecord):
+                return entity
+            return MetaOrchestratorRecord.from_entity(entity, self.org_id)
 
         return None
 
@@ -286,12 +287,22 @@ class MetaOrchestratorService:
         """Spawn TaskOrchestrators according to strategy."""
         from sibyl.agents.task_orchestrator import TaskOrchestratorService
 
-        # Validate we have required dependencies for spawning
+        # If dependencies not available, enqueue spawn job for worker to handle
         if not all([self.relationship_manager, self.agent_runner, self.worktree_manager]):
-            raise MetaOrchestratorError(
-                "Cannot spawn orchestrators: missing required dependencies "
-                "(relationship_manager, agent_runner, worktree_manager)"
+            from sibyl.jobs.queue import enqueue_orchestrator_spawn
+
+            gate_strings = [g.value for g in gate_config] if gate_config else None
+            await enqueue_orchestrator_spawn(
+                orchestrator_id=orchestrator_id,
+                org_id=self.org_id,
+                project_id=self.project_id,
+                gate_config=gate_strings,
             )
+            log.info(
+                "Enqueued orchestrator spawn job",
+                meta_orchestrator_id=orchestrator_id,
+            )
+            return
 
         task_service = TaskOrchestratorService(
             entity_manager=self.entity_manager,

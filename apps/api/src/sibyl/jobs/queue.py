@@ -447,6 +447,36 @@ async def cancel_job(job_id: str) -> bool:
     return False
 
 
+async def delete_agent_job(agent_id: str) -> bool:
+    """Delete an agent job from Redis entirely.
+
+    Used when terminating agents to ensure they don't restart on worker restart.
+    This forcefully removes the job regardless of status.
+
+    Args:
+        agent_id: Agent ID (job will be "agent:{agent_id}")
+
+    Returns:
+        True if deleted, False otherwise
+    """
+    pool = await get_pool()
+    job_id = f"agent:{agent_id}"
+
+    try:
+        # Delete the job key and result key
+        job_key = f"arq:job:{job_id}"
+        result_key = f"arq:result:{job_id}"
+
+        deleted = await pool.delete(job_key, result_key)
+        if deleted:
+            log.info("Deleted agent job from Redis", job_id=job_id, agent_id=agent_id)
+            return True
+        return False
+    except Exception as e:
+        log.warning("Failed to delete agent job", job_id=job_id, error=str(e))
+        return False
+
+
 async def enqueue_agent_execution(
     agent_id: str,
     org_id: str,
@@ -584,6 +614,57 @@ async def enqueue_agent_resume(
         "Enqueued agent resume job",
         job_id=job.job_id,
         agent_id=agent_id,
+    )
+
+    return job.job_id
+
+
+async def enqueue_orchestrator_spawn(
+    orchestrator_id: str,
+    org_id: str,
+    project_id: str,
+    gate_config: list[str] | None = None,
+) -> str:
+    """Enqueue a MetaOrchestrator spawn job.
+
+    Spawns TaskOrchestrators for a MetaOrchestrator in the worker process
+    where all dependencies (agent_runner, worktree_manager) are available.
+
+    Args:
+        orchestrator_id: MetaOrchestrator ID
+        org_id: Organization ID
+        project_id: Project ID
+        gate_config: Quality gate types (as strings)
+
+    Returns:
+        Job ID for tracking
+    """
+    pool = await get_pool()
+
+    # Deterministic job ID prevents duplicate spawns
+    job_id = f"orchestrator_spawn:{orchestrator_id}"
+
+    job = await pool.enqueue_job(
+        "run_orchestrator_spawn",
+        orchestrator_id,
+        org_id,
+        project_id,
+        gate_config=gate_config,
+        _job_id=job_id,
+    )
+
+    if job is None:
+        log.info(
+            "Orchestrator spawn job already exists",
+            job_id=job_id,
+            orchestrator_id=orchestrator_id,
+        )
+        return job_id
+
+    log.info(
+        "Enqueued orchestrator spawn job",
+        job_id=job.job_id,
+        orchestrator_id=orchestrator_id,
     )
 
     return job.job_id

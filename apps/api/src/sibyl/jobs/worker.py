@@ -5,7 +5,7 @@ Run with: uv run arq sibyl.jobs.WorkerSettings
 This is the worker entrypoint. Job implementations are in:
 - crawl.py: crawl_source, sync_source, sync_all_sources
 - entities.py: create_entity, create_learning_episode, update_entity
-- agents.py: run_agent_execution, resume_agent_execution, generate_status_hint
+- agents.py: run_agent_execution, resume_agent_execution, generate_status_hint, run_orchestrator_spawn
 - backup.py: run_backup, cleanup_old_backups
 """
 
@@ -23,6 +23,7 @@ from sibyl.jobs.agents import (
     generate_status_hint,
     resume_agent_execution,
     run_agent_execution,
+    run_orchestrator_spawn,
 )
 from sibyl.jobs.backup import cleanup_old_backups, run_backup, run_scheduled_backups
 from sibyl.jobs.crawl import crawl_source, sync_all_sources, sync_source
@@ -41,6 +42,69 @@ def get_redis_settings() -> RedisSettings:
     )
 
 
+async def _cleanup_orphaned_agent_jobs() -> int:
+    """Clean up agent jobs for agents in terminal states.
+
+    Called at worker startup to prevent stale jobs from auto-running.
+    Checks each agent job against the database and removes jobs for
+    agents that have been terminated/completed/failed.
+
+    Returns:
+        Number of jobs cleaned up
+    """
+    from sibyl.jobs.queue import get_pool
+
+    try:
+        pool = await get_pool()
+
+        # Find all agent jobs in Redis
+        job_keys = await pool.keys("arq:job:agent:*")
+        if not job_keys:
+            return 0
+
+        cleaned = 0
+        for key in job_keys:
+            key_str = key.decode() if isinstance(key, bytes) else key
+            # Extract agent_id from "arq:job:agent:agent_xyz123"
+            agent_id = key_str.replace("arq:job:agent:", "")
+
+            # Check agent status from database
+            try:
+                from sqlmodel import col, select
+
+                from sibyl.db import AgentState, get_session
+
+                async with get_session() as session:
+                    result = await session.execute(
+                        select(AgentState).where(col(AgentState.graph_agent_id) == agent_id)
+                    )
+                    state = result.scalar_one_or_none()
+
+                    if state and state.status in ("terminated", "completed", "failed"):
+                        # Agent is in terminal state - delete the job
+                        result_key = f"arq:result:agent:{agent_id}"
+                        await pool.delete(key_str, result_key)
+                        log.info(
+                            "Cleaned up orphaned agent job",
+                            agent_id=agent_id,
+                            status=state.status,
+                        )
+                        cleaned += 1
+
+            except Exception as e:
+                log.warning(
+                    "Failed to check agent status during cleanup",
+                    agent_id=agent_id,
+                    error=str(e),
+                )
+
+        return cleaned
+
+    except Exception as e:
+        log.warning("Orphaned agent job cleanup failed", error=str(e))
+        return 0
+
+
 async def startup(ctx: dict[str, Any]) -> None:
     """Worker startup - initialize resources."""
     from sibyl.banner import log_banner
@@ -52,6 +116,11 @@ async def startup(ctx: dict[str, Any]) -> None:
     log_banner(component="worker")
     log.info("Job worker online")
     ctx["start_time"] = datetime.now(UTC)
+
+    # Clean up orphaned agent jobs from previous runs
+    cleaned = await _cleanup_orphaned_agent_jobs()
+    if cleaned:
+        log.info("Cleaned up orphaned agent jobs", count=cleaned)
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:  # noqa: ARG001
@@ -109,6 +178,7 @@ class WorkerSettings:
         run_agent_execution,
         resume_agent_execution,
         generate_status_hint,
+        run_orchestrator_spawn,
         # Backup jobs
         run_backup,
         cleanup_old_backups,
