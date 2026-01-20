@@ -68,8 +68,8 @@ class TestRetryConfig:
     def test_graph_retry_preset(self) -> None:
         """GRAPH_RETRY preset has expected configuration."""
         assert GRAPH_RETRY.max_attempts == 3
-        assert GRAPH_RETRY.base_delay == 0.5
-        assert GRAPH_RETRY.max_delay == 5.0
+        assert GRAPH_RETRY.base_delay == 1.0  # Longer delay for graph ops under load
+        assert GRAPH_RETRY.max_delay == 10.0  # More time between retries
 
 
 class TestCalculateDelay:

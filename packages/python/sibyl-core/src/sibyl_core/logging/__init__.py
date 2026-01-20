@@ -14,6 +14,7 @@ Usage:
     log.info("Server starting", port=3334)
 """
 
+from sibyl_core.logging.capture import LogBuffer, LogEntry, capture_processor
 from sibyl_core.logging.colors import (
     ANSI_BOLD,
     ANSI_CORAL,
@@ -37,6 +38,10 @@ from sibyl_core.logging.config import configure_logging, get_logger
 from sibyl_core.logging.formatters import SibylRenderer
 
 __all__ = [
+    # Capture system
+    "LogBuffer",
+    "LogEntry",
+    "capture_processor",
     "ANSI_BOLD",
     "ANSI_CORAL",
     "ANSI_DIM",

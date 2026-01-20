@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import logging
 import sys
+from typing import Any
 
 import structlog
 
+from sibyl_core.logging.capture import capture_processor
 from sibyl_core.logging.formatters import SibylRenderer
 
 # Track if logging has been configured
@@ -68,6 +70,13 @@ def configure_logging(
             show_service=show_service,
         )
 
+    # Processor to inject service name for capture
+    def add_service(
+        _logger: Any, _method: str, event_dict: structlog.typing.EventDict
+    ) -> structlog.typing.EventDict:
+        event_dict["_service"] = service_name
+        return event_dict
+
     structlog.configure(
         processors=[
             structlog.stdlib.add_log_level,
@@ -76,6 +85,8 @@ def configure_logging(
             structlog.processors.StackInfoRenderer(),
             # Note: format_exc_info removed - SibylRenderer handles exceptions
             structlog.processors.UnicodeDecoder(),
+            add_service,  # Inject service name for capture
+            capture_processor,  # Capture to ring buffer for dev introspection
             renderer,
         ],
         wrapper_class=structlog.stdlib.BoundLogger,

@@ -10,6 +10,9 @@ from sibyl.api.schemas import (
     BackfillResponse,
     BackupDataSchema,
     BackupResponse,
+    DebugQueryRequest,
+    DebugQueryResponse,
+    DevStatusResponse,
     HealthResponse,
     RestoreRequest,
     RestoreResponse,
@@ -229,6 +232,172 @@ async def backfill_task_relationships(
     except Exception as e:
         log.exception("backfill_failed", error=str(e))
         raise HTTPException(status_code=500, detail="Backfill failed. Please try again.") from e
+
+
+# === Debug Query Endpoint ===
+
+# OWNER role only for debug queries
+_OWNER_ONLY = (OrganizationRole.OWNER,)
+
+
+def _is_read_only(cypher: str) -> bool:
+    """Check if a Cypher query is read-only (no mutations)."""
+    dangerous = ["CREATE", "SET", "DELETE", "REMOVE", "MERGE", "DROP", "DETACH"]
+    upper = cypher.upper()
+    return not any(d in upper for d in dangerous)
+
+
+@router.post(
+    "/debug/query",
+    response_model=DebugQueryResponse,
+    dependencies=[Depends(require_org_role(*_OWNER_ONLY))],
+)
+async def debug_query(
+    request: DebugQueryRequest,
+    org: Organization = Depends(get_current_organization),
+) -> DebugQueryResponse:
+    """Execute a read-only Cypher query for debugging.
+
+    Allows direct graph inspection for development and troubleshooting.
+    Only read-only queries are permitted (no CREATE, SET, DELETE, etc.).
+
+    Requires organization OWNER role.
+    """
+    # Validate read-only
+    if not _is_read_only(request.cypher):
+        raise HTTPException(
+            status_code=400,
+            detail="Only read-only queries allowed (no CREATE, SET, DELETE, REMOVE, MERGE, DROP)",
+        )
+
+    try:
+        from sibyl_core.graph.client import get_graph_client
+
+        client = await get_graph_client()
+        result = await client.execute_read_org(
+            request.cypher,
+            str(org.id),
+            **request.params,
+        )
+
+        # Convert result records to dicts
+        rows = []
+        for record in result:
+            # FalkorDB returns tuples/records - convert to dict
+            if hasattr(record, "keys"):
+                rows.append(dict(record))
+            elif isinstance(record, (list, tuple)):
+                rows.append({"value": record})
+            else:
+                rows.append({"value": record})
+
+        return DebugQueryResponse(
+            rows=rows,
+            row_count=len(rows),
+        )
+
+    except Exception as e:
+        log.exception("debug_query_failed", error=str(e), cypher=request.cypher[:100])
+        return DebugQueryResponse(
+            error=str(e),
+            rows=[],
+            row_count=0,
+        )
+
+
+# === Dev Status Dashboard ===
+
+
+@router.get(
+    "/dev-status",
+    response_model=DevStatusResponse,
+    dependencies=[Depends(require_org_role(*_OWNER_ONLY))],
+)
+async def dev_status(
+    org: Organization = Depends(get_current_organization),
+) -> DevStatusResponse:
+    """Get comprehensive developer status dashboard.
+
+    Aggregates health checks from all components:
+    - API server health
+    - Worker process status
+    - FalkorDB connectivity
+    - Job queue health
+    - Recent error logs
+    - Active agent count
+
+    Requires organization OWNER role.
+    """
+    from sibyl_core.logging import LogBuffer
+    from sibyl_core.tools.core import get_health, get_stats
+
+    # Get health and stats
+    try:
+        health = await get_health(organization_id=str(org.id))
+        api_healthy = health.get("status") == "healthy"
+        graph_healthy = health.get("graph_connected", False)
+        uptime = health.get("uptime_seconds", 0)
+    except Exception:
+        api_healthy = True  # If we got here, API is up
+        graph_healthy = False
+        uptime = 0
+
+    # Get entity count
+    try:
+        stats = await get_stats(organization_id=str(org.id))
+        entity_count = stats.get("total_entities", 0)
+    except Exception:
+        entity_count = 0
+
+    # Check worker/queue health
+    try:
+        from sibyl.jobs.queue import get_pool
+
+        pool = await get_pool()
+        info = await pool.pool.info()  # type: ignore[union-attr]
+        queue_healthy = bool(info)
+        # Count pending jobs
+        queue_depth = info.get("pending_jobs", 0) if info else 0
+        worker_healthy = bool(info.get("workers", 0)) if info else False
+    except Exception:
+        queue_healthy = False
+        queue_depth = 0
+        worker_healthy = False
+
+    # Count active agents
+    try:
+        from sqlmodel import col, select
+
+        from sibyl.db import get_session
+        from sibyl.db.models import Agent, AgentStatus
+
+        async with get_session() as session:
+            result = await session.execute(
+                select(Agent).where(
+                    col(Agent.organization_id) == org.id,
+                    col(Agent.status) == AgentStatus.RUNNING,
+                )
+            )
+            active_agents = len(list(result.scalars().all()))
+    except Exception:
+        active_agents = 0
+
+    # Get recent error logs
+    buffer = LogBuffer.get()
+    error_entries = buffer.tail(n=10, level="error")
+    recent_errors = [e.to_dict() for e in error_entries]
+
+    return DevStatusResponse(
+        api_healthy=api_healthy,
+        worker_healthy=worker_healthy,
+        graph_healthy=graph_healthy,
+        queue_healthy=queue_healthy,
+        uptime_seconds=uptime,
+        entity_count=entity_count,
+        queue_depth=queue_depth,
+        active_agents=active_agents,
+        recent_errors=recent_errors,
+    )
 
 
 # === Startup Recovery ===

@@ -29,11 +29,13 @@ from sibyl_cli.config_cmd import app as config_app
 from sibyl_cli.config_store import resolve_project_from_cwd
 from sibyl_cli.context import app as context_app
 from sibyl_cli.crawl import app as crawl_app
+from sibyl_cli.debug import app as debug_app
 from sibyl_cli.document import app as document_app
 from sibyl_cli.entity import app as entity_app
 from sibyl_cli.epic import app as epic_app
 from sibyl_cli.explore import app as explore_app
 from sibyl_cli.local import app as local_app
+from sibyl_cli.logs import app as logs_app
 from sibyl_cli.org import app as org_app
 from sibyl_cli.project import app as project_app
 from sibyl_cli.runner import app as runner_app
@@ -60,12 +62,14 @@ app.add_typer(entity_app, name="entity")
 app.add_typer(explore_app, name="explore")
 app.add_typer(source_app, name="source")
 app.add_typer(crawl_app, name="crawl")
+app.add_typer(debug_app, name="debug")
 app.add_typer(document_app, name="document")
 app.add_typer(auth_app, name="auth")
 app.add_typer(org_app, name="org")
 app.add_typer(config_app, name="config")
 app.add_typer(context_app, name="context")
 app.add_typer(local_app, name="local")
+app.add_typer(logs_app, name="logs")
 
 
 def _handle_client_error(e: SibylClientError) -> None:

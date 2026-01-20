@@ -753,6 +753,47 @@ class BackfillResponse(BaseModel):
 
 
 # =============================================================================
+# Debug Schemas
+# =============================================================================
+
+
+class DebugQueryRequest(BaseModel):
+    """Request for executing a debug Cypher query."""
+
+    cypher: str = Field(..., description="Cypher query to execute (read-only)")
+    params: dict[str, Any] = Field(default_factory=dict, description="Query parameters")
+
+
+class DebugQueryResponse(BaseModel):
+    """Response from debug query execution."""
+
+    rows: list[dict[str, Any]] = Field(default_factory=list, description="Query result rows")
+    row_count: int = Field(default=0, description="Number of rows returned")
+    error: str | None = Field(default=None, description="Error message if query failed")
+
+
+class DevStatusResponse(BaseModel):
+    """Comprehensive developer status dashboard."""
+
+    # Component health
+    api_healthy: bool = Field(description="API server is healthy")
+    worker_healthy: bool = Field(description="Worker process is running")
+    graph_healthy: bool = Field(description="FalkorDB is reachable")
+    queue_healthy: bool = Field(description="Job queue is healthy")
+
+    # Stats
+    uptime_seconds: float = Field(default=0, description="Server uptime")
+    entity_count: int = Field(default=0, description="Total entities in graph")
+    queue_depth: int = Field(default=0, description="Jobs in queue")
+    active_agents: int = Field(default=0, description="Currently running agents")
+
+    # Recent activity
+    recent_errors: list[dict[str, Any]] = Field(
+        default_factory=list, description="Recent error log entries"
+    )
+
+
+# =============================================================================
 # Metrics Schemas
 # =============================================================================
 

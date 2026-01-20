@@ -1,7 +1,7 @@
 """MCP Server definition using FastMCP with streamable-http transport.
 
-Exposes 4 tools and 2 resources:
-- Tools: search, explore, add, manage
+Exposes 5 tools and 2 resources:
+- Tools: search, explore, add, manage, logs
 - Resources: sibyl://health, sibyl://stats
 """
 
@@ -655,6 +655,65 @@ def _register_tools(mcp: FastMCP) -> None:
             data=full_data,
         )
         return _to_dict(result)
+
+    # =========================================================================
+    # TOOL 5: logs (Developer Introspection)
+    # =========================================================================
+
+    @mcp.tool()
+    async def logs(
+        limit: int = 50,
+        service: str | None = None,
+        level: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get recent server logs for debugging and development.
+
+        Returns log entries from the server's in-memory ring buffer.
+        Useful for debugging issues without needing direct server access.
+
+        Requires OWNER role (super admin equivalent).
+
+        Args:
+            limit: Maximum entries to return (default 50, max 500)
+            service: Filter by service name (api, worker)
+            level: Filter by log level (debug, info, warning, error)
+
+        Returns:
+            List of log entries with timestamp, service, level, event, context
+
+        Examples:
+            logs()                    # Last 50 entries
+            logs(limit=100)           # Last 100 entries
+            logs(service="worker")    # Worker logs only
+            logs(level="error")       # Errors only
+        """
+        from sibyl.db.connection import get_session
+        from sibyl.db.models import OrganizationMember, OrganizationRole
+        from sibyl_core.logging import LogBuffer
+        from sqlmodel import select
+
+        # Require auth context
+        ctx = await _require_mcp_context()
+
+        # Check OWNER role (super admin)
+        async with get_session() as session:
+            result = await session.execute(
+                select(OrganizationMember).where(
+                    OrganizationMember.organization_id == UUID(ctx.org_id),
+                    OrganizationMember.user_id == UUID(ctx.user_id) if ctx.user_id else False,
+                )
+            )
+            membership = result.scalar_one_or_none()
+            if not membership or membership.role != OrganizationRole.OWNER:
+                raise ValueError("OWNER role required for log access")
+
+        # Clamp limit
+        limit = min(max(1, limit), 500)
+
+        # Get logs from buffer
+        buffer = LogBuffer.get()
+        entries = buffer.tail(n=limit, service=service, level=level)
+        return [e.to_dict() for e in entries]
 
 
 def _register_resources(mcp: FastMCP) -> None:
