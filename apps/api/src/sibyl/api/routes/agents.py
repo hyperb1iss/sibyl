@@ -1671,9 +1671,17 @@ def _entity_to_agent_response(
     else:
         # Fall back to typed fields or metadata for legacy agents
         status = get_field("status", "initializing")
-        last_heartbeat = get_field("last_heartbeat")
-        started_at = get_field("started_at")
-        completed_at = get_field("completed_at")
+        # Convert datetime to ISO string if needed
+        raw_heartbeat = get_field("last_heartbeat")
+        raw_started = get_field("started_at")
+        raw_completed = get_field("completed_at")
+        last_heartbeat = (
+            raw_heartbeat.isoformat() if hasattr(raw_heartbeat, "isoformat") else raw_heartbeat
+        )
+        started_at = raw_started.isoformat() if hasattr(raw_started, "isoformat") else raw_started
+        completed_at = (
+            raw_completed.isoformat() if hasattr(raw_completed, "isoformat") else raw_completed
+        )
         tokens_used = get_field("tokens_used", 0)
         cost_usd = get_field("cost_usd", 0.0)
         error_message = get_field("error_message") or get_field("paused_reason")
