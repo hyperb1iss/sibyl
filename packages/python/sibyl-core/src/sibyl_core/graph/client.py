@@ -3,7 +3,7 @@
 import asyncio
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import structlog
 from dotenv import load_dotenv
@@ -16,7 +16,8 @@ _env_path = Path(__file__).parent.parent.parent.parent / ".env"
 if _env_path.exists():
     load_dotenv(_env_path)
 
-# Set SEMAPHORE_LIMIT from settings if not already set (controls Graphiti LLM concurrency)
+# Set SEMAPHORE_LIMIT from settings (mostly unused - we patch semaphore_gather below)
+# Kept for any code paths that might read the env var directly
 if not os.getenv("SEMAPHORE_LIMIT"):
     os.environ["SEMAPHORE_LIMIT"] = str(settings.graphiti_semaphore_limit)
 
@@ -28,6 +29,39 @@ if not os.getenv("EMBEDDING_DIM"):
 
 # Disable Graphiti's PostHog telemetry (noisy retry errors when offline)
 os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
+
+
+def _patch_semaphore_gather() -> None:
+    """Remove Graphiti's semaphore bottleneck by replacing semaphore_gather with asyncio.gather.
+
+    Graphiti uses a global semaphore (SEMAPHORE_LIMIT) for ALL concurrent operations,
+    including both LLM calls and FalkorDB queries. This was designed for LLM rate limiting,
+    but applying it to DB operations creates artificial serialization.
+
+    Our FalkorDB setup already has proper concurrency controls:
+    - BlockingConnectionPool (50 connections, 60s wait timeout)
+    - FalkorDB/Redis handles concurrent queries natively
+
+    This patch replaces semaphore_gather with plain asyncio.gather, eliminating the
+    Python-level bottleneck while preserving FalkorDB's natural concurrency handling.
+    """
+    import asyncio
+    from collections.abc import Coroutine
+    from typing import Any
+
+    import graphiti_core.helpers as helpers
+
+    async def unlimited_gather[T](
+        *coroutines: Coroutine[Any, Any, T],
+    ) -> list[T]:
+        """Execute coroutines concurrently without semaphore throttling."""
+        return list(await asyncio.gather(*coroutines))
+
+    # Replace the throttled version with unlimited concurrency
+    helpers.semaphore_gather = unlimited_gather
+
+
+_patch_semaphore_gather()
 
 
 def _patch_falkordb_driver() -> None:
@@ -80,32 +114,14 @@ class GraphClient:
     This client manages the connection to FalkorDB and provides
     high-level methods for graph operations.
 
-    Uses per-org semaphores to serialize write operations, preventing connection
-    contention while allowing different organizations to write in parallel.
+    Uses BlockingConnectionPool for concurrency control - the pool handles
+    connection limiting and blocking when exhausted (max 50 connections, 60s timeout).
     """
-
-    # Limit concurrent DB operations to prevent connection contention
-    # Higher values improve bulk performance; lower values reduce contention risk
-    _MAX_CONCURRENT_WRITES = 20  # High parallelism for bulk operations
-
-    # Global semaphore (deprecated - use per-org semaphores via get_org_write_lock)
-    _write_semaphore: asyncio.Semaphore | None = None
-
-    # Per-org write semaphores: org_id -> Semaphore
-    # Each org gets its own semaphore to prevent cross-org blocking
-    _org_semaphores: ClassVar[dict[str, asyncio.Semaphore]] = {}
-    _semaphore_lock: ClassVar[asyncio.Lock | None] = None  # Protects _org_semaphores access
 
     def __init__(self) -> None:
         """Initialize the graph client."""
         self._client: Graphiti | None = None
         self._connected = False
-        # Initialize global semaphore lazily (for backward compat with write_lock property)
-        if GraphClient._write_semaphore is None:
-            GraphClient._write_semaphore = asyncio.Semaphore(self._MAX_CONCURRENT_WRITES)
-        # Initialize lock for semaphore dictionary access
-        if GraphClient._semaphore_lock is None:
-            GraphClient._semaphore_lock = asyncio.Lock()
 
     def _create_llm_client(self) -> "LLMClient":
         """Create the LLM client based on provider settings.
@@ -286,72 +302,6 @@ class GraphClient:
         timeout = TIMEOUTS.get(operation_name, TIMEOUTS["graph_query"])
         return await with_timeout(query_coro, timeout, operation_name)  # type: ignore[arg-type]
 
-    @property
-    def write_lock(self) -> asyncio.Semaphore:
-        """Get the global write semaphore for serializing DB operations.
-
-        DEPRECATED: Use get_org_write_lock() for per-org write locking.
-        This global lock is retained for backward compatibility with
-        non-org-scoped operations like ensure_indexes().
-
-        Returns:
-            Semaphore that limits concurrent writes to prevent connection contention.
-        """
-        if GraphClient._write_semaphore is None:
-            GraphClient._write_semaphore = asyncio.Semaphore(self._MAX_CONCURRENT_WRITES)
-        return GraphClient._write_semaphore
-
-    async def get_org_write_lock(self, organization_id: str) -> asyncio.Semaphore:
-        """Get a write semaphore for a specific organization.
-
-        Each organization gets its own semaphore, allowing writes to different
-        orgs to proceed in parallel while serializing writes within the same org.
-        This prevents one busy org from blocking writes to other orgs.
-
-        Args:
-            organization_id: The organization UUID to get a lock for.
-
-        Returns:
-            Semaphore for the specified organization.
-
-        Raises:
-            ValueError: If organization_id is empty.
-        """
-        if not organization_id:
-            raise ValueError("organization_id is required for per-org write locking")
-
-        # Ensure lock is initialized
-        if GraphClient._semaphore_lock is None:
-            GraphClient._semaphore_lock = asyncio.Lock()
-
-        # Thread-safe access to semaphore dictionary
-        async with GraphClient._semaphore_lock:
-            if organization_id not in GraphClient._org_semaphores:
-                GraphClient._org_semaphores[organization_id] = asyncio.Semaphore(
-                    self._MAX_CONCURRENT_WRITES
-                )
-                log.debug(
-                    "Created org write semaphore",
-                    org_id=organization_id,
-                    max_concurrent=self._MAX_CONCURRENT_WRITES,
-                )
-            return GraphClient._org_semaphores[organization_id]
-
-    def org_write_context(self, organization_id: str) -> "OrgWriteContext":
-        """Get a context manager for org-scoped writes.
-
-        Usage:
-            async with client.org_write_context(org_id) as lock:
-                await driver.execute_query(query)
-
-        Args:
-            organization_id: The organization UUID.
-
-        Returns:
-            Async context manager that acquires org-specific write lock.
-        """
-        return OrgWriteContext(self, organization_id)
-
     @staticmethod
     def normalize_result(result: object) -> list[dict]:  # type: ignore[type-arg]
         """Normalize FalkorDB query results to a consistent list of dicts.
@@ -419,8 +369,7 @@ class GraphClient:
             OPTIONS {dimension: 1536, similarityFunction: 'cosine'}
         """
         try:
-            async with self.write_lock:
-                await driver.execute_query(vector_index_query)
+            await driver.execute_query(vector_index_query)
             log.info("Created vector index on Entity.name_embedding", org=organization_id)
         except Exception as e:
             # Index likely already exists - this is fine
@@ -438,8 +387,7 @@ class GraphClient:
         ]
         for idx_query in composite_indexes:
             try:
-                async with self.write_lock:
-                    await driver.execute_query(idx_query)
+                await driver.execute_query(idx_query)
             except Exception as e:
                 # Index likely already exists - this is fine
                 if "already indexed" not in str(e).lower() and "exists" not in str(e).lower():
@@ -481,10 +429,9 @@ class GraphClient:
         Raises:
             Exception: If query execution fails
         """
-        async with self.write_lock:
-            # type: ignore[arg-type] - dynamic query strings
-            result = await self.client.driver.execute_query(query, **params)  # type: ignore[arg-type]
-            return self.normalize_result(result)
+        # type: ignore[arg-type] - dynamic query strings
+        result = await self.client.driver.execute_query(query, **params)  # type: ignore[arg-type]
+        return self.normalize_result(result)
 
     async def execute_read_org(
         self, query: str, organization_id: str, **params: object
@@ -511,8 +458,6 @@ class GraphClient:
         """Execute a write query on an organization's graph.
 
         This is the preferred method for multi-tenant write operations.
-        Uses a per-org semaphore to serialize writes within the same org
-        while allowing writes to different orgs in parallel.
 
         Args:
             query: Cypher query to execute
@@ -525,11 +470,9 @@ class GraphClient:
         Raises:
             Exception: If query execution fails
         """
-        org_lock = await self.get_org_write_lock(organization_id)
-        async with org_lock:
-            driver = self.get_org_driver(organization_id)
-            result = await driver.execute_query(query, **params)  # type: ignore[arg-type]
-            return self.normalize_result(result)
+        driver = self.get_org_driver(organization_id)
+        result = await driver.execute_query(query, **params)  # type: ignore[arg-type]
+        return self.normalize_result(result)
 
     async def __aenter__(self) -> "GraphClient":
         """Async context manager entry."""
@@ -544,49 +487,6 @@ class GraphClient:
     ) -> None:
         """Async context manager exit."""
         await self.disconnect()
-
-
-class OrgWriteContext:
-    """Async context manager for organization-scoped write locking.
-
-    Acquires the per-org semaphore on entry and releases on exit.
-    Allows convenient usage with async with syntax.
-
-    Usage:
-        async with client.org_write_context(org_id):
-            await driver.execute_query(query)
-    """
-
-    def __init__(self, client: GraphClient, organization_id: str) -> None:
-        """Initialize the context manager.
-
-        Args:
-            client: The GraphClient instance.
-            organization_id: The organization UUID.
-        """
-        self._client = client
-        self._organization_id = organization_id
-        self._semaphore: asyncio.Semaphore | None = None
-
-    async def __aenter__(self) -> asyncio.Semaphore:
-        """Acquire the org-specific write lock.
-
-        Returns:
-            The acquired semaphore (for inspection if needed).
-        """
-        self._semaphore = await self._client.get_org_write_lock(self._organization_id)
-        await self._semaphore.acquire()
-        return self._semaphore
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object,
-    ) -> None:
-        """Release the org-specific write lock."""
-        if self._semaphore is not None:
-            self._semaphore.release()
 
 
 # Global client instance with thread-safe initialization
@@ -617,11 +517,9 @@ async def get_graph_client() -> GraphClient:
 
 
 async def reset_graph_client() -> None:
-    """Reset the global client and per-org semaphores (useful for testing)."""
+    """Reset the global client (useful for testing)."""
     global _graph_client
     async with _client_lock:
         if _graph_client is not None:
             await _graph_client.disconnect()
             _graph_client = None
-        # Clear per-org semaphores to prevent state leakage between tests
-        GraphClient._org_semaphores.clear()
