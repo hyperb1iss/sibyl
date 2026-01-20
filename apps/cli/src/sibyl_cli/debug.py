@@ -106,10 +106,10 @@ def query(
         except SibylClientError as e:
             if e.status_code == 403:
                 error("Access denied - OWNER role required for debug queries")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from None
             if e.status_code == 400:
                 error(f"Invalid query: {e.detail}")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from None
             handle_client_error(e)
 
     _run()
@@ -190,7 +190,7 @@ def schema(
         except SibylClientError as e:
             if e.status_code == 403:
                 error("Access denied - OWNER role required")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from None
             handle_client_error(e)
 
     _run()
@@ -271,7 +271,7 @@ def status(
         except SibylClientError as e:
             if e.status_code == 403:
                 error("Access denied - OWNER role required")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from None
             handle_client_error(e)
 
     _run()

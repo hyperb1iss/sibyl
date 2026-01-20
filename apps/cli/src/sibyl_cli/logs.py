@@ -149,7 +149,7 @@ def tail(
         except SibylClientError as e:
             if e.status_code == 403:
                 error("Access denied - OWNER role required for log access")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from None
             handle_client_error(e)
 
     _run()
@@ -162,6 +162,7 @@ async def _stream_logs(
 ) -> None:
     """Stream logs via WebSocket."""
     import websockets
+
     from sibyl_cli.auth_store import get_access_token
     from sibyl_cli.client import _get_default_api_url
 
@@ -203,7 +204,7 @@ async def _stream_logs(
         console.print("\n[dim]Stream stopped[/dim]")
     except Exception as e:
         error(f"WebSocket error: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command("stats")
@@ -233,7 +234,7 @@ def stats(
         except SibylClientError as e:
             if e.status_code == 403:
                 error("Access denied - OWNER role required")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from None
             handle_client_error(e)
 
     _run()

@@ -38,10 +38,6 @@ from sibyl_core.logging.config import configure_logging, get_logger
 from sibyl_core.logging.formatters import SibylRenderer
 
 __all__ = [
-    # Capture system
-    "LogBuffer",
-    "LogEntry",
-    "capture_processor",
     "ANSI_BOLD",
     "ANSI_CORAL",
     "ANSI_DIM",
@@ -59,7 +55,10 @@ __all__ = [
     "LEVEL_COLORS",
     "NEON_CYAN",
     "SUCCESS_GREEN",
+    "LogBuffer",
+    "LogEntry",
     "SibylRenderer",
+    "capture_processor",
     "configure_logging",
     "get_logger",
 ]

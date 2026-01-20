@@ -22,9 +22,10 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -107,11 +108,9 @@ class LogBuffer:
         # Notify async subscribers (non-blocking)
         with self._subscribers_lock:
             for queue in self._subscribers:
-                try:
+                # Drop if subscriber is slow - they'll catch up via tail()
+                with contextlib.suppress(asyncio.QueueFull):
                     queue.put_nowait(entry)
-                except asyncio.QueueFull:
-                    # Drop if subscriber is slow - they'll catch up via tail()
-                    pass
 
     def tail(
         self,
@@ -165,11 +164,8 @@ class LogBuffer:
         Args:
             queue: The queue returned by subscribe()
         """
-        with self._subscribers_lock:
-            try:
-                self._subscribers.remove(queue)
-            except ValueError:
-                pass  # Already removed
+        with self._subscribers_lock, contextlib.suppress(ValueError):
+            self._subscribers.remove(queue)
 
     @property
     def size(self) -> int:
