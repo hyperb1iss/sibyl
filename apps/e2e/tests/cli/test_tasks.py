@@ -30,8 +30,8 @@ class TestTaskWorkflow:
         create_result = cli.task_create(test_task_title, project_id)
         assert create_result.success
 
-        # List todo tasks
-        list_result = cli.task_list(status="todo")
+        # List todo tasks (use all_projects to avoid host machine's project context)
+        list_result = cli.task_list(status="todo", all_projects=True)
         assert list_result.success
 
         tasks = list_result.json()

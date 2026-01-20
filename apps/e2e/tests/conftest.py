@@ -142,13 +142,25 @@ class CLIRunner:
             args.append("--sync")
         return self.run(*args)
 
-    def task_list(self, status: str | None = None, project: str | None = None) -> CLIResult:
-        """List tasks."""
+    def task_list(
+        self,
+        status: str | None = None,
+        project: str | None = None,
+        all_projects: bool = False,
+    ) -> CLIResult:
+        """List tasks.
+
+        Args:
+            all_projects: List from all projects (bypass auto-resolved project context).
+                          Use when you don't care about project scoping.
+        """
         args = ["task", "list", "--json"]
         if status:
             args.extend(["--status", status])
         if project:
             args.extend(["--project", project])
+        if all_projects:
+            args.append("--all")
         return self.run(*args)
 
     def task_start(self, task_id: str) -> CLIResult:
@@ -178,9 +190,17 @@ class CLIRunner:
             args.extend(["-l", language])
         return self.run(*args)
 
-    def search(self, query: str, limit: int = 5) -> CLIResult:
-        """Search the knowledge graph."""
-        return self.run("search", query, "--limit", str(limit), "--json")
+    def search(self, query: str, limit: int = 5, all_projects: bool = True) -> CLIResult:
+        """Search the knowledge graph.
+
+        Args:
+            all_projects: Search all projects (bypass auto-resolved project context).
+                          Defaults to True for E2E tests to avoid picking up host machine's project.
+        """
+        args = ["search", query, "--limit", str(limit), "--json"]
+        if all_projects:
+            args.append("--all")
+        return self.run(*args)
 
     def entity_list(self, entity_type: str | None = None) -> CLIResult:
         """List entities."""
