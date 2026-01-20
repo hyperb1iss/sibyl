@@ -667,7 +667,7 @@ async def resume_agent_execution(  # noqa: PLR0915
     from sibyl.agents import AgentRunner, WorktreeManager
     from sibyl_core.graph.client import get_graph_client
     from sibyl_core.graph.entities import EntityManager
-    from sibyl_core.models import AgentStatus, EntityType
+    from sibyl_core.models import AgentSpawnSource, AgentStatus, AgentType, EntityType
 
     log.info("resume_agent_execution_started", agent_id=agent_id, prompt_preview=prompt[:100])
 
@@ -685,14 +685,17 @@ async def resume_agent_execution(  # noqa: PLR0915
         session_id = agent_meta.get("session_id")
         project_id = agent_meta.get("project_id") or ""
 
-        # Validate session_id is a proper UUID (not a placeholder like "user-initiated")
-        if not _is_valid_uuid(session_id):
-            raise ValueError(
-                f"Agent {agent_id} has invalid session_id '{session_id}' - cannot resume. "
-                "This agent was created before session tracking was implemented."
-            )
+        # Check if we have a valid session_id for true resume
+        has_valid_session = _is_valid_uuid(session_id)
 
-        log.info("resume_using_session", agent_id=agent_id, session_id=session_id)
+        if has_valid_session:
+            log.info("resume_using_session", agent_id=agent_id, session_id=session_id)
+        else:
+            log.info(
+                "resume_without_session_starting_fresh",
+                agent_id=agent_id,
+                reason="no valid session_id",
+            )
 
         # Create runner and resume
         worktree_manager = WorktreeManager(
@@ -726,13 +729,27 @@ async def resume_agent_execution(  # noqa: PLR0915
             org_id=org_id,
         )
 
-        # Resume using agent's session_id - Claude handles conversation history
-        instance = await runner.resume_agent(
-            agent_id=agent_id,
-            session_id=session_id,
-            prompt=prompt,
-            enable_approvals=True,
-        )
+        # Resume using session_id if available, otherwise start fresh execution
+        if has_valid_session:
+            instance = await runner.resume_agent(
+                agent_id=agent_id,
+                session_id=session_id,
+                prompt=prompt,
+                enable_approvals=True,
+            )
+        else:
+            # No session to resume - start fresh with the user's prompt
+            # The agent record already exists, so we're continuing the same "thread"
+            # but without Claude's conversation history
+            instance = await runner.spawn(
+                prompt=prompt,
+                agent_type=AgentType(agent_meta.get("agent_type", "general")),
+                task=None,
+                spawn_source=AgentSpawnSource.USER,
+                create_worktree=False,  # Use existing worktree if any
+                enable_approvals=True,
+                agent_id=agent_id,  # Re-use existing agent ID
+            )
 
         # Get current max message_num to continue numbering from where we left off
         from sqlalchemy import func, select

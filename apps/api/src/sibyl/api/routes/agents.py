@@ -869,9 +869,13 @@ async def send_agent_message(
     # Check control permission
     await _check_agent_control_permission(ctx, auth.session, entity)
 
+    # Get status from Postgres (primary) or fall back to graph metadata
+    state_result = await auth.session.execute(
+        select(AgentState).where(col(AgentState.graph_agent_id) == agent_id)
+    )
+    state = state_result.scalar_one_or_none()
     agent_meta = entity.metadata or {}
-    agent_status = agent_meta.get("status", "initializing")
-    session_id = agent_meta.get("session_id")
+    agent_status = state.status if state else agent_meta.get("status", "initializing")
 
     # Check if agent can be resumed
     terminal_states = (
@@ -880,19 +884,6 @@ async def send_agent_message(
         AgentStatus.TERMINATED.value,
     )
     needs_resume = agent_status in terminal_states
-
-    # Validate session_id is a proper UUID (not a placeholder like "user-initiated")
-    has_valid_session = _is_valid_uuid(session_id)
-
-    if needs_resume and not has_valid_session:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Agent has no valid session_id - cannot resume. "
-                "This agent was created before session tracking was implemented. "
-                "Start a new agent instead."
-            ),
-        )
 
     # Generate message ID
     msg_id = f"user-{datetime.now(UTC).timestamp():.0f}"
@@ -932,6 +923,21 @@ async def send_agent_message(
 
     # Resume the agent with the user's message
     if needs_resume:
+        from sibyl.api.pubsub import publish_event
+        from sibyl.jobs.queue import enqueue_agent_resume
+
+        # Update AgentState in Postgres (primary source of truth)
+        state_result = await auth.session.execute(
+            select(AgentState).where(col(AgentState.graph_agent_id) == agent_id)
+        )
+        state = state_result.scalar_one_or_none()
+        if state:
+            state.status = AgentStatus.RESUMING.value
+            state.error_message = None
+            state.completed_at = None
+            await auth.session.commit()
+
+        # Update graph metadata
         await manager.update(
             agent_id,
             {
@@ -941,7 +947,12 @@ async def send_agent_message(
             },
         )
 
-        from sibyl.jobs.queue import enqueue_agent_resume
+        # Broadcast status change for immediate UI update
+        await publish_event(
+            "agent_status",
+            {"agent_id": agent_id, "status": AgentStatus.RESUMING.value},
+            org_id=str(org.id),
+        )
 
         # Pass the message directly - Claude handles conversation history
         await enqueue_agent_resume(agent_id, str(org.id), prompt=request.content)

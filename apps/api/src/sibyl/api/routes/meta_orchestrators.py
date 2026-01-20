@@ -212,13 +212,13 @@ async def get_or_create_orchestrator(
     MetaOrchestrator is a singleton per project - only one can exist.
     If one already exists, it is returned.
 
-    Requires ADMIN access to the project.
+    Requires MAINTAINER access to the project.
     """
     org = _require_org(auth)
 
     # Verify project access
     await verify_entity_project_access(
-        auth.session, auth.ctx, request.project_id, required_role=ProjectRole.ADMIN
+        auth.session, auth.ctx, request.project_id, required_role=ProjectRole.MAINTAINER
     )
 
     client = await get_graph_client()
@@ -358,7 +358,7 @@ async def start_orchestrator(
 
     Spawns TaskOrchestrators according to the configured strategy.
 
-    Requires ADMIN access to the orchestrator's project.
+    Requires MAINTAINER access to the orchestrator's project.
     """
     org = _require_org(auth)
 
@@ -369,7 +369,7 @@ async def start_orchestrator(
 
     # Verify project access
     await verify_entity_project_access(
-        auth.session, auth.ctx, record.project_id, required_role=ProjectRole.ADMIN
+        auth.session, auth.ctx, record.project_id, required_role=ProjectRole.MAINTAINER
     )
 
     from sibyl.agents.meta_orchestrator import MetaOrchestratorError, MetaOrchestratorService
@@ -511,7 +511,7 @@ async def update_strategy(
     - parallel: Multiple concurrent tasks (up to max_concurrent)
     - priority: One at a time, highest priority first
 
-    Requires ADMIN access to the orchestrator's project.
+    Requires MAINTAINER access to the orchestrator's project.
     """
     org = _require_org(auth)
 
@@ -522,7 +522,7 @@ async def update_strategy(
 
     # Verify project access
     await verify_entity_project_access(
-        auth.session, auth.ctx, record.project_id, required_role=ProjectRole.ADMIN
+        auth.session, auth.ctx, record.project_id, required_role=ProjectRole.MAINTAINER
     )
 
     strategy = _parse_strategy(request.strategy)
@@ -560,7 +560,7 @@ async def update_budget(
 
     Sets the maximum budget and alert threshold for the sprint.
 
-    Requires ADMIN access to the orchestrator's project.
+    Requires MAINTAINER access to the orchestrator's project.
     """
     org = _require_org(auth)
 
@@ -571,7 +571,7 @@ async def update_budget(
 
     # Verify project access
     await verify_entity_project_access(
-        auth.session, auth.ctx, record.project_id, required_role=ProjectRole.ADMIN
+        auth.session, auth.ctx, record.project_id, required_role=ProjectRole.MAINTAINER
     )
 
     from sibyl.agents.meta_orchestrator import MetaOrchestratorService

@@ -161,15 +161,8 @@ export function ChatPanel({
   const showThinking =
     isAgentWorking && !hasPendingToolCalls && (thinkingReady || !isLastMessageAgentText);
 
-  // Placeholder text based on agent state
-  const placeholder = (() => {
-    if (isAgentWorking) return 'Agent is working... you can still send messages';
-    if (agentStatus === 'paused') return 'Agent is paused. Click \u25b6 to resume...';
-    if (agentStatus === 'completed') return 'Session ended. Send a message to continue...';
-    if (agentStatus === 'failed') return 'Agent failed. Send a message to retry...';
-    if (agentStatus === 'terminated') return 'Session stopped. Send a message to continue...';
-    return 'Send a message to the agent...';
-  })();
+  // Placeholder text - keep it simple, user doesn't care about internal state
+  const placeholder = isAgentWorking ? 'Agent is working...' : 'Send a message...';
 
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

@@ -255,8 +255,30 @@ Example:
 Use the Task tool to explore the authentication module structure
 ```
 
-This is different from Sibyl's MetaOrchestrator (which spawns you). You're a worker agent—
-use subagents for subtasks within your work, while Sibyl orchestrates across tasks.
+This is different from Sibyl's MetaOrchestrator (see below). Use subagents for research
+and subtasks within your current work.
+
+## Multi-Agent Orchestration
+
+When you need to **dispatch multiple independent tasks** to parallel workers (not inline subagents),
+use Sibyl's orchestration commands:
+
+```bash
+# Dispatch tasks to parallel worker agents
+sibyl agent dispatch --status todo --strategy parallel --max 3
+
+# Dispatch specific tasks with budget controls
+sibyl agent dispatch task_abc task_def --budget 25.00 --gates lint,test
+
+# Monitor orchestration progress
+sibyl agent orchestrate status
+```
+
+**When to use what:**
+- **Task tool (subagents)**: Research, exploration, specialized subtasks within YOUR work
+- **sibyl agent dispatch**: Independent tasks that should run as separate parallel processes
+
+For detailed orchestration guidance, run `/agent-orchestrate` to load the full skill.
 """
 
     AGENT_TYPE_PROMPTS = {
