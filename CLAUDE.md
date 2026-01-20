@@ -114,6 +114,37 @@ moon run install          # Install everything (production)
 **Why moon?** Caches results, runs only what changed, handles dependencies between packages. A bare
 `pnpm lint` won't respect the monorepo graph and may miss cross-package issues.
 
+### Dev Introspection Tools
+
+**Use these when debugging Sibyl itself.** Requires OWNER role.
+
+```bash
+# System health at a glance
+sibyl debug status              # API/worker/graph/queue health + recent errors
+
+# Inspect the graph directly
+sibyl debug schema              # Entity types and counts
+sibyl debug query "MATCH ..."   # Run read-only Cypher queries
+
+# Server logs
+sibyl logs tail                 # Last 50 log entries
+sibyl logs tail -n 100          # More entries
+sibyl logs tail -l error        # Filter by level (debug/info/warning/error)
+sibyl logs tail -s api          # Filter by service (api/worker)
+sibyl logs tail -f              # Stream in real-time (Ctrl+C to stop)
+
+# JSON output for scripting
+sibyl debug status --json
+sibyl logs tail --json
+```
+
+**When to use:**
+
+- Tests failing mysteriously → `sibyl logs tail -l error`
+- Graph queries returning unexpected results → `sibyl debug query "MATCH ..."`
+- Need to understand entity distribution → `sibyl debug schema`
+- Something feels broken → `sibyl debug status`
+
 ### Ports
 
 | Service   | Port |
