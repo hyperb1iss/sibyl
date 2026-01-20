@@ -6,7 +6,7 @@ REST API for managing AI agents via the AgentOrchestrator.
 import contextlib
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID, uuid4
 
 import structlog
@@ -359,9 +359,10 @@ async def list_agents(
     # Filter agents based on access control and preferences
     agents: list = []
     for a in results:
+        # Use typed model fields if available (AgentRecord), fall back to metadata (generic Entity)
         meta = a.metadata or {}
-        agent_project_id = meta.get("project_id")
-        agent_created_by = meta.get("created_by") or a.created_by
+        agent_project_id = getattr(a, "project_id", None) or meta.get("project_id")
+        agent_created_by = getattr(a, "created_by", None) or meta.get("created_by") or a.created_by
 
         # Access control: skip agents user cannot view (unless admin)
         if not is_admin:
@@ -382,28 +383,35 @@ async def list_agents(
     if not include_archived:
         agents = [a for a in agents if not (a.metadata or {}).get("archived")]
 
-    # Apply filters - use AgentState for status, graph for other fields
-    if project:
-        agents = [a for a in agents if (a.metadata or {}).get("project_id") == project]
-    if status:
-        # Use AgentState status if available, fall back to graph metadata
-        agents = [
-            a
-            for a in agents
-            if (states_by_id.get(a.id) and states_by_id[a.id].status == status.value)
-            or (a.id not in states_by_id and (a.metadata or {}).get("status") == status.value)
-        ]
-    if agent_type:
-        agents = [a for a in agents if (a.metadata or {}).get("agent_type") == agent_type.value]
+    # Helper to get field from typed model or metadata
+    def _get_agent_field(agent: Any, name: str, default: Any = None) -> Any:
+        val = getattr(agent, name, None)
+        if val is not None:
+            return val.value if hasattr(val, "value") else val
+        return (agent.metadata or {}).get(name, default)
 
-    # Calculate stats using AgentState for status
+    # Apply filters - use typed model fields with metadata fallback
+    if project:
+        agents = [a for a in agents if _get_agent_field(a, "project_id") == project]
+    if status:
+        # Use AgentState status if available, fall back to typed field or metadata
+        def _matches_status(a: Any) -> bool:
+            if states_by_id.get(a.id):
+                return states_by_id[a.id].status == status.value
+            return _get_agent_field(a, "status") == status.value
+
+        agents = [a for a in agents if _matches_status(a)]
+    if agent_type:
+        agents = [a for a in agents if _get_agent_field(a, "agent_type") == agent_type.value]
+
+    # Calculate stats using AgentState for status, typed fields for type
     by_status: dict[str, int] = {}
     by_type: dict[str, int] = {}
     for agent in agents:
         state = states_by_id.get(agent.id)
-        s = state.status if state else (agent.metadata or {}).get("status") or "initializing"
+        s = state.status if state else (_get_agent_field(agent, "status") or "initializing")
         by_status[s] = by_status.get(s, 0) + 1
-        t = (agent.metadata or {}).get("agent_type") or "general"
+        t = _get_agent_field(agent, "agent_type") or "general"
         by_type[t] = by_type.get(t, 0) + 1
 
     return AgentListResponse(
@@ -1634,11 +1642,21 @@ def _entity_to_agent_response(
 ) -> AgentResponse:
     """Convert Entity to AgentResponse, merging with AgentState.
 
-    Identity (name, type, project) comes from graph entity metadata.
+    Identity (name, type, project) comes from typed AgentRecord fields if available,
+    with fallback to metadata for legacy/generic entities.
     Operational state (status, heartbeat, metrics) comes from AgentState if available.
-    Falls back to graph metadata for agents without AgentState (legacy).
     """
     meta = entity.metadata or {}
+
+    # Helper to get field from typed model or metadata
+    def get_field(name: str, default: Any = None) -> Any:
+        val = getattr(entity, name, None)
+        if val is not None:
+            # Handle enum values
+            if hasattr(val, "value"):
+                return val.value
+            return val
+        return meta.get(name, default)
 
     # Use AgentState for operational fields if available
     if state:
@@ -1651,14 +1669,14 @@ def _entity_to_agent_response(
         error_message = state.error_message
         current_activity = state.current_activity
     else:
-        # Fall back to graph metadata for legacy agents
-        status = meta.get("status", "initializing")
-        last_heartbeat = meta.get("last_heartbeat")
-        started_at = meta.get("started_at")
-        completed_at = meta.get("completed_at")
-        tokens_used = meta.get("tokens_used", 0)
-        cost_usd = meta.get("cost_usd", 0.0)
-        error_message = meta.get("error_message") or meta.get("paused_reason")
+        # Fall back to typed fields or metadata for legacy agents
+        status = get_field("status", "initializing")
+        last_heartbeat = get_field("last_heartbeat")
+        started_at = get_field("started_at")
+        completed_at = get_field("completed_at")
+        tokens_used = get_field("tokens_used", 0)
+        cost_usd = get_field("cost_usd", 0.0)
+        error_message = get_field("error_message") or get_field("paused_reason")
         current_activity = None
 
     # Get created_at from entity
@@ -1667,21 +1685,21 @@ def _entity_to_agent_response(
     return AgentResponse(
         id=entity.id,
         name=entity.name,
-        agent_type=meta.get("agent_type", "general"),
+        agent_type=get_field("agent_type", "general"),
         status=status,
-        task_id=meta.get("task_id"),
-        project_id=meta.get("project_id"),
-        created_by=meta.get("created_by") or entity.created_by,
-        spawn_source=meta.get("spawn_source"),
+        task_id=get_field("task_id"),
+        project_id=get_field("project_id"),
+        created_by=get_field("created_by") or entity.created_by,
+        spawn_source=get_field("spawn_source"),
         created_at=created_at,
         started_at=started_at,
         completed_at=completed_at,
         last_heartbeat=last_heartbeat,
         tokens_used=tokens_used,
         cost_usd=cost_usd,
-        worktree_path=meta.get("worktree_path"),
-        worktree_branch=meta.get("worktree_branch"),
+        worktree_path=get_field("worktree_path"),
+        worktree_branch=get_field("worktree_branch"),
         error_message=error_message,
-        tags=meta.get("tags", []),
+        tags=get_field("tags", []),
         current_activity=current_activity,
     )
