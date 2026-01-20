@@ -42,6 +42,68 @@ def get_redis_settings() -> RedisSettings:
     )
 
 
+async def _cleanup_stale_working_agents() -> int:
+    """Mark stale 'working' agents as failed.
+
+    Called at worker startup to clean up agents that were working when
+    the worker crashed or was killed. An agent is considered stale if:
+    - Status is 'working' or 'running'
+    - Last heartbeat is older than 5 minutes
+    - No corresponding job exists in Redis
+
+    Returns:
+        Number of agents marked as failed
+    """
+    from datetime import timedelta
+
+    from sqlmodel import col, select
+
+    from sibyl.db import AgentState, get_session
+    from sibyl.jobs.queue import get_pool
+
+    try:
+        pool = await get_pool()
+        stale_threshold = datetime.now(UTC) - timedelta(minutes=5)
+        marked_failed = 0
+
+        async with get_session() as session:
+            # Find working agents with stale heartbeats
+            result = await session.execute(
+                select(AgentState).where(
+                    col(AgentState.status).in_(["working", "running", "initializing"]),
+                    (col(AgentState.last_heartbeat) < stale_threshold)
+                    | (col(AgentState.last_heartbeat).is_(None)),
+                )
+            )
+            stale_agents = result.scalars().all()
+
+            for agent in stale_agents:
+                # Check if there's still a job running in Redis
+                job_key = f"arq:job:agent:{agent.graph_agent_id}"
+                job_exists = await pool.exists(job_key)
+
+                if not job_exists:
+                    # No job running - mark as failed
+                    agent.status = "failed"
+                    agent.error_message = "worker_crashed"
+                    agent.completed_at = datetime.now(UTC).replace(tzinfo=None)
+                    marked_failed += 1
+                    log.info(
+                        "Marked stale agent as failed",
+                        agent_id=agent.graph_agent_id,
+                        last_heartbeat=agent.last_heartbeat,
+                    )
+
+            if marked_failed:
+                await session.commit()
+
+        return marked_failed
+
+    except Exception as e:
+        log.warning("Stale agent cleanup failed", error=str(e))
+        return 0
+
+
 async def _cleanup_orphaned_agent_jobs() -> int:
     """Clean up agent jobs for agents in terminal states.
 
@@ -116,6 +178,11 @@ async def startup(ctx: dict[str, Any]) -> None:
     log_banner(component="worker")
     log.info("Job worker online")
     ctx["start_time"] = datetime.now(UTC)
+
+    # Clean up stale working agents (from worker crashes)
+    stale_marked = await _cleanup_stale_working_agents()
+    if stale_marked:
+        log.info("Marked stale agents as failed", count=stale_marked)
 
     # Clean up orphaned agent jobs from previous runs
     cleaned = await _cleanup_orphaned_agent_jobs()
