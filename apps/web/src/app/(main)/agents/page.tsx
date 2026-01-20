@@ -20,7 +20,6 @@ import {
   ChevronDown,
   Dashboard,
   EditPencil,
-  Flash,
   List,
   Plus,
   StopCircle,
@@ -171,14 +170,6 @@ const AgentCard = memo(function AgentCard({
     return lastBeat >= twoMinutesAgo;
   })();
 
-  // Is this a NEW agent? (created in last 5 minutes)
-  const isNew = (() => {
-    if (!agent.created_at) return false;
-    const createdTime = new Date(agent.created_at).getTime();
-    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-    return createdTime >= fiveMinutesAgo;
-  })();
-
   const needsApproval = agent.status === 'waiting_approval';
   const statusStyle = isActive
     ? AGENT_STATUS_STYLES.working
@@ -214,21 +205,10 @@ const AgentCard = memo(function AgentCard({
         hover:shadow-card-hover hover:-translate-y-0.5
         border ${statusStyle.border} ${statusStyle.bg}
         ${statusStyle.glow ?? ''}
-        ${isNew ? 'ring-2 ring-sc-cyan/50 ring-offset-2 ring-offset-sc-bg-base' : ''}
       `}
     >
       {/* Status accent bar */}
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${statusStyle.accent}`} />
-
-      {/* NEW badge - top right corner */}
-      {isNew && (
-        <div className="absolute -top-1 -right-1 z-10">
-          <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-2 py-0.5 rounded-full bg-sc-cyan text-sc-bg-dark shadow-lg animate-pulse">
-            <Flash width={10} height={10} />
-            NEW
-          </span>
-        </div>
-      )}
 
       <div className="pl-4 pr-3 py-3">
         {/* Top row: Type badge + Status indicator + Actions */}
@@ -460,24 +440,18 @@ const ProjectGroup = memo(function ProjectGroup({
 // =============================================================================
 
 const SummaryBar = memo(function SummaryBar({ agents }: { agents: Agent[] }) {
-  const { activeCount, needsApproval, newCount } = useMemo(() => {
+  const { activeCount, needsApproval } = useMemo(() => {
     const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
-    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
     let active = 0;
     let approval = 0;
-    let newAgents = 0;
     for (const agent of agents) {
       if (agent.last_heartbeat) {
         const lastBeat = new Date(agent.last_heartbeat).getTime();
         if (lastBeat >= twoMinutesAgo) active++;
       }
       if (agent.status === 'waiting_approval') approval++;
-      if (agent.created_at) {
-        const createdTime = new Date(agent.created_at).getTime();
-        if (createdTime >= fiveMinutesAgo) newAgents++;
-      }
     }
-    return { activeCount: active, needsApproval: approval, newCount: newAgents };
+    return { activeCount: active, needsApproval: approval };
   }, [agents]);
 
   return (
@@ -488,12 +462,6 @@ const SummaryBar = memo(function SummaryBar({ agents }: { agents: Agent[] }) {
       </div>
       <div className="h-6 w-px bg-sc-fg-subtle/20" />
       <div className="flex flex-wrap items-center gap-3 text-sm">
-        {newCount > 0 && (
-          <span className="flex items-center gap-1.5 px-2 py-1 rounded bg-sc-cyan/20 text-sc-cyan font-medium">
-            <Flash width={12} height={12} />
-            {newCount} new
-          </span>
-        )}
         {activeCount > 0 && (
           <span className="flex items-center gap-1.5 px-2 py-1 rounded bg-sc-purple/20 text-sc-purple">
             <span className="w-2 h-2 rounded-full bg-sc-purple animate-pulse" />
@@ -606,26 +574,12 @@ function AgentsPageContent() {
     return lastBeat >= twoMinutesAgo;
   }, []);
 
-  // Helper: check if agent is new (created in last 5 minutes)
-  const isAgentNew = useCallback((agent: Agent) => {
-    if (!agent.created_at) return false;
-    const createdTime = new Date(agent.created_at).getTime();
-    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-    return createdTime >= fiveMinutesAgo;
-  }, []);
-
-  // Sort agents: NEW first, then active, then by most recent activity
+  // Sort agents: active first, then by most recent activity
   const sortedAgents = useMemo(() => {
     return [...standaloneAgents].sort((a, b) => {
-      const aNew = isAgentNew(a);
-      const bNew = isAgentNew(b);
-      // NEW agents first
-      if (aNew && !bNew) return -1;
-      if (!aNew && bNew) return 1;
-
       const aActive = isAgentActive(a);
       const bActive = isAgentActive(b);
-      // Then active agents
+      // Active agents first
       if (aActive && !bActive) return -1;
       if (!aActive && bActive) return 1;
 
@@ -634,7 +588,7 @@ function AgentsPageContent() {
       const bTime = b.last_heartbeat ? new Date(b.last_heartbeat).getTime() : 0;
       return bTime - aTime;
     });
-  }, [standaloneAgents, isAgentActive, isAgentNew]);
+  }, [standaloneAgents, isAgentActive]);
 
   // Group sorted agents by project
   const standaloneByProject = useMemo(() => {
@@ -823,16 +777,9 @@ function AgentsPageContent() {
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[...agents]
                   .sort((a, b) => {
-                    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
                     const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
 
-                    // NEW agents first
-                    const aNew = a.created_at && new Date(a.created_at).getTime() >= fiveMinutesAgo;
-                    const bNew = b.created_at && new Date(b.created_at).getTime() >= fiveMinutesAgo;
-                    if (aNew && !bNew) return -1;
-                    if (!aNew && bNew) return 1;
-
-                    // Then active agents
+                    // Active agents first
                     const aActive =
                       a.last_heartbeat && new Date(a.last_heartbeat).getTime() >= twoMinutesAgo;
                     const bActive =
