@@ -357,6 +357,10 @@ async def run_agent_execution(  # noqa: PLR0915
         # Execute agent with immediate stop support
         # Background task watches for stop signal and sets event
         log.info("run_agent_execution_starting", agent_id=agent_id)
+
+        # Clear any stale stop signal from previous executions
+        await _clear_stop_signal(agent_id)
+
         stop_event = asyncio.Event()
         was_terminated = False
 
@@ -770,6 +774,10 @@ async def resume_agent_execution(  # noqa: PLR0915
 
         # Execute resumed agent with immediate stop support
         log.info("resume_agent_execution_streaming", agent_id=agent_id)
+
+        # Clear any stale stop signal from previous executions
+        await _clear_stop_signal(agent_id)
+
         stop_event = asyncio.Event()
         was_terminated = False
 
