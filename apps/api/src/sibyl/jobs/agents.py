@@ -421,34 +421,20 @@ async def run_agent_execution(  # noqa: PLR0915
         )
         await _store_agent_message(agent_id, org_id, message_count, initial_message)
 
-        # Execute agent with immediate stop support
-        # Background task watches for stop signal and sets event
+        # Execute agent with cancellation support
         log.info("run_agent_execution_starting", agent_id=agent_id)
 
         # Clear any stale stop signal from previous executions
         await _clear_stop_signal(agent_id)
 
-        stop_event = asyncio.Event()
         was_terminated = False
+        message_task: asyncio.Task[None] | None = None
 
-        async def watch_stop_signal() -> None:
-            """Background task to watch for stop signal."""
-            while not stop_event.is_set():
-                if await _check_stop_signal(agent_id):
-                    stop_event.set()
-                    return
-                await asyncio.sleep(0.2)  # Check every 200ms
+        async def process_messages() -> None:
+            """Process messages from agent execution. Can be cancelled by stop watcher."""
+            nonlocal message_count, session_id, context_broadcasted, last_content
 
-        stop_watcher = asyncio.create_task(watch_stop_signal())
-
-        try:
             async for message in instance.execute():
-                # Check for immediate stop
-                if stop_event.is_set():
-                    log.info("agent_stop_signal_immediate", agent_id=agent_id)
-                    was_terminated = True
-                    break
-
                 msg_class = type(message).__name__
 
                 # Format message for UI (returns None for internal SDK messages)
@@ -538,6 +524,24 @@ async def run_agent_execution(  # noqa: PLR0915
                 if formatted.get("content") and formatted.get("type") != "tool_result":
                     last_content = formatted.get("content", "")[:500]
 
+        async def watch_stop_signal() -> None:
+            """Watch for stop signal and cancel execution task."""
+            while True:
+                if await _check_stop_signal(agent_id):
+                    log.info("agent_stop_signal_detected", agent_id=agent_id)
+                    if message_task and not message_task.done():
+                        message_task.cancel()
+                    return
+                await asyncio.sleep(0.2)  # Check every 200ms
+
+        stop_watcher = asyncio.create_task(watch_stop_signal())
+        message_task = asyncio.create_task(process_messages())
+
+        try:
+            await message_task
+        except asyncio.CancelledError:
+            log.info("agent_execution_cancelled", agent_id=agent_id)
+            was_terminated = True
         finally:
             # Clean up stop watcher
             stop_watcher.cancel()
@@ -853,33 +857,20 @@ async def resume_agent_execution(  # noqa: PLR0915
         tool_calls: list[str] = []
         context_broadcasted = False
 
-        # Execute resumed agent with immediate stop support
+        # Execute resumed agent with cancellation support
         log.info("resume_agent_execution_streaming", agent_id=agent_id)
 
         # Clear any stale stop signal from previous executions
         await _clear_stop_signal(agent_id)
 
-        stop_event = asyncio.Event()
         was_terminated = False
+        message_task: asyncio.Task[None] | None = None
 
-        async def watch_stop_signal() -> None:
-            """Background task to watch for stop signal."""
-            while not stop_event.is_set():
-                if await _check_stop_signal(agent_id):
-                    stop_event.set()
-                    return
-                await asyncio.sleep(0.2)  # Check every 200ms
+        async def process_messages() -> None:
+            """Process messages from resumed execution. Can be cancelled by stop watcher."""
+            nonlocal message_count, new_session_id, context_broadcasted
 
-        stop_watcher = asyncio.create_task(watch_stop_signal())
-
-        try:
             async for message in instance.execute():
-                # Check for immediate stop
-                if stop_event.is_set():
-                    log.info("agent_stop_signal_immediate", agent_id=agent_id)
-                    was_terminated = True
-                    break
-
                 msg_class = type(message).__name__
                 formatted = format_agent_message(message)
                 if formatted is None:
@@ -932,6 +923,24 @@ async def resume_agent_execution(  # noqa: PLR0915
                     tool_name = formatted.get("tool_name", "unknown")
                     tool_calls.append(tool_name)
 
+        async def watch_stop_signal() -> None:
+            """Watch for stop signal and cancel execution task."""
+            while True:
+                if await _check_stop_signal(agent_id):
+                    log.info("agent_stop_signal_detected", agent_id=agent_id)
+                    if message_task and not message_task.done():
+                        message_task.cancel()
+                    return
+                await asyncio.sleep(0.2)  # Check every 200ms
+
+        stop_watcher = asyncio.create_task(watch_stop_signal())
+        message_task = asyncio.create_task(process_messages())
+
+        try:
+            await message_task
+        except asyncio.CancelledError:
+            log.info("agent_execution_cancelled", agent_id=agent_id)
+            was_terminated = True
         finally:
             # Clean up stop watcher
             stop_watcher.cancel()
