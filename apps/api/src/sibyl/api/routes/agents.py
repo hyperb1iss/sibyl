@@ -182,6 +182,7 @@ class AgentResponse(BaseModel):
     project_id: str | None = None
     created_by: str | None = None
     spawn_source: str | None = None
+    created_at: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
     last_heartbeat: str | None = None
@@ -191,6 +192,7 @@ class AgentResponse(BaseModel):
     worktree_branch: str | None = None
     error_message: str | None = None
     tags: list[str] = []
+    current_activity: str | None = None
 
 
 class AgentListResponse(BaseModel):
@@ -1642,6 +1644,7 @@ def _entity_to_agent_response(
         tokens_used = state.tokens_used
         cost_usd = state.cost_usd
         error_message = state.error_message
+        current_activity = state.current_activity
     else:
         # Fall back to graph metadata for legacy agents
         status = meta.get("status", "initializing")
@@ -1651,6 +1654,10 @@ def _entity_to_agent_response(
         tokens_used = meta.get("tokens_used", 0)
         cost_usd = meta.get("cost_usd", 0.0)
         error_message = meta.get("error_message") or meta.get("paused_reason")
+        current_activity = None
+
+    # Get created_at from entity
+    created_at = entity.created_at.isoformat() if entity.created_at else None
 
     return AgentResponse(
         id=entity.id,
@@ -1661,6 +1668,7 @@ def _entity_to_agent_response(
         project_id=meta.get("project_id"),
         created_by=meta.get("created_by") or entity.created_by,
         spawn_source=meta.get("spawn_source"),
+        created_at=created_at,
         started_at=started_at,
         completed_at=completed_at,
         last_heartbeat=last_heartbeat,
@@ -1670,4 +1678,5 @@ def _entity_to_agent_response(
         worktree_branch=meta.get("worktree_branch"),
         error_message=error_message,
         tags=meta.get("tags", []),
+        current_activity=current_activity,
     )

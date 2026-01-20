@@ -958,13 +958,18 @@ class AgentInstance:
             Message objects from the Claude SDK
         """
         self._running = True
+        completed_normally = False
 
         # Start heartbeat task
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
         try:
             # Use ClaudeSDKClient for hooks support (query() doesn't support hooks!)
-            async with ClaudeSDKClient(options=self.sdk_options) as client:
+            # Wrap in try/finally to handle cancel scope errors during SDK cleanup
+            client: ClaudeSDKClient | None = None
+            try:
+                client = ClaudeSDKClient(options=self.sdk_options)
+                await client.__aenter__()
                 self._client = client
 
                 # Send initial prompt
@@ -987,6 +992,28 @@ class AgentInstance:
 
                     yield message
 
+                # If we get here, the iteration completed normally
+                completed_normally = True
+
+            finally:
+                # Clean up SDK client - suppress cancel scope errors that can occur
+                # when the generator is closed mid-iteration (termination)
+                if client is not None:
+                    try:
+                        await client.__aexit__(None, None, None)
+                    except RuntimeError as e:
+                        if "cancel scope" in str(e).lower():
+                            log.debug(
+                                f"Agent {self.id} SDK cleanup cancel scope error (expected)",
+                                error=str(e),
+                            )
+                        else:
+                            raise
+
+        except GeneratorExit:
+            # Generator was closed (caller broke from loop) - this is expected for termination
+            log.debug(f"Agent {self.id} generator closed by caller")
+            # Don't re-raise - let finally run and cleanup
         except Exception as e:
             log.exception(f"Agent {self.id} execution failed")
             await self._update_status(AgentStatus.FAILED, error=str(e))
@@ -997,8 +1024,9 @@ class AgentInstance:
             self._client = None
             await self._cancel_heartbeat()
 
-        # Mark completed
-        await self._update_status(AgentStatus.COMPLETED)
+        # Mark completed only if we finished naturally (not terminated/cancelled)
+        if completed_normally:
+            await self._update_status(AgentStatus.COMPLETED)
 
     async def send_message(self, content: str) -> AsyncIterator[Message]:
         """Send a follow-up message to the agent.

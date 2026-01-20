@@ -13,6 +13,7 @@ from uuid import UUID
 import structlog
 
 from sibyl.agents.messages import format_agent_message, generate_workflow_reminder
+from sibyl.agents.state_sync import update_agent_state
 from sibyl.db import AgentMessage, AgentMessageRole, AgentMessageType, get_session
 
 log = structlog.get_logger()
@@ -83,6 +84,72 @@ async def _clear_stop_signal(agent_id: str) -> None:
         await clear_agent_stop(agent_id)
     except Exception:
         log.debug("Stop signal clear failed", agent_id=agent_id)
+
+
+def _get_activity_hint(tool_name: str, tool_input: Any) -> str:
+    """Generate a human-readable activity hint from a tool call.
+
+    Returns a short, meaningful description of what the agent is doing.
+    """
+    # Tool-specific hints based on what the agent is doing
+    tool_hints: dict[str, str] = {
+        "Read": "Reading file",
+        "Write": "Writing file",
+        "Edit": "Editing file",
+        "Bash": "Running command",
+        "Glob": "Searching files",
+        "Grep": "Searching code",
+        "Task": "Running subagent",
+        "WebFetch": "Fetching URL",
+        "WebSearch": "Searching web",
+        "TodoWrite": "Updating tasks",
+        "LSP": "Analyzing code",
+        "AskUserQuestion": "Waiting for input",
+    }
+
+    base_hint = tool_hints.get(tool_name, f"Using {tool_name}")
+
+    # Add context from tool input if available
+    if not isinstance(tool_input, dict):
+        return base_hint
+
+    if tool_name == "Read" and "file_path" in tool_input:
+        path = tool_input["file_path"]
+        filename = path.split("/")[-1] if "/" in path else path
+        return f"Reading {filename}"
+
+    if tool_name == "Write" and "file_path" in tool_input:
+        path = tool_input["file_path"]
+        filename = path.split("/")[-1] if "/" in path else path
+        return f"Writing {filename}"
+
+    if tool_name == "Edit" and "file_path" in tool_input:
+        path = tool_input["file_path"]
+        filename = path.split("/")[-1] if "/" in path else path
+        return f"Editing {filename}"
+
+    if tool_name == "Bash" and "command" in tool_input:
+        cmd = tool_input["command"]
+        first_word = cmd.split()[0] if cmd else "command"
+        return f"Running {first_word}"
+
+    if tool_name == "Grep" and "pattern" in tool_input:
+        pattern = tool_input["pattern"][:30]
+        return f"Searching for '{pattern}'"
+
+    if tool_name == "Glob" and "pattern" in tool_input:
+        pattern = tool_input["pattern"]
+        return f"Finding {pattern}"
+
+    if tool_name == "Task" and "description" in tool_input:
+        desc = tool_input["description"][:40]
+        return f"Subagent: {desc}"
+
+    if tool_name == "WebSearch" and "query" in tool_input:
+        query = tool_input["query"][:30]
+        return f"Searching: {query}"
+
+    return base_hint
 
 
 async def _store_agent_message(
@@ -443,9 +510,17 @@ async def run_agent_execution(  # noqa: PLR0915
                     tool_name = formatted.get("tool_name", "unknown")
                     tool_calls.append(tool_name)
 
+                    # Update current activity for UI visibility
+                    tool_input = formatted.get("input")
+                    activity_hint = _get_activity_hint(tool_name, tool_input)
+                    await update_agent_state(
+                        org_id=org_id,
+                        agent_id=agent_id,
+                        current_activity=activity_hint,
+                    )
+
                     # Generate and broadcast Tier 3 status hint (fire-and-forget)
                     tool_id = formatted.get("tool_id")
-                    tool_input = formatted.get("input")
                     _fire_and_forget(
                         _generate_and_broadcast_status_hint(
                             agent_id=agent_id,
@@ -471,7 +546,13 @@ async def run_agent_execution(  # noqa: PLR0915
 
         # Handle termination
         if was_terminated:
-            await instance.stop("user_terminated")
+            # Stop the agent - suppress expected SDK abort errors during termination
+            try:
+                await instance.stop("user_terminated")
+            except Exception as stop_err:
+                # SDK may throw AbortError when hooks are cancelled mid-execution
+                log.debug("Agent stop raised (expected during termination)", error=str(stop_err))
+
             await _clear_stop_signal(agent_id)
             await _safe_broadcast(
                 "agent_status",
@@ -859,7 +940,13 @@ async def resume_agent_execution(  # noqa: PLR0915
 
         # Handle termination
         if was_terminated:
-            await instance.stop("user_terminated")
+            # Stop the agent - suppress expected SDK abort errors during termination
+            try:
+                await instance.stop("user_terminated")
+            except Exception as stop_err:
+                # SDK may throw AbortError when hooks are cancelled mid-execution
+                log.debug("Agent stop raised (expected during termination)", error=str(stop_err))
+
             await _clear_stop_signal(agent_id)
             await _safe_broadcast(
                 "agent_status",

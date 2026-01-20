@@ -793,6 +793,7 @@ export interface Agent {
   project_id: string | null;
   created_by: string | null;
   spawn_source: AgentSpawnSource | null;
+  created_at: string | null;
   started_at: string | null;
   completed_at: string | null;
   last_heartbeat: string | null;
@@ -802,6 +803,7 @@ export interface Agent {
   worktree_branch: string | null;
   error_message: string | null;
   tags: string[];
+  current_activity: string | null;
 }
 
 export interface AgentListResponse {

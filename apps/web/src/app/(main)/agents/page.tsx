@@ -22,9 +22,8 @@ import {
   ChevronDown,
   Dashboard,
   EditPencil,
+  Flash,
   List,
-  Pause,
-  Play,
   Plus,
   StopCircle,
 } from '@/components/ui/icons';
@@ -33,9 +32,7 @@ import { FilterChip } from '@/components/ui/toggle';
 import { ErrorState } from '@/components/ui/tooltip';
 import type { Agent, AgentStatus, TaskOrchestrator } from '@/lib/api';
 import {
-  AGENT_STATUS_CONFIG,
   AGENT_TYPE_CONFIG,
-  type AgentStatusType,
   type AgentTypeValue,
   formatDistanceToNow,
   ORCHESTRATOR_PHASE_CONFIG,
@@ -46,11 +43,9 @@ import {
   useArchiveAgent,
   useOrchestratorReview,
   useOrchestrators,
-  usePauseAgent,
   usePauseOrchestrator,
   useProjects,
   useRenameAgent,
-  useResumeAgent,
   useResumeOrchestrator,
   useTasks,
   useTerminateAgent,
@@ -116,8 +111,6 @@ const AGENT_STATUS_STYLES: Record<
   },
 };
 
-const DEFAULT_STATUS_STYLE = AGENT_STATUS_STYLES.working;
-
 // Tag category colors for visual distinction (matches task-card.tsx)
 const TAG_STYLES: Record<string, string> = {
   // Agent types
@@ -160,16 +153,12 @@ function getTagStyle(tag: string): string {
 const AgentCard = memo(function AgentCard({
   agent,
   orchestrator,
-  onPause,
-  onResume,
   onTerminate,
   onRename,
   onArchive,
 }: {
   agent: Agent;
   orchestrator?: TaskOrchestrator;
-  onPause: (id: string) => void;
-  onResume: (id: string) => void;
   onTerminate: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onArchive: (id: string) => void;
@@ -177,16 +166,31 @@ const AgentCard = memo(function AgentCard({
   const [isRenaming, setIsRenaming] = useState(false);
   const [newName, setNewName] = useState(agent.name);
 
-  const statusConfig =
-    AGENT_STATUS_CONFIG[agent.status as AgentStatusType] ?? AGENT_STATUS_CONFIG.working;
   const typeConfig =
     AGENT_TYPE_CONFIG[agent.agent_type as AgentTypeValue] ?? AGENT_TYPE_CONFIG.general;
-  const statusStyle = AGENT_STATUS_STYLES[agent.status] ?? DEFAULT_STATUS_STYLE;
 
-  const isActive = ['initializing', 'working', 'resuming'].includes(agent.status);
-  const isPaused = agent.status === 'paused';
-  const isWaiting = ['waiting_approval', 'waiting_dependency'].includes(agent.status);
-  const isTerminal = ['completed', 'failed', 'terminated'].includes(agent.status);
+  // Simple: is it actively running right now? (recent heartbeat within 2 min)
+  const isActive = (() => {
+    if (!agent.last_heartbeat) return false;
+    const lastBeat = new Date(agent.last_heartbeat).getTime();
+    const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+    return lastBeat >= twoMinutesAgo;
+  })();
+
+  // Is this a NEW agent? (created in last 5 minutes)
+  const isNew = (() => {
+    if (!agent.created_at) return false;
+    const createdTime = new Date(agent.created_at).getTime();
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    return createdTime >= fiveMinutesAgo;
+  })();
+
+  const needsApproval = agent.status === 'waiting_approval';
+  const statusStyle = isActive
+    ? AGENT_STATUS_STYLES.working
+    : needsApproval
+      ? AGENT_STATUS_STYLES.waiting_approval
+      : AGENT_STATUS_STYLES.completed; // Inactive = muted styling
 
   const handleRename = () => {
     setIsRenaming(true);
@@ -216,20 +220,20 @@ const AgentCard = memo(function AgentCard({
         hover:shadow-card-hover hover:-translate-y-0.5
         border ${statusStyle.border} ${statusStyle.bg}
         ${statusStyle.glow ?? ''}
+        ${isNew ? 'ring-2 ring-sc-cyan/50 ring-offset-2 ring-offset-sc-bg-base' : ''}
       `}
     >
       {/* Status accent bar */}
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${statusStyle.accent}`} />
 
-      {/* Paused overlay pattern */}
-      {isPaused && (
-        <div
-          className="absolute inset-0 opacity-5 pointer-events-none"
-          style={{
-            backgroundImage:
-              'repeating-linear-gradient(45deg, transparent, transparent 10px, currentColor 10px, currentColor 11px)',
-          }}
-        />
+      {/* NEW badge - top right corner */}
+      {isNew && (
+        <div className="absolute -top-1 -right-1 z-10">
+          <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-2 py-0.5 rounded-full bg-sc-cyan text-sc-bg-dark shadow-lg animate-pulse">
+            <Flash width={10} height={10} />
+            NEW
+          </span>
+        </div>
       )}
 
       <div className="pl-4 pr-3 py-3">
@@ -248,12 +252,17 @@ const AgentCard = memo(function AgentCard({
               {typeConfig.icon} {typeConfig.label}
             </span>
 
-            {/* Status badge */}
-            <span
-              className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${statusConfig.bgClass} ${statusConfig.textClass}`}
-            >
-              {statusConfig.icon} {statusConfig.label}
-            </span>
+            {/* Simple status: Active or Needs Approval */}
+            {isActive && (
+              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-sc-purple/20 text-sc-purple font-medium">
+                ● Active
+              </span>
+            )}
+            {needsApproval && (
+              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-sc-coral/20 text-sc-coral font-medium">
+                ⏳ Needs Approval
+              </span>
+            )}
 
             {/* Orchestrator phase badge */}
             {orchestrator && (
@@ -287,18 +296,6 @@ const AgentCard = memo(function AgentCard({
                 <span>Rename</span>
               </DropdownMenuItem>
               {isActive && (
-                <DropdownMenuItem onClick={() => onPause(agent.id)} className="gap-2 text-xs">
-                  <Pause width={12} height={12} className="text-sc-yellow" />
-                  <span>Pause</span>
-                </DropdownMenuItem>
-              )}
-              {isPaused && (
-                <DropdownMenuItem onClick={() => onResume(agent.id)} className="gap-2 text-xs">
-                  <Play width={12} height={12} className="text-sc-green" />
-                  <span>Resume</span>
-                </DropdownMenuItem>
-              )}
-              {!isTerminal && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -307,7 +304,7 @@ const AgentCard = memo(function AgentCard({
                     className="gap-2 text-xs"
                   >
                     <StopCircle width={12} height={12} />
-                    <span>Terminate</span>
+                    <span>Stop</span>
                   </DropdownMenuItem>
                 </>
               )}
@@ -371,21 +368,19 @@ const AgentCard = memo(function AgentCard({
           </p>
         )}
 
-        {/* Status indicator for active/waiting */}
-        {(isActive || isWaiting) && (
-          <div className="flex items-center gap-2 mt-2">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isActive ? 'bg-sc-purple animate-pulse' : 'bg-sc-coral animate-pulse'
-              }`}
-            />
-            <span className="text-xs text-sc-fg-muted">
-              {isActive
-                ? 'Working...'
-                : agent.status === 'waiting_approval'
-                  ? 'Needs approval'
-                  : 'Waiting on dependency'}
-            </span>
+        {/* Active indicator with current activity */}
+        {isActive && (
+          <div className="flex items-start gap-2 mt-2 p-2 rounded-lg bg-sc-purple/10 border border-sc-purple/20">
+            <span className="w-2 h-2 mt-1 shrink-0 rounded-full bg-sc-purple animate-pulse" />
+            <div className="min-w-0 flex-1">
+              {agent.current_activity ? (
+                <p className="text-xs text-sc-fg-primary line-clamp-2 leading-relaxed">
+                  {agent.current_activity}
+                </p>
+              ) : (
+                <span className="text-xs text-sc-fg-muted italic">Working...</span>
+              )}
+            </div>
           </div>
         )}
 
@@ -420,8 +415,6 @@ const ProjectGroup = memo(function ProjectGroup({
   projectName,
   agents,
   orchestratorsByWorker,
-  onPause,
-  onResume,
   onTerminate,
   onRename,
   onArchive,
@@ -429,17 +422,17 @@ const ProjectGroup = memo(function ProjectGroup({
   projectName: string;
   agents: Agent[];
   orchestratorsByWorker: Map<string, TaskOrchestrator>;
-  onPause: (id: string) => void;
-  onResume: (id: string) => void;
   onTerminate: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onArchive: (id: string) => void;
 }) {
-  const activeCount = agents.filter(a =>
-    ['initializing', 'working', 'resuming', 'waiting_approval', 'waiting_dependency'].includes(
-      a.status
-    )
-  ).length;
+  const activeCount = useMemo(() => {
+    const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+    return agents.filter(a => {
+      if (!a.last_heartbeat) return false;
+      return new Date(a.last_heartbeat).getTime() >= twoMinutesAgo;
+    }).length;
+  }, [agents]);
 
   return (
     <div className="space-y-3">
@@ -458,8 +451,6 @@ const ProjectGroup = memo(function ProjectGroup({
             key={agent.id}
             agent={agent}
             orchestrator={orchestratorsByWorker.get(agent.id)}
-            onPause={onPause}
-            onResume={onResume}
             onTerminate={onTerminate}
             onRename={onRename}
             onArchive={onArchive}
@@ -475,19 +466,25 @@ const ProjectGroup = memo(function ProjectGroup({
 // =============================================================================
 
 const SummaryBar = memo(function SummaryBar({ agents }: { agents: Agent[] }) {
-  const counts = useMemo(() => {
-    const result: Record<string, number> = {};
+  const { activeCount, needsApproval, newCount } = useMemo(() => {
+    const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    let active = 0;
+    let approval = 0;
+    let newAgents = 0;
     for (const agent of agents) {
-      result[agent.status] = (result[agent.status] || 0) + 1;
+      if (agent.last_heartbeat) {
+        const lastBeat = new Date(agent.last_heartbeat).getTime();
+        if (lastBeat >= twoMinutesAgo) active++;
+      }
+      if (agent.status === 'waiting_approval') approval++;
+      if (agent.created_at) {
+        const createdTime = new Date(agent.created_at).getTime();
+        if (createdTime >= fiveMinutesAgo) newAgents++;
+      }
     }
-    return result;
+    return { activeCount: active, needsApproval: approval, newCount: newAgents };
   }, [agents]);
-
-  const totalActive = (counts.initializing || 0) + (counts.working || 0) + (counts.resuming || 0);
-  const totalWaiting = (counts.waiting_approval || 0) + (counts.waiting_dependency || 0);
-  const totalPaused = counts.paused || 0;
-  const totalCompleted = counts.completed || 0;
-  const totalFailed = (counts.failed || 0) + (counts.terminated || 0);
 
   return (
     <div className="flex flex-wrap items-center gap-4 p-4 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg">
@@ -497,30 +494,26 @@ const SummaryBar = memo(function SummaryBar({ agents }: { agents: Agent[] }) {
       </div>
       <div className="h-6 w-px bg-sc-fg-subtle/20" />
       <div className="flex flex-wrap items-center gap-3 text-sm">
-        {totalActive > 0 && (
+        {newCount > 0 && (
+          <span className="flex items-center gap-1.5 px-2 py-1 rounded bg-sc-cyan/20 text-sc-cyan font-medium">
+            <Flash width={12} height={12} />
+            {newCount} new
+          </span>
+        )}
+        {activeCount > 0 && (
           <span className="flex items-center gap-1.5 px-2 py-1 rounded bg-sc-purple/20 text-sc-purple">
             <span className="w-2 h-2 rounded-full bg-sc-purple animate-pulse" />
-            {totalActive} active
+            {activeCount} active
           </span>
         )}
-        {totalWaiting > 0 && (
+        {needsApproval > 0 && (
           <span className="flex items-center gap-1.5 px-2 py-1 rounded bg-sc-coral/20 text-sc-coral">
-            {totalWaiting} waiting
+            {needsApproval} needs approval
           </span>
         )}
-        {totalPaused > 0 && (
-          <span className="flex items-center gap-1.5 px-2 py-1 rounded bg-sc-yellow/20 text-sc-yellow">
-            {totalPaused} paused
-          </span>
-        )}
-        {totalCompleted > 0 && (
-          <span className="flex items-center gap-1.5 px-2 py-1 rounded bg-sc-green/20 text-sc-green">
-            {totalCompleted} completed
-          </span>
-        )}
-        {totalFailed > 0 && (
-          <span className="flex items-center gap-1.5 px-2 py-1 rounded bg-sc-red/20 text-sc-red">
-            {totalFailed} failed
+        {agents.length - activeCount > 0 && (
+          <span className="flex items-center gap-1.5 px-2 py-1 rounded bg-sc-fg-subtle/10 text-sc-fg-muted">
+            {agents.length - activeCount} inactive
           </span>
         )}
       </div>
@@ -595,8 +588,6 @@ function AgentsPageContent() {
   }, [tasksData]);
 
   // Agent mutations
-  const pauseAgent = usePauseAgent();
-  const resumeAgent = useResumeAgent();
   const terminateAgent = useTerminateAgent();
   const renameAgent = useRenameAgent();
   const archiveAgent = useArchiveAgent();
@@ -647,11 +638,49 @@ function AgentsPageContent() {
     return map;
   }, [filteredAgents]);
 
-  // Group standalone agents by project
+  // Helper: check if agent is active (recent heartbeat)
+  const isAgentActive = useCallback((agent: Agent) => {
+    if (!agent.last_heartbeat) return false;
+    const lastBeat = new Date(agent.last_heartbeat).getTime();
+    const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+    return lastBeat >= twoMinutesAgo;
+  }, []);
+
+  // Helper: check if agent is new (created in last 5 minutes)
+  const isAgentNew = useCallback((agent: Agent) => {
+    if (!agent.created_at) return false;
+    const createdTime = new Date(agent.created_at).getTime();
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    return createdTime >= fiveMinutesAgo;
+  }, []);
+
+  // Sort agents: NEW first, then active, then by most recent activity
+  const sortedAgents = useMemo(() => {
+    return [...standaloneAgents].sort((a, b) => {
+      const aNew = isAgentNew(a);
+      const bNew = isAgentNew(b);
+      // NEW agents first
+      if (aNew && !bNew) return -1;
+      if (!aNew && bNew) return 1;
+
+      const aActive = isAgentActive(a);
+      const bActive = isAgentActive(b);
+      // Then active agents
+      if (aActive && !bActive) return -1;
+      if (!aActive && bActive) return 1;
+
+      // Then by most recent heartbeat
+      const aTime = a.last_heartbeat ? new Date(a.last_heartbeat).getTime() : 0;
+      const bTime = b.last_heartbeat ? new Date(b.last_heartbeat).getTime() : 0;
+      return bTime - aTime;
+    });
+  }, [standaloneAgents, isAgentActive, isAgentNew]);
+
+  // Group sorted agents by project
   const standaloneByProject = useMemo(() => {
     const groups: Record<string, { name: string; agents: Agent[] }> = {};
 
-    for (const agent of standaloneAgents) {
+    for (const agent of sortedAgents) {
       const projectId = agent.project_id || 'no-project';
       if (!groups[projectId]) {
         const project = projects.find(p => p.id === projectId);
@@ -663,17 +692,13 @@ function AgentsPageContent() {
       groups[projectId].agents.push(agent);
     }
 
-    // Sort by active agents first
+    // Sort groups by having active agents
     return Object.entries(groups).sort((a, b) => {
-      const aActive = a[1].agents.filter(ag =>
-        ['working', 'initializing'].includes(ag.status)
-      ).length;
-      const bActive = b[1].agents.filter(ag =>
-        ['working', 'initializing'].includes(ag.status)
-      ).length;
+      const aActive = a[1].agents.filter(isAgentActive).length;
+      const bActive = b[1].agents.filter(isAgentActive).length;
       return bActive - aActive;
     });
-  }, [standaloneAgents, projects]);
+  }, [sortedAgents, projects, isAgentActive]);
 
   // Filter handlers
   const handleStatusFilter = useCallback(
@@ -703,20 +728,6 @@ function AgentsPageContent() {
   );
 
   // Action handlers
-  const handlePause = useCallback(
-    (id: string) => {
-      pauseAgent.mutate({ id });
-    },
-    [pauseAgent]
-  );
-
-  const handleResume = useCallback(
-    (id: string) => {
-      resumeAgent.mutate(id);
-    },
-    [resumeAgent]
-  );
-
   const handleTerminate = useCallback(
     (id: string) => {
       terminateAgent.mutate({ id });
@@ -855,7 +866,7 @@ function AgentsPageContent() {
           {agents.length > 0 && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-medium text-sc-fg-primary">Active Agents</h2>
+                <h2 className="text-sm font-medium text-sc-fg-primary">Recent Agents</h2>
                 <button
                   type="button"
                   onClick={() => setViewMode('list')}
@@ -865,25 +876,36 @@ function AgentsPageContent() {
                 </button>
               </div>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {agents
-                  .filter(a =>
-                    [
-                      'initializing',
-                      'working',
-                      'resuming',
-                      'waiting_approval',
-                      'waiting_dependency',
-                      'paused',
-                    ].includes(a.status)
-                  )
+                {[...agents]
+                  .sort((a, b) => {
+                    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+                    const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
+
+                    // NEW agents first
+                    const aNew = a.created_at && new Date(a.created_at).getTime() >= fiveMinutesAgo;
+                    const bNew = b.created_at && new Date(b.created_at).getTime() >= fiveMinutesAgo;
+                    if (aNew && !bNew) return -1;
+                    if (!aNew && bNew) return 1;
+
+                    // Then active agents
+                    const aActive =
+                      a.last_heartbeat && new Date(a.last_heartbeat).getTime() >= twoMinutesAgo;
+                    const bActive =
+                      b.last_heartbeat && new Date(b.last_heartbeat).getTime() >= twoMinutesAgo;
+                    if (aActive && !bActive) return -1;
+                    if (!aActive && bActive) return 1;
+
+                    // Then by most recent activity
+                    const aTime = a.last_heartbeat ? new Date(a.last_heartbeat).getTime() : 0;
+                    const bTime = b.last_heartbeat ? new Date(b.last_heartbeat).getTime() : 0;
+                    return bTime - aTime;
+                  })
                   .slice(0, 6)
                   .map(agent => (
                     <AgentCard
                       key={agent.id}
                       agent={agent}
                       orchestrator={orchestratorsByWorker.get(agent.id)}
-                      onPause={handlePause}
-                      onResume={handleResume}
                       onTerminate={handleTerminate}
                       onRename={handleRename}
                       onArchive={handleArchive}
@@ -1007,11 +1029,9 @@ function AgentsPageContent() {
                   {standaloneByProject.map(([projectId, { name, agents: projectAgents }]) => (
                     <ProjectGroup
                       key={projectId}
-                      projectName={orchestrators.length > 0 ? name : name}
+                      projectName={name}
                       agents={projectAgents}
                       orchestratorsByWorker={orchestratorsByWorker}
-                      onPause={handlePause}
-                      onResume={handleResume}
                       onTerminate={handleTerminate}
                       onRename={handleRename}
                       onArchive={handleArchive}
@@ -1025,9 +1045,9 @@ function AgentsPageContent() {
       )}
 
       {/* Loading indicator for mutations */}
-      {(pauseAgent.isPending || resumeAgent.isPending || terminateAgent.isPending) && (
+      {terminateAgent.isPending && (
         <div className="fixed bottom-4 right-4 bg-sc-bg-elevated border border-sc-fg-subtle/20 rounded-lg px-4 py-2 text-sm text-sc-fg-muted shadow-lg">
-          Updating agent...
+          Stopping agent...
         </div>
       )}
     </div>

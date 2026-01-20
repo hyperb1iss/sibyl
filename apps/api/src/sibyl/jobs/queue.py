@@ -520,6 +520,9 @@ async def enqueue_agent_resume(
     Clears any completed job result and enqueues a new execution.
     Uses the agent's stored session_id for Claude session resumption.
 
+    If a job is currently running for this agent, waits for it to complete
+    before enqueuing the resume (to avoid cancel scope issues in the SDK).
+
     Args:
         agent_id: Agent ID to resume
         org_id: Organization ID
@@ -532,10 +535,37 @@ async def enqueue_agent_resume(
 
     job_id = f"agent:{agent_id}"
 
-    # Clear old result to allow re-enqueue (like force crawl)
+    # Check if job is currently running - if so, request stop and wait
+    existing_job = Job(job_id, pool)
+    existing_status = await existing_job.status()
+
+    if existing_status == ArqJobStatus.in_progress:
+        log.info("Agent job in progress, requesting stop before resume", job_id=job_id)
+        # Signal the running job to stop gracefully
+        from sibyl.api.pubsub import request_agent_stop
+
+        await request_agent_stop(agent_id)
+
+        # Wait for the job to complete (with timeout)
+        import asyncio
+
+        for _ in range(30):  # Wait up to 30 seconds
+            await asyncio.sleep(1)
+            status = await existing_job.status()
+            if status != ArqJobStatus.in_progress:
+                log.debug("Previous job completed", job_id=job_id, status=status)
+                break
+        else:
+            log.warning("Timeout waiting for previous job to complete", job_id=job_id)
+
+    # Clear old result to allow re-enqueue
     result_key = f"arq:result:{job_id}"
     await pool.delete(result_key)
-    log.debug("Cleared old result for agent resume", job_id=job_id)
+
+    # Also clear the job key itself to ensure clean enqueue
+    job_key = f"arq:job:{job_id}"
+    await pool.delete(job_key)
+    log.debug("Cleared old job state for agent resume", job_id=job_id)
 
     job = await pool.enqueue_job(
         "resume_agent_execution",
@@ -546,8 +576,8 @@ async def enqueue_agent_resume(
     )
 
     if job is None:
-        # Job is currently running - that's fine, it will pick up the message
-        log.info("Agent job already running", job_id=job_id, agent_id=agent_id)
+        # This shouldn't happen after clearing, but handle gracefully
+        log.warning("Agent job still exists after clearing", job_id=job_id, agent_id=agent_id)
         return job_id
 
     log.info(
