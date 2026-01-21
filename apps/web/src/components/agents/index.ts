@@ -42,7 +42,6 @@ export {
   transformApiMessage,
   transformApiMessages,
 } from './chat-types';
-export { HealthMonitor } from './health-monitor';
 export { SibylContextMessage } from './sibyl-context-message';
 export { SpawnAgentDialog } from './spawn-agent-dialog';
 // Tool registry - single source of truth for tool metadata

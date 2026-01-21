@@ -245,10 +245,6 @@ const AgentCard = memo(function AgentCard({
               >
                 {
                   ORCHESTRATOR_PHASE_CONFIG[orchestrator.current_phase as OrchestratorPhaseType]
-                    ?.icon
-                }{' '}
-                {
-                  ORCHESTRATOR_PHASE_CONFIG[orchestrator.current_phase as OrchestratorPhaseType]
                     ?.label
                 }
                 {orchestrator.rework_count > 0 && ` #${orchestrator.rework_count}`}

@@ -129,7 +129,7 @@ const PhasePipeline = memo(function PhasePipeline({ currentPhase }: { currentPha
               }
               title={config.label}
             >
-              {isPast ? '✓' : config.icon}
+              {isPast ? '✓' : config.shortLabel}
             </div>
           </div>
         );
@@ -245,7 +245,7 @@ export const OrchestratorGroupCard = memo(function OrchestratorGroupCard({
                 <span
                   className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${phaseConfig.bgClass} ${phaseConfig.textClass}`}
                 >
-                  {phaseConfig.icon} {phaseConfig.label}
+                  {phaseConfig.label}
                   {orchestrator.rework_count > 0 && ` #${orchestrator.rework_count}`}
                 </span>
                 {isPaused && (

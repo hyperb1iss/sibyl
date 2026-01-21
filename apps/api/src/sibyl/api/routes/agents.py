@@ -1105,7 +1105,7 @@ async def record_heartbeat(
     """Record a heartbeat from an agent.
 
     Called periodically by running agents to indicate liveness.
-    Updates AgentState in Postgres (primary) and graph metadata (for legacy compatibility).
+    Updates AgentState in Postgres only (no graph writes for ephemeral data).
     """
     ctx = auth.ctx
     org = _require_org(ctx)
@@ -1122,6 +1122,7 @@ async def record_heartbeat(
     now = utcnow_naive()
 
     # Update AgentState in Postgres (primary source of truth)
+    # No graph update - ephemeral heartbeat/token data lives only in Postgres
     state_result = await auth.session.execute(
         select(AgentState).where(col(AgentState.graph_agent_id) == agent_id)
     )
@@ -1133,18 +1134,6 @@ async def record_heartbeat(
         if request.current_step:
             state.current_activity = request.current_step
         await auth.session.commit()
-
-    # Also update graph metadata for legacy compatibility
-    meta = entity.metadata or {}
-    updates = {
-        "last_heartbeat": now.isoformat(),
-        "tokens_used": meta.get("tokens_used", 0) + request.tokens_delta,
-        "cost_usd": meta.get("cost_usd", 0.0) + request.cost_delta,
-    }
-    if request.current_step:
-        updates["current_step"] = request.current_step
-
-    await manager.update(agent_id, updates)
 
     log.debug(
         "Agent heartbeat recorded",

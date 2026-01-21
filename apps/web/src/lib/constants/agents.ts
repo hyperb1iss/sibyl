@@ -123,41 +123,41 @@ export type OrchestratorPhaseType = (typeof ORCHESTRATOR_PHASES)[number];
 
 export const ORCHESTRATOR_PHASE_CONFIG: Record<
   OrchestratorPhaseType,
-  { label: string; color: string; bgClass: string; textClass: string; icon: string }
+  { label: string; shortLabel: string; color: string; bgClass: string; textClass: string }
 > = {
   implement: {
     label: 'Implementing',
+    shortLabel: 'IMPL',
     color: '#e135ff',
     bgClass: 'bg-[#e135ff]/20',
     textClass: 'text-[#e135ff]',
-    icon: '🔨',
   },
   review: {
     label: 'Reviewing',
+    shortLabel: 'REV',
     color: '#80ffea',
     bgClass: 'bg-[#80ffea]/20',
     textClass: 'text-[#80ffea]',
-    icon: '🔍',
   },
   rework: {
     label: 'Reworking',
+    shortLabel: 'FIX',
     color: '#f1fa8c',
     bgClass: 'bg-[#f1fa8c]/20',
     textClass: 'text-[#f1fa8c]',
-    icon: '🔄',
   },
   human_review: {
     label: 'Human Review',
+    shortLabel: 'WAIT',
     color: '#ff6ac1',
     bgClass: 'bg-[#ff6ac1]/20',
     textClass: 'text-[#ff6ac1]',
-    icon: '👤',
   },
   merge: {
     label: 'Merging',
+    shortLabel: 'DONE',
     color: '#50fa7b',
     bgClass: 'bg-[#50fa7b]/20',
     textClass: 'text-[#50fa7b]',
-    icon: '✓',
   },
 };
