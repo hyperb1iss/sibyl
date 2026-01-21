@@ -1107,19 +1107,17 @@ class AgentInstance:
             self._heartbeat_task = None
 
     async def _heartbeat_loop(self):
-        """Background task to update heartbeat."""
+        """Background task to update heartbeat.
+
+        Updates only Postgres (AgentState) for ephemeral state - no graph writes.
+        Graph is updated on meaningful state changes via _update_status().
+        """
         while self._running:
             try:
                 await asyncio.sleep(self.HEARTBEAT_INTERVAL)
                 if self._running:
-                    await self.entity_manager.update(
-                        self.record.id,
-                        {
-                            "last_heartbeat": datetime.now(UTC).isoformat(),
-                            "tokens_used": self._tokens_used,
-                            "cost_usd": self._cost_usd,
-                        },
-                    )
+                    # Only update Postgres - graph updates are expensive and unnecessary
+                    # for ephemeral heartbeat/token data. The API reads from AgentState.
                     await update_agent_state(
                         org_id=self.record.organization_id,
                         agent_id=self.record.id,
