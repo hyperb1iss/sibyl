@@ -73,13 +73,13 @@ class AgentRecord(Entity):
     worktree_path: str | None = Field(default=None, description="Path to isolated worktree")
     worktree_branch: str | None = Field(default=None, description="Git branch name")
 
-    # Orchestration (three-tier model)
-    task_orchestrator_id: str | None = Field(
-        default=None, description="TaskOrchestrator managing this worker, if any"
+    # Agent hierarchy (recursive spawning)
+    parent_agent_id: str | None = Field(
+        default=None, description="Parent agent that spawned this one, if any"
     )
     standalone: bool = Field(
         default=True,
-        description="True if created directly by user, False if managed by TaskOrchestrator",
+        description="True if created directly by user, False if spawned by parent agent",
     )
 
     # Lifecycle
@@ -161,7 +161,7 @@ class AgentRecord(Entity):
             worktree_id=meta.get("worktree_id"),
             worktree_path=meta.get("worktree_path"),
             worktree_branch=meta.get("worktree_branch"),
-            task_orchestrator_id=meta.get("task_orchestrator_id"),
+            parent_agent_id=meta.get("parent_agent_id") or meta.get("task_orchestrator_id"),
             standalone=meta.get("standalone", True),
             initial_prompt=meta.get("initial_prompt", ""),
             system_prompt_hash=meta.get("system_prompt_hash"),
@@ -179,166 +179,8 @@ class AgentRecord(Entity):
 
 
 # =============================================================================
-# MetaOrchestrator - Project-level coordination singleton (Tier 1)
+# Quality Gates (for agent self-review)
 # =============================================================================
-
-
-class MetaOrchestratorStatus(StrEnum):
-    """MetaOrchestrator lifecycle states."""
-
-    IDLE = "idle"  # No active tasks
-    RUNNING = "running"  # Coordinating tasks
-    PAUSED = "paused"  # User-initiated pause
-    FAILED = "failed"  # Critical error
-
-
-class SprintStrategy(StrEnum):
-    """Strategy for spawning TaskOrchestrators."""
-
-    SEQUENTIAL = "sequential"  # One task at a time
-    PARALLEL = "parallel"  # Multiple concurrent tasks
-    PRIORITY = "priority"  # Highest priority first
-
-
-class MetaOrchestratorRecord(Entity):
-    """Project-level coordination singleton (Tier 1).
-
-    Manages the overall project development by:
-    - Maintaining sprint context (epics, priorities)
-    - Spawning TaskOrchestrators for selected tasks
-    - Aggregating cross-task dependencies
-    - Tracking project-wide cost budgets
-
-    Part of the three-tier orchestration model:
-    - Tier 1: MetaOrchestrator (project-level coordination) <- THIS
-    - Tier 2: TaskOrchestrator (per-task build loop)
-    - Tier 3: Worker Agents (actual implementation)
-    """
-
-    entity_type: EntityType = EntityType.META_ORCHESTRATOR
-
-    # Ownership
-    project_id: str = Field(..., description="Project UUID this orchestrator manages")
-
-    # Sprint context
-    current_epic_id: str | None = Field(default=None, description="Active epic being worked")
-    task_queue: list[str] = Field(
-        default_factory=list, description="Task IDs queued for processing"
-    )
-    active_orchestrators: list[str] = Field(
-        default_factory=list, description="TaskOrchestrator IDs currently running"
-    )
-
-    # Strategy
-    status: MetaOrchestratorStatus = Field(
-        default=MetaOrchestratorStatus.IDLE, description="Current state"
-    )
-    strategy: SprintStrategy = Field(
-        default=SprintStrategy.SEQUENTIAL, description="How to spawn orchestrators"
-    )
-    max_concurrent: int = Field(
-        default=3, description="Max concurrent TaskOrchestrators (for parallel)"
-    )
-
-    # Cost controls
-    budget_usd: float = Field(default=100.0, description="Sprint budget in USD")
-    spent_usd: float = Field(default=0.0, description="Total spent this sprint")
-    cost_alert_threshold: float = Field(default=0.8, description="Alert at this % of budget")
-
-    # Timing
-    sprint_started_at: datetime | None = Field(default=None, description="When sprint started")
-    sprint_ends_at: datetime | None = Field(default=None, description="Sprint deadline")
-
-    # Metrics
-    tasks_completed: int = Field(default=0, description="Tasks completed this sprint")
-    tasks_failed: int = Field(default=0, description="Tasks failed this sprint")
-    total_rework_cycles: int = Field(default=0, description="Total rework cycles across all tasks")
-
-    @model_validator(mode="before")
-    @classmethod
-    def set_entity_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
-        """Set name and content from orchestrator fields."""
-        if isinstance(data, dict):
-            # Require organization_id
-            if not data.get("organization_id"):
-                msg = "organization_id is required for MetaOrchestratorRecord"
-                raise ValueError(msg)
-            # Name: project-based
-            if "name" not in data:
-                project_id = data.get("project_id", "unknown")
-                data["name"] = f"metaorch-{project_id[-8:]}"
-            # Content: status summary
-            if "content" not in data:
-                parts = [
-                    f"Status: {data.get('status', 'idle')}",
-                    f"Queue: {len(data.get('task_queue', []))} tasks",
-                    f"Active: {len(data.get('active_orchestrators', []))}",
-                ]
-                data["content"] = " | ".join(parts)
-        return data
-
-    @classmethod
-    def from_entity(cls, entity: Entity, org_id: str) -> "MetaOrchestratorRecord":
-        """Construct MetaOrchestratorRecord from a generic Entity.
-
-        Args:
-            entity: Generic Entity from EntityManager.get()
-            org_id: Organization ID (fallback if not in entity)
-
-        Returns:
-            Typed MetaOrchestratorRecord with all fields populated.
-        """
-        meta = entity.metadata or {}
-        return cls(
-            id=entity.id,
-            name=entity.name,
-            organization_id=entity.organization_id or org_id,
-            entity_type=EntityType.META_ORCHESTRATOR,
-            metadata=meta,  # Preserve metadata for filtering in list_by_type
-            project_id=meta.get("project_id", ""),
-            current_epic_id=meta.get("current_epic_id"),
-            task_queue=meta.get("task_queue", []),
-            active_orchestrators=meta.get("active_orchestrators", []),
-            status=MetaOrchestratorStatus(meta.get("status", "idle")),
-            strategy=SprintStrategy(meta.get("strategy", "sequential")),
-            max_concurrent=meta.get("max_concurrent", 3),
-            budget_usd=meta.get("budget_usd", 100.0),
-            spent_usd=meta.get("spent_usd", 0.0),
-            cost_alert_threshold=meta.get("cost_alert_threshold", 0.8),
-            sprint_started_at=meta.get("sprint_started_at"),
-            sprint_ends_at=meta.get("sprint_ends_at"),
-            tasks_completed=meta.get("tasks_completed", 0),
-            tasks_failed=meta.get("tasks_failed", 0),
-            total_rework_cycles=meta.get("total_rework_cycles", 0),
-        )
-
-
-# =============================================================================
-# TaskOrchestrator - Per-task build loop coordinator (Tier 2)
-# =============================================================================
-
-
-class TaskOrchestratorStatus(StrEnum):
-    """TaskOrchestrator lifecycle states."""
-
-    INITIALIZING = "initializing"  # Setting up worktree, spawning worker
-    IMPLEMENTING = "implementing"  # Worker actively coding
-    REVIEWING = "reviewing"  # Running quality gates
-    REWORKING = "reworking"  # Worker fixing review feedback
-    HUMAN_REVIEW = "human_review"  # Awaiting human approval
-    COMPLETE = "complete"  # All gates passed, ready for merge
-    FAILED = "failed"  # Max rework attempts exceeded
-    PAUSED = "paused"  # User paused this task
-
-
-class TaskOrchestratorPhase(StrEnum):
-    """Current phase in the build loop."""
-
-    IMPLEMENT = "implement"
-    REVIEW = "review"
-    REWORK = "rework"
-    HUMAN_REVIEW = "human_review"
-    MERGE = "merge"
 
 
 class QualityGateType(StrEnum):
@@ -352,129 +194,9 @@ class QualityGateType(StrEnum):
     HUMAN_REVIEW = "human_review"
 
 
-class TaskOrchestratorRecord(Entity):
-    """Per-task build loop coordinator.
-
-    Manages the implement → review → rework cycle for a single task.
-    Owns the worker lifecycle and quality gates.
-
-    Part of the three-tier orchestration model:
-    - Tier 1: MetaOrchestrator (project-level coordination)
-    - Tier 2: TaskOrchestrator (per-task build loop) <- THIS
-    - Tier 3: Worker Agents (actual implementation)
-    """
-
-    entity_type: EntityType = EntityType.TASK_ORCHESTRATOR
-
-    # Ownership
-    project_id: str = Field(..., description="Project UUID")
-    meta_orchestrator_id: str | None = Field(
-        default=None, description="Parent MetaOrchestrator, if any"
-    )
-    task_id: str = Field(..., description="Sibyl task being worked")
-
-    # Worker management
-    worker_id: str | None = Field(default=None, description="Current worker agent ID")
-    worktree_id: str | None = Field(default=None, description="Worker's worktree ID")
-
-    # Build loop state
-    status: TaskOrchestratorStatus = Field(
-        default=TaskOrchestratorStatus.INITIALIZING, description="Current state"
-    )
-    current_phase: TaskOrchestratorPhase = Field(
-        default=TaskOrchestratorPhase.IMPLEMENT, description="Phase in build loop"
-    )
-
-    # Ralph Loop safety controls
-    rework_count: int = Field(default=0, description="Number of review→rework cycles")
-    max_rework_attempts: int = Field(
-        default=3, description="Max iterations before human escalation"
-    )
-
-    # Quality gates configuration
-    gate_config: list[QualityGateType] = Field(
-        default_factory=lambda: [
-            QualityGateType.LINT,
-            QualityGateType.TYPECHECK,
-            QualityGateType.TEST,
-            QualityGateType.AI_REVIEW,
-        ],
-        description="Quality gates to run",
-    )
-    gate_results: list[dict[str, Any]] = Field(
-        default_factory=list, description="Results from each gate run"
-    )
-
-    # Human review
-    pending_approval_id: str | None = Field(
-        default=None, description="Approval request blocking progress"
-    )
-
-    # Timing
-    started_at: datetime | None = Field(default=None, description="When orchestration started")
-    completed_at: datetime | None = Field(default=None, description="When orchestration completed")
-
-    # Cost tracking
-    total_tokens: int = Field(default=0, description="Total tokens across all iterations")
-    total_cost_usd: float = Field(default=0.0, description="Total cost in USD")
-
-    @model_validator(mode="before")
-    @classmethod
-    def set_entity_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
-        """Set name and content from orchestrator fields."""
-        if isinstance(data, dict):
-            # Require organization_id
-            if not data.get("organization_id"):
-                msg = "organization_id is required for TaskOrchestratorRecord"
-                raise ValueError(msg)
-            # Name: task ID truncated
-            if "name" not in data:
-                task_id = data.get("task_id", "unknown")
-                data["name"] = f"taskorch-{task_id[-8:]}"
-            # Content: status and phase
-            if "content" not in data:
-                parts = [
-                    f"Status: {data.get('status', 'unknown')}",
-                    f"Phase: {data.get('current_phase', 'unknown')}",
-                ]
-                if data.get("rework_count", 0) > 0:
-                    parts.append(f"Rework: {data['rework_count']}")
-                data["content"] = " | ".join(parts)
-        return data
-
-    @classmethod
-    def from_entity(cls, entity: Entity, org_id: str) -> "TaskOrchestratorRecord":
-        """Construct TaskOrchestratorRecord from a generic Entity.
-
-        Args:
-            entity: Generic Entity from EntityManager.get()
-            org_id: Organization ID (fallback if not in entity)
-
-        Returns:
-            Typed TaskOrchestratorRecord with all fields populated.
-        """
-        meta = entity.metadata or {}
-        return cls(
-            id=entity.id,
-            name=entity.name,
-            organization_id=entity.organization_id or org_id,
-            entity_type=EntityType.TASK_ORCHESTRATOR,
-            metadata=meta,  # Preserve metadata for filtering in list_by_type
-            project_id=meta.get("project_id", ""),
-            meta_orchestrator_id=meta.get("meta_orchestrator_id"),
-            task_id=meta.get("task_id", ""),
-            worker_id=meta.get("worker_id"),
-            worktree_id=meta.get("worktree_id"),
-            status=TaskOrchestratorStatus(meta.get("status", "initializing")),
-            current_phase=TaskOrchestratorPhase(meta.get("current_phase", "implement")),
-            rework_count=meta.get("rework_count", 0),
-            max_rework_attempts=meta.get("max_rework_attempts", 3),
-            gate_config=[QualityGateType(g) for g in meta.get("gate_config", [])],
-            gate_results=meta.get("gate_results", []),
-            pending_approval_id=meta.get("pending_approval_id"),
-            total_tokens=meta.get("total_tokens", 0),
-            total_cost_usd=meta.get("total_cost_usd", 0.0),
-        )
+# =============================================================================
+# Worktree - Git worktree for agent isolation
+# =============================================================================
 
 
 class WorktreeStatus(StrEnum):

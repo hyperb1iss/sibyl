@@ -11,9 +11,6 @@ export {
   AGENT_TYPES,
   type AgentStatusType,
   type AgentTypeValue,
-  ORCHESTRATOR_PHASE_CONFIG,
-  ORCHESTRATOR_PHASES,
-  type OrchestratorPhaseType,
 } from './agents';
 // Application
 export { APP_CONFIG, TIMING } from './app';

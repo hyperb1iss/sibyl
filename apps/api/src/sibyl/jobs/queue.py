@@ -619,57 +619,6 @@ async def enqueue_agent_resume(
     return job.job_id
 
 
-async def enqueue_orchestrator_spawn(
-    orchestrator_id: str,
-    org_id: str,
-    project_id: str,
-    gate_config: list[str] | None = None,
-) -> str:
-    """Enqueue a MetaOrchestrator spawn job.
-
-    Spawns TaskOrchestrators for a MetaOrchestrator in the worker process
-    where all dependencies (agent_runner, worktree_manager) are available.
-
-    Args:
-        orchestrator_id: MetaOrchestrator ID
-        org_id: Organization ID
-        project_id: Project ID
-        gate_config: Quality gate types (as strings)
-
-    Returns:
-        Job ID for tracking
-    """
-    pool = await get_pool()
-
-    # Deterministic job ID prevents duplicate spawns
-    job_id = f"orchestrator_spawn:{orchestrator_id}"
-
-    job = await pool.enqueue_job(
-        "run_orchestrator_spawn",
-        orchestrator_id,
-        org_id,
-        project_id,
-        gate_config=gate_config,
-        _job_id=job_id,
-    )
-
-    if job is None:
-        log.info(
-            "Orchestrator spawn job already exists",
-            job_id=job_id,
-            orchestrator_id=orchestrator_id,
-        )
-        return job_id
-
-    log.info(
-        "Enqueued orchestrator spawn job",
-        job_id=job.job_id,
-        orchestrator_id=orchestrator_id,
-    )
-
-    return job.job_id
-
-
 async def enqueue_backup(
     organization_id: str,
     *,

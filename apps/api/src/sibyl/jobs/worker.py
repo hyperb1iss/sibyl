@@ -5,7 +5,7 @@ Run with: uv run arq sibyl.jobs.WorkerSettings
 This is the worker entrypoint. Job implementations are in:
 - crawl.py: crawl_source, sync_source, sync_all_sources
 - entities.py: create_entity, create_learning_episode, update_entity
-- agents.py: run_agent_execution, resume_agent_execution, generate_status_hint, run_orchestrator_spawn
+- agents.py: run_agent_execution, resume_agent_execution, generate_status_hint
 - backup.py: run_backup, cleanup_old_backups
 """
 
@@ -23,7 +23,6 @@ from sibyl.jobs.agents import (
     generate_status_hint,
     resume_agent_execution,
     run_agent_execution,
-    run_orchestrator_spawn,
 )
 from sibyl.jobs.backup import cleanup_old_backups, run_backup, run_scheduled_backups
 from sibyl.jobs.crawl import crawl_source, sync_all_sources, sync_source
@@ -63,7 +62,8 @@ async def _cleanup_stale_working_agents() -> int:
 
     try:
         pool = await get_pool()
-        stale_threshold = datetime.now(UTC) - timedelta(minutes=5)
+        # Use naive datetime to match DB column (TIMESTAMP WITHOUT TIME ZONE)
+        stale_threshold = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=5)
         marked_failed = 0
 
         async with get_session() as session:
@@ -245,7 +245,6 @@ class WorkerSettings:
         run_agent_execution,
         resume_agent_execution,
         generate_status_hint,
-        run_orchestrator_spawn,
         # Backup jobs
         run_backup,
         cleanup_old_backups,

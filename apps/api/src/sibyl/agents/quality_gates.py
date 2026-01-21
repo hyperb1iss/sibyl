@@ -1,4 +1,4 @@
-"""Quality gate runner framework for TaskOrchestrator.
+"""Quality gate runner framework for agent self-review.
 
 Executes lint, typecheck, test, and security scan commands in worktrees.
 Detects project types and runs appropriate commands.

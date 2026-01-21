@@ -14,8 +14,6 @@ from sibyl_core.models.agents import (
     AgentRecord,
     AgentStatus,
     AgentType,
-    TaskOrchestratorRecord,
-    TaskOrchestratorStatus,
     WorktreeRecord,
     WorktreeStatus,
 )
@@ -532,43 +530,6 @@ class TestTypedHydration:
         assert result.status == AgentStatus.WORKING
         assert result.task_id == "task-typed-001"
         assert result.worktree_id == "worktree-typed-001"
-
-    @pytest.mark.asyncio
-    async def test_list_by_type_hydrates_task_orchestrator(
-        self,
-        entity_manager: EntityManager,
-        mock_driver: MagicMock,
-    ) -> None:
-        """list_by_type() returns TaskOrchestratorRecord instances."""
-        mock_driver.execute_query.return_value = (
-            [
-                {
-                    "uuid": "orch-typed-001",
-                    "name": "Task Orchestrator",
-                    "entity_type": "task_orchestrator",
-                    "group_id": "test-org-123",
-                    "metadata": json.dumps(
-                        {
-                            "project_id": "project-typed-001",
-                            "task_id": "task-typed-001",
-                            "worker_id": "agent-typed-001",
-                            "worktree_id": "worktree-typed-001",
-                            "status": "reviewing",
-                            "current_phase": "review",
-                        }
-                    ),
-                }
-            ],
-            None,
-            None,
-        )
-
-        results = await entity_manager.list_by_type(EntityType.TASK_ORCHESTRATOR)
-
-        assert len(results) == 1
-        assert isinstance(results[0], TaskOrchestratorRecord)
-        assert results[0].worker_id == "agent-typed-001"
-        assert results[0].status == TaskOrchestratorStatus.REVIEWING
 
     @pytest.mark.asyncio
     async def test_list_by_type_hydrates_worktree_record(

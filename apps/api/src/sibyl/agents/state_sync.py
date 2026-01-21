@@ -37,7 +37,7 @@ async def update_agent_state(
     completed_at: datetime | None | object = _UNSET,
     error_message: str | None | object = _UNSET,
     task_id: str | None | object = _UNSET,
-    orchestrator_id: str | None | object = _UNSET,
+    parent_agent_id: str | None | object = _UNSET,  # Maps to DB orchestrator_id column
     current_activity: str | None | object = _UNSET,
 ) -> None:
     """Update AgentState in Postgres, creating it if missing.
@@ -72,8 +72,8 @@ async def update_agent_state(
                 )
                 if task_id is not _UNSET:
                     state.task_id = task_id
-                if orchestrator_id is not _UNSET:
-                    state.orchestrator_id = orchestrator_id
+                if parent_agent_id is not _UNSET:
+                    state.orchestrator_id = parent_agent_id  # DB column name
                 session.add(state)
 
             if status is not _UNSET and status is not None:
@@ -92,8 +92,8 @@ async def update_agent_state(
                 state.error_message = error_message
             if task_id is not _UNSET:
                 state.task_id = task_id
-            if orchestrator_id is not _UNSET:
-                state.orchestrator_id = orchestrator_id
+            if parent_agent_id is not _UNSET:
+                state.orchestrator_id = parent_agent_id  # DB column name
             if current_activity is not _UNSET:
                 state.current_activity = current_activity
 

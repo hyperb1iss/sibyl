@@ -27,18 +27,11 @@ import {
 import { LoadingState } from '@/components/ui/spinner';
 import { FilterChip } from '@/components/ui/toggle';
 import { ErrorState } from '@/components/ui/tooltip';
-import type { Agent, AgentStatus, TaskOrchestrator } from '@/lib/api';
-import {
-  AGENT_TYPE_CONFIG,
-  type AgentTypeValue,
-  formatDistanceToNow,
-  ORCHESTRATOR_PHASE_CONFIG,
-  type OrchestratorPhaseType,
-} from '@/lib/constants';
+import type { Agent, AgentStatus } from '@/lib/api';
+import { AGENT_TYPE_CONFIG, type AgentTypeValue, formatDistanceToNow } from '@/lib/constants';
 import {
   useAgents,
   useArchiveAgent,
-  useOrchestrators,
   useProjects,
   useRenameAgent,
   useTerminateAgent,
@@ -145,13 +138,11 @@ function getTagStyle(tag: string): string {
 
 const AgentCard = memo(function AgentCard({
   agent,
-  orchestrator,
   onTerminate,
   onRename,
   onArchive,
 }: {
   agent: Agent;
-  orchestrator?: TaskOrchestrator;
   onTerminate: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onArchive: (id: string) => void;
@@ -235,19 +226,6 @@ const AgentCard = memo(function AgentCard({
             {needsApproval && (
               <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-sc-coral/20 text-sc-coral font-medium">
                 ⏳ Needs Approval
-              </span>
-            )}
-
-            {/* Orchestrator phase badge */}
-            {orchestrator && (
-              <span
-                className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${ORCHESTRATOR_PHASE_CONFIG[orchestrator.current_phase as OrchestratorPhaseType]?.bgClass ?? 'bg-sc-fg-subtle/20'} ${ORCHESTRATOR_PHASE_CONFIG[orchestrator.current_phase as OrchestratorPhaseType]?.textClass ?? 'text-sc-fg-muted'}`}
-              >
-                {
-                  ORCHESTRATOR_PHASE_CONFIG[orchestrator.current_phase as OrchestratorPhaseType]
-                    ?.label
-                }
-                {orchestrator.rework_count > 0 && ` #${orchestrator.rework_count}`}
               </span>
             )}
           </div>
@@ -384,14 +362,12 @@ const AgentCard = memo(function AgentCard({
 const ProjectGroup = memo(function ProjectGroup({
   projectName,
   agents,
-  orchestratorsByWorker,
   onTerminate,
   onRename,
   onArchive,
 }: {
   projectName: string;
   agents: Agent[];
-  orchestratorsByWorker: Map<string, TaskOrchestrator>;
   onTerminate: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onArchive: (id: string) => void;
@@ -420,7 +396,6 @@ const ProjectGroup = memo(function ProjectGroup({
           <AgentCard
             key={agent.id}
             agent={agent}
-            orchestrator={orchestratorsByWorker.get(agent.id)}
             onTerminate={onTerminate}
             onRename={onRename}
             onArchive={onArchive}
@@ -519,20 +494,6 @@ function AgentsPageContent() {
     status: statusFilter ?? undefined,
   });
   const { data: projectsData, isLoading: projectsLoading } = useProjects();
-  const { data: orchestratorsData } = useOrchestrators(projectFilter);
-
-  // Create maps for quick lookups
-  const orchestratorsByWorker = useMemo(() => {
-    const map = new Map<string, TaskOrchestrator>();
-    if (orchestratorsData?.orchestrators) {
-      for (const orch of orchestratorsData.orchestrators) {
-        if (orch.worker_id) {
-          map.set(orch.worker_id, orch);
-        }
-      }
-    }
-    return map;
-  }, [orchestratorsData]);
 
   // Agent mutations
   const terminateAgent = useTerminateAgent();
@@ -793,7 +754,6 @@ function AgentsPageContent() {
                     <AgentCard
                       key={agent.id}
                       agent={agent}
-                      orchestrator={orchestratorsByWorker.get(agent.id)}
                       onTerminate={handleTerminate}
                       onRename={handleRename}
                       onArchive={handleArchive}
@@ -887,7 +847,6 @@ function AgentsPageContent() {
                   key={projectId}
                   projectName={name}
                   agents={projectAgents}
-                  orchestratorsByWorker={orchestratorsByWorker}
                   onTerminate={handleTerminate}
                   onRename={handleRename}
                   onArchive={handleArchive}

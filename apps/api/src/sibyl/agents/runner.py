@@ -661,7 +661,7 @@ When done, complete with learnings to capture insights for future agents.
             status=AgentStatus.WORKING.value,
             started_at=utcnow_naive(),
             task_id=record.task_id,
-            orchestrator_id=record.task_orchestrator_id,
+            parent_agent_id=record.parent_agent_id,
         )
 
         log.info(f"Agent {record.id} spawned and ready")

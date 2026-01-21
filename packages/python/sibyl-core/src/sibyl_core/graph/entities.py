@@ -26,8 +26,6 @@ from sibyl_core.models.agents import (
     ApprovalRecord,
     ApprovalStatus,
     ApprovalType,
-    MetaOrchestratorRecord,
-    TaskOrchestratorRecord,
     WorktreeRecord,
     WorktreeStatus,
 )
@@ -234,10 +232,9 @@ class EntityManager:
             EntityCreationError: If creation fails.
         """
         import json
+        import time as _time
 
         from sibyl_core.errors import EntityCreationError
-
-        import time as _time
 
         log.info(
             "Creating entity directly via EntityNode",
@@ -1514,34 +1511,11 @@ class EntityManager:
                     "worktree_id",
                     "worktree_path",
                     "worktree_branch",
-                    "task_orchestrator_id",
+                    "parent_agent_id",
                     "standalone",
                     "started_at",
                     "last_heartbeat",
                     "completed_at",
-                )
-            )
-        elif isinstance(entity, TaskOrchestratorRecord):
-            add_fields(
-                (
-                    "project_id",
-                    "meta_orchestrator_id",
-                    "task_id",
-                    "worker_id",
-                    "worktree_id",
-                    "status",
-                    "current_phase",
-                    "pending_approval_id",
-                )
-            )
-        elif isinstance(entity, MetaOrchestratorRecord):
-            add_fields(
-                (
-                    "project_id",
-                    "current_epic_id",
-                    "status",
-                    "strategy",
-                    "max_concurrent",
                 )
             )
         elif isinstance(entity, WorktreeRecord):
@@ -1653,7 +1627,7 @@ class EntityManager:
             metadata["created_by"] = entity.created_by
             metadata["worktree_path"] = entity.worktree_path
             metadata["worktree_branch"] = entity.worktree_branch
-            metadata["task_orchestrator_id"] = entity.task_orchestrator_id
+            metadata["parent_agent_id"] = entity.parent_agent_id
             metadata["standalone"] = entity.standalone
             metadata["session_id"] = entity.session_id
             metadata["checkpoint_id"] = entity.checkpoint_id
@@ -1672,45 +1646,6 @@ class EntityManager:
                 metadata["completed_at"] = entity.completed_at.isoformat()
             if entity.paused_reason:
                 metadata["paused_reason"] = entity.paused_reason
-
-        # Add TaskOrchestrator-specific fields
-        elif isinstance(entity, TaskOrchestratorRecord):
-            metadata["project_id"] = entity.project_id
-            metadata["meta_orchestrator_id"] = entity.meta_orchestrator_id
-            metadata["task_id"] = entity.task_id
-            metadata["worker_id"] = entity.worker_id
-            metadata["worktree_id"] = entity.worktree_id
-            metadata["status"] = entity.status.value if entity.status else "initializing"
-            metadata["current_phase"] = (
-                entity.current_phase.value if entity.current_phase else "implement"
-            )
-            metadata["rework_count"] = entity.rework_count
-            metadata["max_rework_attempts"] = entity.max_rework_attempts
-            metadata["gate_config"] = [gate.value for gate in entity.gate_config or []]
-            metadata["gate_results"] = entity.gate_results
-            metadata["pending_approval_id"] = entity.pending_approval_id
-            metadata["total_tokens"] = entity.total_tokens
-            metadata["total_cost_usd"] = entity.total_cost_usd
-
-        # Add MetaOrchestrator-specific fields
-        elif isinstance(entity, MetaOrchestratorRecord):
-            metadata["project_id"] = entity.project_id
-            metadata["current_epic_id"] = entity.current_epic_id
-            metadata["task_queue"] = entity.task_queue
-            metadata["active_orchestrators"] = entity.active_orchestrators
-            metadata["status"] = entity.status.value if entity.status else "idle"
-            metadata["strategy"] = entity.strategy.value if entity.strategy else "sequential"
-            metadata["max_concurrent"] = entity.max_concurrent
-            metadata["budget_usd"] = entity.budget_usd
-            metadata["spent_usd"] = entity.spent_usd
-            metadata["cost_alert_threshold"] = entity.cost_alert_threshold
-            if entity.sprint_started_at:
-                metadata["sprint_started_at"] = entity.sprint_started_at.isoformat()
-            if entity.sprint_ends_at:
-                metadata["sprint_ends_at"] = entity.sprint_ends_at.isoformat()
-            metadata["tasks_completed"] = entity.tasks_completed
-            metadata["tasks_failed"] = entity.tasks_failed
-            metadata["total_rework_cycles"] = entity.total_rework_cycles
 
         # Add WorktreeRecord-specific fields
         elif isinstance(entity, WorktreeRecord):
@@ -1789,8 +1724,6 @@ class EntityManager:
             (
                 Task,
                 AgentRecord,
-                TaskOrchestratorRecord,
-                MetaOrchestratorRecord,
                 WorktreeRecord,
                 AgentCheckpoint,
                 ApprovalRecord,
@@ -1803,10 +1736,6 @@ class EntityManager:
                 return self._entity_to_task(entity)
             if entity.entity_type == EntityType.AGENT:
                 return AgentRecord.from_entity(entity, self._group_id)
-            if entity.entity_type == EntityType.TASK_ORCHESTRATOR:
-                return TaskOrchestratorRecord.from_entity(entity, self._group_id)
-            if entity.entity_type == EntityType.META_ORCHESTRATOR:
-                return MetaOrchestratorRecord.from_entity(entity, self._group_id)
             if entity.entity_type == EntityType.WORKTREE:
                 return self._entity_to_worktree(entity)
             if entity.entity_type == EntityType.CHECKPOINT:
