@@ -85,11 +85,6 @@ class MockGraphClient:
     default_results: list[dict[str, Any]] = field(default_factory=list)
     custom_handlers: dict[str, Any] = field(default_factory=dict)
     _connected: bool = False
-    _write_semaphore: asyncio.Semaphore | None = None
-
-    def __post_init__(self) -> None:
-        """Initialize semaphore after dataclass init."""
-        self._write_semaphore = asyncio.Semaphore(20)
 
     # -------------------------------------------------------------------------
     # Connection Management
@@ -108,13 +103,6 @@ class MockGraphClient:
         """Check if client is connected."""
         return self._connected
 
-    @property
-    def write_lock(self) -> asyncio.Semaphore:
-        """Get write semaphore for serializing operations."""
-        if self._write_semaphore is None:
-            self._write_semaphore = asyncio.Semaphore(20)
-        return self._write_semaphore
-
     # -------------------------------------------------------------------------
     # Query Execution
     # -------------------------------------------------------------------------
@@ -126,9 +114,8 @@ class MockGraphClient:
 
     async def execute_write(self, query: str, **params: Any) -> list[dict[str, Any]]:
         """Execute a write query (deprecated, use execute_write_org)."""
-        async with self.write_lock:
-            self.query_history.append(QueryRecord(query=query, params=params, operation="write"))
-            return self._process_query(query, params)
+        self.query_history.append(QueryRecord(query=query, params=params, operation="write"))
+        return self._process_query(query, params)
 
     async def execute_read_org(
         self, query: str, organization_id: str, **params: Any
@@ -147,15 +134,14 @@ class MockGraphClient:
         self, query: str, organization_id: str, **params: Any
     ) -> list[dict[str, Any]]:
         """Execute a write query scoped to an organization."""
-        async with self.write_lock:
-            self.query_history.append(
-                QueryRecord(
-                    query=query,
-                    params={"organization_id": organization_id, **params},
-                    operation="write",
-                )
+        self.query_history.append(
+            QueryRecord(
+                query=query,
+                params={"organization_id": organization_id, **params},
+                operation="write",
             )
-            return self._process_query(query, params, org_id=organization_id)
+        )
+        return self._process_query(query, params, org_id=organization_id)
 
     def _process_query(
         self, query: str, params: dict[str, Any], org_id: str | None = None

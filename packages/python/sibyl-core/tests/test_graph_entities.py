@@ -61,9 +61,6 @@ def mock_graph_client(mock_graphiti_client: MagicMock) -> MagicMock:
     """Create a mock GraphClient wrapper."""
     graph_client = MagicMock()
     graph_client.client = mock_graphiti_client
-    graph_client.write_lock = MagicMock()
-    graph_client.write_lock.__aenter__ = AsyncMock()
-    graph_client.write_lock.__aexit__ = AsyncMock()
     return graph_client
 
 
@@ -322,11 +319,13 @@ class TestEntityCreateDirect:
         mock_graph_client: MagicMock,
     ) -> None:
         """create_direct() raises EntityCreationError on failure."""
-        # The save method is called on an instance, so we need to make the
-        # write_lock context manager raise the exception
-        mock_graph_client.write_lock.__aenter__.side_effect = Exception("DB error")
-
-        with pytest.raises(EntityCreationError, match="Failed to create entity"):
+        # Mock EntityNode.save to raise an exception
+        with patch.object(
+            EntityNode,
+            "save",
+            new_callable=AsyncMock,
+            side_effect=Exception("DB error"),
+        ), pytest.raises(EntityCreationError, match="Failed to create entity"):
             await entity_manager.create_direct(sample_entity)
 
 
@@ -1693,7 +1692,7 @@ class TestBulkCreateDirect:
 
         call_count = 0
 
-        async def flaky_context(*args: object, **kwargs: object) -> None:
+        async def flaky_save(*args: object, **kwargs: object) -> None:
             nonlocal call_count
             call_count += 1
             # Fail on second entity
@@ -1701,10 +1700,9 @@ class TestBulkCreateDirect:
                 raise Exception("Random failure")
             return None
 
-        # Make the write_lock context fail on second call
-        mock_graph_client.write_lock.__aenter__.side_effect = flaky_context
-
-        created, failed = await entity_manager.bulk_create_direct(entities)
+        # Make EntityNode.save fail on second call
+        with patch.object(EntityNode, "save", new_callable=AsyncMock, side_effect=flaky_save):
+            created, failed = await entity_manager.bulk_create_direct(entities)
 
         assert created == 2
         assert failed == 1
@@ -1914,17 +1912,21 @@ class TestEdgeCases:
         mock_entity.attributes = {"entity_type": "pattern", "metadata": "{}"}
         mock_entity.name_embedding = None
 
-        with patch.object(
-            EntityNode,
-            "get_by_uuid",
-            new_callable=AsyncMock,
-            return_value=mock_entity,
+        with (
+            patch.object(
+                EntityNode,
+                "get_by_uuid",
+                new_callable=AsyncMock,
+                return_value=mock_entity,
+            ),
+            patch.object(
+                manager,
+                "_persist_entity_attributes",
+                new_callable=AsyncMock,
+                side_effect=Exception("Write failed"),
+            ),pytest.raises(Exception, match="Write failed")
         ):
-            # Make write_lock context raise an error during persist
-            mock_graph_client.write_lock.__aenter__.side_effect = Exception("Write failed")
-
-            with pytest.raises(Exception, match="Write failed"):
-                await manager.update("entity-001", {"name": "New Name"})
+            await manager.update("entity-001", {"name": "New Name"})
 
 
 # =============================================================================

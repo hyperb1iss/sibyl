@@ -1121,15 +1121,14 @@ async def backfill_episode_task_relationships(
                     """
                     from datetime import UTC, datetime
 
-                    async with client.write_lock:
-                        await client.execute_write_org(
-                            create_rel_query,
-                            organization_id,
-                            episode_id=episode_id,
-                            task_id=task_id,
-                            group_id=organization_id,
-                            created_at=datetime.now(UTC).isoformat(),
-                        )
+                    await client.execute_write_org(
+                        create_rel_query,
+                        organization_id,
+                        episode_id=episode_id,
+                        task_id=task_id,
+                        group_id=organization_id,
+                        created_at=datetime.now(UTC).isoformat(),
+                    )
                     log.debug(
                         "created_episode_task_rel",
                         episode_id=episode_id,

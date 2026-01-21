@@ -49,9 +49,6 @@ def mock_graph_client(mock_graphiti_client: MagicMock) -> MagicMock:
     graph_client = MagicMock()
     graph_client.client = mock_graphiti_client
     graph_client.driver = mock_graphiti_client.driver
-    graph_client.write_lock = MagicMock()
-    graph_client.write_lock.__aenter__ = AsyncMock()
-    graph_client.write_lock.__aexit__ = AsyncMock()
     graph_client.normalize_result = MagicMock(side_effect=lambda x: x[0] if x else [])
     return graph_client
 
@@ -714,10 +711,10 @@ class TestRelationshipDelete:
     async def test_delete_failure_raises_error(
         self,
         relationship_manager: RelationshipManager,
-        mock_graph_client: MagicMock,
+        mock_driver: MagicMock,
     ) -> None:
         """delete() raises ConventionsMCPError on failure."""
-        mock_graph_client.write_lock.__aenter__.side_effect = Exception("DB error")
+        mock_driver.execute_query.side_effect = Exception("DB error")
 
         with pytest.raises(ConventionsMCPError, match="Failed to delete relationship"):
             await relationship_manager.delete("rel-001")
@@ -760,10 +757,10 @@ class TestDeleteForEntity:
     async def test_delete_for_entity_handles_error(
         self,
         relationship_manager: RelationshipManager,
-        mock_graph_client: MagicMock,
+        mock_driver: MagicMock,
     ) -> None:
         """delete_for_entity() returns 0 on error (graceful degradation)."""
-        mock_graph_client.write_lock.__aenter__.side_effect = Exception("DB error")
+        mock_driver.execute_query.side_effect = Exception("DB error")
 
         result = await relationship_manager.delete_for_entity("entity-001")
 

@@ -130,13 +130,14 @@ results = await manager.search("authentication patterns", limit=20)
 
 ### Write Concurrency
 
-All writes use the write lock to prevent FalkorDB corruption:
+Write concurrency is handled by FalkorDB's BlockingConnectionPool (50 connections, 60s timeout).
+No application-level locking is required.
 
 ```python
-async with client.write_lock:
-    await client.execute_write_org(org_id, query, **params)
+# Direct writes are safe - connection pool handles concurrency
+await client.execute_write_org(org_id, query, **params)
 
-# Or use EntityManager (handles locking internally)
+# Or use EntityManager
 await manager.create(entity)
 ```
 

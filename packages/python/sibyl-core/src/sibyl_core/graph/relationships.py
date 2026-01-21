@@ -197,18 +197,17 @@ class RelationshipManager:
                 RETURN r.uuid as uuid
             """
 
-            async with self._client.write_lock:
-                await self._driver.execute_query(
-                    query,
-                    source_uuid=relationship.source_id,
-                    target_uuid=relationship.target_id,
-                    edge_uuid=edge.uuid,
-                    name=rel_type,
-                    group_id=self._group_id,
-                    created_at=edge.created_at.isoformat(),
-                    weight=relationship.weight,
-                    fact=edge.fact,
-                )
+            await self._driver.execute_query(
+                query,
+                source_uuid=relationship.source_id,
+                target_uuid=relationship.target_id,
+                edge_uuid=edge.uuid,
+                name=rel_type,
+                group_id=self._group_id,
+                created_at=edge.created_at.isoformat(),
+                weight=relationship.weight,
+                fact=edge.fact,
+            )
 
             log.info("Created relationship", relationship_id=edge.uuid)
             return edge.uuid
@@ -494,12 +493,11 @@ class RelationshipManager:
                 RETURN count(r) as deleted
             """
 
-            async with self._client.write_lock:
-                result = await self._driver.execute_query(
-                    query,
-                    relationship_id=relationship_id,
-                    group_id=self._group_id,
-                )
+            result = await self._driver.execute_query(
+                query,
+                relationship_id=relationship_id,
+                group_id=self._group_id,
+            )
 
             rows = self._client.normalize_result(result)
             deleted = (
@@ -541,12 +539,11 @@ class RelationshipManager:
                 RETURN count(r) as deleted
             """
 
-            async with self._client.write_lock:
-                result = await self._driver.execute_query(
-                    query,
-                    entity_id=entity_id,
-                    group_id=self._group_id,
-                )
+            result = await self._driver.execute_query(
+                query,
+                entity_id=entity_id,
+                group_id=self._group_id,
+            )
 
             rows = self._client.normalize_result(result)
             deleted = (
