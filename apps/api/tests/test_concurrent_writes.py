@@ -38,9 +38,29 @@ async def graph_client() -> AsyncGenerator[GraphClient]:
 
 
 @pytest.fixture
-def test_group_id() -> str:
-    """Generate a unique group ID for test isolation."""
-    return f"stress_test_{uuid.uuid4().hex[:8]}"
+async def test_group_id(graph_client: GraphClient) -> AsyncGenerator[str]:
+    """Generate a unique group ID for test isolation.
+
+    Yields the group ID and cleans up the entire graph on teardown.
+    """
+    group_id = f"stress_test_{uuid.uuid4().hex[:8]}"
+    yield group_id
+
+    # Cleanup: delete the entire graph, not just entities
+    # This prevents orphaned test graphs from accumulating in FalkorDB
+    with contextlib.suppress(Exception):
+        import redis.asyncio as redis
+
+        from sibyl.config import settings
+
+        client = redis.Redis(
+            host=settings.falkordb_host,
+            port=settings.falkordb_port,
+            password=settings.falkordb_password or None,
+            decode_responses=True,
+        )
+        await client.execute_command("GRAPH.DELETE", group_id)
+        await client.aclose()
 
 
 def _create_test_pattern(index: int, group_id: str) -> Pattern:

@@ -318,12 +318,15 @@ class TestEntityCreateDirect:
     ) -> None:
         """create_direct() raises EntityCreationError on failure."""
         # Mock EntityNode.save to raise an exception
-        with patch.object(
-            EntityNode,
-            "save",
-            new_callable=AsyncMock,
-            side_effect=Exception("DB error"),
-        ), pytest.raises(EntityCreationError, match="Failed to create entity"):
+        with (
+            patch.object(
+                EntityNode,
+                "save",
+                new_callable=AsyncMock,
+                side_effect=Exception("DB error"),
+            ),
+            pytest.raises(EntityCreationError, match="Failed to create entity"),
+        ):
             await entity_manager.create_direct(sample_entity)
 
 
@@ -1885,7 +1888,8 @@ class TestEdgeCases:
                 "_persist_entity_attributes",
                 new_callable=AsyncMock,
                 side_effect=Exception("Write failed"),
-            ),pytest.raises(Exception, match="Write failed")
+            ),
+            pytest.raises(Exception, match="Write failed"),
         ):
             await manager.update("entity-001", {"name": "New Name"})
 

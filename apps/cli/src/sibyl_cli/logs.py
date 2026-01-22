@@ -188,6 +188,7 @@ async def _stream_logs(
                 try:
                     msg = await ws.recv()
                     import json
+
                     entry = json.loads(msg)
 
                     # Apply filters
@@ -227,8 +228,12 @@ def stats(
                     return
 
                 console.print("\n[bold]Log Buffer Statistics[/bold]\n")
-                console.print(f"  Buffer size:      [{CORAL}]{data.get('buffer_size', 0)}[/{CORAL}] entries")
-                console.print(f"  Active streams:   [{CORAL}]{data.get('subscriber_count', 0)}[/{CORAL}]")
+                console.print(
+                    f"  Buffer size:      [{CORAL}]{data.get('buffer_size', 0)}[/{CORAL}] entries"
+                )
+                console.print(
+                    f"  Active streams:   [{CORAL}]{data.get('subscriber_count', 0)}[/{CORAL}]"
+                )
                 console.print()
 
         except SibylClientError as e:

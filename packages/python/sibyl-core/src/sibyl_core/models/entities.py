@@ -47,7 +47,6 @@ class EntityType(StrEnum):
     CHECKPOINT = "checkpoint"  # Agent session checkpoint for resume
 
 
-
 class RelationshipType(StrEnum):
     """Types of relationships between entities."""
 

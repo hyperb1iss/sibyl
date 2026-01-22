@@ -292,7 +292,9 @@ class EntityManager:
                     embedding = await self._client.client.embedder.create(embed_text)
 
                     _t4 = _time.perf_counter()
-                    log.debug("create_direct_timing", step="embedding_api", ms=round((_t4 - _t3) * 1000))
+                    log.debug(
+                        "create_direct_timing", step="embedding_api", ms=round((_t4 - _t3) * 1000)
+                    )
 
                     # Store embedding on node using vecf32() for FalkorDB vector ops
                     await self._driver.execute_query(
