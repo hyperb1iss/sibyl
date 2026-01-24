@@ -4,6 +4,7 @@ import uuid
 from collections.abc import AsyncGenerator
 
 import pytest
+import pytest_asyncio
 
 from sibyl.config import settings
 from sibyl_core.errors import GraphConnectionError
@@ -12,6 +13,9 @@ from sibyl_core.graph.entities import EntityManager
 from sibyl_core.graph.relationships import RelationshipManager
 from sibyl_core.models.entities import EntityType, Pattern, Relationship, RelationshipType
 
+# Module-scoped async fixtures require module-scoped event loop
+pytestmark = pytest.mark.asyncio(loop_scope="module")
+
 
 @pytest.fixture(scope="module")
 def test_org_id() -> str:
@@ -19,7 +23,7 @@ def test_org_id() -> str:
     return f"test_org_{uuid.uuid4().hex[:8]}"
 
 
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def graph_client_with_cleanup(test_org_id: str) -> AsyncGenerator[GraphClient]:
     """Get graph client and clean up the test graph after all tests complete."""
     if not settings.openai_api_key.get_secret_value():
@@ -53,7 +57,6 @@ async def graph_client_with_cleanup(test_org_id: str) -> AsyncGenerator[GraphCli
         await r.aclose()
 
 
-@pytest.mark.asyncio
 @pytest.mark.integration
 async def test_entity_create_get_delete_preserves_id(
     graph_client_with_cleanup: GraphClient, test_org_id: str
@@ -91,7 +94,6 @@ async def test_entity_create_get_delete_preserves_id(
     assert deleted is True
 
 
-@pytest.mark.asyncio
 @pytest.mark.integration
 async def test_relationship_dedup_and_delete(
     graph_client_with_cleanup: GraphClient, test_org_id: str
