@@ -663,9 +663,14 @@ async def _fetch_graph_edges(
     max_edges: int,
 ) -> list[dict[str, Any]]:
     """Fetch edges between nodes in our set."""
+    if not node_ids:
+        return []
+
     query = """
     MATCH (a)-[r]->(b)
     WHERE r.group_id = $group_id
+      AND a.uuid IN $node_ids
+      AND b.uuid IN $node_ids
     RETURN a.uuid AS source, b.uuid AS target, COALESCE(r.name, type(r)) AS type
     LIMIT $limit
     """
@@ -673,7 +678,11 @@ async def _fetch_graph_edges(
 
     try:
         result = await client.execute_read_org(
-            query, organization_id, group_id=organization_id, limit=max_edges
+            query,
+            organization_id,
+            group_id=organization_id,
+            node_ids=list(node_ids),
+            limit=max_edges,
         )
         for record in result:
             if isinstance(record, (list, tuple)):
@@ -961,7 +970,7 @@ async def export_to_networkx(
         ImportError: If networkx is not installed.
     """
     try:
-        import networkx as nx  # type: ignore[import-not-found]
+        import networkx as nx
     except ImportError as e:
         raise ImportError(
             "networkx is required for community detection. Install with: pip install networkx"
@@ -1107,8 +1116,8 @@ def detect_communities_leiden(
         ImportError: If leidenalg/igraph is not installed.
     """
     try:
-        import igraph as ig  # type: ignore[import-not-found]
-        import leidenalg  # type: ignore[import-not-found]
+        import igraph as ig
+        import leidenalg
     except ImportError as e:
         raise ImportError(
             "leidenalg and igraph are required for Leiden algorithm. "

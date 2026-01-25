@@ -102,6 +102,12 @@ index-out-of-bounds = "warn"
 include = ["apps/*/src/**/*.py", "packages/python/*/src/**/*.py", "hooks/*.py"]
 exclude = ["**/build/**", "**/.venv/**", "**/migrations/**"]
 
+# Hooks use sys.exit() for control flow which ty doesn't understand
+[[tool.ty.overrides]]
+include = ["hooks/*.py"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+
 # Intentional monkey-patching for FalkorDB concurrency fixes
 [[tool.ty.overrides]]
 include = ["**/graph/client.py"]
@@ -116,6 +122,7 @@ missing-argument = "ignore"
 
 # SQLAlchemy/SQLModel: column comparisons return ColumnElement, not bool
 # Also affects .desc(), .asc(), .label(), .op() methods on mapped columns
+# cli/*.py also has entity union types (EntitySummary | RelatedEntity | Unknown)
 [[tool.ty.overrides]]
 include = ["**/db/*.py", "**/api/routes/*.py", "**/auth/*.py", "**/cli/*.py"]
 [tool.ty.overrides.rules]
@@ -123,6 +130,7 @@ invalid-argument-type = "ignore"
 unresolved-attribute = "ignore"
 no-matching-overload = "ignore"
 unsupported-operator = "ignore"
+possibly-missing-attribute = "ignore"
 
 # arq worker/jobs: cron() function, SQLAlchemy queries
 [[tool.ty.overrides]]
@@ -130,11 +138,12 @@ include = ["**/jobs/*.py"]
 [tool.ty.overrides.rules]
 invalid-argument-type = "ignore"
 
-# TypedDict hook outputs, SQLAlchemy in agents
+# TypedDict hook outputs, SQLAlchemy in agents, runner union types
 [[tool.ty.overrides]]
 include = ["**/agents/*.py"]
 [tool.ty.overrides.rules]
 invalid-argument-type = "ignore"
+possibly-missing-attribute = "ignore"
 
 # FastAPI/Starlette middleware and app setup
 [[tool.ty.overrides]]
@@ -142,11 +151,12 @@ include = ["**/api/app.py", "**/server.py", "**/locks.py"]
 [tool.ty.overrides.rules]
 invalid-argument-type = "ignore"
 
-# crawl4ai service types
+# crawl4ai service types - result container union
 [[tool.ty.overrides]]
 include = ["**/crawler/service.py"]
 [tool.ty.overrides.rules]
 invalid-argument-type = "ignore"
+possibly-missing-attribute = "ignore"
 
 # Graph entity manager - dynamic dict access
 [[tool.ty.overrides]]

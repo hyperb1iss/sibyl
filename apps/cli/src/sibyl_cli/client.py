@@ -980,6 +980,7 @@ class SibylClient:
             "GET", f"/agent-messages/conversation/{agent_id}/{other_agent_id}", params=params
         )
 
+
 # Client cache by context name (None = default/active context)
 _clients: dict[str | None, SibylClient] = {}
 

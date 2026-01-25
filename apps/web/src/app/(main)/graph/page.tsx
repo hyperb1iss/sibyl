@@ -21,12 +21,13 @@ import {
   PlusCircle,
   RotateCcw,
   Search,
+  Sparkles,
   X,
 } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
 import type { HierarchicalCluster, HierarchicalEdge, HierarchicalNode } from '@/lib/api';
 import { ENTITY_TYPES, GRAPH_DEFAULTS, getClusterColor, getEntityColor } from '@/lib/constants';
-import { useHierarchicalGraph } from '@/lib/hooks';
+import { useHierarchicalGraph, useProjects } from '@/lib/hooks';
 import { useProjectContext } from '@/lib/project-context';
 import { useTheme } from '@/lib/theme';
 
@@ -281,6 +282,10 @@ function GraphToolbar({
   matchCount,
   nodeCount,
   edgeCount,
+  includeShared,
+  onIncludeSharedChange,
+  sharedLabel,
+  sharedAvailable,
 }: {
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -295,9 +300,15 @@ function GraphToolbar({
   matchCount: number;
   nodeCount: number;
   edgeCount: number;
+  includeShared?: boolean;
+  onIncludeSharedChange?: (next: boolean) => void;
+  sharedLabel?: string;
+  sharedAvailable?: boolean;
 }) {
   const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const canToggleShared = Boolean(sharedAvailable && onIncludeSharedChange);
+  const sharedActive = Boolean(includeShared);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -339,6 +350,21 @@ function GraphToolbar({
             <span className="text-sc-fg-subtle ml-1">edges</span>
           </span>
         </div>
+        {canToggleShared && (
+          <button
+            type="button"
+            onClick={() => onIncludeSharedChange?.(!sharedActive)}
+            aria-pressed={sharedActive}
+            title={sharedActive ? 'Hide shared knowledge' : 'Include shared knowledge'}
+            className={`p-2.5 rounded-lg border transition-colors ${
+              sharedActive
+                ? 'bg-sc-cyan/15 text-sc-cyan border-sc-cyan/40'
+                : 'bg-sc-bg-base/90 text-sc-fg-subtle border-sc-fg-subtle/20 hover:text-sc-fg-primary'
+            }`}
+          >
+            <Sparkles width={18} height={18} />
+          </button>
+        )}
         <button
           type="button"
           onClick={onToggleFullscreen}
@@ -545,6 +571,26 @@ function GraphToolbar({
               </div>
             )}
           </div>
+
+          {canToggleShared && (
+            <>
+              <div className="w-px h-5 bg-sc-fg-subtle/20" />
+              <button
+                type="button"
+                onClick={() => onIncludeSharedChange?.(!sharedActive)}
+                aria-pressed={sharedActive}
+                title={sharedActive ? 'Hide shared knowledge' : 'Include shared knowledge'}
+                className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded-lg transition-colors ${
+                  sharedActive
+                    ? 'bg-sc-cyan/15 text-sc-cyan'
+                    : 'text-sc-fg-muted hover:text-sc-fg-primary'
+                }`}
+              >
+                <Sparkles width={14} height={14} />
+                <span>{sharedLabel || 'Shared'}</span>
+              </button>
+            </>
+          )}
         </Card>
       </div>
 
@@ -582,6 +628,7 @@ function GraphPageContent() {
   const { theme } = useTheme();
   const colors = CANVAS_COLORS[theme];
   const { selectedProjects } = useProjectContext();
+  const { data: projectsData } = useProjects();
   const graphRef = useRef<ForceGraphMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -592,6 +639,41 @@ function GraphPageContent() {
   // Filter state
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
+  const [includeShared, setIncludeShared] = useState(true);
+  const [hasInitialFit, setHasInitialFit] = useState(false);
+  const fitKeyRef = useRef<string>('');
+
+  const sharedProject = useMemo(() => {
+    const projects = projectsData?.entities ?? [];
+    return projects.find(project => {
+      const meta = project.metadata ?? {};
+      const slug = typeof meta.slug === 'string' ? meta.slug : '';
+      const name = (project.name || '').toLowerCase();
+      return Boolean(meta.is_shared) || slug === '_shared' || name === 'shared';
+    });
+  }, [projectsData?.entities]);
+  const sharedProjectId = sharedProject?.id;
+  const sharedProjectLabel = sharedProject?.name || 'Shared';
+
+  const projectFilter = useMemo(() => {
+    if (selectedProjects.length === 0) return undefined;
+    const ids = new Set(selectedProjects);
+    if (includeShared && sharedProjectId) {
+      ids.add(sharedProjectId);
+    }
+    return Array.from(ids);
+  }, [selectedProjects, includeShared, sharedProjectId]);
+  const projectKey = projectFilter?.join(',') || 'all';
+  const selectedTypesKey = selectedTypes.join(',');
+  const filtersKey = `${projectKey}:${selectedTypesKey}`;
+
+  useEffect(() => {
+    const nextKey = `${projectKey}:${selectedTypesKey}:${selectedCluster ?? 'all'}`;
+    if (fitKeyRef.current !== nextKey) {
+      fitKeyRef.current = nextKey;
+      setHasInitialFit(false);
+    }
+  }, [projectKey, selectedTypesKey, selectedCluster]);
 
   // Fetch hierarchical graph data with up to 1000 nodes
   // Filter by selected projects and entity types
@@ -602,9 +684,17 @@ function GraphPageContent() {
   } = useHierarchicalGraph({
     max_nodes: GRAPH_DEFAULTS.MAX_NODES,
     max_edges: GRAPH_DEFAULTS.MAX_EDGES,
-    projects: selectedProjects.length > 0 ? selectedProjects : undefined,
+    projects: projectFilter,
     types: selectedTypes.length > 0 ? selectedTypes : undefined,
   });
+
+  // Reset stale selection state when filters change
+  useEffect(() => {
+    if (!filtersKey) return;
+    setSelectedCluster(null);
+    setSelectedNodeId(null);
+    setHoveredNode(null);
+  }, [filtersKey]);
 
   // Build cluster color map
   const clusterColorMap = useMemo(() => {
@@ -789,6 +879,15 @@ function GraphPageContent() {
 
     return { nodes: graphNodes, links: filteredEdges, maxDegree, matchCount };
   }, [data, selectedCluster, clusterColorMap, matchesSearch]);
+
+  // Keep fullscreen state in sync (Escape key, browser UI, etc.)
+  useEffect(() => {
+    function handleFullscreenChange() {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   // Configure d3 forces
   useEffect(() => {
@@ -1000,6 +1099,12 @@ function GraphPageContent() {
     [selectedNodeId, hoveredNode, theme]
   );
 
+  const handleEngineStop = useCallback(() => {
+    if (hasInitialFit || !graphRef.current) return;
+    graphRef.current.zoomToFit(400, GRAPH_DEFAULTS.FIT_PADDING);
+    setHasInitialFit(true);
+  }, [hasInitialFit]);
+
   // Smooth zoom to node on click
   const handleNodeClick = useCallback(
     (node: GraphNode) => {
@@ -1051,16 +1156,15 @@ function GraphPageContent() {
   const toggleFullscreen = useCallback(() => {
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen();
-      setIsFullscreen(true);
+      void containerRef.current.requestFullscreen();
     } else {
-      document.exitFullscreen();
-      setIsFullscreen(false);
+      void document.exitFullscreen();
     }
   }, []);
 
   const nodeCount = graphData.nodes.length;
   const edgeCount = graphData.links.length;
+  const canToggleShared = Boolean(sharedProjectId && selectedProjects.length > 0);
 
   return (
     <div
@@ -1091,6 +1195,10 @@ function GraphPageContent() {
             matchCount={graphData.matchCount}
             nodeCount={nodeCount}
             edgeCount={edgeCount}
+            includeShared={includeShared}
+            onIncludeSharedChange={setIncludeShared}
+            sharedLabel={sharedProjectLabel}
+            sharedAvailable={canToggleShared}
           />
 
           {/* Stats overlay - separate for detailed view */}
@@ -1132,7 +1240,7 @@ function GraphPageContent() {
           {/* Graph - key forces re-render when theme changes */}
           {!isLoading && graphData.nodes.length > 0 && (
             <ForceGraph2D
-              key={`${theme}-${selectedProjects.join(',')}-${selectedCluster || 'all'}`}
+              key={`${theme}-${projectKey}-${selectedTypesKey}-${selectedCluster || 'all'}`}
               ref={graphRef as React.MutableRefObject<ForceGraphMethods | undefined>}
               graphData={graphData as { nodes: object[]; links: object[] }}
               nodeLabel={() => ''} // Disable default tooltip - we render labels on canvas
@@ -1154,6 +1262,7 @@ function GraphPageContent() {
               linkCanvasObjectMode={() => 'replace'}
               onNodeClick={handleNodeClick as (node: object, event: MouseEvent) => void}
               onNodeHover={node => setHoveredNode((node as GraphNode)?.id || null)}
+              onEngineStop={handleEngineStop}
               cooldownTicks={GRAPH_DEFAULTS.COOLDOWN_TICKS}
               warmupTicks={GRAPH_DEFAULTS.WARMUP_TICKS}
               backgroundColor={colors.bg}

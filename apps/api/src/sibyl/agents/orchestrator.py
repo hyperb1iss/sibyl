@@ -328,11 +328,7 @@ class AgentOrchestrator:
             limit=limit * 2,  # Fetch extra for filtering
         )
 
-        agents = [
-            cast("AgentRecord", r)
-            for r in results
-            if r.entity_type == EntityType.AGENT
-        ]
+        agents = [cast("AgentRecord", r) for r in results if r.entity_type == EntityType.AGENT]
 
         # Filter by project
         agents = [a for a in agents if a.project_id == self.project_id]
