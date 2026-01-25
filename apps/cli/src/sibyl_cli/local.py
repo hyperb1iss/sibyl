@@ -418,9 +418,7 @@ def start(
     console.print(f"[{ELECTRIC_PURPLE}][bold]Next Steps[/bold][/{ELECTRIC_PURPLE}]")
     console.print()
     console.print("  1. Complete the setup wizard in your browser")
-    console.print("  2. Connect Claude Code MCP:")
-    console.print("     [dim]claude mcp add sibyl --transport http http://localhost:3334/mcp[/dim]")
-    console.print("  3. Set up agent skills & hooks:")
+    console.print("  2. Set up agent skills & hooks:")
     console.print("     [dim]sibyl local setup[/dim]")
     console.print()
 
