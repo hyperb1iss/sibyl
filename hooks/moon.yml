@@ -27,7 +27,7 @@ tasks:
     local: true
 
   typecheck:
-    command: "uv run pyright ."
+    command: "uv run ty check ."
     inputs:
       - "@group(sources)"
 

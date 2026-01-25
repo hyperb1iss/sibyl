@@ -39,7 +39,7 @@ class OrganizationManager:
         result = await self._session.execute(select(Organization).where(Organization.slug == slug))
         return result.scalar_one_or_none()
 
-    async def list(self, limit: int = 100) -> list[Organization]:
+    async def list_all(self, limit: int = 100) -> list[Organization]:
         result = await self._session.execute(select(Organization).limit(limit))
         return list(result.scalars().all())
 

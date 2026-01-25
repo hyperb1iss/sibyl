@@ -46,7 +46,7 @@ tasks:
 
   # Type Checking
   typecheck:
-    command: "uv run pyright"
+    command: "uv run ty check"
     inputs:
       - "@group(sources)"
       - "@group(configs)"
