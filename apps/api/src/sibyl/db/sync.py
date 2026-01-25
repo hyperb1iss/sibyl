@@ -6,6 +6,7 @@ backfill missing projects.
 """
 
 import re
+from typing import Any, TypedDict
 from uuid import UUID
 
 import structlog
@@ -15,6 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sibyl.db.models import Project, ProjectVisibility
 
 log = structlog.get_logger()
+
+
+class SyncResult(TypedDict):
+    """Result of a sync operation."""
+
+    created: int
+    skipped: int
+    errors: int
+    details: list[dict[str, Any]]
 
 
 def _slugify(name: str) -> str:
@@ -31,10 +41,10 @@ async def sync_projects_from_graph(
     session: AsyncSession,
     organization_id: UUID,
     owner_user_id: UUID,
-    graph_projects: list[dict],
+    graph_projects: list[dict[str, Any]],
     *,
     dry_run: bool = False,
-) -> dict:
+) -> SyncResult:
     """Sync graph projects to Postgres.
 
     For each graph project not already in Postgres, creates a new Project row
@@ -50,7 +60,7 @@ async def sync_projects_from_graph(
     Returns:
         Dict with 'created', 'skipped', 'errors' counts and 'details' list
     """
-    result = {
+    result: SyncResult = {
         "created": 0,
         "skipped": 0,
         "errors": 0,

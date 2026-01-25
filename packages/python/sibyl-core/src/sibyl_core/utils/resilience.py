@@ -126,7 +126,7 @@ def retry(
     def decorator(func: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
         @functools.wraps(func)
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-            last_exception: Exception | None = None
+            last_exception: BaseException | None = None
 
             for attempt in range(config.max_attempts):
                 try:

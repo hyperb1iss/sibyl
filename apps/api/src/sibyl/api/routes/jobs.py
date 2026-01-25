@@ -40,7 +40,7 @@ async def _job_visible_to_org(
     classified by function name + args.
     """
     fn = getattr(job, "function", "") or ""
-    args = getattr(job, "args", None) or ()
+    args: list[Any] = list(getattr(job, "args", None) or ())
 
     # Graph jobs include group_id explicitly.
     if fn == "create_entity" and len(args) >= 3:

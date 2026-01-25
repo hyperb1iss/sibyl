@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from enum import Enum
 from uuid import UUID
 
 import structlog
@@ -13,7 +14,14 @@ from sibyl_core.models import AgentStatus
 
 log = structlog.get_logger()
 
-_UNSET = object()
+
+class _Unset(Enum):
+    """Sentinel for distinguishing 'not provided' from None."""
+
+    UNSET = "UNSET"
+
+
+_UNSET = _Unset.UNSET
 
 
 def _to_naive(value: datetime | None) -> datetime | None:
@@ -29,16 +37,16 @@ async def update_agent_state(
     *,
     org_id: str,
     agent_id: str,
-    status: str | None | object = _UNSET,
-    last_heartbeat: datetime | None | object = _UNSET,
-    tokens_used: int | None | object = _UNSET,
-    cost_usd: float | None | object = _UNSET,
-    started_at: datetime | None | object = _UNSET,
-    completed_at: datetime | None | object = _UNSET,
-    error_message: str | None | object = _UNSET,
-    task_id: str | None | object = _UNSET,
-    parent_agent_id: str | None | object = _UNSET,  # Maps to DB orchestrator_id column
-    current_activity: str | None | object = _UNSET,
+    status: str | None | _Unset = _UNSET,
+    last_heartbeat: datetime | None | _Unset = _UNSET,
+    tokens_used: int | None | _Unset = _UNSET,
+    cost_usd: float | None | _Unset = _UNSET,
+    started_at: datetime | None | _Unset = _UNSET,
+    completed_at: datetime | None | _Unset = _UNSET,
+    error_message: str | None | _Unset = _UNSET,
+    task_id: str | None | _Unset = _UNSET,
+    parent_agent_id: str | None | _Unset = _UNSET,  # Maps to DB orchestrator_id column
+    current_activity: str | None | _Unset = _UNSET,
 ) -> None:
     """Update AgentState in Postgres, creating it if missing.
 
@@ -65,15 +73,13 @@ async def update_agent_state(
                     organization_id=org_uuid,
                     graph_agent_id=agent_id,
                     status=(
-                        status
-                        if status not in (_UNSET, None)
-                        else AgentStatus.INITIALIZING.value
+                        status if status not in (_UNSET, None) else AgentStatus.INITIALIZING.value
                     ),
                 )
                 if task_id is not _UNSET:
                     state.task_id = task_id
                 if parent_agent_id is not _UNSET:
-                    state.orchestrator_id = parent_agent_id  # DB column name
+                    state.orchestrator_id = parent_agent_id
                 session.add(state)
 
             if status is not _UNSET and status is not None:
@@ -93,7 +99,7 @@ async def update_agent_state(
             if task_id is not _UNSET:
                 state.task_id = task_id
             if parent_agent_id is not _UNSET:
-                state.orchestrator_id = parent_agent_id  # DB column name
+                state.orchestrator_id = parent_agent_id
             if current_activity is not _UNSET:
                 state.current_activity = current_activity
 

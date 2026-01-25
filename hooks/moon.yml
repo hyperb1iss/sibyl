@@ -27,7 +27,7 @@ tasks:
     local: true
 
   typecheck:
-    command: "uv run ty check ."
+    command: "uvx ty check ."
     inputs:
       - "@group(sources)"
 

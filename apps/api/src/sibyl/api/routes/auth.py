@@ -896,7 +896,7 @@ def _render_device_verify_page(
         title = "Approve Device Login"
 
     # Auth status banner
-    if is_authed and not err:
+    if authed_user is not None and not err:
         authed_banner = f"<div class='sub'>Signed in as <strong>{authed_user.email or authed_user.name}</strong></div>"
     elif not safe_code:
         authed_banner = "<div class='sub'>Enter the code shown in your terminal</div>"
