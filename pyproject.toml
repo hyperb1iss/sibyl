@@ -114,6 +114,46 @@ include = ["**/crawler/*.py"]
 [tool.ty.overrides.rules]
 missing-argument = "ignore"
 
+# SQLAlchemy/SQLModel: column comparisons return ColumnElement, not bool
+# Also affects .desc(), .asc(), .label(), .op() methods on mapped columns
+[[tool.ty.overrides]]
+include = ["**/db/*.py", "**/api/routes/*.py", "**/auth/*.py", "**/cli/*.py"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+unresolved-attribute = "ignore"
+no-matching-overload = "ignore"
+unsupported-operator = "ignore"
+
+# arq worker/jobs: cron() function, SQLAlchemy queries
+[[tool.ty.overrides]]
+include = ["**/jobs/*.py"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+
+# TypedDict hook outputs, SQLAlchemy in agents
+[[tool.ty.overrides]]
+include = ["**/agents/*.py"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+
+# FastAPI/Starlette middleware and app setup
+[[tool.ty.overrides]]
+include = ["**/api/app.py", "**/server.py", "**/locks.py"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+
+# crawl4ai service types
+[[tool.ty.overrides]]
+include = ["**/crawler/service.py"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+
+# Graph entity manager - dynamic dict access
+[[tool.ty.overrides]]
+include = ["**/graph/entities.py"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

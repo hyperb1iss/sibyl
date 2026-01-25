@@ -105,8 +105,8 @@ class SessionManager:
             select(UserSession)
             .where(UserSession.refresh_token_hash == refresh_hash)
             .where(_is_none(UserSession.revoked_at))
-            .where(UserSession.refresh_token_expires_at.is_not(None))  # type: ignore[union-attr]
-            .where(UserSession.refresh_token_expires_at > now)  # type: ignore[operator]
+            .where(UserSession.refresh_token_expires_at.is_not(None))
+            .where(UserSession.refresh_token_expires_at > now)
         )
         return result.scalar_one_or_none()
 

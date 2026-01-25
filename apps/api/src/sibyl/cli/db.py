@@ -1216,7 +1216,7 @@ def sync_projects(  # noqa: PLR0915
                 nonlocal owner_uuid
                 if owner_uuid is None:
                     admin_result = await session.execute(
-                        select(OrganizationMember.user_id)  # type: ignore[call-overload]
+                        select(OrganizationMember.user_id)
                         .where(
                             OrganizationMember.organization_id == org_uuid,
                             OrganizationMember.role.in_(

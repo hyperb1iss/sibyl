@@ -69,7 +69,7 @@ async def sync_projects_from_graph(
 
     # Get existing graph_project_ids in Postgres
     existing_result = await session.execute(
-        select(Project.graph_project_id).where(Project.organization_id == organization_id)  # type: ignore[call-overload]
+        select(Project.graph_project_id).where(Project.organization_id == organization_id)
     )
     existing_ids = {row[0] for row in existing_result.all()}
 
@@ -98,7 +98,7 @@ async def sync_projects_from_graph(
         # Check for slug collisions
         while True:
             slug_check = await session.execute(
-                select(Project.id).where(  # type: ignore[call-overload]
+                select(Project.id).where(
                     Project.organization_id == organization_id,
                     Project.slug == slug,
                 )

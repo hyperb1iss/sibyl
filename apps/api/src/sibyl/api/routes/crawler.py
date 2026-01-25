@@ -179,7 +179,7 @@ async def get_stats(
 
         # Count sources by status (org-scoped)
         status_result = await session.execute(
-            select(CrawlSource.crawl_status, func.count(CrawlSource.id))  # type: ignore[call-overload]
+            select(CrawlSource.crawl_status, func.count(CrawlSource.id))
             .where(col(CrawlSource.organization_id) == org.id)
             .group_by(CrawlSource.crawl_status)
         )
@@ -849,7 +849,7 @@ async def get_link_graph_status(
 
         # Pending per source
         pending_query = (
-            select(  # type: ignore[call-overload]
+            select(
                 CrawlSource.name,
                 func.count(DocumentChunk.id).label("pending"),
             )

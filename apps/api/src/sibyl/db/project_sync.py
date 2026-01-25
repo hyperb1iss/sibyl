@@ -39,7 +39,7 @@ async def _generate_unique_slug(
     suffix = 1
 
     while suffix <= 100:
-        query = select(Project.id).where(  # type: ignore[call-overload]
+        query = select(Project.id).where(
             Project.organization_id == organization_id,
             Project.slug == slug,
         )
@@ -194,7 +194,7 @@ async def sync_project_delete(
         )
     )
 
-    if result.rowcount > 0:  # type: ignore[union-attr]
+    if result.rowcount > 0:
         log.info("project_synced_delete", graph_id=graph_project_id)
         return True
 

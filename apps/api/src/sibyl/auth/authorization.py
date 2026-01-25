@@ -170,7 +170,7 @@ async def get_effective_project_role(
 
     # 2. Check direct membership
     result = await session.execute(
-        select(ProjectMember.role).where(  # type: ignore[call-overload]
+        select(ProjectMember.role).where(
             ProjectMember.project_id == project.id,
             ProjectMember.user_id == user_id,
         )
@@ -180,7 +180,7 @@ async def get_effective_project_role(
     # 3. Check team grants
     # Find all teams the user belongs to that have grants on this project
     result = await session.execute(
-        select(TeamProject.role)  # type: ignore[call-overload]
+        select(TeamProject.role)
         .join(TeamMember, TeamMember.team_id == TeamProject.team_id)
         .where(
             TeamProject.project_id == project.id,
@@ -225,7 +225,7 @@ async def list_accessible_project_graph_ids(
     # Check if ANY projects exist in Postgres for this org
     # If not, we're in migration period - skip filtering for org members
     count_result = await session.execute(
-        select(Project.id).where(Project.organization_id == org_id).limit(1)  # type: ignore[call-overload]
+        select(Project.id).where(Project.organization_id == org_id).limit(1)
     )
     if count_result.first() is None:
         # No projects registered yet - allow org members to access everything
@@ -237,7 +237,7 @@ async def list_accessible_project_graph_ids(
     # Org owner/admin can access all projects in org
     if org_role in ORG_ADMIN_ROLES:
         result = await session.execute(
-            select(Project.graph_project_id).where(Project.organization_id == org_id)  # type: ignore[call-overload]
+            select(Project.graph_project_id).where(Project.organization_id == org_id)
         )
         return {row[0] for row in result.all()}
 
@@ -245,7 +245,7 @@ async def list_accessible_project_graph_ids(
 
     # Projects with org visibility
     result = await session.execute(
-        select(Project.graph_project_id).where(  # type: ignore[call-overload]
+        select(Project.graph_project_id).where(
             Project.organization_id == org_id,
             Project.visibility == ProjectVisibility.ORG,
         )
@@ -254,7 +254,7 @@ async def list_accessible_project_graph_ids(
 
     # Direct memberships
     result = await session.execute(
-        select(Project.graph_project_id)  # type: ignore[call-overload]
+        select(Project.graph_project_id)
         .join(ProjectMember, ProjectMember.project_id == Project.id)
         .where(
             Project.organization_id == org_id,
@@ -265,7 +265,7 @@ async def list_accessible_project_graph_ids(
 
     # Team grants
     result = await session.execute(
-        select(Project.graph_project_id)  # type: ignore[call-overload]
+        select(Project.graph_project_id)
         .join(TeamProject, TeamProject.project_id == Project.id)
         .join(TeamMember, TeamMember.team_id == TeamProject.team_id)
         .where(

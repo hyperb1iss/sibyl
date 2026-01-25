@@ -836,7 +836,7 @@ When done, complete with learnings to capture insights for future agents.
         # Build SDK options with session resume
         sdk_options = ClaudeAgentOptions(
             cwd=cwd,
-            hooks=merged_hooks,  # type: ignore[arg-type]
+            hooks=merged_hooks,
             setting_sources=["user", "project"],
             can_use_tool=approval_service.create_can_use_tool_callback()
             if approval_service
