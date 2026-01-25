@@ -131,7 +131,7 @@ async def queue_pending_operation(
         "queued_at": datetime.now(UTC).isoformat(),
     }
 
-    await pool.rpush(key, json.dumps(op_data))  # type: ignore[misc]
+    await pool.rpush(key, json.dumps(op_data))
     await pool.expire(key, int(PENDING_TTL.total_seconds()))
 
     log.info(
@@ -156,7 +156,7 @@ async def get_pending_operations(entity_id: str) -> list[dict[str, Any]]:
     pool = await get_pool()
     key = f"{PENDING_OPS_PREFIX}{entity_id}"
 
-    ops = await pool.lrange(key, 0, -1)  # type: ignore[misc]
+    ops = await pool.lrange(key, 0, -1)
     return [json.loads(op) for op in ops]
 
 
@@ -175,7 +175,7 @@ async def clear_pending_operations(entity_id: str) -> int:
     key = f"{PENDING_OPS_PREFIX}{entity_id}"
 
     # Get count before deleting
-    count = await pool.llen(key)  # type: ignore[misc]
+    count = await pool.llen(key)
     if count > 0:
         await pool.delete(key)
         log.debug("clear_pending_operations", entity_id=entity_id, count=count)

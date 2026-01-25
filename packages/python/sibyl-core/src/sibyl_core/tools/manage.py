@@ -933,24 +933,24 @@ async def _link_graph_status() -> ManageResponse:
     async with get_session() as session:
         # Total chunks (pyright doesn't understand SQLAlchemy func.count)
         total_result = await session.execute(
-            select(func.count(DocumentChunk.id))  # type: ignore[arg-type]
+            select(func.count(DocumentChunk.id))
         )
         total_chunks = total_result.scalar() or 0
 
         # Chunks with entities
         linked_result = await session.execute(
-            select(func.count(DocumentChunk.id)).where(col(DocumentChunk.has_entities) == True)  # type: ignore[arg-type]  # noqa: E712
+            select(func.count(DocumentChunk.id)).where(col(DocumentChunk.has_entities) == True)  # noqa: E712
         )
         chunks_with_entities = linked_result.scalar() or 0
 
         # Pending per source (complex select with joins)
         pending_query = (
             select(  # type: ignore[call-overload]
-                CrawlSource.name,  # type: ignore[arg-type]
-                func.count(DocumentChunk.id).label("pending"),  # type: ignore[arg-type]
+                CrawlSource.name,
+                func.count(DocumentChunk.id).label("pending"),
             )
-            .join(CrawledDocument, CrawledDocument.source_id == CrawlSource.id)  # type: ignore[arg-type]
-            .join(DocumentChunk, DocumentChunk.document_id == CrawledDocument.id)  # type: ignore[arg-type]
+            .join(CrawledDocument, CrawledDocument.source_id == CrawlSource.id)
+            .join(DocumentChunk, DocumentChunk.document_id == CrawledDocument.id)
             .where(col(DocumentChunk.has_entities) == False)  # noqa: E712
             .group_by(CrawlSource.name)
         )

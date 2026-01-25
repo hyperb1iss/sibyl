@@ -96,7 +96,7 @@ def log_operation(
     """
 
     def decorator(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
-        op_name = operation or func.__name__
+        op_name = operation or getattr(func, "__name__", "<unknown>")
 
         @wraps(func)
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:

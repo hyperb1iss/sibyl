@@ -324,7 +324,7 @@ def merge_hooks(
                 merged[event] = []
             merged[event].extend(matchers)
 
-    return merged if merged else None  # type: ignore[return-value]
+    return merged if merged else None
 
 
 def _extract_search_terms(prompt: str) -> str:

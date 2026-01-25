@@ -196,7 +196,7 @@ class QueryCache:
         self._community_cache: LRUCache[Any] = LRUCache(
             maxsize=community_maxsize, default_ttl=community_ttl
         )
-        self._redis: Redis | None = None  # type: ignore[type-arg]
+        self._redis: Redis | None = None
 
     @staticmethod
     def _make_search_key(query: str, **filters: Any) -> str:
@@ -517,7 +517,7 @@ class CachedEntityManager:
         cached = cache.get_search(query, **filters)
         if cached is not None:
             log.debug("cache_hit_search", query=query[:50])
-            return cached  # type: ignore[return-value]
+            return cached
 
         # Execute search
         result = await self._manager.search(query, entity_types, limit)

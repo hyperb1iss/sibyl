@@ -17,9 +17,9 @@ from sibyl.db.models import LoginHistory, PasswordResetToken, User
 from sibyl.email import EmailClient, PasswordResetEmail
 
 
-def _is_none(column: ColumnElement) -> ColumnElement:  # type: ignore[type-arg]
+def _is_none(column: ColumnElement) -> ColumnElement:
     """Create an IS NULL comparison for a column."""
-    return column.is_(None)  # type: ignore[union-attr]
+    return column.is_(None)
 
 
 @dataclass

@@ -17,14 +17,14 @@ if TYPE_CHECKING:
     from uuid import UUID
 
 
-def _is_none(column: ColumnElement) -> ColumnElement:  # type: ignore[type-arg]
+def _is_none(column: ColumnElement) -> ColumnElement:
     """Create an IS NULL comparison for a column."""
-    return column.is_(None)  # type: ignore[union-attr]
+    return column.is_(None)
 
 
-def _desc(column: ColumnElement) -> ColumnElement:  # type: ignore[type-arg]
+def _desc(column: ColumnElement) -> ColumnElement:
     """Create a DESC order for a column."""
-    return column.desc()  # type: ignore[union-attr]
+    return column.desc()
 
 
 class InvitationError(ValueError):

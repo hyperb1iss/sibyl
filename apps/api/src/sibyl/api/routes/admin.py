@@ -354,7 +354,7 @@ async def dev_status(
         from sibyl.jobs.queue import get_pool
 
         pool = await get_pool()
-        info = await pool.pool.info()  # type: ignore[union-attr]
+        info = await pool.pool.info()
         queue_healthy = bool(info)
         # Count pending jobs
         queue_depth = info.get("pending_jobs", 0) if info else 0

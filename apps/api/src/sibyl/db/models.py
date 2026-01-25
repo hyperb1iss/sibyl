@@ -133,7 +133,7 @@ class TimestampMixin(SQLModel):
 class User(TimestampMixin, table=True):
     """A user identity record (GitHub OAuth or local email/password)."""
 
-    __tablename__ = "users"  # type: ignore[assignment]
+    __tablename__ = "users"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
 
@@ -209,7 +209,7 @@ class User(TimestampMixin, table=True):
 class LoginHistory(SQLModel, table=True):
     """Login event history for security auditing."""
 
-    __tablename__ = "login_history"  # type: ignore[assignment]
+    __tablename__ = "login_history"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID | None = Field(default=None, foreign_key="users.id", index=True)
@@ -236,7 +236,7 @@ class LoginHistory(SQLModel, table=True):
 class PasswordResetToken(SQLModel, table=True):
     """Password reset token for email-based password recovery."""
 
-    __tablename__ = "password_reset_tokens"  # type: ignore[assignment]
+    __tablename__ = "password_reset_tokens"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="users.id", index=True)
@@ -260,7 +260,7 @@ class PasswordResetToken(SQLModel, table=True):
 class Organization(TimestampMixin, table=True):
     """An organization/tenant."""
 
-    __tablename__ = "organizations"  # type: ignore[assignment]
+    __tablename__ = "organizations"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     name: str = Field(max_length=255, description="Organization display name")
@@ -289,7 +289,7 @@ class OrganizationRole(StrEnum):
 class OrganizationMember(TimestampMixin, table=True):
     """Membership record linking a user to an organization."""
 
-    __tablename__ = "organization_members"  # type: ignore[assignment]
+    __tablename__ = "organization_members"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     organization_id: UUID = Field(foreign_key="organizations.id", index=True)
@@ -329,7 +329,7 @@ class OrganizationMember(TimestampMixin, table=True):
 class ApiKey(TimestampMixin, table=True):
     """Long-lived API key (store only hash + salt, never raw key)."""
 
-    __tablename__ = "api_keys"  # type: ignore[assignment]
+    __tablename__ = "api_keys"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     organization_id: UUID = Field(foreign_key="organizations.id", index=True)
@@ -363,7 +363,7 @@ class ApiKey(TimestampMixin, table=True):
 class UserSession(TimestampMixin, table=True):
     """User login session for session tracking and revocation."""
 
-    __tablename__ = "user_sessions"  # type: ignore[assignment]
+    __tablename__ = "user_sessions"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="users.id", index=True)
@@ -420,7 +420,7 @@ class UserSession(TimestampMixin, table=True):
 class AuditLog(TimestampMixin, table=True):
     """Append-only audit event record."""
 
-    __tablename__ = "audit_logs"  # type: ignore[assignment]
+    __tablename__ = "audit_logs"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     organization_id: UUID | None = Field(
@@ -467,7 +467,7 @@ class AuditLog(TimestampMixin, table=True):
 class OrganizationInvitation(TimestampMixin, table=True):
     """Invitation to join an organization."""
 
-    __tablename__ = "organization_invitations"  # type: ignore[assignment]
+    __tablename__ = "organization_invitations"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     organization_id: UUID = Field(foreign_key="organizations.id", index=True)
@@ -501,7 +501,7 @@ class OrganizationInvitation(TimestampMixin, table=True):
 class DeviceAuthorizationRequest(TimestampMixin, table=True):
     """Short-lived device authorization request (RFC 8628-style)."""
 
-    __tablename__ = "device_authorization_requests"  # type: ignore[assignment]
+    __tablename__ = "device_authorization_requests"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
 
@@ -554,7 +554,7 @@ class DeviceAuthorizationRequest(TimestampMixin, table=True):
 class OAuthConnection(TimestampMixin, table=True):
     """OAuth provider connection for a user."""
 
-    __tablename__ = "oauth_connections"  # type: ignore[assignment]
+    __tablename__ = "oauth_connections"
     __table_args__ = (
         Index("ix_oauth_connections_provider_user", "provider", "provider_user_id", unique=True),
     )
@@ -614,7 +614,7 @@ class TeamRole(StrEnum):
 class Team(TimestampMixin, table=True):
     """A team within an organization."""
 
-    __tablename__ = "teams"  # type: ignore[assignment]
+    __tablename__ = "teams"
     __table_args__ = (Index("ix_teams_org_slug_unique", "organization_id", "slug", unique=True),)
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -650,7 +650,7 @@ class Team(TimestampMixin, table=True):
 class TeamMember(TimestampMixin, table=True):
     """Membership record linking a user to a team."""
 
-    __tablename__ = "team_members"  # type: ignore[assignment]
+    __tablename__ = "team_members"
     __table_args__ = (Index("ix_team_members_team_user_unique", "team_id", "user_id", unique=True),)
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -704,7 +704,7 @@ class Project(TimestampMixin, table=True):
     Project RBAC is enforced here; graph queries filter by allowed projects.
     """
 
-    __tablename__ = "projects"  # type: ignore[assignment]
+    __tablename__ = "projects"
     __table_args__ = (
         Index("ix_projects_org_slug_unique", "organization_id", "slug", unique=True),
         Index(
@@ -791,7 +791,7 @@ class Project(TimestampMixin, table=True):
 class ProjectMember(TimestampMixin, table=True):
     """Direct membership linking a user to a project."""
 
-    __tablename__ = "project_members"  # type: ignore[assignment]
+    __tablename__ = "project_members"
     __table_args__ = (
         Index("ix_project_members_project_user_unique", "project_id", "user_id", unique=True),
     )
@@ -835,7 +835,7 @@ class ProjectMember(TimestampMixin, table=True):
 class TeamProject(TimestampMixin, table=True):
     """Team-level grant to a project (all team members inherit this role)."""
 
-    __tablename__ = "team_projects"  # type: ignore[assignment]
+    __tablename__ = "team_projects"
     __table_args__ = (
         Index("ix_team_projects_team_project_unique", "team_id", "project_id", unique=True),
     )
@@ -874,7 +874,7 @@ class TeamProject(TimestampMixin, table=True):
 class ApiKeyProjectScope(TimestampMixin, table=True):
     """Restrict an API key to specific projects (optional least-privilege)."""
 
-    __tablename__ = "api_key_project_scopes"  # type: ignore[assignment]
+    __tablename__ = "api_key_project_scopes"
     __table_args__ = (
         Index(
             "ix_api_key_project_scopes_key_project_unique", "api_key_id", "project_id", unique=True
@@ -908,7 +908,7 @@ class CrawlSource(TimestampMixin, table=True):
     One source can have many documents.
     """
 
-    __tablename__ = "crawl_sources"  # type: ignore[assignment]
+    __tablename__ = "crawl_sources"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     organization_id: UUID = Field(
@@ -995,7 +995,7 @@ class CrawledDocument(TimestampMixin, table=True):
     One document has many chunks.
     """
 
-    __tablename__ = "crawled_documents"  # type: ignore[assignment]
+    __tablename__ = "crawled_documents"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     source_id: UUID = Field(foreign_key="crawl_sources.id", index=True)
@@ -1066,7 +1066,7 @@ class DocumentChunk(TimestampMixin, table=True):
     - Sparse vector for learned sparse retrieval
     """
 
-    __tablename__ = "document_chunks"  # type: ignore[assignment]
+    __tablename__ = "document_chunks"
     __table_args__ = (
         # Full-text search index
         Index(
@@ -1150,7 +1150,7 @@ class SystemSetting(TimestampMixin, table=True):
     3. Default value
     """
 
-    __tablename__ = "system_settings"  # type: ignore[assignment]
+    __tablename__ = "system_settings"
 
     key: str = Field(
         primary_key=True,
@@ -1188,7 +1188,7 @@ class BackupSettings(TimestampMixin, table=True):
     Only one BackupSettings row per organization.
     """
 
-    __tablename__ = "backup_settings"  # type: ignore[assignment]
+    __tablename__ = "backup_settings"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     organization_id: UUID = Field(
@@ -1246,7 +1246,7 @@ class Backup(TimestampMixin, table=True):
     and lifecycle management.
     """
 
-    __tablename__ = "backups"  # type: ignore[assignment]
+    __tablename__ = "backups"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     organization_id: UUID = Field(
@@ -1313,7 +1313,7 @@ class AgentMessage(SQLModel, table=True):
     Real-time streaming uses WebSocket; this is for persistence.
     """
 
-    __tablename__ = "agent_messages"  # type: ignore[assignment]
+    __tablename__ = "agent_messages"
     __table_args__ = (
         Index("ix_agent_messages_agent_num", "agent_id", "message_num"),
         Index("ix_agent_messages_parent", "agent_id", "parent_tool_use_id"),
@@ -1383,7 +1383,7 @@ class InterAgentMessage(TimestampMixin, table=True):
     Real-time delivery uses Redis pub/sub.
     """
 
-    __tablename__ = "inter_agent_messages"  # type: ignore[assignment]
+    __tablename__ = "inter_agent_messages"
     __table_args__ = (
         Index("ix_inter_agent_to_agent", "to_agent_id", "read_at"),
         Index("ix_inter_agent_response", "response_to_id"),
@@ -1485,7 +1485,7 @@ class Runner(TimestampMixin, table=True):
     This table is for OPERATIONAL STATE only (heartbeat, status, load).
     """
 
-    __tablename__ = "runners"  # type: ignore[assignment]
+    __tablename__ = "runners"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     organization_id: UUID = Field(
@@ -1566,7 +1566,7 @@ class RunnerProject(TimestampMixin, table=True):
     preferentially assigned tasks for that project (project affinity).
     """
 
-    __tablename__ = "runner_projects"  # type: ignore[assignment]
+    __tablename__ = "runner_projects"
     __table_args__ = (
         Index("ix_runner_projects_runner_project_unique", "runner_id", "project_id", unique=True),
     )
@@ -1624,7 +1624,7 @@ class AgentState(TimestampMixin, table=True):
     operational state that changes frequently during execution.
     """
 
-    __tablename__ = "agent_states"  # type: ignore[assignment]
+    __tablename__ = "agent_states"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     organization_id: UUID = Field(
@@ -1738,7 +1738,7 @@ class OrchestratorState(TimestampMixin, table=True):
     This table stores the evolving state of the build loop.
     """
 
-    __tablename__ = "orchestrator_states"  # type: ignore[assignment]
+    __tablename__ = "orchestrator_states"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     organization_id: UUID = Field(

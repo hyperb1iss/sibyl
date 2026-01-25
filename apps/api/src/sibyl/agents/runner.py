@@ -630,7 +630,7 @@ When done, complete with learnings to capture insights for future agents.
             sdk_kwargs["add_dirs"] = self.add_dirs
         if self.permission_mode:
             sdk_kwargs["permission_mode"] = self.permission_mode
-        sdk_options = ClaudeAgentOptions(**sdk_kwargs)  # type: ignore[arg-type]
+        sdk_options = ClaudeAgentOptions(**sdk_kwargs)
 
         # Create instance
         instance = AgentInstance(

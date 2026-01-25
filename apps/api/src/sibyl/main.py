@@ -239,7 +239,7 @@ def run_server(
         from sibyl.server import create_mcp_server
 
         mcp = create_mcp_server(host=host, port=port)
-        mcp.run(transport="stdio")  # type: ignore[arg-type]
+        mcp.run(transport="stdio")
     else:
         # HTTP mode - combined app with REST API + MCP
         import uvicorn

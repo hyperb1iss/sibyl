@@ -152,9 +152,9 @@ class EntityLockManager:
             retries += 1
             if retries > LOCK_MAX_RETRIES:
                 # Check if lock is stale (holder died)
-                ttl = await self._redis.ttl(key)  # type: ignore[union-attr]
+                ttl = await self._redis.ttl(key)
                 if ttl == -1:  # No expiry - shouldn't happen but recover
-                    await self._redis.expire(key, LOCK_TTL_SECONDS)  # type: ignore[union-attr]
+                    await self._redis.expire(key, LOCK_TTL_SECONDS)
                     log.warning("entity_lock_repaired_ttl", entity_id=entity_id)
 
             delay = LOCK_RETRY_DELAY_BASE * (2 ** min(retries, 4))  # Cap at 1.6s

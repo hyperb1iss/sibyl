@@ -19,7 +19,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
 
-    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+    async def dispatch(self, request: Request, call_next):
         request.state.jwt_claims = None
         token = select_access_token(
             authorization=request.headers.get("authorization"),

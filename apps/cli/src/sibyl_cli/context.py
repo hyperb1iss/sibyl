@@ -74,7 +74,7 @@ def callback(
         async def _fetch_project() -> dict | None:
             try:
                 client = get_client()
-                return await client.get_entity(effective_project)  # type: ignore[return-value]
+                return await client.get_entity(effective_project)
             except SibylClientError:
                 return None
 

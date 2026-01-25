@@ -371,7 +371,7 @@ class EntityDeduplicator:
         """
 
         try:
-            result = await self.client.client.driver.execute_query(query, **params)  # type: ignore[arg-type]
+            result = await self.client.client.driver.execute_query(query, **params)
 
             entities: list[tuple[str, str, str, list[float]]] = []
             for record in result:
@@ -439,12 +439,12 @@ class EntityDeduplicator:
         try:
             # Execute both redirections
             for query in [outgoing_query, incoming_query]:
-                result = await self.client.client.driver.execute_query(query, **params)  # type: ignore[arg-type]
+                result = await self.client.client.driver.execute_query(query, **params)
                 if result:
-                    for record in result:  # type: ignore[union-attr]
+                    for record in result:
                         if isinstance(record, (list, tuple)) and len(record) > 0:
                             val = record[0]
-                            total_redirected += int(val) if val else 0  # type: ignore[arg-type]
+                            total_redirected += int(val) if val else 0
                         elif isinstance(record, dict):
                             total_redirected += int(record.get("redirected", 0))
 

@@ -64,7 +64,7 @@ class DeleteSettingResponse(BaseModel):
 
 async def _is_setup_mode(session: AsyncSession) -> bool:
     """Check if we're in setup mode (no users exist)."""
-    result = await session.execute(select(func.count(User.id)))  # type: ignore[arg-type]
+    result = await session.execute(select(func.count(User.id)))
     user_count = result.scalar() or 0
     return user_count == 0
 

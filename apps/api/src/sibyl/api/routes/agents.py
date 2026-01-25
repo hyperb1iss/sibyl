@@ -911,7 +911,7 @@ async def send_agent_message(
     # Get next message number
     result = await auth.session.execute(
         select(func.coalesce(func.max(AgentMessage.message_num), 0)).where(
-            AgentMessage.agent_id == agent_id  # type: ignore[arg-type]
+            AgentMessage.agent_id == agent_id
         )
     )
     max_num: int = result.scalar() or 0

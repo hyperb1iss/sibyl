@@ -598,7 +598,7 @@ class ApprovalQueue:
         try:
             async with get_session() as session:
                 result = await session.execute(
-                    select(func.coalesce(func.max(AgentMessage.message_num), 0)).where(  # type: ignore[arg-type]
+                    select(func.coalesce(func.max(AgentMessage.message_num), 0)).where(
                         AgentMessage.agent_id == self.agent_id
                     )
                 )

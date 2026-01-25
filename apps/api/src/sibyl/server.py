@@ -256,19 +256,19 @@ def create_mcp_server(
     if auth_server_provider is not None:
 
         @mcp.custom_route("/_oauth/login", methods=["GET"])
-        async def _oauth_login_get(request):  # type: ignore[no-untyped-def]
+        async def _oauth_login_get(request):
             return await auth_server_provider.ui_login_get(request)
 
         @mcp.custom_route("/_oauth/login", methods=["POST"])
-        async def _oauth_login_post(request):  # type: ignore[no-untyped-def]
+        async def _oauth_login_post(request):
             return await auth_server_provider.ui_login_post(request)
 
         @mcp.custom_route("/_oauth/org", methods=["GET"])
-        async def _oauth_org_get(request):  # type: ignore[no-untyped-def]
+        async def _oauth_org_get(request):
             return await auth_server_provider.ui_org_get(request)
 
         @mcp.custom_route("/_oauth/org", methods=["POST"])
-        async def _oauth_org_post(request):  # type: ignore[no-untyped-def]
+        async def _oauth_org_post(request):
             return await auth_server_provider.ui_org_post(request)
 
     _register_tools(mcp)

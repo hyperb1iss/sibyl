@@ -303,7 +303,7 @@ class GraphClient:
         return await with_timeout(query_coro, timeout, operation_name)  # type: ignore[arg-type]
 
     @staticmethod
-    def normalize_result(result: object) -> list[dict]:  # type: ignore[type-arg]
+    def normalize_result(result: object) -> list[dict]:
         """Normalize FalkorDB query results to a consistent list of dicts.
 
         FalkorDB driver returns (records, header, metadata) tuple, but some
@@ -393,7 +393,7 @@ class GraphClient:
                 if "already indexed" not in str(e).lower() and "exists" not in str(e).lower():
                     log.debug("Index creation note", query=idx_query, error=str(e))
 
-    async def execute_read(self, query: str, **params: object) -> list[dict]:  # type: ignore[type-arg]
+    async def execute_read(self, query: str, **params: object) -> list[dict]:
         """Execute a read query on the default graph. DEPRECATED for multi-tenant ops.
 
         WARNING: This uses the default graph, not org-scoped. Use execute_read_org()
@@ -406,11 +406,10 @@ class GraphClient:
         Returns:
             List of result records as dicts
         """
-        # type: ignore[arg-type] - dynamic query strings
-        result = await self.client.driver.execute_query(query, **params)  # type: ignore[arg-type]
+        result = await self.client.driver.execute_query(query, **params)
         return self.normalize_result(result)
 
-    async def execute_write(self, query: str, **params: object) -> list[dict]:  # type: ignore[type-arg]
+    async def execute_write(self, query: str, **params: object) -> list[dict]:
         """Execute a write query on the default graph. DEPRECATED for multi-tenant ops.
 
         WARNING: This uses the default graph, not org-scoped. Use execute_write_org()
@@ -429,13 +428,12 @@ class GraphClient:
         Raises:
             Exception: If query execution fails
         """
-        # type: ignore[arg-type] - dynamic query strings
-        result = await self.client.driver.execute_query(query, **params)  # type: ignore[arg-type]
+        result = await self.client.driver.execute_query(query, **params)
         return self.normalize_result(result)
 
     async def execute_read_org(
         self, query: str, organization_id: str, **params: object
-    ) -> list[dict]:  # type: ignore[type-arg]
+    ) -> list[dict]:
         """Execute a read query on an organization's graph.
 
         This is the preferred method for multi-tenant read operations.
@@ -449,12 +447,12 @@ class GraphClient:
             List of result records as dicts
         """
         driver = self.get_org_driver(organization_id)
-        result = await driver.execute_query(query, **params)  # type: ignore[arg-type]
+        result = await driver.execute_query(query, **params)
         return self.normalize_result(result)
 
     async def execute_write_org(
         self, query: str, organization_id: str, **params: object
-    ) -> list[dict]:  # type: ignore[type-arg]
+    ) -> list[dict]:
         """Execute a write query on an organization's graph.
 
         This is the preferred method for multi-tenant write operations.
@@ -471,7 +469,7 @@ class GraphClient:
             Exception: If query execution fails
         """
         driver = self.get_org_driver(organization_id)
-        result = await driver.execute_query(query, **params)  # type: ignore[arg-type]
+        result = await driver.execute_query(query, **params)
         return self.normalize_result(result)
 
     async def __aenter__(self) -> "GraphClient":

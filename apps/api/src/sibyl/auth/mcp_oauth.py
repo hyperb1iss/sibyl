@@ -379,7 +379,7 @@ class SibylMcpOAuthProvider(
             return None
         return authed
 
-    async def _list_user_orgs(self, session, *, user_id: UUID) -> list[Organization]:  # type: ignore[no-untyped-def]
+    async def _list_user_orgs(self, session, *, user_id: UUID) -> list[Organization]:
         result = await session.execute(
             select(Organization)
             .join(OrganizationMember, OrganizationMember.organization_id == Organization.id)

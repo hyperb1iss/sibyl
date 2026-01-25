@@ -122,7 +122,7 @@ class RedisPubSub:
         """Delete a key."""
         if self._redis is None:
             return
-        await self._redis.delete(key)  # type: ignore[union-attr]
+        await self._redis.delete(key)
 
     async def subscribe(self, local_broadcast_callback: Any) -> None:
         """Subscribe to the Redis channel and forward messages to local broadcast.

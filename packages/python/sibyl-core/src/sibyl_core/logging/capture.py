@@ -88,7 +88,9 @@ class LogBuffer:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = cls(max_size=max_size)
-        return cls._instance
+        instance = cls._instance
+        assert instance is not None  # Guaranteed by double-checked locking above
+        return instance
 
     @classmethod
     def reset(cls) -> None:

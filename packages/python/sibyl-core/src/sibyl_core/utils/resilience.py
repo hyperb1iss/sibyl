@@ -138,7 +138,7 @@ def retry(
                         delay = calculate_delay(attempt, config)
                         log.warning(
                             "Retrying after transient failure",
-                            function=func.__name__,
+                            function=getattr(func, "__name__", "<unknown>"),
                             attempt=attempt + 1,
                             max_attempts=config.max_attempts,
                             delay=f"{delay:.2f}s",
@@ -153,7 +153,7 @@ def retry(
                         # Use log.error (not exception) to avoid traceback spam
                         log.error(
                             "All retry attempts exhausted",
-                            function=func.__name__,
+                            function=getattr(func, "__name__", "<unknown>"),
                             attempts=config.max_attempts,
                             error=str(e),
                         )
@@ -218,7 +218,7 @@ def timeout(
     """
 
     def decorator(func: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
-        name = operation_name or func.__name__
+        name = operation_name or getattr(func, "__name__", "<unknown>")
 
         @functools.wraps(func)
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:

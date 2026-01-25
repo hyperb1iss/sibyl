@@ -270,9 +270,9 @@ async def _cast_name_embeddings_to_vecf32(
             SKIP $offset
             LIMIT $limit
             """
-        result = await client.driver.execute_query(query, offset=offset, limit=batch_size)  # type: ignore[arg-type]
+        result = await client.driver.execute_query(query, offset=offset, limit=batch_size)
 
-        records = result[0] if result and len(result) > 0 else []  # type: ignore[index]
+        records = result[0] if result and len(result) > 0 else []
         if not records:
             break
 
@@ -286,7 +286,7 @@ async def _cast_name_embeddings_to_vecf32(
                     SET n.name_embedding = vecf32(n.name_embedding)
                     RETURN n.uuid AS uuid
                     """
-                await client.driver.execute_query(cast_query, uuid=uuid)  # type: ignore[arg-type]
+                await client.driver.execute_query(cast_query, uuid=uuid)
                 entities_updated += 1
             except Exception as e:
                 # Already Vectorf32 (expected), skip silently.
@@ -320,9 +320,9 @@ async def _clear_mismatched_name_embedding_dimensions(
             SKIP $offset
             LIMIT $limit
             """
-        result = await client.driver.execute_query(query, offset=offset, limit=batch_size)  # type: ignore[arg-type]
+        result = await client.driver.execute_query(query, offset=offset, limit=batch_size)
 
-        records = result[0] if result and len(result) > 0 else []  # type: ignore[index]
+        records = result[0] if result and len(result) > 0 else []
         if not records:
             break
 
@@ -352,7 +352,7 @@ async def _clear_mismatched_name_embedding_dimensions(
                     SET n.name_embedding = NULL
                     RETURN n.uuid AS uuid
                     """
-                await client.driver.execute_query(clear_query, uuid=uuid)  # type: ignore[arg-type]
+                await client.driver.execute_query(clear_query, uuid=uuid)
                 embeddings_cleared += 1
             except Exception as e:
                 log.warning("embedding_clear_failed", uuid=uuid, error=str(e))
