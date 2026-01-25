@@ -1,20 +1,23 @@
 # https://moonrepo.dev/docs/config/workspace
-$schema: "./cache/schemas/workspace.json"
+$schema: ./cache/schemas/workspace.json
 
 vcs:
-  manager: git
+  client: git
   defaultBranch: main
+
+# Default project for unscoped task runs (e.g., `moon run dev` → `root:dev`)
+defaultProject: root
 
 projects:
   root: "."
-  api: "apps/api"
-  cli: "apps/cli"
-  e2e: "apps/e2e"
-  web: "apps/web"
-  docs: "docs"
+  api: apps/api
+  cli: apps/cli
+  e2e: apps/e2e
+  web: apps/web
+  docs: docs
   # Shared packages
-  core: "packages/python/sibyl-core"
+  core: packages/python/sibyl-core
   # Tools
-  hooks: "hooks"
-  skills: "skills"
-  infra: "infra"
+  hooks: hooks
+  skills: skills
+  infra: infra

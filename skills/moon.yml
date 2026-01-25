@@ -1,44 +1,38 @@
-# https://moonrepo.dev/docs/config/project
-$schema: "https://moonrepo.dev/schemas/project.json"
-
+$schema: https://moonrepo.dev/schemas/project.json
 language: other
-type: tool
-
+toolchains:
+  default: system
+tasks:
+  install:
+    options:
+      shell: true
+    script:
+      echo 'Installing Sibyl skill...' && mkdir -p ~/.claude/skills ~/.codex/skills && rm -rf
+      ~/.claude/skills/sibyl ~/.codex/skills/sibyl && cp -r sibyl ~/.claude/skills/ && cp -r sibyl
+      ~/.codex/skills/ && echo '✓ Installed to ~/.claude/skills and ~/.codex/skills'
+    preset: server
+  uninstall:
+    options:
+      shell: true
+    script: rm -rf ~/.claude/skills/sibyl ~/.codex/skills/sibyl && echo '✓ Removed Sibyl skill'
+    preset: server
+  lint:
+    command: npx prettier --check '**/*.md' '**/*.yml'
+    inputs:
+      - "@group(sources)"
+  fix:
+    command: npx prettier --write '**/*.md' '**/*.yml'
+    inputs:
+      - "@group(sources)"
+    preset: server
+  format:
+    command: npx prettier --write '**/*.md' '**/*.yml'
+    inputs:
+      - "@group(sources)"
+    preset: server
 fileGroups:
   sources:
     - "**/*.md"
     - "**/*.yaml"
     - "**/*.yml"
-
-tasks:
-  install:
-    command:
-      "echo 'Installing Sibyl skill...' && mkdir -p ~/.claude/skills ~/.codex/skills && rm -rf
-      ~/.claude/skills/sibyl ~/.codex/skills/sibyl && cp -r sibyl ~/.claude/skills/ && cp -r sibyl
-      ~/.codex/skills/ && echo '✓ Installed to ~/.claude/skills and ~/.codex/skills'"
-    local: true
-    options:
-      shell: true
-
-  uninstall:
-    command: "rm -rf ~/.claude/skills/sibyl ~/.codex/skills/sibyl && echo '✓ Removed Sibyl skill'"
-    local: true
-    options:
-      shell: true
-
-  lint:
-    command: "npx prettier --check '**/*.md' '**/*.yml'"
-    inputs:
-      - "@group(sources)"
-
-  fix:
-    command: "npx prettier --write '**/*.md' '**/*.yml'"
-    inputs:
-      - "@group(sources)"
-    local: true
-
-  format:
-    command: "npx prettier --write '**/*.md' '**/*.yml'"
-    inputs:
-      - "@group(sources)"
-    local: true
+layer: tool

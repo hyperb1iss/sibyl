@@ -1,133 +1,134 @@
 # https://moonrepo.dev/docs/config/project
-$schema: "https://moonrepo.dev/schemas/project.json"
+$schema: https://moonrepo.dev/schemas/project.json
 
 language: python
-type: application
-platform: system
+layer: application
+toolchains:
+  default: system
 
 fileGroups:
   sources:
-    - "src/**/*"
+    - src/**/*
   tests:
-    - "tests/**/*"
+    - tests/**/*
   configs:
-    - "pyproject.toml"
-    - "alembic.ini"
+    - pyproject.toml
+    - alembic.ini
 
 tasks:
   # Linting & Formatting
   lint:
-    command: "uv run ruff check src tests"
+    command: uv run ruff check src tests
     inputs:
       - "@group(sources)"
       - "@group(tests)"
       - "@group(configs)"
 
   format:
-    command: "uv run ruff format src tests"
+    command: uv run ruff format src tests
     inputs:
       - "@group(sources)"
       - "@group(tests)"
-    local: true
+    preset: server
 
   fix:
-    command: "uv run ruff check --fix src tests && uv run ruff format src tests"
+    script: uv run ruff check --fix src tests && uv run ruff format src tests
     inputs:
       - "@group(sources)"
       - "@group(tests)"
-    local: true
+    preset: server
 
   fix-all:
-    command: "uv run ruff check --fix --unsafe-fixes src tests && uv run ruff format src tests"
+    script: uv run ruff check --fix --unsafe-fixes src tests && uv run ruff format src tests
     inputs:
       - "@group(sources)"
       - "@group(tests)"
-    local: true
+    preset: server
 
   # Type Checking
   typecheck:
-    command: "uv run ty check"
+    command: uv run ty check
     inputs:
       - "@group(sources)"
       - "@group(configs)"
 
   # Testing (unit tests only - e2e tests are in apps/e2e)
   test:
-    command: "uv run pytest"
+    command: uv run pytest
     inputs:
       - "@group(sources)"
       - "@group(tests)"
     options:
-      envFile: ".env"
+      envFile: .env
 
   test-cov:
-    command: "uv run pytest --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml"
+    command: uv run pytest --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml
     inputs:
       - "@group(sources)"
       - "@group(tests)"
     outputs:
-      - "coverage.xml"
+      - coverage.xml
     options:
-      envFile: ".env"
+      envFile: .env
 
   # Live model tests (requires ANTHROPIC_API_KEY)
   test-live:
-    command: "uv run pytest tests/live/ --live-models --cost-limit=1.0 --no-cov -v"
+    command: uv run pytest tests/live/ --live-models --cost-limit=1.0 --no-cov -v
     inputs:
       - "@group(sources)"
-      - "tests/live/**/*"
-    local: true  # Not cacheable - makes real API calls
+      - tests/live/**/*
+    preset: server  # Not cacheable - makes real API calls
     options:
-      envFile: ".env"
+      envFile: .env
 
   # Server
   serve:
-    command: "uv run sibyld serve"
-    local: true
+    command: uv run sibyld serve
+    preset: server
     options:
-      envFile: ".env"
+      envFile: .env
       persistent: true
 
   # Worker
   worker:
-    command: "uv run sibyld worker"
-    local: true
+    command: uv run sibyld worker
+    preset: server
     options:
-      envFile: ".env"
+      envFile: .env
       persistent: true
 
   # Database
   db-migrate:
-    command: "uv run alembic upgrade head"
-    local: true
+    command: uv run alembic upgrade head
+    preset: server
     options:
-      envFile: ".env"
+      envFile: .env
 
   db-revision:
-    command: "uv run alembic revision --autogenerate"
-    local: true
+    command: uv run alembic revision --autogenerate
+    preset: server
     options:
-      envFile: ".env"
+      envFile: .env
 
   # Dependencies
   sync:
-    command: "uv sync"
+    command: uv sync
     inputs:
-      - "pyproject.toml"
-      - "uv.lock"
+      - pyproject.toml
+      - uv.lock
 
   # Build
   build:
-    command: "uv build"
+    command: uv build
     inputs:
       - "@group(sources)"
       - "@group(configs)"
 
   # Installation
   install:
-    command: "uv tool install . --force"
-    local: true
+    command: uv tool install . --force
+    preset: server
 
   install-dev:
-    command: "uv tool install . --editable --force"
-    local: true
+    command: uv tool install . --editable --force
+    preset: server

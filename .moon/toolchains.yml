@@ -1,0 +1,15 @@
+# https://moonrepo.dev/docs/config/toolchains
+$schema: ./cache/schemas/toolchains.json
+
+# JavaScript ecosystem (required for node/bun/deno toolchains)
+javascript:
+  packageManager: pnpm
+  syncPackageManagerField: true
+  inferTasksFromScripts: false
+
+# Node.js and pnpm - versions managed by proto
+node: {}
+pnpm: {}
+
+# Tool versions managed by proto in .prototools
+# Python toolchain disabled - uv run handles environments automatically

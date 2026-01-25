@@ -1,84 +1,69 @@
-# sibyl-cli package tasks
-$schema: "https://moonrepo.dev/schemas/project.json"
-
-type: application
+$schema: https://moonrepo.dev/schemas/project.json
+toolchains:
+  default: system
 language: python
-platform: system
-
-tags:
-  - python
-  - cli
-
-fileGroups:
-  sources:
-    - "src/**/*.py"
-  tests:
-    - "tests/**/*.py"
-  configs:
-    - "pyproject.toml"
-    - "moon.yml"
-
 tasks:
   sync:
-    command: "uv sync"
+    command: uv sync
     inputs:
-      - "@group(configs)"
-
+    - '@group(configs)'
   lint:
-    command: "uv run ruff check src/"
+    command: uv run ruff check src/
     inputs:
-      - "@group(sources)"
-
+    - '@group(sources)'
   format:
-    command: "uv run ruff format src/"
+    command: uv run ruff format src/
     inputs:
-      - "@group(sources)"
-
+    - '@group(sources)'
   fix:
-    command: "uv run ruff check --fix src/ && uv run ruff format src/"
+    script: uv run ruff check --fix src/ && uv run ruff format src/
     inputs:
-      - "@group(sources)"
-    local: true
-
+    - '@group(sources)'
+    preset: server
   fix-all:
-    command: "uv run ruff check --fix --unsafe-fixes src/ && uv run ruff format src/"
+    script: uv run ruff check --fix --unsafe-fixes src/ && uv run ruff format src/
     inputs:
-      - "@group(sources)"
-    local: true
-
+    - '@group(sources)'
+    preset: server
   typecheck:
-    command: "uv run ty check src/"
+    command: uv run ty check src/
     inputs:
-      - "@group(sources)"
-
+    - '@group(sources)'
   test:
-    command: "uv run pytest tests/ -v"
+    command: uv run pytest tests/ -v
     inputs:
-      - "@group(sources)"
-      - "@group(tests)"
-
+    - '@group(sources)'
+    - '@group(tests)'
   test-cov:
-    command: "uv run pytest tests/ --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml"
+    command: uv run pytest tests/ --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml
     inputs:
-      - "@group(sources)"
-      - "@group(tests)"
+    - '@group(sources)'
+    - '@group(tests)'
     outputs:
-      - "coverage.xml"
-
+    - coverage.xml
   check:
     deps:
-      - "~:lint"
-      - "~:typecheck"
-      - "~:test"
-
+    - ~:lint
+    - ~:typecheck
+    - ~:test
   install:
-    command: "uv tool install . --force"
-    local: true
-
+    command: uv tool install . --force
+    preset: server
   install-dev:
-    command: "uv tool install . --editable --force"
-    local: true
-
+    command: uv tool install . --editable --force
+    preset: server
   setup-agent:
-    command: "uv run sibyl local setup"
-    local: true
+    command: uv run sibyl local setup
+    preset: server
+tags:
+- python
+- cli
+fileGroups:
+  sources:
+  - src/**/*.py
+  tests:
+  - tests/**/*.py
+  configs:
+  - pyproject.toml
+  - moon.yml
+layer: application

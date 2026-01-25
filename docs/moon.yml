@@ -1,66 +1,52 @@
-# https://moonrepo.dev/docs/config/project
-$schema: "https://moonrepo.dev/schemas/project.json"
-
+$schema: https://moonrepo.dev/schemas/project.json
 language: typescript
-type: application
-platform: node
-
+toolchains:
+  default: node
+tasks:
+  dev:
+    command: pnpm vitepress dev
+    options:
+      persistent: true
+    preset: server
+  build:
+    command: pnpm vitepress build
+    inputs:
+    - '@group(sources)'
+    - '@group(configs)'
+    outputs:
+    - .vitepress/dist
+  preview:
+    command: pnpm vitepress preview
+    options:
+      persistent: true
+    deps:
+    - ~:build
+    preset: server
+  install:
+    command: pnpm install
+    inputs:
+    - package.json
+    - pnpm-lock.yaml
+    preset: server
+  lint:
+    command: npx prettier --check '**/*.md'
+    inputs:
+    - '@group(sources)'
+  fix:
+    command: npx prettier --write '**/*.md'
+    inputs:
+    - '@group(sources)'
+    preset: server
+  format:
+    command: npx prettier --write '**/*.md'
+    inputs:
+    - '@group(sources)'
+    preset: server
 fileGroups:
   sources:
-    - "**/*.md"
-    - ".vitepress/**/*"
+  - '**/*.md'
+  - .vitepress/**/*
   configs:
-    - "package.json"
-    - ".vitepress/config.mts"
-
-tasks:
-  # Development
-  dev:
-    command: "pnpm vitepress dev"
-    local: true
-    options:
-      persistent: true
-
-  # Build
-  build:
-    command: "pnpm vitepress build"
-    inputs:
-      - "@group(sources)"
-      - "@group(configs)"
-    outputs:
-      - ".vitepress/dist"
-
-  # Preview built site
-  preview:
-    command: "pnpm vitepress preview"
-    local: true
-    deps:
-      - "~:build"
-    options:
-      persistent: true
-
-  # Dependencies
-  install:
-    command: "pnpm install"
-    inputs:
-      - "package.json"
-      - "pnpm-lock.yaml"
-    local: true
-
-  # Formatting
-  lint:
-    command: "npx prettier --check '**/*.md'"
-    inputs:
-      - "@group(sources)"
-
-  fix:
-    command: "npx prettier --write '**/*.md'"
-    inputs:
-      - "@group(sources)"
-    local: true
-
-  format:
-    command: "npx prettier --write '**/*.md'"
-    inputs:
-      - "@group(sources)"
-    local: true
+  - package.json
+  - .vitepress/config.mts
+layer: application

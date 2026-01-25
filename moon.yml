@@ -1,67 +1,63 @@
 # https://moonrepo.dev/docs/config/project
-$schema: "https://moonrepo.dev/schemas/project.json"
+$schema: https://moonrepo.dev/schemas/project.json
 
-# Root project for workspace-level tasks
 language: other
-type: configuration
+layer: configuration
 
 tasks:
   # ==========================================================================
   # Development
   # ==========================================================================
   dev:
-    command:
-      'docker compose up -d && sleep 1 && npx concurrently --raw --kill-others-on-fail "uv run
-      --directory apps/api sibyld serve --reload" "uv run --directory apps/api arq
-      sibyl.jobs.worker.WorkerSettings --watch src" "moon run web:dev"'
+    script: |
+      docker compose up -d && sleep 1 && npx concurrently --raw --kill-others-on-fail \
+        "uv run --directory apps/api sibyld serve --reload" \
+        "uv run --directory apps/api arq sibyl.jobs.worker.WorkerSettings --watch src" \
+        "moon run web:dev"
     env:
       FORCE_COLOR: "1"
-    local: true
+    preset: server
     options:
       persistent: true
-      shell: true
 
   dev-api:
-    command: |
+    script: |
       docker compose up -d
       sleep 1
       uv run --directory apps/api sibyld serve --reload
-    local: true
+    preset: server
     options:
       persistent: true
-      shell: true
 
   dev-web:
-    command: "moon run web:dev"
-    local: true
+    command: moon run web:dev
+    preset: server
     options:
       persistent: true
 
   stop:
-    command: |
+    script: |
       echo "🛑 Stopping Sibyl services..."
       pkill -f "sibyl-serve" 2>/dev/null || true
       pkill -f "next dev" 2>/dev/null || true
       docker compose down
       echo "✓ All services stopped"
-    local: true
-    options:
-      shell: true
+    preset: server
 
   # ==========================================================================
   # Docker
   # ==========================================================================
   docker-up:
-    command: "docker compose up -d"
-    local: true
+    command: docker compose up -d
+    preset: server
 
   docker-down:
-    command: "docker compose down"
-    local: true
+    command: docker compose down
+    preset: server
 
   docker-logs:
-    command: "docker compose logs -f"
-    local: true
+    command: docker compose logs -f
+    preset: server
     options:
       persistent: true
 
@@ -69,7 +65,7 @@ tasks:
   # Quickstart (uses GHCR images - same as end-users)
   # ==========================================================================
   quickstart:
-    command: |
+    script: |
       if [ ! -f .env.quickstart ]; then
         echo "⚠️  Create .env.quickstart with your API keys first"
         echo "   cp .env.quickstart.example .env.quickstart"
@@ -81,23 +77,21 @@ tasks:
       echo "   Web UI:   http://localhost:${SIBYL_WEB_PORT:-3337}"
       echo "   API:      http://localhost:${SIBYL_SERVER_PORT:-3334}"
       echo "   Graph UI: http://localhost:${SIBYL_FALKORDB_BROWSER_PORT:-3335}"
-    local: true
-    options:
-      shell: true
+    preset: server
 
   quickstart-stop:
-    command: "docker compose -f docker-compose.quickstart.yml down"
-    local: true
+    command: docker compose -f docker-compose.quickstart.yml down
+    preset: server
 
   quickstart-logs:
-    command: "docker compose -f docker-compose.quickstart.yml logs -f"
-    local: true
+    command: docker compose -f docker-compose.quickstart.yml logs -f
+    preset: server
     options:
       persistent: true
 
   # Test instance (runs alongside dev on different ports)
   quickstart-test:
-    command: |
+    script: |
       if [ ! -f .env.quickstart ]; then
         echo "⚠️  Create .env.quickstart with your API keys first"
         exit 1
@@ -108,70 +102,64 @@ tasks:
       echo "   Web UI:   http://localhost:3347"
       echo "   API:      http://localhost:3344"
       echo "   Graph UI: http://localhost:3345"
-    local: true
-    options:
-      shell: true
+    preset: server
 
   quickstart-test-stop:
-    command:
-      "docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml down"
-    local: true
+    command: docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml down
+    preset: server
 
   quickstart-test-logs:
-    command:
-      "docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml logs -f"
-    local: true
+    command: docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml logs -f
+    preset: server
     options:
       persistent: true
 
   quickstart-pull:
-    command: "docker compose -f docker-compose.quickstart.yml pull"
-    local: true
+    command: docker compose -f docker-compose.quickstart.yml pull
+    preset: server
 
   # ==========================================================================
   # Formatting (aggregates individual project tasks)
   # ==========================================================================
   format:
-    command: "npx prettier --write '\\*.md' '\\*.yml' '\\*.yaml'"
+    command: "npx prettier --write '*.md' '*.yml' '*.yaml'"
     inputs:
       - "*.md"
       - "*.yml"
       - "*.yaml"
-    local: true
+    preset: server
 
   fmt:
     deps:
-      - "root:format"
-      - "docs:format"
-      - "skills:format"
-      - "infra:format"
-    local: true
+      - root:format
+      - docs:format
+      - skills:format
+      - infra:format
+    preset: server
 
   fmt-check:
     deps:
-      - "docs:lint"
-      - "skills:lint"
-      - "infra:lint"
+      - docs:lint
+      - skills:lint
+      - infra:lint
 
   # ==========================================================================
   # Coverage
   # ==========================================================================
   coverage:
     deps:
-      - "api:test-cov"
-      - "cli:test-cov"
-      - "core:test-cov"
-      - "web:test-cov"
+      - api:test-cov
+      - cli:test-cov
+      - core:test-cov
+      - web:test-cov
 
   # ==========================================================================
   # E2E Testing
   # ==========================================================================
   e2e-up:
-    command: "docker compose -f compose.e2e.yml up -d"
-    local: true
+    command: docker compose -f compose.e2e.yml up -d
+    preset: server
 
   e2e-down:
-    command: "docker compose -f compose.e2e.yml down -v"
-    local: true
-
-  # Python: No sync task needed - uv run handles deps automatically
+    command: docker compose -f compose.e2e.yml down -v
+    preset: server

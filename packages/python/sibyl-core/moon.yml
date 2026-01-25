@@ -1,77 +1,65 @@
-# sibyl-core package tasks
-$schema: "https://moonrepo.dev/schemas/project.json"
-
-type: library
+$schema: https://moonrepo.dev/schemas/project.json
+toolchains:
+  default: system
 language: python
-platform: system
-
-tags:
-  - python
-  - library
-  - core
-
-fileGroups:
-  sources:
-    - "src/**/*.py"
-  tests:
-    - "tests/**/*.py"
-  configs:
-    - "pyproject.toml"
-    - "moon.yml"
-
 tasks:
   sync:
-    command: "uv sync"
+    command: uv sync
     inputs:
-      - "@group(configs)"
-
+    - '@group(configs)'
   lint:
-    command: "uv run ruff check src/ tests/"
+    command: uv run ruff check src/ tests/
     inputs:
-      - "@group(sources)"
-      - "@group(tests)"
-
+    - '@group(sources)'
+    - '@group(tests)'
   format:
-    command: "uv run ruff format src/ tests/"
+    command: uv run ruff format src/ tests/
     inputs:
-      - "@group(sources)"
-      - "@group(tests)"
-
+    - '@group(sources)'
+    - '@group(tests)'
   fix:
-    command: "uv run ruff check --fix src/ tests/ && uv run ruff format src/ tests/"
+    script: uv run ruff check --fix src/ tests/ && uv run ruff format src/ tests/
     inputs:
-      - "@group(sources)"
-      - "@group(tests)"
-    local: true
-
+    - '@group(sources)'
+    - '@group(tests)'
+    preset: server
   fix-all:
-    command: "uv run ruff check --fix --unsafe-fixes src/ tests/ && uv run ruff format src/ tests/"
+    script: uv run ruff check --fix --unsafe-fixes src/ tests/ && uv run ruff format src/ tests/
     inputs:
-      - "@group(sources)"
-      - "@group(tests)"
-    local: true
-
+    - '@group(sources)'
+    - '@group(tests)'
+    preset: server
   typecheck:
-    command: "uv run ty check src/"
+    command: uv run ty check src/
     inputs:
-      - "@group(sources)"
-
+    - '@group(sources)'
   test:
-    command: "uv run pytest tests/ -v"
+    command: uv run pytest tests/ -v
     inputs:
-      - "@group(sources)"
-      - "@group(tests)"
-
+    - '@group(sources)'
+    - '@group(tests)'
   test-cov:
-    command: "uv run pytest tests/ --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml"
+    command: uv run pytest tests/ --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml
     inputs:
-      - "@group(sources)"
-      - "@group(tests)"
+    - '@group(sources)'
+    - '@group(tests)'
     outputs:
-      - "coverage.xml"
-
+    - coverage.xml
   check:
     deps:
-      - "~:lint"
-      - "~:typecheck"
-      - "~:test"
+    - ~:lint
+    - ~:typecheck
+    - ~:test
+tags:
+- python
+- library
+- core
+fileGroups:
+  sources:
+  - src/**/*.py
+  tests:
+  - tests/**/*.py
+  configs:
+  - pyproject.toml
+  - moon.yml
+layer: library

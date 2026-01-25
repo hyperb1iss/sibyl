@@ -1,50 +1,42 @@
-# https://moonrepo.dev/docs/config/project
-$schema: "https://moonrepo.dev/schemas/project.json"
-
+$schema: https://moonrepo.dev/schemas/project.json
 language: python
-type: tool
-
-fileGroups:
-  sources:
-    - "*.py"
-
+toolchains:
+  default: system
 tasks:
   lint:
-    command: "uv run ruff check ."
+    command: uv run ruff check .
     inputs:
-      - "@group(sources)"
-
+    - '@group(sources)'
   format:
-    command: "uv run ruff format ."
+    command: uv run ruff format .
     inputs:
-      - "@group(sources)"
-    local: true
-
+    - '@group(sources)'
+    preset: server
   fix:
-    command: "uv run ruff check --fix . && uv run ruff format ."
+    script: uv run ruff check --fix . && uv run ruff format .
     inputs:
-      - "@group(sources)"
-    local: true
-
+    - '@group(sources)'
+    preset: server
   typecheck:
-    command: "uvx ty check ."
+    command: uvx ty check .
     inputs:
-      - "@group(sources)"
-
+    - '@group(sources)'
   check:
-    command: "noop"
+    command: noop
     deps:
-      - "~:lint"
-      - "~:typecheck"
-
+    - ~:lint
+    - ~:typecheck
   install:
-    command: "echo 'Installing Claude Code hooks...' && mkdir -p ~/.claude/hooks/sibyl && cp ./*.py ~/.claude/hooks/sibyl/ && chmod +x ~/.claude/hooks/sibyl/*.py && python3 configure.py && echo '✓ Hooks installed - restart Claude Code to activate'"
-    local: true
     options:
       shell: true
-
+    script: echo 'Installing Claude Code hooks...' && mkdir -p ~/.claude/hooks/sibyl && cp ./*.py ~/.claude/hooks/sibyl/ && chmod +x ~/.claude/hooks/sibyl/*.py && python3 configure.py && echo '✓ Hooks installed - restart Claude Code to activate'
+    preset: server
   uninstall:
-    command: "rm -rf ~/.claude/hooks/sibyl && echo '✓ Removed Sibyl hooks (settings.json unchanged - edit manually if needed)'"
-    local: true
     options:
       shell: true
+    script: rm -rf ~/.claude/hooks/sibyl && echo '✓ Removed Sibyl hooks (settings.json unchanged - edit manually if needed)'
+    preset: server
+fileGroups:
+  sources:
+  - '*.py'
+layer: tool

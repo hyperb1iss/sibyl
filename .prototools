@@ -2,7 +2,7 @@
 # Managed by proto - https://moonrepo.dev/proto
 # moon is built-in to proto v0.45+, no plugin needed
 
-moon = "~1"
+moon = "2.0.0-beta.1"
 python = "3.13"
 node = "24"
 pnpm = "10"
