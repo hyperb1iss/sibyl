@@ -418,8 +418,10 @@ def start(
     console.print(f"[{ELECTRIC_PURPLE}][bold]Next Steps[/bold][/{ELECTRIC_PURPLE}]")
     console.print()
     console.print("  1. Complete the setup wizard in your browser")
-    console.print("  2. Connect Claude Code:")
+    console.print("  2. Connect Claude Code MCP:")
     console.print("     [dim]claude mcp add sibyl --transport http http://localhost:3334/mcp[/dim]")
+    console.print("  3. Set up agent skills & hooks:")
+    console.print("     [dim]sibyl local setup[/dim]")
     console.print()
 
 
@@ -557,3 +559,42 @@ def reset(
 
     success("Sibyl reset complete")
     console.print("\nRun [bold]sibyl local start[/bold] to set up again.")
+
+
+@app.command()
+def setup(
+    status_only: Annotated[
+        bool,
+        typer.Option("--status", "-s", help="Only show current installation status"),
+    ] = False,
+    show_snippet: Annotated[
+        bool,
+        typer.Option("--snippet", help="Show prompt snippet for agent config"),
+    ] = False,
+) -> None:
+    """Set up agent integration (skills + hooks for Claude/Codex).
+
+    Installs:
+      • Skills for Claude Code (~/.claude/skills/sibyl/)
+      • Skills for Codex CLI (~/.codex/skills/sibyl/)
+      • Hooks for Claude Code (session-start, prompt injection)
+
+    In development mode (run from Sibyl repo), creates symlinks.
+    In package mode, copies embedded files.
+    """
+    from sibyl_cli.setup import (
+        print_prompt_snippet,
+        print_status,
+        setup_agent_integration,
+    )
+
+    if status_only:
+        print_status()
+        return
+
+    if show_snippet:
+        print_prompt_snippet()
+        return
+
+    if setup_agent_integration():
+        print_prompt_snippet()

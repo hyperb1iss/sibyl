@@ -78,3 +78,7 @@ tasks:
   install-dev:
     command: "uv tool install . --editable --force"
     local: true
+
+  setup-agent:
+    command: "uv run sibyl local setup"
+    local: true

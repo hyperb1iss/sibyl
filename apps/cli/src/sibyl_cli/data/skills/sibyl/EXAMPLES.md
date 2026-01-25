@@ -1,0 +1,349 @@
+# Sibyl CLI Examples
+
+Concrete examples showing the CLI in action.
+
+> ⚠️ **Common Mistakes to Avoid:**
+>
+> - `sibyl task add` → Use `sibyl task create --title "..."`
+> - `-t "Title"` → Use `--title "..."` for task creation
+> - `jq '.[].title'` → Use `jq '.[].name'` (field is `name`)
+> - Not fetching full content → Use `sibyl entity show <id>` after search
+
+---
+
+## Search Examples
+
+### Basic Search
+
+```bash
+sibyl search "authentication patterns"
+# Output shows: name, section path, preview, and entity ID
+```
+
+### Get Full Content After Search
+
+```bash
+# 1. Search finds relevant results with IDs
+sibyl search "redis connection"
+# Output includes ID like: episode:abc123-uuid-here
+
+# 2. Fetch full content by ID
+sibyl entity show "episode:abc123-uuid-here"
+```
+
+### Search with Type Filter
+
+```bash
+sibyl search "error handling" --type pattern
+sibyl search "debugging tips" --type episode
+sibyl search "security rules" --type rule
+```
+
+### Search with Limit
+
+```bash
+sibyl search "OAuth" --limit 5
+```
+
+### Complex Search
+
+```bash
+# Find Python patterns about async
+sibyl search "async await patterns" --type pattern
+
+# Find debugging episodes
+sibyl search "connection timeout" --type episode
+
+# Search across all projects
+sibyl search "python conventions" --all
+```
+
+---
+
+## Task Examples
+
+### List Tasks
+
+```bash
+# All tasks in a project
+sibyl task list --project proj_a1b2c3d4e5f6
+
+# Filter by status
+sibyl task list --project proj_a1b2c3d4e5f6 --status todo
+sibyl task list --status doing
+sibyl task list --status blocked
+
+# Filter by assignee
+sibyl task list --assignee alice
+
+# Semantic search within tasks
+sibyl task list -q "authentication"
+```
+
+### Task Details
+
+```bash
+sibyl task show task_a1b2c3d4e5f6
+```
+
+### Start Task
+
+```bash
+sibyl task start task_a1b2c3d4e5f6 --assignee alice
+# Output: Task started, branch: feature/task-abc123
+```
+
+### Block Task
+
+```bash
+sibyl task block task_a1b2c3d4e5f6 --reason "Waiting for design approval"
+```
+
+### Unblock Task
+
+```bash
+sibyl task unblock task_a1b2c3d4e5f6
+```
+
+### Submit for Review
+
+```bash
+sibyl task review task_a1b2c3d4e5f6 --pr "https://github.com/org/repo/pull/42"
+
+# With commits
+sibyl task review task_a1b2c3d4e5f6 \
+  --pr "https://github.com/org/repo/pull/42" \
+  --commits "abc1234,def5678,ghi9012"
+```
+
+### Complete Task
+
+```bash
+# Basic completion
+sibyl task complete task_a1b2c3d4e5f6
+
+# With time tracking
+sibyl task complete task_a1b2c3d4e5f6 --hours 4.5
+
+# With learnings (creates episode automatically)
+sibyl task complete task_a1b2c3d4e5f6 \
+  --hours 4.5 \
+  --learnings "OAuth tokens must be refreshed 5 minutes before expiry to avoid race conditions"
+```
+
+### Archive Task
+
+```bash
+sibyl task archive task_a1b2c3d4e5f6 --yes
+```
+
+---
+
+## Project Examples
+
+### List Projects
+
+```bash
+sibyl project list
+```
+
+### Show Project
+
+```bash
+sibyl project show proj_a1b2c3d4e5f6
+```
+
+### Create Project
+
+```bash
+sibyl project create \
+  --name "API Gateway" \
+  --description "Rate limiting, auth, and routing layer"
+```
+
+---
+
+## Entity Examples
+
+### List Entities by Type
+
+```bash
+sibyl entity list --type pattern
+sibyl entity list --type episode
+sibyl entity list --type rule
+
+# With filters
+sibyl entity list --type pattern --language python
+sibyl entity list --type rule --category security
+```
+
+### Show Entity
+
+```bash
+sibyl entity show ptrn_a1b2c3d4e5f6
+```
+
+### Create Entity (Capture Learning)
+
+```bash
+# Episode for a debugging insight
+sibyl entity create \
+  --type episode \
+  --name "Redis connection pool exhaustion fix" \
+  --content "When using Redis with high concurrency, pool size must match concurrent operations. Pool=10 with 20 concurrent requests causes exhaustion. Solution: pool >= max_concurrent * 1.5" \
+  --category debugging \
+  --languages python
+
+# Pattern for a reusable approach
+sibyl entity create \
+  --type pattern \
+  --name "Exponential backoff with jitter" \
+  --content "delay = min(max_delay, base_delay * 2^attempt) + random(0, jitter)" \
+  --category resilience \
+  --languages python,typescript
+```
+
+### Related Entities
+
+```bash
+sibyl entity related ptrn_a1b2c3d4e5f6
+```
+
+### Delete Entity
+
+```bash
+sibyl entity delete epsd_a1b2c3d4e5f6 --yes
+```
+
+---
+
+## Exploration Examples
+
+### Related Entities (1-hop)
+
+```bash
+sibyl explore related pattern_oauth
+```
+
+### Multi-hop Traversal
+
+```bash
+sibyl explore traverse proj_a1b2c3d4e5f6 --depth 2
+```
+
+### Task Dependencies
+
+```bash
+# Single task
+sibyl explore dependencies task_deploy
+
+# Project-wide
+sibyl explore dependencies --project proj_d4e5f6a1b2c3
+```
+
+### Find Path
+
+```bash
+sibyl explore path pattern_auth task_login
+```
+
+---
+
+## Output Formats
+
+### Table Output (Default)
+
+```bash
+# Table is the default - human-readable format
+sibyl task list
+sibyl entity list --type pattern
+sibyl project list
+```
+
+### JSON Output (For Scripting)
+
+```bash
+# Use --json or -j for JSON output
+sibyl task list --json
+sibyl entity list --type pattern --json
+sibyl project list -j
+```
+
+### CSV Output
+
+```bash
+sibyl task list --csv > tasks.csv
+sibyl entity list --type episode --csv > episodes.csv
+```
+
+---
+
+## Complete Workflow Example
+
+A full feature implementation from start to finish:
+
+```bash
+# 1. Research phase
+sibyl search "user authentication" --type pattern
+# Found pattern:abc123... - get full content
+sibyl entity show "pattern:abc123-uuid"
+
+sibyl search "OAuth implementation" --type episode
+
+# 2. Check existing projects
+sibyl project list
+
+# 3. Project exists, list its tasks
+sibyl task list --project proj_a1b2c3d4e5f6 --status todo
+
+# 4. Start the task
+sibyl task start task_oauth_google --assignee developer
+# Output: Task started, branch: feature/oauth-google-login
+
+# 5. Hit a blocker
+sibyl task block task_oauth_google \
+  --reason "Need to register app in Google Cloud Console"
+
+# 6. Blocker resolved, resume
+sibyl task unblock task_oauth_google
+
+# 7. Implementation complete, submit PR
+sibyl task review task_oauth_google \
+  --pr "https://github.com/org/repo/pull/123"
+
+# 8. PR approved, complete with learnings
+sibyl task complete task_oauth_google \
+  --hours 4.0 \
+  --learnings "Google OAuth2 requires specific scopes: openid, email, profile. Token refresh should happen 5 min before expiry."
+
+# 9. Check next task
+sibyl task list --project proj_a1b2c3d4e5f6 --status todo
+```
+
+---
+
+## Admin Examples
+
+### Health Check
+
+```bash
+sibyl health
+```
+
+### Statistics
+
+```bash
+sibyl stats
+```
+
+### Configuration
+
+```bash
+sibyl config
+```
+
+### Setup (First Time)
+
+```bash
+sibyl setup
+```

@@ -112,6 +112,15 @@ install_sibyl() {
 # ============================================================================
 # Main
 # ============================================================================
+setup_agent_integration() {
+    info "Setting up agent integration (skills + hooks)..."
+    if sibyl local setup >/dev/null 2>&1; then
+        success "Agent integration configured"
+    else
+        warn "Agent integration setup skipped (run 'sibyl local setup' later)"
+    fi
+}
+
 main() {
     banner
 
@@ -121,6 +130,9 @@ main() {
     echo
     install_uv
     install_sibyl
+
+    echo
+    setup_agent_integration
 
     echo
     printf '%s\n' "${GREEN}${BOLD}Installation complete!${RESET}"
