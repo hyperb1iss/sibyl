@@ -70,14 +70,16 @@ jobs:
         with:
           auto-install: true
 
-      - name: Fix proto shim permissions
+      - name: Warm up proto toolchain
         run: |
-          if [ -d "$HOME/.proto/shims" ]; then
-            chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.proto/bin" ]; then
-            chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
-          fi
+          # Install all tools defined in .prototools BEFORE parallel tasks run
+          # This prevents race conditions where multiple tasks try to auto-install simultaneously
+          proto use --log debug
+          # Ensure shims have execute permissions
+          chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          # Verify uv is working
+          uv --version
 
       # =========================================================================
       # Caching
