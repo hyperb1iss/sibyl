@@ -20,12 +20,22 @@ Server commands (serve, db, generate, etc.) are in the sibyl-server package.
 """
 
 import os
+from importlib.metadata import version as pkg_version
+
+from sibyl_cli.main import app, main
 
 # Disable Graphiti telemetry
 os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
 
-__version__ = "0.1.0"
 
-from sibyl_cli.main import app, main
+def __getattr__(name: str) -> str:
+    """Lazy attribute access for __version__."""
+    if name == "__version__":
+        try:
+            return pkg_version("sibyl-dev")
+        except Exception:
+            return "unknown"
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = ["__version__", "app", "main"]

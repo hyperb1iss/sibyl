@@ -6,6 +6,7 @@ All commands communicate with the REST API.
 Server commands (serve, dev, db, generate, etc.) are in sibyl-server.
 """
 
+from importlib.metadata import version as pkg_version
 from typing import Annotated
 
 import typer
@@ -43,6 +44,22 @@ from sibyl_cli.source import app as source_app
 from sibyl_cli.state import set_context_override
 from sibyl_cli.task import app as task_app
 from sibyl_cli.update import app as update_app
+
+
+def get_version() -> str:
+    """Get the installed package version."""
+    try:
+        return pkg_version("sibyl-dev")
+    except Exception:
+        return "unknown"
+
+
+def version_callback(value: bool) -> None:
+    """Print version and exit."""
+    if value:
+        print(f"sibyl {get_version()}")
+        raise typer.Exit()
+
 
 # Main app
 app = typer.Typer(
@@ -119,6 +136,16 @@ def main_callback(
             envvar="SIBYL_CONTEXT",
         ),
     ] = None,
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            "-V",
+            help="Show version and exit",
+            callback=version_callback,
+            is_eager=True,
+        ),
+    ] = False,
 ) -> None:
     """Sibyl CLI - interact with your knowledge graph."""
     if context:
@@ -335,9 +362,7 @@ def stats(
 @app.command()
 def version() -> None:
     """Show version information."""
-    from sibyl_cli import __version__
-
-    console.print(f"sibyl-dev version {__version__}")
+    console.print(f"sibyl {get_version()}")
 
 
 def main() -> None:

@@ -317,9 +317,7 @@ def update(
     # Check for dev mode
     if is_dev_mode():
         console.print()
-        console.print(
-            f"[{ELECTRIC_YELLOW}]You're running Sibyl from source.[/{ELECTRIC_YELLOW}]"
-        )
+        console.print(f"[{ELECTRIC_YELLOW}]You're running Sibyl from source.[/{ELECTRIC_YELLOW}]")
         console.print()
         console.print("To update, use:")
         console.print(f"  [{NEON_CYAN}]git pull[/{NEON_CYAN}]")

@@ -932,9 +932,7 @@ async def _link_graph_status() -> ManageResponse:
 
     async with get_session() as session:
         # Total chunks (pyright doesn't understand SQLAlchemy func.count)
-        total_result = await session.execute(
-            select(func.count(DocumentChunk.id))
-        )
+        total_result = await session.execute(select(func.count(DocumentChunk.id)))
         total_chunks = total_result.scalar() or 0
 
         # Chunks with entities
