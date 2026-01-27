@@ -109,7 +109,7 @@ services:
       api:
         condition: service_healthy
     environment:
-      SIBYL_API_URL: http://api:3334  # Server-side (SSR) fetches
+      SIBYL_API_URL: http://api:3334/api  # Server-side (SSR) fetches
       NEXT_PUBLIC_API_URL: http://localhost:${SIBYL_SERVER_PORT:-3334}  # Client-side (browser) fetches
       NODE_ENV: production
     healthcheck:

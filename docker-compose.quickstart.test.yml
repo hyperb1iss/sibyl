@@ -23,7 +23,7 @@ services:
     ports:
       - "3347:3337"
     environment:
-      SIBYL_API_URL: http://api:3334
+      SIBYL_API_URL: http://api:3334/api
       NEXT_PUBLIC_API_URL: http://localhost:3344
 
   falkordb:

@@ -74,8 +74,10 @@ services:
     ports:
       - "3337:3337"
     environment:
-      # API URL for client-side requests
+      # API URL for client-side requests (browser → external URL)
       NEXT_PUBLIC_API_URL: ${SIBYL_SERVER_URL:-http://localhost:3334}
+      # API URL for server-side requests (Next.js server → backend container)
+      SIBYL_API_URL: http://backend:3334/api
       NODE_ENV: production
     restart: unless-stopped
 
