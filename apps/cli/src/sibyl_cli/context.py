@@ -31,6 +31,8 @@ from sibyl_cli.config_store import (
     get_active_context,
     get_active_context_name,
     get_context,
+    get_current_context,
+    get_effective_server_url,
     list_contexts,
     resolve_project_from_cwd,
     set_active_context,
@@ -55,12 +57,21 @@ def callback(
     if ctx.invoked_subcommand is not None:
         return
 
-    # No subcommand - show active context
+    # No subcommand - show active context or path-detected project
     active = get_active_context()
-    if not active:
+    linked_project = resolve_project_from_cwd()
+
+    # If no named context and no path mapping, show helpful message
+    if not active and not linked_project:
         error("No active context")
-        info("Set one with: sibyl context use <name>")
+        info("Link this directory: sibyl project link")
+        info("Or create a context: sibyl context create local --use")
         raise typer.Exit(1)
+
+    # If no named context but we have a path mapping, show that
+    if not active and linked_project:
+        _show_path_context(linked_project, json_out)
+        return
 
     # Resolve effective project (linked > default)
     linked_project = resolve_project_from_cwd()
@@ -198,6 +209,84 @@ def _context_to_dict(ctx: Context) -> dict:
         "default_project": ctx.default_project,
         "insecure": ctx.insecure,
     }
+
+
+def _show_path_context(project_id: str, json_out: bool) -> None:
+    """Show context when only path mapping is available (no named context)."""
+    _, matched_path = get_current_context()
+    server_url = get_effective_server_url()
+
+    # Fetch project details
+    project_data: dict | None = None
+
+    @run_async
+    async def _fetch_project() -> dict | None:
+        try:
+            client = get_client()
+            return await client.get_entity(project_id)
+        except SibylClientError:
+            return None
+
+    project_data = _fetch_project()
+
+    if json_out:
+        result = {
+            "project_id": project_id,
+            "matched_path": matched_path,
+            "server_url": server_url,
+            "source": "path_mapping",
+        }
+        if project_data:
+            result["project_details"] = project_data
+        print_json(result)
+        return
+
+    # Display
+    console.print()
+    project_name = project_data.get("name", project_id) if project_data else project_id
+    console.print(f"  [{ELECTRIC_PURPLE}]Project:[/{ELECTRIC_PURPLE}] [bold]{project_name}[/bold]")
+    console.print(f"  [{SUCCESS_GREEN}](detected from path)[/{SUCCESS_GREEN}]")
+    console.print()
+    console.print(f"  [{NEON_CYAN}]Server:[/{NEON_CYAN}]  {server_url}")
+    if matched_path:
+        console.print(f"  [{NEON_CYAN}]Path:[/{NEON_CYAN}]    {matched_path}")
+
+    # Show project summary if we have data
+    if project_data:
+        meta = project_data.get("metadata", {})
+        status_counts = meta.get("status_counts", {})
+        total = meta.get("total_tasks", 0)
+        pct = meta.get("progress_pct", 0.0)
+
+        if project_data.get("description"):
+            console.print(f"  [dim]{project_data['description']}[/dim]")
+
+        # Progress bar
+        if total > 0:
+            console.print()
+            bar_filled = int(pct / 5)
+            bar = f"[{SUCCESS_GREEN}]{'█' * bar_filled}[/{SUCCESS_GREEN}]{'░' * (20 - bar_filled)}"
+            console.print(f"  {bar} {pct:.0f}%")
+
+            # Brief status summary
+            doing = status_counts.get("doing", 0)
+            blocked = status_counts.get("blocked", 0)
+            review = status_counts.get("review", 0)
+            todo = status_counts.get("todo", 0)
+
+            status_parts = []
+            if doing:
+                status_parts.append(f"[{SUCCESS_GREEN}]{doing} doing[/{SUCCESS_GREEN}]")
+            if blocked:
+                status_parts.append(f"[red]{blocked} blocked[/red]")
+            if review:
+                status_parts.append(f"[{ELECTRIC_YELLOW}]{review} review[/{ELECTRIC_YELLOW}]")
+            if todo:
+                status_parts.append(f"[dim]{todo} todo[/dim]")
+            if status_parts:
+                console.print(f"  {' · '.join(status_parts)}")
+
+    console.print()
 
 
 @app.command("list")
