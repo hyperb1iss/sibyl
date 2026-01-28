@@ -237,6 +237,17 @@ class GraphClient:
 
             # Initialize Graphiti with the driver and LLM client
             self._client = Graphiti(graph_driver=driver, llm_client=llm_client)
+
+            # Wrap embedder with LRU cache to avoid redundant OpenAI API calls
+            # This is critical for performance - search operations generate embeddings
+            # repeatedly for similar queries, and entity creation embeds each entity.
+            from sibyl_core.graph.cached_embedder import wrap_embedder_with_cache
+
+            self._client.embedder = wrap_embedder_with_cache(
+                self._client.embedder,
+                max_size=2000,  # ~12MB for 1536-dim embeddings
+            )
+
             self._connected = True
             log.info("Connected to FalkorDB successfully", llm_provider=settings.llm_provider)
 
