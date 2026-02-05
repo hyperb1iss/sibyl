@@ -100,7 +100,7 @@ class AgentOrchestrator:
 
         Recovers state from the graph and begins health monitoring.
         """
-        log.info(f"Starting orchestrator for project {self.project_id}")
+        log.info("Starting orchestrator", project_id=self.project_id)
         self._running = True
 
         # Recover any agents that were running before restart
@@ -133,7 +133,7 @@ class AgentOrchestrator:
                 await agent.checkpoint(current_step="orchestrator_shutdown")
                 await agent.stop(reason="orchestrator_shutdown")
             except Exception:
-                log.exception(f"Error stopping agent {agent.id}")
+                log.exception("Error stopping agent", agent_id=agent.id)
 
         # Clean up orphaned worktrees
         await self.worktree_manager.cleanup_orphaned()
@@ -174,7 +174,7 @@ class AgentOrchestrator:
         # Create message queue for this agent
         self._message_queues[instance.id] = asyncio.Queue()
 
-        log.info(f"Orchestrator spawned agent {instance.id}")
+        log.info("Orchestrator spawned agent", agent_id=instance.id)
         return instance
 
     async def spawn_for_task(
@@ -243,7 +243,7 @@ class AgentOrchestrator:
             try:
                 await instance.checkpoint(current_step=f"terminated: {reason}")
             except Exception:
-                log.exception(f"Failed to checkpoint agent {agent_id}")
+                log.exception("Failed to checkpoint agent", agent_id=agent_id)
 
         # Clean up message queue
         self._message_queues.pop(agent_id, None)
@@ -486,7 +486,7 @@ class AgentOrchestrator:
         """
         queue = self._message_queues.get(to_agent)
         if not queue:
-            log.warning(f"No message queue for agent {to_agent}")
+            log.warning("No message queue for agent", agent_id=to_agent)
             return False
 
         message = AgentMessage(
@@ -499,7 +499,7 @@ class AgentOrchestrator:
         )
 
         await queue.put(message)
-        log.debug(f"Message queued: {from_agent} -> {to_agent}")
+        log.debug("Message queued", from_agent=from_agent, to_agent=to_agent)
         return True
 
     async def receive_messages(
@@ -595,18 +595,11 @@ class AgentOrchestrator:
     ) -> AgentInstance | None:
         """Find a paused agent of the preferred type that can be resumed.
 
-        Note: In practice, we usually spawn new agents for each task rather
-        than reusing paused ones, since agents maintain task-specific context.
+        # TODO(agent-pool): Intentionally stubbed — always returns None so we
+        # spawn fresh agents per task. Resuming paused agents requires solving
+        # context drift (stale system prompts, changed task state) and is
+        # deferred until the agent-pool milestone.
         """
-        # Check for paused agents that could be resumed
-        agents = await self.list_agents(status=AgentStatus.PAUSED)
-
-        for record in agents:
-            if record.agent_type == preferred_type:
-                # This agent could be resumed
-                # For now, return None to always spawn fresh agents
-                pass
-
         return None
 
     async def _reassign_agent(
@@ -614,7 +607,12 @@ class AgentOrchestrator:
         instance: AgentInstance,
         task: Task,
     ) -> AgentInstance:
-        """Reassign an idle agent to a new task."""
+        """Reassign an idle agent to a new task.
+
+        # TODO(agent-pool): Stubbed — only reachable when _find_available_agent
+        # returns an instance (currently never). Implementation is complete but
+        # untested; validate when agent-pool is enabled.
+        """
         # Update agent record
         await self.entity_manager.update(
             instance.id,
@@ -659,13 +657,13 @@ class AgentOrchestrator:
         )
         recoverable = [a for a in agents if a.status in recoverable_statuses]
 
-        log.info(f"Found {len(recoverable)} agents to recover")
+        log.info("Found agents to recover", count=len(recoverable))
 
         for record in recoverable:
             try:
                 instance = await self.resume_agent(record.id)
                 if instance:
-                    log.info(f"Recovered agent {record.id}")
+                    log.info("Recovered agent", agent_id=record.id)
                 else:
                     # Mark as failed if can't recover
                     await self.entity_manager.update(
@@ -682,7 +680,7 @@ class AgentOrchestrator:
                         error_message="Failed to recover after restart",
                     )
             except Exception:
-                log.exception(f"Failed to recover agent {record.id}")
+                log.exception("Failed to recover agent", agent_id=record.id)
 
     async def _health_check_loop(self) -> None:
         """Background task to monitor agent health."""
@@ -696,20 +694,44 @@ class AgentOrchestrator:
                 log.exception("Health check failed")
 
     async def _check_agent_health(self) -> None:
-        """Check for stale or unhealthy agents."""
+        """Check for stale or unhealthy agents.
+
+        Reads last_heartbeat from AgentState (Postgres) rather than the
+        in-memory record, since heartbeats are written to Postgres only.
+        """
+        from sqlalchemy import select as sa_select
+
+        from sibyl.db import get_session
+        from sibyl.db.models import AgentState
+
         now = datetime.now(UTC)
         active = await self.runner.list_active()
 
         for instance in active:
-            record = instance.record
+            # Read heartbeat from Postgres (authoritative source)
+            heartbeat: datetime | None = None
+            try:
+                async with get_session() as session:
+                    stmt = sa_select(AgentState).where(
+                        AgentState.graph_agent_id == instance.id
+                    )
+                    result = await session.execute(stmt)
+                    state = result.scalar_one_or_none()
+                    if state is not None:
+                        heartbeat = state.last_heartbeat
+            except Exception:
+                log.warning("Failed to read heartbeat from AgentState", agent_id=instance.id)
+                continue
 
-            # Check heartbeat
-            if record.last_heartbeat:
-                heartbeat = record.last_heartbeat
+            if heartbeat:
                 age = (now - heartbeat).total_seconds()
 
                 if age > self.STALE_HEARTBEAT_THRESHOLD:
-                    log.warning(f"Agent {instance.id} stale (no heartbeat for {age:.0f}s)")
+                    log.warning(
+                        "Agent stale, no heartbeat",
+                        agent_id=instance.id,
+                        stale_seconds=int(age),
+                    )
                     # Checkpoint and mark as stale
                     try:
                         await instance.checkpoint(current_step="stale_heartbeat")
@@ -723,7 +745,7 @@ class AgentOrchestrator:
                             status=AgentStatus.FAILED.value,
                         )
                     except Exception:
-                        log.exception(f"Failed to handle stale agent {instance.id}")
+                        log.exception("Failed to handle stale agent", agent_id=instance.id)
 
 
 class AgentMessage:
