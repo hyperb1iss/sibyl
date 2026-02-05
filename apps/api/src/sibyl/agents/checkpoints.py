@@ -263,7 +263,7 @@ async def restore_from_checkpoint(
 
     This validates the checkpoint and returns the data needed
     to resume an agent. The actual agent creation should be done
-    by AgentRunner.resume_from_checkpoint().
+    by AgentRunner.resume_agent().
 
     Args:
         entity_manager: Graph client

@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import hashlib
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -96,8 +97,21 @@ def _derive_agent_name(prompt: str, agent_type: AgentType, agent_id: str) -> str
 # Haiku model for fast, cheap tag generation
 _HAIKU_MODEL = "claude-3-5-haiku-latest"
 
+# Lazy-initialized async Anthropic client for tag derivation
+_async_anthropic_client: Any = None
 
-def _derive_agent_tags(
+
+def _get_async_anthropic() -> Any:
+    """Get or create a module-level AsyncAnthropic client."""
+    global _async_anthropic_client  # noqa: PLW0603
+    if _async_anthropic_client is None:
+        import anthropic
+
+        _async_anthropic_client = anthropic.AsyncAnthropic()
+    return _async_anthropic_client
+
+
+async def _derive_agent_tags(
     prompt: str,
     agent_type: AgentType,
     task: Task | None = None,
@@ -127,9 +141,7 @@ def _derive_agent_tags(
 
     # Try LLM-based extraction
     try:
-        import anthropic
-
-        client = anthropic.Anthropic()
+        client = _get_async_anthropic()
 
         # Build context for tag extraction
         context_parts = [f"Agent type: {agent_type.value}"]
@@ -148,7 +160,7 @@ Bad tags: the, code, work, task, agent (too generic)
 
 Reply with ONLY comma-separated tags, nothing else. Example: fix, api, auth"""
 
-        message = client.messages.create(
+        message = await client.messages.create(
             model=_HAIKU_MODEL,
             max_tokens=50,
             messages=[{"role": "user", "content": llm_prompt}],
@@ -163,9 +175,45 @@ Reply with ONLY comma-separated tags, nothing else. Example: fix, api, auth"""
         all_tags = base_tags | llm_tags
         return sorted(all_tags)[:8]
 
-    except Exception as e:
-        log.warning(f"LLM tag extraction failed, using base tags: {e}")
+    except Exception:
+        log.warning("LLM tag extraction failed, using base tags", agent_type=agent_type.value)
         return sorted(base_tags)[:8]
+
+
+@dataclass(frozen=True)
+class AgentConfig:
+    """Per-agent-type SDK configuration defaults."""
+
+    model: str | None = None  # "sonnet", "opus", "haiku", or None (SDK default)
+    max_turns: int | None = None
+    max_budget_usd: float | None = None
+    disallowed_tools: list[str] = field(default_factory=list)
+
+
+AGENT_TYPE_CONFIGS: dict[AgentType, AgentConfig] = {
+    AgentType.GENERAL: AgentConfig(max_turns=200, max_budget_usd=5.0),
+    AgentType.PLANNER: AgentConfig(
+        model="opus",
+        max_turns=100,
+        max_budget_usd=10.0,
+        disallowed_tools=["Write", "Edit", "MultiEdit"],
+    ),
+    AgentType.IMPLEMENTER: AgentConfig(max_turns=300, max_budget_usd=8.0),
+    AgentType.TESTER: AgentConfig(max_turns=200, max_budget_usd=5.0),
+    AgentType.REVIEWER: AgentConfig(
+        model="opus",
+        max_turns=50,
+        max_budget_usd=5.0,
+        disallowed_tools=["Write", "Edit", "MultiEdit"],
+    ),
+    AgentType.INTEGRATOR: AgentConfig(max_turns=100, max_budget_usd=5.0),
+    AgentType.ORCHESTRATOR: AgentConfig(
+        model="opus",
+        max_turns=150,
+        max_budget_usd=10.0,
+        disallowed_tools=["Write", "Edit", "MultiEdit"],
+    ),
+}
 
 
 class AgentRunnerError(Exception):
@@ -451,7 +499,7 @@ When done, complete with learnings to capture insights for future agents.
         except EntityNotFoundError:
             pass
 
-        tags = _derive_agent_tags(prompt, agent_type, task)
+        tags = await _derive_agent_tags(prompt, agent_type, task)
 
         if record is None:
             record = AgentRecord(
@@ -630,6 +678,18 @@ When done, complete with learnings to capture insights for future agents.
             sdk_kwargs["add_dirs"] = self.add_dirs
         if self.permission_mode:
             sdk_kwargs["permission_mode"] = self.permission_mode
+
+        # Apply per-agent-type config defaults
+        agent_config = AGENT_TYPE_CONFIGS.get(agent_type, AgentConfig())
+        if agent_config.model:
+            sdk_kwargs["model"] = agent_config.model
+        if agent_config.max_turns is not None:
+            sdk_kwargs["max_turns"] = agent_config.max_turns
+        if agent_config.max_budget_usd is not None:
+            sdk_kwargs["max_budget_usd"] = agent_config.max_budget_usd
+        if agent_config.disallowed_tools:
+            sdk_kwargs["disallowed_tools"] = agent_config.disallowed_tools
+
         sdk_options = ClaudeAgentOptions(**sdk_kwargs)
 
         # Create instance

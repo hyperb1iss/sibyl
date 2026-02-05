@@ -290,11 +290,16 @@ class AgentOrchestrator:
         checkpoint = await manager.get_latest()
 
         if not checkpoint:
-            log.warning(f"No checkpoint found for agent {agent_id}")
+            log.warning("No checkpoint found for agent", agent_id=agent_id)
             return None
 
-        instance = await self.runner.resume_from_checkpoint(
-            checkpoint=checkpoint,
+        if not checkpoint.session_id:
+            log.warning("No session_id in checkpoint, cannot resume", agent_id=agent_id)
+            return None
+
+        instance = await self.runner.resume_agent(
+            agent_id=agent_id,
+            session_id=checkpoint.session_id,
             prompt=prompt,
         )
 
