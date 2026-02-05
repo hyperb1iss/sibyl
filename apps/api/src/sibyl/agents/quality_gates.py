@@ -529,39 +529,47 @@ class QualityGateRunner:
         self,
         gates: list[QualityGateType],
     ) -> list[GateResult]:
-        """Run multiple quality gates.
+        """Run multiple quality gates in parallel.
 
         Args:
             gates: List of gates to run
 
         Returns:
-            List of GateResult for each gate
+            List of GateResult for each gate (order matches input)
         """
-        results = []
+        gate_runners: dict[QualityGateType, Any] = {
+            QualityGateType.LINT: self.run_lint,
+            QualityGateType.TYPECHECK: self.run_typecheck,
+            QualityGateType.TEST: self.run_test,
+            QualityGateType.SECURITY_SCAN: self.run_security,
+        }
 
-        for gate in gates:
-            if gate == QualityGateType.LINT:
-                results.append(await self.run_lint())
-            elif gate == QualityGateType.TYPECHECK:
-                results.append(await self.run_typecheck())
-            elif gate == QualityGateType.TEST:
-                results.append(await self.run_test())
-            elif gate == QualityGateType.SECURITY_SCAN:
-                results.append(await self.run_security())
-            elif gate == QualityGateType.HUMAN_REVIEW:
-                # Human review is handled separately
-                pass
-            elif gate == QualityGateType.AI_REVIEW:
-                # AI review needs separate implementation
-                results.append(
-                    GateResult(
-                        gate_type=QualityGateType.AI_REVIEW,
-                        passed=True,
-                        output="AI review not implemented",
-                    )
+        async def _run_gate(gate: QualityGateType) -> GateResult | None:
+            if gate == QualityGateType.HUMAN_REVIEW:
+                # Human review is handled separately via approval flow
+                return None
+            if gate == QualityGateType.AI_REVIEW:
+                log.warning("AI_REVIEW gate requested but not yet implemented, skipping")
+                return None
+
+            runner = gate_runners.get(gate)
+            if runner is None:
+                log.warning("Unknown gate type, skipping", gate=gate.value)
+                return None
+
+            try:
+                return await runner()
+            except Exception:
+                log.exception("Gate failed with exception", gate=gate.value)
+                return GateResult(
+                    gate_type=gate,
+                    passed=False,
+                    output="Gate runner raised an exception",
+                    errors=["Internal error running gate"],
                 )
 
-        return results
+        gate_results = await asyncio.gather(*[_run_gate(g) for g in gates])
+        return [r for r in gate_results if r is not None]
 
 
 async def create_gate_runner(worktree_path: str | Path) -> QualityGateRunner:
