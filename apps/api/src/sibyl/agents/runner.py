@@ -596,7 +596,7 @@ When done, complete with learnings to capture insights for future agents.
         Returns:
             AgentInstance ready for execution
         """
-        log.info(f"Spawning {agent_type} agent for task {task.id if task else 'adhoc'}")
+        log.info("Spawning agent", agent_type=agent_type.value, task_id=task.id if task else None)
 
         # Generate agent ID if not provided
         if agent_id is None:
@@ -656,9 +656,10 @@ When done, complete with learnings to capture insights for future agents.
         merged_hooks = merge_hooks(sibyl_hooks, user_hooks)
 
         log.debug(
-            f"Hooks configured for agent {record.id}: "
-            f"user={list(user_hooks.keys()) if user_hooks else []}, "
-            f"sibyl={list(sibyl_hooks.keys()) if sibyl_hooks else []}"
+            "Hooks configured for agent",
+            agent_id=record.id,
+            user_hooks=list(user_hooks.keys()) if user_hooks else [],
+            sibyl_hooks=list(sibyl_hooks.keys()) if sibyl_hooks else [],
         )
 
         # Create SDK options
@@ -724,7 +725,7 @@ When done, complete with learnings to capture insights for future agents.
             parent_agent_id=record.parent_agent_id,
         )
 
-        log.info(f"Agent {record.id} spawned and ready")
+        log.info("Agent spawned and ready", agent_id=record.id)
         return instance
 
     async def spawn_for_task(
@@ -834,7 +835,7 @@ When done, complete with learnings to capture insights for future agents.
         Raises:
             AgentRunnerError: If agent cannot be resumed
         """
-        log.info(f"Resuming agent {agent_id} with session {session_id}")
+        log.info("Resuming agent", agent_id=agent_id, session_id=session_id)
 
         # Get agent record
         entity = await self.entity_manager.get(agent_id)
@@ -881,7 +882,7 @@ When done, complete with learnings to capture insights for future agents.
         if agent.worktree_path:
             worktree_path = Path(agent.worktree_path)
             if not worktree_path.exists():
-                log.warning(f"Worktree no longer exists: {worktree_path}")
+                log.warning("Worktree no longer exists", path=str(worktree_path))
                 worktree_path = None
 
         # Build hooks
@@ -926,7 +927,7 @@ When done, complete with learnings to capture insights for future agents.
         instance.set_session_id(session_id)
         self._active_agents[agent.id] = instance
 
-        log.info(f"Agent {agent.id} resumed (session: {session_id})")
+        log.info("Agent resumed", agent_id=agent.id, session_id=session_id)
         return instance
 
 
@@ -1064,7 +1065,8 @@ class AgentInstance:
                     except RuntimeError as e:
                         if "cancel scope" in str(e).lower():
                             log.debug(
-                                f"Agent {self.id} SDK cleanup cancel scope error (expected)",
+                                "SDK cleanup cancel scope error (expected)",
+                                agent_id=self.id,
                                 error=str(e),
                             )
                         else:
@@ -1072,10 +1074,10 @@ class AgentInstance:
 
         except GeneratorExit:
             # Generator was closed (caller broke from loop) - this is expected for termination
-            log.debug(f"Agent {self.id} generator closed by caller")
+            log.debug("Agent generator closed by caller", agent_id=self.id)
             # Don't re-raise - let finally run and cleanup
         except Exception as e:
-            log.exception(f"Agent {self.id} execution failed")
+            log.exception("Agent execution failed", agent_id=self.id)
             await self._update_status(AgentStatus.FAILED, error=str(e))
             raise
 
@@ -1188,7 +1190,7 @@ class AgentInstance:
             except asyncio.CancelledError:
                 break
             except Exception:
-                log.exception(f"Heartbeat failed for agent {self.id}")
+                log.exception("Heartbeat failed", agent_id=self.id)
 
     async def _update_status(
         self,
