@@ -184,7 +184,7 @@ Reply with ONLY comma-separated tags, nothing else. Example: fix, api, auth"""
 class AgentConfig:
     """Per-agent-type SDK configuration defaults."""
 
-    model: str | None = None  # "sonnet", "opus", "haiku", or None (SDK default)
+    model: str = "claude-opus-4-6"  # Full model ID; CLI also accepts "opus", "sonnet", "haiku"
     max_turns: int | None = None
     max_budget_usd: float | None = None
     disallowed_tools: list[str] = field(default_factory=list)
@@ -193,7 +193,6 @@ class AgentConfig:
 AGENT_TYPE_CONFIGS: dict[AgentType, AgentConfig] = {
     AgentType.GENERAL: AgentConfig(max_turns=200, max_budget_usd=5.0),
     AgentType.PLANNER: AgentConfig(
-        model="opus",
         max_turns=100,
         max_budget_usd=10.0,
         disallowed_tools=["Write", "Edit", "MultiEdit"],
@@ -201,14 +200,12 @@ AGENT_TYPE_CONFIGS: dict[AgentType, AgentConfig] = {
     AgentType.IMPLEMENTER: AgentConfig(max_turns=300, max_budget_usd=8.0),
     AgentType.TESTER: AgentConfig(max_turns=200, max_budget_usd=5.0),
     AgentType.REVIEWER: AgentConfig(
-        model="opus",
         max_turns=50,
         max_budget_usd=5.0,
         disallowed_tools=["Write", "Edit", "MultiEdit"],
     ),
     AgentType.INTEGRATOR: AgentConfig(max_turns=100, max_budget_usd=5.0),
     AgentType.ORCHESTRATOR: AgentConfig(
-        model="opus",
         max_turns=150,
         max_budget_usd=10.0,
         disallowed_tools=["Write", "Edit", "MultiEdit"],
@@ -682,8 +679,7 @@ When done, complete with learnings to capture insights for future agents.
 
         # Apply per-agent-type config defaults
         agent_config = AGENT_TYPE_CONFIGS.get(agent_type, AgentConfig())
-        if agent_config.model:
-            sdk_kwargs["model"] = agent_config.model
+        sdk_kwargs["model"] = agent_config.model
         if agent_config.max_turns is not None:
             sdk_kwargs["max_turns"] = agent_config.max_turns
         if agent_config.max_budget_usd is not None:
