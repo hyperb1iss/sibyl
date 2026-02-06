@@ -1,7 +1,7 @@
 """AgentOrchestrator for multi-agent coordination.
 
-Central coordinator that manages agent lifecycles, routes messages,
-and distributes tasks across multiple concurrent agents.
+Central coordinator that manages agent lifecycles and distributes
+tasks across multiple concurrent agents.
 """
 
 import asyncio
@@ -41,7 +41,6 @@ class AgentOrchestrator:
     - Agent registry: tracks all agents for an org/project
     - Lifecycle: spawn, pause, resume, terminate agents
     - Task distribution: assign tasks to appropriate agents
-    - Message routing: inter-agent communication
     - Recovery: restore agent state on startup
 
     Unlike AgentRunner which manages individual agent execution,
@@ -91,9 +90,6 @@ class AgentOrchestrator:
         # Runtime state
         self._running = False
         self._health_check_task: asyncio.Task[None] | None = None
-
-        # Message queues for inter-agent communication
-        self._message_queues: dict[str, asyncio.Queue[AgentMessage]] = {}
 
     async def start(self) -> None:
         """Start the orchestrator.
@@ -171,9 +167,6 @@ class AgentOrchestrator:
             enable_approvals=True,
         )
 
-        # Create message queue for this agent
-        self._message_queues[instance.id] = asyncio.Queue()
-
         log.info("Orchestrator spawned agent", agent_id=instance.id)
         return instance
 
@@ -245,9 +238,6 @@ class AgentOrchestrator:
             except Exception:
                 log.exception("Failed to checkpoint agent", agent_id=agent_id)
 
-        # Clean up message queue
-        self._message_queues.pop(agent_id, None)
-
         return await self.runner.stop_agent(agent_id, reason)
 
     async def pause_agent(self, agent_id: str, reason: str = "user_request") -> bool:
@@ -297,16 +287,11 @@ class AgentOrchestrator:
             log.warning("No session_id in checkpoint, cannot resume", agent_id=agent_id)
             return None
 
-        instance = await self.runner.resume_agent(
+        return await self.runner.resume_agent(
             agent_id=agent_id,
             session_id=checkpoint.session_id,
             prompt=prompt,
         )
-
-        # Recreate message queue
-        self._message_queues[instance.id] = asyncio.Queue()
-
-        return instance
 
     # -------------------------------------------------------------------------
     # Agent Registry
@@ -461,113 +446,6 @@ class AgentOrchestrator:
         }
 
     # -------------------------------------------------------------------------
-    # Inter-Agent Messaging
-    # -------------------------------------------------------------------------
-
-    async def send_message(
-        self,
-        from_agent: str,
-        to_agent: str,
-        content: str,
-        message_type: str = "text",
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Send a message from one agent to another.
-
-        Args:
-            from_agent: Sender agent ID
-            to_agent: Recipient agent ID
-            content: Message content
-            message_type: Type of message
-            metadata: Additional message data
-
-        Returns:
-            True if message was queued
-        """
-        queue = self._message_queues.get(to_agent)
-        if not queue:
-            log.warning("No message queue for agent", agent_id=to_agent)
-            return False
-
-        message = AgentMessage(
-            from_agent=from_agent,
-            to_agent=to_agent,
-            content=content,
-            message_type=message_type,
-            metadata=metadata or {},
-            timestamp=datetime.now(UTC),
-        )
-
-        await queue.put(message)
-        log.debug("Message queued", from_agent=from_agent, to_agent=to_agent)
-        return True
-
-    async def receive_messages(
-        self,
-        agent_id: str,
-        wait_timeout: float = 0.1,
-    ) -> list["AgentMessage"]:
-        """Receive pending messages for an agent.
-
-        Args:
-            agent_id: Agent to receive messages for
-            wait_timeout: How long to wait for messages
-
-        Returns:
-            List of pending messages
-        """
-        queue = self._message_queues.get(agent_id)
-        if not queue:
-            return []
-
-        messages: list[AgentMessage] = []
-
-        try:
-            while True:
-                message = await asyncio.wait_for(
-                    queue.get(),
-                    timeout=wait_timeout,
-                )
-                messages.append(message)
-        except TimeoutError:
-            pass
-
-        return messages
-
-    async def broadcast(
-        self,
-        from_agent: str,
-        content: str,
-        message_type: str = "broadcast",
-        exclude: list[str] | None = None,
-    ) -> int:
-        """Broadcast a message to all active agents.
-
-        Args:
-            from_agent: Sender agent ID
-            content: Message content
-            message_type: Type of message
-            exclude: Agent IDs to exclude
-
-        Returns:
-            Number of agents that received the message
-        """
-        exclude = exclude or []
-        count = 0
-
-        for agent_id in self._message_queues:
-            if agent_id != from_agent and agent_id not in exclude:
-                if await self.send_message(
-                    from_agent=from_agent,
-                    to_agent=agent_id,
-                    content=content,
-                    message_type=message_type,
-                ):
-                    count += 1
-
-        return count
-
-    # -------------------------------------------------------------------------
     # Internal Methods
     # -------------------------------------------------------------------------
 
@@ -712,9 +590,7 @@ class AgentOrchestrator:
             heartbeat: datetime | None = None
             try:
                 async with get_session() as session:
-                    stmt = sa_select(AgentState).where(
-                        AgentState.graph_agent_id == instance.id
-                    )
+                    stmt = sa_select(AgentState).where(AgentState.graph_agent_id == instance.id)
                     result = await session.execute(stmt)
                     state = result.scalar_one_or_none()
                     if state is not None:
@@ -746,34 +622,3 @@ class AgentOrchestrator:
                         )
                     except Exception:
                         log.exception("Failed to handle stale agent", agent_id=instance.id)
-
-
-class AgentMessage:
-    """Message passed between agents."""
-
-    def __init__(
-        self,
-        from_agent: str,
-        to_agent: str,
-        content: str,
-        message_type: str,
-        metadata: dict[str, Any],
-        timestamp: datetime,
-    ):
-        self.from_agent = from_agent
-        self.to_agent = to_agent
-        self.content = content
-        self.message_type = message_type
-        self.metadata = metadata
-        self.timestamp = timestamp
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to dict."""
-        return {
-            "from_agent": self.from_agent,
-            "to_agent": self.to_agent,
-            "content": self.content,
-            "message_type": self.message_type,
-            "metadata": self.metadata,
-            "timestamp": self.timestamp.isoformat(),
-        }

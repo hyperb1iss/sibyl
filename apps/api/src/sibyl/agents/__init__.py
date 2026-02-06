@@ -39,13 +39,12 @@ from sibyl.agents.messages import (
     generate_workflow_reminder,
     get_tool_icon_and_preview,
 )
-from sibyl.agents.orchestrator import AgentMessage, AgentOrchestrator, OrchestratorError
+from sibyl.agents.orchestrator import AgentOrchestrator, OrchestratorError
 from sibyl.agents.runner import AgentInstance, AgentRunner, AgentRunnerError
 from sibyl.agents.worktree import SetupConfig, SetupResult, WorktreeError, WorktreeManager
 
 __all__ = [
     "AgentInstance",
-    "AgentMessage",
     "AgentOrchestrator",
     "AgentRunner",
     "AgentRunnerError",
