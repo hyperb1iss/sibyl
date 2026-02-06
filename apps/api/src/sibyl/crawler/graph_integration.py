@@ -148,6 +148,7 @@ Do not infer entities that aren't explicitly present."""
         content: str,
         context: str | None = None,
         url: str | None = None,
+        source_chunk_id: str | None = None,
     ) -> list[ExtractedEntity]:
         """Extract entities from a single chunk.
 
@@ -191,6 +192,7 @@ Do not infer entities that aren't explicitly present."""
                     entity_type=item.get("type", "concept"),
                     description=item.get("description", ""),
                     confidence=float(item.get("confidence", 0.5)),
+                    source_chunk_id=source_chunk_id,
                     source_url=url,
                 )
                 for item in result.get("entities", [])
@@ -210,7 +212,7 @@ Do not infer entities that aren't explicitly present."""
 
     async def extract_batch(
         self,
-        chunks: list[tuple[str, str | None, str | None]],  # (content, context, url)
+        chunks: list[tuple[str, str | None, str | None]],  # (content, context, chunk_id)
         max_concurrent: int = 5,
     ) -> list[ExtractedEntity]:
         """Extract entities from multiple chunks concurrently.
@@ -229,11 +231,15 @@ Do not infer entities that aren't explicitly present."""
 
         semaphore = asyncio.Semaphore(max_concurrent)
 
-        async def extract_with_limit(content, context, url):
+        async def extract_with_limit(content: str, context: str | None, chunk_id: str | None):
             async with semaphore:
-                return await self.extract_from_chunk(content, context, url)
+                return await self.extract_from_chunk(
+                    content,
+                    context,
+                    source_chunk_id=chunk_id,
+                )
 
-        tasks = [extract_with_limit(content, context, url) for content, context, url in chunks]
+        tasks = [extract_with_limit(content, context, chunk_id) for content, context, chunk_id in chunks]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -362,7 +368,7 @@ class EntityLinker:
             # Exact match
             if extracted_name_lower == candidate_name_lower:
                 return EntityLink(
-                    chunk_id="",  # Will be set by caller
+                    chunk_id=extracted.source_chunk_id or "",
                     entity_uuid=candidate["uuid"],
                     entity_name=candidate["name"],
                     entity_type=candidate["entity_type"],
@@ -385,7 +391,7 @@ class EntityLinker:
 
         if best_match:
             return EntityLink(
-                chunk_id="",
+                chunk_id=extracted.source_chunk_id or "",
                 entity_uuid=best_match["uuid"],
                 entity_name=best_match["name"],
                 entity_type=best_match["entity_type"],
@@ -474,7 +480,7 @@ class GraphIntegrationService:
             return stats
 
         # Extract entities from chunks
-        chunk_data = [(chunk.content, chunk.context, str(chunk.document_id)) for chunk in chunks]
+        chunk_data = [(chunk.content, chunk.context, str(chunk.id)) for chunk in chunks]
 
         extracted = await self.extractor.extract_batch(chunk_data)
         stats.entities_extracted = len(extracted)
@@ -489,18 +495,15 @@ class GraphIntegrationService:
 
         # Update chunk entity_ids in database
         async with get_session() as session:
-            for i, chunk in enumerate(chunks):
+            for chunk in chunks:
                 # Find links for this chunk
-                chunk_links = [
-                    link
-                    for link in linked
-                    if str(chunk.id) in (link.chunk_id or "") or extracted[i].source_url
-                ]
+                chunk_links = [link for link in linked if link.chunk_id == str(chunk.id)]
 
                 if chunk_links:
                     chunk.entity_ids = [link.entity_uuid for link in chunk_links]
                     chunk.has_entities = True
                     session.add(chunk)
+            await session.commit()
 
         # Optionally create new entities for unlinked
         if self.create_new_entities and unlinked:
@@ -521,6 +524,9 @@ class GraphIntegrationService:
         self,
         document_id: UUID,
         entity_uuids: list[str],
+        *,
+        document_title: str | None = None,
+        document_url: str | None = None,
     ) -> int:
         """Create DOCUMENTED_IN relationships from entities to document.
 
@@ -543,9 +549,24 @@ class GraphIntegrationService:
                 query = """
                 MATCH (e)
                 WHERE (e:Episodic OR e:Entity) AND e.uuid = $entity_uuid
-                MERGE (d:Document {uuid: $doc_uuid})
+                MERGE (d {uuid: $doc_uuid})
+                ON CREATE SET
+                    d.group_id = $group_id,
+                    d.entity_type = 'document',
+                    d.name = COALESCE($doc_title, $doc_uuid),
+                    d.summary = COALESCE($doc_title, 'Documentation page'),
+                    d.url = $doc_url,
+                    d.created_at = timestamp()
+                ON MATCH SET
+                    d.group_id = COALESCE(d.group_id, $group_id),
+                    d.entity_type = COALESCE(d.entity_type, 'document'),
+                    d.name = COALESCE(d.name, $doc_title, $doc_uuid),
+                    d.url = COALESCE(d.url, $doc_url)
+                SET d:Entity:Document
                 MERGE (e)-[r:DOCUMENTED_IN]->(d)
-                SET r.created_at = timestamp()
+                SET r.created_at = COALESCE(r.created_at, timestamp()),
+                    r.group_id = COALESCE(r.group_id, $group_id),
+                    r.name = COALESCE(r.name, 'DOCUMENTED_IN')
                 RETURN count(r) as count
                 """
 
@@ -554,6 +575,9 @@ class GraphIntegrationService:
                     self.organization_id,
                     entity_uuid=entity_uuid,
                     doc_uuid=str(document_id),
+                    doc_title=document_title,
+                    doc_url=document_url,
+                    group_id=self.organization_id,
                 )
                 created += 1
 

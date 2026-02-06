@@ -286,6 +286,10 @@ function GraphToolbar({
   onIncludeSharedChange,
   sharedLabel,
   sharedAvailable,
+  focusProjects,
+  onFocusProjectsChange,
+  focusedProjectCount,
+  focusAvailable,
 }: {
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -304,10 +308,16 @@ function GraphToolbar({
   onIncludeSharedChange?: (next: boolean) => void;
   sharedLabel?: string;
   sharedAvailable?: boolean;
+  focusProjects?: boolean;
+  onFocusProjectsChange?: (next: boolean) => void;
+  focusedProjectCount?: number;
+  focusAvailable?: boolean;
 }) {
   const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const canToggleShared = Boolean(sharedAvailable && onIncludeSharedChange);
+  const canToggleFocus = Boolean(focusAvailable && onFocusProjectsChange);
+  const focusActive = Boolean(focusProjects);
+  const canToggleShared = Boolean(focusActive && sharedAvailable && onIncludeSharedChange);
   const sharedActive = Boolean(includeShared);
 
   // Close dropdown on outside click
@@ -363,6 +373,21 @@ function GraphToolbar({
             }`}
           >
             <Sparkles width={18} height={18} />
+          </button>
+        )}
+        {canToggleFocus && (
+          <button
+            type="button"
+            onClick={() => onFocusProjectsChange?.(!focusActive)}
+            aria-pressed={focusActive}
+            title={focusActive ? 'Show all projects in graph' : 'Focus graph to selected projects'}
+            className={`p-2.5 rounded-lg border transition-colors ${
+              focusActive
+                ? 'bg-sc-purple/15 text-sc-purple border-sc-purple/40'
+                : 'bg-sc-bg-base/90 text-sc-fg-subtle border-sc-fg-subtle/20 hover:text-sc-fg-primary'
+            }`}
+          >
+            <Focus width={18} height={18} />
           </button>
         )}
         <button
@@ -572,6 +597,32 @@ function GraphToolbar({
             )}
           </div>
 
+          {canToggleFocus && (
+            <>
+              <div className="w-px h-5 bg-sc-fg-subtle/20" />
+              <button
+                type="button"
+                onClick={() => onFocusProjectsChange?.(!focusActive)}
+                aria-pressed={focusActive}
+                title={
+                  focusActive ? 'Show all projects in graph' : 'Focus graph to selected projects'
+                }
+                className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded-lg transition-colors ${
+                  focusActive
+                    ? 'bg-sc-purple/15 text-sc-purple'
+                    : 'text-sc-fg-muted hover:text-sc-fg-primary'
+                }`}
+              >
+                <Focus width={14} height={14} />
+                <span>
+                  {focusActive
+                    ? `Focused (${focusedProjectCount || 0})`
+                    : `Focus (${focusedProjectCount || 0})`}
+                </span>
+              </button>
+            </>
+          )}
+
           {canToggleShared && (
             <>
               <div className="w-px h-5 bg-sc-fg-subtle/20" />
@@ -640,6 +691,7 @@ function GraphPageContent() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
   const [includeShared, setIncludeShared] = useState(true);
+  const [focusProjects, setFocusProjects] = useState(false);
   const [hasInitialFit, setHasInitialFit] = useState(false);
   const fitKeyRef = useRef<string>('');
 
@@ -654,15 +706,24 @@ function GraphPageContent() {
   }, [projectsData?.entities]);
   const sharedProjectId = sharedProject?.id;
   const sharedProjectLabel = sharedProject?.name || 'Shared';
+  const hasProjectSelection = selectedProjects.length > 0;
+
+  // Graph defaults to all projects. Focus mode is opt-in and only available
+  // when project context has one or more selected projects.
+  useEffect(() => {
+    if (!hasProjectSelection && focusProjects) {
+      setFocusProjects(false);
+    }
+  }, [focusProjects, hasProjectSelection]);
 
   const projectFilter = useMemo(() => {
-    if (selectedProjects.length === 0) return undefined;
+    if (!focusProjects || selectedProjects.length === 0) return undefined;
     const ids = new Set(selectedProjects);
     if (includeShared && sharedProjectId) {
       ids.add(sharedProjectId);
     }
     return Array.from(ids);
-  }, [selectedProjects, includeShared, sharedProjectId]);
+  }, [focusProjects, selectedProjects, includeShared, sharedProjectId]);
   const projectKey = projectFilter?.join(',') || 'all';
   const selectedTypesKey = selectedTypes.join(',');
   const filtersKey = `${projectKey}:${selectedTypesKey}`;
@@ -1164,7 +1225,8 @@ function GraphPageContent() {
 
   const nodeCount = graphData.nodes.length;
   const edgeCount = graphData.links.length;
-  const canToggleShared = Boolean(sharedProjectId && selectedProjects.length > 0);
+  const canToggleShared = Boolean(sharedProjectId && selectedProjects.length > 0 && focusProjects);
+  const canToggleFocus = hasProjectSelection;
 
   return (
     <div
@@ -1199,6 +1261,10 @@ function GraphPageContent() {
             onIncludeSharedChange={setIncludeShared}
             sharedLabel={sharedProjectLabel}
             sharedAvailable={canToggleShared}
+            focusProjects={focusProjects}
+            onFocusProjectsChange={setFocusProjects}
+            focusedProjectCount={selectedProjects.length}
+            focusAvailable={canToggleFocus}
           />
 
           {/* Stats overlay - separate for detailed view */}

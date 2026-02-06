@@ -203,6 +203,12 @@ export interface SearchResponse {
   total: number;
   query: string;
   filters: Record<string, unknown>;
+  graph_count?: number;
+  document_count?: number;
+  limit?: number;
+  offset?: number;
+  has_more?: boolean;
+  actual_total?: number;
 }
 
 export interface GraphNode {

@@ -42,7 +42,7 @@ async def debug_graph(org: Organization = Depends(get_current_organization)):
     # Get nodes
     node_query = """
         MATCH (n)
-        WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+        WHERE (n:Episodic OR n:Entity OR n:Document) AND n.group_id = $group_id
         RETURN n.uuid as id LIMIT 500
     """
     node_result = await driver.execute_query(node_query, group_id=group_id)
@@ -127,7 +127,7 @@ async def get_all_nodes(
         # Query nodes directly from graph - both Episodic and Entity labels
         query = f"""
             MATCH (n)
-            WHERE (n:Episodic OR n:Entity)
+            WHERE (n:Episodic OR n:Entity OR n:Document)
             AND n.group_id = $group_id
             {type_filter}
             RETURN n.uuid as id,
@@ -265,7 +265,7 @@ async def get_full_graph(
 
         node_query = f"""
             MATCH (n)
-            WHERE (n:Episodic OR n:Entity)
+            WHERE (n:Episodic OR n:Entity OR n:Document)
             AND n.group_id = $group_id
             {type_filter}
             RETURN n.uuid as id,
@@ -658,7 +658,7 @@ async def get_graph_stats(
         # Count nodes by type - single aggregation query
         node_query = """
         MATCH (n)
-        WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+        WHERE (n:Episodic OR n:Entity OR n:Document) AND n.group_id = $group_id
         RETURN n.entity_type AS type, count(*) AS cnt
         """
         node_result = await driver.execute_query(node_query, group_id=group_id)

@@ -467,6 +467,8 @@ class IngestionPipeline:
                     await self._graph_integration.create_doc_relationships(
                         document.id,
                         list(set(entity_uuids)),  # Dedupe
+                        document_title=document.title,
+                        document_url=document.url,
                     )
 
             except Exception as e:

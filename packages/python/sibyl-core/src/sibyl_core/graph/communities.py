@@ -119,7 +119,7 @@ async def _create_type_based_clusters(
     """Create clusters based on entity type (fallback when no networkx)."""
     query = """
     MATCH (n)
-    WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+    WHERE (n:Episodic OR n:Entity OR n:Document) AND n.group_id = $group_id
     RETURN n.entity_type AS type, collect(n.uuid) AS ids
     """
 
@@ -381,110 +381,63 @@ async def _get_graph_totals(
     total_nodes = 0
     total_edges = 0
 
+    # NOTE: include_neighbors is intentionally ignored for totals.
+    # Totals reflect the focused subset selected by project filters.
+
     # Handle special __unassigned__ filter for entities without a project
     UNASSIGNED_ID = "__unassigned__"
     has_unassigned = project_ids and UNASSIGNED_ID in project_ids
     real_project_ids = [pid for pid in (project_ids or []) if pid != UNASSIGNED_ID]
 
-    # For specific projects with neighbors, use UNION query
-    # For unassigned or no filter, use simple query
-    use_transitive = include_neighbors and real_project_ids and not has_unassigned
-
     params: dict[str, str | list[str]] = {"group_id": organization_id}
     if real_project_ids:
         params["project_ids"] = real_project_ids
 
+    def _project_filter(var: str) -> str:
+        if has_unassigned and real_project_ids:
+            return f"({var}.project_id IS NULL OR {var}.uuid IN $project_ids OR {var}.project_id IN $project_ids)"
+        if has_unassigned:
+            return f"{var}.project_id IS NULL"
+        if real_project_ids:
+            return f"({var}.uuid IN $project_ids OR {var}.project_id IN $project_ids)"
+        return "TRUE"
+
+    def _focused_filter(var: str) -> str:
+        if not project_ids:
+            return "TRUE"
+        return (
+            f"({_project_filter(var)} OR ({var}:Document AND EXISTS {{ "
+            f"MATCH ({var})-[:DOCUMENTED_IN]-(owner) "
+            f"WHERE (owner:Episodic OR owner:Entity OR owner:Document) "
+            f"AND owner.group_id = $group_id AND {_project_filter('owner')} "
+            f"}}))"
+        )
+
     try:
-        if use_transitive:
-            # Include nodes with direct project_id + their 1-hop neighbors
-            node_query = """
-            MATCH (n)
-            WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
-              AND (n.project_id IN $project_ids OR n.uuid IN $project_ids)
-            RETURN count(DISTINCT n) AS cnt
-            UNION ALL
-            MATCH (n)-[]-(neighbor)
-            WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
-              AND (neighbor.project_id IN $project_ids OR neighbor.uuid IN $project_ids)
-            RETURN count(DISTINCT n) AS cnt
-            """
-        elif has_unassigned and real_project_ids:
-            # Both unassigned AND specific projects
-            node_query = """
-            MATCH (n)
-            WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
-              AND (n.project_id IS NULL OR n.uuid IN $project_ids OR n.project_id IN $project_ids)
-            RETURN count(n) AS cnt
-            """
-        elif has_unassigned:
-            # Only unassigned
-            node_query = """
-            MATCH (n)
-            WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
-              AND n.project_id IS NULL
-            RETURN count(n) AS cnt
-            """
-        elif real_project_ids:
-            # Specific projects without neighbors (fallback)
-            node_query = """
-            MATCH (n)
-            WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
-              AND (n.uuid IN $project_ids OR n.project_id IN $project_ids)
-            RETURN count(n) AS cnt
-            """
-        else:
-            # No filter - count all
-            node_query = """
-            MATCH (n)
-            WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
-            RETURN count(n) AS cnt
-            """
+        node_query = f"""
+        MATCH (n)
+        WHERE (n:Episodic OR n:Entity OR n:Document)
+          AND n.group_id = $group_id
+          AND {_focused_filter("n")}
+        RETURN count(n) AS cnt
+        """
 
         result = await client.execute_read_org(node_query, organization_id, **params)
         if result:
-            # For UNION ALL, we get multiple rows - sum them
-            for record in result:
-                cnt = record[0] if isinstance(record, (list, tuple)) else record.get("cnt", 0)
-                total_nodes += cnt
+            record = result[0]
+            total_nodes = record[0] if isinstance(record, (list, tuple)) else record.get("cnt", 0)
     except Exception as e:
         log.warning("count_nodes_failed", error=str(e))
 
-    # Edge count - for transitive, count edges between matching nodes
+    # Count edges where BOTH endpoints are in the focused subset.
     try:
-        if use_transitive:
-            # For transitive, count edges where at least one endpoint is a seed node
-            # This is simpler and still gives a useful count
-            edge_query = """
-            MATCH (a)-[r]->(b)
-            WHERE r.group_id = $group_id
-              AND (a:Episodic OR a:Entity) AND a.group_id = $group_id
-              AND (b:Episodic OR b:Entity) AND b.group_id = $group_id
-              AND (
-                a.project_id IN $project_ids OR a.uuid IN $project_ids
-                OR b.project_id IN $project_ids OR b.uuid IN $project_ids
-              )
-            RETURN count(r) AS cnt
-            """
-        elif project_ids:
-            # Non-transitive project filter
-            if has_unassigned and real_project_ids:
-                node_filter = "(n.project_id IS NULL OR n.uuid IN $project_ids OR n.project_id IN $project_ids)"
-            elif has_unassigned:
-                node_filter = "n.project_id IS NULL"
-            else:
-                node_filter = "(n.uuid IN $project_ids OR n.project_id IN $project_ids)"
-
-            a_filter = node_filter.replace("n.", "a.")
-            b_filter = node_filter.replace("n.", "b.")
-            edge_query = f"""
-            MATCH (a)-[r]->(b)
-            WHERE (a:Episodic OR a:Entity) AND a.group_id = $group_id AND {a_filter}
-              AND (b:Episodic OR b:Entity) AND b.group_id = $group_id AND {b_filter}
-              AND r.group_id = $group_id
-            RETURN count(r) AS cnt
-            """
-        else:
-            edge_query = "MATCH ()-[r]->() WHERE r.group_id = $group_id RETURN count(r) AS cnt"
+        edge_query = f"""
+        MATCH (a)-[r]->(b)
+        WHERE r.group_id = $group_id
+          AND (a:Episodic OR a:Entity OR a:Document) AND a.group_id = $group_id AND {_focused_filter("a")}
+          AND (b:Episodic OR b:Entity OR b:Document) AND b.group_id = $group_id AND {_focused_filter("b")}
+        RETURN count(r) AS cnt
+        """
 
         result = await client.execute_read_org(edge_query, organization_id, **params)
         if result:
@@ -553,71 +506,62 @@ async def _fetch_graph_nodes(
     project_ids: list[str] | None = None,
     entity_types: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], set[str]]:
-    """Fetch nodes with cluster assignments, optionally filtered by project/type.
-
-    When filtering by project, includes:
-    - Nodes with direct project_id matching the filter
-    - 1-hop neighbors (e.g., episodes related to tasks in the project)
-    """
+    """Fetch nodes with cluster assignments, optionally filtered by project/type."""
     # Handle special __unassigned__ filter for entities without a project
     UNASSIGNED_ID = "__unassigned__"
     has_unassigned = project_ids and UNASSIGNED_ID in project_ids
     real_project_ids = [pid for pid in (project_ids or []) if pid != UNASSIGNED_ID]
 
-    # Decide whether to use transitive (1-hop neighbor) filtering
-    use_transitive = real_project_ids and not has_unassigned
-
-    # Build entity type filter if provided
-    type_filter = ""
-    if entity_types:
-        type_list = ", ".join(f"'{t}'" for t in entity_types)
-        type_filter = f" AND n.entity_type IN [{type_list}]"
-
     params: dict[str, Any] = {"group_id": organization_id, "limit": max_nodes}
     if real_project_ids:
         params["project_ids"] = real_project_ids
+    if entity_types:
+        params["entity_types"] = entity_types
 
-    if use_transitive:
-        # Use UNION to get direct project members + 1-hop neighbors
-        query = f"""
-        MATCH (n)
-        WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
-          AND (n.project_id IN $project_ids OR n.uuid IN $project_ids){type_filter}
-        RETURN DISTINCT n.uuid AS id, n.name AS name, n.entity_type AS type,
-               n.summary AS summary, n.labels AS labels, n.project_id AS project_id
-        UNION
-        MATCH (n)-[]-(neighbor)
-        WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
-          AND (neighbor.project_id IN $project_ids OR neighbor.uuid IN $project_ids){type_filter}
-        RETURN DISTINCT n.uuid AS id, n.name AS name, n.entity_type AS type,
-               n.summary AS summary, n.labels AS labels, n.project_id AS project_id
-        LIMIT $limit
-        """
-    else:
-        # Build simple filter for unassigned or no-project case
-        filters = ["(n:Episodic OR n:Entity)", "n.group_id = $group_id"]
-
+    def _project_filter(var: str) -> str:
         if has_unassigned and real_project_ids:
-            filters.append(
-                "(n.project_id IS NULL OR n.uuid IN $project_ids OR n.project_id IN $project_ids)"
-            )
-        elif has_unassigned:
-            filters.append("n.project_id IS NULL")
-        elif real_project_ids:
-            filters.append("(n.uuid IN $project_ids OR n.project_id IN $project_ids)")
+            return f"({var}.project_id IS NULL OR {var}.uuid IN $project_ids OR {var}.project_id IN $project_ids)"
+        if has_unassigned:
+            return f"{var}.project_id IS NULL"
+        if real_project_ids:
+            return f"({var}.uuid IN $project_ids OR {var}.project_id IN $project_ids)"
+        return "TRUE"
 
-        if entity_types:
-            type_list = ", ".join(f"'{t}'" for t in entity_types)
-            filters.append(f"n.entity_type IN [{type_list}]")
+    type_filter = (
+        "AND COALESCE(n.entity_type, CASE WHEN n:Document THEN 'document' ELSE '' END) IN $entity_types"
+        if entity_types
+        else ""
+    )
+    doc_type_filter = (
+        "AND COALESCE(d.entity_type, CASE WHEN d:Document THEN 'document' ELSE '' END) IN $entity_types"
+        if entity_types
+        else ""
+    )
 
-        where_clause = " AND ".join(filters)
-        query = f"""
-        MATCH (n)
-        WHERE {where_clause}
-        RETURN n.uuid AS id, n.name AS name, n.entity_type AS type,
-               n.summary AS summary, n.labels AS labels, n.project_id AS project_id
-        LIMIT $limit
+    query = f"""
+    MATCH (n)
+    WHERE (n:Episodic OR n:Entity OR n:Document)
+      AND n.group_id = $group_id
+      AND {_project_filter("n")}
+      {type_filter}
+    RETURN DISTINCT n.uuid AS id, n.name AS name, n.entity_type AS type,
+           n.summary AS summary, labels(n) AS labels, n.project_id AS project_id
+    """
+
+    # Keep documentation visible when focusing projects by pulling docs linked to focused nodes.
+    if project_ids:
+        query += f"""
+        UNION
+        MATCH (d:Document)-[:DOCUMENTED_IN]-(owner)
+        WHERE d.group_id = $group_id
+          AND (owner:Episodic OR owner:Entity OR owner:Document) AND owner.group_id = $group_id
+          AND {_project_filter("owner")}
+          {doc_type_filter}
+        RETURN DISTINCT d.uuid AS id, d.name AS name, d.entity_type AS type,
+               d.summary AS summary, labels(d) AS labels, d.project_id AS project_id
         """
+
+    query += "\nLIMIT $limit"
 
     nodes: list[dict[str, Any]] = []
     node_ids: set[str] = set()
@@ -981,11 +925,11 @@ async def export_to_networkx(
     # Create undirected graph for community detection
     G = nx.Graph()
 
-    # Fetch ALL nodes - both Episodic and Entity labels with group_id filter
+    # Fetch ALL nodes - Episodic, Entity, and Document labels with group_id filter
     # Also fetch labels array for type resolution
     node_query = """
     MATCH (n)
-    WHERE (n:Episodic OR n:Entity) AND n.group_id = $group_id
+    WHERE (n:Episodic OR n:Entity OR n:Document) AND n.group_id = $group_id
     RETURN n.uuid AS id, n.name AS name, n.entity_type AS type, n.labels AS labels
     """
 

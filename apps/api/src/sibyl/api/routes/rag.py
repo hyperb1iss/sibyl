@@ -33,6 +33,7 @@ from sibyl.api.schemas import (
     RAGSearchResponse,
     SourcePagesResponse,
 )
+from sibyl.auth.authorization import list_accessible_project_graph_ids
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, require_org_role
 from sibyl.auth.errors import NoOrgContextError
@@ -60,6 +61,14 @@ router = APIRouter(
         ),
     ],
 )
+
+
+def _parse_uuid_or_400(value: str, field_name: str) -> UUID:
+    """Parse UUID input and raise a user-facing 400 on invalid format."""
+    try:
+        return UUID(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name} format: {value}") from None
 
 
 # =============================================================================
@@ -111,7 +120,8 @@ async def rag_search(
         # Apply source filters
         source_filter_name = None
         if request.source_id:
-            query = query.where(col(CrawlSource.id) == UUID(request.source_id))
+            source_uuid = _parse_uuid_or_400(request.source_id, "source ID")
+            query = query.where(col(CrawlSource.id) == source_uuid)
             source_filter_name = request.source_id
         elif request.source_name:
             query = query.where(col(CrawlSource.name).ilike(f"%{request.source_name}%"))
@@ -235,7 +245,8 @@ async def search_code_examples(
 
         # Apply filters
         if request.source_id:
-            query = query.where(col(CrawlSource.id) == UUID(request.source_id))
+            source_uuid = _parse_uuid_or_400(request.source_id, "source ID")
+            query = query.where(col(CrawlSource.id) == source_uuid)
 
         if request.language:
             query = query.where(col(DocumentChunk.language).ilike(request.language))
@@ -512,7 +523,8 @@ async def hybrid_search(
         # Apply source filters
         source_filter_name = None
         if request.source_id:
-            query = query.where(col(CrawlSource.id) == UUID(request.source_id))
+            source_uuid = _parse_uuid_or_400(request.source_id, "source ID")
+            query = query.where(col(CrawlSource.id) == source_uuid)
             source_filter_name = request.source_id
         elif request.source_name:
             query = query.where(col(CrawlSource.name).ilike(f"%{request.source_name}%"))
@@ -702,6 +714,8 @@ async def get_document_related_entities(
             status_code=400, detail=f"Invalid document ID format: {document_id}"
         ) from None
 
+    accessible_projects: set[str] | None = None
+
     async with get_session() as session:
         # Get the document and verify org ownership
         doc = await session.get(CrawledDocument, doc_uuid)
@@ -712,6 +726,9 @@ async def get_document_related_entities(
         if not source or str(source.organization_id) != auth.organization_id:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
+        # Enforce project-level graph visibility for related entities.
+        # None means migration mode: skip project filtering.
+        accessible_projects = await list_accessible_project_graph_ids(session, auth)
         doc_title = doc.title
 
     # Search the knowledge graph using document title as query
@@ -732,6 +749,15 @@ async def get_document_related_entities(
         for entity, score in search_results:
             # Skip very low relevance matches
             if score < 0.1:
+                continue
+
+            # Enforce project RBAC for graph entities (unassigned is visible).
+            project_id = (entity.metadata or {}).get("project_id")
+            if (
+                accessible_projects is not None
+                and project_id is not None
+                and project_id not in accessible_projects
+            ):
                 continue
 
             entities.append(
