@@ -1,7 +1,7 @@
 /**
  * Sibyl console greeting
  *
- * ✦ SIBYL — knowledge echoes forward
+ * ✦ SIBYL — collective intelligence
  */
 
 const VERSION = '0.1.0';
@@ -19,7 +19,7 @@ export function printConsoleGreeting(): void {
   if (typeof window === 'undefined') return;
 
   console.log(
-    `%c✦ %cSIBYL%c — %cknowledge echoes forward  %cv${VERSION}`,
+    `%c✦ %cSIBYL%c — %ccollective intelligence  %cv${VERSION}`,
     STYLES.star,
     STYLES.name,
     STYLES.dash,
