@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sibyl.api.decorators import handle_workflow_errors
+from sibyl.api.event_types import WSEvent
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.authorization import ProjectRole, verify_entity_project_access
 from sibyl.auth.context import AuthContext
@@ -22,6 +23,7 @@ from sibyl.auth.dependencies import (
 )
 from sibyl.auth.rls import AuthSession, get_auth_session
 from sibyl.db.models import Organization, OrganizationRole, User
+from sibyl.locks import entity_lock
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.graph.relationships import RelationshipManager
@@ -227,7 +229,7 @@ async def create_task(
         )
 
         await broadcast_event(
-            "entity_created",
+            WSEvent.ENTITY_CREATED,
             {"id": task_id, "entity_type": "task", "name": request.title},
             org_id=str(org.id),
         )
@@ -257,7 +259,7 @@ async def _broadcast_task_update(
 ) -> None:
     """Broadcast task update event (scoped to org)."""
     await broadcast_event(
-        "entity_updated",
+        WSEvent.ENTITY_UPDATED,
         {
             "id": task_id,
             "entity_type": "task",
@@ -319,13 +321,18 @@ async def start_task(
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
     group_id = str(org.id)
-    client = await get_graph_client()
-    entity_manager = EntityManager(client, group_id=group_id)
-    relationship_manager = RelationshipManager(client, group_id=group_id)
-    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
-    assignee = request.assignee if request else None
-    task = await workflow.start_task(task_id, assignee or "system")
+    async with entity_lock(group_id, task_id, blocking=True) as lock_token:
+        if not lock_token:
+            raise HTTPException(status_code=409, detail="Task is locked by another process")
+
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=group_id)
+        relationship_manager = RelationshipManager(client, group_id=group_id)
+        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+
+        assignee = request.assignee if request else None
+        task = await workflow.start_task(task_id, assignee or "system")
 
     await _broadcast_task_update(
         task_id,
@@ -355,12 +362,17 @@ async def block_task(
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
     group_id = str(org.id)
-    client = await get_graph_client()
-    entity_manager = EntityManager(client, group_id=group_id)
-    relationship_manager = RelationshipManager(client, group_id=group_id)
-    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
-    task = await workflow.block_task(task_id, request.reason)
+    async with entity_lock(group_id, task_id, blocking=True) as lock_token:
+        if not lock_token:
+            raise HTTPException(status_code=409, detail="Task is locked by another process")
+
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=group_id)
+        relationship_manager = RelationshipManager(client, group_id=group_id)
+        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+
+        task = await workflow.block_task(task_id, request.reason)
 
     await _broadcast_task_update(
         task_id,
@@ -389,12 +401,17 @@ async def unblock_task(
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
     group_id = str(org.id)
-    client = await get_graph_client()
-    entity_manager = EntityManager(client, group_id=group_id)
-    relationship_manager = RelationshipManager(client, group_id=group_id)
-    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
-    task = await workflow.unblock_task(task_id)
+    async with entity_lock(group_id, task_id, blocking=True) as lock_token:
+        if not lock_token:
+            raise HTTPException(status_code=409, detail="Task is locked by another process")
+
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=group_id)
+        relationship_manager = RelationshipManager(client, group_id=group_id)
+        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+
+        task = await workflow.unblock_task(task_id)
 
     await _broadcast_task_update(
         task_id,
@@ -424,14 +441,19 @@ async def submit_review(
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
     group_id = str(org.id)
-    client = await get_graph_client()
-    entity_manager = EntityManager(client, group_id=group_id)
-    relationship_manager = RelationshipManager(client, group_id=group_id)
-    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
-    pr_url = request.pr_url if request else None
-    commit_shas = request.commit_shas if request else []
-    task = await workflow.submit_for_review(task_id, commit_shas, pr_url)
+    async with entity_lock(group_id, task_id, blocking=True) as lock_token:
+        if not lock_token:
+            raise HTTPException(status_code=409, detail="Task is locked by another process")
+
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=group_id)
+        relationship_manager = RelationshipManager(client, group_id=group_id)
+        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+
+        pr_url = request.pr_url if request else None
+        commit_shas = request.commit_shas if request else []
+        task = await workflow.submit_for_review(task_id, commit_shas, pr_url)
 
     await _broadcast_task_update(
         task_id,
@@ -463,18 +485,23 @@ async def complete_task(
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
     group_id = str(org.id)
-    client = await get_graph_client()
-    entity_manager = EntityManager(client, group_id=group_id)
-    relationship_manager = RelationshipManager(client, group_id=group_id)
-    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
-    actual_hours = request.actual_hours if request else None
-    learnings = request.learnings if request else None
+    async with entity_lock(group_id, task_id, blocking=True) as lock_token:
+        if not lock_token:
+            raise HTTPException(status_code=409, detail="Task is locked by another process")
 
-    # Skip sync episode creation - we'll enqueue it as a background job
-    task = await workflow.complete_task(
-        task_id, actual_hours, learnings or "", create_episode=False
-    )
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=group_id)
+        relationship_manager = RelationshipManager(client, group_id=group_id)
+        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+
+        actual_hours = request.actual_hours if request else None
+        learnings = request.learnings if request else None
+
+        # Skip sync episode creation - we'll enqueue it as a background job
+        task = await workflow.complete_task(
+            task_id, actual_hours, learnings or "", create_episode=False
+        )
 
     # Enqueue learning episode creation as background job (fast response)
     if learnings:
@@ -511,13 +538,18 @@ async def archive_task(
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
     group_id = str(org.id)
-    client = await get_graph_client()
-    entity_manager = EntityManager(client, group_id=group_id)
-    relationship_manager = RelationshipManager(client, group_id=group_id)
-    workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
 
-    reason = request.reason if request else ""
-    task = await workflow.archive_task(task_id, reason)
+    async with entity_lock(group_id, task_id, blocking=True) as lock_token:
+        if not lock_token:
+            raise HTTPException(status_code=409, detail="Task is locked by another process")
+
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=group_id)
+        relationship_manager = RelationshipManager(client, group_id=group_id)
+        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+
+        reason = request.reason if request else ""
+        task = await workflow.archive_task(task_id, reason)
 
     await _broadcast_task_update(
         task_id,
@@ -544,7 +576,7 @@ async def update_task(
     auth: AuthSession = Depends(get_auth_session),
 ) -> TaskActionResponse:
     """Update task fields directly."""
-    from sibyl.locks import LockAcquisitionError, entity_lock
+    from sibyl.locks import LockAcquisitionError
     from sibyl_core.models.entities import Relationship, RelationshipType
 
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
@@ -727,7 +759,7 @@ async def create_note(
             )
 
             await broadcast_event(
-                "note_pending",
+                WSEvent.NOTE_PENDING,
                 {"id": note_id, "task_id": task_id, "op_id": op_id},
                 org_id=group_id,
             )
@@ -782,7 +814,7 @@ async def create_note(
         )
 
         await broadcast_event(
-            "note_created",
+            WSEvent.NOTE_CREATED,
             {"id": note_id, "task_id": task_id, "author_type": request.author_type.value},
             org_id=group_id,
         )
