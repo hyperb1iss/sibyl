@@ -24,6 +24,7 @@ from sibyl.agents.redis_sub import (
     publish_approval_response,
 )
 from sibyl.agents.state_sync import update_agent_state
+from sibyl.api.event_types import WSEvent
 from sibyl.config import settings
 from sibyl_core.models import ApprovalRecord, ApprovalStatus, ApprovalType, EntityType
 
@@ -623,9 +624,9 @@ class ApprovalQueue:
         try:
             from sibyl.api.pubsub import publish_event
 
-            await publish_event("agent_message", message_payload, org_id=self.org_id)
+            await publish_event(WSEvent.AGENT_MESSAGE, message_payload, org_id=self.org_id)
             await publish_event(
-                "agent_status",
+                WSEvent.AGENT_STATUS,
                 {"agent_id": self.agent_id, "status": "waiting_approval"},
                 org_id=self.org_id,
             )

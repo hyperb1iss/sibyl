@@ -741,10 +741,11 @@ async def _handle_project_register(
 
 async def _handle_agent_update(data: dict, org_id: UUID) -> None:
     """Handle agent update and broadcast to listeners."""
+    from sibyl.api.event_types import WSEvent
     from sibyl.api.websocket import broadcast_event
 
     await broadcast_event(
-        "agent_update",
+        WSEvent.AGENT_UPDATE,
         {
             "agent_id": data.get("agent_id"),
             "status": data.get("status"),

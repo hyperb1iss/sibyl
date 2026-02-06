@@ -10,6 +10,7 @@ import structlog
 from sqlalchemy import func, select
 from sqlmodel import col
 
+from sibyl.api.event_types import WSEvent
 from sibyl.db import CrawledDocument, CrawlSource, CrawlStatus, DocumentChunk, get_session
 from sibyl.db.models import utcnow_naive
 
@@ -79,7 +80,7 @@ async def crawl_source(
 
     # Broadcast start event
     await _safe_broadcast(
-        "crawl_started",
+        WSEvent.CRAWL_STARTED,
         {
             "source_id": source_id,
             "source_name": source_name,
@@ -98,7 +99,7 @@ async def crawl_source(
                 db_source.chunk_count = stats.chunks_created
 
         await _safe_broadcast(
-            "crawl_progress",
+            WSEvent.CRAWL_PROGRESS,
             {
                 "source_id": source_id,
                 "source_name": source_name,
@@ -147,7 +148,7 @@ async def crawl_source(
         }
 
         # Broadcast completion
-        await _safe_broadcast("crawl_complete", result, org_id=organization_id)
+        await _safe_broadcast(WSEvent.CRAWL_COMPLETE, result, org_id=organization_id)
 
         log.info("Crawl job complete", **result)
         return result
@@ -162,7 +163,7 @@ async def crawl_source(
                 db_source.last_error = str(e)[:1000]
 
         await _safe_broadcast(
-            "crawl_complete",
+            WSEvent.CRAWL_COMPLETE,
             {"source_id": source_id, "error": str(e)},
             org_id=organization_id,
         )
@@ -243,7 +244,7 @@ async def sync_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:  #
         }
 
     log.info("Sync job complete", **result)
-    await _safe_broadcast("crawl_sync_complete", result, org_id=organization_id)
+    await _safe_broadcast(WSEvent.CRAWL_SYNC_COMPLETE, result, org_id=organization_id)
     return result
 
 

@@ -24,6 +24,7 @@ from claude_agent_sdk.types import (
 from sqlalchemy import func, select
 
 from sibyl.agents.state_sync import update_agent_state
+from sibyl.api.event_types import WSEvent
 from sibyl.db import get_session
 from sibyl.db.models import AgentMessage, AgentMessageRole, AgentMessageType
 from sibyl_core.models import (
@@ -362,11 +363,11 @@ class ApprovalService:
         try:
             from sibyl.api.pubsub import publish_event
 
-            await publish_event("agent_message", message_payload, org_id=self.org_id)
+            await publish_event(WSEvent.AGENT_MESSAGE, message_payload, org_id=self.org_id)
 
             # Also broadcast agent status change
             await publish_event(
-                "agent_status",
+                WSEvent.AGENT_STATUS,
                 {"agent_id": self.agent_id, "status": "waiting_input"},
                 org_id=self.org_id,
             )
@@ -511,11 +512,11 @@ class ApprovalService:
         try:
             from sibyl.api.pubsub import publish_event
 
-            await publish_event("agent_message", message_payload, org_id=self.org_id)
+            await publish_event(WSEvent.AGENT_MESSAGE, message_payload, org_id=self.org_id)
 
             # Also broadcast agent status change
             await publish_event(
-                "agent_status",
+                WSEvent.AGENT_STATUS,
                 {"agent_id": self.agent_id, "status": "waiting_approval"},
                 org_id=self.org_id,
             )

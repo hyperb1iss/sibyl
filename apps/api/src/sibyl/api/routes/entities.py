@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
+from sibyl.api.event_types import WSEvent
 from sibyl.api.schemas import (
     EntityCreate,
     EntityListResponse,
@@ -549,7 +550,7 @@ async def create_entity(
             )
             # Broadcast pending creation event
             await broadcast_event(
-                "entity_pending", response.model_dump(mode="json"), org_id=str(org.id)
+                WSEvent.ENTITY_PENDING, response.model_dump(mode="json"), org_id=str(org.id)
             )
             return response
 
@@ -580,7 +581,7 @@ async def create_entity(
 
         # Broadcast creation event (scoped to org)
         await broadcast_event(
-            "entity_created", response.model_dump(mode="json"), org_id=str(org.id)
+            WSEvent.ENTITY_CREATED, response.model_dump(mode="json"), org_id=str(org.id)
         )
 
         if created.entity_type == EntityType.PROJECT:
@@ -706,7 +707,7 @@ async def update_entity(
 
             # Broadcast update event (scoped to org)
             await broadcast_event(
-                "entity_updated", response.model_dump(mode="json"), org_id=str(org.id)
+                WSEvent.ENTITY_UPDATED, response.model_dump(mode="json"), org_id=str(org.id)
             )
 
             if existing.entity_type == EntityType.PROJECT:
@@ -814,7 +815,7 @@ async def delete_entity(
 
             # Broadcast deletion event (scoped to org)
             await broadcast_event(
-                "entity_deleted",
+                WSEvent.ENTITY_DELETED,
                 {"id": entity_id, "type": existing.entity_type.value, "name": existing.name},
                 org_id=str(org.id),
             )

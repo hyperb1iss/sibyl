@@ -313,6 +313,7 @@ class TestCrawlWebSocketEvents:
     @pytest.mark.asyncio
     async def test_crawl_complete_event_includes_source_id(self) -> None:
         """Test that crawl_complete events include the source_id."""
+        from sibyl.api.event_types import WSEvent
         from sibyl.api.websocket import broadcast_event
 
         # Mock the connection manager
@@ -321,7 +322,7 @@ class TestCrawlWebSocketEvents:
 
         with patch("sibyl.api.websocket.get_manager", return_value=mock_manager):
             await broadcast_event(
-                "crawl_complete",
+                WSEvent.CRAWL_COMPLETE,
                 {"source_id": "src-123", "status": "completed", "documents_crawled": 50},
             )
 
@@ -335,6 +336,7 @@ class TestCrawlWebSocketEvents:
     @pytest.mark.asyncio
     async def test_crawl_started_event_includes_source_id(self) -> None:
         """Test that crawl_started events include the source_id."""
+        from sibyl.api.event_types import WSEvent
         from sibyl.api.websocket import broadcast_event
 
         mock_manager = MagicMock()
@@ -342,7 +344,7 @@ class TestCrawlWebSocketEvents:
 
         with patch("sibyl.api.websocket.get_manager", return_value=mock_manager):
             await broadcast_event(
-                "crawl_started",
+                WSEvent.CRAWL_STARTED,
                 {"source_id": "src-456", "max_pages": 100},
             )
 
@@ -355,6 +357,7 @@ class TestCrawlWebSocketEvents:
     @pytest.mark.asyncio
     async def test_broadcast_event_respects_org_id(self) -> None:
         """Test that broadcast_event passes org_id correctly."""
+        from sibyl.api.event_types import WSEvent
         from sibyl.api.websocket import broadcast_event
 
         mock_manager = MagicMock()
@@ -362,7 +365,7 @@ class TestCrawlWebSocketEvents:
 
         with patch("sibyl.api.websocket.get_manager", return_value=mock_manager):
             await broadcast_event(
-                "entity_created",
+                WSEvent.ENTITY_CREATED,
                 {"id": "ent-123"},
                 org_id="org-abc",
             )

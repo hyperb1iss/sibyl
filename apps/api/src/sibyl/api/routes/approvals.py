@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sibyl.agents.approval_queue import create_approval_queue
 from sibyl.agents.state_sync import update_agent_state
+from sibyl.api.event_types import WSEvent
 from sibyl.auth.authorization import (
     list_accessible_project_graph_ids,
     verify_entity_project_access,
@@ -505,7 +506,7 @@ async def respond_to_approval(
     from sibyl.api.pubsub import publish_event
 
     await publish_event(
-        "approval_response",
+        WSEvent.APPROVAL_RESPONSE,
         {
             "approval_id": approval_id,
             "agent_id": agent_id,
@@ -519,7 +520,7 @@ async def respond_to_approval(
     # Also broadcast agent status change to UI
     if agent_id:
         await publish_event(
-            "agent_status",
+            WSEvent.AGENT_STATUS,
             {"agent_id": agent_id, "status": agent_status.value},
             org_id=str(org.id),
         )
@@ -609,7 +610,7 @@ async def answer_question(
     from sibyl.api.pubsub import publish_event
 
     await publish_event(
-        "question_answered",
+        WSEvent.QUESTION_ANSWERED,
         {
             "question_id": question_id,
             "answers": request.answers,

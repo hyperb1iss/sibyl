@@ -22,6 +22,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
+from sibyl.api.event_types import WSEvent
 from sibyl.db import InterAgentMessage, InterAgentMessageType
 
 log = structlog.get_logger()
@@ -115,7 +116,7 @@ class MessageBus:
         from sibyl.api.pubsub import publish_event
 
         await publish_event(
-            "inter_agent_message",
+            WSEvent.INTER_AGENT_MESSAGE,
             {
                 "id": str(message.id),
                 "from_agent_id": from_agent_id,
@@ -198,7 +199,7 @@ class MessageBus:
         from sibyl.api.pubsub import publish_event
 
         await publish_event(
-            "inter_agent_message",
+            WSEvent.INTER_AGENT_MESSAGE,
             {
                 "id": str(response.id),
                 "from_agent_id": from_agent_id,

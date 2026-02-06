@@ -21,6 +21,7 @@ from typing import Any
 
 import structlog
 
+from sibyl.api.event_types import WSEvent
 from sibyl.config import settings
 
 log = structlog.get_logger()
@@ -252,7 +253,7 @@ async def run_backup(  # noqa: PLR0915
     )
 
     await _safe_broadcast(
-        "backup_started",
+        WSEvent.BACKUP_STARTED,
         {"backup_id": backup_id, "organization_id": organization_id},
         org_id=organization_id,
     )
@@ -415,7 +416,7 @@ async def run_backup(  # noqa: PLR0915
                 "duration_seconds": duration,
             }
 
-            await _safe_broadcast("backup_complete", result_data, org_id=organization_id)
+            await _safe_broadcast(WSEvent.BACKUP_COMPLETE, result_data, org_id=organization_id)
 
             return result_data
 
@@ -434,7 +435,7 @@ async def run_backup(  # noqa: PLR0915
         )
 
         await _safe_broadcast(
-            "backup_failed",
+            WSEvent.BACKUP_FAILED,
             {"backup_id": backup_id, "error": error_msg},
             org_id=organization_id,
         )

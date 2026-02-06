@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlmodel import col
 
+from sibyl.api.event_types import WSEvent
 from sibyl.api.schemas import (
     CrawlDocumentListResponse,
     CrawlDocumentResponse,
@@ -345,7 +346,7 @@ async def delete_document(
         )
 
     await broadcast_event(
-        "entity_deleted",
+        WSEvent.ENTITY_DELETED,
         {"type": "crawled_document", "id": document_id},
         org_id=str(org.id),
     )
@@ -460,7 +461,7 @@ async def create_source(
         response = _source_to_response(source)
 
     await broadcast_event(
-        "entity_created",
+        WSEvent.ENTITY_CREATED,
         {"type": "crawl_source", "id": str(source.id)},
         org_id=str(org.id),
     )
@@ -529,7 +530,7 @@ async def update_source(
         response = _source_to_response(source)
 
     await broadcast_event(
-        "entity_updated",
+        WSEvent.ENTITY_UPDATED,
         {"type": "crawl_source", "id": str(source.id)},
         org_id=str(org.id),
     )
@@ -567,7 +568,7 @@ async def delete_source(
         log.info("Deleted crawl source", id=source_id, name=source.name)
 
     await broadcast_event(
-        "entity_deleted",
+        WSEvent.ENTITY_DELETED,
         {"type": "crawl_source", "id": source_id},
         org_id=str(org.id),
     )
@@ -714,7 +715,7 @@ async def cancel_crawl(
         )
 
         await broadcast_event(
-            "entity_updated",
+            WSEvent.ENTITY_UPDATED,
             {"type": "crawl_source", "id": source_id},
             org_id=str(org.id),
         )
@@ -789,7 +790,7 @@ async def sync_source(
         )
 
     await broadcast_event(
-        "entity_updated",
+        WSEvent.ENTITY_UPDATED,
         {"type": "crawl_source", "id": source_id},
         org_id=str(org.id),
     )
@@ -1029,7 +1030,7 @@ async def _process_graph_linking(
         )
 
     await broadcast_event(
-        "graph_updated",
+        WSEvent.GRAPH_UPDATED,
         {"chunks_processed": total_chunks},
         org_id=str(org_uuid),
     )

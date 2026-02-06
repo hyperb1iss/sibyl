@@ -14,6 +14,7 @@ import structlog
 
 from sibyl.agents.messages import format_agent_message, generate_workflow_reminder
 from sibyl.agents.state_sync import update_agent_state
+from sibyl.api.event_types import WSEvent
 from sibyl.db import AgentMessage, AgentMessageRole, AgentMessageType, get_session
 
 log = structlog.get_logger()
@@ -284,7 +285,7 @@ async def _generate_and_broadcast_status_hint(
 
         # Broadcast the hint
         await _safe_broadcast(
-            "status_hint",
+            WSEvent.STATUS_HINT,
             {
                 "agent_id": agent_id,
                 "tool_call_id": tool_call_id,
@@ -393,7 +394,7 @@ async def run_agent_execution(  # noqa: PLR0915
 
         # Broadcast that agent is now working
         await _safe_broadcast(
-            "agent_status",
+            WSEvent.AGENT_STATUS,
             {"agent_id": agent_id, "status": "working"},
             org_id=org_id,
         )
@@ -415,7 +416,7 @@ async def run_agent_execution(  # noqa: PLR0915
             "preview": prompt[:100] + "..." if len(prompt) > 100 else prompt,
         }
         await _safe_broadcast(
-            "agent_message",
+            WSEvent.AGENT_MESSAGE,
             {"agent_id": agent_id, "message_num": message_count, **initial_message},
             org_id=org_id,
         )
@@ -454,7 +455,7 @@ async def run_agent_execution(  # noqa: PLR0915
 
                 # Broadcast message to UI in real-time
                 await _safe_broadcast(
-                    "agent_message",
+                    WSEvent.AGENT_MESSAGE,
                     {
                         "agent_id": agent_id,
                         "message_num": message_count,
@@ -481,7 +482,7 @@ async def run_agent_execution(  # noqa: PLR0915
                             "icon": "Sparkles",
                         }
                         await _safe_broadcast(
-                            "agent_message",
+                            WSEvent.AGENT_MESSAGE,
                             {"agent_id": agent_id, "message_num": message_count, **context_message},
                             org_id=org_id,
                         )
@@ -559,7 +560,7 @@ async def run_agent_execution(  # noqa: PLR0915
 
             await _clear_stop_signal(agent_id)
             await _safe_broadcast(
-                "agent_status",
+                WSEvent.AGENT_STATUS,
                 {"agent_id": agent_id, "status": "terminated"},
                 org_id=org_id,
             )
@@ -588,7 +589,7 @@ async def run_agent_execution(  # noqa: PLR0915
                 message_count += 1
 
                 await _safe_broadcast(
-                    "agent_message",
+                    WSEvent.AGENT_MESSAGE,
                     {"agent_id": agent_id, "message_num": message_count, **formatted},
                     org_id=org_id,
                 )
@@ -666,7 +667,7 @@ async def run_agent_execution(  # noqa: PLR0915
 
         # Broadcast completion via WebSocket
         await _safe_broadcast(
-            "agent_status",
+            WSEvent.AGENT_STATUS,
             {"agent_id": agent_id, "status": "completed", "turns": message_count},
             org_id=org_id,
         )
@@ -725,7 +726,7 @@ async def run_agent_execution(  # noqa: PLR0915
 
         # Broadcast failure via WebSocket
         await _safe_broadcast(
-            "agent_status",
+            WSEvent.AGENT_STATUS,
             {"agent_id": agent_id, "status": "failed", "error": str(e)},
             org_id=org_id,
         )
@@ -813,7 +814,7 @@ async def resume_agent_execution(  # noqa: PLR0915
 
         # Broadcast that agent is now working
         await _safe_broadcast(
-            "agent_status",
+            WSEvent.AGENT_STATUS,
             {"agent_id": agent_id, "status": "working"},
             org_id=org_id,
         )
@@ -887,7 +888,7 @@ async def resume_agent_execution(  # noqa: PLR0915
 
                 # Broadcast to UI
                 await _safe_broadcast(
-                    "agent_message",
+                    WSEvent.AGENT_MESSAGE,
                     {"agent_id": agent_id, "message_num": message_count, **formatted},
                     org_id=org_id,
                 )
@@ -908,7 +909,7 @@ async def resume_agent_execution(  # noqa: PLR0915
                             "icon": "Sparkles",
                         }
                         await _safe_broadcast(
-                            "agent_message",
+                            WSEvent.AGENT_MESSAGE,
                             {"agent_id": agent_id, "message_num": message_count, **context_message},
                             org_id=org_id,
                         )
@@ -958,7 +959,7 @@ async def resume_agent_execution(  # noqa: PLR0915
 
             await _clear_stop_signal(agent_id)
             await _safe_broadcast(
-                "agent_status",
+                WSEvent.AGENT_STATUS,
                 {"agent_id": agent_id, "status": "terminated"},
                 org_id=org_id,
             )
@@ -987,7 +988,7 @@ async def resume_agent_execution(  # noqa: PLR0915
         }
 
         await _safe_broadcast(
-            "agent_status",
+            WSEvent.AGENT_STATUS,
             {"agent_id": agent_id, "status": "completed", "turns": message_count},
             org_id=org_id,
         )
@@ -1008,7 +1009,7 @@ async def resume_agent_execution(  # noqa: PLR0915
             log.warning("Failed to update agent status on error", agent_id=agent_id)
 
         await _safe_broadcast(
-            "agent_status",
+            WSEvent.AGENT_STATUS,
             {"agent_id": agent_id, "status": "failed", "error": str(e)},
             org_id=org_id,
         )
@@ -1051,7 +1052,7 @@ async def generate_status_hint(
 
         # Broadcast the hint via pubsub
         await _safe_broadcast(
-            "status_hint",
+            WSEvent.STATUS_HINT,
             {
                 "agent_id": agent_id,
                 "tool_call_id": tool_call_id,

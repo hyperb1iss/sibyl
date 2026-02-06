@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from sibyl.api.decorators import handle_not_found
+from sibyl.api.event_types import WSEvent
 from sibyl.auth.authorization import (
     list_accessible_project_graph_ids,
     verify_entity_project_access,
@@ -778,7 +779,7 @@ async def terminate_agent(
 
     # Broadcast termination via WebSocket for UI update
     await publish_event(
-        "agent_status",
+        WSEvent.AGENT_STATUS,
         {"agent_id": agent_id, "status": "terminated"},
         org_id=str(org.id),
     )
@@ -964,7 +965,7 @@ async def send_agent_message(
 
         # Broadcast status change for immediate UI update
         await publish_event(
-            "agent_status",
+            WSEvent.AGENT_STATUS,
             {"agent_id": agent_id, "status": AgentStatus.RESUMING.value},
             org_id=str(org.id),
         )
@@ -1542,7 +1543,7 @@ async def rename_agent(
 
     # Publish event for real-time UI updates
     await publish_event(
-        "agent_status",
+        WSEvent.AGENT_STATUS,
         {
             "agent_id": agent_id,
             "name": request.name,
@@ -1602,7 +1603,7 @@ async def archive_agent(
 
     # Publish event for real-time UI updates
     await publish_event(
-        "agent_status",
+        WSEvent.AGENT_STATUS,
         {
             "agent_id": agent_id,
             "archived": True,

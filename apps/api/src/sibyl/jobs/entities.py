@@ -8,6 +8,8 @@ from typing import Any
 
 import structlog
 
+from sibyl.api.event_types import WSEvent
+
 log = structlog.get_logger()
 
 
@@ -200,7 +202,7 @@ async def create_entity(  # noqa: PLR0915
 
         # Broadcast entity creation event
         await _safe_broadcast(
-            "entity_created",
+            WSEvent.ENTITY_CREATED,
             {
                 "id": created_id,
                 "entity_type": entity_type,
@@ -394,7 +396,7 @@ async def create_learning_episode(
 
         # Broadcast episode creation
         await _safe_broadcast(
-            "entity_created",
+            WSEvent.ENTITY_CREATED,
             {
                 "id": episode_id,
                 "entity_type": "episode",
@@ -458,7 +460,7 @@ async def update_entity(
         if result:
             # Broadcast update event
             await _safe_broadcast(
-                "entity_updated",
+                WSEvent.ENTITY_UPDATED,
                 {
                     "id": entity_id,
                     "entity_type": entity_type,

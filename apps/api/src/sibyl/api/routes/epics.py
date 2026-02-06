@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sibyl.api.event_types import WSEvent
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.authorization import ProjectRole, verify_entity_project_access
 from sibyl.auth.context import AuthContext
@@ -122,7 +123,7 @@ async def _broadcast_epic_update(
 ) -> None:
     """Broadcast epic update event (scoped to org)."""
     await broadcast_event(
-        "entity_updated",
+        WSEvent.ENTITY_UPDATED,
         {
             "id": epic_id,
             "entity_type": "epic",

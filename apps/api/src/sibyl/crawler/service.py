@@ -23,6 +23,7 @@ from crawl4ai.deep_crawling.filters import FilterChain, URLPatternFilter
 from sqlalchemy import select
 from sqlmodel import col
 
+from sibyl.api.event_types import WSEvent
 from sibyl.api.websocket import broadcast_event
 from sibyl.crawler.discovery import DiscoveryResult, DiscoveryService
 from sibyl.crawler.llms_parser import LLMsSection, parse_llms_full
@@ -288,7 +289,7 @@ class CrawlerService:
 
                 # Broadcast progress every page
                 await broadcast_event(
-                    "crawl_progress",
+                    WSEvent.CRAWL_PROGRESS,
                     {
                         "source_id": str(source_id),
                         "pages_crawled": crawled_count,
@@ -753,7 +754,7 @@ class CrawlerService:
                     )
 
                     await broadcast_event(
-                        "crawl_progress",
+                        WSEvent.CRAWL_PROGRESS,
                         {
                             "source_id": str(source.id),
                             "pages_crawled": crawled,
