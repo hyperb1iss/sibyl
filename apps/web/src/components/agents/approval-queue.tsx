@@ -9,7 +9,7 @@
 import { formatDistanceToNow } from 'date-fns';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 
 import { Card, Section } from '@/components/ui/card';
 import {
@@ -72,6 +72,7 @@ interface ApprovalCardProps {
   isResponding: boolean;
   isDismissing: boolean;
   projectFilter?: string;
+  onAgentClick?: (id: string) => void;
 }
 
 const ApprovalCard = memo(function ApprovalCard({
@@ -81,6 +82,7 @@ const ApprovalCard = memo(function ApprovalCard({
   isResponding,
   isDismissing,
   projectFilter,
+  onAgentClick,
 }: ApprovalCardProps) {
   const config = TYPE_CONFIG[approval.approval_type] || {
     icon: InfoCircle,
@@ -90,31 +92,45 @@ const ApprovalCard = memo(function ApprovalCard({
   const displayText = getDisplayText(approval);
   const createdAt = approval.created_at ? new Date(approval.created_at) : null;
 
+  const headerContent = (
+    <>
+      <div className="flex items-center gap-2">
+        <Icon className={`h-4 w-4 shrink-0 ${config.color}`} />
+        <code className="text-xs text-sc-fg-primary truncate flex-1">{displayText}</code>
+        {createdAt && (
+          <span className="text-[10px] text-sc-fg-subtle shrink-0">
+            {formatDistanceToNow(createdAt, { addSuffix: true })}
+          </span>
+        )}
+      </div>
+      {approval.agent_name && (
+        <p className="text-[10px] text-sc-fg-muted mt-0.5 ml-6 truncate">{approval.agent_name}</p>
+      )}
+    </>
+  );
+
   // Build link to agent chat
   const agentLink = projectFilter
-    ? `/agents/${approval.agent_id}?project=${projectFilter}`
-    : `/agents/${approval.agent_id}`;
+    ? `/agents?id=${approval.agent_id}&project=${projectFilter}`
+    : `/agents?id=${approval.agent_id}`;
 
   return (
     <div className="group rounded-lg border border-sc-fg-subtle/30 bg-sc-bg-elevated/80 hover:bg-sc-bg-elevated hover:border-sc-purple/40 transition-all">
-      {/* Clickable header - links to agent chat */}
+      {/* Clickable header */}
       <div className="flex items-start">
-        <Link href={agentLink} className="flex-1 block px-3 py-2 min-w-0">
-          <div className="flex items-center gap-2">
-            <Icon className={`h-4 w-4 shrink-0 ${config.color}`} />
-            <code className="text-xs text-sc-fg-primary truncate flex-1">{displayText}</code>
-            {createdAt && (
-              <span className="text-[10px] text-sc-fg-subtle shrink-0">
-                {formatDistanceToNow(createdAt, { addSuffix: true })}
-              </span>
-            )}
-          </div>
-          {approval.agent_name && (
-            <p className="text-[10px] text-sc-fg-muted mt-0.5 ml-6 truncate">
-              {approval.agent_name}
-            </p>
-          )}
-        </Link>
+        {onAgentClick ? (
+          <button
+            type="button"
+            onClick={() => onAgentClick(approval.agent_id)}
+            className="flex-1 block px-3 py-2 min-w-0 text-left"
+          >
+            {headerContent}
+          </button>
+        ) : (
+          <Link href={agentLink} className="flex-1 block px-3 py-2 min-w-0">
+            {headerContent}
+          </Link>
+        )}
         {/* Dismiss button - for stale approvals */}
         <button
           type="button"
@@ -164,17 +180,34 @@ const ApprovalCard = memo(function ApprovalCard({
 
 interface ApprovalQueueProps {
   projectId?: string;
+  agentId?: string;
+  onAgentClick?: (id: string) => void;
   maxHeight?: string;
   className?: string;
 }
 
-export function ApprovalQueue({ projectId, maxHeight = '400px', className }: ApprovalQueueProps) {
+export function ApprovalQueue({
+  projectId,
+  agentId,
+  onAgentClick,
+  maxHeight = '400px',
+  className,
+}: ApprovalQueueProps) {
   const searchParams = useSearchParams();
   const projectFilter = projectId || searchParams.get('project') || undefined;
 
   const { data, isLoading, error } = usePendingApprovals(projectFilter);
   const respondMutation = useRespondToApproval();
   const dismissMutation = useDismissApproval();
+
+  // Client-side filter by agent when specified
+  const approvals = useMemo(() => {
+    const all = data?.approvals || [];
+    if (!agentId) return all;
+    return all.filter(a => a.agent_id === agentId);
+  }, [data?.approvals, agentId]);
+
+  const pendingCount = agentId ? approvals.length : data?.by_status?.pending || 0;
 
   const handleRespond = (id: string, action: 'approve' | 'deny') => {
     respondMutation.mutate({ id, request: { action } });
@@ -211,9 +244,6 @@ export function ApprovalQueue({ projectId, maxHeight = '400px', className }: App
       </Section>
     );
   }
-
-  const approvals = data?.approvals || [];
-  const pendingCount = data?.by_status?.pending || 0;
 
   if (approvals.length === 0) {
     return (
@@ -252,6 +282,7 @@ export function ApprovalQueue({ projectId, maxHeight = '400px', className }: App
               isResponding={respondMutation.isPending}
               isDismissing={dismissMutation.isPending}
               projectFilter={projectFilter}
+              onAgentClick={onAgentClick}
             />
           ))}
         </div>

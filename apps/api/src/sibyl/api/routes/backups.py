@@ -21,8 +21,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_admin
 from sibyl.db.connection import get_session
 from sibyl.db.models import Backup, BackupSettings, BackupStatus, Organization, User
-from sibyl.jobs import enqueue_backup, enqueue_backup_cleanup, get_job_status
-from sibyl.jobs.backup import delete_backup as delete_backup_file, get_backup as get_backup_file
 
 log = structlog.get_logger()
 
@@ -248,6 +246,8 @@ async def create_backup(
         )
 
         # Enqueue the job
+        from sibyl.jobs.queue import enqueue_backup
+
         job_id = await enqueue_backup(
             str(org.id),
             include_postgres=request.include_postgres,
@@ -383,6 +383,8 @@ async def download_backup(
             raise HTTPException(status_code=404, detail="Backup file path not recorded")
 
         # Use the file-based function to verify and get file details
+        from sibyl.jobs.backup import get_backup as get_backup_file
+
         file_info = get_backup_file(backup_id)
         if file_info is None:
             raise HTTPException(status_code=404, detail="Backup file not found on disk")
@@ -424,6 +426,8 @@ async def delete_backup(
         log.info("backup_delete_requested", backup_id=backup_id, organization_id=str(org.id))
 
         # Delete the file
+        from sibyl.jobs.backup import delete_backup as delete_backup_file
+
         delete_backup_file(backup_id)
 
         # Delete the DB record
@@ -452,6 +456,8 @@ async def run_cleanup(
         retention_days=retention,
     )
 
+    from sibyl.jobs.queue import enqueue_backup_cleanup
+
     job_id = await enqueue_backup_cleanup(retention_days=retention)
 
     return CleanupResponse(
@@ -466,6 +472,8 @@ async def get_backup_job_status(job_id: str) -> dict[str, Any]:
 
     Returns job status, result (if complete), or error (if failed).
     """
+    from sibyl.jobs.queue import get_job_status
+
     info = await get_job_status(job_id)
 
     return {

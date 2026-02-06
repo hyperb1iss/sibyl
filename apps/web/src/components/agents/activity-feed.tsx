@@ -9,7 +9,7 @@
 
 import { formatDistanceToNow } from 'date-fns';
 import Link from 'next/link';
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 
 import { Section } from '@/components/ui/card';
 import {
@@ -34,62 +34,21 @@ import { useActivityFeed } from '@/lib/hooks';
 
 const EVENT_CONFIG: Record<
   ActivityEventType,
-  { icon: typeof Activity; label: string; colorClass: string; bgClass: string }
+  { icon: typeof Activity; label: string; colorClass: string }
 > = {
-  agent_spawned: {
-    icon: Sparks,
-    label: 'Spawned',
-    colorClass: 'text-sc-purple',
-    bgClass: 'bg-sc-purple/20',
-  },
-  agent_started: {
-    icon: Play,
-    label: 'Started',
-    colorClass: 'text-sc-cyan',
-    bgClass: 'bg-sc-cyan/20',
-  },
-  agent_completed: {
-    icon: Check,
-    label: 'Completed',
-    colorClass: 'text-sc-green',
-    bgClass: 'bg-sc-green/20',
-  },
-  agent_failed: {
-    icon: WarningCircle,
-    label: 'Failed',
-    colorClass: 'text-sc-red',
-    bgClass: 'bg-sc-red/20',
-  },
-  agent_paused: {
-    icon: Pause,
-    label: 'Paused',
-    colorClass: 'text-sc-yellow',
-    bgClass: 'bg-sc-yellow/20',
-  },
-  agent_terminated: {
-    icon: Xmark,
-    label: 'Terminated',
-    colorClass: 'text-sc-red',
-    bgClass: 'bg-sc-red/20',
-  },
-  agent_message: {
-    icon: InfoCircle,
-    label: 'Message',
-    colorClass: 'text-sc-fg-muted',
-    bgClass: 'bg-sc-fg-subtle/10',
-  },
+  agent_spawned: { icon: Sparks, label: 'Spawned', colorClass: 'text-sc-purple' },
+  agent_started: { icon: Play, label: 'Started', colorClass: 'text-sc-cyan' },
+  agent_completed: { icon: Check, label: 'Completed', colorClass: 'text-sc-green' },
+  agent_failed: { icon: WarningCircle, label: 'Failed', colorClass: 'text-sc-red' },
+  agent_paused: { icon: Pause, label: 'Paused', colorClass: 'text-sc-yellow' },
+  agent_terminated: { icon: Xmark, label: 'Terminated', colorClass: 'text-sc-red' },
+  agent_message: { icon: InfoCircle, label: 'Message', colorClass: 'text-sc-fg-muted' },
   approval_requested: {
     icon: AlertTriangle,
     label: 'Approval Requested',
     colorClass: 'text-sc-yellow',
-    bgClass: 'bg-sc-yellow/20',
   },
-  approval_responded: {
-    icon: Check,
-    label: 'Approval Responded',
-    colorClass: 'text-sc-green',
-    bgClass: 'bg-sc-green/20',
-  },
+  approval_responded: { icon: Check, label: 'Approval Responded', colorClass: 'text-sc-green' },
 };
 
 // =============================================================================
@@ -98,49 +57,68 @@ const EVENT_CONFIG: Record<
 
 interface ActivityEventItemProps {
   event: ActivityEvent;
+  onAgentClick?: (id: string) => void;
 }
 
-const ActivityEventItem = memo(function ActivityEventItem({ event }: ActivityEventItemProps) {
+const ActivityEventItem = memo(function ActivityEventItem({
+  event,
+  onAgentClick,
+}: ActivityEventItemProps) {
   const config = EVENT_CONFIG[event.event_type] || {
     icon: Activity,
     label: event.event_type,
     colorClass: 'text-sc-fg-muted',
-    bgClass: 'bg-sc-fg-subtle/10',
   };
   const EventIcon = config.icon;
   const timestamp = event.timestamp ? new Date(event.timestamp) : null;
 
   const content = (
-    <div className="flex items-start gap-3 py-3 border-b border-sc-fg-subtle/10 last:border-0 group-hover:bg-sc-bg-elevated/50 transition-colors">
-      {/* Icon */}
-      <div className={`p-2 rounded-lg ${config.bgClass}`}>
-        <EventIcon className={`h-4 w-4 ${config.colorClass}`} />
+    <div className="flex gap-2.5 px-2 py-2 rounded-lg group-hover:bg-sc-bg-elevated/50 transition-colors">
+      {/* Timeline icon */}
+      <div className="shrink-0 pt-0.5">
+        <EventIcon className={`h-3.5 w-3.5 ${config.colorClass}`} />
       </div>
 
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-0.5">
-          <span className={`text-xs font-medium ${config.colorClass}`}>{config.label}</span>
-          {event.agent_name && (
-            <span className="text-xs text-sc-fg-subtle">• {event.agent_name}</span>
+      {/* Content — stacked for narrow panels */}
+      <div className="flex-1 min-w-0 space-y-0.5">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className={`text-[11px] font-medium ${config.colorClass} shrink-0`}>
+            {config.label}
+          </span>
+          {timestamp && (
+            <span className="text-[10px] text-sc-fg-subtle shrink-0 tabular-nums">
+              {formatDistanceToNow(timestamp, { addSuffix: true })}
+            </span>
           )}
         </div>
-        <p className="text-sm text-sc-fg-primary truncate">{event.summary}</p>
+        {event.summary && (
+          <p className="text-[11px] text-sc-fg-muted leading-snug line-clamp-2">{event.summary}</p>
+        )}
+        {event.agent_name && (
+          <p className="text-[10px] text-sc-fg-subtle truncate">{event.agent_name}</p>
+        )}
       </div>
-
-      {/* Timestamp */}
-      {timestamp && (
-        <span className="text-xs text-sc-fg-subtle flex-shrink-0">
-          {formatDistanceToNow(timestamp, { addSuffix: true })}
-        </span>
-      )}
     </div>
   );
 
-  // Wrap in Link if we have an agent_id
+  // Use callback for in-page selection when provided
+  if (event.agent_id && onAgentClick) {
+    const agentId = event.agent_id;
+    return (
+      <button
+        type="button"
+        onClick={() => onAgentClick(agentId)}
+        className="block w-full text-left group"
+      >
+        {content}
+      </button>
+    );
+  }
+
+  // Fall back to Link navigation
   if (event.agent_id) {
     return (
-      <Link href={`/agents/${event.agent_id}`} className="block group">
+      <Link href={`/agents?id=${event.agent_id}`} className="block group">
         {content}
       </Link>
     );
@@ -155,12 +133,27 @@ const ActivityEventItem = memo(function ActivityEventItem({ event }: ActivityEve
 
 interface ActivityFeedProps {
   projectId?: string;
+  agentId?: string;
+  onAgentClick?: (id: string) => void;
   maxHeight?: string;
   className?: string;
 }
 
-export function ActivityFeed({ projectId, maxHeight = '400px', className }: ActivityFeedProps) {
+export function ActivityFeed({
+  projectId,
+  agentId,
+  onAgentClick,
+  maxHeight = '400px',
+  className,
+}: ActivityFeedProps) {
   const { data, isLoading, error } = useActivityFeed(projectId);
+
+  // Client-side filter by agent when specified
+  const events = useMemo(() => {
+    const all = data?.events || [];
+    if (!agentId) return all;
+    return all.filter(e => e.agent_id === agentId);
+  }, [data?.events, agentId]);
 
   if (isLoading) {
     return (
@@ -188,8 +181,6 @@ export function ActivityFeed({ projectId, maxHeight = '400px', className }: Acti
     );
   }
 
-  const events = data?.events || [];
-
   if (events.length === 0) {
     return (
       <Section
@@ -207,11 +198,11 @@ export function ActivityFeed({ projectId, maxHeight = '400px', className }: Acti
     <Section
       title="Activity Feed"
       icon={<Activity className="h-5 w-5 text-sc-cyan" />}
-      description="Recent activity across all agents."
+      description={agentId ? 'Activity for this agent.' : 'Recent activity across all agents.'}
       actions={
-        data?.total && data.total > 0 ? (
+        events.length > 0 ? (
           <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-sc-cyan/20 text-sc-cyan border border-sc-cyan/40">
-            {data.total}
+            {events.length}
           </span>
         ) : null
       }
@@ -219,7 +210,7 @@ export function ActivityFeed({ projectId, maxHeight = '400px', className }: Acti
     >
       <div className="overflow-y-auto" style={{ maxHeight }}>
         {events.map(event => (
-          <ActivityEventItem key={event.id} event={event} />
+          <ActivityEventItem key={event.id} event={event} onAgentClick={onAgentClick} />
         ))}
       </div>
     </Section>
