@@ -239,7 +239,9 @@ Do not infer entities that aren't explicitly present."""
                     source_chunk_id=chunk_id,
                 )
 
-        tasks = [extract_with_limit(content, context, chunk_id) for content, context, chunk_id in chunks]
+        tasks = [
+            extract_with_limit(content, context, chunk_id) for content, context, chunk_id in chunks
+        ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 

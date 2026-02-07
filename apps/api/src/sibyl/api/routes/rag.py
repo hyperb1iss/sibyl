@@ -68,7 +68,9 @@ def _parse_uuid_or_400(value: str, field_name: str) -> UUID:
     try:
         return UUID(value)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid {field_name} format: {value}") from None
+        raise HTTPException(
+            status_code=400, detail=f"Invalid {field_name} format: {value}"
+        ) from None
 
 
 # =============================================================================

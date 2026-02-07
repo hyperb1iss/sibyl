@@ -65,8 +65,8 @@ interface GraphNode extends HierarchicalNode {
 
 // d3-force mutates source/target from string IDs to node objects at runtime
 interface GraphLink extends Omit<HierarchicalEdge, 'source' | 'target'> {
-  source: string | GraphNode;
-  target: string | GraphNode;
+  source: string | number | GraphNode;
+  target: string | number | GraphNode;
   sourceNode?: GraphNode;
   targetNode?: GraphNode;
 }
@@ -692,6 +692,7 @@ function GraphPageContent() {
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
   const [includeShared, setIncludeShared] = useState(true);
   const [focusProjects, setFocusProjects] = useState(false);
+  const previousSelectedProjectsRef = useRef<string[]>(selectedProjects);
   const [hasInitialFit, setHasInitialFit] = useState(false);
   const fitKeyRef = useRef<string>('');
 
@@ -715,6 +716,22 @@ function GraphPageContent() {
       setFocusProjects(false);
     }
   }, [focusProjects, hasProjectSelection]);
+
+  // If project selection changes via header selector, auto-enable focus mode.
+  // This preserves "start with all projects" while making selector changes
+  // immediately visible on the graph.
+  useEffect(() => {
+    const prev = previousSelectedProjectsRef.current;
+    const changed =
+      prev.length !== selectedProjects.length ||
+      prev.some((projectId, index) => selectedProjects[index] !== projectId);
+
+    if (changed && selectedProjects.length > 0) {
+      setFocusProjects(true);
+    }
+
+    previousSelectedProjectsRef.current = selectedProjects;
+  }, [selectedProjects]);
 
   const projectFilter = useMemo(() => {
     if (!focusProjects || selectedProjects.length === 0) return undefined;
@@ -950,29 +967,47 @@ function GraphPageContent() {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  // Configure d3 forces
+  // Configure d3 forces whenever the graph dataset/mode changes.
   useEffect(() => {
-    if (!graphRef.current) return;
+    const nodeCount = graphData.nodes.length;
+    const linkCount = graphData.links.length;
+    if (!graphRef.current || (nodeCount === 0 && linkCount === 0)) return;
+
+    // Adaptive forces keep large graphs readable and prevent "starfield" dispersion
+    // after project filter transitions.
+    const largeGraphScale = nodeCount >= 900 ? 0.4 : nodeCount >= 500 ? 0.55 : 1;
+    const chargeStrength = Math.round(GRAPH_DEFAULTS.CHARGE_STRENGTH * largeGraphScale);
+    const linkDistance =
+      nodeCount >= 900 ? 42 : nodeCount >= 500 ? 50 : GRAPH_DEFAULTS.LINK_DISTANCE;
+    const collisionRadius =
+      nodeCount >= 900 ? 10 : nodeCount >= 500 ? 12 : GRAPH_DEFAULTS.COLLISION_RADIUS;
+    const centerStrength =
+      nodeCount >= 900 ? 0.12 : nodeCount >= 500 ? 0.08 : GRAPH_DEFAULTS.CENTER_STRENGTH;
 
     graphRef.current.d3Force(
       'charge',
-      d3Force.forceManyBody().strength(GRAPH_DEFAULTS.CHARGE_STRENGTH)
+      d3Force
+        .forceManyBody()
+        .strength(chargeStrength)
+        .distanceMax(linkDistance * 8)
     );
-    graphRef.current.d3Force(
-      'center',
-      d3Force.forceCenter().strength(GRAPH_DEFAULTS.CENTER_STRENGTH)
-    );
-    graphRef.current.d3Force(
-      'collision',
-      d3Force.forceCollide().radius(GRAPH_DEFAULTS.COLLISION_RADIUS)
-    );
+    graphRef.current.d3Force('center', d3Force.forceCenter().strength(centerStrength));
+    graphRef.current.d3Force('collision', d3Force.forceCollide().radius(collisionRadius));
 
     // Link force with distance - ForceFn has [key: string]: any so we can access distance directly
     const linkForce = graphRef.current.d3Force('link');
     if (linkForce && typeof linkForce.distance === 'function') {
-      linkForce.distance(GRAPH_DEFAULTS.LINK_DISTANCE);
+      linkForce.distance(linkDistance);
     }
-  }, []);
+
+    // Reheat simulation after re-keyed graph mounts (project/type/cluster switches).
+    const graph = graphRef.current as ForceGraphMethods & {
+      d3ReheatSimulation?: () => void;
+    };
+    if (typeof graph.d3ReheatSimulation === 'function') {
+      graph.d3ReheatSimulation();
+    }
+  }, [graphData.nodes.length, graphData.links.length]);
 
   // Clean node rendering - entity colors + degree-based sizing
   // Labels scale with zoom: more labels appear as you zoom in
@@ -1122,42 +1157,48 @@ function GraphPageContent() {
     [selectedNodeId, hoveredNode, graphData.maxDegree, theme, colors]
   );
 
-  // Clean link rendering
-  const paintLink = useCallback(
-    (link: GraphLink, ctx: CanvasRenderingContext2D) => {
-      // After d3-force processes, source/target become node objects (not strings)
-      const source = link.sourceNode || (typeof link.source === 'object' ? link.source : null);
-      const target = link.targetNode || (typeof link.target === 'object' ? link.target : null);
-      if (!source || !target) return;
-      const sx = source.x;
-      const sy = source.y;
-      const tx = target.x;
-      const ty = target.y;
-      if (sx === undefined || sy === undefined || tx === undefined || ty === undefined) return;
-
-      // Highlight links connected to selected/hovered node
-      const isHighlighted =
-        source.id === selectedNodeId ||
-        target.id === selectedNodeId ||
-        source.id === hoveredNode ||
-        target.id === hoveredNode;
-
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(tx, ty);
-
-      // Theme-aware link colors
-      const linkColor = theme === 'neon' ? '#ffffff' : '#2b2540';
-      if (isHighlighted) {
-        ctx.strokeStyle = theme === 'neon' ? `${linkColor}60` : `${linkColor}80`;
-        ctx.lineWidth = 2;
-      } else {
-        ctx.strokeStyle = theme === 'neon' ? `${linkColor}30` : `${linkColor}50`;
-        ctx.lineWidth = 0.8;
-      }
-      ctx.stroke();
+  // Use the library's native link renderer for robustness; only customize
+  // width/color callbacks for highlight behavior.
+  const getLinkEndpointId = useCallback(
+    (endpoint: string | number | GraphNode | undefined): string | null => {
+      if (typeof endpoint === 'string') return endpoint;
+      if (typeof endpoint === 'number') return graphData.nodes[endpoint]?.id ?? null;
+      if (endpoint && typeof endpoint === 'object') return endpoint.id;
+      return null;
     },
-    [selectedNodeId, hoveredNode, theme]
+    [graphData.nodes]
+  );
+
+  const linkColor = useCallback(
+    (link: GraphLink) => {
+      const sourceId = getLinkEndpointId(link.source);
+      const targetId = getLinkEndpointId(link.target);
+      const isHighlighted =
+        sourceId === selectedNodeId ||
+        targetId === selectedNodeId ||
+        sourceId === hoveredNode ||
+        targetId === hoveredNode;
+
+      if (isHighlighted) {
+        return theme === 'neon' ? 'rgba(255, 255, 255, 0.72)' : 'rgba(43, 37, 64, 0.62)';
+      }
+      return theme === 'neon' ? 'rgba(255, 255, 255, 0.52)' : 'rgba(43, 37, 64, 0.42)';
+    },
+    [getLinkEndpointId, selectedNodeId, hoveredNode, theme]
+  );
+
+  const linkWidth = useCallback(
+    (link: GraphLink) => {
+      const sourceId = getLinkEndpointId(link.source);
+      const targetId = getLinkEndpointId(link.target);
+      const isHighlighted =
+        sourceId === selectedNodeId ||
+        targetId === selectedNodeId ||
+        sourceId === hoveredNode ||
+        targetId === hoveredNode;
+      return isHighlighted ? 2 : 1.2;
+    },
+    [getLinkEndpointId, selectedNodeId, hoveredNode]
   );
 
   const handleEngineStop = useCallback(() => {
@@ -1318,14 +1359,8 @@ function GraphPageContent() {
                 ) => void
               }
               nodeCanvasObjectMode={() => 'replace'}
-              linkCanvasObject={
-                paintLink as (
-                  link: object,
-                  ctx: CanvasRenderingContext2D,
-                  globalScale: number
-                ) => void
-              }
-              linkCanvasObjectMode={() => 'replace'}
+              linkColor={linkColor as (link: object) => string}
+              linkWidth={linkWidth as (link: object) => number}
               onNodeClick={handleNodeClick as (node: object, event: MouseEvent) => void}
               onNodeHover={node => setHoveredNode((node as GraphNode)?.id || null)}
               onEngineStop={handleEngineStop}

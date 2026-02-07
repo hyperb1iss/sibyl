@@ -822,6 +822,13 @@ async def get_hierarchical_graph(
     )
     edges = await _fetch_graph_edges(client, organization_id, node_ids, max_edges)
 
+    # Fallback: if focused totals query fails or undercounts, use displayed values.
+    # This prevents confusing "0 nodes / 0 edges" overlays when focused data exists.
+    if project_ids and total_node_count == 0 and nodes:
+        total_node_count = len(nodes)
+    if project_ids and total_edge_count == 0 and edges:
+        total_edge_count = len(edges)
+
     # Build cluster metadata
     enriched_clusters, cluster_edges = _build_cluster_metadata(
         nodes, clusters_meta, node_to_cluster, edges
