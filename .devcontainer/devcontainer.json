@@ -1,0 +1,46 @@
+{
+  "name": "Sibyl",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "workspace",
+  "workspaceFolder": "/workspace/sibyl",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "24" },
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "forwardPorts": [3334, 3337, 6380, 5433, 3335],
+  "portsAttributes": {
+    "3334": { "label": "Sibyl API" },
+    "3337": { "label": "Sibyl Web" },
+    "6380": { "label": "FalkorDB" },
+    "5433": { "label": "PostgreSQL" },
+    "3335": { "label": "FalkorDB Browser" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "tamasfe.even-better-toml",
+        "bradlc.vscode-tailwindcss",
+        "dbaeumer.vscode-eslint"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/workspace/sibyl/.venv/bin/python",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true
+        }
+      }
+    }
+  },
+  "postCreateCommand": ".devcontainer/setup.sh",
+  "remoteEnv": {
+    "SIBYL_DATABASE_URL": "postgresql://sibyl:sibyl_dev@postgres:5432/sibyl",
+    "SIBYL_FALKORDB_HOST": "falkordb",
+    "SIBYL_FALKORDB_PORT": "6379",
+    "SIBYL_FALKORDB_PASSWORD": "conventions",
+    "SIBYL_SERVER_URL": "http://localhost:3334",
+    "SIBYL_SERVER_PORT": "3334",
+    "SIBYL_WEB_PORT": "3337"
+  }
+}

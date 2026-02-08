@@ -181,6 +181,24 @@ class SandboxController:
         if runner_id:
             env_vars.append({"name": "SIBYL_RUNNER_ID", "value": str(runner_id)})
 
+        # Mint a scoped JWT for the runner to authenticate back to the API
+        sandbox_id = getattr(sandbox, "id", None)
+        org_id = getattr(sandbox, "organization_id", None)
+        user_id = getattr(sandbox, "user_id", None)
+        if runner_id and org_id and user_id:
+            try:
+                from sibyl.auth.jwt import create_runner_token
+
+                token = create_runner_token(
+                    user_id=user_id,
+                    organization_id=org_id,
+                    runner_id=runner_id,
+                    sandbox_id=sandbox_id,
+                )
+                env_vars.append({"name": "SIBYL_RUNNER_TOKEN", "value": token})
+            except Exception as e:
+                log.warning("sandbox_token_mint_failed", error=str(e))
+
         resources = {
             "requests": {
                 "cpu": str(getattr(sandbox, "cpu_request", "250m")),

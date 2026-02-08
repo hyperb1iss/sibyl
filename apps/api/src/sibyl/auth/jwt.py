@@ -158,6 +158,34 @@ def verify_refresh_token(token: str, *, verify_expiry: bool = True) -> dict[str,
     return claims
 
 
+def create_runner_token(
+    *,
+    user_id: UUID,
+    organization_id: UUID,
+    runner_id: UUID,
+    sandbox_id: UUID | None = None,
+    expires_in: timedelta | None = None,
+) -> str:
+    """Create a scoped JWT for a sandbox-bound runner.
+
+    Claims:
+    - rid: runner UUID (binds token to specific runner)
+    - sid: sandbox UUID (if sandbox-bound)
+    - scp: space-separated scopes
+    """
+    scopes = "sandbox:runner" if sandbox_id else "runner runner:connect mcp"
+    extra: dict[str, Any] = {"rid": str(runner_id), "scp": scopes}
+    if sandbox_id:
+        extra["sid"] = str(sandbox_id)
+
+    return create_access_token(
+        user_id=user_id,
+        organization_id=organization_id,
+        expires_in=expires_in or timedelta(hours=24),
+        extra_claims=extra,
+    )
+
+
 def decode_token_unverified(token: str) -> dict[str, Any]:
     """Decode token without verification (for debugging/logging only)."""
     try:
