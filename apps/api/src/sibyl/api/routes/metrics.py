@@ -329,11 +329,12 @@ async def sandbox_metrics(
         total_sandboxes = sum(status_counts.values())
         total_tasks = sum(queue_depth.values())
 
-        # Retry rate: tasks with attempt_count > 1 / total completed+failed tasks
+        # Retry rate: terminal tasks with attempt_count > 1 / total completed+failed tasks
         retry_result = await session.execute(
             select(func.count()).where(
                 SandboxTask.organization_id == org_id,
                 SandboxTask.attempt_count > 1,
+                SandboxTask.status.in_(["completed", "failed"]),
             )
         )
         retry_count = retry_result.scalar() or 0

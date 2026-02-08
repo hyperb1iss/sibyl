@@ -30,10 +30,10 @@ Or describe what you need:
 
 ## Generated Files
 
-| File                           | Purpose                                            |
-| ------------------------------ | -------------------------------------------------- |
-| `.devcontainer/devcontainer.json` | VS Code / Codespaces dev container config       |
-| `docker-compose.sandbox.yml`  | Docker Compose overlay with runner sidecar          |
+| File                              | Purpose                                    |
+| --------------------------------- | ------------------------------------------ |
+| `.devcontainer/devcontainer.json` | VS Code / Codespaces dev container config  |
+| `docker-compose.sandbox.yml`      | Docker Compose overlay with runner sidecar |
 
 ## How it works
 

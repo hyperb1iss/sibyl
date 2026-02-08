@@ -26,8 +26,8 @@ you find:
 - **Kubernetes**: `charts/`, `k8s/`, any YAML files containing `apiVersion:`
 - **Package managers**: `pyproject.toml`, `package.json`, `Cargo.toml`, `go.mod`, `Gemfile`,
   `build.gradle`, `pom.xml`
-- **Runtime version pinning**: `.nvmrc`, `.python-version`, `.tool-versions`,
-  `rust-toolchain.toml`, `.ruby-version`
+- **Runtime version pinning**: `.nvmrc`, `.python-version`, `.tool-versions`, `rust-toolchain.toml`,
+  `.ruby-version`
 - **Environment files**: `.env.example`, `.env.template` (never read `.env` directly)
 
 Use Glob to find these files quickly:
@@ -59,39 +59,38 @@ Select the base image using this priority order. Stop at the first match:
 1. **Existing Dockerfile** -- extract the final `FROM` image (handle multi-stage builds; use the
    last stage's base)
 2. **devcontainer.json** -- extract the `image` field
-3. **CI workflow** -- extract container images from `jobs.*.container.image` or
-   `services.*.image`
+3. **CI workflow** -- extract container images from `jobs.*.container.image` or `services.*.image`
 4. **Language detection** -- infer from the primary package manager found:
 
-   | Package Manager | Base Image |
-   | --------------- | ---------- |
-   | `pyproject.toml` | `python:3.12-slim` |
-   | `package.json` | `node:22-slim` |
-   | `Cargo.toml` | `rust:1-slim` |
-   | `go.mod` | `golang:1.23-slim` |
-   | `Gemfile` | `ruby:3.3-slim` |
+   | Package Manager            | Base Image               |
+   | -------------------------- | ------------------------ |
+   | `pyproject.toml`           | `python:3.12-slim`       |
+   | `package.json`             | `node:22-slim`           |
+   | `Cargo.toml`               | `rust:1-slim`            |
+   | `go.mod`                   | `golang:1.23-slim`       |
+   | `Gemfile`                  | `ruby:3.3-slim`          |
    | `pom.xml` / `build.gradle` | `eclipse-temurin:21-jdk` |
 
 5. **Fallback** -- `ubuntu:24.04`
 
-If a `.python-version`, `.nvmrc`, or `rust-toolchain.toml` exists, use the pinned version instead
-of the defaults above.
+If a `.python-version`, `.nvmrc`, or `rust-toolchain.toml` exists, use the pinned version instead of
+the defaults above.
 
 ### 3. Detect Install Command
 
 Determine the post-create install command from the package manager:
 
-| Package Manager | Install Command |
-| --------------- | --------------- |
-| `pyproject.toml` (with `uv.lock`) | `uv sync` |
-| `pyproject.toml` (with `poetry.lock`) | `poetry install` |
-| `pyproject.toml` (plain) | `pip install -e .` |
-| `package.json` (with `pnpm-lock.yaml`) | `pnpm install` |
-| `package.json` (with `yarn.lock`) | `yarn install` |
-| `package.json` (with `package-lock.json` or default) | `npm install` |
-| `Cargo.toml` | `cargo build` |
-| `go.mod` | `go mod download` |
-| `Gemfile` | `bundle install` |
+| Package Manager                                      | Install Command    |
+| ---------------------------------------------------- | ------------------ |
+| `pyproject.toml` (with `uv.lock`)                    | `uv sync`          |
+| `pyproject.toml` (with `poetry.lock`)                | `poetry install`   |
+| `pyproject.toml` (plain)                             | `pip install -e .` |
+| `package.json` (with `pnpm-lock.yaml`)               | `pnpm install`     |
+| `package.json` (with `yarn.lock`)                    | `yarn install`     |
+| `package.json` (with `package-lock.json` or default) | `npm install`      |
+| `Cargo.toml`                                         | `cargo build`      |
+| `go.mod`                                             | `go mod download`  |
+| `Gemfile`                                            | `bundle install`   |
 
 If multiple package managers exist (e.g., monorepo with Python + Node), chain them:
 `uv sync && pnpm install`
@@ -104,31 +103,31 @@ Extract port mappings from infrastructure files:
 - **Dockerfile**: Parse `EXPOSE` directives
 - **Common conventions**: Check for well-known service ports in compose services
 
-| Service | Default Port |
-| ------- | ------------ |
-| PostgreSQL | 5432 |
-| MySQL | 3306 |
-| Redis | 6379 |
-| FalkorDB | 6380 |
-| MongoDB | 27017 |
-| Elasticsearch | 9200 |
-| HTTP APIs | 3000, 3334, 8000, 8080 |
-| Frontend dev servers | 3000, 3337, 5173 |
+| Service              | Default Port           |
+| -------------------- | ---------------------- |
+| PostgreSQL           | 5432                   |
+| MySQL                | 3306                   |
+| Redis                | 6379                   |
+| FalkorDB             | 6380                   |
+| MongoDB              | 27017                  |
+| Elasticsearch        | 9200                   |
+| HTTP APIs            | 3000, 3334, 8000, 8080 |
+| Frontend dev servers | 3000, 3337, 5173       |
 
 ### 5. Detect VS Code Extensions
 
 Map detected languages to recommended extensions:
 
-| Language/Tool | Extensions |
-| ------------- | ---------- |
-| Python | `ms-python.python`, `charliermarsh.ruff` |
+| Language/Tool         | Extensions                                         |
+| --------------------- | -------------------------------------------------- |
+| Python                | `ms-python.python`, `charliermarsh.ruff`           |
 | TypeScript/JavaScript | `dbaeumer.vscode-eslint`, `esbenp.prettier-vscode` |
-| Rust | `rust-lang.rust-analyzer` |
-| Go | `golang.go` |
-| Ruby | `shopify.ruby-lsp` |
-| Java | `redhat.java` |
-| Docker | `ms-azuretools.vscode-docker` |
-| YAML/Kubernetes | `redhat.vscode-yaml` |
+| Rust                  | `rust-lang.rust-analyzer`                          |
+| Go                    | `golang.go`                                        |
+| Ruby                  | `shopify.ruby-lsp`                                 |
+| Java                  | `redhat.java`                                      |
+| Docker                | `ms-azuretools.vscode-docker`                      |
+| YAML/Kubernetes       | `redhat.vscode-yaml`                               |
 
 ### 6. Generate .devcontainer Configuration
 
@@ -200,7 +199,8 @@ Show the user a clear summary:
    - For compose overlay: `docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up`
    - Connecting to Sibyl: set `SIBYL_SERVER_URL` if not using localhost
 
-**Ask the user if they want to write the files or adjust the configuration before writing anything.**
+**Ask the user if they want to write the files or adjust the configuration before writing
+anything.**
 
 Do NOT write files until the user confirms. Present the generated content and wait for approval.
 
@@ -223,5 +223,5 @@ Chain install commands. Include extensions for all detected languages.
 
 ### Private/custom base images
 
-If the Dockerfile uses a private registry image (not Docker Hub or MCR), note this in the output
-and ask the user whether the sandbox should use the same image or a public alternative.
+If the Dockerfile uses a private registry image (not Docker Hub or MCR), note this in the output and
+ask the user whether the sandbox should use the same image or a public alternative.

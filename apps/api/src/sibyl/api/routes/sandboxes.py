@@ -422,7 +422,7 @@ async def get_sandbox_logs(
 async def sandbox_attach(websocket: WebSocket, sandbox_id: UUID) -> None:
     """WebSocket exec proxy: browser terminal <-> K8s pod shell.
 
-    Auth: JWT token from ?token= query param.
+    Auth: JWT from ?token= query param, Authorization header, or sibyl_access_token cookie.
     Protocol:
       - Client sends raw text (stdin) or {"type": "resize", "cols": N, "rows": M}
       - Server sends raw text (stdout/stderr from pod)
@@ -431,8 +431,15 @@ async def sandbox_attach(websocket: WebSocket, sandbox_id: UUID) -> None:
     from sibyl.auth.jwt import JwtError, verify_access_token
     from sibyl.config import settings
 
-    # 1. Extract and validate JWT from query param
-    token = websocket.query_params.get("token")
+    # 1. Extract JWT from query param, Authorization header, or cookie
+    token = (
+        websocket.query_params.get("token")
+        or websocket.cookies.get("sibyl_access_token")
+    )
+    auth_header = websocket.headers.get("authorization")
+    if not token and auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+
     if not token and not settings.disable_auth:
         await websocket.close(code=4001, reason="Missing token")
         return
