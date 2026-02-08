@@ -21,17 +21,9 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
+from sibyl.agents.sandbox_utils import set_if_present as _set_if_present, status_of as _status_of
+
 log = structlog.get_logger()
-
-
-def _set_if_present(model: Any, attr: str, value: Any) -> None:
-    if hasattr(model, attr):
-        setattr(model, attr, value)
-
-
-def _status_of(model: Any) -> str:
-    value = getattr(model, "status", "") or ""
-    return str(value).lower()
 
 
 class SandboxDispatcherError(RuntimeError):
@@ -41,7 +33,7 @@ class SandboxDispatcherError(RuntimeError):
 class SandboxDispatcher:
     """DB-backed sandbox task queue with retry/fail semantics."""
 
-    PENDING_STATUSES = {"queued", "retry", "pending"}
+    PENDING_STATUSES = {"queued", "retry"}
 
     def __init__(
         self,
@@ -156,7 +148,7 @@ class SandboxDispatcher:
         """Dispatch queued tasks for a sandbox to a connected runner."""
         self._require_enabled()
         sandbox_task_model = self._task_model()
-        now = datetime.now(UTC)
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         async with self._session_factory() as session:
             stmt = (
@@ -178,7 +170,7 @@ class SandboxDispatcher:
                 if attempts >= task_max_attempts:
                     _set_if_present(task, "status", "failed")
                     _set_if_present(task, "error_message", "max_attempts_exceeded")
-                    _set_if_present(task, "failed_at", now.replace(tzinfo=None))
+                    _set_if_present(task, "failed_at", now)
                     continue
 
                 payload = dict(getattr(task, "payload", {}) or {})
@@ -187,7 +179,7 @@ class SandboxDispatcher:
                 ok = await self._maybe_await(send_fn(message))
 
                 _set_if_present(task, "attempt_count", attempts + 1)
-                _set_if_present(task, "last_dispatch_at", now.replace(tzinfo=None))
+                _set_if_present(task, "last_dispatch_at", now)
                 if runner_id is not None:
                     _set_if_present(task, "runner_id", runner_id)
 
@@ -198,7 +190,7 @@ class SandboxDispatcher:
                 elif attempts + 1 >= task_max_attempts:
                     _set_if_present(task, "status", "failed")
                     _set_if_present(task, "error_message", "dispatch_failed_max_attempts")
-                    _set_if_present(task, "failed_at", now.replace(tzinfo=None))
+                    _set_if_present(task, "failed_at", now)
                 else:
                     _set_if_present(task, "status", "retry")
                     _set_if_present(task, "error_message", "dispatch_failed_retrying")

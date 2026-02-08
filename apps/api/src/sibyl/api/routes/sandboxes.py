@@ -66,6 +66,31 @@ def _require_org(auth: AuthSession) -> Organization:
     return auth.ctx.organization
 
 
+def _check_sandbox_access(auth: AuthSession, sandbox: Any) -> None:
+    """Non-admin users can only access their own sandbox."""
+    if auth.ctx.org_role in (OrganizationRole.ADMIN, OrganizationRole.OWNER):
+        return
+    sandbox_user_id = getattr(sandbox, "user_id", None)
+    if sandbox_user_id != auth.ctx.user.id:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+
+
+async def _preflight_sandbox_access(auth: AuthSession, sandbox_id: UUID, org_id: UUID) -> None:
+    """Pre-fetch sandbox and enforce ownership for mutating endpoints."""
+    if auth.ctx.org_role in (OrganizationRole.ADMIN, OrganizationRole.OWNER):
+        return
+    sandbox_model = _sandbox_model()
+    result = await auth.session.execute(
+        select(sandbox_model).where(
+            sandbox_model.id == sandbox_id, sandbox_model.organization_id == org_id
+        )
+    )
+    sandbox = result.scalar_one_or_none()
+    if sandbox is None:
+        raise HTTPException(status_code=404, detail="Sandbox not found")
+    _check_sandbox_access(auth, sandbox)
+
+
 def _sandbox_model() -> type[Any]:
     from sibyl.db import models as db_models
 
@@ -146,11 +171,17 @@ async def list_sandboxes(
     status: str | None = None,
     auth: AuthSession = Depends(get_auth_session),
 ) -> SandboxListResponse:
-    """List sandboxes in this organization."""
+    """List sandboxes in this organization.
+
+    Non-admin users only see their own sandbox. Admins/owners see all.
+    """
     org = _require_org(auth)
     sandbox_model = _sandbox_model()
 
     stmt = select(sandbox_model).where(sandbox_model.organization_id == org.id)
+    # Non-admin users only see their own sandbox
+    if auth.ctx.org_role not in (OrganizationRole.ADMIN, OrganizationRole.OWNER):
+        stmt = stmt.where(sandbox_model.user_id == auth.ctx.user.id)
     if status:
         stmt = stmt.where(sandbox_model.status == status)
     stmt = stmt.order_by(sandbox_model.created_at.desc())
@@ -179,6 +210,7 @@ async def get_sandbox(
     sandbox = result.scalar_one_or_none()
     if sandbox is None:
         raise HTTPException(status_code=404, detail="Sandbox not found")
+    _check_sandbox_access(auth, sandbox)
     return _to_sandbox_response(sandbox)
 
 
@@ -190,6 +222,7 @@ async def suspend_sandbox(
 ) -> SandboxResponse:
     """Suspend a sandbox."""
     org = _require_org(auth)
+    await _preflight_sandbox_access(auth, sandbox_id, org.id)
     controller = _require_controller(request)
     try:
         sandbox = await controller.suspend(sandbox_id, organization_id=org.id)
@@ -208,6 +241,7 @@ async def resume_sandbox(
 ) -> SandboxResponse:
     """Resume a sandbox."""
     org = _require_org(auth)
+    await _preflight_sandbox_access(auth, sandbox_id, org.id)
     controller = _require_controller(request)
     try:
         sandbox = await controller.resume(sandbox_id, organization_id=org.id)
@@ -226,6 +260,7 @@ async def delete_sandbox(
 ) -> dict[str, Any]:
     """Destroy a sandbox."""
     org = _require_org(auth)
+    await _preflight_sandbox_access(auth, sandbox_id, org.id)
     controller = _require_controller(request)
     try:
         sandbox = await controller.destroy(sandbox_id, organization_id=org.id)
@@ -249,6 +284,7 @@ async def get_sandbox_logs(
     - Returns clear "not implemented" when there is no runtime pod yet.
     """
     org = _require_org(auth)
+    await _preflight_sandbox_access(auth, sandbox_id, org.id)
     controller = _require_controller(request)
     try:
         logs_text = await controller.get_logs(

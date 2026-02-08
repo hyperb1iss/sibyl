@@ -21,6 +21,8 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
+from sibyl.agents.sandbox_utils import set_if_present as _set_if_present, status_of as _status_of
+
 log = structlog.get_logger()
 
 
@@ -29,16 +31,6 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _set_if_present(model: Any, attr: str, value: Any) -> None:
-    if hasattr(model, attr):
-        setattr(model, attr, value)
-
-
-def _status_of(model: Any) -> str:
-    value = getattr(model, "status", "") or ""
-    return str(value).lower()
 
 
 class SandboxControllerError(RuntimeError):
@@ -59,14 +51,23 @@ class SandboxController:
         namespace: str | None = None,
         pod_prefix: str | None = None,
         reconcile_interval_seconds: int | None = None,
+        idle_ttl_seconds: int | None = None,
+        max_lifetime_seconds: int | None = None,
+        sandbox_image: str | None = None,
     ) -> None:
         self._session_factory = session_factory
         self.enabled = enabled
         self.namespace = namespace or os.getenv("SIBYL_SANDBOX_K8S_NAMESPACE", "default")
         self.pod_prefix = pod_prefix or os.getenv("SIBYL_SANDBOX_POD_PREFIX", "sibyl-sandbox")
-        self.sandbox_image = os.getenv("SIBYL_SANDBOX_IMAGE", "busybox:1.36")
+        self.sandbox_image = sandbox_image or os.getenv("SIBYL_SANDBOX_IMAGE", "busybox:1.36")
         self.reconcile_interval_seconds = reconcile_interval_seconds or int(
             os.getenv("SIBYL_SANDBOX_RECONCILE_SECONDS", "20")
+        )
+        self.idle_ttl_seconds = idle_ttl_seconds or int(
+            os.getenv("SIBYL_SANDBOX_IDLE_TTL_SECONDS", "1800")
+        )
+        self.max_lifetime_seconds = max_lifetime_seconds or int(
+            os.getenv("SIBYL_SANDBOX_MAX_LIFETIME_SECONDS", "14400")
         )
         self.k8s_required = _env_bool("SIBYL_SANDBOX_K8S_REQUIRED", default=False)
 
@@ -465,12 +466,37 @@ class SandboxController:
         except Exception as e:
             raise SandboxControllerError(f"Failed to read sandbox logs: {e}") from e
 
+    def _is_idle_expired(self, sandbox: Any, now: datetime) -> bool:
+        """Check if sandbox has exceeded idle TTL based on last heartbeat or update."""
+        last_activity = (
+            getattr(sandbox, "last_heartbeat", None)
+            or getattr(sandbox, "updated_at", None)
+        )
+        if last_activity is None:
+            return False
+        # Strip tzinfo for comparison (DB stores naive UTC)
+        if hasattr(last_activity, "tzinfo") and last_activity.tzinfo is not None:
+            last_activity = last_activity.replace(tzinfo=None)
+        idle_seconds = (now - last_activity).total_seconds()
+        return idle_seconds > self.idle_ttl_seconds
+
+    def _is_lifetime_expired(self, sandbox: Any, now: datetime) -> bool:
+        """Check if sandbox has exceeded max lifetime since startup."""
+        started_at = getattr(sandbox, "started_at", None)
+        if started_at is None:
+            return False
+        if hasattr(started_at, "tzinfo") and started_at.tzinfo is not None:
+            started_at = started_at.replace(tzinfo=None)
+        lifetime_seconds = (now - started_at).total_seconds()
+        return lifetime_seconds > self.max_lifetime_seconds
+
     async def _reconcile_once(self) -> None:
         if not self.enabled:
             return
 
         sandbox_model = self._sandbox_model()
         tracked_statuses = list(self.ACTIVE_STATUSES | {"failed"})
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         async with self._session_factory() as session:
             stmt = select(sandbox_model).where(sandbox_model.status.in_(tracked_statuses))
@@ -481,8 +507,30 @@ class SandboxController:
 
             k8s_ready = await self._ensure_k8s_client()
             for sandbox in sandboxes:
+                sandbox_id_str = str(getattr(sandbox, "id", ""))
+                status = _status_of(sandbox)
+
+                # Check idle timeout and max lifetime for running sandboxes
+                if status == "running":
+                    if self._is_lifetime_expired(sandbox, now):
+                        log.info("sandbox_max_lifetime_exceeded", sandbox_id=sandbox_id_str)
+                        await self._delete_pod_if_exists(getattr(sandbox, "pod_name", None))
+                        _set_if_present(sandbox, "status", "suspended")
+                        _set_if_present(sandbox, "runner_id", None)
+                        _set_if_present(sandbox, "stopped_at", now)
+                        _set_if_present(sandbox, "error_message", "auto-suspended: max lifetime exceeded")
+                        continue
+                    if self._is_idle_expired(sandbox, now):
+                        log.info("sandbox_idle_timeout", sandbox_id=sandbox_id_str)
+                        await self._delete_pod_if_exists(getattr(sandbox, "pod_name", None))
+                        _set_if_present(sandbox, "status", "suspended")
+                        _set_if_present(sandbox, "runner_id", None)
+                        _set_if_present(sandbox, "stopped_at", now)
+                        _set_if_present(sandbox, "error_message", "auto-suspended: idle timeout")
+                        continue
+
                 if not k8s_ready:
-                    if _status_of(sandbox) in {"pending", "starting"} and self.runtime_error:
+                    if status in {"pending", "starting"} and self.runtime_error:
                         _set_if_present(sandbox, "status", "failed")
                         _set_if_present(sandbox, "error_message", self.runtime_error)
                     continue
@@ -509,13 +557,13 @@ class SandboxController:
                         _set_if_present(sandbox, "error_message", f"pod_phase={phase}")
                 except Exception as e:
                     if self._is_not_found(e):
-                        if _status_of(sandbox) in {"running", "starting", "pending"}:
+                        if status in {"running", "starting", "pending"}:
                             _set_if_present(sandbox, "status", "failed")
                             _set_if_present(sandbox, "error_message", "sandbox pod not found")
                     else:
                         log.warning(
                             "sandbox_reconcile_pod_read_failed",
-                            sandbox_id=str(getattr(sandbox, "id", "")),
+                            sandbox_id=sandbox_id_str,
                             pod_name=pod_name,
                             error=str(e),
                         )

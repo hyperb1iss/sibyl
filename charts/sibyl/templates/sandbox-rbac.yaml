@@ -1,4 +1,5 @@
 {{- if and .Values.sandbox.enabled .Values.sandbox.rbac.enabled }}
+# Namespace-scoped Role for sandbox pod/resource management
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -20,7 +21,16 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["secrets", "configmaps"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["resourcequotas", "limitranges"]
+    verbs: ["get", "list", "create", "patch", "delete"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get", "list", "watch", "create", "delete"]
@@ -39,4 +49,39 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ include "sibyl.fullname" . }}-sandbox-controller
+---
+# Cluster-scoped role for namespace-per-sandbox isolation model
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "sibyl.fullname" . }}-sandbox-namespaces
+  labels:
+    {{- include "sibyl.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "create", "delete"]
+  # Manage RBAC in sandbox namespaces for runner service accounts
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  # Create service accounts in sandbox namespaces
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "sibyl.fullname" . }}-sandbox-namespaces
+  labels:
+    {{- include "sibyl.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ default (include "sibyl.serviceAccountName" .) .Values.sandbox.rbac.serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "sibyl.fullname" . }}-sandbox-namespaces
 {{- end }}

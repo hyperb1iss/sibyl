@@ -161,7 +161,14 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
             from sibyl.agents.sandbox_dispatcher import SandboxDispatcher
             from sibyl.db.connection import get_session
 
-            controller = SandboxController(get_session, enabled=True)
+            controller = SandboxController(
+                get_session,
+                enabled=True,
+                sandbox_image=settings.sandbox_default_image,
+                reconcile_interval_seconds=settings.sandbox_reconcile_interval_seconds,
+                idle_ttl_seconds=settings.sandbox_idle_ttl_seconds,
+                max_lifetime_seconds=settings.sandbox_max_lifetime_seconds,
+            )
             dispatcher = SandboxDispatcher(get_session, enabled=True)
             stop_event = asyncio.Event()
             reconcile_task = asyncio.create_task(controller.reconcile_loop(stop_event))

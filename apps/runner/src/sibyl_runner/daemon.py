@@ -530,7 +530,23 @@ class RunnerDaemon:
         stdout_task.add_done_callback(self._background_tasks.discard)
         stderr_task.add_done_callback(self._background_tasks.discard)
 
-        exit_code = await execution.process.wait()
+        timeout = config.get("timeout_seconds") or int(
+            os.environ.get("SIBYL_EXECUTION_TIMEOUT", "3600")
+        )
+        try:
+            exit_code = await asyncio.wait_for(execution.process.wait(), timeout=timeout)
+        except TimeoutError:
+            log.warning(
+                "execution_timeout",
+                task_id=execution.task_id,
+                timeout=timeout,
+            )
+            execution.process.terminate()
+            try:
+                exit_code = await asyncio.wait_for(execution.process.wait(), timeout=10)
+            except TimeoutError:
+                execution.process.kill()
+                exit_code = await execution.process.wait()
         stdout_lines, stderr_lines = await asyncio.gather(stdout_task, stderr_task)
 
         status = "completed" if exit_code == 0 else "failed"
