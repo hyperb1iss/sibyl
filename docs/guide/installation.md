@@ -263,6 +263,59 @@ echo $SIBYL_OPENAI_API_KEY
 A production Docker Compose configuration is planned. For now, use the individual Docker commands
 above.
 
+## Sandbox Setup (Optional)
+
+Sibyl's sandbox system provides isolated execution environments for AI agents. This is optional
+for basic usage but required for distributed task execution.
+
+### Enabling Sandbox Mode
+
+Set the sandbox mode in your environment:
+
+```bash
+# Shadow mode — observe and log sandbox operations without enforcement
+export SIBYL_SANDBOX_MODE=shadow
+
+# Enforced mode — require sandbox for all task execution
+export SIBYL_SANDBOX_MODE=enforced
+```
+
+### Runner Registration
+
+Register a runner to execute tasks:
+
+```bash
+# Register via API
+curl -X POST http://localhost:3334/api/runners/register \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"name": "my-runner", "hostname": "dev-machine", "capabilities": ["docker"]}'
+```
+
+### Runner Daemon
+
+Install and start the runner daemon:
+
+```bash
+# Install
+moon run runner:install
+
+# Start with connection to Sibyl API
+sibyl-runner --server-url http://localhost:3334 --runner-id <runner-id>
+```
+
+### Sandbox Configuration
+
+| Variable                             | Default                                   | Description                            |
+| ------------------------------------ | ----------------------------------------- | -------------------------------------- |
+| `SIBYL_SANDBOX_MODE`                 | `off`                                     | Sandbox policy: off, shadow, enforced  |
+| `SIBYL_SANDBOX_DEFAULT_IMAGE`        | `ghcr.io/hyperb1iss/sibyl-sandbox:latest` | Default container image                |
+| `SIBYL_SANDBOX_IDLE_TTL_SECONDS`     | `1800`                                    | Auto-suspend after idle (seconds)      |
+| `SIBYL_SANDBOX_MAX_LIFETIME_SECONDS` | `14400`                                   | Maximum sandbox lifetime (seconds)     |
+| `SIBYL_SANDBOX_K8S_NAMESPACE`        | `default`                                 | Kubernetes namespace for pods          |
+| `SIBYL_SANDBOX_RECONCILE_ENABLED`    | `true`                                    | Enable reconciliation loop             |
+
+For detailed architecture, see [Sandbox Architecture](../design/sandbox-architecture.md).
+
 ## Next Steps
 
 - [Quick Start](./quick-start.md) - 5-minute tutorial

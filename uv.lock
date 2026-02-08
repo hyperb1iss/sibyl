@@ -3003,6 +3003,7 @@ dependencies = [
     { name = "sibyl-core" },
     { name = "tomli-w" },
     { name = "typer" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -3022,6 +3023,7 @@ requires-dist = [
     { name = "sibyl-core", editable = "packages/python/sibyl-core" },
     { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "typer", specifier = ">=0.20.0" },
+    { name = "websockets", specifier = ">=12.0" },
 ]
 
 [package.metadata.requires-dev]

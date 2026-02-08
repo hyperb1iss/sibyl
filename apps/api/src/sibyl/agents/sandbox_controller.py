@@ -18,6 +18,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -54,22 +55,21 @@ class SandboxController:
         idle_ttl_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
         sandbox_image: str | None = None,
+        server_url: str | None = None,
+        k8s_required: bool = False,
+        dispatcher: Any | None = None,
     ) -> None:
         self._session_factory = session_factory
         self.enabled = enabled
-        self.namespace = namespace or os.getenv("SIBYL_SANDBOX_K8S_NAMESPACE", "default")
-        self.pod_prefix = pod_prefix or os.getenv("SIBYL_SANDBOX_POD_PREFIX", "sibyl-sandbox")
-        self.sandbox_image = sandbox_image or os.getenv("SIBYL_SANDBOX_IMAGE", "busybox:1.36")
-        self.reconcile_interval_seconds = reconcile_interval_seconds or int(
-            os.getenv("SIBYL_SANDBOX_RECONCILE_SECONDS", "20")
-        )
-        self.idle_ttl_seconds = idle_ttl_seconds or int(
-            os.getenv("SIBYL_SANDBOX_IDLE_TTL_SECONDS", "1800")
-        )
-        self.max_lifetime_seconds = max_lifetime_seconds or int(
-            os.getenv("SIBYL_SANDBOX_MAX_LIFETIME_SECONDS", "14400")
-        )
-        self.k8s_required = _env_bool("SIBYL_SANDBOX_K8S_REQUIRED", default=False)
+        self._dispatcher = dispatcher
+        self.namespace = namespace or "default"
+        self.pod_prefix = pod_prefix or "sibyl-sandbox"
+        self.sandbox_image = sandbox_image or "ghcr.io/hyperb1iss/sibyl-sandbox:latest"
+        self.reconcile_interval_seconds = reconcile_interval_seconds or 20
+        self.idle_ttl_seconds = idle_ttl_seconds or 1800
+        self.max_lifetime_seconds = max_lifetime_seconds or 14400
+        self.k8s_required = k8s_required
+        self.server_url = server_url or ""
 
         self._k8s_checked = False
         self._k8s_error: str | None = None
@@ -172,17 +172,53 @@ class SandboxController:
             "organization_id": str(getattr(sandbox, "organization_id", "")),
         }
         image = str(getattr(sandbox, "image", "") or self.sandbox_image)
+
+        env_vars = [
+            {"name": "SIBYL_SANDBOX_ID", "value": str(getattr(sandbox, "id", ""))},
+            {"name": "SIBYL_SERVER_URL", "value": self.server_url},
+        ]
+        runner_id = getattr(sandbox, "runner_id", None)
+        if runner_id:
+            env_vars.append({"name": "SIBYL_RUNNER_ID", "value": str(runner_id)})
+
+        resources = {
+            "requests": {
+                "cpu": str(getattr(sandbox, "cpu_request", "250m")),
+                "memory": str(getattr(sandbox, "memory_request", "512Mi")),
+                "ephemeral-storage": str(
+                    getattr(sandbox, "ephemeral_storage_request", "1Gi")
+                ),
+            },
+            "limits": {
+                "cpu": str(getattr(sandbox, "cpu_limit", "1000m")),
+                "memory": str(getattr(sandbox, "memory_limit", "2Gi")),
+                "ephemeral-storage": str(
+                    getattr(sandbox, "ephemeral_storage_limit", "4Gi")
+                ),
+            },
+        }
+
+        security_context = {
+            "runAsNonRoot": True,
+            "allowPrivilegeEscalation": False,
+            "capabilities": {"drop": ["ALL"]},
+            "readOnlyRootFilesystem": False,
+        }
+
         return {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {"name": pod_name, "labels": labels},
             "spec": {
                 "restartPolicy": "Always",
+                "automountServiceAccountToken": False,
                 "containers": [
                     {
                         "name": "runner",
                         "image": image,
-                        "command": ["sh", "-c", "sleep infinity"],
+                        "env": env_vars,
+                        "resources": resources,
+                        "securityContext": security_context,
                     }
                 ],
             },
@@ -287,7 +323,20 @@ class SandboxController:
                 break
 
         if candidate is None:
-            return await self.create(organization_id=organization_id, user_id=user_id, metadata=metadata)
+            try:
+                return await self.create(
+                    organization_id=organization_id, user_id=user_id, metadata=metadata
+                )
+            except IntegrityError:
+                # Another caller won the race -- re-query
+                async with self._session_factory() as session:
+                    stmt = select(self._sandbox_model()).where(
+                        self._sandbox_model().organization_id == organization_id,
+                        self._sandbox_model().user_id == user_id,
+                        self._sandbox_model().status.notin_(list(self.TERMINAL_STATUSES)),
+                    )
+                    result = await session.execute(stmt)
+                    return result.scalar_one()
 
         if _status_of(candidate) in {"suspended", "failed"}:
             return await self.resume(candidate.id, organization_id=organization_id)
@@ -350,6 +399,8 @@ class SandboxController:
 
             _set_if_present(sandbox, "status", "starting")
             _set_if_present(sandbox, "stopped_at", None)
+            # Clear stale heartbeat so reconcile doesn't immediately re-suspend
+            _set_if_present(sandbox, "last_heartbeat", None)
             pod_ready = await self._ensure_pod(sandbox)
             if pod_ready:
                 _set_if_present(sandbox, "status", "running")
@@ -490,6 +541,80 @@ class SandboxController:
         lifetime_seconds = (now - started_at).total_seconds()
         return lifetime_seconds > self.max_lifetime_seconds
 
+    async def _auto_suspend(self, sandbox: Any, now: datetime, reason: str) -> None:
+        """Suspend a sandbox due to idle/lifetime timeout."""
+        await self._delete_pod_if_exists(getattr(sandbox, "pod_name", None))
+        _set_if_present(sandbox, "status", "suspended")
+        _set_if_present(sandbox, "runner_id", None)
+        _set_if_present(sandbox, "stopped_at", now)
+        _set_if_present(sandbox, "error_message", f"auto-suspended: {reason}")
+
+    async def _reconcile_sandbox(
+        self, sandbox: Any, *, now: datetime, k8s_ready: bool
+    ) -> None:
+        """Reconcile a single sandbox against runtime state."""
+        sandbox_id_str = str(getattr(sandbox, "id", ""))
+        status = _status_of(sandbox)
+
+        if status == "running":
+            if self._is_lifetime_expired(sandbox, now):
+                log.info("sandbox_max_lifetime_exceeded", sandbox_id=sandbox_id_str)
+                await self._auto_suspend(sandbox, now, "max lifetime exceeded")
+                return
+            if self._is_idle_expired(sandbox, now):
+                log.info("sandbox_idle_timeout", sandbox_id=sandbox_id_str)
+                await self._auto_suspend(sandbox, now, "idle timeout")
+                return
+
+        if not k8s_ready:
+            if status in {"pending", "starting"} and self.runtime_error:
+                _set_if_present(sandbox, "status", "failed")
+                _set_if_present(sandbox, "error_message", self.runtime_error)
+            return
+
+        pod_name = getattr(sandbox, "pod_name", None)
+        if not pod_name:
+            return
+
+        try:
+            pod = await self._core_api.read_namespaced_pod(
+                name=pod_name, namespace=self.namespace
+            )
+            phase = (
+                getattr(getattr(pod, "status", None), "phase", None) or ""
+            ).lower()
+            if phase == "running":
+                _set_if_present(sandbox, "status", "running")
+                _set_if_present(sandbox, "error_message", None)
+            elif phase == "pending":
+                _set_if_present(sandbox, "status", "starting")
+            elif phase in {"failed", "unknown"}:
+                _set_if_present(sandbox, "status", "failed")
+                _set_if_present(sandbox, "error_message", f"pod_phase={phase}")
+        except Exception as e:
+            if self._is_not_found(e):
+                if status in {"running", "starting", "pending"}:
+                    _set_if_present(sandbox, "status", "failed")
+                    _set_if_present(sandbox, "error_message", "sandbox pod not found")
+            else:
+                log.warning(
+                    "sandbox_reconcile_pod_read_failed",
+                    sandbox_id=sandbox_id_str,
+                    pod_name=pod_name,
+                    error=str(e),
+                )
+
+    async def _reap_stale_tasks(self) -> None:
+        """Reap stale dispatched/acked tasks via dispatcher (if wired)."""
+        if self._dispatcher is None:
+            return
+        try:
+            reaped = await self._dispatcher.reap_stale_tasks()
+            if reaped:
+                log.info("sandbox_reconcile_reaped_tasks", count=reaped)
+        except Exception as e:
+            log.warning("sandbox_reconcile_reap_failed", error=str(e))
+
     async def _reconcile_once(self) -> None:
         if not self.enabled:
             return
@@ -503,71 +628,15 @@ class SandboxController:
             result = await session.execute(stmt)
             sandboxes = result.scalars().all()
             if not sandboxes:
+                await self._reap_stale_tasks()
                 return
 
             k8s_ready = await self._ensure_k8s_client()
             for sandbox in sandboxes:
-                sandbox_id_str = str(getattr(sandbox, "id", ""))
-                status = _status_of(sandbox)
-
-                # Check idle timeout and max lifetime for running sandboxes
-                if status == "running":
-                    if self._is_lifetime_expired(sandbox, now):
-                        log.info("sandbox_max_lifetime_exceeded", sandbox_id=sandbox_id_str)
-                        await self._delete_pod_if_exists(getattr(sandbox, "pod_name", None))
-                        _set_if_present(sandbox, "status", "suspended")
-                        _set_if_present(sandbox, "runner_id", None)
-                        _set_if_present(sandbox, "stopped_at", now)
-                        _set_if_present(sandbox, "error_message", "auto-suspended: max lifetime exceeded")
-                        continue
-                    if self._is_idle_expired(sandbox, now):
-                        log.info("sandbox_idle_timeout", sandbox_id=sandbox_id_str)
-                        await self._delete_pod_if_exists(getattr(sandbox, "pod_name", None))
-                        _set_if_present(sandbox, "status", "suspended")
-                        _set_if_present(sandbox, "runner_id", None)
-                        _set_if_present(sandbox, "stopped_at", now)
-                        _set_if_present(sandbox, "error_message", "auto-suspended: idle timeout")
-                        continue
-
-                if not k8s_ready:
-                    if status in {"pending", "starting"} and self.runtime_error:
-                        _set_if_present(sandbox, "status", "failed")
-                        _set_if_present(sandbox, "error_message", self.runtime_error)
-                    continue
-
-                pod_name = getattr(sandbox, "pod_name", None)
-                if not pod_name:
-                    continue
-
-                try:
-                    pod = await self._core_api.read_namespaced_pod(
-                        name=pod_name, namespace=self.namespace
-                    )
-                    phase = (
-                        getattr(getattr(pod, "status", None), "phase", None)
-                        or ""
-                    ).lower()
-                    if phase == "running":
-                        _set_if_present(sandbox, "status", "running")
-                        _set_if_present(sandbox, "error_message", None)
-                    elif phase == "pending":
-                        _set_if_present(sandbox, "status", "starting")
-                    elif phase in {"failed", "unknown"}:
-                        _set_if_present(sandbox, "status", "failed")
-                        _set_if_present(sandbox, "error_message", f"pod_phase={phase}")
-                except Exception as e:
-                    if self._is_not_found(e):
-                        if status in {"running", "starting", "pending"}:
-                            _set_if_present(sandbox, "status", "failed")
-                            _set_if_present(sandbox, "error_message", "sandbox pod not found")
-                    else:
-                        log.warning(
-                            "sandbox_reconcile_pod_read_failed",
-                            sandbox_id=sandbox_id_str,
-                            pod_name=pod_name,
-                            error=str(e),
-                        )
+                await self._reconcile_sandbox(sandbox, now=now, k8s_ready=k8s_ready)
             await session.commit()
+
+        await self._reap_stale_tasks()
 
     async def reconcile_loop(self, stop_event: asyncio.Event | None = None) -> None:
         """Periodic reconcile loop for sandbox runtime/DB consistency."""

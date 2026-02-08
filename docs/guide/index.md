@@ -174,6 +174,23 @@ Sibyl offers three interfaces, each suited to different users:
 For AI agents, **prefer the CLI** for routine operations. It's more expressive, enables scripting,
 and uses fewer tokens than MCP tool calls.
 
+## Distributed Execution
+
+Sibyl includes a sandbox system for distributed task execution via **runner daemons**. Runners
+provide isolated, ephemeral environments where AI agents can execute tasks safely — from local
+process-level isolation for development up to Kubernetes pod-level isolation for production.
+
+Key capabilities:
+
+- **Isolated environments** — Each task runs in its own sandboxed context
+- **BYOD runners** — Bring your own compute; runners self-register with capabilities
+- **Automatic routing** — Tasks are dispatched to the best available runner based on availability,
+  capability match, and warm worktree proximity
+- **Multiple isolation tiers** — Local, Docker, Kubernetes, and vCluster
+
+For the full technical design, see
+[Sandbox Architecture](../design/sandbox-architecture.md).
+
 ## Next Steps
 
 ### Getting Started

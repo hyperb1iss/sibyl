@@ -120,10 +120,41 @@ async def _run_migrations() -> None:
     await loop.run_in_executor(None, _run_migrations_sync)
 
 
+async def _init_sandbox_control_plane(app: FastAPI) -> None:
+    """Initialize sandbox controller + dispatcher and start reconcile loop."""
+    from sibyl.agents.sandbox_controller import SandboxController
+    from sibyl.agents.sandbox_dispatcher import SandboxDispatcher
+    from sibyl.db.connection import get_session
+
+    dispatcher = SandboxDispatcher(get_session, enabled=True)
+    controller = SandboxController(
+        get_session,
+        enabled=True,
+        sandbox_image=settings.sandbox_default_image,
+        reconcile_interval_seconds=settings.sandbox_reconcile_interval_seconds,
+        idle_ttl_seconds=settings.sandbox_idle_ttl_seconds,
+        max_lifetime_seconds=settings.sandbox_max_lifetime_seconds,
+        namespace=settings.sandbox_k8s_namespace,
+        pod_prefix=settings.sandbox_pod_prefix,
+        server_url=settings.sandbox_server_url or settings.server_url,
+        k8s_required=settings.sandbox_k8s_required,
+        dispatcher=dispatcher,
+    )
+    stop_event = asyncio.Event()
+    reconcile_task = None
+    if settings.sandbox_reconcile_enabled:
+        reconcile_task = asyncio.create_task(controller.reconcile_loop(stop_event))
+
+    app.state.sandbox_controller = controller
+    app.state.sandbox_dispatcher = dispatcher
+    app.state.sandbox_reconcile_stop = stop_event
+    app.state.sandbox_reconcile_task = reconcile_task
+    log.info("Sandbox control plane initialized", mode=_sandbox_mode())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Run migrations, pre-warm graph client, and start Redis pub/sub on startup."""
-    # Run database migrations first
     await _run_migrations()
 
     log.info("Pre-warming graph client connection...")
@@ -135,8 +166,6 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     except Exception as e:
         log.warning("Failed to pre-warm graph client", error=str(e))
 
-    # Initialize Redis pub/sub for cross-process WebSocket broadcasts
-    # (worker process publishes events, API process receives and broadcasts to clients)
     log.info("Initializing Redis pub/sub for WebSocket broadcasts...")
     try:
         from sibyl.api.pubsub import init_pubsub, shutdown_pubsub
@@ -150,41 +179,18 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
             "Failed to initialize Redis pub/sub (worker broadcasts may not work)", error=str(e)
         )
 
-    # Initialize sandbox control plane (optional)
     _app.state.sandbox_controller = None
     _app.state.sandbox_dispatcher = None
     _app.state.sandbox_reconcile_stop = None
     _app.state.sandbox_reconcile_task = None
     if _sandbox_enabled():
         try:
-            from sibyl.agents.sandbox_controller import SandboxController
-            from sibyl.agents.sandbox_dispatcher import SandboxDispatcher
-            from sibyl.db.connection import get_session
-
-            controller = SandboxController(
-                get_session,
-                enabled=True,
-                sandbox_image=settings.sandbox_default_image,
-                reconcile_interval_seconds=settings.sandbox_reconcile_interval_seconds,
-                idle_ttl_seconds=settings.sandbox_idle_ttl_seconds,
-                max_lifetime_seconds=settings.sandbox_max_lifetime_seconds,
-            )
-            dispatcher = SandboxDispatcher(get_session, enabled=True)
-            stop_event = asyncio.Event()
-            reconcile_task = asyncio.create_task(controller.reconcile_loop(stop_event))
-
-            _app.state.sandbox_controller = controller
-            _app.state.sandbox_dispatcher = dispatcher
-            _app.state.sandbox_reconcile_stop = stop_event
-            _app.state.sandbox_reconcile_task = reconcile_task
-
-            log.info("Sandbox control plane initialized", mode=_sandbox_mode())
+            await _init_sandbox_control_plane(_app)
         except Exception as e:
             log.warning("Failed to initialize sandbox control plane", error=str(e), mode=_sandbox_mode())
 
     yield
 
-    # Cleanup on shutdown
     stop_event = getattr(_app.state, "sandbox_reconcile_stop", None)
     reconcile_task = getattr(_app.state, "sandbox_reconcile_task", None)
     if stop_event is not None:

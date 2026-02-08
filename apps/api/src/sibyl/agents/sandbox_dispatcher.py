@@ -13,10 +13,11 @@ import inspect
 import os
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+import sqlalchemy as sa
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -159,6 +160,7 @@ class SandboxDispatcher:
                 )
                 .order_by(sandbox_task_model.created_at.asc())
                 .limit(limit)
+                .with_for_update(skip_locked=True)
             )
             result = await session.execute(stmt)
             tasks = result.scalars().all()
@@ -174,8 +176,9 @@ class SandboxDispatcher:
                     continue
 
                 payload = dict(getattr(task, "payload", {}) or {})
-                message = {"type": "task_assign", "task_id": str(task.id)}
-                message.update(payload)
+                message = dict(payload)
+                message["type"] = "task_assign"
+                message["task_id"] = str(task.id)
                 ok = await self._maybe_await(send_fn(message))
 
                 _set_if_present(task, "attempt_count", attempts + 1)
@@ -278,3 +281,63 @@ class SandboxDispatcher:
                 canceled=canceled,
             )
             return task
+
+    async def reap_stale_tasks(
+        self,
+        *,
+        dispatch_ttl_seconds: int = 300,
+        ack_ttl_seconds: int = 1800,
+    ) -> int:
+        """Requeue tasks stuck in dispatched (unacknowledged) past dispatch TTL.
+
+        Acked tasks get a much longer TTL since they may be legitimately running.
+        Only tasks that have not been acknowledged within dispatch_ttl, or acked
+        tasks that exceeded ack_ttl, are considered stale.
+        """
+        self._require_enabled()
+        sandbox_task_model = self._task_model()
+        now = datetime.now(UTC).replace(tzinfo=None)
+        dispatch_cutoff = now - timedelta(seconds=dispatch_ttl_seconds)
+        ack_cutoff = now - timedelta(seconds=ack_ttl_seconds)
+
+        async with self._session_factory() as session:
+            # Dispatched but never acknowledged — short TTL
+            # Acked but no completion — long TTL (may be legitimately running)
+            stmt = (
+                select(sandbox_task_model)
+                .where(
+                    sa.or_(
+                        sa.and_(
+                            sandbox_task_model.status == "dispatched",
+                            sandbox_task_model.last_dispatch_at < dispatch_cutoff,
+                        ),
+                        sa.and_(
+                            sandbox_task_model.status == "acked",
+                            sandbox_task_model.last_dispatch_at < ack_cutoff,
+                        ),
+                    )
+                )
+                .with_for_update(skip_locked=True)
+            )
+            result = await session.execute(stmt)
+            stale = result.scalars().all()
+
+            reaped = 0
+            for task in stale:
+                attempts = int(getattr(task, "attempt_count", 0) or 0)
+                max_att = int(
+                    getattr(task, "max_attempts", self.max_attempts) or self.max_attempts
+                )
+                if attempts >= max_att:
+                    _set_if_present(task, "status", "failed")
+                    _set_if_present(task, "error_message", "lease_expired_max_attempts")
+                    _set_if_present(task, "failed_at", datetime.now(UTC).replace(tzinfo=None))
+                else:
+                    _set_if_present(task, "status", "retry")
+                    _set_if_present(task, "error_message", "lease_expired_requeued")
+                reaped += 1
+
+            await session.commit()
+            if reaped:
+                log.info("sandbox_tasks_reaped", count=reaped)
+            return reaped

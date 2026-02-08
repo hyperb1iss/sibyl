@@ -1471,6 +1471,7 @@ class SandboxStatus(StrEnum):
     PENDING = "pending"
     STARTING = "starting"
     RUNNING = "running"
+    SUSPENDING = "suspending"
     SUSPENDED = "suspended"
     TERMINATING = "terminating"
     FAILED = "failed"
@@ -1617,6 +1618,14 @@ class SandboxTask(TimestampMixin, table=True):
     __tablename__ = "sandbox_tasks"
     __table_args__ = (
         Index("ix_sandbox_tasks_sandbox_created", "sandbox_id", "created_at"),
+        Index(
+            "ix_sandbox_tasks_idempotency",
+            "organization_id",
+            "sandbox_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -1859,6 +1868,10 @@ class Runner(TimestampMixin, table=True):
         default=None,
         index=True,
         description="Last heartbeat timestamp",
+    )
+    sandbox_heartbeat_at: datetime | None = Field(
+        default=None,
+        description="Last sandbox-specific heartbeat (for idle timeout tracking)",
     )
 
     # Connection info

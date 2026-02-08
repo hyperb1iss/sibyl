@@ -218,6 +218,22 @@ class Settings(BaseSettings):
         le=3600,
         description="Sandbox reconciler interval in seconds",
     )
+    sandbox_k8s_namespace: str = Field(
+        default="default",
+        description="Kubernetes namespace for sandbox pods",
+    )
+    sandbox_pod_prefix: str = Field(
+        default="sibyl-sandbox",
+        description="Prefix for sandbox pod names",
+    )
+    sandbox_k8s_required: bool = Field(
+        default=False,
+        description="Require Kubernetes for sandbox operations (fail if unavailable)",
+    )
+    sandbox_server_url: str = Field(
+        default="",
+        description="Server URL injected into sandbox pods (defaults to server_url)",
+    )
 
     # Email configuration (Resend)
     resend_api_key: SecretStr = Field(

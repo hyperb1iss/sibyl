@@ -70,6 +70,7 @@ sibyl/
 ├── apps/
 │   ├── api/              # sibyld - Server daemon (serve, worker, db)
 │   ├── cli/              # sibyl - Client CLI (task, search, add, etc.)
+│   ├── runner/           # sibyl-runner - Distributed execution daemon
 │   └── web/              # Next.js 16 frontend
 ├── packages/python/
 │   └── sibyl-core/       # Shared library (models, graph, tools)
@@ -79,10 +80,11 @@ sibyl/
 
 ### CLI Executables
 
-| Binary   | Package    | Purpose                                    |
-| -------- | ---------- | ------------------------------------------ |
-| `sibyld` | `apps/api` | Server daemon (serve, worker, db, up/down) |
-| `sibyl`  | `apps/cli` | Client CLI (task, search, add, explore)    |
+| Binary         | Package       | Purpose                                    |
+| -------------- | ------------- | ------------------------------------------ |
+| `sibyld`       | `apps/api`    | Server daemon (serve, worker, db, up/down) |
+| `sibyl`        | `apps/cli`    | Client CLI (task, search, add, explore)    |
+| `sibyl-runner` | `apps/runner` | Distributed execution daemon               |
 
 ### Development Commands
 

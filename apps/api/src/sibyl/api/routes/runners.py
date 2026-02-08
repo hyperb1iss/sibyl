@@ -729,12 +729,28 @@ def _extract_runner_auth(websocket: WebSocket) -> RunnerAuthContext | None:
         return None
 
 
-async def _handle_heartbeat(conn: RunnerConnection, runner_id: UUID, session: AsyncSession) -> None:
-    """Handle heartbeat acknowledgment from runner."""
-    conn.last_heartbeat = datetime.now(UTC)
+async def _handle_heartbeat(
+    conn: RunnerConnection, runner_id: UUID, session: AsyncSession, *, sandbox_id: UUID | None = None
+) -> None:
+    """Handle heartbeat acknowledgment from runner.
+
+    When the runner is sandbox-bound, also update the sandbox's last_heartbeat
+    so the reconcile loop knows the sandbox is still active.
+    """
+    now = datetime.now(UTC)
+    conn.last_heartbeat = now
+
     await session.execute(
-        update(Runner).where(Runner.id == runner_id).values(last_heartbeat=datetime.now(UTC))
+        update(Runner).where(Runner.id == runner_id).values(last_heartbeat=now)
     )
+
+    if sandbox_id:
+        from sibyl.db.models import Sandbox
+
+        await session.execute(
+            update(Sandbox).where(Sandbox.id == sandbox_id).values(last_heartbeat=now.replace(tzinfo=None))
+        )
+
     await session.commit()
 
 
@@ -871,6 +887,34 @@ async def _handle_task_complete(
     log.info("task_completed_by_runner", runner_id=str(runner_id), task_id=task_id)
 
 
+async def _handle_task_reject(runner_id: UUID, data: dict, websocket: WebSocket) -> None:
+    """Handle task rejection from runner -- requeue the task for retry."""
+    task_id = data.get("task_id")
+    reason = data.get("reason", "runner_rejected")
+
+    if not task_id:
+        return
+
+    dispatcher = _get_sandbox_dispatcher(websocket)
+    if dispatcher is None:
+        return
+
+    try:
+        await dispatcher.complete_task(
+            task_id=task_id,
+            success=False,
+            retryable=True,
+            error=f"runner_rejected: {reason}",
+        )
+    except Exception as e:
+        log.warning(
+            "sandbox_task_reject_failed",
+            runner_id=str(runner_id),
+            task_id=str(task_id),
+            error=str(e),
+        )
+
+
 async def _handle_ws_message(
     conn: RunnerConnection,
     runner_id: UUID,
@@ -878,12 +922,14 @@ async def _handle_ws_message(
     data: dict,
     websocket: WebSocket,
     session: AsyncSession,
+    *,
+    sandbox_id: UUID | None = None,
 ) -> None:
     """Route incoming WebSocket message to appropriate handler."""
     msg_type = data.get("type")
 
     if msg_type == "heartbeat_ack":
-        await _handle_heartbeat(conn, runner_id, session)
+        await _handle_heartbeat(conn, runner_id, session, sandbox_id=sandbox_id)
     elif msg_type == "status":
         await _handle_status(runner_id, data, session)
     elif msg_type == "project_register":
@@ -894,6 +940,8 @@ async def _handle_ws_message(
         await _handle_task_ack(runner_id, data, websocket)
     elif msg_type == "task_complete":
         await _handle_task_complete(conn, runner_id, data, websocket)
+    elif msg_type == "task_reject":
+        await _handle_task_reject(runner_id, data, websocket)
     else:
         await websocket.send_json({"type": "error", "message": f"Unknown message type: {msg_type}"})
 
@@ -963,6 +1011,21 @@ async def runner_websocket(websocket: WebSocket, runner_id: UUID) -> None:  # no
             await websocket.close(code=1008, reason="Not authorized for this runner")
             return
 
+        # Enforce strict auth binding for sandbox-bound runners
+        if runner.is_sandbox_runner:
+            if not auth_ctx or not auth_ctx.sandbox_id:
+                await websocket.accept()
+                await websocket.close(code=4003, reason="Missing sandbox claim for sandbox runner")
+                return
+            if str(auth_ctx.sandbox_id) != str(runner.sandbox_id):
+                await websocket.accept()
+                await websocket.close(code=4003, reason="Sandbox claim mismatch")
+                return
+            if "sandbox:runner" not in (auth_ctx.scopes or set()):
+                await websocket.accept()
+                await websocket.close(code=4003, reason="Missing sandbox:runner scope")
+                return
+
         manager = get_runner_manager()
         conn = await manager.connect(websocket, runner_id, org_id, user_id, session)
 
@@ -1005,7 +1068,10 @@ async def runner_websocket(websocket: WebSocket, runner_id: UUID) -> None:  # no
             try:
                 data = await websocket.receive_json()
                 async with get_session() as session:
-                    await _handle_ws_message(conn, runner_id, org_id, data, websocket, session)
+                    await _handle_ws_message(
+                        conn, runner_id, org_id, data, websocket, session,
+                        sandbox_id=auth_ctx.sandbox_id if auth_ctx else None,
+                    )
             except ValueError:
                 await websocket.send_json({"type": "error", "message": "Invalid JSON"})
     except WebSocketDisconnect:
