@@ -69,6 +69,12 @@ def upgrade() -> None:
         sa.Column("expires_at", sa.DateTime(), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column(
+            "runner_id",
+            sa.UUID(),
+            sa.ForeignKey("runners.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column(
             "context",
             postgresql.JSONB(),
             nullable=False,
@@ -85,6 +91,13 @@ def upgrade() -> None:
     op.create_index("ix_sandboxes_pod_name", "sandboxes", ["pod_name"])
     op.create_index("ix_sandboxes_last_heartbeat", "sandboxes", ["last_heartbeat"])
     op.create_index("ix_sandboxes_org_status", "sandboxes", ["organization_id", "status"])
+    op.create_index("ix_sandboxes_runner_id", "sandboxes", ["runner_id"])
+    op.create_index(
+        "ix_sandboxes_org_user_unique",
+        "sandboxes",
+        ["organization_id", "user_id"],
+        unique=True,
+    )
 
     op.create_table(
         "sandbox_tasks",
@@ -233,6 +246,8 @@ def downgrade() -> None:
     op.drop_index("ix_sandbox_tasks_sandbox_id", table_name="sandbox_tasks")
     op.drop_table("sandbox_tasks")
 
+    op.drop_index("ix_sandboxes_org_user_unique", table_name="sandboxes")
+    op.drop_index("ix_sandboxes_runner_id", table_name="sandboxes")
     op.drop_index("ix_sandboxes_org_status", table_name="sandboxes")
     op.drop_index("ix_sandboxes_last_heartbeat", table_name="sandboxes")
     op.drop_index("ix_sandboxes_pod_name", table_name="sandboxes")

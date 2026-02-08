@@ -489,6 +489,9 @@ class RunnerDaemon:
             return await self._run_internal_callable(execution, prompt, worktree)
 
         env = os.environ.copy()
+        # Scrub sensitive tokens from child process environment
+        for key in ("SIBYL_RUNNER_TOKEN", "SIBYL_AUTH_TOKEN", "SIBYL_API_KEY"):
+            env.pop(key, None)
         env["SIBYL_TASK_ID"] = execution.task_id
         env["SIBYL_AGENT_ID"] = execution.agent_id
         env["SIBYL_PROJECT_ID"] = execution.project_id

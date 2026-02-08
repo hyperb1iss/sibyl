@@ -2,6 +2,7 @@
 
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import { env } from 'next-dynenv';
 import { useEffect, useMemo, useRef, useState } from 'react';
 

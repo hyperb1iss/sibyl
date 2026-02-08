@@ -235,6 +235,7 @@ async function sandboxFetch<T>(paths: string[], init?: RequestInit): Promise<T> 
   for (const path of paths) {
     const response = await fetch(path, {
       ...init,
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         ...(init?.headers ?? {}),

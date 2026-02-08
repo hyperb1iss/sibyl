@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
 from pydantic import field_validator
-from sqlalchemy import ARRAY, Column, DateTime, Enum, Index, String, Text, text
+from sqlalchemy import ARRAY, Column, DateTime, Enum, Index, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -1483,6 +1483,7 @@ class Sandbox(TimestampMixin, table=True):
     __tablename__ = "sandboxes"
     __table_args__ = (
         Index("ix_sandboxes_org_status", "organization_id", "status"),
+        UniqueConstraint("organization_id", "user_id", name="ix_sandboxes_org_user_unique"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -1512,6 +1513,14 @@ class Sandbox(TimestampMixin, table=True):
             server_default=text("'pending'"),
         ),
         description="Current sandbox lifecycle status",
+    )
+
+    # Runner association
+    runner_id: UUID | None = Field(
+        default=None,
+        foreign_key="runners.id",
+        index=True,
+        description="Runner currently connected to this sandbox",
     )
 
     # Runtime identity

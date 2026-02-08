@@ -39,6 +39,8 @@ dependencies = [
     # Config
     "pyyaml>=6.0",
     "tomli-w>=1.2.0",
+    # WebSocket (sandbox shell/logs --follow)
+    "websockets>=12.0",
     # Shared library
     "sibyl-core",
 ]
