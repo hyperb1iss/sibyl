@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID, uuid4
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,7 @@ from sibyl.auth.authorization import (
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import require_org_role
 from sibyl.auth.rls import AuthSession, get_auth_session
+from sibyl.config import settings
 from sibyl.db import AgentMessage as DbAgentMessage, AgentState
 from sibyl.db.models import Organization, OrganizationRole, ProjectRole, utcnow_naive
 from sibyl_core.errors import EntityNotFoundError
@@ -42,6 +43,11 @@ if TYPE_CHECKING:
     from sibyl_core.models.entities import Entity
 
 log = structlog.get_logger()
+
+
+def _sandbox_mode() -> str:
+    """Resolve sandbox dispatch mode for API spawn paths."""
+    return str(getattr(settings, "sandbox_mode", "off") or "off").lower()
 
 
 def _require_org(ctx: AuthContext) -> Organization:
@@ -456,7 +462,8 @@ async def get_agent(
 
 
 @router.post("", response_model=SpawnAgentResponse)
-async def spawn_agent(
+async def spawn_agent(  # noqa: PLR0915
+    http_request: Request,
     request: SpawnAgentRequest,
     auth: AuthSession = Depends(get_auth_session),
 ) -> SpawnAgentResponse:
@@ -536,18 +543,88 @@ async def spawn_agent(
         except Exception:  # noqa: S110
             pass  # Fallback to cwd if project lookup fails
 
-        # Enqueue execution in worker process
-        await enqueue_agent_execution(
-            agent_id=agent_id,
-            org_id=str(org.id),
-            project_id=request.project_id,
-            prompt=request.prompt,
-            agent_type=request.agent_type.value,
-            task_id=request.task_id,
-            created_by=str(user.id),
-            create_worktree=request.create_worktree,
-            repo_path=repo_path,
-        )
+        sandbox_mode = _sandbox_mode()
+        sandbox_dispatch = sandbox_mode in {"shadow", "enforced"}
+        legacy_dispatch = sandbox_mode != "enforced"
+
+        sandbox_enqueued = False
+        if sandbox_dispatch:
+            controller = getattr(http_request.app.state, "sandbox_controller", None)
+            dispatcher = getattr(http_request.app.state, "sandbox_dispatcher", None)
+
+            if controller is None or dispatcher is None:
+                detail = (
+                    "Sandbox mode is active but sandbox controller/dispatcher is not initialized"
+                )
+                if sandbox_mode == "enforced":
+                    raise RuntimeError(detail)
+                log.warning("sandbox_dispatch_skipped_shadow_fallback", detail=detail, agent_id=agent_id)
+            else:
+                try:
+                    sandbox = await controller.ensure(
+                        organization_id=org.id,
+                        user_id=user.id,
+                        metadata={
+                            "spawn_source": AgentSpawnSource.USER.value,
+                            "agent_type": request.agent_type.value,
+                        },
+                    )
+                    payload = {
+                        "agent_id": agent_id,
+                        "project_id": request.project_id,
+                        "config": {
+                            "prompt": request.prompt,
+                            "agent_type": request.agent_type.value,
+                            "task_id": request.task_id,
+                            "created_by": str(user.id),
+                            "create_worktree": request.create_worktree,
+                            "repo_path": repo_path,
+                        },
+                    }
+                    await dispatcher.enqueue_task(
+                        sandbox_id=sandbox.id,
+                        organization_id=org.id,
+                        task_type="agent_execution",
+                        payload=payload,
+                        idempotency_key=f"agent:{agent_id}",
+                    )
+                    sandbox_enqueued = True
+
+                    sandbox_runner_id = getattr(sandbox, "runner_id", None)
+                    if sandbox_runner_id is not None:
+                        from sibyl.api.routes.runners import get_runner_manager
+
+                        runner_manager = get_runner_manager()
+                        await dispatcher.dispatch_pending_for_sandbox(
+                            sandbox_id=sandbox.id,
+                            runner_id=sandbox_runner_id,
+                            send_fn=lambda msg: runner_manager.send_to_runner(sandbox_runner_id, msg),
+                        )
+                except Exception as e:
+                    if sandbox_mode == "enforced":
+                        raise
+                    log.warning(
+                        "sandbox_enqueue_failed_shadow_fallback",
+                        agent_id=agent_id,
+                        error=str(e),
+                    )
+
+        if legacy_dispatch:
+            # Existing queue path (default / shadow mode)
+            await enqueue_agent_execution(
+                agent_id=agent_id,
+                org_id=str(org.id),
+                project_id=request.project_id,
+                prompt=request.prompt,
+                agent_type=request.agent_type.value,
+                task_id=request.task_id,
+                created_by=str(user.id),
+                create_worktree=request.create_worktree,
+                repo_path=repo_path,
+            )
+
+        if not legacy_dispatch and not sandbox_enqueued:
+            raise RuntimeError("Sandbox enforced mode did not enqueue sandbox task")
 
         return SpawnAgentResponse(
             success=True,

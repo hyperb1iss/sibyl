@@ -5,6 +5,7 @@ REST API and WebSocket for managing distributed runners that execute agents.
 
 import asyncio
 import contextlib
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -29,6 +30,17 @@ from sibyl.db.models import (
 )
 
 log = structlog.get_logger()
+
+
+@dataclass
+class RunnerAuthContext:
+    """Decoded auth context for runner WebSocket sessions."""
+
+    org_id: UUID
+    user_id: UUID
+    runner_id: UUID | None = None
+    sandbox_id: UUID | None = None
+    scopes: set[str] = field(default_factory=set)
 
 # Auth: org member required for all runner operations
 _RUNNER_ROLES = (OrganizationRole.MEMBER, OrganizationRole.ADMIN, OrganizationRole.OWNER)
@@ -655,10 +667,17 @@ def get_runner_manager() -> RunnerConnectionManager:
 # =============================================================================
 
 
-def _extract_runner_auth(websocket: WebSocket) -> tuple[UUID, UUID] | None:
-    """Extract org_id and user_id from WebSocket auth.
+def _extract_runner_auth(websocket: WebSocket) -> RunnerAuthContext | None:
+    """Extract runner WebSocket auth claims.
 
-    Returns (org_id, user_id) or None if auth fails.
+    Required claims:
+    - org: organization ID
+    - sub: user ID
+
+    Optional claims:
+    - rid: bound runner ID
+    - sid: sandbox ID
+    - scp/scope: scopes
     """
     if settings.disable_auth:
         return None
@@ -676,10 +695,38 @@ def _extract_runner_auth(websocket: WebSocket) -> tuple[UUID, UUID] | None:
 
     org_id = claims.get("org")
     user_id = claims.get("sub")
+    if not (org_id and user_id):
+        return None
 
-    if org_id and user_id:
-        return UUID(str(org_id)), UUID(str(user_id))
-    return None
+    rid_claim = claims.get("rid")
+    sid_claim = claims.get("sid")
+    scope_claim = claims.get("scp", claims.get("scope"))
+    scopes: set[str] = set()
+    if isinstance(scope_claim, str):
+        scopes = {item.strip() for item in scope_claim.split() if item.strip()}
+    elif isinstance(scope_claim, list):
+        scopes = {str(item).strip() for item in scope_claim if str(item).strip()}
+
+    runner_claim: UUID | None = None
+    sandbox_claim: UUID | None = None
+    try:
+        if rid_claim:
+            runner_claim = UUID(str(rid_claim))
+        if sid_claim:
+            sandbox_claim = UUID(str(sid_claim))
+    except (TypeError, ValueError):
+        return None
+
+    try:
+        return RunnerAuthContext(
+            org_id=UUID(str(org_id)),
+            user_id=UUID(str(user_id)),
+            runner_id=runner_claim,
+            sandbox_id=sandbox_claim,
+            scopes=scopes,
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 async def _handle_heartbeat(conn: RunnerConnection, runner_id: UUID, session: AsyncSession) -> None:
@@ -756,7 +803,38 @@ async def _handle_agent_update(data: dict, org_id: UUID) -> None:
     )
 
 
-async def _handle_task_complete(conn: RunnerConnection, runner_id: UUID, data: dict) -> None:
+def _get_sandbox_dispatcher(websocket: WebSocket):
+    return getattr(websocket.app.state, "sandbox_dispatcher", None)
+
+
+def _get_sandbox_controller(websocket: WebSocket):
+    return getattr(websocket.app.state, "sandbox_controller", None)
+
+
+async def _handle_task_ack(runner_id: UUID, data: dict, websocket: WebSocket) -> None:
+    """Handle task ack from runner and mark sandbox task acknowledged."""
+    task_id = data.get("task_id")
+    if not task_id:
+        return
+
+    dispatcher = _get_sandbox_dispatcher(websocket)
+    if dispatcher is None:
+        return
+
+    try:
+        await dispatcher.ack_task(task_id=task_id, runner_id=runner_id)
+    except Exception as e:
+        log.warning(
+            "sandbox_task_ack_failed",
+            runner_id=str(runner_id),
+            task_id=str(task_id),
+            error=str(e),
+        )
+
+
+async def _handle_task_complete(
+    conn: RunnerConnection, runner_id: UUID, data: dict, websocket: WebSocket
+) -> None:
     """Handle task completion from runner."""
     task_id = data.get("task_id")
     result = data.get("result", {})
@@ -765,6 +843,28 @@ async def _handle_task_complete(conn: RunnerConnection, runner_id: UUID, data: d
     if task_id in conn.pending_tasks:
         conn.pending_tasks[task_id].set_result(result)
         del conn.pending_tasks[task_id]
+
+    dispatcher = _get_sandbox_dispatcher(websocket)
+    if dispatcher is not None and task_id:
+        status_value = str((result or {}).get("status", "")).lower()
+        success = bool(data.get("success", status_value not in {"failed", "error"}))
+        retryable = bool(data.get("retryable", False))
+        error = data.get("error") or ((result or {}).get("error") if isinstance(result, dict) else None)
+        try:
+            await dispatcher.complete_task(
+                task_id=task_id,
+                success=success,
+                result=result if isinstance(result, dict) else {"result": result},
+                error=str(error) if error else None,
+                retryable=retryable,
+            )
+        except Exception as e:
+            log.warning(
+                "sandbox_task_complete_failed",
+                runner_id=str(runner_id),
+                task_id=str(task_id),
+                error=str(e),
+            )
 
     log.info("task_completed_by_runner", runner_id=str(runner_id), task_id=task_id)
 
@@ -788,14 +888,16 @@ async def _handle_ws_message(
         await _handle_project_register(runner_id, data, websocket, session)
     elif msg_type == "agent_update":
         await _handle_agent_update(data, org_id)
+    elif msg_type == "task_ack":
+        await _handle_task_ack(runner_id, data, websocket)
     elif msg_type == "task_complete":
-        await _handle_task_complete(conn, runner_id, data)
+        await _handle_task_complete(conn, runner_id, data, websocket)
     else:
         await websocket.send_json({"type": "error", "message": f"Unknown message type: {msg_type}"})
 
 
 @router.websocket("/ws/{runner_id}")
-async def runner_websocket(websocket: WebSocket, runner_id: UUID) -> None:
+async def runner_websocket(websocket: WebSocket, runner_id: UUID) -> None:  # noqa: PLR0915
     """WebSocket endpoint for runner connections.
 
     Protocol:
@@ -803,6 +905,7 @@ async def runner_websocket(websocket: WebSocket, runner_id: UUID) -> None:
             - {"type": "heartbeat_ack"} - Acknowledge server heartbeat
             - {"type": "status", "status": "busy|online|draining"}
             - {"type": "agent_update", "agent_id": "...", ...}
+            - {"type": "task_ack", "task_id": "..."}
             - {"type": "task_complete", "task_id": "...", "result": {...}}
             - {"type": "project_register", "project_id": "...", "worktree_path": "..."}
 
@@ -814,18 +917,32 @@ async def runner_websocket(websocket: WebSocket, runner_id: UUID) -> None:
     from sibyl.db.connection import get_session
 
     # Authenticate
+    auth_ctx: RunnerAuthContext | None = None
     if not settings.disable_auth:
-        auth = _extract_runner_auth(websocket)
-        if not auth:
+        auth_ctx = _extract_runner_auth(websocket)
+        if not auth_ctx:
             await websocket.accept()
             await websocket.close(code=1008, reason="Authentication required")
             return
-        org_id, user_id = auth
+        org_id = auth_ctx.org_id
+        user_id = auth_ctx.user_id
     else:
         await websocket.accept()
         await websocket.send_json({"type": "error", "message": "Auth disabled in dev mode"})
         await websocket.close(code=1008)
         return
+
+    # Optional claim bindings: rid/sid/scp
+    if auth_ctx and auth_ctx.runner_id and auth_ctx.runner_id != runner_id:
+        await websocket.accept()
+        await websocket.close(code=1008, reason="Runner claim does not match requested runner")
+        return
+    if auth_ctx and auth_ctx.scopes:
+        allowed = {"runner", "runner:connect", "sandbox:runner", "mcp"}
+        if not (auth_ctx.scopes & allowed):
+            await websocket.accept()
+            await websocket.close(code=1008, reason="Insufficient runner scope")
+            return
 
     # Verify runner exists and belongs to user's org
     async with get_session() as session:
@@ -847,6 +964,40 @@ async def runner_websocket(websocket: WebSocket, runner_id: UUID) -> None:
         manager = get_runner_manager()
         conn = await manager.connect(websocket, runner_id, org_id, user_id, session)
 
+    # If this is a sandbox-bound runner, sync sandbox status and flush pending tasks.
+    if auth_ctx and auth_ctx.sandbox_id:
+        controller = _get_sandbox_controller(websocket)
+        if controller is not None:
+            try:
+                await controller.sync_runner_connection(
+                    sandbox_id=auth_ctx.sandbox_id,
+                    runner_id=runner_id,
+                    connected=True,
+                )
+            except Exception as e:
+                log.warning(
+                    "sandbox_runner_connect_sync_failed",
+                    runner_id=str(runner_id),
+                    sandbox_id=str(auth_ctx.sandbox_id),
+                    error=str(e),
+                )
+
+        dispatcher = _get_sandbox_dispatcher(websocket)
+        if dispatcher is not None:
+            try:
+                await dispatcher.dispatch_pending_for_sandbox(
+                    sandbox_id=auth_ctx.sandbox_id,
+                    runner_id=runner_id,
+                    send_fn=lambda msg: manager.send_to_runner(runner_id, msg),
+                )
+            except Exception as e:
+                log.warning(
+                    "sandbox_dispatch_on_connect_failed",
+                    runner_id=str(runner_id),
+                    sandbox_id=str(auth_ctx.sandbox_id),
+                    error=str(e),
+                )
+
     try:
         while True:
             try:
@@ -860,3 +1011,19 @@ async def runner_websocket(websocket: WebSocket, runner_id: UUID) -> None:
     finally:
         async with get_session() as session:
             await manager.disconnect(runner_id, session)
+        if auth_ctx and auth_ctx.sandbox_id:
+            controller = _get_sandbox_controller(websocket)
+            if controller is not None:
+                try:
+                    await controller.sync_runner_connection(
+                        sandbox_id=auth_ctx.sandbox_id,
+                        runner_id=runner_id,
+                        connected=False,
+                    )
+                except Exception as e:
+                    log.warning(
+                        "sandbox_runner_disconnect_sync_failed",
+                        runner_id=str(runner_id),
+                        sandbox_id=str(auth_ctx.sandbox_id),
+                        error=str(e),
+                    )

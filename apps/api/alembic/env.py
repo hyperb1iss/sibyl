@@ -29,9 +29,12 @@ from sibyl.db.models import (  # noqa: F401
     OrganizationInvitation,
     OrganizationMember,
     PasswordResetToken,
+    Sandbox,
+    SandboxTask,
     Team,
     TeamMember,
     User,
+    UserSSHKey,
     UserSession,
 )
 

@@ -147,6 +147,78 @@ class Settings(BaseSettings):
         description="Rate limit storage backend (memory://, redis://host:port)",
     )
 
+    # Sandbox runtime configuration
+    sandbox_enabled: bool = Field(
+        default=False,
+        description="Enable sandbox orchestration features",
+    )
+    sandbox_mode: Literal["off", "shadow", "enforced"] = Field(
+        default="off",
+        description="Sandbox policy mode: off (disabled), shadow (observe), enforced (require)",
+    )
+    sandbox_default_image: str = Field(
+        default="ghcr.io/hyperb1iss/sibyl-sandbox:latest",
+        description="Default container image used for new sandboxes",
+    )
+    sandbox_default_cpu_request: str = Field(
+        default="250m",
+        description="Default CPU request for sandbox pods",
+    )
+    sandbox_default_cpu_limit: str = Field(
+        default="1000m",
+        description="Default CPU limit for sandbox pods",
+    )
+    sandbox_default_memory_request: str = Field(
+        default="512Mi",
+        description="Default memory request for sandbox pods",
+    )
+    sandbox_default_memory_limit: str = Field(
+        default="2Gi",
+        description="Default memory limit for sandbox pods",
+    )
+    sandbox_default_ephemeral_storage_request: str = Field(
+        default="1Gi",
+        description="Default ephemeral storage request for sandbox pods",
+    )
+    sandbox_default_ephemeral_storage_limit: str = Field(
+        default="4Gi",
+        description="Default ephemeral storage limit for sandbox pods",
+    )
+    sandbox_create_timeout_seconds: int = Field(
+        default=120,
+        ge=10,
+        le=3600,
+        description="Timeout for sandbox provisioning operations",
+    )
+    sandbox_start_timeout_seconds: int = Field(
+        default=90,
+        ge=10,
+        le=3600,
+        description="Timeout for sandbox startup/readiness checks",
+    )
+    sandbox_idle_ttl_seconds: int = Field(
+        default=1800,
+        ge=60,
+        le=86400,
+        description="Auto-stop sandbox after this many idle seconds",
+    )
+    sandbox_max_lifetime_seconds: int = Field(
+        default=14400,
+        ge=300,
+        le=604800,
+        description="Maximum sandbox lifetime in seconds",
+    )
+    sandbox_reconcile_enabled: bool = Field(
+        default=True,
+        description="Enable periodic sandbox reconciliation loop",
+    )
+    sandbox_reconcile_interval_seconds: int = Field(
+        default=30,
+        ge=5,
+        le=3600,
+        description="Sandbox reconciler interval in seconds",
+    )
+
     # Email configuration (Resend)
     resend_api_key: SecretStr = Field(
         default=SecretStr(""),

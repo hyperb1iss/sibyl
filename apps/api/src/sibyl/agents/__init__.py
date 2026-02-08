@@ -41,6 +41,8 @@ from sibyl.agents.messages import (
 )
 from sibyl.agents.orchestrator import AgentOrchestrator, OrchestratorError
 from sibyl.agents.runner import AgentInstance, AgentRunner, AgentRunnerError
+from sibyl.agents.sandbox_controller import SandboxController, SandboxControllerError
+from sibyl.agents.sandbox_dispatcher import SandboxDispatcher, SandboxDispatcherError
 from sibyl.agents.worktree import SetupConfig, SetupResult, WorktreeError, WorktreeManager
 
 __all__ = [
@@ -58,6 +60,10 @@ __all__ = [
     "IntegrationStatus",
     "MessageBus",
     "OrchestratorError",
+    "SandboxController",
+    "SandboxControllerError",
+    "SandboxDispatcher",
+    "SandboxDispatcherError",
     "RestoreResult",
     "SetupConfig",
     "SetupResult",

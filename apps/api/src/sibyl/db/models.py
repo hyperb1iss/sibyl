@@ -1461,6 +1461,258 @@ class InterAgentMessage(TimestampMixin, table=True):
 
 
 # =============================================================================
+# Sandboxes - Ephemeral execution environments
+# =============================================================================
+
+
+class SandboxStatus(StrEnum):
+    """Status of a sandbox environment."""
+
+    PENDING = "pending"
+    PROVISIONING = "provisioning"
+    RUNNING = "running"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
+    FAILED = "failed"
+    DELETED = "deleted"
+
+
+class Sandbox(TimestampMixin, table=True):
+    """A sandbox execution environment for isolated task execution."""
+
+    __tablename__ = "sandboxes"
+    __table_args__ = (
+        Index("ix_sandboxes_org_status", "organization_id", "status"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    organization_id: UUID = Field(
+        foreign_key="organizations.id",
+        index=True,
+        description="Organization that owns this sandbox",
+    )
+    user_id: UUID | None = Field(
+        default=None,
+        foreign_key="users.id",
+        index=True,
+        description="User who requested this sandbox",
+    )
+
+    name: str = Field(max_length=255, index=True, description="Sandbox display name")
+    status: str = Field(
+        default=SandboxStatus.PENDING.value,
+        sa_column=Column(
+            String(32),
+            nullable=False,
+            server_default=text("'pending'"),
+        ),
+        description="Current sandbox lifecycle status",
+    )
+
+    # Runtime identity
+    image: str = Field(max_length=512, description="Container image used by this sandbox")
+    namespace: str | None = Field(
+        default=None,
+        max_length=255,
+        index=True,
+        description="Kubernetes namespace for this sandbox",
+    )
+    pod_name: str | None = Field(
+        default=None,
+        max_length=255,
+        index=True,
+        description="Kubernetes pod name for this sandbox",
+    )
+
+    # Resource profile
+    cpu_request: str = Field(default="250m", max_length=32, description="Requested CPU")
+    cpu_limit: str = Field(default="1000m", max_length=32, description="CPU limit")
+    memory_request: str = Field(default="512Mi", max_length=32, description="Requested memory")
+    memory_limit: str = Field(default="2Gi", max_length=32, description="Memory limit")
+    ephemeral_storage_request: str = Field(
+        default="1Gi",
+        max_length=32,
+        description="Requested ephemeral storage",
+    )
+    ephemeral_storage_limit: str = Field(
+        default="4Gi",
+        max_length=32,
+        description="Ephemeral storage limit",
+    )
+
+    # Time limits
+    idle_ttl_seconds: int = Field(
+        default=1800,
+        ge=60,
+        le=86400,
+        description="Auto-stop sandbox after this many idle seconds",
+    )
+    max_lifetime_seconds: int = Field(
+        default=14400,
+        ge=300,
+        le=604800,
+        description="Maximum total lifetime for sandbox in seconds",
+    )
+
+    # Runtime timestamps
+    last_heartbeat: datetime | None = Field(
+        default=None,
+        index=True,
+        description="Last runtime heartbeat from sandbox controller",
+    )
+    started_at: datetime | None = Field(default=None, description="When sandbox became running")
+    stopped_at: datetime | None = Field(default=None, description="When sandbox stopped")
+    expires_at: datetime | None = Field(default=None, description="Hard expiry timestamp")
+
+    # Opaque metadata for runtime/reconciler
+    context: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        description="Runtime metadata (labels, node info, annotations)",
+    )
+
+    def __repr__(self) -> str:
+        return f"<Sandbox {self.name} status={self.status}>"
+
+
+class SandboxTaskStatus(StrEnum):
+    """Status for work executed inside a sandbox."""
+
+    QUEUED = "queued"
+    STARTING = "starting"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELED = "canceled"
+    TIMED_OUT = "timed_out"
+
+
+class SandboxTask(TimestampMixin, table=True):
+    """A task execution record tied to a sandbox."""
+
+    __tablename__ = "sandbox_tasks"
+    __table_args__ = (
+        Index("ix_sandbox_tasks_sandbox_created", "sandbox_id", "created_at"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    sandbox_id: UUID = Field(
+        foreign_key="sandboxes.id",
+        index=True,
+        description="Sandbox this task ran in",
+    )
+    organization_id: UUID = Field(
+        foreign_key="organizations.id",
+        index=True,
+        description="Organization context for this task",
+    )
+    runner_id: UUID | None = Field(
+        default=None,
+        foreign_key="runners.id",
+        index=True,
+        description="Runner that dispatched this task",
+    )
+    task_id: str | None = Field(
+        default=None,
+        max_length=64,
+        index=True,
+        description="Associated graph task entity ID",
+    )
+
+    status: str = Field(
+        default=SandboxTaskStatus.QUEUED.value,
+        sa_column=Column(
+            String(32),
+            nullable=False,
+            server_default=text("'queued'"),
+        ),
+        description="Sandbox task execution status",
+    )
+    command: str = Field(sa_type=Text, description="Command executed in sandbox")
+    working_directory: str | None = Field(
+        default=None,
+        max_length=1024,
+        description="Working directory inside sandbox",
+    )
+
+    # Execution output
+    exit_code: int | None = Field(default=None, description="Process exit code")
+    stdout_preview: str | None = Field(
+        default=None,
+        sa_type=Text,
+        description="Truncated stdout preview",
+    )
+    stderr_preview: str | None = Field(
+        default=None,
+        sa_type=Text,
+        description="Truncated stderr preview",
+    )
+    error_message: str | None = Field(
+        default=None,
+        sa_type=Text,
+        description="Error details when execution fails",
+    )
+
+    requested_at: datetime = Field(default_factory=utcnow_naive, description="When task was queued")
+    started_at: datetime | None = Field(default=None, description="When execution started")
+    completed_at: datetime | None = Field(default=None, description="When execution completed")
+
+    context: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        description="Task context (env, invocation metadata, policy flags)",
+    )
+
+    def __repr__(self) -> str:
+        return f"<SandboxTask {self.id} status={self.status}>"
+
+
+class UserSSHKey(TimestampMixin, table=True):
+    """User-managed SSH public key used for sandbox access."""
+
+    __tablename__ = "user_ssh_keys"
+    __table_args__ = (
+        Index("ix_user_ssh_keys_user_fingerprint_unique", "user_id", "fingerprint", unique=True),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    user_id: UUID = Field(
+        foreign_key="users.id",
+        index=True,
+        description="Owner of this SSH key",
+    )
+
+    name: str = Field(max_length=255, description="Display name for this key")
+    public_key: str = Field(sa_type=Text, description="OpenSSH public key")
+    key_type: str = Field(
+        default="ssh-ed25519",
+        max_length=32,
+        description="Key algorithm type",
+    )
+    fingerprint: str = Field(
+        max_length=128,
+        index=True,
+        description="Canonical fingerprint for dedupe and lookup",
+    )
+    comment: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Optional user-supplied key comment",
+    )
+    is_active: bool = Field(default=True, description="Whether this key may be used")
+    last_used_at: datetime | None = Field(default=None, description="Last successful key usage")
+
+    extra: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        description="Additional metadata for audit/integration",
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserSSHKey user={self.user_id} fingerprint={self.fingerprint}>"
+
+
+# =============================================================================
 # Runner - Distributed agent execution hosts
 # =============================================================================
 
@@ -1508,6 +1760,17 @@ class Runner(TimestampMixin, table=True):
     )
     name: str = Field(max_length=255, description="Runner display name")
     hostname: str = Field(max_length=255, description="Host machine name")
+    sandbox_id: UUID | None = Field(
+        default=None,
+        foreign_key="sandboxes.id",
+        index=True,
+        description="Attached sandbox for this runner, if isolated",
+    )
+    is_sandbox_runner: bool = Field(
+        default=False,
+        index=True,
+        description="Whether this runner executes only within sandbox constraints",
+    )
 
     # Capabilities
     capabilities: list[str] = Field(

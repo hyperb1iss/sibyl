@@ -3,6 +3,7 @@
 Creates the REST API app that gets mounted alongside MCP.
 """
 
+import asyncio
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -39,6 +40,7 @@ from sibyl.api.routes import (
     project_members_router,
     rag_router,
     runners_router,
+    sandboxes_router,
     search_router,
     settings_router,
     setup_router,
@@ -50,6 +52,17 @@ from sibyl.auth.middleware import AuthMiddleware
 from sibyl.config import settings
 
 log = structlog.get_logger()
+
+
+def _sandbox_mode() -> str:
+    return str(getattr(settings, "sandbox_mode", "off") or "off").lower()
+
+
+def _sandbox_enabled() -> bool:
+    explicit = getattr(settings, "sandbox_enabled", None)
+    if isinstance(explicit, bool):
+        return explicit
+    return _sandbox_mode() in {"shadow", "enforced"}
 
 
 class AccessLogMiddleware(BaseHTTPMiddleware):
@@ -137,9 +150,47 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
             "Failed to initialize Redis pub/sub (worker broadcasts may not work)", error=str(e)
         )
 
+    # Initialize sandbox control plane (optional)
+    _app.state.sandbox_controller = None
+    _app.state.sandbox_dispatcher = None
+    _app.state.sandbox_reconcile_stop = None
+    _app.state.sandbox_reconcile_task = None
+    if _sandbox_enabled():
+        try:
+            from sibyl.agents.sandbox_controller import SandboxController
+            from sibyl.agents.sandbox_dispatcher import SandboxDispatcher
+            from sibyl.db.connection import get_session
+
+            controller = SandboxController(get_session, enabled=True)
+            dispatcher = SandboxDispatcher(get_session, enabled=True)
+            stop_event = asyncio.Event()
+            reconcile_task = asyncio.create_task(controller.reconcile_loop(stop_event))
+
+            _app.state.sandbox_controller = controller
+            _app.state.sandbox_dispatcher = dispatcher
+            _app.state.sandbox_reconcile_stop = stop_event
+            _app.state.sandbox_reconcile_task = reconcile_task
+
+            log.info("Sandbox control plane initialized", mode=_sandbox_mode())
+        except Exception as e:
+            log.warning("Failed to initialize sandbox control plane", error=str(e), mode=_sandbox_mode())
+
     yield
 
     # Cleanup on shutdown
+    stop_event = getattr(_app.state, "sandbox_reconcile_stop", None)
+    reconcile_task = getattr(_app.state, "sandbox_reconcile_task", None)
+    if stop_event is not None:
+        stop_event.set()
+    if reconcile_task is not None:
+        reconcile_task.cancel()
+        try:
+            await reconcile_task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            log.debug("Sandbox reconcile task shutdown error", error=str(e))
+
     try:
         from sibyl.api.pubsub import shutdown_pubsub
         from sibyl.api.websocket import disable_pubsub
@@ -238,6 +289,7 @@ def create_api_app() -> FastAPI:
     app.include_router(invitations_router)
     app.include_router(rag_router)
     app.include_router(runners_router)
+    app.include_router(sandboxes_router)
     app.include_router(jobs_router)
     app.include_router(logs_router)
     app.include_router(metrics_router)

@@ -47,8 +47,13 @@ from sibyl.db.models import (
     Runner,
     RunnerProject,
     RunnerStatus,
+    Sandbox,
+    SandboxStatus,
+    SandboxTask,
+    SandboxTaskStatus,
     SourceType,
     User,
+    UserSSHKey,
 )
 
 __all__ = [
@@ -73,9 +78,12 @@ __all__ = [
     "OrganizationMember",
     "OrganizationRole",
     "OrganizationInvitation",
+    "Sandbox",
+    "SandboxTask",
     "Runner",
     "RunnerProject",
     "User",
+    "UserSSHKey",
     # Enums
     "AgentMessageRole",
     "AgentMessageType",
@@ -85,6 +93,8 @@ __all__ = [
     "InterAgentMessageType",
     "OrchestratorOperationalStatus",
     "OrchestratorPhase",
+    "SandboxStatus",
+    "SandboxTaskStatus",
     "RunnerStatus",
     "SourceType",
 ]
