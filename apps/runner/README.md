@@ -15,7 +15,7 @@ pip install sibyl-runner
 uv tool install sibyl-runner
 
 # From source (development)
-uv pip install -e apps/runner
+uv tool install --editable ./apps/runner
 ```
 
 ## Quick Start
@@ -29,6 +29,24 @@ sibyl-runner run
 
 # 3. Check status
 sibyl-runner status
+```
+
+## Sandbox Mode
+
+Sandbox mode is an env-bootstrapped runner path for ephemeral execution environments.
+
+```bash
+export SIBYL_SERVER_URL=https://sibyl.example.com
+export SIBYL_RUNNER_ID=<runner-id>
+export SIBYL_RUNNER_TOKEN=<runner-token>
+export SIBYL_SANDBOX_ID=<sandbox-id>
+
+# Optional toggles
+export SIBYL_SANDBOX_MODE=true
+export SIBYL_WORKTREE_BASE=/tmp/sibyl/worktrees
+export SIBYL_SANDBOX_WORKTREE_BASE=/tmp/sibyl/sandboxes/$SIBYL_SANDBOX_ID/worktrees
+
+sibyl-runner run --sandbox-mode
 ```
 
 ## How It Works
@@ -101,7 +119,13 @@ docker run -d \
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SIBYL_SERVER_URL` | - | Sibyl server URL (required) |
+| `SIBYL_RUNNER_ID` | - | Runner ID for connection (`--runner-id` alternative) |
+| `SIBYL_RUNNER_TOKEN` | - | Runner auth token used for WebSocket auth |
+| `SIBYL_SANDBOX_ID` | - | Sandbox execution context identifier |
+| `SIBYL_SANDBOX_MODE` | `false` | Enable sandbox mode (`true/false`) |
+| `SIBYL_RUNNER_MODE` | - | Alternate mode selector (`sandbox` or `registered`) |
 | `SIBYL_WORKTREE_BASE` | `/var/sibyl/worktrees` | Base directory for git worktrees |
+| `SIBYL_SANDBOX_WORKTREE_BASE` | - | Sandbox-specific worktree base override |
 | `SIBYL_CONFIG_DIR` | `/var/sibyl/config` | Config directory (runner.yaml) |
 
 ### First-time Setup
@@ -116,6 +140,24 @@ docker exec -it sibyl-runner sibyl-runner register \
 
 # Restart to apply registration
 docker restart sibyl-runner
+```
+
+### Sandbox Docker Image
+
+`apps/runner/Dockerfile.sandbox` is optimized for sandbox mode and uses a devcontainer base image.
+
+```bash
+# Build sandbox image
+docker build -f apps/runner/Dockerfile.sandbox -t sibyl-runner-sandbox .
+
+# Run sandbox runner (env bootstrap, no register command required if runner ID is provided)
+docker run --rm \
+  -e SIBYL_SERVER_URL=https://sibyl.example.com \
+  -e SIBYL_RUNNER_ID=<runner-id> \
+  -e SIBYL_RUNNER_TOKEN=<runner-token> \
+  -e SIBYL_SANDBOX_ID=<sandbox-id> \
+  -v runner-worktrees:/workspace/.sibyl/worktrees \
+  sibyl-runner-sandbox
 ```
 
 ## Development

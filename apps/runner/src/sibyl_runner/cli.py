@@ -49,6 +49,16 @@ def run(
         "-m",
         help="Max concurrent agents (overrides config)",
     ),
+    runner_id: str = typer.Option(
+        None,
+        "--runner-id",
+        help="Runner ID (overrides config/env; bypasses manual register flow when set)",
+    ),
+    sandbox_mode: bool | None = typer.Option(
+        None,
+        "--sandbox-mode/--no-sandbox-mode",
+        help="Enable sandbox execution mode",
+    ),
     foreground: bool = typer.Option(
         False,
         "--foreground",
@@ -67,21 +77,29 @@ def run(
         config.name = name
     if max_agents:
         config.max_concurrent_agents = max_agents
+    if runner_id:
+        config.runner_id = runner_id
+    if sandbox_mode is not None:
+        config.sandbox_mode = sandbox_mode
 
     # Validate config
     if not config.server_url:
         console.print(f"[{CORAL}]Error:[/] No server URL configured")
-        console.print("Use [cyan]--server[/] or set in config file")
+        console.print("Use [cyan]--server[/] or set SIBYL_SERVER_URL / config file")
         raise typer.Exit(1)
 
     if not config.runner_id:
-        console.print(f"[{CORAL}]Error:[/] Runner not registered")
-        console.print("Run [cyan]sibyl-runner register[/] first")
+        console.print(f"[{CORAL}]Error:[/] Missing runner ID")
+        console.print("Provide [cyan]--runner-id[/], set SIBYL_RUNNER_ID, or run register first")
         raise typer.Exit(1)
 
     console.print(f"[{PURPLE}]Sibyl Runner[/] starting...")
+    mode_label = "sandbox" if config.sandbox_mode else "registered"
     console.print(f"  Server: [{CYAN}]{config.server_url}[/]")
-    console.print(f"  Runner: [{CYAN}]{config.name}[/] ({config.runner_id})")
+    console.print(f"  Runner: [{CYAN}]{config.name or 'unnamed-runner'}[/] ({config.runner_id})")
+    console.print(f"  Mode: [{CYAN}]{mode_label}[/]")
+    if config.sandbox_mode and config.sandbox_id:
+        console.print(f"  Sandbox: [{CYAN}]{config.sandbox_id}[/]")
     console.print(f"  Max agents: [{CYAN}]{config.max_concurrent_agents}[/]")
 
     # Run daemon
@@ -175,7 +193,6 @@ async def _register_runner(
 ) -> dict:
     """Register runner with server via REST API."""
     import httpx
-
     from sibyl_cli.auth_store import get_access_token, normalize_api_url
 
     url = f"{server_url.rstrip('/')}/api/runners/register"

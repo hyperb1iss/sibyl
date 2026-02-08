@@ -1,0 +1,47 @@
+# ============================================================================
+# Sibyl Runner Sandbox Dockerfile
+# Uses a devcontainer base for richer tool availability during agent execution.
+# ============================================================================
+
+FROM mcr.microsoft.com/devcontainers/python:1-3.13-bookworm
+
+USER root
+
+# Install uv and ensure baseline runtime tools are available.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    jq \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/sibyl
+
+# Copy workspace metadata and required packages for dependency resolution.
+COPY pyproject.toml uv.lock VERSION ./
+COPY packages/python/sibyl-core/pyproject.toml packages/python/sibyl-core/README.md packages/python/sibyl-core/
+COPY packages/python/sibyl-core/src packages/python/sibyl-core/src
+COPY apps/runner/pyproject.toml apps/runner/README.md apps/runner/
+COPY apps/runner/src apps/runner/src
+
+# Install runner package into a local virtualenv.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable --package sibyl-runner
+
+ENV PATH="/workspace/sibyl/.venv/bin:${PATH}" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    SIBYL_RUNNER_MODE=sandbox \
+    SIBYL_SANDBOX_MODE=true \
+    SIBYL_WORKTREE_BASE=/workspace/.sibyl/worktrees
+
+RUN mkdir -p /workspace/.sibyl/worktrees /workspace/.sibyl/config && \
+    chown -R vscode:vscode /workspace/.sibyl
+
+USER vscode
+
+VOLUME ["/workspace/.sibyl/worktrees", "/workspace/.sibyl/config"]
+
+# Sandbox mode expects env bootstrap values (runner ID/token/sandbox ID).
+ENTRYPOINT ["sibyl-runner", "run", "--sandbox-mode", "--foreground"]

@@ -185,6 +185,18 @@ class RunnerClient:
             "result": result,
         })
 
+    async def send_task_ack(
+        self,
+        task_id: str,
+        agent_id: str,
+    ) -> bool:
+        """Acknowledge task assignment before execution starts."""
+        return await self.send({
+            "type": "task_ack",
+            "task_id": task_id,
+            "agent_id": agent_id,
+        })
+
     async def run_message_loop(self) -> None:
         """Run the message receive loop.
 
@@ -306,7 +318,13 @@ class RunnerClient:
         """Build request headers with authentication."""
         headers = {}
 
-        if self.config.access_token:
-            headers["Authorization"] = f"Bearer {self.config.access_token}"
+        token = self.config.runner_token or self.config.access_token
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        if self.config.sandbox_id:
+            headers["X-Sibyl-Sandbox-Id"] = self.config.sandbox_id
+        if self.config.sandbox_mode:
+            headers["X-Sibyl-Runner-Mode"] = "sandbox"
 
         return headers
