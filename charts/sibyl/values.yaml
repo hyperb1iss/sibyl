@@ -389,6 +389,21 @@ sandbox:
   # -- Enable sandbox feature wiring
   enabled: false
 
+  # -- Base path for sandbox worktrees inside pods
+  worktreeBase: /workspace/sandboxes
+
+  # -- Persistent volume claim for sandbox worktrees
+  persistence:
+    # -- Enable PVC for sandbox worktree storage
+    enabled: false
+    # -- Storage class (empty = cluster default)
+    storageClass: ""
+    # -- PVC size
+    size: 10Gi
+    # -- Access modes
+    accessModes:
+      - ReadWriteOnce
+
   # -- Sandbox runtime environment variables
   env:
     SIBYL_SANDBOX_ENABLED: "false"

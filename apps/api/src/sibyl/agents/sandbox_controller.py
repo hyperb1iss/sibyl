@@ -58,6 +58,7 @@ class SandboxController:
         server_url: str | None = None,
         k8s_required: bool = False,
         dispatcher: Any | None = None,
+        worktree_base: str | None = None,
     ) -> None:
         self._session_factory = session_factory
         self.enabled = enabled
@@ -70,6 +71,7 @@ class SandboxController:
         self.max_lifetime_seconds = max_lifetime_seconds or 14400
         self.k8s_required = k8s_required
         self.server_url = server_url or ""
+        self.worktree_base = worktree_base or "/tmp/sibyl/sandboxes"  # noqa: S108
 
         self._k8s_checked = False
         self._k8s_error: str | None = None
@@ -176,6 +178,8 @@ class SandboxController:
         env_vars = [
             {"name": "SIBYL_SANDBOX_ID", "value": str(getattr(sandbox, "id", ""))},
             {"name": "SIBYL_SERVER_URL", "value": self.server_url},
+            {"name": "SIBYL_SANDBOX_WORKTREE_BASE", "value": self.worktree_base},
+            {"name": "SIBYL_SANDBOX_MODE", "value": "true"},
         ]
         runner_id = getattr(sandbox, "runner_id", None)
         if runner_id:
@@ -223,6 +227,27 @@ class SandboxController:
             "readOnlyRootFilesystem": False,
         }
 
+        container: dict[str, Any] = {
+            "name": "runner",
+            "image": image,
+            "env": env_vars,
+            "resources": resources,
+            "securityContext": security_context,
+            "volumeMounts": [
+                {
+                    "name": "worktree-storage",
+                    "mountPath": self.worktree_base,
+                }
+            ],
+        }
+
+        volumes: list[dict[str, Any]] = [
+            {
+                "name": "worktree-storage",
+                "emptyDir": {},
+            }
+        ]
+
         return {
             "apiVersion": "v1",
             "kind": "Pod",
@@ -230,15 +255,8 @@ class SandboxController:
             "spec": {
                 "restartPolicy": "Always",
                 "automountServiceAccountToken": False,
-                "containers": [
-                    {
-                        "name": "runner",
-                        "image": image,
-                        "env": env_vars,
-                        "resources": resources,
-                        "securityContext": security_context,
-                    }
-                ],
+                "containers": [container],
+                "volumes": volumes,
             },
         }
 

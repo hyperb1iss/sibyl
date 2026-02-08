@@ -230,6 +230,10 @@ class Settings(BaseSettings):
         default=False,
         description="Require Kubernetes for sandbox operations (fail if unavailable)",
     )
+    sandbox_worktree_base: str = Field(
+        default="/tmp/sibyl/sandboxes",  # noqa: S108
+        description="Base path for sandbox worktrees (PVC mount in K8s)",
+    )
     sandbox_server_url: str = Field(
         default="",
         description="Server URL injected into sandbox pods (defaults to server_url)",

@@ -4,12 +4,18 @@ import asyncio
 import contextlib
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import structlog
 
+from sibyl_core.execution import (
+    ExecutionResult,
+    SubprocessExecutor,
+    build_execution_env,
+    resolve_execution_command,
+)
 from sibyl_runner.config import RunnerConfig
 from sibyl_runner.connection import RunnerClient
 from sibyl_runner.project_registry import ProjectRegistry
@@ -25,12 +31,17 @@ class AgentExecution:
     task_id: str
     project_id: str
     worktree_path: str
-    process: asyncio.subprocess.Process | None = None
+    executor: SubprocessExecutor = field(default_factory=SubprocessExecutor)
     run_task: asyncio.Task[None] | None = None
     started_at: float = 0
     status: str = "initializing"
     completion_sent: bool = False
     cancel_reason: str = ""
+
+    @property
+    def process(self) -> asyncio.subprocess.Process | None:
+        """Underlying subprocess (delegates to executor)."""
+        return self.executor.process
 
 
 class RunnerDaemon:
@@ -354,7 +365,6 @@ class RunnerDaemon:
         finally:
             # Remove from active executions
             self._executions.pop(execution.task_id, None)
-            execution.process = None
 
             await self._update_status()
 
@@ -362,16 +372,8 @@ class RunnerDaemon:
         """Cancel a running execution."""
         execution.cancel_reason = reason
 
-        if execution.process and execution.process.returncode is None:
-            try:
-                execution.process.terminate()
-                await asyncio.wait_for(execution.process.wait(), timeout=5)
-            except TimeoutError:
-                execution.process.kill()
-                with contextlib.suppress(Exception):
-                    await execution.process.wait()
-            except Exception:
-                pass
+        # Cancel via shared executor (SIGTERM -> SIGKILL)
+        await execution.executor.cancel()
 
         run_task = execution.run_task
         current = asyncio.current_task()
@@ -460,22 +462,6 @@ class RunnerDaemon:
         execution.worktree_path = str(worktree)
         return worktree
 
-    def _resolve_execution_command(self, config: dict[str, Any]) -> list[str] | None:
-        """Resolve command used for the execution harness."""
-        command = config.get("command") or config.get("exec_command") or config.get("runner_command")
-
-        if isinstance(command, list) and command and all(isinstance(item, str) for item in command):
-            return command
-        if isinstance(command, str) and command.strip():
-            return ["/bin/sh", "-lc", command]
-
-        env_cmd = os.environ.get("SIBYL_RUNNER_EXEC_CMD")
-        if env_cmd:
-            return ["/bin/sh", "-lc", env_cmd]
-
-        # MVP fallback still executes through a concrete subprocess path.
-        return ["/bin/sh", "-lc", 'printf "%s\\n" "$SIBYL_TASK_PROMPT"']
-
     async def _run_execution_harness(
         self,
         execution: AgentExecution,
@@ -484,21 +470,16 @@ class RunnerDaemon:
         worktree: Path,
     ) -> dict[str, Any]:
         """Execute task through subprocess harness, fallback to internal callable."""
-        command = self._resolve_execution_command(config)
-        if not command:
-            return await self._run_internal_callable(execution, prompt, worktree)
+        command = resolve_execution_command(config)
 
-        env = os.environ.copy()
-        # Scrub sensitive tokens from child process environment
-        for key in ("SIBYL_RUNNER_TOKEN", "SIBYL_AUTH_TOKEN", "SIBYL_API_KEY"):
-            env.pop(key, None)
-        env["SIBYL_TASK_ID"] = execution.task_id
-        env["SIBYL_AGENT_ID"] = execution.agent_id
-        env["SIBYL_PROJECT_ID"] = execution.project_id
-        env["SIBYL_TASK_PROMPT"] = prompt
-        env["SIBYL_WORKTREE_PATH"] = str(worktree)
-        if self.config.sandbox_id:
-            env["SIBYL_SANDBOX_ID"] = self.config.sandbox_id
+        env = build_execution_env(
+            task_id=execution.task_id,
+            agent_id=execution.agent_id,
+            project_id=execution.project_id,
+            prompt=prompt,
+            worktree_path=worktree,
+            sandbox_id=self.config.sandbox_id or None,
+        )
 
         await self.client.send_agent_update(
             execution.agent_id,
@@ -507,92 +488,39 @@ class RunnerDaemon:
             activity="Launching execution subprocess",
         )
 
+        # Output callback: throttled agent status updates via WebSocket
+        async def _on_output(stream_name: str, line: str) -> None:
+            await self.client.send_agent_update(
+                execution.agent_id,
+                "running",
+                activity=f"{stream_name}: {line[:200]}",
+            )
+
+        timeout = config.get("timeout_seconds") or int(
+            os.environ.get("SIBYL_EXECUTION_TIMEOUT", "3600")
+        )
+
         try:
-            execution.process = await asyncio.create_subprocess_exec(
-                *command,
-                cwd=str(worktree),
+            result: ExecutionResult = await execution.executor.run(
+                command=command,
+                cwd=worktree,
                 env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                timeout_seconds=timeout,
+                on_output=_on_output,
             )
         except FileNotFoundError:
             log.warning("execution_command_not_found", command=command[0])
             return await self._run_internal_callable(execution, prompt, worktree)
 
-        stdout_task = asyncio.create_task(
-            self._collect_stream(execution=execution, stream=execution.process.stdout, stream_name="stdout")
-        )
-        stderr_task = asyncio.create_task(
-            self._collect_stream(execution=execution, stream=execution.process.stderr, stream_name="stderr")
-        )
-        self._background_tasks.add(stdout_task)
-        self._background_tasks.add(stderr_task)
-        stdout_task.add_done_callback(self._background_tasks.discard)
-        stderr_task.add_done_callback(self._background_tasks.discard)
-
-        timeout = config.get("timeout_seconds") or int(
-            os.environ.get("SIBYL_EXECUTION_TIMEOUT", "3600")
-        )
-        try:
-            exit_code = await asyncio.wait_for(execution.process.wait(), timeout=timeout)
-        except TimeoutError:
-            log.warning(
-                "execution_timeout",
-                task_id=execution.task_id,
-                timeout=timeout,
-            )
-            execution.process.terminate()
-            try:
-                exit_code = await asyncio.wait_for(execution.process.wait(), timeout=10)
-            except TimeoutError:
-                execution.process.kill()
-                exit_code = await execution.process.wait()
-        stdout_lines, stderr_lines = await asyncio.gather(stdout_task, stderr_task)
-
-        status = "completed" if exit_code == 0 else "failed"
         return {
-            "status": status,
-            "exit_code": exit_code,
-            "command": command,
-            "worktree_path": str(worktree),
-            "stdout": "\n".join(stdout_lines[-200:]),
-            "stderr": "\n".join(stderr_lines[-200:]),
-            "duration_s": time.time() - execution.started_at,
+            "status": result.status,
+            "exit_code": result.exit_code,
+            "command": result.command,
+            "worktree_path": result.worktree_path,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "duration_s": result.duration_s,
         }
-
-    async def _collect_stream(
-        self,
-        execution: AgentExecution,
-        stream: asyncio.StreamReader | None,
-        stream_name: str,
-    ) -> list[str]:
-        """Collect subprocess stream output and send throttled status updates."""
-        if stream is None:
-            return []
-
-        lines: list[str] = []
-        last_update = 0.0
-
-        while True:
-            raw = await stream.readline()
-            if not raw:
-                break
-
-            text = raw.decode("utf-8", errors="replace").rstrip()
-            if not text:
-                continue
-
-            lines.append(text)
-            now = time.monotonic()
-            if now - last_update >= 1.0:
-                last_update = now
-                await self.client.send_agent_update(
-                    execution.agent_id,
-                    "running",
-                    activity=f"{stream_name}: {text[:200]}",
-                )
-
-        return lines
 
     async def _run_internal_callable(
         self,

@@ -47,6 +47,8 @@ from sibyl_core.models import (
 )
 
 if TYPE_CHECKING:
+    from sibyl.agents.sandbox_controller import SandboxController
+    from sibyl.agents.sandbox_dispatcher import SandboxDispatcher
     from sibyl_core.graph import EntityManager
 
 log = structlog.get_logger()
@@ -369,6 +371,10 @@ For detailed orchestration guidance, run `/agent-orchestrate` to load the full s
         project_id: str,
         add_dirs: list[str] | None = None,
         permission_mode: str | None = None,
+        sandbox_mode: str = "off",
+        sandbox_controller: "SandboxController | None" = None,
+        sandbox_dispatcher: "SandboxDispatcher | None" = None,
+        user_id: str | None = None,
     ):
         """Initialize AgentRunner.
 
@@ -379,6 +385,10 @@ For detailed orchestration guidance, run `/agent-orchestrate` to load the full s
             project_id: Project UUID
             add_dirs: Additional directories to allow for sandbox access
             permission_mode: SDK permission mode ("default", "acceptEdits", "bypassPermissions")
+            sandbox_mode: Sandbox policy — "off", "shadow", or "enforced"
+            sandbox_controller: Sandbox lifecycle controller (required for shadow/enforced)
+            sandbox_dispatcher: Sandbox task dispatcher (required for shadow/enforced)
+            user_id: User UUID (required for sandbox ensure)
         """
         self.entity_manager = entity_manager
         self.worktree_manager = worktree_manager
@@ -386,6 +396,10 @@ For detailed orchestration guidance, run `/agent-orchestrate` to load the full s
         self.project_id = project_id
         self.add_dirs = add_dirs
         self.permission_mode = permission_mode
+        self.sandbox_mode = sandbox_mode
+        self._sandbox_controller = sandbox_controller
+        self._sandbox_dispatcher = sandbox_dispatcher
+        self._user_id = user_id
 
         # Active agent instances (in-memory during execution)
         self._active_agents: dict[str, AgentInstance] = {}
@@ -580,6 +594,11 @@ When done, complete with learnings to capture insights for future agents.
     ) -> "AgentInstance":
         """Spawn a new Claude agent instance.
 
+        Routes through sandbox modes when configured:
+        - **off**: Direct local execution (current behavior)
+        - **shadow**: Local execution AND fire-and-forget sandbox queue (for comparison)
+        - **enforced**: Route exclusively through sandbox dispatcher
+
         Args:
             prompt: Initial prompt for the agent
             agent_type: Type of specialized agent
@@ -593,13 +612,64 @@ When done, complete with learnings to capture insights for future agents.
         Returns:
             AgentInstance ready for execution
         """
-        log.info("Spawning agent", agent_type=agent_type.value, task_id=task.id if task else None)
+        log.info(
+            "Spawning agent",
+            agent_type=agent_type.value,
+            task_id=task.id if task else None,
+            sandbox_mode=self.sandbox_mode,
+        )
 
         # Generate agent ID if not provided
         if agent_id is None:
             timestamp = datetime.now(UTC).isoformat()
             agent_id = _generate_agent_id(self.org_id, self.project_id, timestamp)
 
+        # Enforced mode: route exclusively through sandbox
+        if self.sandbox_mode == "enforced":
+            return await self._spawn_sandboxed(
+                agent_id=agent_id,
+                prompt=prompt,
+                agent_type=agent_type,
+                task=task,
+                spawn_source=spawn_source,
+            )
+
+        # Off / shadow: always run locally
+        instance = await self._spawn_local(
+            agent_id=agent_id,
+            prompt=prompt,
+            agent_type=agent_type,
+            task=task,
+            spawn_source=spawn_source,
+            create_worktree=create_worktree,
+            custom_instructions=custom_instructions,
+            enable_approvals=enable_approvals,
+        )
+
+        # Shadow mode: also queue to sandbox for comparison (fire-and-forget)
+        if self.sandbox_mode == "shadow":
+            await self._queue_sandbox_task(
+                agent_id=agent_id,
+                prompt=prompt,
+                agent_type=agent_type,
+                task=task,
+            )
+
+        return instance
+
+    async def _spawn_local(
+        self,
+        *,
+        agent_id: str,
+        prompt: str,
+        agent_type: AgentType,
+        task: Task | None,
+        spawn_source: AgentSpawnSource = AgentSpawnSource.USER,
+        create_worktree: bool = True,
+        custom_instructions: str | None = None,
+        enable_approvals: bool = True,
+    ) -> "AgentInstance":
+        """Spawn agent locally via Claude SDK (original behavior)."""
         record = await self._resolve_agent_record(
             agent_id=agent_id,
             prompt=prompt,
@@ -660,9 +730,6 @@ When done, complete with learnings to capture insights for future agents.
         )
 
         # Create SDK options
-        # - setting_sources: Load Claude Code config from user (~/.claude) and project (.claude)
-        # - can_use_tool: Integrate with SDK's permission system via our approval UI
-        # - add_dirs: Additional sandbox-allowed directories (e.g., temp dirs for tests)
         sdk_kwargs: dict[str, Any] = {
             "cwd": cwd,
             "system_prompt": system_prompt,
@@ -721,8 +788,145 @@ When done, complete with learnings to capture insights for future agents.
             parent_agent_id=record.parent_agent_id,
         )
 
-        log.info("Agent spawned and ready", agent_id=record.id)
+        log.info("Agent spawned locally", agent_id=record.id)
         return instance
+
+    async def _spawn_sandboxed(
+        self,
+        *,
+        agent_id: str,
+        prompt: str,
+        agent_type: AgentType,
+        task: Task | None,
+        spawn_source: AgentSpawnSource = AgentSpawnSource.USER,
+    ) -> "AgentInstance":
+        """Spawn agent via sandbox dispatcher (enforced mode).
+
+        Creates the agent record, ensures a sandbox exists, enqueues a
+        SandboxTask, and returns a "pending" AgentInstance that will be
+        updated by the runner daemon when execution begins.
+        """
+        from uuid import UUID
+
+        if not self._sandbox_controller or not self._sandbox_dispatcher:
+            raise AgentRunnerError(
+                "Sandbox mode is 'enforced' but sandbox_controller/dispatcher not provided"
+            )
+        if not self._user_id:
+            raise AgentRunnerError(
+                "Sandbox mode is 'enforced' but user_id not provided to AgentRunner"
+            )
+
+        record = await self._resolve_agent_record(
+            agent_id=agent_id,
+            prompt=prompt,
+            agent_type=agent_type,
+            task=task,
+            spawn_source=spawn_source,
+        )
+
+        # Ensure a sandbox exists for this user/org
+        sandbox = await self._sandbox_controller.ensure(
+            organization_id=UUID(self.org_id),
+            user_id=UUID(self._user_id),
+        )
+        sandbox_id = getattr(sandbox, "id", None)
+        if sandbox_id is None:
+            raise AgentRunnerError("Sandbox ensure() returned record without id")
+
+        # Enqueue the execution task for the sandbox runner
+        await self._sandbox_dispatcher.enqueue_task(
+            sandbox_id=sandbox_id,
+            organization_id=UUID(self.org_id),
+            task_type="agent_execution",
+            payload={
+                "agent_id": record.id,
+                "project_id": self.project_id,
+                "prompt": prompt,
+                "agent_type": agent_type.value,
+                "task_id": task.id if task else None,
+            },
+            idempotency_key=f"agent:{record.id}",
+        )
+
+        # Mark agent as pending (runner daemon will transition to working)
+        await self.entity_manager.update(
+            record.id,
+            {
+                "status": AgentStatus.INITIALIZING.value,
+                "started_at": datetime.now(UTC).isoformat(),
+            },
+        )
+        await update_agent_state(
+            org_id=self.org_id,
+            agent_id=record.id,
+            status=AgentStatus.INITIALIZING.value,
+            started_at=utcnow_naive(),
+            task_id=record.task_id,
+            parent_agent_id=record.parent_agent_id,
+        )
+
+        # Return a pending instance (no SDK client — execution is remote)
+        instance = AgentInstance(
+            record=record,
+            sdk_options=ClaudeAgentOptions(system_prompt=""),
+            entity_manager=self.entity_manager,
+            initial_prompt=prompt,
+            task=task,
+        )
+        self._active_agents[record.id] = instance
+
+        log.info(
+            "Agent queued for sandbox execution",
+            agent_id=record.id,
+            sandbox_id=str(sandbox_id),
+        )
+        return instance
+
+    async def _queue_sandbox_task(
+        self,
+        *,
+        agent_id: str,
+        prompt: str,
+        agent_type: AgentType,
+        task: Task | None,
+    ) -> None:
+        """Fire-and-forget sandbox task queue for shadow mode comparison."""
+        from uuid import UUID
+
+        if not self._sandbox_controller or not self._sandbox_dispatcher or not self._user_id:
+            log.debug(
+                "Shadow mode sandbox queue skipped — missing controller/dispatcher/user_id",
+                agent_id=agent_id,
+            )
+            return
+
+        try:
+            sandbox = await self._sandbox_controller.ensure(
+                organization_id=UUID(self.org_id),
+                user_id=UUID(self._user_id),
+            )
+            sandbox_id = getattr(sandbox, "id", None)
+            if sandbox_id is None:
+                return
+
+            await self._sandbox_dispatcher.enqueue_task(
+                sandbox_id=sandbox_id,
+                organization_id=UUID(self.org_id),
+                task_type="agent_execution",
+                payload={
+                    "agent_id": agent_id,
+                    "project_id": self.project_id,
+                    "prompt": prompt,
+                    "agent_type": agent_type.value,
+                    "task_id": task.id if task else None,
+                    "shadow": True,
+                },
+                idempotency_key=f"shadow:{agent_id}",
+            )
+            log.info("Shadow sandbox task queued", agent_id=agent_id, sandbox_id=str(sandbox_id))
+        except Exception:
+            log.warning("Shadow sandbox task queue failed", agent_id=agent_id, exc_info=True)
 
     async def spawn_for_task(
         self,
