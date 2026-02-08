@@ -4,19 +4,21 @@ FROM mcr.microsoft.com/devcontainers/python:1-3.13-bookworm
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 # Install system deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Remove stale Yarn apt source from base image (we use pnpm, not Yarn)
+RUN rm -f /etc/apt/sources.list.d/yarn.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
     git curl jq ca-certificates build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install pnpm globally
-RUN npm install -g pnpm@10
+# Install proto + moon + node + pnpm (versions from .prototools)
+# PROTO_HOME in /opt so it's accessible to both root (build) and vscode (runtime)
+ENV PROTO_HOME=/opt/proto
+ENV PATH="/opt/proto/shims:/opt/proto/bin:${PATH}"
 
-# Install proto + moon
 RUN curl -fsSL https://moonrepo.dev/install/proto.sh | bash -s -- --yes \
-    && /home/vscode/.proto/bin/proto plugin add moon \
-       --to /home/vscode/.proto/.prototools \
-    && /home/vscode/.proto/bin/proto install moon 2.0.0-beta.1
-
-ENV PATH="/home/vscode/.proto/shims:/home/vscode/.proto/bin:${PATH}"
+    && proto install moon 2.0.0-beta.1 \
+    && proto install node 24 \
+    && proto install pnpm 10 \
+    && chmod -R a+rx /opt/proto
 
 WORKDIR /workspace/sibyl

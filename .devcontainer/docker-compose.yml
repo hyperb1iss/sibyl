@@ -15,8 +15,8 @@ services:
   falkordb:
     image: falkordb/falkordb:latest
     ports:
-      - "6380:6379"
-      - "3335:3000"
+      - "6379"
+      - "3000"
     volumes:
       - falkordb-data:/data
     environment:
@@ -30,7 +30,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg18
     ports:
-      - "5433:5432"
+      - "5432"
     volumes:
       - postgres-data:/var/lib/postgresql
     environment:
