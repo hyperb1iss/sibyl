@@ -1469,10 +1469,10 @@ class SandboxStatus(StrEnum):
     """Status of a sandbox environment."""
 
     PENDING = "pending"
-    PROVISIONING = "provisioning"
+    STARTING = "starting"
     RUNNING = "running"
-    STOPPING = "stopping"
-    STOPPED = "stopped"
+    SUSPENDED = "suspended"
+    TERMINATING = "terminating"
     FAILED = "failed"
     DELETED = "deleted"
 
@@ -1498,7 +1498,12 @@ class Sandbox(TimestampMixin, table=True):
         description="User who requested this sandbox",
     )
 
-    name: str = Field(max_length=255, index=True, description="Sandbox display name")
+    name: str = Field(
+        default="sandbox",
+        max_length=255,
+        index=True,
+        description="Sandbox display name",
+    )
     status: str = Field(
         default=SandboxStatus.PENDING.value,
         sa_column=Column(
@@ -1510,7 +1515,11 @@ class Sandbox(TimestampMixin, table=True):
     )
 
     # Runtime identity
-    image: str = Field(max_length=512, description="Container image used by this sandbox")
+    image: str = Field(
+        default="ghcr.io/hyperb1iss/sibyl-sandbox:latest",
+        max_length=512,
+        description="Container image used by this sandbox",
+    )
     namespace: str | None = Field(
         default=None,
         max_length=255,
@@ -1563,6 +1572,11 @@ class Sandbox(TimestampMixin, table=True):
     started_at: datetime | None = Field(default=None, description="When sandbox became running")
     stopped_at: datetime | None = Field(default=None, description="When sandbox stopped")
     expires_at: datetime | None = Field(default=None, description="Hard expiry timestamp")
+    error_message: str | None = Field(
+        default=None,
+        sa_type=Text,
+        description="Latest runtime/provisioning error for this sandbox",
+    )
 
     # Opaque metadata for runtime/reconciler
     context: dict[str, Any] = Field(
@@ -1579,12 +1593,13 @@ class SandboxTaskStatus(StrEnum):
     """Status for work executed inside a sandbox."""
 
     QUEUED = "queued"
-    STARTING = "starting"
+    DISPATCHED = "dispatched"
+    ACKED = "acked"
     RUNNING = "running"
-    SUCCEEDED = "succeeded"
+    RETRY = "retry"
+    COMPLETED = "completed"
     FAILED = "failed"
     CANCELED = "canceled"
-    TIMED_OUT = "timed_out"
 
 
 class SandboxTask(TimestampMixin, table=True):
@@ -1618,6 +1633,18 @@ class SandboxTask(TimestampMixin, table=True):
         index=True,
         description="Associated graph task entity ID",
     )
+    task_type: str = Field(
+        default="agent_execution",
+        max_length=64,
+        index=True,
+        description="Task execution type",
+    )
+    idempotency_key: str | None = Field(
+        default=None,
+        max_length=255,
+        index=True,
+        description="Optional idempotency key for dedupe",
+    )
 
     status: str = Field(
         default=SandboxTaskStatus.QUEUED.value,
@@ -1628,12 +1655,28 @@ class SandboxTask(TimestampMixin, table=True):
         ),
         description="Sandbox task execution status",
     )
-    command: str = Field(sa_type=Text, description="Command executed in sandbox")
+    command: str | None = Field(
+        default=None,
+        sa_type=Text,
+        description="Optional command executed in sandbox",
+    )
     working_directory: str | None = Field(
         default=None,
         max_length=1024,
         description="Working directory inside sandbox",
     )
+    payload: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        description="Dispatcher payload (task assignment envelope)",
+    )
+    result: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        description="Dispatcher/task result payload",
+    )
+    attempt_count: int = Field(default=0, ge=0, description="Number of dispatch attempts")
+    max_attempts: int = Field(default=3, ge=1, description="Maximum retry attempts")
 
     # Execution output
     exit_code: int | None = Field(default=None, description="Process exit code")
@@ -1654,8 +1697,11 @@ class SandboxTask(TimestampMixin, table=True):
     )
 
     requested_at: datetime = Field(default_factory=utcnow_naive, description="When task was queued")
+    last_dispatch_at: datetime | None = Field(default=None, description="Last dispatch attempt time")
+    acked_at: datetime | None = Field(default=None, description="When runner acknowledged task")
     started_at: datetime | None = Field(default=None, description="When execution started")
     completed_at: datetime | None = Field(default=None, description="When execution completed")
+    failed_at: datetime | None = Field(default=None, description="When task entered failed state")
 
     context: dict[str, Any] = Field(
         default_factory=dict,

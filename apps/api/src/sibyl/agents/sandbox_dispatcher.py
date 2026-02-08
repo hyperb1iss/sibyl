@@ -129,7 +129,7 @@ class SandboxDispatcher:
             _set_if_present(task, "payload", payload)
             _set_if_present(task, "attempt_count", 0)
             _set_if_present(task, "max_attempts", self.max_attempts)
-            _set_if_present(task, "last_error", None)
+            _set_if_present(task, "error_message", None)
             if idempotency_key:
                 _set_if_present(task, "idempotency_key", idempotency_key)
 
@@ -177,7 +177,7 @@ class SandboxDispatcher:
                 task_max_attempts = int(getattr(task, "max_attempts", self.max_attempts) or self.max_attempts)
                 if attempts >= task_max_attempts:
                     _set_if_present(task, "status", "failed")
-                    _set_if_present(task, "last_error", "max_attempts_exceeded")
+                    _set_if_present(task, "error_message", "max_attempts_exceeded")
                     _set_if_present(task, "failed_at", now.replace(tzinfo=None))
                     continue
 
@@ -193,15 +193,15 @@ class SandboxDispatcher:
 
                 if ok:
                     _set_if_present(task, "status", "dispatched")
-                    _set_if_present(task, "last_error", None)
+                    _set_if_present(task, "error_message", None)
                     dispatched += 1
                 elif attempts + 1 >= task_max_attempts:
                     _set_if_present(task, "status", "failed")
-                    _set_if_present(task, "last_error", "dispatch_failed_max_attempts")
+                    _set_if_present(task, "error_message", "dispatch_failed_max_attempts")
                     _set_if_present(task, "failed_at", now.replace(tzinfo=None))
                 else:
                     _set_if_present(task, "status", "retry")
-                    _set_if_present(task, "last_error", "dispatch_failed_retrying")
+                    _set_if_present(task, "error_message", "dispatch_failed_retrying")
 
             await session.commit()
             if dispatched:
@@ -241,6 +241,7 @@ class SandboxDispatcher:
         result: dict[str, Any] | None = None,
         error: str | None = None,
         retryable: bool = False,
+        canceled: bool = False,
     ) -> Any:
         """Mark task completion, with retry/fail behavior using attempt_count."""
         self._require_enabled()
@@ -254,10 +255,15 @@ class SandboxDispatcher:
             attempts = int(getattr(task, "attempt_count", 0) or 0)
             task_max_attempts = int(getattr(task, "max_attempts", self.max_attempts) or self.max_attempts)
 
-            if success:
+            if canceled:
+                _set_if_present(task, "status", "canceled")
+                _set_if_present(task, "result", result or {})
+                _set_if_present(task, "error_message", error)
+                _set_if_present(task, "completed_at", now)
+            elif success:
                 _set_if_present(task, "status", "completed")
                 _set_if_present(task, "result", result or {})
-                _set_if_present(task, "last_error", None)
+                _set_if_present(task, "error_message", None)
                 _set_if_present(task, "completed_at", now)
             else:
                 if retryable and attempts < task_max_attempts:
@@ -265,7 +271,7 @@ class SandboxDispatcher:
                 else:
                     _set_if_present(task, "status", "failed")
                     _set_if_present(task, "failed_at", now)
-                _set_if_present(task, "last_error", error or "sandbox_task_failed")
+                _set_if_present(task, "error_message", error or "sandbox_task_failed")
                 if result is not None:
                     _set_if_present(task, "result", result)
 
@@ -277,5 +283,6 @@ class SandboxDispatcher:
                 status=_status_of(task),
                 success=success,
                 retryable=retryable,
+                canceled=canceled,
             )
             return task

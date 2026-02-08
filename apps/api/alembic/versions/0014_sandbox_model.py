@@ -35,9 +35,14 @@ def upgrade() -> None:
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
-        sa.Column("name", sa.String(255), nullable=False),
+        sa.Column("name", sa.String(255), nullable=False, server_default="sandbox"),
         sa.Column("status", sa.String(32), nullable=False, server_default="pending"),
-        sa.Column("image", sa.String(512), nullable=False),
+        sa.Column(
+            "image",
+            sa.String(512),
+            nullable=False,
+            server_default="ghcr.io/hyperb1iss/sibyl-sandbox:latest",
+        ),
         sa.Column("namespace", sa.String(255), nullable=True),
         sa.Column("pod_name", sa.String(255), nullable=True),
         sa.Column("cpu_request", sa.String(32), nullable=False, server_default="250m"),
@@ -62,6 +67,7 @@ def upgrade() -> None:
         sa.Column("started_at", sa.DateTime(), nullable=True),
         sa.Column("stopped_at", sa.DateTime(), nullable=True),
         sa.Column("expires_at", sa.DateTime(), nullable=True),
+        sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column(
             "context",
             postgresql.JSONB(),
@@ -102,16 +108,35 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column("task_id", sa.String(64), nullable=True),
+        sa.Column("task_type", sa.String(64), nullable=False, server_default="agent_execution"),
+        sa.Column("idempotency_key", sa.String(255), nullable=True),
         sa.Column("status", sa.String(32), nullable=False, server_default="queued"),
-        sa.Column("command", sa.Text(), nullable=False),
+        sa.Column("command", sa.Text(), nullable=True),
         sa.Column("working_directory", sa.String(1024), nullable=True),
+        sa.Column(
+            "payload",
+            postgresql.JSONB(),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
+        sa.Column(
+            "result",
+            postgresql.JSONB(),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
+        sa.Column("attempt_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("max_attempts", sa.Integer(), nullable=False, server_default="3"),
         sa.Column("exit_code", sa.Integer(), nullable=True),
         sa.Column("stdout_preview", sa.Text(), nullable=True),
         sa.Column("stderr_preview", sa.Text(), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("requested_at", sa.DateTime(), nullable=False, server_default=sa.text("now()")),
+        sa.Column("last_dispatch_at", sa.DateTime(), nullable=True),
+        sa.Column("acked_at", sa.DateTime(), nullable=True),
         sa.Column("started_at", sa.DateTime(), nullable=True),
         sa.Column("completed_at", sa.DateTime(), nullable=True),
+        sa.Column("failed_at", sa.DateTime(), nullable=True),
         sa.Column(
             "context",
             postgresql.JSONB(),
@@ -125,6 +150,8 @@ def upgrade() -> None:
     op.create_index("ix_sandbox_tasks_organization_id", "sandbox_tasks", ["organization_id"])
     op.create_index("ix_sandbox_tasks_runner_id", "sandbox_tasks", ["runner_id"])
     op.create_index("ix_sandbox_tasks_task_id", "sandbox_tasks", ["task_id"])
+    op.create_index("ix_sandbox_tasks_task_type", "sandbox_tasks", ["task_type"])
+    op.create_index("ix_sandbox_tasks_idempotency_key", "sandbox_tasks", ["idempotency_key"])
     op.create_index("ix_sandbox_tasks_status", "sandbox_tasks", ["status"])
     op.create_index(
         "ix_sandbox_tasks_sandbox_created",
@@ -198,6 +225,8 @@ def downgrade() -> None:
 
     op.drop_index("ix_sandbox_tasks_sandbox_created", table_name="sandbox_tasks")
     op.drop_index("ix_sandbox_tasks_status", table_name="sandbox_tasks")
+    op.drop_index("ix_sandbox_tasks_idempotency_key", table_name="sandbox_tasks")
+    op.drop_index("ix_sandbox_tasks_task_type", table_name="sandbox_tasks")
     op.drop_index("ix_sandbox_tasks_task_id", table_name="sandbox_tasks")
     op.drop_index("ix_sandbox_tasks_runner_id", table_name="sandbox_tasks")
     op.drop_index("ix_sandbox_tasks_organization_id", table_name="sandbox_tasks")

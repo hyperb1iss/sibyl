@@ -847,7 +847,8 @@ async def _handle_task_complete(
     dispatcher = _get_sandbox_dispatcher(websocket)
     if dispatcher is not None and task_id:
         status_value = str((result or {}).get("status", "")).lower()
-        success = bool(data.get("success", status_value not in {"failed", "error"}))
+        canceled = status_value in {"cancelled", "canceled"}
+        success = bool(data.get("success", status_value not in {"failed", "error", "cancelled", "canceled"}))
         retryable = bool(data.get("retryable", False))
         error = data.get("error") or ((result or {}).get("error") if isinstance(result, dict) else None)
         try:
@@ -857,6 +858,7 @@ async def _handle_task_complete(
                 result=result if isinstance(result, dict) else {"result": result},
                 error=str(error) if error else None,
                 retryable=retryable,
+                canceled=canceled,
             )
         except Exception as e:
             log.warning(

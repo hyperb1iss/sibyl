@@ -30,6 +30,8 @@ class SandboxEnsureRequest(BaseModel):
     """Ensure/create sandbox request."""
 
     user_id: UUID | None = None
+    context: dict[str, Any] | None = None
+    # Backward compatibility alias for callers still sending metadata.
     metadata: dict[str, Any] | None = None
 
 
@@ -38,12 +40,15 @@ class SandboxResponse(BaseModel):
 
     id: UUID
     organization_id: UUID
-    user_id: UUID
+    user_id: UUID | None = None
     status: str
     runner_id: UUID | None = None
     pod_name: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    context: dict[str, Any] | None = None
+    error_message: str | None = None
+    # Backward compatibility fields.
     metadata: dict[str, Any] | None = None
     last_error: str | None = None
 
@@ -88,17 +93,21 @@ def _to_iso(value: Any) -> str | None:
 
 
 def _to_sandbox_response(sandbox: Any) -> SandboxResponse:
+    context = getattr(sandbox, "context", None)
+    error_message = getattr(sandbox, "error_message", None)
     return SandboxResponse(
         id=sandbox.id,
         organization_id=sandbox.organization_id,
-        user_id=sandbox.user_id,
+        user_id=getattr(sandbox, "user_id", None),
         status=str(getattr(sandbox, "status", "")),
         runner_id=getattr(sandbox, "runner_id", None),
         pod_name=getattr(sandbox, "pod_name", None),
         created_at=_to_iso(getattr(sandbox, "created_at", None)),
         updated_at=_to_iso(getattr(sandbox, "updated_at", None)),
-        metadata=getattr(sandbox, "metadata", None),
-        last_error=getattr(sandbox, "last_error", None),
+        context=context,
+        error_message=error_message,
+        metadata=context,
+        last_error=error_message,
     )
 
 
@@ -120,10 +129,11 @@ async def ensure_sandbox(
         raise HTTPException(status_code=403, detail="Only admins can ensure sandbox for another user")
 
     try:
+        context = body.context if body.context is not None else body.metadata
         sandbox = await controller.ensure(
             organization_id=org.id,
             user_id=target_user_id,
-            metadata=body.metadata,
+            metadata=context,
         )
     except SandboxControllerError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e

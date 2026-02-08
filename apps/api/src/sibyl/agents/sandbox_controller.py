@@ -48,8 +48,8 @@ class SandboxControllerError(RuntimeError):
 class SandboxController:
     """Create/suspend/resume/destroy tenant sandboxes with reconciliation."""
 
-    ACTIVE_STATUSES = {"creating", "resuming", "running", "ready", "online", "busy"}
-    TERMINAL_STATUSES = {"destroyed", "deleted"}
+    ACTIVE_STATUSES = {"pending", "starting", "running", "terminating"}
+    TERMINAL_STATUSES = {"deleted"}
 
     def __init__(
         self,
@@ -170,6 +170,7 @@ class SandboxController:
             "sandbox_id": str(getattr(sandbox, "id", "")),
             "organization_id": str(getattr(sandbox, "organization_id", "")),
         }
+        image = str(getattr(sandbox, "image", "") or self.sandbox_image)
         return {
             "apiVersion": "v1",
             "kind": "Pod",
@@ -179,7 +180,7 @@ class SandboxController:
                 "containers": [
                     {
                         "name": "runner",
-                        "image": self.sandbox_image,
+                        "image": image,
                         "command": ["sh", "-c", "sleep infinity"],
                     }
                 ],
@@ -287,7 +288,7 @@ class SandboxController:
         if candidate is None:
             return await self.create(organization_id=organization_id, user_id=user_id, metadata=metadata)
 
-        if _status_of(candidate) in {"suspended", "offline", "stopped"}:
+        if _status_of(candidate) in {"suspended", "failed"}:
             return await self.resume(candidate.id, organization_id=organization_id)
 
         return candidate
@@ -302,12 +303,15 @@ class SandboxController:
         """Create and initialize a new sandbox record (and pod if available)."""
         self._require_enabled()
         sandbox_model = self._sandbox_model()
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         async with self._session_factory() as session:
             sandbox = sandbox_model(organization_id=organization_id, user_id=user_id)
-            _set_if_present(sandbox, "status", "creating")
-            if metadata and hasattr(sandbox, "metadata"):
-                sandbox.metadata = metadata
+            _set_if_present(sandbox, "status", "starting")
+            if metadata and hasattr(sandbox, "context"):
+                context = dict(getattr(sandbox, "context", {}) or {})
+                context.update(metadata)
+                sandbox.context = context
             session.add(sandbox)
             await session.commit()
             await session.refresh(sandbox)
@@ -315,10 +319,12 @@ class SandboxController:
             pod_ready = await self._ensure_pod(sandbox)
             if pod_ready:
                 _set_if_present(sandbox, "status", "running")
-                _set_if_present(sandbox, "last_error", None)
+                _set_if_present(sandbox, "error_message", None)
+                if getattr(sandbox, "started_at", None) is None:
+                    _set_if_present(sandbox, "started_at", now)
             elif self.runtime_error:
-                _set_if_present(sandbox, "status", "error")
-                _set_if_present(sandbox, "last_error", self.runtime_error)
+                _set_if_present(sandbox, "status", "failed")
+                _set_if_present(sandbox, "error_message", self.runtime_error)
 
             await session.commit()
             await session.refresh(sandbox)
@@ -334,20 +340,24 @@ class SandboxController:
     async def resume(self, sandbox_id: UUID, *, organization_id: UUID | None = None) -> Any:
         """Resume a sandbox by ensuring runtime pod and setting active status."""
         self._require_enabled()
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         async with self._session_factory() as session:
             sandbox = await self._get_sandbox(session, sandbox_id, organization_id)
             if sandbox is None:
                 raise SandboxControllerError(f"Sandbox not found: {sandbox_id}")
 
-            _set_if_present(sandbox, "status", "resuming")
+            _set_if_present(sandbox, "status", "starting")
+            _set_if_present(sandbox, "stopped_at", None)
             pod_ready = await self._ensure_pod(sandbox)
             if pod_ready:
                 _set_if_present(sandbox, "status", "running")
-                _set_if_present(sandbox, "last_error", None)
+                _set_if_present(sandbox, "error_message", None)
+                if getattr(sandbox, "started_at", None) is None:
+                    _set_if_present(sandbox, "started_at", now)
             elif self.runtime_error:
-                _set_if_present(sandbox, "status", "error")
-                _set_if_present(sandbox, "last_error", self.runtime_error)
+                _set_if_present(sandbox, "status", "failed")
+                _set_if_present(sandbox, "error_message", self.runtime_error)
 
             await session.commit()
             await session.refresh(sandbox)
@@ -357,6 +367,7 @@ class SandboxController:
     async def suspend(self, sandbox_id: UUID, *, organization_id: UUID | None = None) -> Any:
         """Suspend a sandbox and tear down pod when possible."""
         self._require_enabled()
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         async with self._session_factory() as session:
             sandbox = await self._get_sandbox(session, sandbox_id, organization_id)
@@ -368,6 +379,7 @@ class SandboxController:
 
             _set_if_present(sandbox, "status", "suspended")
             _set_if_present(sandbox, "runner_id", None)
+            _set_if_present(sandbox, "stopped_at", now)
             await session.commit()
             await session.refresh(sandbox)
             log.info("sandbox_suspended", sandbox_id=str(sandbox_id))
@@ -376,18 +388,19 @@ class SandboxController:
     async def destroy(self, sandbox_id: UUID, *, organization_id: UUID | None = None) -> Any:
         """Destroy sandbox runtime and mark DB record as destroyed."""
         self._require_enabled()
+        now = datetime.now(UTC).replace(tzinfo=None)
 
         async with self._session_factory() as session:
             sandbox = await self._get_sandbox(session, sandbox_id, organization_id)
             if sandbox is None:
                 raise SandboxControllerError(f"Sandbox not found: {sandbox_id}")
 
+            _set_if_present(sandbox, "status", "terminating")
             await self._delete_pod_if_exists(getattr(sandbox, "pod_name", None))
 
-            _set_if_present(sandbox, "status", "destroyed")
+            _set_if_present(sandbox, "status", "deleted")
             _set_if_present(sandbox, "runner_id", None)
-            if hasattr(sandbox, "deleted_at"):
-                sandbox.deleted_at = datetime.now(UTC).replace(tzinfo=None)
+            _set_if_present(sandbox, "stopped_at", now)
             await session.commit()
             await session.refresh(sandbox)
             log.info("sandbox_destroyed", sandbox_id=str(sandbox_id))
@@ -415,7 +428,7 @@ class SandboxController:
                 return
 
             _set_if_present(sandbox, "runner_id", runner_id if connected else None)
-            _set_if_present(sandbox, "status", "running" if connected else "ready")
+            _set_if_present(sandbox, "status", "running" if connected else "suspended")
             await session.commit()
 
     async def get_logs(
@@ -457,7 +470,7 @@ class SandboxController:
             return
 
         sandbox_model = self._sandbox_model()
-        tracked_statuses = list(self.ACTIVE_STATUSES | {"error"})
+        tracked_statuses = list(self.ACTIVE_STATUSES | {"failed"})
 
         async with self._session_factory() as session:
             stmt = select(sandbox_model).where(sandbox_model.status.in_(tracked_statuses))
@@ -469,9 +482,9 @@ class SandboxController:
             k8s_ready = await self._ensure_k8s_client()
             for sandbox in sandboxes:
                 if not k8s_ready:
-                    if _status_of(sandbox) in {"creating", "resuming"} and self.runtime_error:
-                        _set_if_present(sandbox, "status", "error")
-                        _set_if_present(sandbox, "last_error", self.runtime_error)
+                    if _status_of(sandbox) in {"pending", "starting"} and self.runtime_error:
+                        _set_if_present(sandbox, "status", "failed")
+                        _set_if_present(sandbox, "error_message", self.runtime_error)
                     continue
 
                 pod_name = getattr(sandbox, "pod_name", None)
@@ -488,17 +501,17 @@ class SandboxController:
                     ).lower()
                     if phase == "running":
                         _set_if_present(sandbox, "status", "running")
-                        _set_if_present(sandbox, "last_error", None)
+                        _set_if_present(sandbox, "error_message", None)
                     elif phase == "pending":
-                        _set_if_present(sandbox, "status", "creating")
+                        _set_if_present(sandbox, "status", "starting")
                     elif phase in {"failed", "unknown"}:
-                        _set_if_present(sandbox, "status", "error")
-                        _set_if_present(sandbox, "last_error", f"pod_phase={phase}")
+                        _set_if_present(sandbox, "status", "failed")
+                        _set_if_present(sandbox, "error_message", f"pod_phase={phase}")
                 except Exception as e:
                     if self._is_not_found(e):
-                        if _status_of(sandbox) in {"running", "resuming", "creating"}:
-                            _set_if_present(sandbox, "status", "error")
-                            _set_if_present(sandbox, "last_error", "sandbox pod not found")
+                        if _status_of(sandbox) in {"running", "starting", "pending"}:
+                            _set_if_present(sandbox, "status", "failed")
+                            _set_if_present(sandbox, "error_message", "sandbox pod not found")
                     else:
                         log.warning(
                             "sandbox_reconcile_pod_read_failed",
