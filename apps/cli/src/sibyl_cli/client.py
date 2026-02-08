@@ -321,6 +321,135 @@ class SibylClient:
         """Generic POST request."""
         return await self._request("POST", path, json=json, params=params)
 
+    async def patch(
+        self,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Generic PATCH request."""
+        return await self._request("PATCH", path, json=json, params=params)
+
+    async def delete(
+        self,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Generic DELETE request."""
+        return await self._request("DELETE", path, json=json, params=params)
+
+    async def _request_any(
+        self,
+        method: str,
+        paths: list[str],
+        *,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Try multiple paths, falling back when an endpoint is not found."""
+        last_error: SibylClientError | None = None
+        for path in paths:
+            try:
+                return await self._request(method, path, json=json, params=params)
+            except SibylClientError as e:
+                if e.status_code == 404:
+                    last_error = e
+                    continue
+                raise
+
+        if last_error:
+            raise last_error
+        raise SibylClientError("No API path candidates provided")
+
+    # =========================================================================
+    # Sandbox Operations
+    # =========================================================================
+
+    async def list_sandboxes(
+        self,
+        *,
+        project_id: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """List sandboxes."""
+        params: dict[str, Any] = {}
+        if project_id:
+            params["project_id"] = project_id
+        if status:
+            params["status"] = status
+        return await self._request_any(
+            "GET",
+            ["/sandboxes", "/sandbox"],
+            params=params or None,
+        )
+
+    async def get_sandbox(self, sandbox_id: str) -> dict[str, Any]:
+        """Get sandbox status/details."""
+        return await self._request_any(
+            "GET",
+            [f"/sandboxes/{sandbox_id}", f"/sandbox/{sandbox_id}"],
+        )
+
+    async def start_sandbox(
+        self,
+        *,
+        task_id: str | None = None,
+        project_id: str | None = None,
+        image: str | None = None,
+        ttl_seconds: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Start a sandbox."""
+        payload: dict[str, Any] = {}
+        if task_id:
+            payload["task_id"] = task_id
+        if project_id:
+            payload["project_id"] = project_id
+        if image:
+            payload["image"] = image
+        if ttl_seconds is not None:
+            payload["ttl_seconds"] = ttl_seconds
+        if metadata:
+            payload["metadata"] = metadata
+
+        return await self._request_any(
+            "POST",
+            ["/sandboxes", "/sandbox"],
+            json=payload or None,
+        )
+
+    async def suspend_sandbox(self, sandbox_id: str) -> dict[str, Any]:
+        """Suspend a running sandbox."""
+        return await self._request_any(
+            "POST",
+            [f"/sandboxes/{sandbox_id}/suspend", f"/sandbox/{sandbox_id}/suspend"],
+        )
+
+    async def resume_sandbox(self, sandbox_id: str) -> dict[str, Any]:
+        """Resume a suspended sandbox."""
+        return await self._request_any(
+            "POST",
+            [f"/sandboxes/{sandbox_id}/resume", f"/sandbox/{sandbox_id}/resume"],
+        )
+
+    async def destroy_sandbox(self, sandbox_id: str) -> dict[str, Any]:
+        """Destroy a sandbox."""
+        return await self._request_any(
+            "DELETE",
+            [f"/sandboxes/{sandbox_id}", f"/sandbox/{sandbox_id}"],
+        )
+
+    async def sandbox_logs(self, sandbox_id: str, tail: int = 200) -> dict[str, Any]:
+        """Get sandbox logs."""
+        return await self._request_any(
+            "GET",
+            [f"/sandboxes/{sandbox_id}/logs", f"/sandbox/{sandbox_id}/logs"],
+            params={"tail": tail},
+        )
+
     # =========================================================================
     # Entity Operations
     # =========================================================================

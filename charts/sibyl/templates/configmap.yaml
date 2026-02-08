@@ -19,3 +19,9 @@ data:
   # FalkorDB connection
   SIBYL_FALKORDB_HOST: {{ .Values.backend.falkordb.host | quote }}
   SIBYL_FALKORDB_PORT: {{ .Values.backend.falkordb.port | quote }}
+  # Sandbox configuration
+  {{- if .Values.sandbox.enabled }}
+  {{- range $key, $value := .Values.sandbox.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  {{- end }}

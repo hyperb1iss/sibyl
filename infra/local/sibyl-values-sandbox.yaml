@@ -1,0 +1,22 @@
+# Sandbox feature overlay for local Tilt development.
+# Usage: tilt up -- --sandbox
+
+sandbox:
+  enabled: true
+
+  env:
+    SIBYL_SANDBOX_ENABLED: "true"
+    SIBYL_SANDBOX_NAMESPACE: "sibyl"
+    SIBYL_SANDBOX_IMAGE: "ghcr.io/hyperb1iss/sibyl-sandbox:latest"
+    SIBYL_SANDBOX_TTL_SECONDS: "1800"
+
+  rbac:
+    enabled: true
+
+  # Keep off by default for local dev unless you want strict egress controls.
+  networkPolicy:
+    enabled: false
+    ingressPorts:
+      - 8080
+    allowDns: true
+    allowWebEgress: true

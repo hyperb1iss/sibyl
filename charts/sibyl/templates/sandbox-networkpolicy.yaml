@@ -1,0 +1,56 @@
+{{- if and .Values.sandbox.enabled .Values.sandbox.networkPolicy.enabled }}
+{{- $allowDns := .Values.sandbox.networkPolicy.allowDns }}
+{{- $allowWeb := .Values.sandbox.networkPolicy.allowWebEgress }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sibyl.fullname" . }}-sandbox
+  labels:
+    {{- include "sibyl.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sibyl.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: sandbox
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "sibyl.backend.selectorLabels" . | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "sibyl.worker.selectorLabels" . | nindent 14 }}
+      ports:
+        {{- range .Values.sandbox.networkPolicy.ingressPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+  egress:
+    {{- if $allowDns }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.sandbox.networkPolicy.dnsNamespace | quote }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- end }}
+    {{- if $allowWeb }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+    {{- end }}
+    {{- if and (not $allowDns) (not $allowWeb) }}
+    []
+    {{- end }}
+{{- end }}

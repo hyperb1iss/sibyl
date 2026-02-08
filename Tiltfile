@@ -13,6 +13,7 @@ load('ext://helm_resource', 'helm_resource', 'helm_repo')
 
 # Configuration
 config.define_bool("skip-infra")
+config.define_bool("sandbox")
 cfg = config.parse()
 
 # =============================================================================
@@ -226,12 +227,16 @@ docker_build(
     ],
 )
 
+helm_values = ['infra/local/sibyl-values.yaml']
+if cfg.get('sandbox'):
+    helm_values.append('infra/local/sibyl-values-sandbox.yaml')
+
 k8s_yaml(
     helm(
         'charts/sibyl',
         name='sibyl',
         namespace='sibyl',
-        values=['infra/local/sibyl-values.yaml'],
+        values=helm_values,
     )
 )
 

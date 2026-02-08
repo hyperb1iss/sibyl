@@ -192,11 +192,117 @@ export const queryKeys = {
     detail: (id: string) => ['backups', 'detail', id] as const,
     jobStatus: (jobId: string) => ['backups', 'job', jobId] as const,
   },
+  sandboxes: {
+    all: ['sandboxes'] as const,
+    list: (params?: { project_id?: string; status?: string }) =>
+      ['sandboxes', 'list', params] as const,
+    detail: (id: string) => ['sandboxes', 'detail', id] as const,
+    logs: (id: string, tail: number) => ['sandboxes', 'logs', id, tail] as const,
+  },
 };
 
 // =============================================================================
 // Smart Cache Invalidation Helpers
 // =============================================================================
+
+export interface Sandbox {
+  id: string;
+  status?: string;
+  phase?: string;
+  project_id?: string | null;
+  task_id?: string | null;
+  image?: string;
+  created_at?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+}
+
+export interface SandboxListResponse {
+  sandboxes: Sandbox[];
+  total?: number;
+}
+
+export interface SandboxActionResponse {
+  sandbox?: Sandbox;
+  success?: boolean;
+  message?: string;
+  [key: string]: unknown;
+}
+
+async function sandboxFetch<T>(paths: string[], init?: RequestInit): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (const path of paths) {
+    const response = await fetch(path, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+    });
+
+    if (response.status === 404) {
+      lastError = new Error(`Sandbox endpoint not found: ${path}`);
+      continue;
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `Sandbox API error: ${response.status}`);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    return (await response.json()) as T;
+  }
+
+  throw lastError ?? new Error('Sandbox API endpoint not found');
+}
+
+function normalizeSandboxList(data: unknown): Sandbox[] {
+  if (!data) return [];
+
+  if (Array.isArray(data)) {
+    return data.filter((item): item is Sandbox => Boolean(item && typeof item === 'object'));
+  }
+
+  if (typeof data !== 'object') return [];
+  const asRecord = data as Record<string, unknown>;
+
+  if (Array.isArray(asRecord.sandboxes)) {
+    return asRecord.sandboxes.filter((item): item is Sandbox =>
+      Boolean(item && typeof item === 'object')
+    );
+  }
+  if (Array.isArray(asRecord.items)) {
+    return asRecord.items.filter((item): item is Sandbox =>
+      Boolean(item && typeof item === 'object')
+    );
+  }
+  if (Array.isArray(asRecord.data)) {
+    return asRecord.data.filter((item): item is Sandbox =>
+      Boolean(item && typeof item === 'object')
+    );
+  }
+
+  return [];
+}
+
+function normalizeSandboxDetail(data: unknown): Sandbox {
+  if (!data || typeof data !== 'object') return {} as Sandbox;
+  const asRecord = data as Record<string, unknown>;
+
+  if (asRecord.sandbox && typeof asRecord.sandbox === 'object') {
+    return asRecord.sandbox as Sandbox;
+  }
+  if (asRecord.data && typeof asRecord.data === 'object') {
+    return asRecord.data as Sandbox;
+  }
+
+  return asRecord as Sandbox;
+}
 
 /**
  * Invalidate queries based on entity type.
@@ -2134,6 +2240,153 @@ export function useBackupJobStatus(jobId: string, options?: { enabled?: boolean 
         return false;
       }
       return 3000; // Poll every 3 seconds while job is running
+    },
+  });
+}
+
+// =============================================================================
+// Sandbox Hooks
+// =============================================================================
+
+/**
+ * List sandboxes with optional filtering.
+ */
+export function useSandboxes(params?: { project_id?: string; status?: string }) {
+  const searchParams = new URLSearchParams();
+  if (params?.project_id) searchParams.set('project_id', params.project_id);
+  if (params?.status) searchParams.set('status', params.status);
+  const query = searchParams.toString();
+
+  return useQuery({
+    queryKey: queryKeys.sandboxes.list(params),
+    queryFn: async () => {
+      const data = await sandboxFetch<unknown>([
+        `/api/sandboxes${query ? `?${query}` : ''}`,
+        `/api/sandbox${query ? `?${query}` : ''}`,
+      ]);
+      return {
+        sandboxes: normalizeSandboxList(data),
+      } as SandboxListResponse;
+    },
+  });
+}
+
+/**
+ * Fetch a single sandbox by ID.
+ */
+export function useSandbox(id: string, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.sandboxes.detail(id),
+    queryFn: async () => {
+      const data = await sandboxFetch<unknown>([`/api/sandboxes/${id}`, `/api/sandbox/${id}`]);
+      return normalizeSandboxDetail(data);
+    },
+    enabled: (options?.enabled ?? true) && Boolean(id),
+    staleTime: 5000,
+  });
+}
+
+/**
+ * Fetch recent logs for a sandbox.
+ */
+export function useSandboxLogs(sandboxId: string, options?: { enabled?: boolean; tail?: number }) {
+  const tail = options?.tail ?? 200;
+
+  return useQuery({
+    queryKey: queryKeys.sandboxes.logs(sandboxId, tail),
+    queryFn: () =>
+      sandboxFetch<unknown>([
+        `/api/sandboxes/${sandboxId}/logs?tail=${tail}`,
+        `/api/sandbox/${sandboxId}/logs?tail=${tail}`,
+      ]),
+    enabled: (options?.enabled ?? true) && Boolean(sandboxId),
+    staleTime: 2000,
+  });
+}
+
+/**
+ * Start a sandbox.
+ */
+export function useStartSandbox() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (params?: {
+      task_id?: string;
+      project_id?: string;
+      image?: string;
+      ttl_seconds?: number;
+      metadata?: Record<string, unknown>;
+    }) =>
+      sandboxFetch<SandboxActionResponse>(['/api/sandboxes', '/api/sandbox'], {
+        method: 'POST',
+        body: JSON.stringify(params ?? {}),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.sandboxes.all });
+    },
+  });
+}
+
+/**
+ * Suspend a sandbox.
+ */
+export function useSuspendSandbox() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (sandboxId: string) =>
+      sandboxFetch<SandboxActionResponse>(
+        [`/api/sandboxes/${sandboxId}/suspend`, `/api/sandbox/${sandboxId}/suspend`],
+        {
+          method: 'POST',
+        }
+      ),
+    onSuccess: (_data, sandboxId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.sandboxes.detail(sandboxId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sandboxes.all });
+    },
+  });
+}
+
+/**
+ * Resume a sandbox.
+ */
+export function useResumeSandbox() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (sandboxId: string) =>
+      sandboxFetch<SandboxActionResponse>(
+        [`/api/sandboxes/${sandboxId}/resume`, `/api/sandbox/${sandboxId}/resume`],
+        {
+          method: 'POST',
+        }
+      ),
+    onSuccess: (_data, sandboxId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.sandboxes.detail(sandboxId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sandboxes.all });
+    },
+  });
+}
+
+/**
+ * Destroy a sandbox.
+ */
+export function useDestroySandbox() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (sandboxId: string) =>
+      sandboxFetch<SandboxActionResponse>(
+        [`/api/sandboxes/${sandboxId}`, `/api/sandbox/${sandboxId}`],
+        {
+          method: 'DELETE',
+        }
+      ),
+    onSuccess: (_data, sandboxId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.sandboxes.detail(sandboxId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.sandboxes.all });
     },
   });
 }

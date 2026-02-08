@@ -40,6 +40,7 @@ from sibyl_cli.logs import app as logs_app
 from sibyl_cli.org import app as org_app
 from sibyl_cli.project import app as project_app
 from sibyl_cli.runner import app as runner_app
+from sibyl_cli.sandbox import app as sandbox_app
 from sibyl_cli.source import app as source_app
 from sibyl_cli.state import set_context_override
 from sibyl_cli.task import app as task_app
@@ -88,6 +89,7 @@ app.add_typer(config_app, name="config")
 app.add_typer(context_app, name="context")
 app.add_typer(local_app, name="local")
 app.add_typer(logs_app, name="logs")
+app.add_typer(sandbox_app, name="sandbox")
 app.add_typer(update_app, name="update")
 
 

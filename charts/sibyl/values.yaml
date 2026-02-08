@@ -384,6 +384,37 @@ worker:
   # -- Affinity rules (overridden by podAntiAffinity if enabled)
   affinity: {}
 
+# -- Sandbox execution configuration
+sandbox:
+  # -- Enable sandbox feature wiring
+  enabled: false
+
+  # -- Sandbox runtime environment variables
+  env:
+    SIBYL_SANDBOX_ENABLED: "false"
+    SIBYL_SANDBOX_NAMESPACE: "sibyl"
+    SIBYL_SANDBOX_IMAGE: "ghcr.io/hyperb1iss/sibyl-sandbox:latest"
+    SIBYL_SANDBOX_TTL_SECONDS: "3600"
+
+  # -- RBAC for sandbox controller actions (pods/exec/logs lifecycle)
+  rbac:
+    enabled: false
+    # -- Optional override (defaults to chart service account)
+    serviceAccountName: ""
+
+  # -- NetworkPolicy for sandbox workloads (label app.kubernetes.io/component=sandbox)
+  networkPolicy:
+    enabled: false
+    # -- Namespace where DNS runs (for kube-dns/coredns)
+    dnsNamespace: "kube-system"
+    # -- Inbound ports opened to sandbox pods from backend/worker pods
+    ingressPorts:
+      - 8080
+    # -- Allow DNS egress
+    allowDns: true
+    # -- Allow outbound HTTP/HTTPS egress from sandbox pods
+    allowWebEgress: true
+
 # -- Ingress configuration (for reference, actual ingress via Kong)
 ingress:
   # -- Enable ingress resource creation
