@@ -97,6 +97,14 @@ export interface PermissionChangedPayload {
   org_role?: string;
 }
 
+/** Sandbox status change payload */
+export interface SandboxStatusPayload {
+  sandbox_id: string;
+  status: string;
+  org_id?: string;
+  pod_name?: string;
+}
+
 /** Map event types to their payload types */
 export interface WebSocketEventPayloadMap {
   entity_created: EntityEventPayload;
@@ -115,6 +123,7 @@ export interface WebSocketEventPayloadMap {
   approval_response: ApprovalResponsePayload;
   status_hint: StatusHintPayload;
   permission_changed: PermissionChangedPayload;
+  sandbox_status_changed: SandboxStatusPayload;
 }
 
 export type WebSocketEventType = keyof WebSocketEventPayloadMap;

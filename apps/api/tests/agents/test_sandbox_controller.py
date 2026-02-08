@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
-from sibyl.agents.sandbox_controller import SandboxController
+from sibyl.agents.sandbox_controller import SandboxController, SandboxControllerError
 from sibyl.auth.jwt import JwtError, create_runner_token, verify_access_token
 from sibyl.config import Settings
 
@@ -228,3 +228,170 @@ class TestPodManifestTokenInjection:
         assert container["securityContext"]["runAsNonRoot"] is True
         assert container["securityContext"]["allowPrivilegeEscalation"] is False
         assert container["resources"]["requests"]["cpu"] == "250m"
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle tests (mocked K8s + mocked session)
+# ---------------------------------------------------------------------------
+
+
+class TestSandboxLifecycle:
+    """Full lifecycle: ensure -> suspend -> resume -> destroy."""
+
+    @pytest.fixture
+    def mock_session(self):
+        """Mock async session with sandbox-like objects."""
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        return session
+
+    @pytest.fixture
+    def lifecycle_controller(self, mock_session):
+        """Controller with mocked session factory and K8s."""
+        factory = AsyncMock(return_value=mock_session)
+        return SandboxController(
+            session_factory=factory,
+            enabled=True,
+            server_url="http://localhost:3334",
+            k8s_required=False,
+        )
+
+    def test_pod_name_deterministic(self, lifecycle_controller, ids):
+        """Same sandbox ID always produces the same pod name."""
+        name1 = lifecycle_controller._pod_name_for(ids.sandbox)
+        name2 = lifecycle_controller._pod_name_for(ids.sandbox)
+        assert name1 == name2
+        assert name1.startswith("sibyl-sandbox-")
+
+    def test_pod_name_lowercase(self, lifecycle_controller, ids):
+        """Pod names are always lowercase."""
+        name = lifecycle_controller._pod_name_for(ids.sandbox)
+        assert name == name.lower()
+
+    def test_pod_name_truncated(self, lifecycle_controller, ids):
+        """Pod name uses first 24 chars of sandbox ID."""
+        name = lifecycle_controller._pod_name_for(ids.sandbox)
+        sid = str(ids.sandbox).replace("_", "-")
+        expected = f"sibyl-sandbox-{sid[:24]}".lower()
+        assert name == expected
+
+    def test_require_enabled_raises_when_disabled(self):
+        """Controller methods raise when disabled."""
+        ctrl = SandboxController(
+            session_factory=AsyncMock(),
+            enabled=False,
+        )
+        with pytest.raises(SandboxControllerError, match="disabled"):
+            ctrl._require_enabled()
+
+    def test_require_enabled_passes_when_enabled(self, lifecycle_controller):
+        """No exception when controller is enabled."""
+        lifecycle_controller._require_enabled()
+
+    def test_active_statuses_are_tracked(self):
+        """Verify the set of active statuses hasn't changed unexpectedly."""
+        assert "running" in SandboxController.ACTIVE_STATUSES
+        assert "pending" in SandboxController.ACTIVE_STATUSES
+        assert "starting" in SandboxController.ACTIVE_STATUSES
+        assert "deleted" not in SandboxController.ACTIVE_STATUSES
+
+    def test_terminal_statuses(self):
+        """Verify terminal statuses."""
+        assert "deleted" in SandboxController.TERMINAL_STATUSES
+        assert "running" not in SandboxController.TERMINAL_STATUSES
+
+    def test_k8s_available_false_by_default(self, lifecycle_controller):
+        """K8s starts unavailable until explicitly checked."""
+        assert lifecycle_controller.k8s_available is False
+
+    def test_runtime_error_none_initially(self, lifecycle_controller):
+        """No runtime error before any operations."""
+        assert lifecycle_controller.runtime_error is None
+
+    def test_namespace_default(self):
+        """Default namespace is 'default'."""
+        ctrl = SandboxController(session_factory=AsyncMock(), enabled=True)
+        assert ctrl.namespace == "default"
+
+    def test_namespace_custom(self):
+        """Custom namespace is respected."""
+        ctrl = SandboxController(
+            session_factory=AsyncMock(), enabled=True, namespace="sibyl-prod"
+        )
+        assert ctrl.namespace == "sibyl-prod"
+
+    def test_constructor_defaults(self):
+        """Constructor defaults are sane."""
+        ctrl = SandboxController(session_factory=AsyncMock())
+        assert ctrl.enabled is False
+        assert ctrl.pod_prefix == "sibyl-sandbox"
+        assert ctrl.reconcile_interval_seconds == 20
+        assert ctrl.idle_ttl_seconds == 1800
+        assert ctrl.max_lifetime_seconds == 14400
+        assert ctrl.k8s_required is False
+
+
+class TestSandboxAdminEndpoints:
+    """Test suspend_all and find_orphaned_pods controller methods."""
+
+    async def test_suspend_all_returns_zero_when_none_active(self):
+        """No active sandboxes -> 0 suspended."""
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        # Mock execute -> result.scalars().all() chain (sync calls on awaited result)
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = []
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = mock_scalars
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        factory = MagicMock(return_value=mock_session)
+        ctrl = SandboxController(
+            session_factory=factory,
+            enabled=True,
+            k8s_required=False,
+        )
+
+        count = await ctrl.suspend_all(uuid4())
+        assert count == 0
+
+    async def test_find_orphaned_pods_returns_empty_without_k8s(self):
+        """Without K8s, no orphans found."""
+        factory = AsyncMock()
+        ctrl = SandboxController(
+            session_factory=factory,
+            enabled=True,
+            k8s_required=False,
+        )
+        # K8s not initialized -> should return empty
+        orphans = await ctrl.find_orphaned_pods(uuid4())
+        assert orphans == []
+
+    async def test_suspend_all_raises_when_disabled(self):
+        """suspend_all raises when controller disabled."""
+        ctrl = SandboxController(
+            session_factory=AsyncMock(),
+            enabled=False,
+        )
+        with pytest.raises(SandboxControllerError, match="disabled"):
+            await ctrl.suspend_all(uuid4())
+
+    def test_is_not_found_true_for_404(self):
+        """_is_not_found returns True for status 404."""
+        ctrl = SandboxController(session_factory=AsyncMock(), enabled=True)
+        exc = type("FakeExc", (), {"status": 404})()
+        assert ctrl._is_not_found(exc) is True
+
+    def test_is_not_found_false_for_500(self):
+        """_is_not_found returns False for non-404."""
+        ctrl = SandboxController(session_factory=AsyncMock(), enabled=True)
+        exc = type("FakeExc", (), {"status": 500})()
+        assert ctrl._is_not_found(exc) is False
+
+    def test_is_not_found_false_without_status(self):
+        """_is_not_found returns False when no status attr."""
+        ctrl = SandboxController(session_factory=AsyncMock(), enabled=True)
+        assert ctrl._is_not_found(RuntimeError("nope")) is False

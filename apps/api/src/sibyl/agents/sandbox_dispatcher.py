@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import time
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, suppress
 from datetime import UTC, datetime, timedelta
@@ -93,6 +94,7 @@ class SandboxDispatcher:
         idempotency_key: str | None = None,
     ) -> Any:
         """Enqueue a durable sandbox task."""
+        start = time.monotonic()
         self._require_enabled()
         sandbox_task_model = self._task_model()
         payload = payload or {}
@@ -135,6 +137,8 @@ class SandboxDispatcher:
                 sandbox_id=str(sandbox_id),
                 task_id=str(getattr(task, "id", "")),
                 task_type=task_type,
+                org_id=str(organization_id),
+                duration_ms=round((time.monotonic() - start) * 1000, 1),
             )
             return task
 
@@ -147,6 +151,7 @@ class SandboxDispatcher:
         limit: int = 20,
     ) -> int:
         """Dispatch queued tasks for a sandbox to a connected runner."""
+        start = time.monotonic()
         self._require_enabled()
         sandbox_task_model = self._task_model()
         now = datetime.now(UTC).replace(tzinfo=None)
@@ -204,6 +209,7 @@ class SandboxDispatcher:
                     "sandbox_tasks_dispatched",
                     sandbox_id=str(sandbox_id),
                     count=dispatched,
+                    duration_ms=round((time.monotonic() - start) * 1000, 1),
                 )
             return dispatched
 
@@ -279,6 +285,8 @@ class SandboxDispatcher:
                 success=success,
                 retryable=retryable,
                 canceled=canceled,
+                task_type=str(getattr(task, "task_type", "")),
+                attempt=int(getattr(task, "attempt_count", 0) or 0),
             )
             return task
 
@@ -294,6 +302,7 @@ class SandboxDispatcher:
         Only tasks that have not been acknowledged within dispatch_ttl, or acked
         tasks that exceeded ack_ttl, are considered stale.
         """
+        start = time.monotonic()
         self._require_enabled()
         sandbox_task_model = self._task_model()
         now = datetime.now(UTC).replace(tzinfo=None)
@@ -339,5 +348,41 @@ class SandboxDispatcher:
 
             await session.commit()
             if reaped:
-                log.info("sandbox_tasks_reaped", count=reaped)
+                log.info(
+                    "sandbox_tasks_reaped",
+                    count=reaped,
+                    duration_ms=round((time.monotonic() - start) * 1000, 1),
+                )
             return reaped
+
+    async def fail_all_pending(self, org_id: UUID) -> int:
+        """Fail all pending/dispatched/acked tasks for an org. Returns count."""
+        self._require_enabled()
+        sandbox_task_model = self._task_model()
+        now = datetime.now(UTC).replace(tzinfo=None)
+        drainable_statuses = list(self.PENDING_STATUSES | {"dispatched", "acked"})
+
+        async with self._session_factory() as session:
+            stmt = (
+                select(sandbox_task_model)
+                .where(
+                    sandbox_task_model.organization_id == org_id,
+                    sandbox_task_model.status.in_(drainable_statuses),
+                )
+                .with_for_update(skip_locked=True)
+            )
+            result = await session.execute(stmt)
+            tasks = result.scalars().all()
+
+            count = 0
+            for task in tasks:
+                _set_if_present(task, "status", "failed")
+                _set_if_present(task, "error_message", "admin_rollback")
+                _set_if_present(task, "failed_at", now)
+                count += 1
+
+            await session.commit()
+
+        if count:
+            log.info("sandbox_fail_all_pending", org_id=str(org_id), count=count)
+        return count

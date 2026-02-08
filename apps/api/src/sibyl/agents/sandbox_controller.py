@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+import time
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
@@ -387,6 +388,7 @@ class SandboxController:
         metadata: dict[str, Any] | None = None,
     ) -> Any:
         """Create and initialize a new sandbox record (and pod if available)."""
+        start = time.monotonic()
         self._require_enabled()
         sandbox_model = self._sandbox_model()
         now = datetime.now(UTC).replace(tzinfo=None)
@@ -414,17 +416,20 @@ class SandboxController:
 
             await session.commit()
             await session.refresh(sandbox)
+            duration_ms = (time.monotonic() - start) * 1000
             log.info(
                 "sandbox_created",
                 sandbox_id=str(getattr(sandbox, "id", "")),
                 organization_id=str(organization_id),
                 user_id=str(user_id),
                 status=_status_of(sandbox),
+                duration_ms=round(duration_ms, 1),
             )
             return sandbox
 
     async def resume(self, sandbox_id: UUID, *, organization_id: UUID | None = None) -> Any:
         """Resume a sandbox by ensuring runtime pod and setting active status."""
+        start = time.monotonic()
         self._require_enabled()
         now = datetime.now(UTC).replace(tzinfo=None)
 
@@ -449,11 +454,17 @@ class SandboxController:
 
             await session.commit()
             await session.refresh(sandbox)
-            log.info("sandbox_resumed", sandbox_id=str(sandbox_id), status=_status_of(sandbox))
+            log.info(
+                "sandbox_resumed",
+                sandbox_id=str(sandbox_id),
+                status=_status_of(sandbox),
+                duration_ms=round((time.monotonic() - start) * 1000, 1),
+            )
             return sandbox
 
     async def suspend(self, sandbox_id: UUID, *, organization_id: UUID | None = None) -> Any:
         """Suspend a sandbox and tear down pod when possible."""
+        start = time.monotonic()
         self._require_enabled()
         now = datetime.now(UTC).replace(tzinfo=None)
 
@@ -470,11 +481,17 @@ class SandboxController:
             _set_if_present(sandbox, "stopped_at", now)
             await session.commit()
             await session.refresh(sandbox)
-            log.info("sandbox_suspended", sandbox_id=str(sandbox_id))
+            log.info(
+                "sandbox_suspended",
+                sandbox_id=str(sandbox_id),
+                org_id=str(organization_id),
+                duration_ms=round((time.monotonic() - start) * 1000, 1),
+            )
             return sandbox
 
     async def destroy(self, sandbox_id: UUID, *, organization_id: UUID | None = None) -> Any:
         """Destroy sandbox runtime and mark DB record as destroyed."""
+        start = time.monotonic()
         self._require_enabled()
         now = datetime.now(UTC).replace(tzinfo=None)
 
@@ -491,7 +508,12 @@ class SandboxController:
             _set_if_present(sandbox, "stopped_at", now)
             await session.commit()
             await session.refresh(sandbox)
-            log.info("sandbox_destroyed", sandbox_id=str(sandbox_id))
+            log.info(
+                "sandbox_destroyed",
+                sandbox_id=str(sandbox_id),
+                org_id=str(organization_id),
+                duration_ms=round((time.monotonic() - start) * 1000, 1),
+            )
             return sandbox
 
     async def sync_runner_connection(
@@ -651,20 +673,100 @@ class SandboxController:
         except Exception as e:
             log.warning("sandbox_reconcile_reap_failed", error=str(e))
 
+    async def suspend_all(self, org_id: UUID) -> int:
+        """Suspend all active sandboxes for an org. Returns count."""
+        self._require_enabled()
+        sandbox_model = self._sandbox_model()
+        now = datetime.now(UTC).replace(tzinfo=None)
+        count = 0
+
+        async with self._session_factory() as session:
+            stmt = select(sandbox_model).where(
+                sandbox_model.organization_id == org_id,
+                sandbox_model.status.in_(list(self.ACTIVE_STATUSES)),
+            )
+            result = await session.execute(stmt)
+            sandboxes = result.scalars().all()
+
+            for sandbox in sandboxes:
+                pod_name = getattr(sandbox, "pod_name", None)
+                await self._delete_pod_if_exists(pod_name)
+                _set_if_present(sandbox, "status", "suspended")
+                _set_if_present(sandbox, "runner_id", None)
+                _set_if_present(sandbox, "stopped_at", now)
+                _set_if_present(sandbox, "error_message", "admin_rollback")
+                count += 1
+
+            await session.commit()
+
+        if count:
+            log.info("sandbox_suspend_all", org_id=str(org_id), count=count)
+        return count
+
+    async def find_orphaned_pods(self, org_id: UUID) -> list[str]:
+        """Find K8s pods with sandbox label but no matching active DB record."""
+        if not await self._ensure_k8s_client():
+            return []
+
+        sandbox_model = self._sandbox_model()
+
+        # Get active pod names from DB
+        async with self._session_factory() as session:
+            stmt = select(sandbox_model.pod_name).where(
+                sandbox_model.organization_id == org_id,
+                sandbox_model.status.in_(list(self.ACTIVE_STATUSES)),
+                sandbox_model.pod_name.isnot(None),
+            )
+            result = await session.execute(stmt)
+            active_pod_names = {row[0] for row in result.all() if row[0]}
+
+        # List K8s pods with sandbox label
+        try:
+            pods = await self._core_api.list_namespaced_pod(
+                namespace=self.namespace,
+                label_selector="app=sibyl-sandbox",
+            )
+        except Exception as e:
+            log.warning("sandbox_orphan_scan_failed", error=str(e))
+            return []
+
+        orphaned: list[str] = []
+        for pod in getattr(pods, "items", []):
+            pod_name = getattr(getattr(pod, "metadata", None), "name", None)
+            if pod_name and pod_name not in active_pod_names:
+                # Verify this pod belongs to the requesting org
+                labels = getattr(getattr(pod, "metadata", None), "labels", {}) or {}
+                if labels.get("organization_id") == str(org_id):
+                    orphaned.append(pod_name)
+
+        if orphaned:
+            log.info("sandbox_orphaned_pods_found", org_id=str(org_id), count=len(orphaned))
+        return orphaned
+
     async def _reconcile_once(self) -> None:
         if not self.enabled:
             return
 
+        start = time.monotonic()
         sandbox_model = self._sandbox_model()
         tracked_statuses = list(self.ACTIVE_STATUSES | {"failed"})
         now = datetime.now(UTC).replace(tzinfo=None)
 
+        sandboxes: list[Any] = []
         async with self._session_factory() as session:
             stmt = select(sandbox_model).where(sandbox_model.status.in_(tracked_statuses))
             result = await session.execute(stmt)
-            sandboxes = result.scalars().all()
+            sandboxes = list(result.scalars().all())
             if not sandboxes:
                 await self._reap_stale_tasks()
+                duration_ms = (time.monotonic() - start) * 1000
+                log.info(
+                    "sandbox_reconcile_complete",
+                    total=0,
+                    suspended=0,
+                    failed=0,
+                    duration_ms=round(duration_ms, 1),
+                )
                 return
 
             k8s_ready = await self._ensure_k8s_client()
@@ -673,6 +775,20 @@ class SandboxController:
             await session.commit()
 
         await self._reap_stale_tasks()
+        duration_ms = (time.monotonic() - start) * 1000
+        suspended_count = sum(
+            1 for s in sandboxes if str(getattr(s, "status", "")).lower() == "suspended"
+        )
+        failed_count = sum(
+            1 for s in sandboxes if str(getattr(s, "status", "")).lower() == "failed"
+        )
+        log.info(
+            "sandbox_reconcile_complete",
+            total=len(sandboxes),
+            suspended=suspended_count,
+            failed=failed_count,
+            duration_ms=round(duration_ms, 1),
+        )
 
     async def reconcile_loop(self, stop_event: asyncio.Event | None = None) -> None:
         """Periodic reconcile loop for sandbox runtime/DB consistency."""

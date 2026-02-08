@@ -231,6 +231,32 @@ helm_values = ['infra/local/sibyl-values.yaml']
 if cfg.get('sandbox'):
     helm_values.append('infra/local/sibyl-values-sandbox.yaml')
 
+    # Runner image (daemon that connects to API via WebSocket)
+    docker_build(
+        'sibyl-runner',
+        context='.',
+        dockerfile='apps/runner/Dockerfile',
+        only=[
+            'pyproject.toml',
+            'uv.lock',
+            'apps/runner/',
+            'packages/python/sibyl-core/',
+        ],
+    )
+
+    # Sandbox runner image (devcontainer-based execution environment)
+    docker_build(
+        'sibyl-sandbox',
+        context='.',
+        dockerfile='apps/runner/Dockerfile.sandbox',
+        only=[
+            'pyproject.toml',
+            'uv.lock',
+            'apps/runner/',
+            'packages/python/sibyl-core/',
+        ],
+    )
+
 k8s_yaml(
     helm(
         'charts/sibyl',

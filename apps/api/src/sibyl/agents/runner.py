@@ -612,20 +612,43 @@ When done, complete with learnings to capture insights for future agents.
         Returns:
             AgentInstance ready for execution
         """
-        log.info(
-            "Spawning agent",
-            agent_type=agent_type.value,
-            task_id=task.id if task else None,
-            sandbox_mode=self.sandbox_mode,
-        )
-
         # Generate agent ID if not provided
         if agent_id is None:
             timestamp = datetime.now(UTC).isoformat()
             agent_id = _generate_agent_id(self.org_id, self.project_id, timestamp)
 
+        # Resolve effective sandbox mode for this org via rollout gate
+        from uuid import UUID
+
+        from sibyl.agents.sandbox_rollout import resolve_sandbox_mode
+        from sibyl.config import settings
+
+        try:
+            org_uuid = UUID(self.org_id)
+        except (ValueError, TypeError):
+            org_uuid = None
+
+        if org_uuid is not None:
+            effective_mode = resolve_sandbox_mode(
+                global_mode=self.sandbox_mode,
+                org_id=org_uuid,
+                rollout_percent=settings.sandbox_rollout_percent,
+                rollout_orgs=settings.sandbox_rollout_orgs,
+                canary_mode=settings.sandbox_canary_mode,
+            )
+        else:
+            effective_mode = self.sandbox_mode
+
+        log.info(
+            "Spawning agent",
+            agent_type=agent_type.value,
+            task_id=task.id if task else None,
+            sandbox_mode=self.sandbox_mode,
+            effective_mode=effective_mode,
+        )
+
         # Enforced mode: route exclusively through sandbox
-        if self.sandbox_mode == "enforced":
+        if effective_mode == "enforced":
             return await self._spawn_sandboxed(
                 agent_id=agent_id,
                 prompt=prompt,
@@ -647,7 +670,7 @@ When done, complete with learnings to capture insights for future agents.
         )
 
         # Shadow mode: also queue to sandbox for comparison (fire-and-forget)
-        if self.sandbox_mode == "shadow":
+        if effective_mode == "shadow":
             await self._queue_sandbox_task(
                 agent_id=agent_id,
                 prompt=prompt,

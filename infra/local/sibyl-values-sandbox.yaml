@@ -7,8 +7,19 @@ sandbox:
   env:
     SIBYL_SANDBOX_ENABLED: "true"
     SIBYL_SANDBOX_NAMESPACE: "sibyl"
-    SIBYL_SANDBOX_IMAGE: "ghcr.io/hyperb1iss/sibyl-sandbox:latest"
+    SIBYL_SANDBOX_IMAGE: "sibyl-sandbox"
     SIBYL_SANDBOX_TTL_SECONDS: "1800"
+
+  image:
+    repository: sibyl-sandbox
+    tag: dev
+    pullPolicy: Never
+
+  runner:
+    image:
+      repository: sibyl-runner
+      tag: dev
+      pullPolicy: Never
 
   rbac:
     enabled: true

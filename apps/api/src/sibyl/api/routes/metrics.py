@@ -282,3 +282,90 @@ async def get_org_metrics(
         raise HTTPException(
             status_code=500, detail="Failed to get organization metrics. Please try again."
         ) from e
+
+
+@router.get("/sandboxes")
+async def sandbox_metrics(
+    org: Organization = Depends(get_current_organization),
+) -> dict:
+    """Sandbox usage metrics for the organization."""
+    from sqlalchemy import extract, func
+    from sqlmodel import select
+
+    try:
+        # Lazy import sandbox models to avoid import errors when feature is off
+        from sibyl.db.models import Sandbox, SandboxTask
+    except ImportError:
+        return {
+            "error": "Sandbox models not available",
+            "status_counts": {},
+            "queue_depth": {},
+            "total_sandboxes": 0,
+            "total_tasks": 0,
+        }
+
+    from sibyl.db.connection import get_session
+
+    org_id = org.id
+
+    async with get_session() as session:
+        # Count sandboxes by status
+        sandbox_status_result = await session.execute(
+            select(Sandbox.status, func.count())
+            .where(Sandbox.organization_id == org_id)
+            .group_by(Sandbox.status)
+        )
+        status_counts = dict(sandbox_status_result.all())
+
+        # Count tasks by status (queue depth)
+        task_status_result = await session.execute(
+            select(SandboxTask.status, func.count())
+            .where(SandboxTask.organization_id == org_id)
+            .group_by(SandboxTask.status)
+        )
+        queue_depth = dict(task_status_result.all())
+
+        # Total counts
+        total_sandboxes = sum(status_counts.values())
+        total_tasks = sum(queue_depth.values())
+
+        # Retry rate: tasks with attempt_count > 1 / total completed+failed tasks
+        retry_result = await session.execute(
+            select(func.count()).where(
+                SandboxTask.organization_id == org_id,
+                SandboxTask.attempt_count > 1,
+            )
+        )
+        retry_count = retry_result.scalar() or 0
+
+        terminal_result = await session.execute(
+            select(func.count()).where(
+                SandboxTask.organization_id == org_id,
+                SandboxTask.status.in_(["completed", "failed"]),
+            )
+        )
+        terminal_count = terminal_result.scalar() or 0
+        retry_rate = (retry_count / terminal_count * 100) if terminal_count > 0 else 0.0
+
+        # Dispatch latency: avg time from creation to ack for acked/completed tasks
+        latency_result = await session.execute(
+            select(
+                func.avg(
+                    extract("epoch", SandboxTask.acked_at)
+                    - extract("epoch", SandboxTask.created_at)
+                )
+            ).where(
+                SandboxTask.organization_id == org_id,
+                SandboxTask.acked_at.isnot(None),
+            )
+        )
+        avg_dispatch_latency_seconds = latency_result.scalar()
+
+    return {
+        "status_counts": status_counts,
+        "queue_depth": queue_depth,
+        "total_sandboxes": total_sandboxes,
+        "total_tasks": total_tasks,
+        "retry_rate": round(retry_rate, 1),
+        "avg_dispatch_latency_seconds": round(float(avg_dispatch_latency_seconds or 0), 2),
+    }

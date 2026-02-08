@@ -239,6 +239,22 @@ class Settings(BaseSettings):
         description="Server URL injected into sandbox pods (defaults to server_url)",
     )
 
+    # Staged rollout
+    sandbox_rollout_percent: int = Field(
+        default=0,
+        ge=0,
+        le=100,
+        description="Percentage of orgs to enable sandbox for (0=none, 100=all)",
+    )
+    sandbox_rollout_orgs: list[str] = Field(
+        default_factory=list,
+        description="Explicit org IDs to enable sandbox for (bypass percentage)",
+    )
+    sandbox_canary_mode: bool = Field(
+        default=False,
+        description="When true, rollout orgs get shadow mode instead of enforced",
+    )
+
     # Email configuration (Resend)
     resend_api_key: SecretStr = Field(
         default=SecretStr(""),
