@@ -743,6 +743,10 @@ class SandboxController:
             log.info("sandbox_orphaned_pods_found", org_id=str(org_id), count=len(orphaned))
         return orphaned
 
+    async def delete_orphaned_pod(self, pod_name: str) -> None:
+        """Delete a single orphaned pod by name (public API for admin cleanup)."""
+        await self._delete_pod_if_exists(pod_name)
+
     async def _reconcile_once(self) -> None:
         if not self.enabled:
             return

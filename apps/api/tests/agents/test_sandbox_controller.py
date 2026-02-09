@@ -366,7 +366,12 @@ class TestSandboxAdminEndpoints:
             enabled=True,
             k8s_required=False,
         )
-        # K8s not initialized -> should return empty
+        # Force K8s unavailable by resetting checked state and clearing client
+        ctrl._k8s_checked = False
+        ctrl._core_api = None
+        ctrl._k8s_error = "no cluster"
+        # Prevent re-initialization by marking checked after clearing
+        ctrl._k8s_checked = True
         orphans = await ctrl.find_orphaned_pods(uuid4())
         assert orphans == []
 

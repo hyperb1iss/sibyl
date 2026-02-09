@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import Any
 
@@ -127,15 +128,11 @@ class SandboxExecProxy:
     async def close(self) -> None:
         """Clean up K8s connection."""
         if self._k8s_stream is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._k8s_stream.close()
-            except Exception:
-                pass
             self._k8s_stream = None
         if self._ws_client is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await self._ws_client.close()
-            except Exception:
-                pass
             self._ws_client = None
         log.debug("sandbox_exec_closed")

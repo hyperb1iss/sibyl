@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from pydantic import BaseModel
 from sqlmodel import select
 
@@ -255,7 +255,7 @@ async def sandbox_cleanup(
     deleted_pods = 0
     for pod_name in orphaned_pods:
         try:
-            await controller._delete_pod_if_exists(pod_name)
+            await controller.delete_orphaned_pod(pod_name)
             deleted_pods += 1
         except Exception as e:
             log.warning("sandbox_cleanup_pod_delete_failed", pod_name=pod_name, error=str(e))
@@ -278,7 +278,6 @@ async def sandbox_cleanup(
 
 @router.get("/admin/rollout")
 async def sandbox_rollout_status(
-    request: Request,
     auth: AuthSession = Depends(get_auth_session),
 ) -> dict[str, Any]:
     """Show current rollout config and this org's effective mode."""
@@ -418,6 +417,50 @@ async def get_sandbox_logs(
         raise HTTPException(status_code=503, detail=detail) from e
 
 
+def _extract_ws_token(websocket: WebSocket) -> str | None:
+    """Extract JWT from query param, Authorization header, or cookie."""
+    token = websocket.query_params.get("token") or websocket.cookies.get("sibyl_access_token")
+    if not token:
+        auth_header = websocket.headers.get("authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+    return token
+
+
+async def _authenticate_ws(websocket: WebSocket) -> tuple[UUID | None, UUID | None] | None:
+    """Authenticate a WebSocket connection, returning (org_id, user_id) or None on failure.
+
+    On auth failure, closes the websocket and returns None.
+    """
+    from sibyl.auth.jwt import JwtError, verify_access_token
+    from sibyl.config import settings
+
+    token = _extract_ws_token(websocket)
+    if not token and not settings.disable_auth:
+        await websocket.close(code=4001, reason="Missing token")
+        return None
+
+    if settings.disable_auth:
+        return (None, None)
+
+    try:
+        claims = verify_access_token(token)  # type: ignore[arg-type]
+    except JwtError:
+        await websocket.close(code=4001, reason="Invalid token")
+        return None
+
+    org_claim, user_claim = claims.get("org"), claims.get("sub")
+    if not (org_claim and user_claim):
+        await websocket.close(code=4001, reason="Invalid token claims")
+        return None
+
+    try:
+        return (UUID(str(org_claim)), UUID(str(user_claim)))
+    except (TypeError, ValueError):
+        await websocket.close(code=4001, reason="Invalid token claims")
+        return None
+
+
 @router.websocket("/{sandbox_id}/attach")
 async def sandbox_attach(websocket: WebSocket, sandbox_id: UUID) -> None:
     """WebSocket exec proxy: browser terminal <-> K8s pod shell.
@@ -428,44 +471,13 @@ async def sandbox_attach(websocket: WebSocket, sandbox_id: UUID) -> None:
       - Server sends raw text (stdout/stderr from pod)
     """
     from sibyl.agents.sandbox_exec import SandboxExecProxy
-    from sibyl.auth.jwt import JwtError, verify_access_token
     from sibyl.config import settings
 
-    # 1. Extract JWT from query param, Authorization header, or cookie
-    token = (
-        websocket.query_params.get("token")
-        or websocket.cookies.get("sibyl_access_token")
-    )
-    auth_header = websocket.headers.get("authorization")
-    if not token and auth_header and auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-
-    if not token and not settings.disable_auth:
-        await websocket.close(code=4001, reason="Missing token")
+    # 1. Authenticate
+    identity = await _authenticate_ws(websocket)
+    if identity is None:
         return
-
-    org_id: UUID | None = None
-    user_id: UUID | None = None
-
-    if not settings.disable_auth:
-        try:
-            claims = verify_access_token(token)  # type: ignore[arg-type]
-        except JwtError:
-            await websocket.close(code=4001, reason="Invalid token")
-            return
-
-        org_claim = claims.get("org")
-        user_claim = claims.get("sub")
-        if not (org_claim and user_claim):
-            await websocket.close(code=4001, reason="Invalid token claims")
-            return
-
-        try:
-            org_id = UUID(str(org_claim))
-            user_id = UUID(str(user_claim))
-        except (TypeError, ValueError):
-            await websocket.close(code=4001, reason="Invalid token claims")
-            return
+    org_id, user_id = identity
 
     # 2. Look up sandbox, verify status and ownership
     sandbox_model = _sandbox_model()
@@ -497,9 +509,7 @@ async def sandbox_attach(websocket: WebSocket, sandbox_id: UUID) -> None:
     # 3. Check ownership (non-admin users can only attach to their own sandbox)
     if user_id is not None and not settings.disable_auth:
         sandbox_user_id = getattr(sandbox, "user_id", None)
-        # Allow if same user or if we can't determine (let it through)
         if sandbox_user_id is not None and sandbox_user_id != user_id:
-            # Would need role check here -- for now, close
             await websocket.close(code=4003, reason="Access denied")
             return
 
