@@ -418,6 +418,131 @@ async def create_learning_episode(
         raise
 
 
+async def update_task(
+    ctx: dict[str, Any],  # noqa: ARG001
+    task_id: str,
+    updates: dict[str, Any],
+    group_id: str,
+    epic_id: str | None = None,
+    new_status: str | None = None,
+) -> dict[str, Any]:
+    """Update a task asynchronously with epic relationship and auto-start logic.
+
+    Task-aware background job that handles concerns the generic update_entity
+    doesn't: BELONGS_TO epic relationships and epic auto-start on forward progress.
+
+    Args:
+        ctx: arq context
+        task_id: The task entity ID to update
+        updates: Dict of field names to new values
+        group_id: Organization ID
+        epic_id: Epic ID if being set/changed (triggers BELONGS_TO creation)
+        new_status: New task status (triggers epic auto-start check)
+
+    Returns:
+        Dict with update results
+    """
+    from sibyl.locks import entity_lock
+    from sibyl_core.graph.client import get_graph_client
+    from sibyl_core.graph.entities import EntityManager
+    from sibyl_core.graph.relationships import RelationshipManager
+    from sibyl_core.models.entities import Relationship, RelationshipType
+
+    log.info(
+        "update_task_started",
+        task_id=task_id,
+        fields=list(updates.keys()),
+        epic_id=epic_id,
+    )
+
+    try:
+        async with entity_lock(group_id, task_id, blocking=True) as lock_token:
+            if not lock_token:
+                log.warning("update_task_lock_failed", task_id=task_id)
+                return {"task_id": task_id, "success": False, "message": "Lock contention"}
+
+            client = await get_graph_client()
+            entity_manager = EntityManager(client, group_id=group_id)
+
+            # Perform the update
+            updated = await entity_manager.update(task_id, updates)
+            if not updated:
+                log.warning("update_task_no_changes", task_id=task_id)
+                return {"task_id": task_id, "success": False, "message": "No changes made"}
+
+            # Create BELONGS_TO relationship for epic (if epic_id was set/changed)
+            if epic_id is not None:
+                relationship_manager = RelationshipManager(client, group_id=group_id)
+                belongs_to_epic = Relationship(
+                    id=f"rel_{task_id}_belongs_to_{epic_id}",
+                    source_id=task_id,
+                    target_id=epic_id,
+                    relationship_type=RelationshipType.BELONGS_TO,
+                )
+                await relationship_manager.create(belongs_to_epic)
+
+            # Auto-start epic if task moves to forward-progress state
+            if new_status:
+                resolved_epic = epic_id or updated.metadata.get("epic_id")
+                if resolved_epic:
+                    await _maybe_start_epic_bg(entity_manager, task_id, resolved_epic, new_status)
+
+        # Broadcast outside the lock
+        await _safe_broadcast(
+            WSEvent.ENTITY_UPDATED,
+            {
+                "id": task_id,
+                "entity_type": "task",
+                "action": "update_task",
+                "name": updated.name,
+                **updates,
+            },
+            org_id=group_id,
+        )
+
+        log.info("update_task_completed", task_id=task_id, fields=list(updates.keys()))
+        return {
+            "task_id": task_id,
+            "updated_fields": list(updates.keys()),
+            "success": True,
+        }
+
+    except Exception as e:
+        log.exception("update_task_failed", task_id=task_id, error=str(e))
+        raise
+
+
+async def _maybe_start_epic_bg(
+    entity_manager: Any,
+    task_id: str,
+    epic_id: str,
+    task_status: str,
+) -> bool:
+    """Auto-start epic if task moves to forward-progress state (background job variant).
+
+    Same logic as tasks.py:_maybe_start_epic but lives here so the background
+    job doesn't import from the route module.
+    """
+    from datetime import UTC, datetime
+
+    from sibyl_core.models.tasks import EpicStatus
+
+    forward_progress_states = {"doing", "review", "blocked"}
+    if task_status not in forward_progress_states:
+        return False
+
+    epic = await entity_manager.get(epic_id)
+    if not epic or epic.metadata.get("status") != "planning":
+        return False
+
+    await entity_manager.update(
+        epic_id,
+        {"status": EpicStatus.IN_PROGRESS, "started_at": datetime.now(UTC)},
+    )
+    log.info("Epic auto-started (bg)", epic_id=epic_id, task_id=task_id, task_status=task_status)
+    return True
+
+
 async def update_entity(
     ctx: dict[str, Any],  # noqa: ARG001
     entity_id: str,

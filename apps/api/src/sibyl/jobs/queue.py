@@ -321,20 +321,57 @@ async def enqueue_update_task(
     task_id: str,
     updates: dict[str, Any],
     group_id: str,
+    epic_id: str | None = None,
+    new_status: str | None = None,
 ) -> str:
     """Enqueue a task update job.
 
-    Convenience wrapper around enqueue_update_entity for tasks.
+    Uses the task-aware ``update_task`` job which handles epic relationships
+    and epic auto-start — concerns the generic ``update_entity`` doesn't cover.
+
+    Job IDs are timestamp-suffixed to prevent arq deduplication from silently
+    dropping rapid-fire updates to the same task.
 
     Args:
         task_id: The task entity ID to update
         updates: Dict of field names to new values
         group_id: Organization ID
+        epic_id: Epic ID if being set/changed (triggers BELONGS_TO creation)
+        new_status: New task status string (triggers epic auto-start check)
 
     Returns:
         Job ID for tracking
     """
-    return await enqueue_update_entity(task_id, updates, "task", group_id)
+    import time
+
+    pool = await get_pool()
+
+    # Timestamp-suffixed ID: allows multiple queued updates for the same task
+    epoch_ms = int(time.time() * 1000)
+    job_id = f"update_task:{task_id}:{epoch_ms}"
+
+    job = await pool.enqueue_job(
+        "update_task",
+        task_id,
+        updates,
+        group_id,
+        epic_id=epic_id,
+        new_status=new_status,
+        _job_id=job_id,
+    )
+
+    if job is None:
+        log.info("Update task job already exists", job_id=job_id, task_id=task_id)
+        return job_id
+
+    log.info(
+        "Enqueued update_task job",
+        job_id=job.job_id,
+        task_id=task_id,
+        fields=list(updates.keys()),
+    )
+
+    return job.job_id
 
 
 async def get_job_status(job_id: str) -> JobInfo:

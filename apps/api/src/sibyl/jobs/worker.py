@@ -26,7 +26,7 @@ from sibyl.jobs.agents import (
 )
 from sibyl.jobs.backup import cleanup_old_backups, run_backup, run_scheduled_backups
 from sibyl.jobs.crawl import crawl_source, sync_all_sources, sync_source
-from sibyl.jobs.entities import create_entity, create_learning_episode, update_entity
+from sibyl.jobs.entities import create_entity, create_learning_episode, update_entity, update_task
 
 log = structlog.get_logger()
 
@@ -241,6 +241,7 @@ class WorkerSettings:
         create_entity,
         create_learning_episode,
         update_entity,
+        update_task,
         # Agent jobs
         run_agent_execution,
         resume_agent_execution,

@@ -7,7 +7,7 @@ import uuid
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -571,20 +571,72 @@ async def archive_task(
 async def update_task(
     task_id: str,
     request: UpdateTaskRequest,
+    sync: bool = Query(False, description="Wait for update to complete synchronously"),
     org: Organization = Depends(get_current_organization),
     user: User = Depends(get_current_user),
     auth: AuthSession = Depends(get_auth_session),
 ) -> TaskActionResponse:
-    """Update task fields directly."""
-    from sibyl.locks import LockAcquisitionError
-    from sibyl_core.models.entities import Relationship, RelationshipType
+    """Update task fields.
 
+    By default, enqueues the update to the background worker and returns
+    immediately (async fast path). Pass ``?sync=true`` to wait for the
+    update to complete inline — useful when the caller needs confirmation.
+    """
+    from sibyl.jobs.queue import enqueue_update_task as enqueue_update_task_async
+
+    # Auth check stays synchronous — fast (one graph read + one PG query)
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
     group_id = str(org.id)
 
+    # Build update dict with actor attribution
+    update_data: dict[str, Any] = {"modified_by": str(user.id)}
+    if request.status is not None:
+        update_data["status"] = request.status
+    if request.priority is not None:
+        update_data["priority"] = request.priority
+    if request.title is not None:
+        update_data["name"] = request.title
+    if request.description is not None:
+        update_data["description"] = request.description
+    if request.assignees is not None:
+        update_data["assignees"] = request.assignees
+    if request.epic_id is not None:
+        update_data["epic_id"] = request.epic_id
+    if request.feature is not None:
+        update_data["feature"] = request.feature
+    if request.complexity is not None:
+        update_data["complexity"] = request.complexity
+    if request.tags is not None:
+        update_data["tags"] = request.tags
+    if request.technologies is not None:
+        update_data["technologies"] = request.technologies
+
+    if len(update_data) <= 1:  # only modified_by
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    # --- Async fast path (default) ---
+    if not sync:
+        job_id = await enqueue_update_task_async(
+            task_id,
+            update_data,
+            group_id,
+            epic_id=request.epic_id,
+            new_status=request.status.value if request.status else None,
+        )
+        return TaskActionResponse(
+            success=True,
+            action="update_task",
+            task_id=task_id,
+            message="Update queued",
+            data={"job_id": job_id, **update_data},
+        )
+
+    # --- Sync path (?sync=true) — existing inline behaviour ---
+    from sibyl.locks import LockAcquisitionError
+    from sibyl_core.models.entities import Relationship, RelationshipType
+
     try:
-        # Acquire distributed lock to prevent concurrent updates
         async with entity_lock(group_id, task_id, blocking=True) as lock_token:
             if not lock_token:
                 raise HTTPException(
@@ -595,43 +647,10 @@ async def update_task(
             client = await get_graph_client()
             entity_manager = EntityManager(client, group_id=group_id)
 
-            # Get existing task
-            existing = await entity_manager.get(task_id)
-            if not existing:
-                raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
-
-            # Build update dict with actor attribution
-            update_data: dict[str, Any] = {"modified_by": str(user.id)}
-            if request.status is not None:
-                update_data["status"] = request.status
-            if request.priority is not None:
-                update_data["priority"] = request.priority
-            if request.title is not None:
-                update_data["name"] = request.title
-            if request.description is not None:
-                update_data["description"] = request.description
-            if request.assignees is not None:
-                update_data["assignees"] = request.assignees
-            if request.epic_id is not None:
-                update_data["epic_id"] = request.epic_id
-            if request.feature is not None:
-                update_data["feature"] = request.feature
-            if request.complexity is not None:
-                update_data["complexity"] = request.complexity
-            if request.tags is not None:
-                update_data["tags"] = request.tags
-            if request.technologies is not None:
-                update_data["technologies"] = request.technologies
-
-            if not update_data:
-                raise HTTPException(status_code=400, detail="No fields to update")
-
-            # Update in graph
             updated = await entity_manager.update(task_id, update_data)
             if not updated:
                 raise HTTPException(status_code=500, detail="Update failed")
 
-            # Create BELONGS_TO relationship for epic (if epic_id was updated)
             if request.epic_id is not None:
                 relationship_manager = RelationshipManager(client, group_id=group_id)
                 belongs_to_epic = Relationship(
@@ -642,7 +661,6 @@ async def update_task(
                 )
                 await relationship_manager.create(belongs_to_epic)
 
-            # Auto-start epic if task moves to forward-progress state
             if request.status:
                 epic_id = request.epic_id or updated.metadata.get("epic_id")
                 await _maybe_start_epic(entity_manager, task_id, epic_id, request.status)

@@ -23,7 +23,7 @@ from sibyl.jobs.backup import (
     run_backup,
 )
 from sibyl.jobs.crawl import crawl_source, sync_all_sources, sync_source
-from sibyl.jobs.entities import create_entity, create_learning_episode, update_entity
+from sibyl.jobs.entities import create_entity, create_learning_episode, update_entity, update_task
 from sibyl.jobs.pending import (
     clear_pending,
     clear_pending_operations,
@@ -87,6 +87,7 @@ __all__ = [
     "create_entity",
     "create_learning_episode",
     "update_entity",
+    "update_task",
     "run_agent_execution",
     "resume_agent_execution",
     "generate_status_hint",
