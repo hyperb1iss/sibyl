@@ -38,8 +38,6 @@ def get_redis_settings() -> RedisSettings:
 
 async def startup(ctx: dict[str, Any]) -> None:
     """Worker startup - initialize resources."""
-    import os
-
     from sibyl.banner import log_banner
     from sibyl_core.logging import configure_logging
 
