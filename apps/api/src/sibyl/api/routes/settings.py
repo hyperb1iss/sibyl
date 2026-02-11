@@ -6,6 +6,8 @@ Works without auth during setup mode, requires admin role otherwise.
 
 from __future__ import annotations
 
+import os
+
 import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
@@ -192,6 +194,10 @@ async def update_settings(
                 description="OpenAI API key for embeddings and LLM operations",
             )
             updated.append("openai_api_key")
+            # Update environment variable so running server uses new key immediately
+            # This bridges webapp settings to GraphClient which reads from env vars
+            os.environ["OPENAI_API_KEY"] = request.openai_api_key
+            log.info("Updated OpenAI API key in environment")
         else:
             log.warning("OpenAI key validation failed", error=error)
 
@@ -208,8 +214,22 @@ async def update_settings(
                 description="Anthropic API key for Claude models",
             )
             updated.append("anthropic_api_key")
+            # Update environment variable so running server uses new key immediately
+            os.environ["ANTHROPIC_API_KEY"] = request.anthropic_api_key
+            log.info("Updated Anthropic API key in environment")
         else:
             log.warning("Anthropic key validation failed", error=error)
+
+    # If API keys were updated, reset the GraphClient so it reconnects with new keys
+    # The global singleton is reused, so existing connections would use stale keys
+    if updated:
+        try:
+            from sibyl_core.graph.client import reset_graph_client
+
+            await reset_graph_client()
+            log.info("Reset GraphClient after API key update", keys=updated)
+        except Exception as e:
+            log.warning("Failed to reset GraphClient", error=str(e))
 
     return UpdateSettingsResponse(updated=updated, validation=validation)
 
@@ -239,6 +259,19 @@ async def delete_setting(
     deleted = await service.delete(key)
 
     if deleted:
+        # Clear from environment and reset GraphClient if this was an API key
+        if key in ("openai_api_key", "anthropic_api_key"):
+            env_key = "OPENAI_API_KEY" if key == "openai_api_key" else "ANTHROPIC_API_KEY"
+            os.environ.pop(env_key, None)
+
+            try:
+                from sibyl_core.graph.client import reset_graph_client
+
+                await reset_graph_client()
+                log.info("Reset GraphClient after API key deletion", key=key)
+            except Exception as e:
+                log.warning("Failed to reset GraphClient", error=str(e))
+
         return DeleteSettingResponse(
             deleted=True,
             key=key,
