@@ -113,6 +113,31 @@ def create_combined_app(  # noqa: PLR0915
             except Exception as e:
                 log.warning("Source recovery failed", error=str(e))
 
+        # Load API keys from database into environment BEFORE GraphClient initializes
+        # This bridges the gap between webapp-configured settings (stored in DB)
+        # and CoreConfig (which reads from env vars at import time)
+        if db_connected:
+            try:
+                from sibyl.services.settings import get_settings_service
+
+                settings_svc = get_settings_service()
+
+                # Load OpenAI key if not already set in environment
+                if not os.environ.get("OPENAI_API_KEY"):
+                    openai_key = await settings_svc.get_openai_key()
+                    if openai_key:
+                        os.environ["OPENAI_API_KEY"] = openai_key
+                        log.debug("Loaded OpenAI API key from database settings")
+
+                # Load Anthropic key if not already set in environment
+                if not os.environ.get("ANTHROPIC_API_KEY"):
+                    anthropic_key = await settings_svc.get_anthropic_key()
+                    if anthropic_key:
+                        os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+                        log.debug("Loaded Anthropic API key from database settings")
+            except Exception as e:
+                log.warning("Failed to load API keys from database", error=str(e))
+
         try:
             from sibyl_core.graph.client import get_graph_client
 
