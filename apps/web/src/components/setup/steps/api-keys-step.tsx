@@ -46,7 +46,6 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
     updateSettings.data?.validation?.anthropic_api_key?.valid ??
     validation?.anthropic_valid ??
     initialStatus?.anthropic_valid;
-  const bothValid = openaiValid === true && anthropicValid === true;
 
   // Validation errors
   const openaiError =
@@ -92,10 +91,11 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
   }, [revalidate, onValidated]);
 
   const handleContinue = useCallback(() => {
-    if (bothValid) {
+    // Both keys are configured (and were validated before being saved)
+    if (bothConfigured) {
       onValidated(true);
     }
-  }, [bothValid, onValidated]);
+  }, [bothConfigured, onValidated]);
 
   return (
     <div className="p-8">
@@ -155,6 +155,19 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
         </div>
       )}
 
+      {/* Progress message - show when one key is saved but not both */}
+      {!bothConfigured && (openaiConfigured || anthropicConfigured) && (
+        <div className="mb-6 p-4 rounded-xl bg-sc-green/10 border border-sc-green/20">
+          <div className="flex gap-3">
+            <Check width={20} height={20} className="text-sc-green flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-sc-green">
+              {openaiConfigured && !anthropicConfigured && 'OpenAI key saved! Now add your Anthropic key below.'}
+              {anthropicConfigured && !openaiConfigured && 'Anthropic key saved! Now add your OpenAI key below.'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Help text */}
       {!bothConfigured && !hasKeyInput && (
         <div className="mb-6 p-4 rounded-xl bg-sc-cyan/10 border border-sc-cyan/20">
@@ -198,7 +211,8 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
           Back
         </button>
 
-        {bothValid ? (
+        {bothConfigured ? (
+          // Both keys saved - show Continue
           <button
             type="button"
             onClick={handleContinue}
@@ -207,6 +221,7 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
             Continue
           </button>
         ) : hasKeyInput ? (
+          // User has typed a key - show Save button
           <button
             type="button"
             onClick={handleSaveKeys}
@@ -219,32 +234,21 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
                 Validating & Saving...
               </>
             ) : (
-              'Validate & Save'
-            )}
-          </button>
-        ) : bothConfigured ? (
-          <button
-            type="button"
-            onClick={handleValidateExisting}
-            disabled={isValidating}
-            className="flex-1 py-2.5 px-4 rounded-lg bg-sc-cyan text-sc-bg-dark font-medium text-sm transition-all hover:bg-sc-cyan/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {isValidating ? (
-              <>
-                <Spinner size="sm" color="current" />
-                Validating...
-              </>
-            ) : (
-              'Validate Keys'
+              `Save ${openaiKey.trim() && anthropicKey.trim() ? 'Keys' : 'Key'}`
             )}
           </button>
         ) : (
+          // Waiting for user to enter key(s)
           <button
             type="button"
             disabled
             className="flex-1 py-2.5 px-4 rounded-lg bg-sc-fg-subtle/20 text-sc-fg-muted font-medium text-sm cursor-not-allowed"
           >
-            Enter API Keys
+            {openaiConfigured && !anthropicConfigured
+              ? 'Enter Anthropic Key'
+              : anthropicConfigured && !openaiConfigured
+                ? 'Enter OpenAI Key'
+                : 'Enter API Keys'}
           </button>
         )}
       </div>
@@ -287,23 +291,18 @@ function ApiKeyInput({
     statusIcon = <Spinner size="sm" color="cyan" />;
     statusColor = 'text-sc-cyan';
     statusText = 'Validating...';
-  } else if (valid === true) {
-    statusIcon = <Check aria-hidden="true" width={16} height={16} />;
-    statusColor = 'text-sc-green';
-    statusText = 'Valid';
   } else if (valid === false) {
+    // Explicit validation failure - show error
     statusIcon = <WarningTriangle aria-hidden="true" width={16} height={16} />;
     statusColor = 'text-sc-red';
     statusText = error || 'Invalid';
   } else if (configured) {
-    statusIcon = <HelpCircle aria-hidden="true" width={16} height={16} />;
-    statusColor = 'text-sc-fg-muted';
-    statusText = 'Not validated';
-  } else {
-    statusIcon = null;
-    statusColor = 'text-sc-fg-subtle';
-    statusText = 'Not configured';
+    // Key is configured in DB - it was validated before being saved
+    statusIcon = <Check aria-hidden="true" width={16} height={16} />;
+    statusColor = 'text-sc-green';
+    statusText = 'Saved';
   }
+  // When not configured, no badge is shown (statusIcon remains null)
 
   return (
     <div className="p-4 rounded-xl bg-sc-bg-base/50 border border-sc-fg-subtle/10">

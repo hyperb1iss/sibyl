@@ -113,6 +113,14 @@ def create_combined_app(  # noqa: PLR0915
             except Exception as e:
                 log.warning("Source recovery failed", error=str(e))
 
+        # Load API keys from database into environment BEFORE GraphClient initializes
+        # This bridges the gap between webapp-configured settings (stored in DB)
+        # and CoreConfig (which reads from env vars at import time)
+        if db_connected:
+            from sibyl.services.settings import load_api_keys_from_db
+
+            await load_api_keys_from_db()
+
         try:
             from sibyl_core.graph.client import get_graph_client
 
