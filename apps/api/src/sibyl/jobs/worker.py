@@ -169,8 +169,6 @@ async def _cleanup_orphaned_agent_jobs() -> int:
 
 async def startup(ctx: dict[str, Any]) -> None:
     """Worker startup - initialize resources."""
-    import os
-
     from sibyl.banner import log_banner
     from sibyl_core.logging import configure_logging
 
