@@ -1,7 +1,7 @@
 'use client';
 
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { SetupStatus } from '@/lib/api';
 import { AdminAccountStep } from './steps/admin-account-step';
 import { ApiKeysStep } from './steps/api-keys-step';
@@ -16,9 +16,30 @@ interface SetupWizardProps {
 }
 
 const STEPS: SetupStep[] = ['welcome', 'api-keys', 'admin', 'connect'];
+const STEP_STORAGE_KEY = 'sibyl-setup-step';
+
+function getStoredStep(): SetupStep {
+  if (typeof window === 'undefined') return 'welcome';
+  const stored = sessionStorage.getItem(STEP_STORAGE_KEY);
+  if (stored && STEPS.includes(stored as SetupStep)) {
+    return stored as SetupStep;
+  }
+  return 'welcome';
+}
 
 export function SetupWizard({ initialStatus, onComplete }: SetupWizardProps) {
-  const [step, setStep] = useState<SetupStep>('welcome');
+  const [step, setStep] = useState<SetupStep>(getStoredStep);
+
+  // Persist step to sessionStorage so tab switches don't reset progress
+  useEffect(() => {
+    sessionStorage.setItem(STEP_STORAGE_KEY, step);
+  }, [step]);
+
+  // Clear stored step on completion
+  const handleComplete = useCallback(() => {
+    sessionStorage.removeItem(STEP_STORAGE_KEY);
+    onComplete();
+  }, [onComplete]);
 
   const currentIndex = STEPS.indexOf(step);
   const isLastStep = step === 'connect';
@@ -128,7 +149,7 @@ export function SetupWizard({ initialStatus, onComplete }: SetupWizardProps) {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.3 }}
             >
-              <ConnectClaudeStep onFinish={onComplete} />
+              <ConnectClaudeStep onFinish={handleComplete} />
             </motion.div>
           )}
         </AnimatePresence>
