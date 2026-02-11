@@ -20,9 +20,13 @@ const STEP_STORAGE_KEY = 'sibyl-setup-step';
 
 function getStoredStep(): SetupStep {
   if (typeof window === 'undefined') return 'welcome';
-  const stored = sessionStorage.getItem(STEP_STORAGE_KEY);
-  if (stored && STEPS.includes(stored as SetupStep)) {
-    return stored as SetupStep;
+  try {
+    const stored = sessionStorage.getItem(STEP_STORAGE_KEY);
+    if (stored && STEPS.includes(stored as SetupStep)) {
+      return stored as SetupStep;
+    }
+  } catch {
+    // sessionStorage may throw in restricted browsers (e.g., Safari private mode)
   }
   return 'welcome';
 }
@@ -32,12 +36,20 @@ export function SetupWizard({ initialStatus, onComplete }: SetupWizardProps) {
 
   // Persist step to sessionStorage so tab switches don't reset progress
   useEffect(() => {
-    sessionStorage.setItem(STEP_STORAGE_KEY, step);
+    try {
+      sessionStorage.setItem(STEP_STORAGE_KEY, step);
+    } catch {
+      // sessionStorage may throw in restricted browsers
+    }
   }, [step]);
 
   // Clear stored step on completion
   const handleComplete = useCallback(() => {
-    sessionStorage.removeItem(STEP_STORAGE_KEY);
+    try {
+      sessionStorage.removeItem(STEP_STORAGE_KEY);
+    } catch {
+      // sessionStorage may throw in restricted browsers
+    }
     onComplete();
   }, [onComplete]);
 

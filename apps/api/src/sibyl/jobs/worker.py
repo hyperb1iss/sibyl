@@ -184,26 +184,9 @@ async def startup(ctx: dict[str, Any]) -> None:
     # Load API keys from database into environment BEFORE any jobs use GraphClient
     # This bridges the gap between webapp-configured settings (stored in DB)
     # and CoreConfig (which reads from env vars at import time)
-    try:
-        from sibyl.services.settings import get_settings_service
+    from sibyl.services.settings import load_api_keys_from_db
 
-        settings_svc = get_settings_service()
-
-        # Load OpenAI key if not already set in environment
-        if not os.environ.get("OPENAI_API_KEY"):
-            openai_key = await settings_svc.get_openai_key()
-            if openai_key:
-                os.environ["OPENAI_API_KEY"] = openai_key
-                log.debug("Loaded OpenAI API key from database settings")
-
-        # Load Anthropic key if not already set in environment
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            anthropic_key = await settings_svc.get_anthropic_key()
-            if anthropic_key:
-                os.environ["ANTHROPIC_API_KEY"] = anthropic_key
-                log.debug("Loaded Anthropic API key from database settings")
-    except Exception as e:
-        log.warning("Failed to load API keys from database", error=str(e))
+    await load_api_keys_from_db()
 
     # Clean up stale working agents (from worker crashes)
     stale_marked = await _cleanup_stale_working_agents()

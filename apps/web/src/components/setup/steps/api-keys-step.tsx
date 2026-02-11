@@ -301,12 +301,8 @@ function ApiKeyInput({
     statusIcon = <Check aria-hidden="true" width={16} height={16} />;
     statusColor = 'text-sc-green';
     statusText = 'Saved';
-  } else {
-    // Not configured yet
-    statusIcon = null;
-    statusColor = 'text-sc-fg-subtle';
-    statusText = 'Required';
   }
+  // When not configured, no badge is shown (statusIcon remains null)
 
   return (
     <div className="p-4 rounded-xl bg-sc-bg-base/50 border border-sc-fg-subtle/10">
