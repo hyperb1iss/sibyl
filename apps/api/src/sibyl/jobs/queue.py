@@ -323,11 +323,14 @@ async def enqueue_update_task(
     group_id: str,
     epic_id: str | None = None,
     new_status: str | None = None,
+    add_depends_on: list[str] | None = None,
+    remove_depends_on: list[str] | None = None,
 ) -> str:
     """Enqueue a task update job.
 
-    Uses the task-aware ``update_task`` job which handles epic relationships
-    and epic auto-start — concerns the generic ``update_entity`` doesn't cover.
+    Uses the task-aware ``update_task`` job which handles epic relationships,
+    epic auto-start, and dependency mutations — concerns the generic
+    ``update_entity`` doesn't cover.
 
     Job IDs are timestamp-suffixed to prevent arq deduplication from silently
     dropping rapid-fire updates to the same task.
@@ -338,6 +341,8 @@ async def enqueue_update_task(
         group_id: Organization ID
         epic_id: Epic ID if being set/changed (triggers BELONGS_TO creation)
         new_status: New task status string (triggers epic auto-start check)
+        add_depends_on: Task IDs to add as dependencies
+        remove_depends_on: Task IDs to remove as dependencies
 
     Returns:
         Job ID for tracking
@@ -357,6 +362,8 @@ async def enqueue_update_task(
         group_id,
         epic_id=epic_id,
         new_status=new_status,
+        add_depends_on=add_depends_on or [],
+        remove_depends_on=remove_depends_on or [],
         _job_id=job_id,
     )
 

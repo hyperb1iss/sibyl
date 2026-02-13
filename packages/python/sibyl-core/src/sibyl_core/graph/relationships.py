@@ -519,6 +519,70 @@ class RelationshipManager:
                 details={"relationship_id": relationship_id},
             ) from e
 
+    async def delete_between(
+        self,
+        source_id: str,
+        target_id: str,
+        relationship_type: RelationshipType,
+    ) -> int:
+        """Delete relationships of a specific type between source and target.
+
+        Args:
+            source_id: Source entity UUID.
+            target_id: Target entity UUID.
+            relationship_type: Type of relationship to delete.
+
+        Returns:
+            Number of relationships deleted.
+        """
+        log.info(
+            "Deleting relationship between entities",
+            source_id=source_id,
+            target_id=target_id,
+            type=relationship_type.value,
+        )
+
+        try:
+            rel_type = _validate_relationship_type(relationship_type.value)
+
+            query = f"""
+                MATCH (s {{uuid: $source_id}})-[r:{rel_type}]->(t {{uuid: $target_id}})
+                WHERE r.group_id = $group_id
+                DELETE r
+                RETURN count(r) as deleted
+            """
+
+            result = await self._driver.execute_query(
+                query,
+                source_id=source_id,
+                target_id=target_id,
+                group_id=self._group_id,
+            )
+
+            rows = self._client.normalize_result(result)
+            deleted = (
+                rows[0]["deleted"]
+                if rows and isinstance(rows[0], dict)
+                else (rows[0][0] if rows else 0)
+            )
+
+            log.info(
+                "Deleted relationships between entities",
+                source_id=source_id,
+                target_id=target_id,
+                count=deleted,
+            )
+            return deleted
+
+        except Exception as e:
+            log.warning(
+                "Failed to delete relationships between entities",
+                error=str(e),
+                source_id=source_id,
+                target_id=target_id,
+            )
+            return 0
+
     async def delete_for_entity(self, entity_id: str) -> int:
         """Delete all relationships for an entity.
 
