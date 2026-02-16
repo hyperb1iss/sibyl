@@ -10,8 +10,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      {{- include "sibyl.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: sandbox
+      app: sibyl-sandbox
   policyTypes:
     - Ingress
     - Egress

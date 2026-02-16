@@ -6,20 +6,13 @@ sandbox:
 
   env:
     SIBYL_SANDBOX_ENABLED: "true"
-    SIBYL_SANDBOX_NAMESPACE: "sibyl"
-    SIBYL_SANDBOX_IMAGE: "sibyl-sandbox"
-    SIBYL_SANDBOX_TTL_SECONDS: "1800"
-
-  image:
-    repository: sibyl-sandbox
-    tag: dev
-    pullPolicy: Never
-
-  runner:
-    image:
-      repository: sibyl-runner
-      tag: dev
-      pullPolicy: Never
+    SIBYL_SANDBOX_MODE: "enforced"
+    SIBYL_SANDBOX_K8S_NAMESPACE: "sibyl"
+    SIBYL_SANDBOX_DEFAULT_IMAGE: "sibyl-sandbox:dev"
+    SIBYL_SANDBOX_WORKTREE_BASE: "/tmp/sibyl/sandboxes"
+    SIBYL_SANDBOX_IDLE_TTL_SECONDS: "1800"
+    SIBYL_SANDBOX_MAX_LIFETIME_SECONDS: "14400"
+    SIBYL_SANDBOX_RECONCILE_ENABLED: "true"
 
   rbac:
     enabled: true

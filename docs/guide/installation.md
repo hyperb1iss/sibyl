@@ -268,6 +268,16 @@ above.
 Sibyl's sandbox system provides isolated execution environments for AI agents. This is optional
 for basic usage but required for distributed task execution.
 
+### Install Agent Sandbox Controller
+
+Sibyl's Kubernetes sandbox runtime now uses the upstream `kubernetes-sigs/agent-sandbox`
+controller and CRDs.
+
+```bash
+export AGENT_SANDBOX_VERSION=v0.1.1
+kubectl apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${AGENT_SANDBOX_VERSION}/manifest.yaml
+```
+
 ### Enabling Sandbox Mode
 
 Set the sandbox mode in your environment:
@@ -309,6 +319,7 @@ sibyl-runner --server-url http://localhost:3334 --runner-id <runner-id>
 | ------------------------------------ | ----------------------------------------- | -------------------------------------- |
 | `SIBYL_SANDBOX_MODE`                 | `off`                                     | Sandbox policy: off, shadow, enforced  |
 | `SIBYL_SANDBOX_DEFAULT_IMAGE`        | `ghcr.io/hyperb1iss/sibyl-sandbox:latest` | Default container image                |
+| `SIBYL_SANDBOX_WORKTREE_BASE`        | `/tmp/sibyl/sandboxes`                    | Base path mounted for sandbox worktrees |
 | `SIBYL_SANDBOX_IDLE_TTL_SECONDS`     | `1800`                                    | Auto-suspend after idle (seconds)      |
 | `SIBYL_SANDBOX_MAX_LIFETIME_SECONDS` | `14400`                                   | Maximum sandbox lifetime (seconds)     |
 | `SIBYL_SANDBOX_K8S_NAMESPACE`        | `default`                                 | Kubernetes namespace for pods          |

@@ -8,32 +8,34 @@ description: Isolated execution environments for AI agents
 Sibyl's sandbox system provides isolated, ephemeral execution environments for AI agents. The
 architecture splits into two planes: a **control plane** (the API server) that manages sandbox
 lifecycle and task routing, and an **execution plane** (runner daemons) that actually runs tasks
-inside sandboxed environments.
+inside sandboxed environments. Runtime lifecycle is delegated to the
+`kubernetes-sigs/agent-sandbox` `Sandbox` CRD.
 
 ## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────┐
 │           Sibyl API Server              │
-│  ┌───────────┐  ┌────────────────────┐  │
-│  │ Controller │  │    Dispatcher      │  │
-│  │ (lifecycle)│  │   (task queue)     │  │
-│  └─────┬─────┘  └────────┬───────────┘  │
-│        │                 │              │
-│  ┌─────┴─────────────────┴───────────┐  │
-│  │       WebSocket Protocol          │  │
+│  ┌──────────────┐ ┌──────────────────┐  │
+│  │ Controller   │ │   Dispatcher      │  │
+│  │ (CRD client) │ │  (task queue)     │  │
+│  └──────┬───────┘ └────────┬─────────┘  │
+│         │                  │            │
+│  ┌──────┴──────────────────┴─────────┐  │
+│  │      WebSocket Protocol           │  │
 │  └──────────────┬────────────────────┘  │
 └─────────────────┼───────────────────────┘
                   │
-     ┌────────────┼────────────┐
-     │            │            │
- ┌───┴───┐  ┌───┴───┐  ┌───┴───┐
- │Runner │  │Runner │  │Runner │
- │(pod)  │  │(pod)  │  │(pod)  │
- └───────┘  └───────┘  └───────┘
+     ┌────────────┼──────────────┐
+     │            │              │
+ ┌───┴───┐  ┌───┴───┐     ┌────────────────┐
+ │Runner │  │Runner │ ... │ agent-sandbox  │
+ │(pod)  │  │(pod)  │     │ controller/CRD │
+ └───────┘  └───────┘     └────────────────┘
 ```
 
-- **Controller** manages sandbox lifecycle: create, suspend, resume, delete.
+- **Controller** manages sandbox lifecycle by creating/updating/deleting `agents.x-k8s.io/v1alpha1`
+  `Sandbox` resources.
 - **Dispatcher** routes tasks to runners based on availability, capabilities, and warm worktree
   proximity.
 - **WebSocket Protocol** provides bidirectional communication between server and runners.
@@ -50,8 +52,7 @@ Sibyl supports multiple isolation levels, chosen per deployment:
 | Kubernetes | Pod-level       | Production                |
 | vCluster   | Cluster-level   | Multi-tenant production   |
 
-Higher tiers provide stronger isolation at the cost of provisioning latency. The sandbox controller
-abstracts over all tiers through a unified interface, so task code is tier-agnostic.
+Higher tiers provide stronger isolation at the cost of provisioning latency.
 
 ## BYOD Model
 
@@ -117,7 +118,8 @@ pending → starting → running → suspending → suspended → deleted
 | `failed`    | Error state, reachable from any other state              |
 
 Sandboxes auto-suspend after `SIBYL_SANDBOX_IDLE_TTL_SECONDS` of inactivity and are hard-deleted
-after `SIBYL_SANDBOX_MAX_LIFETIME_SECONDS`.
+after `SIBYL_SANDBOX_MAX_LIFETIME_SECONDS`. Suspend/resume maps to
+`Sandbox.spec.replicas = 0|1` in the agent-sandbox CRD.
 
 ## Task Lifecycle
 
@@ -165,6 +167,7 @@ All sandbox configuration uses the `SIBYL_SANDBOX_` prefix:
 | ------------------------------------- | ------------------------------------------ | -------------------------------------- |
 | `SIBYL_SANDBOX_MODE`                  | `off`                                      | Policy: `off`, `shadow`, `enforced`    |
 | `SIBYL_SANDBOX_DEFAULT_IMAGE`         | `ghcr.io/hyperb1iss/sibyl-sandbox:latest`  | Default container image for sandboxes  |
+| `SIBYL_SANDBOX_WORKTREE_BASE`         | `/tmp/sibyl/sandboxes`                     | Base path mounted for sandbox worktrees |
 | `SIBYL_SANDBOX_IDLE_TTL_SECONDS`      | `1800`                                     | Auto-suspend after idle (seconds)      |
 | `SIBYL_SANDBOX_MAX_LIFETIME_SECONDS`  | `14400`                                    | Maximum sandbox lifetime (seconds)     |
 | `SIBYL_SANDBOX_K8S_NAMESPACE`         | `default`                                  | Kubernetes namespace for sandbox pods  |

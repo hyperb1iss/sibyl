@@ -1,16 +1,18 @@
-"""Sandbox control plane for lifecycle and reconciliation.
+"""Sandbox control plane backed by kubernetes-sigs/agent-sandbox CRDs.
 
-This module is intentionally defensive:
-- Sandbox feature can be disabled entirely.
-- Kubernetes is optional; when unavailable we store clear error state.
-- DB model availability is validated at runtime for graceful degradation.
+This controller keeps the existing Sibyl sandbox API contract while delegating
+runtime lifecycle to the `agents.x-k8s.io/v1alpha1 Sandbox` custom resource.
+Sibyl remains responsible for:
+- Sandbox DB records and orchestration metadata
+- Runner/task binding and auth token minting
+- Policy-driven suspend/resume/reconcile behavior
 """
 
 from __future__ import annotations
 
 import asyncio
 import inspect
-import os
+import secrets
 import time
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
@@ -28,13 +30,6 @@ from sibyl.agents.sandbox_utils import set_if_present as _set_if_present, status
 log = structlog.get_logger()
 
 
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
 class SandboxControllerError(RuntimeError):
     """Sandbox lifecycle operation error."""
 
@@ -44,6 +39,11 @@ class SandboxController:
 
     ACTIVE_STATUSES = {"pending", "starting", "running", "terminating"}
     TERMINAL_STATUSES = {"deleted"}
+
+    _SANDBOX_GROUP = "agents.x-k8s.io"
+    _SANDBOX_VERSION = "v1alpha1"
+    _SANDBOX_PLURAL = "sandboxes"
+    _SANDBOX_POD_NAME_ANNOTATION = "agents.x-k8s.io/pod-name"
 
     def __init__(
         self,
@@ -77,6 +77,7 @@ class SandboxController:
         self._k8s_checked = False
         self._k8s_error: str | None = None
         self._core_api: Any | None = None
+        self._custom_api: Any | None = None
         self._api_exception_type: type[BaseException] | None = None
 
     @property
@@ -87,7 +88,7 @@ class SandboxController:
     @property
     def k8s_available(self) -> bool:
         """Whether Kubernetes API is configured and ready."""
-        return self._core_api is not None
+        return self._core_api is not None and self._custom_api is not None
 
     def _require_enabled(self) -> None:
         if not self.enabled:
@@ -105,6 +106,16 @@ class SandboxController:
             )
         return model
 
+    def _runner_model(self) -> type[Any]:
+        from sibyl.db import models as db_models
+
+        model = getattr(db_models, "Runner", None)
+        if model is None:
+            raise SandboxControllerError(
+                "Runner DB model is unavailable; ensure runner migrations/models are loaded"
+            )
+        return model
+
     async def _maybe_await(self, value: Any) -> Any:
         if inspect.isawaitable(value):
             return await value
@@ -112,7 +123,7 @@ class SandboxController:
 
     async def _ensure_k8s_client(self) -> bool:
         if self._k8s_checked:
-            return self._core_api is not None
+            return self.k8s_available
         self._k8s_checked = True
 
         try:
@@ -150,6 +161,7 @@ class SandboxController:
             return False
 
         self._core_api = k8s_client.CoreV1Api()
+        self._custom_api = k8s_client.CustomObjectsApi()
         rest_module = getattr(k8s_client, "rest", None)
         self._api_exception_type = (
             getattr(rest_module, "ApiException", None)
@@ -168,11 +180,276 @@ class SandboxController:
         sid = str(sandbox_id).replace("_", "-")
         return f"{self.pod_prefix}-{sid[:24]}".lower()
 
-    def _pod_manifest(self, *, pod_name: str, sandbox: Any) -> dict[str, Any]:
+    def _runtime_name_for(self, sandbox: Any) -> str:
+        context = getattr(sandbox, "context", {}) or {}
+        runtime_name: str | None = None
+        if isinstance(context, dict):
+            raw = context.get("agent_sandbox_name")
+            if isinstance(raw, str) and raw.strip():
+                runtime_name = raw.strip()
+        if not runtime_name:
+            raw_pod_name = getattr(sandbox, "pod_name", None)
+            if isinstance(raw_pod_name, str) and raw_pod_name.strip():
+                runtime_name = raw_pod_name.strip()
+        if not runtime_name:
+            runtime_name = self._pod_name_for(getattr(sandbox, "id", "sandbox"))
+        return runtime_name
+
+    def _persist_runtime_identity(self, sandbox: Any, runtime_name: str) -> None:
+        _set_if_present(sandbox, "pod_name", runtime_name)
+        _set_if_present(sandbox, "namespace", self.namespace)
+        if hasattr(sandbox, "context"):
+            context = dict(getattr(sandbox, "context", {}) or {})
+            context["agent_sandbox_name"] = runtime_name
+            sandbox.context = context
+
+    async def _read_runtime_sandbox(self, runtime_name: str) -> dict[str, Any] | None:
+        if not self.k8s_available:
+            return None
+        try:
+            return await self._custom_api.get_namespaced_custom_object(
+                group=self._SANDBOX_GROUP,
+                version=self._SANDBOX_VERSION,
+                namespace=self.namespace,
+                plural=self._SANDBOX_PLURAL,
+                name=runtime_name,
+            )
+        except Exception as e:
+            if self._is_not_found(e):
+                return None
+            raise
+
+    async def _create_or_patch_runtime_sandbox(self, sandbox: Any) -> dict[str, Any] | None:
+        ready = await self._ensure_k8s_client()
+        if not ready:
+            if self.k8s_required:
+                raise SandboxControllerError(self._k8s_error or "Kubernetes is unavailable")
+            return None
+
+        runtime_name = self._runtime_name_for(sandbox)
+        self._persist_runtime_identity(sandbox, runtime_name)
+        manifest = self._sandbox_manifest(runtime_name=runtime_name, sandbox=sandbox)
+        existing = await self._read_runtime_sandbox(runtime_name)
+
+        if existing is None:
+            try:
+                created = await self._custom_api.create_namespaced_custom_object(
+                    group=self._SANDBOX_GROUP,
+                    version=self._SANDBOX_VERSION,
+                    namespace=self.namespace,
+                    plural=self._SANDBOX_PLURAL,
+                    body=manifest,
+                )
+                log.info(
+                    "sandbox_runtime_created",
+                    sandbox_id=str(getattr(sandbox, "id", "")),
+                    runtime_name=runtime_name,
+                )
+                return created
+            except Exception as e:
+                self._k8s_error = f"Failed creating runtime sandbox {runtime_name}: {e}"
+                if self.k8s_required:
+                    raise SandboxControllerError(self._k8s_error) from e
+                log.warning("sandbox_runtime_create_failed", runtime_name=runtime_name, error=str(e))
+                return None
+
+        patch = {
+            "metadata": {
+                "labels": manifest["metadata"].get("labels", {}),
+                "annotations": manifest["metadata"].get("annotations", {}),
+            },
+            "spec": manifest["spec"],
+        }
+        try:
+            return await self._custom_api.patch_namespaced_custom_object(
+                group=self._SANDBOX_GROUP,
+                version=self._SANDBOX_VERSION,
+                namespace=self.namespace,
+                plural=self._SANDBOX_PLURAL,
+                name=runtime_name,
+                body=patch,
+            )
+        except Exception as e:
+            self._k8s_error = f"Failed patching runtime sandbox {runtime_name}: {e}"
+            if self.k8s_required:
+                raise SandboxControllerError(self._k8s_error) from e
+            log.warning("sandbox_runtime_patch_failed", runtime_name=runtime_name, error=str(e))
+            return None
+
+    async def _scale_runtime_sandbox(self, runtime_name: str, replicas: int) -> None:
+        if not await self._ensure_k8s_client():
+            if self.k8s_required:
+                raise SandboxControllerError(self._k8s_error or "Kubernetes is unavailable")
+            return
+
+        try:
+            await self._custom_api.patch_namespaced_custom_object(
+                group=self._SANDBOX_GROUP,
+                version=self._SANDBOX_VERSION,
+                namespace=self.namespace,
+                plural=self._SANDBOX_PLURAL,
+                name=runtime_name,
+                body={"spec": {"replicas": replicas}},
+            )
+        except Exception as e:
+            if self._is_not_found(e):
+                return
+            self._k8s_error = f"Failed scaling runtime sandbox {runtime_name}: {e}"
+            if self.k8s_required:
+                raise SandboxControllerError(self._k8s_error) from e
+            log.warning(
+                "sandbox_runtime_scale_failed",
+                runtime_name=runtime_name,
+                replicas=replicas,
+                error=str(e),
+            )
+
+    async def _delete_runtime_sandbox(self, runtime_name: str | None) -> None:
+        if not runtime_name:
+            return
+        if not await self._ensure_k8s_client():
+            if self.k8s_required:
+                raise SandboxControllerError(self._k8s_error or "Kubernetes is unavailable")
+            return
+
+        try:
+            await self._custom_api.delete_namespaced_custom_object(
+                group=self._SANDBOX_GROUP,
+                version=self._SANDBOX_VERSION,
+                namespace=self.namespace,
+                plural=self._SANDBOX_PLURAL,
+                name=runtime_name,
+                body={},
+            )
+            log.info("sandbox_runtime_deleted", runtime_name=runtime_name)
+        except Exception as e:
+            if self._is_not_found(e):
+                return
+            self._k8s_error = f"Failed deleting runtime sandbox {runtime_name}: {e}"
+            if self.k8s_required:
+                raise SandboxControllerError(self._k8s_error) from e
+            log.warning("sandbox_runtime_delete_failed", runtime_name=runtime_name, error=str(e))
+
+    def _runtime_ready(self, runtime: dict[str, Any]) -> bool:
+        conditions = runtime.get("status", {}).get("conditions", [])
+        if not isinstance(conditions, list):
+            return False
+        for cond in conditions:
+            if not isinstance(cond, dict):
+                continue
+            if cond.get("type") == "Ready":
+                return str(cond.get("status", "")).lower() == "true"
+        return False
+
+    def _runtime_status_replicas(self, runtime: dict[str, Any]) -> int:
+        raw = runtime.get("status", {}).get("replicas", 0)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return 0
+
+    def _runtime_spec_replicas(self, runtime: dict[str, Any]) -> int:
+        raw = runtime.get("spec", {}).get("replicas", 1)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return 1
+
+    def _runtime_pod_name(self, runtime: dict[str, Any]) -> str | None:
+        metadata = runtime.get("metadata", {}) if isinstance(runtime, dict) else {}
+        if not isinstance(metadata, dict):
+            return None
+        annotations = metadata.get("annotations", {})
+        if isinstance(annotations, dict):
+            raw = annotations.get(self._SANDBOX_POD_NAME_ANNOTATION)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+        raw_name = metadata.get("name")
+        if isinstance(raw_name, str) and raw_name.strip():
+            return raw_name.strip()
+        return None
+
+    async def _new_graph_runner_id(self, session: AsyncSession) -> str:
+        runner_model = self._runner_model()
+        for _ in range(10):
+            candidate = f"runner_{secrets.token_hex(8)}"
+            result = await session.execute(
+                select(runner_model).where(runner_model.graph_runner_id == candidate)
+            )
+            if result.scalar_one_or_none() is None:
+                return candidate
+        raise SandboxControllerError("Failed generating unique graph runner ID")
+
+    async def _ensure_sandbox_runner(self, session: AsyncSession, sandbox: Any) -> Any:
+        runner_model = self._runner_model()
+        from sibyl.db.models import RunnerStatus
+
+        sandbox_id = getattr(sandbox, "id", None)
+        org_id = getattr(sandbox, "organization_id", None)
+        user_id = getattr(sandbox, "user_id", None)
+        if sandbox_id is None or org_id is None or user_id is None:
+            raise SandboxControllerError("Sandbox missing id/org/user; cannot bind sandbox runner")
+
+        current_runner_id = getattr(sandbox, "runner_id", None)
+        if current_runner_id:
+            result = await session.execute(
+                select(runner_model).where(
+                    runner_model.id == current_runner_id,
+                    runner_model.organization_id == org_id,
+                )
+            )
+            runner = result.scalar_one_or_none()
+            if runner is not None:
+                _set_if_present(runner, "sandbox_id", sandbox_id)
+                _set_if_present(runner, "is_sandbox_runner", True)
+                return runner
+
+        existing_result = await session.execute(
+            select(runner_model).where(
+                runner_model.organization_id == org_id,
+                runner_model.sandbox_id == sandbox_id,
+            )
+        )
+        existing_runner = existing_result.scalar_one_or_none()
+        if existing_runner is not None:
+            _set_if_present(existing_runner, "is_sandbox_runner", True)
+            _set_if_present(sandbox, "runner_id", existing_runner.id)
+            return existing_runner
+
+        graph_runner_id = await self._new_graph_runner_id(session)
+        name = f"sandbox-runner-{str(sandbox_id)[:8]}"
+        runner = runner_model(
+            organization_id=org_id,
+            user_id=user_id,
+            graph_runner_id=graph_runner_id,
+            name=name,
+            hostname=name,
+            capabilities=["sandbox", "kubernetes"],
+            max_concurrent_agents=1,
+            status=RunnerStatus.OFFLINE.value,
+            sandbox_id=sandbox_id,
+            is_sandbox_runner=True,
+        )
+        session.add(runner)
+        await session.flush()
+        _set_if_present(sandbox, "runner_id", runner.id)
+        log.info(
+            "sandbox_runner_created",
+            sandbox_id=str(sandbox_id),
+            runner_id=str(getattr(runner, "id", "")),
+            org_id=str(org_id),
+        )
+        return runner
+
+    def _sandbox_manifest(self, *, runtime_name: str, sandbox: Any) -> dict[str, Any]:
         labels = {
             "app": "sibyl-sandbox",
             "sandbox_id": str(getattr(sandbox, "id", "")),
             "organization_id": str(getattr(sandbox, "organization_id", "")),
+        }
+        annotations = {
+            "sibyl.ai/sandbox-id": str(getattr(sandbox, "id", "")),
+            "sibyl.ai/organization-id": str(getattr(sandbox, "organization_id", "")),
         }
         image = str(getattr(sandbox, "image", "") or self.sandbox_image)
 
@@ -182,11 +459,11 @@ class SandboxController:
             {"name": "SIBYL_SANDBOX_WORKTREE_BASE", "value": self.worktree_base},
             {"name": "SIBYL_SANDBOX_MODE", "value": "true"},
         ]
+
         runner_id = getattr(sandbox, "runner_id", None)
         if runner_id:
             env_vars.append({"name": "SIBYL_RUNNER_ID", "value": str(runner_id)})
 
-        # Mint a scoped JWT for the runner to authenticate back to the API
         sandbox_id = getattr(sandbox, "id", None)
         org_id = getattr(sandbox, "organization_id", None)
         user_id = getattr(sandbox, "user_id", None)
@@ -208,16 +485,12 @@ class SandboxController:
             "requests": {
                 "cpu": str(getattr(sandbox, "cpu_request", "250m")),
                 "memory": str(getattr(sandbox, "memory_request", "512Mi")),
-                "ephemeral-storage": str(
-                    getattr(sandbox, "ephemeral_storage_request", "1Gi")
-                ),
+                "ephemeral-storage": str(getattr(sandbox, "ephemeral_storage_request", "1Gi")),
             },
             "limits": {
                 "cpu": str(getattr(sandbox, "cpu_limit", "1000m")),
                 "memory": str(getattr(sandbox, "memory_limit", "2Gi")),
-                "ephemeral-storage": str(
-                    getattr(sandbox, "ephemeral_storage_limit", "4Gi")
-                ),
+                "ephemeral-storage": str(getattr(sandbox, "ephemeral_storage_limit", "4Gi")),
             },
         }
 
@@ -228,91 +501,49 @@ class SandboxController:
             "readOnlyRootFilesystem": False,
         }
 
-        container: dict[str, Any] = {
-            "name": "runner",
-            "image": image,
-            "env": env_vars,
-            "resources": resources,
-            "securityContext": security_context,
-            "volumeMounts": [
-                {
-                    "name": "worktree-storage",
-                    "mountPath": self.worktree_base,
-                }
-            ],
-        }
-
-        volumes: list[dict[str, Any]] = [
-            {
-                "name": "worktree-storage",
-                "emptyDir": {},
-            }
-        ]
-
         return {
-            "apiVersion": "v1",
-            "kind": "Pod",
-            "metadata": {"name": pod_name, "labels": labels},
+            "apiVersion": f"{self._SANDBOX_GROUP}/{self._SANDBOX_VERSION}",
+            "kind": "Sandbox",
+            "metadata": {
+                "name": runtime_name,
+                "labels": labels,
+                "annotations": annotations,
+            },
             "spec": {
-                "restartPolicy": "Always",
-                "automountServiceAccountToken": False,
-                "containers": [container],
-                "volumes": volumes,
+                "replicas": 1,
+                "podTemplate": {
+                    "metadata": {
+                        "labels": labels,
+                        "annotations": annotations,
+                    },
+                    "spec": {
+                        "restartPolicy": "Always",
+                        "automountServiceAccountToken": False,
+                        "containers": [
+                            {
+                                "name": "runner",
+                                "image": image,
+                                "env": env_vars,
+                                "resources": resources,
+                                "securityContext": security_context,
+                                "volumeMounts": [
+                                    {
+                                        "name": "worktree-storage",
+                                        "mountPath": self.worktree_base,
+                                    }
+                                ],
+                            }
+                        ],
+                        "volumes": [
+                            {
+                                "name": "worktree-storage",
+                                "emptyDir": {},
+                            }
+                        ],
+                    },
+                },
             },
         }
-
-    async def _ensure_pod(self, sandbox: Any) -> bool:
-        ready = await self._ensure_k8s_client()
-        if not ready:
-            if self.k8s_required:
-                raise SandboxControllerError(self._k8s_error or "Kubernetes is unavailable")
-            return False
-
-        pod_name = getattr(sandbox, "pod_name", None) or self._pod_name_for(sandbox.id)
-        _set_if_present(sandbox, "pod_name", pod_name)
-
-        try:
-            await self._core_api.read_namespaced_pod(name=pod_name, namespace=self.namespace)
-            return True
-        except Exception as e:
-            if not self._is_not_found(e):
-                self._k8s_error = f"Failed reading sandbox pod {pod_name}: {e}"
-                if self.k8s_required:
-                    raise SandboxControllerError(self._k8s_error) from e
-                log.warning("sandbox_pod_read_failed", pod_name=pod_name, error=str(e))
-                return False
-
-        try:
-            manifest = self._pod_manifest(pod_name=pod_name, sandbox=sandbox)
-            await self._core_api.create_namespaced_pod(namespace=self.namespace, body=manifest)
-            log.info("sandbox_pod_created", sandbox_id=str(getattr(sandbox, "id", "")), pod_name=pod_name)
-            return True
-        except Exception as e:
-            self._k8s_error = f"Failed creating sandbox pod {pod_name}: {e}"
-            if self.k8s_required:
-                raise SandboxControllerError(self._k8s_error) from e
-            log.warning("sandbox_pod_create_failed", pod_name=pod_name, error=str(e))
-            return False
-
-    async def _delete_pod_if_exists(self, pod_name: str | None) -> None:
-        if not pod_name:
-            return
-
-        if not await self._ensure_k8s_client():
-            if self.k8s_required:
-                raise SandboxControllerError(self._k8s_error or "Kubernetes is unavailable")
-            return
-
-        try:
-            await self._core_api.delete_namespaced_pod(name=pod_name, namespace=self.namespace)
-            log.info("sandbox_pod_deleted", pod_name=pod_name)
-        except Exception as e:
-            if self._is_not_found(e):
-                return
-            self._k8s_error = f"Failed deleting sandbox pod {pod_name}: {e}"
-            if self.k8s_required:
-                raise SandboxControllerError(self._k8s_error) from e
-            log.warning("sandbox_pod_delete_failed", pod_name=pod_name, error=str(e))
 
     async def _get_sandbox(
         self, session: AsyncSession, sandbox_id: UUID, organization_id: UUID | None
@@ -365,7 +596,6 @@ class SandboxController:
                     organization_id=organization_id, user_id=user_id, metadata=metadata
                 )
             except IntegrityError:
-                # Another caller won the race -- re-query
                 async with self._session_factory() as session:
                     stmt = select(self._sandbox_model()).where(
                         self._sandbox_model().organization_id == organization_id,
@@ -373,12 +603,23 @@ class SandboxController:
                         self._sandbox_model().status.notin_(list(self.TERMINAL_STATUSES)),
                     )
                     result = await session.execute(stmt)
-                    return result.scalar_one()
+                    candidate = result.scalar_one()
+
+        if candidate is None:
+            raise SandboxControllerError("Failed resolving sandbox candidate")
 
         if _status_of(candidate) in {"suspended", "failed"}:
             return await self.resume(candidate.id, organization_id=organization_id)
 
-        return candidate
+        # Backfill runner binding if this sandbox predates the runner bootstrap.
+        async with self._session_factory() as session:
+            sandbox = await self._get_sandbox(session, candidate.id, organization_id)
+            if sandbox is None:
+                return candidate
+            await self._ensure_sandbox_runner(session, sandbox)
+            await session.commit()
+            await session.refresh(sandbox)
+            return sandbox
 
     async def create(
         self,
@@ -387,7 +628,7 @@ class SandboxController:
         user_id: UUID,
         metadata: dict[str, Any] | None = None,
     ) -> Any:
-        """Create and initialize a new sandbox record (and pod if available)."""
+        """Create and initialize a new sandbox record and runtime Sandbox CR."""
         start = time.monotonic()
         self._require_enabled()
         sandbox_model = self._sandbox_model()
@@ -400,16 +641,24 @@ class SandboxController:
                 context = dict(getattr(sandbox, "context", {}) or {})
                 context.update(metadata)
                 sandbox.context = context
-            session.add(sandbox)
-            await session.commit()
-            await session.refresh(sandbox)
 
-            pod_ready = await self._ensure_pod(sandbox)
-            if pod_ready:
-                _set_if_present(sandbox, "status", "running")
+            session.add(sandbox)
+            await session.flush()
+            await self._ensure_sandbox_runner(session, sandbox)
+            runtime = await self._create_or_patch_runtime_sandbox(sandbox)
+
+            if runtime is not None:
+                _set_if_present(
+                    sandbox,
+                    "status",
+                    "running" if self._runtime_ready(runtime) else "starting",
+                )
                 _set_if_present(sandbox, "error_message", None)
                 if getattr(sandbox, "started_at", None) is None:
                     _set_if_present(sandbox, "started_at", now)
+                runtime_pod_name = self._runtime_pod_name(runtime)
+                if runtime_pod_name:
+                    _set_if_present(sandbox, "pod_name", runtime_pod_name)
             elif self.runtime_error:
                 _set_if_present(sandbox, "status", "failed")
                 _set_if_present(sandbox, "error_message", self.runtime_error)
@@ -428,7 +677,7 @@ class SandboxController:
             return sandbox
 
     async def resume(self, sandbox_id: UUID, *, organization_id: UUID | None = None) -> Any:
-        """Resume a sandbox by ensuring runtime pod and setting active status."""
+        """Resume a sandbox by scaling runtime Sandbox CR to one replica."""
         start = time.monotonic()
         self._require_enabled()
         now = datetime.now(UTC).replace(tzinfo=None)
@@ -440,14 +689,22 @@ class SandboxController:
 
             _set_if_present(sandbox, "status", "starting")
             _set_if_present(sandbox, "stopped_at", None)
-            # Clear stale heartbeat so reconcile doesn't immediately re-suspend
             _set_if_present(sandbox, "last_heartbeat", None)
-            pod_ready = await self._ensure_pod(sandbox)
-            if pod_ready:
-                _set_if_present(sandbox, "status", "running")
+            await self._ensure_sandbox_runner(session, sandbox)
+            runtime = await self._create_or_patch_runtime_sandbox(sandbox)
+
+            if runtime is not None:
+                _set_if_present(
+                    sandbox,
+                    "status",
+                    "running" if self._runtime_ready(runtime) else "starting",
+                )
                 _set_if_present(sandbox, "error_message", None)
                 if getattr(sandbox, "started_at", None) is None:
                     _set_if_present(sandbox, "started_at", now)
+                runtime_pod_name = self._runtime_pod_name(runtime)
+                if runtime_pod_name:
+                    _set_if_present(sandbox, "pod_name", runtime_pod_name)
             elif self.runtime_error:
                 _set_if_present(sandbox, "status", "failed")
                 _set_if_present(sandbox, "error_message", self.runtime_error)
@@ -463,7 +720,7 @@ class SandboxController:
             return sandbox
 
     async def suspend(self, sandbox_id: UUID, *, organization_id: UUID | None = None) -> Any:
-        """Suspend a sandbox and tear down pod when possible."""
+        """Suspend a sandbox by scaling runtime Sandbox CR down to zero."""
         start = time.monotonic()
         self._require_enabled()
         now = datetime.now(UTC).replace(tzinfo=None)
@@ -473,11 +730,10 @@ class SandboxController:
             if sandbox is None:
                 raise SandboxControllerError(f"Sandbox not found: {sandbox_id}")
 
-            pod_name = getattr(sandbox, "pod_name", None)
-            await self._delete_pod_if_exists(pod_name)
+            runtime_name = self._runtime_name_for(sandbox)
+            await self._scale_runtime_sandbox(runtime_name, replicas=0)
 
             _set_if_present(sandbox, "status", "suspended")
-            _set_if_present(sandbox, "runner_id", None)
             _set_if_present(sandbox, "stopped_at", now)
             await session.commit()
             await session.refresh(sandbox)
@@ -501,10 +757,9 @@ class SandboxController:
                 raise SandboxControllerError(f"Sandbox not found: {sandbox_id}")
 
             _set_if_present(sandbox, "status", "terminating")
-            await self._delete_pod_if_exists(getattr(sandbox, "pod_name", None))
+            await self._delete_runtime_sandbox(self._runtime_name_for(sandbox))
 
             _set_if_present(sandbox, "status", "deleted")
-            _set_if_present(sandbox, "runner_id", None)
             _set_if_present(sandbox, "stopped_at", now)
             await session.commit()
             await session.refresh(sandbox)
@@ -537,8 +792,11 @@ class SandboxController:
                 )
                 return
 
-            _set_if_present(sandbox, "runner_id", runner_id if connected else None)
-            _set_if_present(sandbox, "status", "running" if connected else "suspended")
+            if connected:
+                _set_if_present(sandbox, "runner_id", runner_id or getattr(sandbox, "runner_id", None))
+                _set_if_present(sandbox, "status", "running")
+                _set_if_present(sandbox, "error_message", None)
+
             await session.commit()
 
     async def get_logs(
@@ -554,11 +812,11 @@ class SandboxController:
             sandbox = await self._get_sandbox(session, sandbox_id, organization_id)
             if sandbox is None:
                 raise SandboxControllerError(f"Sandbox not found: {sandbox_id}")
-            pod_name = getattr(sandbox, "pod_name", None)
+            pod_name = getattr(sandbox, "pod_name", None) or self._runtime_name_for(sandbox)
 
         if not pod_name:
             raise SandboxControllerError(
-                "Logs not available: sandbox has no associated pod name yet"
+                "Logs not available: sandbox has no associated runtime name yet"
             )
         if not await self._ensure_k8s_client():
             raise SandboxControllerError(
@@ -583,7 +841,6 @@ class SandboxController:
         )
         if last_activity is None:
             return False
-        # Strip tzinfo for comparison (DB stores naive UTC)
         if hasattr(last_activity, "tzinfo") and last_activity.tzinfo is not None:
             last_activity = last_activity.replace(tzinfo=None)
         idle_seconds = (now - last_activity).total_seconds()
@@ -601,9 +858,8 @@ class SandboxController:
 
     async def _auto_suspend(self, sandbox: Any, now: datetime, reason: str) -> None:
         """Suspend a sandbox due to idle/lifetime timeout."""
-        await self._delete_pod_if_exists(getattr(sandbox, "pod_name", None))
+        await self._scale_runtime_sandbox(self._runtime_name_for(sandbox), replicas=0)
         _set_if_present(sandbox, "status", "suspended")
-        _set_if_present(sandbox, "runner_id", None)
         _set_if_present(sandbox, "stopped_at", now)
         _set_if_present(sandbox, "error_message", f"auto-suspended: {reason}")
 
@@ -630,37 +886,52 @@ class SandboxController:
                 _set_if_present(sandbox, "error_message", self.runtime_error)
             return
 
-        pod_name = getattr(sandbox, "pod_name", None)
-        if not pod_name:
+        runtime_name = self._runtime_name_for(sandbox)
+        try:
+            runtime = await self._read_runtime_sandbox(runtime_name)
+        except Exception as e:
+            log.warning(
+                "sandbox_reconcile_runtime_read_failed",
+                sandbox_id=sandbox_id_str,
+                runtime_name=runtime_name,
+                error=str(e),
+            )
             return
 
-        try:
-            pod = await self._core_api.read_namespaced_pod(
-                name=pod_name, namespace=self.namespace
-            )
-            phase = (
-                getattr(getattr(pod, "status", None), "phase", None) or ""
-            ).lower()
-            if phase == "running":
-                _set_if_present(sandbox, "status", "running")
-                _set_if_present(sandbox, "error_message", None)
-            elif phase == "pending":
-                _set_if_present(sandbox, "status", "starting")
-            elif phase in {"failed", "unknown"}:
+        if runtime is None:
+            if status in {"running", "starting", "pending"}:
                 _set_if_present(sandbox, "status", "failed")
-                _set_if_present(sandbox, "error_message", f"pod_phase={phase}")
-        except Exception as e:
-            if self._is_not_found(e):
-                if status in {"running", "starting", "pending"}:
-                    _set_if_present(sandbox, "status", "failed")
-                    _set_if_present(sandbox, "error_message", "sandbox pod not found")
-            else:
-                log.warning(
-                    "sandbox_reconcile_pod_read_failed",
-                    sandbox_id=sandbox_id_str,
-                    pod_name=pod_name,
-                    error=str(e),
-                )
+                _set_if_present(sandbox, "error_message", "runtime sandbox not found")
+            return
+
+        desired_replicas = self._runtime_spec_replicas(runtime)
+        actual_replicas = self._runtime_status_replicas(runtime)
+        ready = self._runtime_ready(runtime)
+        runtime_pod_name = self._runtime_pod_name(runtime)
+        if runtime_pod_name:
+            _set_if_present(sandbox, "pod_name", runtime_pod_name)
+        _set_if_present(sandbox, "namespace", self.namespace)
+        if hasattr(sandbox, "context"):
+            context = dict(getattr(sandbox, "context", {}) or {})
+            context["agent_sandbox_name"] = runtime_name
+            sandbox.context = context
+
+        if desired_replicas == 0:
+            _set_if_present(sandbox, "status", "suspended")
+            return
+
+        if actual_replicas == 0:
+            _set_if_present(sandbox, "status", "starting")
+            return
+
+        if ready and actual_replicas >= 1:
+            _set_if_present(sandbox, "status", "running")
+            _set_if_present(sandbox, "error_message", None)
+            if getattr(sandbox, "started_at", None) is None:
+                _set_if_present(sandbox, "started_at", now)
+            return
+
+        _set_if_present(sandbox, "status", "starting")
 
     async def _reap_stale_tasks(self) -> None:
         """Reap stale dispatched/acked tasks via dispatcher (if wired)."""
@@ -689,10 +960,8 @@ class SandboxController:
             sandboxes = result.scalars().all()
 
             for sandbox in sandboxes:
-                pod_name = getattr(sandbox, "pod_name", None)
-                await self._delete_pod_if_exists(pod_name)
+                await self._scale_runtime_sandbox(self._runtime_name_for(sandbox), replicas=0)
                 _set_if_present(sandbox, "status", "suspended")
-                _set_if_present(sandbox, "runner_id", None)
                 _set_if_present(sandbox, "stopped_at", now)
                 _set_if_present(sandbox, "error_message", "admin_rollback")
                 count += 1
@@ -703,49 +972,54 @@ class SandboxController:
             log.info("sandbox_suspend_all", org_id=str(org_id), count=count)
         return count
 
-    async def find_orphaned_pods(self, org_id: UUID) -> list[str]:
-        """Find K8s pods with sandbox label but no matching active DB record."""
+    async def find_orphaned_runtimes(self, org_id: UUID) -> list[str]:
+        """Find runtime Sandbox CRs with no matching active DB record."""
         if not await self._ensure_k8s_client():
             return []
 
         sandbox_model = self._sandbox_model()
-
-        # Get active pod names from DB
         async with self._session_factory() as session:
-            stmt = select(sandbox_model.pod_name).where(
+            stmt = select(sandbox_model).where(
                 sandbox_model.organization_id == org_id,
                 sandbox_model.status.in_(list(self.ACTIVE_STATUSES)),
-                sandbox_model.pod_name.isnot(None),
             )
             result = await session.execute(stmt)
-            active_pod_names = {row[0] for row in result.all() if row[0]}
+            active_runtime_names = {self._runtime_name_for(s) for s in result.scalars().all()}
 
-        # List K8s pods with sandbox label
         try:
-            pods = await self._core_api.list_namespaced_pod(
+            resources = await self._custom_api.list_namespaced_custom_object(
+                group=self._SANDBOX_GROUP,
+                version=self._SANDBOX_VERSION,
                 namespace=self.namespace,
-                label_selector="app=sibyl-sandbox",
+                plural=self._SANDBOX_PLURAL,
+                label_selector=f"app=sibyl-sandbox,organization_id={org_id}",
             )
         except Exception as e:
             log.warning("sandbox_orphan_scan_failed", error=str(e))
             return []
 
         orphaned: list[str] = []
-        for pod in getattr(pods, "items", []):
-            pod_name = getattr(getattr(pod, "metadata", None), "name", None)
-            if pod_name and pod_name not in active_pod_names:
-                # Verify this pod belongs to the requesting org
-                labels = getattr(getattr(pod, "metadata", None), "labels", {}) or {}
-                if labels.get("organization_id") == str(org_id):
-                    orphaned.append(pod_name)
+        for item in resources.get("items", []):
+            metadata = item.get("metadata", {})
+            name = metadata.get("name")
+            if isinstance(name, str) and name and name not in active_runtime_names:
+                orphaned.append(name)
 
         if orphaned:
-            log.info("sandbox_orphaned_pods_found", org_id=str(org_id), count=len(orphaned))
+            log.info("sandbox_orphaned_runtime_found", org_id=str(org_id), count=len(orphaned))
         return orphaned
 
+    async def delete_orphaned_runtime(self, runtime_name: str) -> None:
+        """Delete orphaned runtime sandbox by name."""
+        await self._delete_runtime_sandbox(runtime_name)
+
+    async def find_orphaned_pods(self, org_id: UUID) -> list[str]:
+        """Backward-compatible alias for runtime orphan discovery."""
+        return await self.find_orphaned_runtimes(org_id)
+
     async def delete_orphaned_pod(self, pod_name: str) -> None:
-        """Delete a single orphaned pod by name (public API for admin cleanup)."""
-        await self._delete_pod_if_exists(pod_name)
+        """Backward-compatible alias for runtime orphan deletion."""
+        await self.delete_orphaned_runtime(pod_name)
 
     async def _reconcile_once(self) -> None:
         if not self.enabled:
@@ -753,7 +1027,7 @@ class SandboxController:
 
         start = time.monotonic()
         sandbox_model = self._sandbox_model()
-        tracked_statuses = list(self.ACTIVE_STATUSES | {"failed"})
+        tracked_statuses = list(self.ACTIVE_STATUSES | {"failed", "suspended"})
         now = datetime.now(UTC).replace(tzinfo=None)
 
         sandboxes: list[Any] = []

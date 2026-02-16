@@ -250,29 +250,29 @@ async def sandbox_cleanup(
     if dispatcher is not None:
         reaped_tasks = await dispatcher.reap_stale_tasks()
 
-    # Find and delete orphaned pods
-    orphaned_pods = await controller.find_orphaned_pods(org.id)
-    deleted_pods = 0
-    for pod_name in orphaned_pods:
+    # Find and delete orphaned runtime sandboxes
+    orphaned_runtimes = await controller.find_orphaned_runtimes(org.id)
+    deleted_runtimes = 0
+    for runtime_name in orphaned_runtimes:
         try:
-            await controller.delete_orphaned_pod(pod_name)
-            deleted_pods += 1
+            await controller.delete_orphaned_runtime(runtime_name)
+            deleted_runtimes += 1
         except Exception as e:
-            log.warning("sandbox_cleanup_pod_delete_failed", pod_name=pod_name, error=str(e))
+            log.warning("sandbox_cleanup_runtime_delete_failed", runtime_name=runtime_name, error=str(e))
 
     log.info(
         "sandbox_admin_cleanup",
         org_id=str(org.id),
         reaped_tasks=reaped_tasks,
-        orphaned_pods=len(orphaned_pods),
-        deleted_pods=deleted_pods,
+        orphaned_runtimes=len(orphaned_runtimes),
+        deleted_runtimes=deleted_runtimes,
     )
 
     return {
         "status": "cleaned_up",
         "reaped_tasks": reaped_tasks,
-        "orphaned_pods_found": len(orphaned_pods),
-        "orphaned_pods_deleted": deleted_pods,
+        "orphaned_runtimes_found": len(orphaned_runtimes),
+        "orphaned_runtimes_deleted": deleted_runtimes,
     }
 
 

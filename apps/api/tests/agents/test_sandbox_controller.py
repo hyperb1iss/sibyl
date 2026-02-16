@@ -141,12 +141,12 @@ class TestCreateRunnerToken:
 
 
 # ---------------------------------------------------------------------------
-# _pod_manifest — token injection into env vars
+# _sandbox_manifest — token injection into runtime Sandbox CR env vars
 # ---------------------------------------------------------------------------
 
 
-class TestPodManifestTokenInjection:
-    """Verify runner token appears in pod env when IDs are present."""
+class TestSandboxManifestTokenInjection:
+    """Verify runner token appears in runtime Sandbox env when IDs are present."""
 
     def _make_sandbox(self, ids, *, include_runner: bool = True):
         """Build a minimal sandbox-like namespace."""
@@ -167,9 +167,9 @@ class TestPodManifestTokenInjection:
     def test_token_injected_when_runner_present(self, controller, ids):
         """SIBYL_RUNNER_TOKEN env var appears when runner_id/org_id/user_id exist."""
         sandbox = self._make_sandbox(ids)
-        manifest = controller._pod_manifest(pod_name="test-pod", sandbox=sandbox)
+        manifest = controller._sandbox_manifest(runtime_name="test-sandbox", sandbox=sandbox)
 
-        env_vars = manifest["spec"]["containers"][0]["env"]
+        env_vars = manifest["spec"]["podTemplate"]["spec"]["containers"][0]["env"]
         env_names = {e["name"] for e in env_vars}
 
         assert "SIBYL_RUNNER_TOKEN" in env_names
@@ -186,26 +186,26 @@ class TestPodManifestTokenInjection:
     def test_no_token_without_runner_id(self, controller, ids):
         """No SIBYL_RUNNER_TOKEN when runner_id is absent."""
         sandbox = self._make_sandbox(ids, include_runner=False)
-        manifest = controller._pod_manifest(pod_name="test-pod", sandbox=sandbox)
+        manifest = controller._sandbox_manifest(runtime_name="test-sandbox", sandbox=sandbox)
 
-        env_vars = manifest["spec"]["containers"][0]["env"]
+        env_vars = manifest["spec"]["podTemplate"]["spec"]["containers"][0]["env"]
         env_names = {e["name"] for e in env_vars}
 
         assert "SIBYL_RUNNER_TOKEN" not in env_names
         assert "SIBYL_RUNNER_ID" not in env_names
 
     def test_token_mint_failure_is_non_fatal(self, controller, ids):
-        """If JWT minting fails, pod manifest still builds (no token env var)."""
+        """If JWT minting fails, sandbox manifest still builds (no token env var)."""
         sandbox = self._make_sandbox(ids)
 
-        # Patch at the source — the lazy import inside _pod_manifest pulls from sibyl.auth.jwt
+        # Patch at the source — the lazy import inside _sandbox_manifest pulls from sibyl.auth.jwt
         with patch(
             "sibyl.auth.jwt.create_runner_token",
             side_effect=JwtError("boom"),
         ):
-            manifest = controller._pod_manifest(pod_name="test-pod", sandbox=sandbox)
+            manifest = controller._sandbox_manifest(runtime_name="test-sandbox", sandbox=sandbox)
 
-        env_vars = manifest["spec"]["containers"][0]["env"]
+        env_vars = manifest["spec"]["podTemplate"]["spec"]["containers"][0]["env"]
         env_names = {e["name"] for e in env_vars}
 
         # Token mint failed but manifest was still produced
@@ -214,16 +214,18 @@ class TestPodManifestTokenInjection:
         assert "SIBYL_RUNNER_TOKEN" not in env_names
 
     def test_manifest_structure_unchanged(self, controller, ids):
-        """Token injection doesn't break existing manifest structure."""
+        """Token injection doesn't break runtime Sandbox manifest structure."""
         sandbox = self._make_sandbox(ids)
-        manifest = controller._pod_manifest(pod_name="test-pod", sandbox=sandbox)
+        manifest = controller._sandbox_manifest(runtime_name="test-sandbox", sandbox=sandbox)
 
-        assert manifest["apiVersion"] == "v1"
-        assert manifest["kind"] == "Pod"
-        assert manifest["metadata"]["name"] == "test-pod"
+        assert manifest["apiVersion"] == "agents.x-k8s.io/v1alpha1"
+        assert manifest["kind"] == "Sandbox"
+        assert manifest["metadata"]["name"] == "test-sandbox"
         assert manifest["metadata"]["labels"]["app"] == "sibyl-sandbox"
+        assert manifest["spec"]["replicas"] == 1
+        assert manifest["spec"]["podTemplate"]["spec"]["automountServiceAccountToken"] is False
 
-        container = manifest["spec"]["containers"][0]
+        container = manifest["spec"]["podTemplate"]["spec"]["containers"][0]
         assert container["name"] == "runner"
         assert container["securityContext"]["runAsNonRoot"] is True
         assert container["securityContext"]["allowPrivilegeEscalation"] is False

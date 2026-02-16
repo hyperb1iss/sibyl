@@ -384,34 +384,23 @@ worker:
   # -- Affinity rules (overridden by podAntiAffinity if enabled)
   affinity: {}
 
-# -- Sandbox execution configuration
+# -- Sandbox execution configuration (agent-sandbox CRD runtime)
 sandbox:
   # -- Enable sandbox feature wiring
   enabled: false
 
-  # -- Base path for sandbox worktrees inside pods
-  worktreeBase: /workspace/sandboxes
-
-  # -- Persistent volume claim for sandbox worktrees
-  persistence:
-    # -- Enable PVC for sandbox worktree storage
-    enabled: false
-    # -- Storage class (empty = cluster default)
-    storageClass: ""
-    # -- PVC size
-    size: 10Gi
-    # -- Access modes
-    accessModes:
-      - ReadWriteOnce
-
   # -- Sandbox runtime environment variables
   env:
     SIBYL_SANDBOX_ENABLED: "false"
-    SIBYL_SANDBOX_NAMESPACE: "sibyl"
-    SIBYL_SANDBOX_IMAGE: "ghcr.io/hyperb1iss/sibyl-sandbox:latest"
-    SIBYL_SANDBOX_TTL_SECONDS: "3600"
+    SIBYL_SANDBOX_MODE: "off"
+    SIBYL_SANDBOX_K8S_NAMESPACE: "sibyl"
+    SIBYL_SANDBOX_DEFAULT_IMAGE: "ghcr.io/hyperb1iss/sibyl-sandbox:latest"
+    SIBYL_SANDBOX_WORKTREE_BASE: "/tmp/sibyl/sandboxes"
+    SIBYL_SANDBOX_IDLE_TTL_SECONDS: "1800"
+    SIBYL_SANDBOX_MAX_LIFETIME_SECONDS: "14400"
+    SIBYL_SANDBOX_RECONCILE_ENABLED: "true"
 
-  # -- RBAC for sandbox controller actions (pods/exec/logs lifecycle)
+  # -- RBAC for agent-sandbox CRD operations + pod exec/log access
   rbac:
     enabled: false
     # -- Optional override (defaults to chart service account)
