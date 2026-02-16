@@ -1,6 +1,11 @@
 # Sibyl values for local development
 # Uses local infrastructure (CNPG, FalkorDB, Kong)
 
+# Disable Helm hook migration Job — Tilt can't handle immutable Job reapply.
+# Use the 'migrate' local_resource in Tilt instead.
+migrations:
+  enabled: false
+
 backend:
   replicaCount: 1
 

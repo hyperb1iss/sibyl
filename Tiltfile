@@ -15,6 +15,7 @@ load('ext://helm_resource', 'helm_resource', 'helm_repo')
 config.define_bool("skip-infra")
 config.define_bool("sandbox")
 cfg = config.parse()
+agent_sandbox_version = os.getenv("AGENT_SANDBOX_VERSION", "v0.1.1")
 
 # =============================================================================
 # HELM REPOSITORIES
@@ -52,6 +53,36 @@ if not cfg.get("skip-infra"):
     # Namespaces
     # -------------------------------------------------------------------------
     k8s_yaml("infra/local/namespace.yaml")
+
+    # -------------------------------------------------------------------------
+    # agent-sandbox (required for sandbox mode)
+    # -------------------------------------------------------------------------
+    if cfg.get("sandbox"):
+        local_resource(
+            'agent-sandbox',
+            cmd='''
+            set -euo pipefail
+            VERSION="{version}"
+            MANIFEST_URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${{VERSION}}/manifest.yaml"
+
+            echo "🔄 Installing agent-sandbox ${VERSION}..."
+            kubectl apply -f "${MANIFEST_URL}"
+
+            echo "⏳ Waiting for sandbox CRD..."
+            kubectl wait --for=condition=Established --timeout=120s \
+                crd/sandboxes.agents.x-k8s.io
+
+            echo "⏳ Waiting for agent-sandbox controller..."
+            kubectl rollout status --timeout=180s \
+                statefulset/agent-sandbox-controller \
+                -n agent-sandbox-system
+
+            echo "✅ agent-sandbox ${VERSION} ready"
+            '''.format(version=agent_sandbox_version),
+            resource_deps=['gateway-api-crds'],
+            allow_parallel=True,
+            trigger_mode=TRIGGER_MODE_AUTO,
+        )
 
     # -------------------------------------------------------------------------
     # cert-manager
@@ -221,6 +252,7 @@ docker_build(
     only=[
         'pyproject.toml',
         'uv.lock',
+        'VERSION',
         'README.md',
         'apps/api/',
         'packages/python/sibyl-core/',
@@ -239,6 +271,7 @@ if cfg.get('sandbox'):
         only=[
             'pyproject.toml',
             'uv.lock',
+            'VERSION',
             'apps/runner/',
             'packages/python/sibyl-core/',
         ],
@@ -252,6 +285,7 @@ if cfg.get('sandbox'):
         only=[
             'pyproject.toml',
             'uv.lock',
+            'VERSION',
             'apps/runner/',
             'packages/python/sibyl-core/',
         ],
@@ -267,12 +301,34 @@ k8s_yaml(
 )
 
 backend_deps = ['postgres', 'falkordb'] if not cfg.get('skip-infra') else []
+if cfg.get('sandbox') and not cfg.get('skip-infra'):
+    backend_deps.append('agent-sandbox')
 k8s_resource(
     workload='sibyl-backend',
     new_name='backend',
     labels=['application'],
     # No port-forward - access via Kong gateway at sibyl.local
     resource_deps=backend_deps,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+# Migration — runs alembic via kubectl exec on the backend pod.
+# The Helm hook Job is disabled for local dev (Tilt can't reapply immutable Jobs).
+local_resource(
+    'migrate',
+    cmd='''
+    POD=$(kubectl get pod -n sibyl -l app.kubernetes.io/component=backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    if [ -z "$POD" ]; then
+        echo "❌ No backend pod found — is the backend running?"
+        exit 1
+    fi
+    echo "🔄 Running alembic upgrade head on $POD..."
+    kubectl exec -n sibyl "$POD" -- alembic upgrade head
+    echo "✅ Migration complete"
+    ''',
+    labels=['application'],
+    resource_deps=['backend'],
+    auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
@@ -283,17 +339,13 @@ k8s_resource(
 
 docker_build(
     'sibyl-frontend',
-    context='apps/web',
+    context='.',
     dockerfile='apps/web/Dockerfile',
     only=[
-        'src/',
-        'public/',
-        'package.json',
+        'VERSION',
         'pnpm-lock.yaml',
-        'next.config.ts',
-        'tailwind.config.ts',
-        'postcss.config.mjs',
-        'tsconfig.json',
+        'pnpm-workspace.yaml',
+        'apps/web/',
     ],
 )
 
