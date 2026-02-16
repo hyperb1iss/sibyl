@@ -68,6 +68,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone /app
 COPY --from=builder /app/apps/web/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./.next/static
 
+# Next.js needs writable .next tree at runtime (image cache, etc.)
+RUN mkdir -p .next/cache && chown -R nextjs:nodejs .next
+
 # Switch to non-root user
 USER nextjs
 

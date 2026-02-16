@@ -9,6 +9,7 @@ import { EditableTags, EditableText } from '@/components/editable';
 import { Breadcrumb, ROUTE_CONFIG } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { VelocityLineChart } from '@/components/metrics/charts';
+import { CreateProjectDialog } from '@/components/projects/create-project-dialog';
 import { ProjectsEmptyState } from '@/components/ui/empty-state';
 import {
   AlertTriangle,
@@ -139,6 +140,7 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
   const setSortBy = (v: ProjectSortOption) => setPrefs(p => ({ ...p, sortBy: v }));
   const setShowArchived = (v: boolean) => setPrefs(p => ({ ...p, showArchived: v }));
 
+  const [showCreate, setShowCreate] = useState(false);
   const selectedProjectId = searchParams.get('id');
 
   // Fetch projects
@@ -281,7 +283,12 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
       <div className="space-y-4">
         <Breadcrumb />
         <PageHeader description="Manage your development projects" meta="0 projects" />
-        <ProjectsEmptyState />
+        <ProjectsEmptyState onCreateProject={() => setShowCreate(true)} />
+        <CreateProjectDialog
+          isOpen={showCreate}
+          onClose={() => setShowCreate(false)}
+          onCreated={id => router.push(`/projects?id=${id}`)}
+        />
       </div>
     );
   }
@@ -296,12 +303,19 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
         action={
           <button
             type="button"
+            onClick={() => setShowCreate(true)}
             className="shrink-0 px-4 py-2 bg-sc-purple hover:bg-sc-purple/80 text-white rounded-lg font-medium transition-colors flex items-center gap-1.5 text-sm"
           >
             <span>+</span>
             <span>New Project</span>
           </button>
         }
+      />
+
+      <CreateProjectDialog
+        isOpen={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={id => router.push(`/projects?id=${id}`)}
       />
 
       <div className="flex gap-6">
