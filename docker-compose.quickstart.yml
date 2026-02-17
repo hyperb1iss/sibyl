@@ -129,7 +129,7 @@ services:
       - "${SIBYL_FALKORDB_PORT:-6380}:6379" # Redis protocol
       - "${SIBYL_FALKORDB_BROWSER_PORT:-3335}:3000" # Browser UI (optional)
     volumes:
-      - sibyl_falkordb:/data
+      - sibyl_falkordb:/var/lib/falkordb/data
     environment:
       FALKORDB_ARGS: --requirepass ${SIBYL_FALKORDB_PASSWORD:-sibyl_quickstart}
     healthcheck:

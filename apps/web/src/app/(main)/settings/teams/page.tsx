@@ -83,12 +83,12 @@ function OrgMembersCard({ org, currentUserId, isCurrentOrg }: OrgMembersCardProp
       }`}
     >
       {/* Header */}
-      <button
-        type="button"
-        className="w-full p-4 flex items-center justify-between gap-3 text-left"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="flex items-center gap-3 flex-1 min-w-0">
+      <div className="w-full p-4 flex items-center justify-between gap-3">
+        <button
+          type="button"
+          className="flex items-center gap-3 flex-1 min-w-0 text-left"
+          onClick={() => setExpanded(!expanded)}
+        >
           <div
             className={`w-10 h-10 rounded-lg flex items-center justify-center ${
               isCurrentOrg ? 'bg-sc-purple/20' : 'bg-sc-bg-highlight'
@@ -118,24 +118,28 @@ function OrgMembersCard({ org, currentUserId, isCurrentOrg }: OrgMembersCardProp
               {org.is_personal && <span className="text-xs text-sc-fg-subtle">(personal)</span>}
             </div>
           </div>
-        </div>
+        </button>
         <div className="flex items-center gap-2">
           {!isCurrentOrg && (
             <Button
               variant="secondary"
               size="sm"
-              onClick={e => {
-                e.stopPropagation();
-                void handleSwitch();
-              }}
+              onClick={() => void handleSwitch()}
               loading={switchOrg.isPending}
             >
               Switch
             </Button>
           )}
-          <span className="text-sc-fg-muted text-sm">{expanded ? '▲' : '▼'}</span>
+          <button
+            type="button"
+            className="text-sc-fg-muted text-sm hover:text-sc-fg-primary transition-colors"
+            onClick={() => setExpanded(!expanded)}
+            aria-label={expanded ? 'Collapse members' : 'Expand members'}
+          >
+            {expanded ? '▲' : '▼'}
+          </button>
         </div>
-      </button>
+      </div>
 
       {/* Members List */}
       {expanded && (

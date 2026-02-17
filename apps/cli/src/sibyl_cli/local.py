@@ -125,7 +125,7 @@ COMPOSE_CONFIG = {
                 "api": {"condition": "service_healthy"},
             },
             "environment": {
-                "SIBYL_API_URL": "http://api:3334",  # Server-side (SSR) fetches
+                "SIBYL_API_URL": "http://api:3334/api",  # Server-side (SSR) fetches
                 "NEXT_PUBLIC_API_URL": "http://localhost:3334",  # Client-side fetches
                 "NODE_ENV": "production",
             },
@@ -141,7 +141,7 @@ COMPOSE_CONFIG = {
             "image": "falkordb/falkordb:latest",
             "container_name": "sibyl-falkordb",
             "ports": ["6380:6379", "3335:3000"],
-            "volumes": ["sibyl_falkordb:/data"],
+            "volumes": ["sibyl_falkordb:/var/lib/falkordb/data"],
             "environment": {
                 "FALKORDB_ARGS": "--requirepass ${SIBYL_FALKORDB_PASSWORD:-sibyl_local}",
             },

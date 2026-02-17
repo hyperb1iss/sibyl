@@ -3,7 +3,7 @@
 # Run with: tilt up
 
 # Force minikube context
-k8s_context('minikube')
+k8s_context('orbstack')
 
 # Increase timeout for large charts
 update_settings(k8s_upsert_timeout_secs=300)

@@ -14,7 +14,7 @@ services:
       - "${SIBYL_FALKORDB_PORT:-6380}:6379"
       - "${SIBYL_FALKORDB_BROWSER_PORT:-3335}:3000"
     volumes:
-      - falkordb_data:/data
+      - falkordb_data:/var/lib/falkordb/data
     environment:
       - FALKORDB_ARGS=--requirepass ${SIBYL_FALKORDB_PASSWORD:-conventions}
     healthcheck:

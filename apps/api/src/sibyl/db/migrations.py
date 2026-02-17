@@ -23,9 +23,12 @@ def _run_migrations_sync() -> None:
 
     # Fallback for development (source tree)
     if not alembic_ini.exists():
-        # Go up from sibyl/db/migrations.py to apps/api
-        api_root = Path(__file__).parent.parent.parent
-        alembic_ini = api_root / "alembic.ini"
+        # Walk up from apps/api/src/sibyl/db/migrations.py until we find apps/api/alembic.ini.
+        for parent in Path(__file__).resolve().parents:
+            candidate = parent / "alembic.ini"
+            if candidate.exists():
+                alembic_ini = candidate
+                break
 
     if not alembic_ini.exists():
         log.warning("alembic.ini not found, skipping migrations", path=str(alembic_ini))
