@@ -318,9 +318,7 @@ class TestSandboxLifecycle:
 
     def test_namespace_custom(self):
         """Custom namespace is respected."""
-        ctrl = SandboxController(
-            session_factory=AsyncMock(), enabled=True, namespace="sibyl-prod"
-        )
+        ctrl = SandboxController(session_factory=AsyncMock(), enabled=True, namespace="sibyl-prod")
         assert ctrl.namespace == "sibyl-prod"
 
     def test_constructor_defaults(self):

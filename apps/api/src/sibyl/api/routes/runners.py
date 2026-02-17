@@ -42,6 +42,7 @@ class RunnerAuthContext:
     sandbox_id: UUID | None = None
     scopes: set[str] = field(default_factory=set)
 
+
 # Auth: org member required for all runner operations
 _RUNNER_ROLES = (OrganizationRole.MEMBER, OrganizationRole.ADMIN, OrganizationRole.OWNER)
 
@@ -730,7 +731,11 @@ def _extract_runner_auth(websocket: WebSocket) -> RunnerAuthContext | None:
 
 
 async def _handle_heartbeat(
-    conn: RunnerConnection, runner_id: UUID, session: AsyncSession, *, sandbox_id: UUID | None = None
+    conn: RunnerConnection,
+    runner_id: UUID,
+    session: AsyncSession,
+    *,
+    sandbox_id: UUID | None = None,
 ) -> None:
     """Handle heartbeat acknowledgment from runner.
 
@@ -740,15 +745,15 @@ async def _handle_heartbeat(
     now = datetime.now(UTC)
     conn.last_heartbeat = now
 
-    await session.execute(
-        update(Runner).where(Runner.id == runner_id).values(last_heartbeat=now)
-    )
+    await session.execute(update(Runner).where(Runner.id == runner_id).values(last_heartbeat=now))
 
     if sandbox_id:
         from sibyl.db.models import Sandbox
 
         await session.execute(
-            update(Sandbox).where(Sandbox.id == sandbox_id).values(last_heartbeat=now.replace(tzinfo=None))
+            update(Sandbox)
+            .where(Sandbox.id == sandbox_id)
+            .values(last_heartbeat=now.replace(tzinfo=None))
         )
 
     await session.commit()
@@ -864,9 +869,13 @@ async def _handle_task_complete(
     if dispatcher is not None and task_id:
         status_value = str((result or {}).get("status", "")).lower()
         canceled = status_value in {"cancelled", "canceled"}
-        success = bool(data.get("success", status_value not in {"failed", "error", "cancelled", "canceled"}))
+        success = bool(
+            data.get("success", status_value not in {"failed", "error", "cancelled", "canceled"})
+        )
         retryable = bool(data.get("retryable", False))
-        error = data.get("error") or ((result or {}).get("error") if isinstance(result, dict) else None)
+        error = data.get("error") or (
+            (result or {}).get("error") if isinstance(result, dict) else None
+        )
         try:
             await dispatcher.complete_task(
                 task_id=task_id,
@@ -1069,7 +1078,12 @@ async def runner_websocket(websocket: WebSocket, runner_id: UUID) -> None:  # no
                 data = await websocket.receive_json()
                 async with get_session() as session:
                     await _handle_ws_message(
-                        conn, runner_id, org_id, data, websocket, session,
+                        conn,
+                        runner_id,
+                        org_id,
+                        data,
+                        websocket,
+                        session,
                         sandbox_id=auth_ctx.sandbox_id if auth_ctx else None,
                     )
             except ValueError:

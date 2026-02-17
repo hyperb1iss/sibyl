@@ -250,7 +250,9 @@ class SandboxController:
                 self._k8s_error = f"Failed creating runtime sandbox {runtime_name}: {e}"
                 if self.k8s_required:
                     raise SandboxControllerError(self._k8s_error) from e
-                log.warning("sandbox_runtime_create_failed", runtime_name=runtime_name, error=str(e))
+                log.warning(
+                    "sandbox_runtime_create_failed", runtime_name=runtime_name, error=str(e)
+                )
                 return None
 
         patch = {
@@ -793,7 +795,9 @@ class SandboxController:
                 return
 
             if connected:
-                _set_if_present(sandbox, "runner_id", runner_id or getattr(sandbox, "runner_id", None))
+                _set_if_present(
+                    sandbox, "runner_id", runner_id or getattr(sandbox, "runner_id", None)
+                )
                 _set_if_present(sandbox, "status", "running")
                 _set_if_present(sandbox, "error_message", None)
 
@@ -835,9 +839,8 @@ class SandboxController:
 
     def _is_idle_expired(self, sandbox: Any, now: datetime) -> bool:
         """Check if sandbox has exceeded idle TTL based on last heartbeat or update."""
-        last_activity = (
-            getattr(sandbox, "last_heartbeat", None)
-            or getattr(sandbox, "updated_at", None)
+        last_activity = getattr(sandbox, "last_heartbeat", None) or getattr(
+            sandbox, "updated_at", None
         )
         if last_activity is None:
             return False
@@ -863,9 +866,7 @@ class SandboxController:
         _set_if_present(sandbox, "stopped_at", now)
         _set_if_present(sandbox, "error_message", f"auto-suspended: {reason}")
 
-    async def _reconcile_sandbox(
-        self, sandbox: Any, *, now: datetime, k8s_ready: bool
-    ) -> None:
+    async def _reconcile_sandbox(self, sandbox: Any, *, now: datetime, k8s_ready: bool) -> None:
         """Reconcile a single sandbox against runtime state."""
         sandbox_id_str = str(getattr(sandbox, "id", ""))
         status = _status_of(sandbox)

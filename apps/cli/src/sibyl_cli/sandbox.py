@@ -154,9 +154,7 @@ def status(
 
                     console.print("\n[bold]Sandbox Status[/bold]\n")
                     console.print(f"  ID:        [{NEON_CYAN}]{_sandbox_id(sandbox)}[/{NEON_CYAN}]")
-                    console.print(
-                        f"  Status:    [{CORAL}]{_sandbox_status(sandbox)}[/{CORAL}]"
-                    )
+                    console.print(f"  Status:    [{CORAL}]{_sandbox_status(sandbox)}[/{CORAL}]")
                     console.print(
                         f"  Project:   [{NEON_CYAN}]{sandbox.get('project_id', '-')}[/{NEON_CYAN}]"
                     )
@@ -236,10 +234,7 @@ def start(
                     print_json(data)
                     return
 
-                success(
-                    f"Started sandbox {_sandbox_id(sandbox)}"
-                    f" ({_sandbox_status(sandbox)})"
-                )
+                success(f"Started sandbox {_sandbox_id(sandbox)} ({_sandbox_status(sandbox)})")
 
         except SibylClientError as e:
             handle_client_error(e)

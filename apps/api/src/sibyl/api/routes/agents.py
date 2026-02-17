@@ -558,7 +558,9 @@ async def spawn_agent(  # noqa: PLR0915
                 )
                 if sandbox_mode == "enforced":
                     raise RuntimeError(detail)
-                log.warning("sandbox_dispatch_skipped_shadow_fallback", detail=detail, agent_id=agent_id)
+                log.warning(
+                    "sandbox_dispatch_skipped_shadow_fallback", detail=detail, agent_id=agent_id
+                )
             else:
                 try:
                     sandbox = await controller.ensure(
@@ -598,7 +600,9 @@ async def spawn_agent(  # noqa: PLR0915
                         await dispatcher.dispatch_pending_for_sandbox(
                             sandbox_id=sandbox.id,
                             runner_id=sandbox_runner_id,
-                            send_fn=lambda msg: runner_manager.send_to_runner(sandbox_runner_id, msg),
+                            send_fn=lambda msg: runner_manager.send_to_runner(
+                                sandbox_runner_id, msg
+                            ),
                         )
                 except Exception as e:
                     if sandbox_mode == "enforced":

@@ -152,7 +152,9 @@ async def ensure_sandbox(
         OrganizationRole.ADMIN,
         OrganizationRole.OWNER,
     ):
-        raise HTTPException(status_code=403, detail="Only admins can ensure sandbox for another user")
+        raise HTTPException(
+            status_code=403, detail="Only admins can ensure sandbox for another user"
+        )
 
     try:
         context = body.context if body.context is not None else body.metadata
@@ -258,7 +260,9 @@ async def sandbox_cleanup(
             await controller.delete_orphaned_runtime(runtime_name)
             deleted_runtimes += 1
         except Exception as e:
-            log.warning("sandbox_cleanup_runtime_delete_failed", runtime_name=runtime_name, error=str(e))
+            log.warning(
+                "sandbox_cleanup_runtime_delete_failed", runtime_name=runtime_name, error=str(e)
+            )
 
     log.info(
         "sandbox_admin_cleanup",

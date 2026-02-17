@@ -173,7 +173,9 @@ class SandboxDispatcher:
             dispatched = 0
             for task in tasks:
                 attempts = int(getattr(task, "attempt_count", 0) or 0)
-                task_max_attempts = int(getattr(task, "max_attempts", self.max_attempts) or self.max_attempts)
+                task_max_attempts = int(
+                    getattr(task, "max_attempts", self.max_attempts) or self.max_attempts
+                )
                 if attempts >= task_max_attempts:
                     _set_if_present(task, "status", "failed")
                     _set_if_present(task, "error_message", "max_attempts_exceeded")
@@ -254,7 +256,9 @@ class SandboxDispatcher:
                 raise SandboxDispatcherError(f"Sandbox task not found: {task_id}")
 
             attempts = int(getattr(task, "attempt_count", 0) or 0)
-            task_max_attempts = int(getattr(task, "max_attempts", self.max_attempts) or self.max_attempts)
+            task_max_attempts = int(
+                getattr(task, "max_attempts", self.max_attempts) or self.max_attempts
+            )
 
             if canceled:
                 _set_if_present(task, "status", "canceled")
@@ -334,9 +338,7 @@ class SandboxDispatcher:
             reaped = 0
             for task in stale:
                 attempts = int(getattr(task, "attempt_count", 0) or 0)
-                max_att = int(
-                    getattr(task, "max_attempts", self.max_attempts) or self.max_attempts
-                )
+                max_att = int(getattr(task, "max_attempts", self.max_attempts) or self.max_attempts)
                 if attempts >= max_att:
                     _set_if_present(task, "status", "failed")
                     _set_if_present(task, "error_message", "lease_expired_max_attempts")

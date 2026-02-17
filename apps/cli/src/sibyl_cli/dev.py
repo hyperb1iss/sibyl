@@ -66,9 +66,7 @@ def _require_docker() -> None:
         console.print("\nInstall Docker from: https://docs.docker.com/get-docker/")
         raise typer.Exit(1)
 
-    result = subprocess.run(
-        ["docker", "info"], capture_output=True, text=True, check=False
-    )
+    result = subprocess.run(["docker", "info"], capture_output=True, text=True, check=False)
     if result.returncode != 0:
         error("Docker daemon is not running")
         raise typer.Exit(1)
@@ -134,9 +132,7 @@ def shell(
 
 @app.command()
 def up(
-    build: bool = typer.Option(
-        False, "--build", "-b", help="Rebuild images before starting"
-    ),
+    build: bool = typer.Option(False, "--build", "-b", help="Rebuild images before starting"),
     detach: bool = typer.Option(
         True, "--detach/--no-detach", "-d", help="Run in background (default: true)"
     ),
@@ -155,9 +151,7 @@ def up(
     result = _run_compose(args, compose_file)
     if result and result.returncode == 0:
         success("Devcontainer stack is up")
-        console.print(
-            f"  [{NEON_CYAN}]Tip:[/{NEON_CYAN}] [bold]sibyl dev shell[/bold] to jump in"
-        )
+        console.print(f"  [{NEON_CYAN}]Tip:[/{NEON_CYAN}] [bold]sibyl dev shell[/bold] to jump in")
     else:
         error("Failed to start devcontainer stack")
         raise typer.Exit(1)
@@ -201,9 +195,7 @@ def status() -> None:
     raw = result.stdout.strip()
     if not raw:
         info("No devcontainer services running")
-        console.print(
-            f"\nRun [{NEON_CYAN}]sibyl dev up[/{NEON_CYAN}] to start the stack."
-        )
+        console.print(f"\nRun [{NEON_CYAN}]sibyl dev up[/{NEON_CYAN}] to start the stack.")
         return
 
     import json
@@ -220,9 +212,7 @@ def status() -> None:
         info("No devcontainer services running")
         return
 
-    table = Table(
-        title="Devcontainer Services", border_style=ELECTRIC_PURPLE
-    )
+    table = Table(title="Devcontainer Services", border_style=ELECTRIC_PURPLE)
     table.add_column("Service", style=NEON_CYAN)
     table.add_column("State", style=SUCCESS_GREEN)
     table.add_column("Status", style="dim")

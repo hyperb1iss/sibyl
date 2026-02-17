@@ -21,7 +21,9 @@ class SandboxExecProxy:
         self._ws_client: Any | None = None
         self._k8s_stream: Any | None = None
 
-    async def connect(self, pod_name: str, namespace: str | None = None, command: list[str] | None = None) -> None:
+    async def connect(
+        self, pod_name: str, namespace: str | None = None, command: list[str] | None = None
+    ) -> None:
         """Open K8s exec stream to the given pod."""
         ns = namespace or self._namespace
         cmd = command or ["/bin/sh"]

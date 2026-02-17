@@ -1715,7 +1715,9 @@ class SandboxTask(TimestampMixin, table=True):
     )
 
     requested_at: datetime = Field(default_factory=utcnow_naive, description="When task was queued")
-    last_dispatch_at: datetime | None = Field(default=None, description="Last dispatch attempt time")
+    last_dispatch_at: datetime | None = Field(
+        default=None, description="Last dispatch attempt time"
+    )
     acked_at: datetime | None = Field(default=None, description="When runner acknowledged task")
     started_at: datetime | None = Field(default=None, description="When execution started")
     completed_at: datetime | None = Field(default=None, description="When execution completed")

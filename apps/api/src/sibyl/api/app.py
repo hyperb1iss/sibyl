@@ -191,7 +191,9 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         try:
             await _init_sandbox_control_plane(_app)
         except Exception as e:
-            log.warning("Failed to initialize sandbox control plane", error=str(e), mode=_sandbox_mode())
+            log.warning(
+                "Failed to initialize sandbox control plane", error=str(e), mode=_sandbox_mode()
+            )
 
     yield
 
