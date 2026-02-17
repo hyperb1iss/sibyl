@@ -13,8 +13,9 @@ load('ext://helm_resource', 'helm_resource', 'helm_repo')
 
 # Configuration
 config.define_bool("skip-infra")
-config.define_bool("sandbox")
+config.define_bool("no-sandbox")
 cfg = config.parse()
+sandbox_enabled = not cfg.get("no-sandbox")
 agent_sandbox_version = os.getenv("AGENT_SANDBOX_VERSION", "v0.1.1")
 
 # =============================================================================
@@ -57,19 +58,25 @@ if not cfg.get("skip-infra"):
     # -------------------------------------------------------------------------
     # agent-sandbox (required for sandbox mode)
     # -------------------------------------------------------------------------
-    if cfg.get("sandbox"):
+    if sandbox_enabled:
         local_resource(
             'agent-sandbox',
             cmd='''
             set -euo pipefail
             VERSION="{version}"
+            TARGET_IMAGE="registry.k8s.io/agent-sandbox/agent-sandbox-controller:${{VERSION}}"
             MANIFEST_URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${{VERSION}}/manifest.yaml"
+            CURRENT_IMAGE="$(kubectl get statefulset -n agent-sandbox-system agent-sandbox-controller -o jsonpath='{{.spec.template.spec.containers[0].image}}' 2>/dev/null || true)"
 
-            echo "🔄 Installing agent-sandbox ${VERSION}..."
-            kubectl apply -f "${MANIFEST_URL}"
+            if [ "${{CURRENT_IMAGE}}" != "${{TARGET_IMAGE}}" ]; then
+                echo "🔄 Installing agent-sandbox ${{VERSION}}..."
+                kubectl apply -f "${{MANIFEST_URL}}"
+            else
+                echo "✅ agent-sandbox ${{VERSION}} already installed"
+            fi
 
             echo "⏳ Waiting for sandbox CRD..."
-            kubectl wait --for=condition=Established --timeout=120s \
+            kubectl wait --for=condition=Established --timeout=180s \
                 crd/sandboxes.agents.x-k8s.io
 
             echo "⏳ Waiting for agent-sandbox controller..."
@@ -77,7 +84,15 @@ if not cfg.get("skip-infra"):
                 statefulset/agent-sandbox-controller \
                 -n agent-sandbox-system
 
-            echo "✅ agent-sandbox ${VERSION} ready"
+            CURRENT_IMAGE="$(kubectl get statefulset -n agent-sandbox-system agent-sandbox-controller -o jsonpath='{{.spec.template.spec.containers[0].image}}')"
+            if [ "${{CURRENT_IMAGE}}" != "${{TARGET_IMAGE}}" ]; then
+                echo "❌ agent-sandbox controller image mismatch."
+                echo "   Expected: ${{TARGET_IMAGE}}"
+                echo "   Actual:   ${{CURRENT_IMAGE}}"
+                exit 1
+            fi
+
+            echo "✅ agent-sandbox ${{VERSION}} ready (${{CURRENT_IMAGE}})"
             '''.format(version=agent_sandbox_version),
             resource_deps=['gateway-api-crds'],
             allow_parallel=True,
@@ -260,7 +275,7 @@ docker_build(
 )
 
 helm_values = ['infra/local/sibyl-values.yaml']
-if cfg.get('sandbox'):
+if sandbox_enabled:
     helm_values.append('infra/local/sibyl-values-sandbox.yaml')
 
     # Runner image (daemon that connects to API via WebSocket)
@@ -301,7 +316,7 @@ k8s_yaml(
 )
 
 backend_deps = ['postgres', 'falkordb'] if not cfg.get('skip-infra') else []
-if cfg.get('sandbox') and not cfg.get('skip-infra'):
+if sandbox_enabled and not cfg.get('skip-infra'):
     backend_deps.append('agent-sandbox')
 k8s_resource(
     workload='sibyl-backend',

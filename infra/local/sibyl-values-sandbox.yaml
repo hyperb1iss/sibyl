@@ -1,5 +1,6 @@
 # Sandbox feature overlay for local Tilt development.
-# Usage: tilt up -- --sandbox
+# Applied by default in Tilt.
+# Disable with: tilt up -- --no-sandbox
 
 sandbox:
   enabled: true

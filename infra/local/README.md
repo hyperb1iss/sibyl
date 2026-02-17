@@ -15,7 +15,10 @@ Local Kubernetes development environment using minikube.
 # Start minikube with enough resources
 minikube start --cpus=4 --memory=8192 --driver=docker
 
-# From project root, run Tilt
+# Optional: pin agent-sandbox version
+export AGENT_SANDBOX_VERSION=v0.1.1
+
+# From project root, run Tilt (sandbox enabled by default)
 tilt up
 ```
 
@@ -28,6 +31,7 @@ tilt up
 | FalkorDB      | bitnami/redis        | latest  | Graph database (Redis + FalkorDB module) |
 | Kong Operator | kong/kong-operator   | latest  | API Gateway                              |
 | Gateway API   | k8s-sigs/gateway-api | v1.4.1  | Gateway CRDs                             |
+| Agent Sandbox | kubernetes-sigs/agent-sandbox | v0.1.1 | Sandbox CRD/controller (enabled by default; disable with `--no-sandbox`) |
 | Sibyl         | ./charts/sibyl       | 0.1.0   | Application                              |
 
 ## Manual Setup (without Tilt)

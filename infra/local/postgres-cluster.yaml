@@ -21,7 +21,8 @@ spec:
   # Storage configuration
   storage:
     size: 5Gi
-    storageClass: standard # minikube default
+    # Use the cluster default StorageClass for local portability
+    # (e.g. minikube: standard, OrbStack: local-path).
 
   # Resource limits for local dev
   resources:

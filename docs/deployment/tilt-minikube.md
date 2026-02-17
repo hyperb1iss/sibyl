@@ -69,7 +69,10 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # 3. Add sibyl.local to /etc/hosts
 echo "127.0.0.1 sibyl.local" | sudo tee -a /etc/hosts
 
-# 4. Start Tilt (from project root)
+# Optional: pin agent-sandbox version
+export AGENT_SANDBOX_VERSION=v0.1.1
+
+# 4. Start Tilt (sandbox enabled by default)
 tilt up
 ```
 
@@ -82,6 +85,7 @@ The Tiltfile orchestrates deployment of:
 | Component          | Namespace    | Purpose                         |
 | ------------------ | ------------ | ------------------------------- |
 | Gateway API CRDs   | -            | Kubernetes Gateway API          |
+| Agent Sandbox CRDs | agent-sandbox-system | Sandbox CRD controller (enabled by default; disable with `--no-sandbox`) |
 | cert-manager       | cert-manager | TLS certificate management      |
 | Kong Operator      | kong-system  | API Gateway operator            |
 | Kong Gateway       | kong         | Ingress/routing                 |
@@ -154,7 +158,7 @@ The Tilt UI at http://localhost:10350 shows:
 
 ### Resource Groups
 
-- **infrastructure**: Gateway API CRDs, cert-manager, Kong, CNPG, FalkorDB
+- **infrastructure**: Gateway API CRDs, agent-sandbox, cert-manager, Kong, CNPG, FalkorDB
 - **application**: Backend, Frontend, Worker
 - **networking**: Kong port-forward, Caddy proxy
 - **tools**: Convenience commands
@@ -211,6 +215,31 @@ To skip infrastructure deployment (use existing databases):
 
 ```bash
 tilt up -- --skip-infra
+```
+
+### Sandbox Mode (agent-sandbox, default on)
+
+Sandbox mode is enabled by default in Tilt:
+
+```bash
+export AGENT_SANDBOX_VERSION=v0.1.1
+tilt up
+```
+
+Tilt installs the upstream manifest from:
+`https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${AGENT_SANDBOX_VERSION}/manifest.yaml`
+
+Disable sandbox mode only when needed:
+
+```bash
+tilt up -- --no-sandbox
+```
+
+Verify installation:
+
+```bash
+kubectl get crd sandboxes.agents.x-k8s.io
+kubectl rollout status -n agent-sandbox-system statefulset/agent-sandbox-controller
 ```
 
 ## Development Workflow
@@ -356,6 +385,17 @@ kubectl get cluster -n sibyl sibyl-postgres
 
 # Check postgres pods
 kubectl get pods -n sibyl -l cnpg.io/cluster=sibyl-postgres
+```
+
+### Agent Sandbox Not Ready
+
+```bash
+# Check CRD
+kubectl get crd sandboxes.agents.x-k8s.io
+
+# Check controller status and logs
+kubectl get pods -n agent-sandbox-system
+kubectl logs -n agent-sandbox-system statefulset/agent-sandbox-controller
 ```
 
 ### Can't Reach sibyl.local
