@@ -3,7 +3,7 @@
 # moon is built-in to proto v0.45+, no plugin needed
 
 proto = "~0.54"
-moon = "2.0.0-beta.1"
+moon = "2.0.0-rc.4"
 python = "3.13"
 node = "24"
 pnpm = "10"
