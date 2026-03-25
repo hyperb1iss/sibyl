@@ -5,8 +5,11 @@
 # Force minikube context
 k8s_context('orbstack')
 
-# Increase timeout for large charts
-update_settings(k8s_upsert_timeout_secs=300)
+# Increase timeout for large charts and suppress known-intentional image warnings.
+update_settings(
+    k8s_upsert_timeout_secs=300,
+    suppress_unused_image_warnings=['sibyl-runner'],
+)
 
 # Load extensions
 load('ext://helm_resource', 'helm_resource', 'helm_repo')
