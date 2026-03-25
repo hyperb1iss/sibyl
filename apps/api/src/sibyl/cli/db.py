@@ -5,6 +5,8 @@ Commands for backup, restore, and database management.
 
 import json
 import subprocess
+import tarfile
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -522,11 +524,13 @@ def _find_pg_tool(tool: str) -> str:
     """
     import shutil
 
-    # Homebrew keg paths to check (prefer newer versions)
+    # Homebrew keg paths to check (prefer newer versions, include libpq)
     keg_paths = [
+        f"/opt/homebrew/opt/libpq/bin/{tool}",
         f"/opt/homebrew/opt/postgresql@18/bin/{tool}",
         f"/opt/homebrew/opt/postgresql@17/bin/{tool}",
         f"/opt/homebrew/opt/postgresql@16/bin/{tool}",
+        f"/usr/local/opt/libpq/bin/{tool}",
         f"/usr/local/opt/postgresql@18/bin/{tool}",
         f"/usr/local/opt/postgresql@17/bin/{tool}",
         f"/usr/local/opt/postgresql@16/bin/{tool}",
@@ -845,6 +849,10 @@ BEGIN
     FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
         EXECUTE 'DROP TABLE IF EXISTS ' || quote_ident(r.tablename) || ' CASCADE';
     END LOOP;
+    FOR r IN (SELECT typname FROM pg_type t JOIN pg_namespace n ON t.typnamespace = n.oid
+              WHERE n.nspname = 'public' AND t.typtype = 'e') LOOP
+        EXECUTE 'DROP TYPE IF EXISTS ' || quote_ident(r.typname) || ' CASCADE';
+    END LOOP;
 END $$;
 DROP TABLE IF EXISTS alembic_version CASCADE;
 
@@ -904,12 +912,65 @@ def _restore_graph_from_file(graph_path: Path, org_id: str, clean: bool) -> None
     _restore()
 
 
+def _resolve_backup_source(
+    source: Path,
+    org_id: str,
+    pg_file: str,
+    graph_file: str,
+) -> tuple[Path, Path | None, str]:
+    """Resolve backup source to (pg_path, graph_path, org_id).
+
+    Handles both .tar.gz archives and directories. For archives, extracts to a
+    temp dir and reads metadata.json for org_id if not provided.
+    """
+    if source.is_file() and (
+        source.name.endswith(".tar.gz") or source.name.endswith(".tgz")
+    ):
+        # Extract archive to temp dir
+        extract_dir = Path(tempfile.mkdtemp(prefix="sibyl_restore_"))
+        info(f"Extracting {source.name}...")
+        with tarfile.open(source, "r:gz") as tar:
+            tar.extractall(extract_dir, filter="data")  # noqa: S202
+        backup_dir = extract_dir
+    elif source.is_dir():
+        backup_dir = source
+    else:
+        error(f"Not a .tar.gz archive or directory: {source}")
+        raise typer.Exit(code=1)
+
+    # Read org_id from metadata.json if not provided
+    if not org_id:
+        metadata_path = backup_dir / "metadata.json"
+        if metadata_path.exists():
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            org_id = metadata.get("organization_id", "")
+            if org_id:
+                info(f"Organization: {org_id} (from metadata)")
+
+    # Find PG file — check both archive format (postgres.sql) and backup-all format (*_pg.sql)
+    pg_path = _find_backup_file(
+        backup_dir, pg_file, ["postgres.sql", "*_pg.sql", "*pg_backup.sql"]
+    )
+    # Find graph file — check both archive format (graph.json) and backup-all format (*_graph.json)
+    graph_path = _find_backup_file(
+        backup_dir, graph_file, ["graph.json", "*_graph.json", "*graph_backup.json"]
+    )
+
+    if not pg_path or not pg_path.exists():
+        error("No PostgreSQL backup file found")
+        raise typer.Exit(code=1)
+
+    return pg_path, graph_path if graph_path and graph_path.exists() else None, org_id
+
+
 @app.command("restore-all")
 def restore_all(
-    backup_dir: Annotated[Path, typer.Argument(help="Directory containing backup files")],
+    source: Annotated[
+        Path, typer.Argument(help="Backup .tar.gz archive or directory")
+    ],
     org_id: Annotated[
         str,
-        typer.Option("--org-id", help="Organization UUID (required for graph restore)"),
+        typer.Option("--org-id", help="Organization UUID (auto-detected from archive metadata)"),
     ] = "",
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
     clean: Annotated[
@@ -918,41 +979,31 @@ def restore_all(
     ] = False,
     pg_file: Annotated[
         str,
-        typer.Option(
-            "--pg-file", help="Specific PostgreSQL backup file (default: latest *_pg.sql)"
-        ),
+        typer.Option("--pg-file", help="Override PostgreSQL backup filename"),
     ] = "",
     graph_file: Annotated[
         str,
-        typer.Option(
-            "--graph-file", help="Specific graph backup file (default: latest *_graph.json)"
-        ),
+        typer.Option("--graph-file", help="Override graph backup filename"),
     ] = "",
 ) -> None:
-    """Restore BOTH PostgreSQL database AND FalkorDB graph from backup.
+    """Restore PostgreSQL + FalkorDB graph from a backup archive or directory.
 
-    Expects backup files created by 'backup-all' command.
+    Accepts a .tar.gz archive (from backup jobs) or a directory (from backup-all).
+    Reads org_id from metadata.json automatically when restoring from an archive.
 
     WARNING: With --clean, this will DROP ALL EXISTING DATA!
     """
-    if not backup_dir.exists():
-        error(f"Backup directory not found: {backup_dir}")
+    if not source.exists():
+        error(f"Backup not found: {source}")
         raise typer.Exit(code=1)
 
-    # Find backup files
-    pg_path = _find_backup_file(backup_dir, pg_file, ["*_pg.sql", "*pg_backup.sql"])
-    graph_path = _find_backup_file(backup_dir, graph_file, ["*_graph.json", "*graph_backup.json"])
+    pg_path, graph_path, org_id = _resolve_backup_source(source, org_id, pg_file, graph_file)
 
-    if not pg_path or not pg_path.exists():
-        error("No PostgreSQL backup file found in directory")
-        raise typer.Exit(code=1)
-
-    info(f"PostgreSQL backup: {pg_path}")
-    if graph_path and graph_path.exists():
-        info(f"Graph backup: {graph_path}")
+    info(f"PostgreSQL: {pg_path.name}")
+    if graph_path:
+        info(f"Graph: {graph_path.name}")
     else:
-        warn("No graph backup file found. Only PostgreSQL will be restored.")
-        graph_path = None
+        warn("No graph backup found — only PostgreSQL will be restored.")
 
     # Confirmation
     if not yes:
@@ -977,12 +1028,12 @@ def restore_all(
         error("psql not found. Install PostgreSQL client tools.")
         raise typer.Exit(code=1) from None
 
-    # Restore Graph (if file exists and org_id provided)
+    # Restore Graph
     if graph_path and org_id:
         info("Step 2/2: Restoring FalkorDB graph...")
         _restore_graph_from_file(graph_path, org_id, clean)
     elif graph_path:
-        warn("Step 2/2: Skipping graph restore (no --org-id provided)")
+        warn("Step 2/2: Skipping graph restore (no --org-id — pass it or add metadata.json)")
     else:
         info("Step 2/2: Skipping graph restore (no backup file)")
 

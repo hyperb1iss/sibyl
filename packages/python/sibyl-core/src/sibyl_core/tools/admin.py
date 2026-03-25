@@ -593,11 +593,15 @@ async def restore_backup(
         for entity_data in backup_data.entities:
             try:
                 entity = Entity.model_validate(entity_data)
-                # Check if entity exists
-                existing = await entity_manager.get(entity.id)
-                if existing and skip_existing:
-                    entities_skipped += 1
-                    continue
+                # Check if entity exists (get() raises on missing)
+                if skip_existing:
+                    try:
+                        existing = await entity_manager.get(entity.id)
+                        if existing:
+                            entities_skipped += 1
+                            continue
+                    except Exception:
+                        pass  # Entity doesn't exist — proceed to create
 
                 await entity_manager.create(entity)
                 entities_restored += 1

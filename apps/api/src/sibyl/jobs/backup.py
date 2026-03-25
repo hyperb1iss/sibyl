@@ -85,11 +85,13 @@ def _get_pg_connection_args() -> list[str]:
 
 def _find_pg_tool(tool: str) -> str:
     """Find PostgreSQL tool (pg_dump) preferring newer versions."""
-    # Homebrew keg paths to check (prefer newer versions)
+    # Homebrew keg paths to check (prefer newer versions, include libpq)
     keg_paths = [
+        f"/opt/homebrew/opt/libpq/bin/{tool}",
         f"/opt/homebrew/opt/postgresql@18/bin/{tool}",
         f"/opt/homebrew/opt/postgresql@17/bin/{tool}",
         f"/opt/homebrew/opt/postgresql@16/bin/{tool}",
+        f"/usr/local/opt/libpq/bin/{tool}",
         f"/usr/local/opt/postgresql@18/bin/{tool}",
         f"/usr/local/opt/postgresql@17/bin/{tool}",
         f"/usr/local/opt/postgresql@16/bin/{tool}",
