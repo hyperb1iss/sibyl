@@ -263,69 +263,11 @@ echo $SIBYL_OPENAI_API_KEY
 A production Docker Compose configuration is planned. For now, use the individual Docker commands
 above.
 
-## Sandbox Setup (Optional)
+### Experimental Runtime Features
 
-Sibyl's sandbox system provides isolated execution environments for AI agents. This is optional
-for basic usage but required for distributed task execution.
-
-### Install Agent Sandbox Controller
-
-Sibyl's Kubernetes sandbox runtime now uses the upstream `kubernetes-sigs/agent-sandbox`
-controller and CRDs.
-
-```bash
-export AGENT_SANDBOX_VERSION=v0.1.1
-kubectl apply -f https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${AGENT_SANDBOX_VERSION}/manifest.yaml
-```
-
-### Enabling Sandbox Mode
-
-Set the sandbox mode in your environment:
-
-```bash
-# Shadow mode — observe and log sandbox operations without enforcement
-export SIBYL_SANDBOX_MODE=shadow
-
-# Enforced mode — require sandbox for all task execution
-export SIBYL_SANDBOX_MODE=enforced
-```
-
-### Runner Registration
-
-Register a runner to execute tasks:
-
-```bash
-# Register via API
-curl -X POST http://localhost:3334/api/runners/register \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"name": "my-runner", "hostname": "dev-machine", "capabilities": ["docker"]}'
-```
-
-### Runner Daemon
-
-Install and start the runner daemon:
-
-```bash
-# Install
-moon run runner:install
-
-# Start with connection to Sibyl API
-sibyl-runner --server-url http://localhost:3334 --runner-id <runner-id>
-```
-
-### Sandbox Configuration
-
-| Variable                             | Default                                   | Description                            |
-| ------------------------------------ | ----------------------------------------- | -------------------------------------- |
-| `SIBYL_SANDBOX_MODE`                 | `off`                                     | Sandbox policy: off, shadow, enforced  |
-| `SIBYL_SANDBOX_DEFAULT_IMAGE`        | `ghcr.io/hyperb1iss/sibyl-sandbox:latest` | Default container image                |
-| `SIBYL_SANDBOX_WORKTREE_BASE`        | `/tmp/sibyl/sandboxes`                    | Base path mounted for sandbox worktrees |
-| `SIBYL_SANDBOX_IDLE_TTL_SECONDS`     | `1800`                                    | Auto-suspend after idle (seconds)      |
-| `SIBYL_SANDBOX_MAX_LIFETIME_SECONDS` | `14400`                                   | Maximum sandbox lifetime (seconds)     |
-| `SIBYL_SANDBOX_K8S_NAMESPACE`        | `default`                                 | Kubernetes namespace for pods          |
-| `SIBYL_SANDBOX_RECONCILE_ENABLED`    | `true`                                    | Enable reconciliation loop             |
-
-For detailed architecture, see [Sandbox Architecture](../design/sandbox-architecture.md).
+Sibyl's core workflow no longer depends on sandbox mode or runner daemons. If you are evaluating
+the knowledge graph, tasks, search, and source ingestion flows, you can skip the older
+agent-execution/runtime setup entirely.
 
 ## Next Steps
 

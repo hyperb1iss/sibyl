@@ -3,12 +3,11 @@
 </p>
 
 <p align="center">
-  <strong>Build With Agents That Remember</strong><br>
+  <strong>Build With Memory That Compounds</strong><br>
   <sub>✦ A Collective Intelligence Runtime ✦</sub>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Claude-Agents-d4a574?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude">
   <img src="https://img.shields.io/badge/Graphiti-Memory-e135ff?style=for-the-badge&logo=neo4j&logoColor=white" alt="Graphiti">
   <img src="https://img.shields.io/badge/FalkorDB-Graph-00aaff?style=for-the-badge&logo=redis&logoColor=white" alt="FalkorDB">
   <img src="https://img.shields.io/badge/PostgreSQL_18-Data-336791?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL">
@@ -32,7 +31,6 @@
 <p align="center">
   <a href="#-the-problem">Why Sibyl?</a> •
   <a href="#-quickstart">Quickstart</a> •
-  <a href="#-agent-orchestration">Agents</a> •
   <a href="#-the-cli">CLI</a> •
   <a href="#-web-ui">Web UI</a> •
   <a href="#-faq">FAQ</a>
@@ -42,18 +40,16 @@
 
 ## 🔮 The Vision
 
-AI agents that remember everything. A collective intelligence that compounds with every session.
-Orchestration that lets you manage a fleet of autonomous agents—all building on shared knowledge,
-all tracked in one place.
+Persistent memory for your projects, tasks, and research. A collective intelligence that compounds
+with every session and makes your graph more useful over time.
 
-Today's agents have amnesia. Every session starts fresh. No memory of what worked, what failed, what
-you learned yesterday. Multiple agents across different features? Chaos.
+Most coding sessions start cold. No memory of what worked, what failed, or what you learned
+yesterday. Notes drift. Tasks scatter. Useful context disappears.
 
 **Sibyl changes that.**
 
-A knowledge graph gives your agents persistent memory. Epics and tasks structure your work. Spawn
-agents that execute autonomously while you approve decisions and track progress. Solo dev? Your
-agents become your team. Actual team? Everyone's insights compound.
+A knowledge graph gives your work persistent memory. Epics and tasks structure execution. Search,
+docs ingestion, and graph exploration keep hard-won context close at hand for both humans and tools.
 
 **The whole becomes greater than the sum of its parts.**
 
@@ -61,11 +57,10 @@ agents become your team. Actual team? Everyone's insights compound.
 
 | Capability                     | What It Means                                                                                               |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| 🔮 **Collective Intelligence** | Every agent contributes. Every session compounds. The graph gets smarter over time                          |
+| 🔮 **Collective Intelligence** | Every session compounds. The graph gets smarter as your team and tools capture real work                    |
 | 🎯 **Semantic Search**         | Find knowledge by meaning—"authentication patterns" finds OAuth solutions even if "OAuth" isn't in the text |
-| 🧠 **Persistent Memory**       | What you learn today helps tomorrow. AI agents remember across sessions                                     |
-| ⚡ **Agent Orchestration**     | Spawn Claude agents that work autonomously with human-in-the-loop approvals                                 |
-| 🦋 **Task Workflow**           | Plan with epics and tasks. Track parallel work across agents. See everything in one place                   |
+| 🧠 **Persistent Memory**       | What you learn today helps tomorrow. Patterns, decisions, and gotchas stay searchable across sessions      |
+| 🦋 **Task Workflow**           | Plan with epics and tasks. Track execution across sessions and teammates in one place                       |
 | 📚 **Doc Ingestion**           | Crawl and index external documentation into your graph                                                      |
 | 🏢 **Multi-Tenancy**           | Isolated graphs per organization. Enterprise-ready from day one                                             |
 | 🌐 **Graph Visualization**     | Interactive D3 visualization of your knowledge connections                                                  |
@@ -158,62 +153,19 @@ curl http://localhost:3334/api/health
 | Web UI    | 3337 | http://localhost:3337 |
 | FalkorDB  | 6380 | —                     |
 
-## 🤖 Agent Orchestration
+## 🗂️ Core Workflow
 
-Sibyl's flagship feature: **spawn AI agents that work autonomously** while you review and approve
-their actions.
+Sibyl is strongest when it stays close to the work itself:
 
-### How It Works
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Web UI    │────▶│   Sibyl     │────▶│   Claude    │
-│  (approve)  │◀────│  (orchestr) │◀────│   (agent)   │
-└─────────────┘     └─────────────┘     └─────────────┘
-       │                   │                   │
-       │                   ▼                   │
-       │           ┌─────────────┐             │
-       └──────────▶│  Knowledge  │◀────────────┘
-                   │    Graph    │
-                   └─────────────┘
-```
-
-1. **Spawn agents** from the web UI or CLI with a task description
-2. **Agents work autonomously** using Claude SDK with your knowledge graph as context
-3. **Human-in-the-loop approvals** for destructive operations, sensitive files, external APIs
-4. **Progress streams** in real-time via WebSocket to the chat UI
-5. **Checkpoints save state** so agents can resume after interruptions
-
-### Agent Features
-
-- **Task Assignment** — Agents claim tasks and update status automatically
-- **Git Worktrees** — Each agent works in an isolated worktree to prevent conflicts
-- **Approval Queue** — Review and approve/deny agent actions before execution
-- **Cost Tracking** — Monitor token usage and USD cost per agent
-- **Checkpointing** — Save/restore agent state for crash recovery
-- **Multi-Agent** — Multiple agents can collaborate on related tasks
-
-### Spawning an Agent
-
-**Web UI:** Navigate to `/agents` → Click "Spawn Agent" → Describe the task
-
-**CLI:**
-
-```bash
-sibyl agent spawn --task task_abc123 "Implement the OAuth flow"
-```
-
-**REST API:**
-
-```bash
-curl -X POST http://localhost:3334/api/agents \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"prompt": "Implement OAuth", "task_id": "task_abc123"}'
-```
+1. **Capture knowledge** from debugging, implementation, and research
+2. **Search semantically** when you need the pattern again
+3. **Track execution** with projects, epics, and tasks
+4. **Ingest docs** so external references live beside internal learnings
+5. **Explore the graph** to see how ideas, tasks, and sources connect
 
 ## The CLI
 
-The CLI is the power-user interface. Clean output, optimized for scripting and AI agent consumption.
+The CLI is the power-user interface. Clean output, optimized for scripting and durable project workflows.
 
 ```bash
 # Install globally
@@ -265,7 +217,6 @@ sibyl task list --csv            # For spreadsheets
 A full admin interface at `http://localhost:3337`:
 
 - **Dashboard** — Stats overview, recent activity, quick actions
-- **Agents** — Spawn, monitor, and chat with AI agents
 - **Tasks** — Kanban-style workflow with inline editing
 - **Graph** — Interactive D3 visualization of knowledge connections
 - **Search** — Semantic search with filters
@@ -442,26 +393,25 @@ moon run docker-down      # Stop databases
 
 ### Who is Sibyl for?
 
-**Solo developers** who want a team of AI agents working on their codebase—with memory that
-persists. **Teams** who want shared knowledge that compounds. **Anyone** building with AI who's
-tired of repeating context every session.
+**Solo developers** who want durable memory for projects and debugging. **Teams** who want shared
+knowledge that compounds. **Anyone** building with AI who is tired of repeating context every
+session.
 
 ### Do I need AI agents to use Sibyl?
 
-No. The knowledge graph and task system work great standalone—for documentation, task tracking, and
-capturing learnings. But agents are where Sibyl really shines: autonomous workers that share memory
-and coordinate through your graph.
+No. The knowledge graph and task system are the core product: documentation, task tracking,
+captured learnings, and semantic search over what your team already knows.
 
 ### How does it compare to Mem0 / LangMem / similar?
 
 Sibyl is **self-hosted and open source**—you own your data. It includes a full **task workflow
-system**, not just memory. It has a **web UI** for humans, not just APIs for machines. And it
-provides **agent orchestration** with approvals, not just memory storage.
+system**, not just memory. It has a **web UI** for humans, not just APIs for machines. And it keeps
+knowledge, tasks, and docs connected in one graph instead of scattering them across tools.
 
 ### What LLM APIs do I need?
 
 - **OpenAI** (required): For embeddings (`text-embedding-3-small`)
-- **Anthropic** (optional): For agent orchestration and entity extraction
+- **Anthropic** (optional): For additional model-powered extraction workflows
 
 A typical solo developer uses ~$5/month in API costs.
 

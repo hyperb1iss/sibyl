@@ -17,9 +17,9 @@ moon run web:generate-types
 
 ## Features
 
-- **Dashboard** — Stats, activity feed, onboarding checklist
-- **Agents** — Spawn, monitor, chat with AI agents in real-time
+- **Dashboard** — Stats, activity, onboarding checklist
 - **Tasks** — Kanban workflow with inline editing
+- **Projects & Epics** — Plan work across larger efforts
 - **Graph** — Interactive D3 visualization
 - **Search** — Semantic search with filters
 - **Sources** — Documentation crawl management
@@ -38,34 +38,16 @@ moon run web:generate-types
 ```
 src/
 ├── app/(main)/       # Authenticated routes
-│   ├── agents/       # Agent management + chat
 │   ├── tasks/        # Task workflow
 │   ├── graph/        # Visualization
 │   └── ...
 ├── components/
-│   ├── agents/       # Chat system (18 components)
 │   ├── graph/        # D3 visualization
 │   └── ui/           # Base components
 └── lib/
-    ├── hooks.ts      # React Query hooks (30+)
+    ├── hooks.ts      # React Query hooks
     └── websocket.ts  # Real-time client
 ```
-
-## Agent Chat Architecture
-
-```
-AgentPage
-├── AgentList (sidebar)
-└── ChatPanel
-    ├── ChatHeader
-    ├── ChatMessages
-    │   ├── ToolMessage (collapsible output)
-    │   ├── ApprovalRequestMessage (approve/deny)
-    │   └── UserQuestionMessage (answer options)
-    └── ChatInput
-```
-
-Real-time via WebSocket → invalidates React Query caches.
 
 ## Configuration
 

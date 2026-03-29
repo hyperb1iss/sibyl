@@ -1,6 +1,6 @@
 # Sibyl API Server
 
-FastAPI + MCP server providing the backend for Sibyl's knowledge graph, agent orchestration, and real-time updates.
+FastAPI + MCP server providing the backend for Sibyl's knowledge graph, task workflows, search, and real-time updates.
 
 ## Quick Reference
 
@@ -19,12 +19,11 @@ moon run api:typecheck    # Type check
 
 ## What's Here
 
-- **MCP Server** — 4-tool API for AI agents (`search`, `explore`, `add`, `manage`)
-- **REST API** — Full CRUD for entities, tasks, projects, agents, sources
-- **Agent Orchestrator** — Spawn Claude agents with human-in-the-loop approvals
+- **MCP Server** — 4-tool API for search, exploration, capture, and task management
+- **REST API** — Full CRUD for entities, tasks, projects, and sources
 - **Auth System** — JWT, OAuth (GitHub), API keys, RBAC
-- **Background Jobs** — arq workers for crawling, agent execution
-- **WebSocket** — Real-time updates for entities, tasks, agents
+- **Background Jobs** — arq workers for crawling and maintenance
+- **WebSocket** — Real-time updates for entities and tasks
 
 ## Architecture
 
@@ -40,8 +39,7 @@ Sibyl Combined App (port 3334)
 
 | Directory | Purpose |
 |-----------|---------|
-| `api/routes/` | REST endpoints (agents, tasks, entities, auth, etc.) |
-| `agents/` | Agent orchestration (runner, approvals, checkpoints, worktrees) |
+| `api/routes/` | REST endpoints (tasks, entities, auth, sources, admin) |
 | `auth/` | JWT, sessions, API keys, RBAC, RLS |
 | `crawler/` | Documentation ingestion pipeline |
 | `jobs/` | Background job definitions |
@@ -57,10 +55,10 @@ SIBYL_JWT_SECRET=...              # Auth
 
 **Optional:**
 ```bash
-SIBYL_ANTHROPIC_API_KEY=...       # Agents + entity extraction
+SIBYL_ANTHROPIC_API_KEY=...       # Optional model-powered extraction
 SIBYL_DATABASE_URL=...            # PostgreSQL
 SIBYL_FALKORDB_HOST=...           # Graph DB
-SIBYL_REDIS_URL=...               # Agent approvals pub/sub
+SIBYL_REDIS_URL=...               # Queue + pub/sub
 ```
 
 ## CLI Commands
