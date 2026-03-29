@@ -127,6 +127,8 @@ class UpdateTaskRequest(BaseModel):
     feature: str | None = None
     tags: list[str] | None = None
     technologies: list[str] | None = None
+    add_depends_on: list[str] = []
+    remove_depends_on: list[str] = []
 
 
 class CreateTaskRequest(BaseModel):
@@ -567,6 +569,29 @@ async def archive_task(
     )
 
 
+def _build_update_data(request: UpdateTaskRequest, user_id: str) -> dict[str, Any]:
+    """Build the update dict from request fields with actor attribution."""
+    update_data: dict[str, Any] = {"modified_by": user_id}
+    # Map request fields to entity fields (title → name for graph storage)
+    field_map: dict[str, str] = {
+        "status": "status",
+        "priority": "priority",
+        "title": "name",
+        "description": "description",
+        "assignees": "assignees",
+        "epic_id": "epic_id",
+        "feature": "feature",
+        "complexity": "complexity",
+        "tags": "tags",
+        "technologies": "technologies",
+    }
+    for req_field, data_key in field_map.items():
+        value = getattr(request, req_field)
+        if value is not None:
+            update_data[data_key] = value
+    return update_data
+
+
 @router.patch("/{task_id}", response_model=TaskActionResponse)
 async def update_task(
     task_id: str,
@@ -588,31 +613,10 @@ async def update_task(
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
     group_id = str(org.id)
+    update_data = _build_update_data(request, str(user.id))
 
-    # Build update dict with actor attribution
-    update_data: dict[str, Any] = {"modified_by": str(user.id)}
-    if request.status is not None:
-        update_data["status"] = request.status
-    if request.priority is not None:
-        update_data["priority"] = request.priority
-    if request.title is not None:
-        update_data["name"] = request.title
-    if request.description is not None:
-        update_data["description"] = request.description
-    if request.assignees is not None:
-        update_data["assignees"] = request.assignees
-    if request.epic_id is not None:
-        update_data["epic_id"] = request.epic_id
-    if request.feature is not None:
-        update_data["feature"] = request.feature
-    if request.complexity is not None:
-        update_data["complexity"] = request.complexity
-    if request.tags is not None:
-        update_data["tags"] = request.tags
-    if request.technologies is not None:
-        update_data["technologies"] = request.technologies
-
-    if len(update_data) <= 1:  # only modified_by
+    has_dep_changes = bool(request.add_depends_on or request.remove_depends_on)
+    if len(update_data) <= 1 and not has_dep_changes:  # only modified_by
         raise HTTPException(status_code=400, detail="No fields to update")
 
     # --- Async fast path (default) ---
@@ -623,6 +627,8 @@ async def update_task(
             group_id,
             epic_id=request.epic_id,
             new_status=request.status.value if request.status else None,
+            add_depends_on=request.add_depends_on,
+            remove_depends_on=request.remove_depends_on,
         )
         return TaskActionResponse(
             success=True,
@@ -651,8 +657,16 @@ async def update_task(
             if not updated:
                 raise HTTPException(status_code=500, detail="Update failed")
 
-            if request.epic_id is not None:
+            # Create relationship manager if any relationship changes needed
+            needs_rel_mgr = (
+                request.epic_id is not None
+                or request.add_depends_on
+                or request.remove_depends_on
+            )
+            if needs_rel_mgr:
                 relationship_manager = RelationshipManager(client, group_id=group_id)
+
+            if request.epic_id is not None:
                 belongs_to_epic = Relationship(
                     id=f"rel_{task_id}_belongs_to_{request.epic_id}",
                     source_id=task_id,
@@ -660,6 +674,20 @@ async def update_task(
                     relationship_type=RelationshipType.BELONGS_TO,
                 )
                 await relationship_manager.create(belongs_to_epic)
+
+            # Handle dependency mutations
+            for dep_id in request.add_depends_on:
+                dep_rel = Relationship(
+                    id=f"rel_{task_id}_depends_on_{dep_id}",
+                    source_id=task_id,
+                    target_id=dep_id,
+                    relationship_type=RelationshipType.DEPENDS_ON,
+                )
+                await relationship_manager.create(dep_rel)
+            for dep_id in request.remove_depends_on:
+                await relationship_manager.delete_between(
+                    task_id, dep_id, RelationshipType.DEPENDS_ON
+                )
 
             if request.status:
                 epic_id = request.epic_id or updated.metadata.get("epic_id")

@@ -425,11 +425,14 @@ async def update_task(
     group_id: str,
     epic_id: str | None = None,
     new_status: str | None = None,
+    add_depends_on: list[str] | None = None,
+    remove_depends_on: list[str] | None = None,
 ) -> dict[str, Any]:
     """Update a task asynchronously with epic relationship and auto-start logic.
 
     Task-aware background job that handles concerns the generic update_entity
-    doesn't: BELONGS_TO epic relationships and epic auto-start on forward progress.
+    doesn't: BELONGS_TO epic relationships, epic auto-start on forward progress,
+    and DEPENDS_ON dependency mutations.
 
     Args:
         ctx: arq context
@@ -438,6 +441,8 @@ async def update_task(
         group_id: Organization ID
         epic_id: Epic ID if being set/changed (triggers BELONGS_TO creation)
         new_status: New task status (triggers epic auto-start check)
+        add_depends_on: Task IDs to add as dependencies
+        remove_depends_on: Task IDs to remove as dependencies
 
     Returns:
         Dict with update results
@@ -448,11 +453,16 @@ async def update_task(
     from sibyl_core.graph.relationships import RelationshipManager
     from sibyl_core.models.entities import Relationship, RelationshipType
 
+    add_depends_on = add_depends_on or []
+    remove_depends_on = remove_depends_on or []
+
     log.info(
         "update_task_started",
         task_id=task_id,
         fields=list(updates.keys()),
         epic_id=epic_id,
+        add_deps=len(add_depends_on),
+        remove_deps=len(remove_depends_on),
     )
 
     try:
@@ -464,15 +474,23 @@ async def update_task(
             client = await get_graph_client()
             entity_manager = EntityManager(client, group_id=group_id)
 
-            # Perform the update
-            updated = await entity_manager.update(task_id, updates)
-            if not updated:
-                log.warning("update_task_no_changes", task_id=task_id)
-                return {"task_id": task_id, "success": False, "message": "No changes made"}
+            # Perform the entity field update (skip if only dep changes)
+            updated = None
+            if len(updates) > 1:  # more than just modified_by
+                updated = await entity_manager.update(task_id, updates)
+                if not updated:
+                    log.warning("update_task_no_changes", task_id=task_id)
+                    return {"task_id": task_id, "success": False, "message": "No changes made"}
+
+            # Create relationship manager if any relationship changes needed
+            needs_rel_mgr = (
+                epic_id is not None or add_depends_on or remove_depends_on
+            )
+            if needs_rel_mgr:
+                relationship_manager = RelationshipManager(client, group_id=group_id)
 
             # Create BELONGS_TO relationship for epic (if epic_id was set/changed)
             if epic_id is not None:
-                relationship_manager = RelationshipManager(client, group_id=group_id)
                 belongs_to_epic = Relationship(
                     id=f"rel_{task_id}_belongs_to_{epic_id}",
                     source_id=task_id,
@@ -481,24 +499,39 @@ async def update_task(
                 )
                 await relationship_manager.create(belongs_to_epic)
 
+            # Handle dependency mutations
+            for dep_id in add_depends_on:
+                dep_rel = Relationship(
+                    id=f"rel_{task_id}_depends_on_{dep_id}",
+                    source_id=task_id,
+                    target_id=dep_id,
+                    relationship_type=RelationshipType.DEPENDS_ON,
+                )
+                await relationship_manager.create(dep_rel)
+            for dep_id in remove_depends_on:
+                await relationship_manager.delete_between(
+                    task_id, dep_id, RelationshipType.DEPENDS_ON
+                )
+
             # Auto-start epic if task moves to forward-progress state
             if new_status:
-                resolved_epic = epic_id or updated.metadata.get("epic_id")
+                task_entity = updated or await entity_manager.get(task_id)
+                resolved_epic = epic_id or (
+                    task_entity.metadata.get("epic_id") if task_entity else None
+                )
                 if resolved_epic:
                     await _maybe_start_epic_bg(entity_manager, task_id, resolved_epic, new_status)
 
         # Broadcast outside the lock
-        await _safe_broadcast(
-            WSEvent.ENTITY_UPDATED,
-            {
-                "id": task_id,
-                "entity_type": "task",
-                "action": "update_task",
-                "name": updated.name,
-                **updates,
-            },
-            org_id=group_id,
-        )
+        broadcast_data: dict[str, Any] = {
+            "id": task_id,
+            "entity_type": "task",
+            "action": "update_task",
+            **updates,
+        }
+        if updated:
+            broadcast_data["name"] = updated.name
+        await _safe_broadcast(WSEvent.ENTITY_UPDATED, broadcast_data, org_id=group_id)
 
         log.info("update_task_completed", task_id=task_id, fields=list(updates.keys()))
         return {

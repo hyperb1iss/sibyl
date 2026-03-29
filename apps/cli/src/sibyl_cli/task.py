@@ -744,10 +744,9 @@ def create_task(
     technologies: Annotated[
         str | None, typer.Option("--tech", help="Comma-separated technologies")
     ] = None,
-    sync: Annotated[
-        bool,
-        typer.Option("--sync", help="Wait for task creation (slower but immediately available)"),
-    ] = False,
+    depends_on: Annotated[
+        str | None, typer.Option("--depends-on", help="Comma-separated task IDs this depends on")
+    ] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -774,43 +773,35 @@ def create_task(
             tech_list = [t.strip() for t in technologies.split(",")] if technologies else None
             tag_list = [t.strip() for t in tags.split(",")] if tags else None
             assignee_list = [assignee] if assignee else None
+            dep_list = [d.strip() for d in depends_on.split(",")] if depends_on else None
 
-            # Build metadata
-            metadata: dict = {
-                "project_id": effective_project,
-                "priority": priority,
-                "complexity": complexity,
-                "status": "todo",
-            }
-            if assignee_list:
-                metadata["assignees"] = assignee_list
-            if tech_list:
-                metadata["technologies"] = tech_list
-            if tag_list:
-                metadata["tags"] = tag_list
-            if feature:
-                metadata["feature"] = feature
-            if epic:
-                metadata["epic_id"] = epic
-
-            response = await client.create_entity(
-                name=title,
-                content=description or title,
-                entity_type="task",
-                metadata=metadata,
-                sync=sync,
+            response = await client.create_task(
+                title=title,
+                project_id=effective_project,
+                description=description,
+                priority=priority,
+                complexity=complexity,
+                assignees=assignee_list,
+                epic_id=epic,
+                feature=feature,
+                tags=tag_list,
+                technologies=tech_list,
+                depends_on=dep_list,
             )
 
             if json_out:
                 print_json(response)
                 return
 
-            if response.get("id"):
-                success(f"Task created: {response['id']}")
+            task_id = response.get("task_id") or response.get("id")
+            if response.get("success") or task_id:
+                success(f"Task created: {task_id}")
                 if assignee:
                     info(f"Assigned to: {assignee}")
+                if dep_list:
+                    info(f"Dependencies: {', '.join(dep_list)}")
             else:
-                error("Failed to create task")
+                error(f"Failed to create task: {response.get('message', 'Unknown error')}")
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -845,6 +836,14 @@ def update_task(
     technologies: Annotated[
         str | None, typer.Option("--tech", help="Comma-separated technologies (replaces existing)")
     ] = None,
+    add_dep: Annotated[
+        str | None,
+        typer.Option("--add-dep", help="Comma-separated task IDs to add as dependencies"),
+    ] = None,
+    remove_dep: Annotated[
+        str | None,
+        typer.Option("--remove-dep", help="Comma-separated task IDs to remove as dependencies"),
+    ] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -869,10 +868,14 @@ def update_task(
                     feature,
                     tags,
                     technologies,
+                    add_dep,
+                    remove_dep,
                 ]
             ):
                 error(
-                    "No fields to update. Use --status, --priority, --complexity, --title, --description, --assignee, --epic, --feature, --tags, or --tech"
+                    "No fields to update. Use --status, --priority, --complexity, --title, "
+                    "--description, --assignee, --epic, --feature, --tags, --tech, "
+                    "--add-dep, or --remove-dep"
                 )
                 return
 
@@ -880,6 +883,8 @@ def update_task(
             assignees = [assignee] if assignee else None
             tag_list = [t.strip() for t in tags.split(",")] if tags else None
             tech_list = [t.strip() for t in technologies.split(",")] if technologies else None
+            add_dep_list = [d.strip() for d in add_dep.split(",")] if add_dep else None
+            remove_dep_list = [d.strip() for d in remove_dep.split(",")] if remove_dep else None
 
             response = await client.update_task(
                 task_id=resolved_id,
@@ -893,6 +898,8 @@ def update_task(
                 feature=feature,
                 tags=tag_list,
                 technologies=tech_list,
+                add_depends_on=add_dep_list,
+                remove_depends_on=remove_dep_list,
             )
 
             if json_out:

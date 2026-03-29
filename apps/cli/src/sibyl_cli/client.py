@@ -660,6 +660,50 @@ class SibylClient:
         data = {"reason": reason} if reason else None
         return await self._request("POST", f"/tasks/{task_id}/archive", json=data)
 
+    async def create_task(
+        self,
+        title: str,
+        project_id: str,
+        description: str | None = None,
+        priority: str = "medium",
+        complexity: str = "medium",
+        status: str = "todo",
+        assignees: list[str] | None = None,
+        epic_id: str | None = None,
+        feature: str | None = None,
+        tags: list[str] | None = None,
+        technologies: list[str] | None = None,
+        depends_on: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a task via the dedicated POST /tasks endpoint.
+
+        Uses the task-specific endpoint which handles BELONGS_TO relationships
+        and DEPENDS_ON dependencies automatically.
+        """
+        data: dict[str, Any] = {
+            "title": title,
+            "project_id": project_id,
+            "priority": priority,
+            "complexity": complexity,
+            "status": status,
+        }
+        if description:
+            data["description"] = description
+        if assignees:
+            data["assignees"] = assignees
+        if epic_id:
+            data["epic_id"] = epic_id
+        if feature:
+            data["feature"] = feature
+        if tags:
+            data["tags"] = tags
+        if technologies:
+            data["technologies"] = technologies
+        if depends_on:
+            data["depends_on"] = depends_on
+
+        return await self._request("POST", "/tasks", json=data)
+
     async def update_task(
         self,
         task_id: str,
@@ -673,6 +717,8 @@ class SibylClient:
         feature: str | None = None,
         tags: list[str] | None = None,
         technologies: list[str] | None = None,
+        add_depends_on: list[str] | None = None,
+        remove_depends_on: list[str] | None = None,
     ) -> dict[str, Any]:
         """Update task fields."""
         data: dict[str, Any] = {}
@@ -696,6 +742,10 @@ class SibylClient:
             data["tags"] = tags
         if technologies:
             data["technologies"] = technologies
+        if add_depends_on:
+            data["add_depends_on"] = add_depends_on
+        if remove_depends_on:
+            data["remove_depends_on"] = remove_depends_on
 
         return await self._request("PATCH", f"/tasks/{task_id}", json=data)
 
