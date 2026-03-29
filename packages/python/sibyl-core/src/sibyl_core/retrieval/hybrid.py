@@ -156,10 +156,10 @@ async def graph_traversal(
         LIMIT $limit
         """
 
-        from sibyl_core.graph.client import GraphClient
-
-        result = await client.client.driver.execute_query(query, **params)
-        rows = GraphClient.normalize_result(result)
+        if group_id:
+            rows = await client.execute_read_org(query, group_id, **params)
+        else:
+            rows = await client.execute_read(query, **params)
 
         # Convert to Entity objects with distance-based scores
         results: list[tuple[Entity, float]] = []

@@ -371,7 +371,11 @@ class EntityDeduplicator:
         """
 
         try:
-            result = await self.client.client.driver.execute_query(query, **params)
+            group_id = getattr(self.entity_manager, "_group_id", None)
+            if group_id:
+                result = await self.client.execute_read_org(query, group_id, **params)
+            else:
+                result = await self.client.execute_read(query, **params)
 
             entities: list[tuple[str, str, str, list[float]]] = []
             for record in result:

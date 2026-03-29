@@ -79,6 +79,16 @@ class MockGraphClientForDedup:
         mock.driver = self.MockDriver(self)
         return mock
 
+    async def execute_read(self, query: str, **params: Any) -> list[Any]:
+        """Execute an unscoped read."""
+        return await self.MockDriver(self).execute_query(query, **params)
+
+    async def execute_read_org(
+        self, query: str, organization_id: str, **params: Any
+    ) -> list[Any]:
+        """Execute an org-scoped read."""
+        return await self.MockDriver(self).execute_query(query, **params)
+
 
 @dataclass
 class MockEntityManagerForDedup:
@@ -87,6 +97,7 @@ class MockEntityManagerForDedup:
     entities: dict[str, Entity] = field(default_factory=dict)
     deleted_ids: list[str] = field(default_factory=list)
     updated_ids: list[str] = field(default_factory=list)
+    _group_id: str = "org-123"
 
     async def get(self, entity_id: str) -> Entity | None:
         """Get entity by ID."""
@@ -154,6 +165,18 @@ class MockGraphClientForHybrid:
         mock = MagicMock()
         mock.driver = self.MockDriver(self)
         return mock
+
+    async def execute_read(self, query: str, **params: Any) -> list[dict[str, Any]]:
+        """Execute an unscoped read."""
+        self.query_history.append(query)
+        return self.traversal_results
+
+    async def execute_read_org(
+        self, query: str, organization_id: str, **params: Any
+    ) -> list[dict[str, Any]]:
+        """Execute an org-scoped read."""
+        self.query_history.append(query)
+        return self.traversal_results
 
     @staticmethod
     def normalize_result(result: Any) -> list[dict[str, Any]]:

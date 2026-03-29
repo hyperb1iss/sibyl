@@ -172,12 +172,22 @@ class TestEntityDeduplicator:
         """Create mock graph client."""
         client = MagicMock()
         client.client.driver.execute_query = AsyncMock(return_value=[])
+
+        async def _execute_read(query: str, **params) -> list:
+            return await client.client.driver.execute_query(query, **params)
+
+        async def _execute_read_org(query: str, organization_id: str, **params) -> list:
+            return await client.client.driver.execute_query(query, **params)
+
+        client.execute_read = AsyncMock(side_effect=_execute_read)
+        client.execute_read_org = AsyncMock(side_effect=_execute_read_org)
         return client
 
     @pytest.fixture
     def mock_entity_manager(self) -> MagicMock:
         """Create mock entity manager."""
         manager = MagicMock()
+        manager._group_id = "org-123"
         manager.get = AsyncMock(return_value=None)
         manager.update = AsyncMock(return_value=None)
         manager.delete = AsyncMock(return_value=True)
@@ -204,7 +214,7 @@ class TestEntityDeduplicator:
     ) -> None:
         """Single entity returns empty duplicates."""
         # Return single entity with embedding
-        mock_client.client.driver.execute_query = AsyncMock(
+        mock_client.execute_read_org = AsyncMock(
             return_value=[("id1", "Entity One", "pattern", [1.0, 0.0, 0.0])]
         )
 
@@ -217,7 +227,7 @@ class TestEntityDeduplicator:
     ) -> None:
         """Different entities return empty duplicates."""
         # Two orthogonal embeddings = 0 similarity
-        mock_client.client.driver.execute_query = AsyncMock(
+        mock_client.execute_read_org = AsyncMock(
             return_value=[
                 ("id1", "Entity One", "pattern", [1.0, 0.0, 0.0]),
                 ("id2", "Entity Two", "pattern", [0.0, 1.0, 0.0]),
@@ -233,7 +243,7 @@ class TestEntityDeduplicator:
     ) -> None:
         """Similar entities are detected as duplicates."""
         # Nearly identical embeddings
-        mock_client.client.driver.execute_query = AsyncMock(
+        mock_client.execute_read_org = AsyncMock(
             return_value=[
                 ("id1", "Error handling", "pattern", [1.0, 0.0, 0.0]),
                 ("id2", "Error handling pattern", "pattern", [0.99, 0.01, 0.0]),
@@ -254,7 +264,7 @@ class TestEntityDeduplicator:
         """Different entity types are not compared when same_type_only=True."""
         dedup.config.same_type_only = True
 
-        mock_client.client.driver.execute_query = AsyncMock(
+        mock_client.execute_read_org = AsyncMock(
             return_value=[
                 ("id1", "Error handling", "pattern", [1.0, 0.0, 0.0]),
                 (
@@ -434,12 +444,23 @@ class TestDedupWithNameOverlap:
         """Create mock graph client."""
         client = MagicMock()
         client.client.driver.execute_query = AsyncMock(return_value=[])
+
+        async def _execute_read(query: str, **params) -> list:
+            return await client.client.driver.execute_query(query, **params)
+
+        async def _execute_read_org(query: str, organization_id: str, **params) -> list:
+            return await client.client.driver.execute_query(query, **params)
+
+        client.execute_read = AsyncMock(side_effect=_execute_read)
+        client.execute_read_org = AsyncMock(side_effect=_execute_read_org)
         return client
 
     @pytest.fixture
     def mock_entity_manager(self) -> MagicMock:
         """Create mock entity manager."""
-        return MagicMock()
+        manager = MagicMock()
+        manager._group_id = "org-123"
+        return manager
 
     @pytest.mark.asyncio
     async def test_name_overlap_filter(

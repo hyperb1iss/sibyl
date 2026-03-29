@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import httpx
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
+from sibyl.auth.dependencies import build_auth_context
 from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import OrganizationRole, User
 from sibyl.services.settings import get_settings_service
@@ -67,6 +68,16 @@ async def _is_setup_mode(session: AsyncSession) -> bool:
     result = await session.execute(select(func.count(User.id)))
     user_count = result.scalar() or 0
     return user_count == 0
+
+
+async def _require_settings_admin(request: Request, session: AsyncSession) -> None:
+    """Allow setup-mode bootstrapping, otherwise require an authenticated org admin."""
+    if await _is_setup_mode(session):
+        return
+
+    ctx = await build_auth_context(request, session)
+    if ctx.organization is None or ctx.org_role not in _ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Admin or owner role required")
 
 
 async def _validate_openai_key(key: str) -> tuple[bool, str | None]:
@@ -124,6 +135,7 @@ async def _validate_anthropic_key(key: str) -> tuple[bool, str | None]:
 
 @router.get("", response_model=SettingsResponse)
 async def get_settings(
+    request: Request,
     session: AsyncSession = Depends(get_session_dependency),
 ) -> SettingsResponse:
     """Get all system settings with their configuration status.
@@ -134,11 +146,7 @@ async def get_settings(
     This endpoint works without authentication during setup mode (no users exist).
     Otherwise, admin role is required.
     """
-    # Check if in setup mode
-    if not await _is_setup_mode(session):
-        # Not in setup mode - require admin (this would need auth)
-        # For now, we'll allow read access - the values are masked anyway
-        pass
+    await _require_settings_admin(request, session)
 
     service = get_settings_service()
     all_settings = await service.get_all(include_secrets=False)
@@ -158,7 +166,8 @@ async def get_settings(
 
 @router.patch("", response_model=UpdateSettingsResponse)
 async def update_settings(
-    request: UpdateSettingsRequest,
+    request: Request,
+    body: UpdateSettingsRequest,
     session: AsyncSession = Depends(get_session_dependency),
 ) -> UpdateSettingsResponse:
     """Update system settings.
@@ -168,26 +177,21 @@ async def update_settings(
     This endpoint works without authentication during setup mode (no users exist).
     Otherwise, admin role is required.
     """
-    # Check if in setup mode
-    is_setup = await _is_setup_mode(session)
-    if not is_setup:
-        # Not in setup mode - for now we'll still allow updates
-        # TODO: Add proper admin auth check
-        log.info("Settings update outside setup mode")
+    await _require_settings_admin(request, session)
 
     service = get_settings_service()
     updated: list[str] = []
     validation: dict[str, dict] = {}
 
     # Validate and save OpenAI key
-    if request.openai_api_key is not None:
-        valid, error = await _validate_openai_key(request.openai_api_key)
+    if body.openai_api_key is not None:
+        valid, error = await _validate_openai_key(body.openai_api_key)
         validation["openai_api_key"] = {"valid": valid, "error": error}
 
         if valid:
             await service.set(
                 "openai_api_key",
-                request.openai_api_key,
+                body.openai_api_key,
                 is_secret=True,
                 description="OpenAI API key for embeddings and LLM operations",
             )
@@ -196,14 +200,14 @@ async def update_settings(
             log.warning("OpenAI key validation failed", error=error)
 
     # Validate and save Anthropic key
-    if request.anthropic_api_key is not None:
-        valid, error = await _validate_anthropic_key(request.anthropic_api_key)
+    if body.anthropic_api_key is not None:
+        valid, error = await _validate_anthropic_key(body.anthropic_api_key)
         validation["anthropic_api_key"] = {"valid": valid, "error": error}
 
         if valid:
             await service.set(
                 "anthropic_api_key",
-                request.anthropic_api_key,
+                body.anthropic_api_key,
                 is_secret=True,
                 description="Anthropic API key for Claude models",
             )
@@ -216,6 +220,7 @@ async def update_settings(
 
 @router.delete("/{key}", response_model=DeleteSettingResponse)
 async def delete_setting(
+    request: Request,
     key: str,
     session: AsyncSession = Depends(get_session_dependency),
 ) -> DeleteSettingResponse:
@@ -226,14 +231,10 @@ async def delete_setting(
 
     Requires admin role (not available during setup mode).
     """
-    # For delete, we require auth (can't accidentally delete during setup)
     if await _is_setup_mode(session):
-        raise HTTPException(
-            status_code=403,
-            detail="Cannot delete settings during setup mode",
-        )
+        raise HTTPException(status_code=403, detail="Cannot delete settings during setup mode")
 
-    # TODO: Add proper admin auth check
+    await _require_settings_admin(request, session)
 
     service = get_settings_service()
     deleted = await service.delete(key)
