@@ -6,6 +6,8 @@ Works without auth during setup mode, requires admin role otherwise.
 
 from __future__ import annotations
 
+import os
+
 import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
@@ -23,6 +25,21 @@ log = structlog.get_logger()
 
 # Admin roles that can manage settings
 _ADMIN_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN)
+
+
+async def _try_reset_graph_client(context: str) -> None:
+    """Reset the global GraphClient, logging on failure.
+
+    Args:
+        context: Description for log message (e.g., "API key update", "API key deletion")
+    """
+    try:
+        from sibyl_core.graph.client import reset_graph_client
+
+        await reset_graph_client()
+        log.info(f"Reset GraphClient after {context}")
+    except Exception as e:
+        log.warning("Failed to reset GraphClient", error=str(e))
 
 
 class SettingInfo(BaseModel):
@@ -192,6 +209,10 @@ async def update_settings(
                 description="OpenAI API key for embeddings and LLM operations",
             )
             updated.append("openai_api_key")
+            # Update environment variable so running server uses new key immediately
+            # This bridges webapp settings to GraphClient which reads from env vars
+            os.environ["OPENAI_API_KEY"] = request.openai_api_key
+            log.info("Updated OpenAI API key in environment")
         else:
             log.warning("OpenAI key validation failed", error=error)
 
@@ -208,8 +229,16 @@ async def update_settings(
                 description="Anthropic API key for Claude models",
             )
             updated.append("anthropic_api_key")
+            # Update environment variable so running server uses new key immediately
+            os.environ["ANTHROPIC_API_KEY"] = request.anthropic_api_key
+            log.info("Updated Anthropic API key in environment")
         else:
             log.warning("Anthropic key validation failed", error=error)
+
+    # If API keys were updated, reset the GraphClient so it reconnects with new keys
+    # The global singleton is reused, so existing connections would use stale keys
+    if updated:
+        await _try_reset_graph_client(f"API key update keys={updated}")
 
     return UpdateSettingsResponse(updated=updated, validation=validation)
 
@@ -239,6 +268,15 @@ async def delete_setting(
     deleted = await service.delete(key)
 
     if deleted:
+        # Clear from environment and reset GraphClient if this was an API key
+        if key in ("openai_api_key", "anthropic_api_key"):
+            env_key = "OPENAI_API_KEY" if key == "openai_api_key" else "ANTHROPIC_API_KEY"
+            # Note: This clears the env var even if it was externally set. Since webapp users
+            # typically configure keys via UI (not external env), this is the expected behavior.
+            # If external env vars need to be preserved, track DB-loaded keys at startup.
+            os.environ.pop(env_key, None)
+            await _try_reset_graph_client(f"API key deletion key={key}")
+
         return DeleteSettingResponse(
             deleted=True,
             key=key,

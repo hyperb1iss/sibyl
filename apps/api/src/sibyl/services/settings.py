@@ -350,3 +350,32 @@ def reset_settings_service() -> None:
     """Reset the global settings service (for testing)."""
     global _settings_service  # noqa: PLW0603
     _settings_service = None
+
+
+async def load_api_keys_from_db() -> list[str]:
+    """Load API keys from database into environment variables.
+
+    Only loads keys that are not already set in the environment.
+    This should be called at startup before GraphClient is initialized.
+
+    Returns:
+        List of keys that were loaded from the database.
+    """
+    loaded: list[str] = []
+    settings_svc = get_settings_service()
+
+    for setting_key, env_var in [
+        ("openai_api_key", "OPENAI_API_KEY"),
+        ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+    ]:
+        try:
+            if not os.environ.get(env_var):
+                key = await settings_svc.get(setting_key)
+                if key:
+                    os.environ[env_var] = key
+                    loaded.append(setting_key)
+                    log.debug(f"Loaded {setting_key} from database settings")
+        except Exception as e:
+            log.warning(f"Failed to load {setting_key} from database", error=str(e))
+
+    return loaded
