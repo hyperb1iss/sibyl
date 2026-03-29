@@ -1,5 +1,5 @@
-# Sibyl - Collective Intelligence Runtime
-# Root workspace configuration for dependency version management
+# Sibyl workspace configuration
+# Shared dependency and tooling config for the graph + task workflow monorepo
 
 # =============================================================================
 # UV Workspace Configuration (virtual workspace - not a package)
@@ -135,13 +135,6 @@ possibly-missing-attribute = "ignore"
 include = ["**/jobs/*.py"]
 [tool.ty.overrides.rules]
 invalid-argument-type = "ignore"
-
-# TypedDict hook outputs, SQLAlchemy in agents, runner union types
-[[tool.ty.overrides]]
-include = ["**/agents/*.py"]
-[tool.ty.overrides.rules]
-invalid-argument-type = "ignore"
-possibly-missing-attribute = "ignore"
 
 # FastAPI/Starlette middleware and app setup
 [[tool.ty.overrides]]

@@ -17,7 +17,7 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.13"
 authors = [{ name = "Stefanie Jane", email = "stef@hyperbliss.tech" }]
-keywords = ["ai-agents", "knowledge-graph", "graph-rag", "collective-intelligence"]
+keywords = ["knowledge-graph", "graph-rag", "persistent-memory", "task-workflow"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

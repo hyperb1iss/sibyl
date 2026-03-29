@@ -238,8 +238,8 @@ Add timestamped notes to tasks:
 # Add a human note
 sibyl task note task_xyz "Found the root cause of the bug"
 
-# Add an agent note
-sibyl task note task_xyz "Implemented fix" --agent --author claude
+# Add an assistant note
+sibyl task note task_xyz "Implemented fix" --assistant --author claude
 
 # List notes
 sibyl task notes task_xyz

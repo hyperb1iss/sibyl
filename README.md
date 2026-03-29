@@ -305,7 +305,7 @@ sibyl/
 - **Frontend:** Next.js 16 / React 19 / React Query / Tailwind 4
 - **Database:** FalkorDB (graph) + PostgreSQL (relational)
 - **Build:** moonrepo + uv (Python) + pnpm (TypeScript)
-- **Agents:** Claude SDK with human-in-the-loop approvals
+- **Integrations:** Claude Code, MCP clients, and project-local hooks
 
 ## Authentication
 
