@@ -263,11 +263,10 @@ echo $SIBYL_OPENAI_API_KEY
 A production Docker Compose configuration is planned. For now, use the individual Docker commands
 above.
 
-### Experimental Runtime Features
+### Legacy Runtime Notes
 
-Sibyl's core workflow no longer depends on sandbox mode or runner daemons. If you are evaluating
-the knowledge graph, tasks, search, and source ingestion flows, you can skip the older
-agent-execution/runtime setup entirely.
+Sibyl's current product surface centers on the knowledge graph, tasks, search, and source ingestion.
+If you are evaluating Sibyl today, you can ignore older experimental internal-runtime material.
 
 ## Next Steps
 

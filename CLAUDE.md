@@ -2,8 +2,8 @@
 
 ## Project Overview
 
-**Sibyl** is a Collective Intelligence Runtime - an MCP server providing AI agents shared memory,
-task orchestration, and collaborative knowledge through a Graphiti-powered knowledge graph.
+**Sibyl** is a graph-backed memory system - an MCP server and web app providing persistent memory,
+search, and task coordination through a Graphiti-powered knowledge graph.
 
 **See package READMEs for detailed documentation:**
 
@@ -70,7 +70,6 @@ sibyl/
 ├── apps/
 │   ├── api/              # sibyld - Server daemon (serve, worker, db)
 │   ├── cli/              # sibyl - Client CLI (task, search, add, etc.)
-│   ├── runner/           # sibyl-runner - Distributed execution daemon
 │   └── web/              # Next.js 16 frontend
 ├── packages/python/
 │   └── sibyl-core/       # Shared library (models, graph, tools)
@@ -84,7 +83,6 @@ sibyl/
 | -------------- | ------------- | ------------------------------------------ |
 | `sibyld`       | `apps/api`    | Server daemon (serve, worker, db, up/down) |
 | `sibyl`        | `apps/cli`    | Client CLI (task, search, add, explore)    |
-| `sibyl-runner` | `apps/runner` | Distributed execution daemon               |
 
 ### Development Commands
 

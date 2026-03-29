@@ -86,9 +86,9 @@ export default defineConfig({
                     ],
                 },
                 {
-                    text: 'Agent Orchestration',
+                    text: 'Agent Workflows',
                     items: [
-                        { text: 'Agent Harness', link: '/guide/agent-harness' },
+                        { text: 'Working with Agents', link: '/guide/working-with-agents' },
                         { text: 'Claude Code', link: '/guide/claude-code' },
                         { text: 'MCP Configuration', link: '/guide/mcp-configuration' },
                         { text: 'Agent Collaboration', link: '/guide/agent-collaboration' },
