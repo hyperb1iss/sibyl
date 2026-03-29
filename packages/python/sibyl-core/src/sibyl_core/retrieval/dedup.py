@@ -441,9 +441,13 @@ class EntityDeduplicator:
         params = {"from_id": from_id, "to_id": to_id}
 
         try:
+            group_id = getattr(self.entity_manager, "_group_id", None)
             # Execute both redirections
             for query in [outgoing_query, incoming_query]:
-                result = await self.client.client.driver.execute_query(query, **params)
+                if group_id:
+                    result = await self.client.execute_write_org(query, group_id, **params)
+                else:
+                    result = await self.client.execute_write(query, **params)
                 if result:
                     for record in result:
                         if isinstance(record, (list, tuple)) and len(record) > 0:

@@ -179,8 +179,16 @@ class TestEntityDeduplicator:
         async def _execute_read_org(query: str, organization_id: str, **params) -> list:
             return await client.client.driver.execute_query(query, **params)
 
+        async def _execute_write(query: str, **params) -> list:
+            return await client.client.driver.execute_query(query, **params)
+
+        async def _execute_write_org(query: str, organization_id: str, **params) -> list:
+            return await client.client.driver.execute_query(query, **params)
+
         client.execute_read = AsyncMock(side_effect=_execute_read)
         client.execute_read_org = AsyncMock(side_effect=_execute_read_org)
+        client.execute_write = AsyncMock(side_effect=_execute_write)
+        client.execute_write_org = AsyncMock(side_effect=_execute_write_org)
         return client
 
     @pytest.fixture
@@ -355,6 +363,7 @@ class TestEntityDeduplicator:
         assert result is True
         # Entity manager delete should be called
         mock_entity_manager.delete.assert_called_once_with("remove")
+        assert mock_client.execute_write_org.await_count == 2
         # Pair should be removed from cache
         assert len(dedup._duplicate_pairs) == 0
 

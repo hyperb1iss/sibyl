@@ -50,6 +50,7 @@ class MockGraphClientForDedup:
     entities_with_embeddings: list[tuple[str, str, str, list[float]]] = field(default_factory=list)
     redirect_count: int = 0
     query_history: list[str] = field(default_factory=list)
+    write_org_calls: list[tuple[str, str]] = field(default_factory=list)
 
     class MockDriver:
         """Mock driver for execute_query."""
@@ -87,6 +88,17 @@ class MockGraphClientForDedup:
         self, query: str, organization_id: str, **params: Any
     ) -> list[Any]:
         """Execute an org-scoped read."""
+        return await self.MockDriver(self).execute_query(query, **params)
+
+    async def execute_write(self, query: str, **params: Any) -> list[Any]:
+        """Execute an unscoped write."""
+        return await self.MockDriver(self).execute_query(query, **params)
+
+    async def execute_write_org(
+        self, query: str, organization_id: str, **params: Any
+    ) -> list[Any]:
+        """Execute an org-scoped write."""
+        self.write_org_calls.append((organization_id, query))
         return await self.MockDriver(self).execute_query(query, **params)
 
 
@@ -512,6 +524,8 @@ class TestEntityDeduplicatorMerge:
         assert result is True
         assert "id2" in manager.deleted_ids
         assert "id2" not in manager.entities
+        assert len(client.write_org_calls) == 2
+        assert all(org_id == manager._group_id for org_id, _ in client.write_org_calls)
 
     @pytest.mark.asyncio
     async def test_merge_entities_not_found(self) -> None:
