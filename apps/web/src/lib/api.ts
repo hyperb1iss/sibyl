@@ -72,8 +72,10 @@ export interface EpicMetadata extends BaseMetadata {
   status?: 'planning' | 'in_progress' | 'blocked' | 'completed' | 'archived';
   total_tasks?: number;
   completed_tasks?: number;
-  doing_tasks?: number;
+  in_progress_tasks?: number;
   blocked_tasks?: number;
+  in_review_tasks?: number;
+  completion_pct?: number;
 }
 
 /** Search result metadata */
@@ -739,6 +741,10 @@ export interface EpicSummary {
     assignees?: string[];
     total_tasks?: number;
     completed_tasks?: number;
+    in_progress_tasks?: number;
+    blocked_tasks?: number;
+    in_review_tasks?: number;
+    completion_pct?: number;
     [key: string]: unknown;
   };
 }
@@ -746,9 +752,9 @@ export interface EpicSummary {
 export interface EpicProgress {
   total_tasks: number;
   completed_tasks: number;
-  doing_tasks: number;
+  in_progress_tasks: number;
   blocked_tasks: number;
-  review_tasks: number;
+  in_review_tasks: number;
   completion_pct: number;
 }
 

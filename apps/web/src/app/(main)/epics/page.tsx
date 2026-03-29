@@ -140,9 +140,15 @@ function EpicsPageContent() {
         }
         case 'progress': {
           const aProgress =
-            ((a.metadata?.tasks_done as number) ?? 0) / ((a.metadata?.tasks_total as number) || 1);
+            (a.metadata?.completion_pct as number | undefined) ??
+            (((a.metadata?.completed_tasks as number) ?? 0) /
+              ((a.metadata?.total_tasks as number) || 1)) *
+              100;
           const bProgress =
-            ((b.metadata?.tasks_done as number) ?? 0) / ((b.metadata?.tasks_total as number) || 1);
+            (b.metadata?.completion_pct as number | undefined) ??
+            (((b.metadata?.completed_tasks as number) ?? 0) /
+              ((b.metadata?.total_tasks as number) || 1)) *
+              100;
           return bProgress - aProgress; // Higher progress first
         }
         default: {

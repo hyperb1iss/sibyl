@@ -73,9 +73,11 @@ export const EpicCard = memo(function EpicCard({
   // Progress calculation from metadata
   const totalTasks = (metadata.total_tasks as number) ?? 0;
   const doneTasks = (metadata.completed_tasks as number) ?? 0;
-  const doingTasks = (metadata.doing_tasks as number) ?? 0;
+  const doingTasks = (metadata.in_progress_tasks as number) ?? 0;
   const blockedTasks = (metadata.blocked_tasks as number) ?? 0;
-  const progressPercent = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+  const progressPercent =
+    (metadata.completion_pct as number | undefined) ??
+    (totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0);
   const progress =
     totalTasks > 0
       ? { total: totalTasks, done: doneTasks, doing: doingTasks, blocked: blockedTasks }
