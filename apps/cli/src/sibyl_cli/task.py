@@ -920,8 +920,13 @@ def update_task(
 def add_note(
     task_id: Annotated[str, typer.Argument(help="Task ID (full ID required)")],
     content: Annotated[str, typer.Argument(help="Note content")],
-    agent: Annotated[
-        bool, typer.Option("--agent", help="Mark as agent-authored (default: user)")
+    assistant: Annotated[
+        bool,
+        typer.Option(
+            "--assistant",
+            "--agent",
+            help="Mark as assistant-authored (default: user)",
+        ),
     ] = False,
     author: Annotated[
         str | None, typer.Option("--author", "-a", help="Author name/identifier")
@@ -934,7 +939,7 @@ def add_note(
 
     Examples:
         sibyl task note task_abc "Found the root cause"
-        sibyl task note task_abc "Implementing fix" --agent --author claude
+        sibyl task note task_abc "Implementing fix" --assistant --author claude
     """
 
     @run_async
@@ -943,7 +948,7 @@ def add_note(
 
         try:
             resolved_id = _validate_task_id(task_id)
-            author_type = "agent" if agent else "user"
+            author_type = "agent" if assistant else "user"
             author_name = author or ""
 
             response = await client.create_note(resolved_id, content, author_type, author_name)

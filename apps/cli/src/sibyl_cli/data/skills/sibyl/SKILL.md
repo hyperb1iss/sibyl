@@ -195,7 +195,7 @@ sibyl task update task_a1b2c3d4e5f6 --status done --priority high
 
 # Add a note DURING work (progress breadcrumbs, NOT for completion)
 sibyl task note task_a1b2c3d4e5f6 "Found the root cause"
-sibyl task note task_a1b2c3d4e5f6 "Implemented fix" --agent
+sibyl task note task_a1b2c3d4e5f6 "Implemented fix" --assistant
 
 # List notes for a task
 sibyl task notes task_a1b2c3d4e5f6

@@ -401,11 +401,12 @@ sibyl task note <task_id> <content> [options]
 
 ### Options
 
-| Option     | Short | Description                            |
-| ---------- | ----- | -------------------------------------- |
-| `--agent`  |       | Mark as agent-authored (default: user) |
-| `--author` | `-a`  | Author name/identifier                 |
-| `--json`   | `-j`  | JSON output                            |
+| Option          | Short | Description                                 |
+| --------------- | ----- | ------------------------------------------- |
+| `--assistant`   |       | Mark as assistant-authored (default: user)  |
+| `--agent`       |       | Backward-compatible alias for `--assistant` |
+| `--author`      | `-a`  | Author name/identifier                      |
+| `--json`        | `-j`  | JSON output                                 |
 
 ### Examples
 
@@ -413,8 +414,8 @@ sibyl task note <task_id> <content> [options]
 # Add user note
 sibyl task note task_abc123 "Found the root cause - Redis connection timeout"
 
-# Add agent note
-sibyl task note task_abc123 "Implementing the fix now" --agent --author claude
+# Add assistant note
+sibyl task note task_abc123 "Implementing the fix now" --assistant --author claude
 ```
 
 ---
@@ -448,7 +449,7 @@ Output:
 user 2024-01-15 10:30:00
   Found the root cause - Redis connection timeout
 
-agent claude 2024-01-15 10:35:00
+assistant claude 2024-01-15 10:35:00
   Implementing the fix now. Will add retry logic.
 
 user 2024-01-15 11:00:00

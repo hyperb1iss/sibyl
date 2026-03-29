@@ -403,7 +403,7 @@ async def update_config(
             "anthropic_api_key",
             body.anthropic_api_key,
             is_secret=True,
-            description="Anthropic API key for Claude agents",
+            description="Anthropic API key for Claude-powered extraction workflows",
         )
         log.info("Anthropic API key updated", valid=anthropic_valid)
 

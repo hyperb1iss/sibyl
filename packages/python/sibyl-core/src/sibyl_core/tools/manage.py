@@ -434,7 +434,7 @@ async def _add_note(
         task_id: Task ID to add note to
         data: Dict containing note fields:
             - content: Note content (required)
-            - author_type: "agent" or "user" (default: "user")
+            - author_type: "agent" (assistant-authored) or "user" (default: "user")
             - author_name: Author identifier (optional)
     """
     import uuid

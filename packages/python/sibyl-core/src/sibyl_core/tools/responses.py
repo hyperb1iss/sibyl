@@ -33,7 +33,7 @@ class SearchResponse:
     limit: int = 10
     offset: int = 0
     has_more: bool = False
-    # Agent guidance - tells agents how to get full content
+    # Client guidance - tells assistants and scripts how to get full content
     usage_hint: str = "Results show previews. To get full content, use: sibyl entity show <id>"
 
 

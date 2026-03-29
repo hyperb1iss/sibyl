@@ -393,7 +393,7 @@ def main():
             debug_info = f"\n_Query: `{search_query}` ({elapsed:.2f}s)_"
 
         # Output as additional context
-        # Include a reminder about the /sibyl skill for agents that haven't loaded it
+        # Include a reminder about the /sibyl skill for assistants that haven't loaded it
         sibyl_hint = "Sibyl is your knowledge graph. Run `/sibyl` for full CLI instructions."
         response = {
             "hookSpecificOutput": {

@@ -358,14 +358,14 @@ class TaskKnowledgeSuggestion(BaseModel):
 class AuthorType(StrEnum):
     """Author type for notes."""
 
-    AGENT = "agent"  # AI agent authored
+    AGENT = "agent"  # Assistant-authored; wire value retained for compatibility
     USER = "user"  # Human authored
 
 
 class Note(Entity):
     """A timestamped note on a task.
 
-    Notes provide a way for agents and users to add progress updates,
+    Notes provide a way for assistants and users to add progress updates,
     findings, and observations to tasks. They are stored as separate
     entities with BELONGS_TO relationships to their parent task.
     """
@@ -374,8 +374,11 @@ class Note(Entity):
 
     # Core fields
     task_id: str = Field(..., description="Parent task UUID (required)")
-    author_type: AuthorType = Field(default=AuthorType.USER, description="Agent or user")
-    author_name: str = Field(default="", description="Author identifier (user email or agent name)")
+    author_type: AuthorType = Field(default=AuthorType.USER, description="Assistant or user")
+    author_name: str = Field(
+        default="",
+        description="Author identifier (user email or assistant name)",
+    )
 
     @model_validator(mode="before")
     @classmethod

@@ -119,7 +119,7 @@ async def _search_documents(
                 if heading_context:
                     content = f"[{heading_context}] {content}"
 
-                # Don't expose file:// URLs - agents will try to read them
+                # Don't expose file:// URLs - assistant clients will try to read them
                 # Instead, provide entity URL for fetching full content
                 display_url = None
                 if doc.url and not doc.url.startswith("file://"):
@@ -145,7 +145,7 @@ async def _search_documents(
                             "heading_path": chunk.heading_path or [],
                             "language": chunk.language,
                             "has_code": doc.has_code,
-                            # Help agents understand how to get full content
+                            # Help clients understand how to get full content
                             "hint": "Use 'sibyl entity <id>' or fetch /api/entities/<id> for full content",
                         },
                     )
