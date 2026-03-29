@@ -785,7 +785,6 @@ class DevStatusResponse(BaseModel):
     uptime_seconds: float = Field(default=0, description="Server uptime")
     entity_count: int = Field(default=0, description="Total entities in graph")
     queue_depth: int = Field(default=0, description="Jobs in queue")
-    active_agents: int = Field(default=0, description="Currently running agents")
 
     # Recent activity
     recent_errors: list[dict[str, Any]] = Field(

@@ -324,7 +324,6 @@ async def dev_status(
     - FalkorDB connectivity
     - Job queue health
     - Recent error logs
-    - Active agent count
 
     Requires organization OWNER role.
     """
@@ -364,24 +363,6 @@ async def dev_status(
         queue_depth = 0
         worker_healthy = False
 
-    # Count active agents
-    try:
-        from sqlmodel import col, select
-
-        from sibyl.db import get_session
-        from sibyl.db.models import Agent, AgentStatus
-
-        async with get_session() as session:
-            result = await session.execute(
-                select(Agent).where(
-                    col(Agent.organization_id) == org.id,
-                    col(Agent.status) == AgentStatus.RUNNING,
-                )
-            )
-            active_agents = len(list(result.scalars().all()))
-    except Exception:
-        active_agents = 0
-
     # Get recent error logs
     buffer = LogBuffer.get()
     error_entries = buffer.tail(n=10, level="error")
@@ -395,7 +376,6 @@ async def dev_status(
         uptime_seconds=uptime,
         entity_count=entity_count,
         queue_depth=queue_depth,
-        active_agents=active_agents,
         recent_errors=recent_errors,
     )
 

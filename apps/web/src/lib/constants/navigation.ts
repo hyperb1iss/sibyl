@@ -9,7 +9,6 @@ export const NAVIGATION = [
   { name: 'Tasks', href: '/tasks', icon: '☰' },
   { name: 'Sources', href: '/sources', icon: '▤' },
   { name: 'Graph', href: '/graph', icon: '⬡' },
-  { name: 'Sandboxes', href: '/sandboxes', icon: '▢' },
   { name: 'Entities', href: '/entities', icon: '▣' },
   { name: 'Search', href: '/search', icon: '⌕' },
 ] as const;

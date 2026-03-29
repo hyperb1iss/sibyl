@@ -15,7 +15,6 @@ import {
   ListTodo,
   Network,
   Search,
-  Sparks,
 } from '@/components/ui/icons';
 
 /**
@@ -27,7 +26,6 @@ export const ROUTE_CONFIG: Record<string, { label: string; icon: IconComponent }
   projects: { label: 'Projects', icon: FolderKanban },
   epics: { label: 'Epics', icon: Layers },
   tasks: { label: 'Tasks', icon: ListTodo },
-  agents: { label: 'Agents', icon: Sparks },
   sources: { label: 'Sources', icon: BookOpen },
   documents: { label: 'Documents', icon: FileText },
   graph: { label: 'Graph', icon: Network },
@@ -148,7 +146,7 @@ export const Breadcrumb = memo(BreadcrumbInner);
  * Automatically uses correct icons from ROUTE_CONFIG.
  */
 interface EntityBreadcrumbProps {
-  entityType: 'project' | 'epic' | 'task' | 'entity' | 'source' | 'agent' | 'planning';
+  entityType: 'project' | 'epic' | 'task' | 'entity' | 'source';
   entityName: string;
   parentProject?: { id: string; name: string };
 }
@@ -177,35 +175,12 @@ export function EntityBreadcrumb({ entityType, entityName, parentProject }: Enti
         icon: ROUTE_CONFIG.projects.icon,
       });
     }
-  } else if (entityType === 'agent') {
-    items.push({ label: 'Agents', href: '/agents', icon: ROUTE_CONFIG.agents.icon });
-    if (parentProject) {
-      items.push({
-        label: parentProject.name,
-        href: `/agents?project=${parentProject.id}`,
-        icon: ROUTE_CONFIG.projects.icon,
-      });
-    }
   } else if (entityType === 'project') {
     items.push({ label: 'Projects', href: '/projects', icon: ROUTE_CONFIG.projects.icon });
   } else if (entityType === 'entity') {
     items.push({ label: 'Entities', href: '/entities', icon: ROUTE_CONFIG.entities.icon });
   } else if (entityType === 'source') {
     items.push({ label: 'Sources', href: '/sources', icon: ROUTE_CONFIG.sources.icon });
-  } else if (entityType === 'planning') {
-    items.push({ label: 'Agents', href: '/agents', icon: ROUTE_CONFIG.agents.icon });
-    items.push({
-      label: 'Planning',
-      href: '/agents?view=planning',
-      icon: ROUTE_CONFIG.agents.icon,
-    });
-    if (parentProject) {
-      items.push({
-        label: parentProject.name,
-        href: `/agents?view=planning&project=${parentProject.id}`,
-        icon: ROUTE_CONFIG.projects.icon,
-      });
-    }
   }
 
   items.push({ label: entityName });

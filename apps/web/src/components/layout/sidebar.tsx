@@ -8,7 +8,6 @@ import { useEffect } from 'react';
 import {
   BookOpen,
   Boxes,
-  Cube,
   FolderKanban,
   type IconComponent,
   Layers,
@@ -16,7 +15,6 @@ import {
   ListTodo,
   Network,
   Search,
-  Sparks,
   X,
 } from '@/components/ui/icons';
 import { APP_CONFIG } from '@/lib/constants';
@@ -29,8 +27,6 @@ const NAVIGATION: Array<{ name: string; href: string; icon: IconComponent }> = [
   { name: 'Projects', href: '/projects', icon: FolderKanban },
   { name: 'Epics', href: '/epics', icon: Layers },
   { name: 'Tasks', href: '/tasks', icon: ListTodo },
-  { name: 'Agents', href: '/agents', icon: Sparks },
-  { name: 'Sandboxes', href: '/sandboxes', icon: Cube },
   { name: 'Sources', href: '/sources', icon: BookOpen },
   { name: 'Graph', href: '/graph', icon: Network },
   { name: 'Entities', href: '/entities', icon: Boxes },
