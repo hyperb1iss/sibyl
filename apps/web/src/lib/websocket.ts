@@ -44,65 +44,11 @@ export interface CrawlCompletePayload {
   error?: string;
 }
 
-/** Agent event payloads */
-export interface AgentStatusPayload {
-  agent_id: string;
-  status: string;
-  reason?: string;
-}
-
-export interface AgentMessagePayload {
-  agent_id: string;
-  message_num: number;
-  role: string;
-  type: string;
-  content?: string;
-  preview?: string;
-  blocks?: unknown[];
-  icon?: string;
-  tool_name?: string;
-  tool_id?: string;
-  is_error?: boolean;
-  usage?: { input_tokens: number; output_tokens: number };
-  cost_usd?: number;
-  timestamp?: string;
-}
-
-export interface AgentWorkspacePayload {
-  agent_id: string;
-  worktree_path?: string;
-  branch?: string;
-  modified_files?: string[];
-}
-
-/** Approval event payload */
-export interface ApprovalResponsePayload {
-  approval_id: string;
-  agent_id?: string;
-  action: 'approve' | 'deny' | 'edit';
-  message?: string;
-}
-
-/** Status hint payload (Tier 3 Haiku-generated hints) */
-export interface StatusHintPayload {
-  agent_id: string;
-  tool_call_id: string;
-  hint: string;
-}
-
 /** Permission changed payload */
 export interface PermissionChangedPayload {
   user_id: string;
   change_type: 'org_member_added' | 'org_role_changed' | 'org_member_removed';
   org_role?: string;
-}
-
-/** Sandbox status change payload */
-export interface SandboxStatusPayload {
-  sandbox_id: string;
-  status: string;
-  org_id?: string;
-  pod_name?: string;
 }
 
 /** Map event types to their payload types */
@@ -117,13 +63,7 @@ export interface WebSocketEventPayloadMap {
   health_update: Record<string, unknown>;
   heartbeat: Record<string, unknown>;
   connection_status: ConnectionStatusPayload;
-  agent_status: AgentStatusPayload;
-  agent_message: AgentMessagePayload;
-  agent_workspace: AgentWorkspacePayload;
-  approval_response: ApprovalResponsePayload;
-  status_hint: StatusHintPayload;
   permission_changed: PermissionChangedPayload;
-  sandbox_status_changed: SandboxStatusPayload;
 }
 
 export type WebSocketEventType = keyof WebSocketEventPayloadMap;
