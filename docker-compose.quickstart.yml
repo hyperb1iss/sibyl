@@ -62,7 +62,9 @@ services:
       # Server config
       SIBYL_SERVER_HOST: 0.0.0.0
       SIBYL_SERVER_PORT: 3334
-      SIBYL_ENVIRONMENT: production
+      SIBYL_ENVIRONMENT: development
+    volumes:
+      - sibyl_secrets:/root/.sibyl
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:3334/api/health')"]
       interval: 10s
@@ -95,6 +97,8 @@ services:
       SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:-}
       SIBYL_LLM_PROVIDER: anthropic
       SIBYL_LLM_MODEL: claude-haiku-4-5
+    volumes:
+      - sibyl_secrets:/root/.sibyl
     restart: unless-stopped
 
   # ==========================================================================
@@ -161,6 +165,8 @@ services:
     restart: unless-stopped
 
 volumes:
+  sibyl_secrets:
+    name: sibyl_secrets
   sibyl_falkordb:
     name: sibyl_falkordb
   sibyl_postgres:

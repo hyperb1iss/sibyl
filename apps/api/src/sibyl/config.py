@@ -1,11 +1,40 @@
 """Configuration management for Sibyl MCP Server."""
 
 import os
+import secrets
 from pathlib import Path
 from typing import Literal
 
+import structlog
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_log = structlog.get_logger()
+
+# Persisted auto-generated JWT key (same pattern as settings.key in crypto.py)
+_JWT_KEY_FILE = Path.home() / ".sibyl" / "jwt.key"
+
+
+def _get_or_create_jwt_secret() -> str:
+    """Read persisted JWT secret from ~/.sibyl/jwt.key, or generate and save one."""
+    if _JWT_KEY_FILE.exists():
+        try:
+            key = _JWT_KEY_FILE.read_text().strip()
+            if key:
+                return key
+        except Exception as e:
+            _log.warning("Failed to read JWT key file", error=str(e))
+
+    key = secrets.token_hex(32)
+    _log.info("Auto-generated JWT secret for development", path=str(_JWT_KEY_FILE))
+    try:
+        _JWT_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _JWT_KEY_FILE.write_text(key)
+        _JWT_KEY_FILE.chmod(0o600)
+    except Exception as e:
+        _log.warning("Failed to persist JWT key", error=str(e))
+
+    return key
 
 
 class Settings(BaseSettings):
@@ -332,11 +361,15 @@ class Settings(BaseSettings):
             if fallback:
                 object.__setattr__(self, "github_client_secret", SecretStr(fallback))
 
-        # JWT: fall back to non-prefixed env vars
+        # JWT: fall back to non-prefixed env vars, auto-generate in dev
         if not self.jwt_secret.get_secret_value():
             fallback = os.environ.get("JWT_SECRET", "")
             if fallback:
                 object.__setattr__(self, "jwt_secret", SecretStr(fallback))
+            elif self.environment != "production":
+                object.__setattr__(
+                    self, "jwt_secret", SecretStr(_get_or_create_jwt_secret())
+                )
 
         return self
 
