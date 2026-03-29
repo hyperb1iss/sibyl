@@ -1,5 +1,6 @@
 """Task workflow engine for status transitions and automations."""
 
+import json
 import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -585,45 +586,63 @@ class TaskWorkflowEngine:
         """
         log.debug("Updating project progress", project_id=project_id)
 
-        # Query task counts using Cypher
+        # Query project tasks using the current graph shape:
+        # task nodes BELONGS_TO a project, and status typically lives in metadata.
         query = """
-        MATCH (p:Project {uuid: $project_id})-[:CONTAINS]->(t:Task)
-        WITH p,
-             count(t) as total,
-             count(CASE WHEN t.status = 'done' THEN 1 END) as done,
-             count(CASE WHEN t.status = 'doing' THEN 1 END) as doing
-        RETURN total, done, doing
+        MATCH (t)-[:BELONGS_TO]->(p)
+        WHERE t.entity_type = 'task'
+          AND p.entity_type = 'project'
+          AND t.group_id = $group_id
+          AND p.uuid = $project_id
+        RETURN t.metadata AS metadata
         """
 
         rows = await self._graph_client.execute_read_org(
-            query, self._organization_id, project_id=project_id
+            query,
+            self._organization_id,
+            group_id=self._organization_id,
+            project_id=project_id,
         )
-        if rows:
-            record = rows[0]
-            total = record.get("total", 0)
-            done = record.get("done", 0)
-            doing = record.get("doing", 0)
 
-            # Update project entity with progress and activity timestamp
-            now = datetime.now(UTC)
-            await self._entity_manager.update(
-                project_id,
-                {
-                    "total_tasks": total,
-                    "completed_tasks": done,
-                    "in_progress_tasks": doing,
-                    "last_activity_at": now.isoformat(),
-                },
-            )
+        total = 0
+        done = 0
+        doing = 0
 
-            log.debug(
-                "Project progress updated",
-                project_id=project_id,
-                total=total,
-                done=done,
-                doing=doing,
-                last_activity_at=now.isoformat(),
-            )
+        for record in rows:
+            metadata = record.get("metadata") or {}
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except json.JSONDecodeError:
+                    metadata = {}
+
+            status = (metadata.get("status") if isinstance(metadata, dict) else None) or "todo"
+            total += 1
+            if status == "done":
+                done += 1
+            elif status == "doing":
+                doing += 1
+
+        # Update project entity with progress and activity timestamp
+        now = datetime.now(UTC)
+        await self._entity_manager.update(
+            project_id,
+            {
+                "total_tasks": total,
+                "completed_tasks": done,
+                "in_progress_tasks": doing,
+                "last_activity_at": now.isoformat(),
+            },
+        )
+
+        log.debug(
+            "Project progress updated",
+            project_id=project_id,
+            total=total,
+            done=done,
+            doing=doing,
+            last_activity_at=now.isoformat(),
+        )
 
     async def _maybe_start_epic(self, task: Task) -> bool:
         """Auto-start epic if a task moves to a forward-progress state.

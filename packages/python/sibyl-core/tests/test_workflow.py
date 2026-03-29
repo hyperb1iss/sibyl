@@ -130,6 +130,7 @@ class MockGraphClient:
     """Mock GraphClient for testing workflow engine."""
 
     query_results: list[dict[str, Any]]
+    last_query: str | None = None
 
     async def execute_read_org(
         self,
@@ -138,6 +139,7 @@ class MockGraphClient:
         **params: Any,
     ) -> list[dict[str, Any]]:
         """Execute read query."""
+        self.last_query = query
         return self.query_results
 
 
@@ -557,6 +559,38 @@ class TestWorkflowEngine:
         # Assert
         assert result.status == TaskStatus.ARCHIVED
         assert result.metadata.get("archive_reason") == "No longer needed"
+
+    @pytest.mark.asyncio
+    async def test_update_project_progress_uses_belongs_to_relationship(
+        self,
+        workflow_engine: TaskWorkflowEngine,
+        mock_entity_manager: MockEntityManager,
+        mock_graph_client: MockGraphClient,
+    ) -> None:
+        """Project progress uses BELONGS_TO edges and task metadata status values."""
+        project_id = "project_abc123"
+        mock_entity_manager.entities[project_id] = make_entity(
+            entity_id=project_id,
+            name="Test project",
+            entity_type=EntityType.PROJECT,
+            metadata={},
+        )
+        mock_graph_client.query_results = [
+            {"metadata": {"status": "done"}},
+            {"metadata": '{"status":"doing"}'},
+            {"metadata": {"status": "todo"}},
+        ]
+
+        await workflow_engine._update_project_progress(project_id)
+
+        assert mock_graph_client.last_query is not None
+        assert "BELONGS_TO" in mock_graph_client.last_query
+        assert "CONTAINS" not in mock_graph_client.last_query
+
+        project = mock_entity_manager.entities[project_id]
+        assert project.metadata["total_tasks"] == 3
+        assert project.metadata["completed_tasks"] == 1
+        assert project.metadata["in_progress_tasks"] == 1
 
     @pytest.mark.asyncio
     async def test_archive_from_archived_raises(
