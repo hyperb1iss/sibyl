@@ -177,6 +177,7 @@ async def search(
     include_graph: bool = True,
     use_enhanced: bool = True,
     boost_recent: bool = True,
+    temporal_decay_days: float | None = None,
     organization_id: str | None = None,
 ) -> SearchResponse:
     """Unified semantic search across knowledge graph AND documentation.
@@ -323,10 +324,16 @@ async def search(
 
             if use_enhanced:
                 try:
+                    from sibyl_core.config import core_config
+
+                    decay = temporal_decay_days or core_config.temporal_decay_days
                     hybrid_config = HybridConfig(
                         apply_temporal=boost_recent,
-                        temporal_decay_days=365.0,
+                        temporal_decay_days=decay,
                         graph_depth=2,
+                        apply_reranking=core_config.rerank_enabled,
+                        rerank_top_k=core_config.rerank_top_k,
+                        rerank_model=core_config.rerank_model,
                     )
 
                     hybrid_result = await with_timeout(
@@ -360,7 +367,10 @@ async def search(
                     operation_name="search",
                 )
                 if boost_recent and raw_results:
-                    raw_results = temporal_boost(raw_results, decay_days=365.0)
+                    from sibyl_core.config import core_config
+
+                    decay = temporal_decay_days or core_config.temporal_decay_days
+                    raw_results = temporal_boost(raw_results, decay_days=decay)
 
             # Filter and convert to SearchResult
             for entity, score in raw_results:

@@ -101,6 +101,29 @@ class CoreConfig(BaseSettings):
         description="Graphiti concurrent operations limit (controls SEMAPHORE_LIMIT). Higher = more parallelism but more FalkorDB load.",
     )
 
+    # Retrieval: cross-encoder reranking
+    rerank_enabled: bool = Field(
+        default=False,
+        description="Enable cross-encoder reranking after RRF fusion. Adds ~100-200ms latency but +33-40%% accuracy.",
+    )
+    rerank_model: str = Field(
+        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        description="Cross-encoder model for reranking (sentence-transformers must be installed).",
+    )
+    rerank_top_k: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Number of top candidates to rerank (rest pass through unchanged).",
+    )
+
+    # Retrieval: temporal decay
+    temporal_decay_days: float = Field(
+        default=365.0,
+        gt=0,
+        description="Default decay half-life in days for temporal boosting (1 year default).",
+    )
+
     # Ingestion configuration
     chunk_max_tokens: int = Field(
         default=1000,

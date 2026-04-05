@@ -322,6 +322,7 @@ def _register_tools(mcp: FastMCP) -> None:
         include_graph: bool = True,
         use_enhanced: bool = True,
         boost_recent: bool = True,
+        temporal_decay_days: float | None = None,
     ) -> dict[str, Any]:
         """Unified semantic search across knowledge graph AND documentation.
 
@@ -403,6 +404,7 @@ def _register_tools(mcp: FastMCP) -> None:
             include_graph=include_graph,
             use_enhanced=use_enhanced,
             boost_recent=boost_recent,
+            temporal_decay_days=temporal_decay_days,
             organization_id=ctx.org_id,
         )
         return _to_dict(result)
