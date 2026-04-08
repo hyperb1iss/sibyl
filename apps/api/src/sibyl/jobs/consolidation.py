@@ -146,10 +146,11 @@ async def priority_decay(
         cutoff = datetime.now(UTC) - timedelta(days=min_age_days)
         cutoff_iso = cutoff.isoformat()
 
-        # Find old episodic entities that aren't already archived
+        # Find old episodic nodes (both :Entity and :Episodic labels)
         query = """
-        MATCH (n:Entity)
-        WHERE n.entity_type = 'episode'
+        MATCH (n)
+        WHERE (n:Entity OR n:Episodic)
+          AND n.entity_type = 'episode'
           AND n.group_id = $group_id
           AND n.created_at < $cutoff
           AND (n.status IS NULL OR n.status <> 'archived')
@@ -174,8 +175,15 @@ async def priority_decay(
 
             try:
                 archive_query = """
-                MATCH (n:Entity {uuid: $entity_id, group_id: $group_id})
-                SET n.status = 'archived', n.archived_at = $now
+                MATCH (n {uuid: $entity_id, group_id: $group_id})
+                WHERE n:Entity OR n:Episodic
+                SET n.status = 'archived',
+                    n.archived_at = $now,
+                    n.metadata = CASE
+                        WHEN n.metadata IS NOT NULL
+                        THEN n.metadata
+                        ELSE '{}'
+                    END
                 RETURN n.uuid
                 """
                 await client.execute_write_org(
@@ -212,26 +220,21 @@ async def consolidate_all_orgs(
     Designed as a cron job that discovers all orgs and runs
     consolidation + priority decay for each.
     """
-    from sibyl_core.graph.client import get_graph_client
-
     log.info("consolidate_all_orgs_started")
 
     try:
-        client = await get_graph_client()
+        # Enumerate orgs from PostgreSQL (source of truth), not the graph
+        from sqlalchemy import select
 
-        # Get distinct org IDs from the graph
-        query = """
-        MATCH (n:Entity)
-        WHERE n.group_id IS NOT NULL
-        RETURN DISTINCT n.group_id AS org_id
-        """
-        rows = await client.execute_read(query)
+        from sibyl.db.connection import get_session
+        from sibyl.db.models import Organization
 
-        org_ids = []
-        for record in rows:
-            org_id = record[0] if isinstance(record, (list, tuple)) else record.get("org_id")
-            if org_id:
-                org_ids.append(str(org_id))
+        org_ids: list[str] = []
+        async with get_session() as session:
+            result = await session.execute(select(Organization))
+            org_ids = [str(org.id) for (org,) in result.all()]
+
+        log.info("consolidate_all_orgs_discovered", org_count=len(org_ids))
 
         results = []
         for org_id in org_ids:

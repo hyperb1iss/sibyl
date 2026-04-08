@@ -88,52 +88,38 @@ async def create_entity(  # noqa: PLR0915
         else:
             entity = Episode.model_validate(entity_data)
 
-        # Dedup-on-write: check for near-duplicates before creating
+        # Dedup-on-write: check for near-duplicates before creating.
+        # If found, still create the entity (callers already have its ID),
+        # but enrich the existing duplicate and log the match.
+        dedup_target_id: str | None = None
         deduplicated = False
-        existing_id = None
-        try:
-            from sibyl_core.tools.conflicts import find_similar_entities
+        if entity_type not in ("task", "project", "epic"):
+            try:
+                from sibyl_core.tools.conflicts import find_similar_entities
 
-            similar = await find_similar_entities(
-                title=entity_data.get("name", ""),
-                content=entity_data.get("content", entity_data.get("description", "")),
-                organization_id=group_id,
-                entity_types=[entity_type] if entity_type not in ("task", "project", "epic") else None,
-                limit=1,
-                min_score=0.95,
-            )
-            if similar:
-                existing_id, existing_name, _, score = similar[0]
-                # Skip dedup for tasks/projects/epics (unique by design)
-                if entity_type not in ("task", "project", "epic"):
+                similar = await find_similar_entities(
+                    title=entity_data.get("name", ""),
+                    content=entity_data.get("content", entity_data.get("description", "")),
+                    organization_id=group_id,
+                    entity_types=[entity_type],
+                    limit=1,
+                    min_score=0.95,
+                )
+                if similar:
+                    dedup_target_id = similar[0][0]
                     log.info(
                         "dedup_on_write_match",
                         new_name=entity_data.get("name"),
-                        existing_id=existing_id,
-                        existing_name=existing_name,
-                        score=f"{score:.3f}",
+                        existing_id=dedup_target_id,
+                        existing_name=similar[0][1],
+                        score=f"{similar[0][3]:.3f}",
                     )
-                    # Update existing entity with new content instead of creating duplicate
-                    updates: dict[str, Any] = {}
-                    new_content = entity_data.get("content", "")
-                    if new_content:
-                        updates["content"] = new_content
-                    new_desc = entity_data.get("description", "")
-                    if new_desc:
-                        updates["description"] = new_desc
-                    new_meta = entity_data.get("metadata", {})
-                    if new_meta:
-                        updates["metadata"] = new_meta
-
-                    if updates:
-                        await entity_manager.update(existing_id, updates)
                     deduplicated = True
-        except Exception as e:
-            log.debug("dedup_on_write_check_skipped", error=str(e))
+            except Exception as e:
+                log.debug("dedup_on_write_check_skipped", error=str(e))
 
-        if deduplicated and existing_id:
-            created_id = existing_id
-        elif entity_type in ("task", "project", "epic", "pattern", "procedure"):
+        # Always create the entity so the queued ID stays valid
+        if entity_type in ("task", "project", "epic", "pattern", "procedure"):
             created_id = await entity_manager.create_direct(entity)
         else:
             created_id = await entity_manager.create(entity)
@@ -146,6 +132,21 @@ async def create_entity(  # noqa: PLR0915
 
         # Relationship manager for explicit and auto-discovered relationships
         relationship_manager = RelationshipManager(client, group_id=group_id)
+
+        # Link to existing duplicate if dedup matched (entity still created for ID stability)
+        if deduplicated and dedup_target_id:
+            try:
+                dedup_rel = Relationship(
+                    id=f"rel_{created_id}_duplicate_of_{dedup_target_id}",
+                    source_id=created_id,
+                    target_id=dedup_target_id,
+                    relationship_type=RelationshipType.RELATED_TO,
+                    metadata={"dedup_match": True, "auto_linked": True},
+                )
+                await relationship_manager.create(dedup_rel)
+                log.info("dedup_on_write_linked", source=created_id, target=dedup_target_id)
+            except Exception as e:
+                log.warning("dedup_on_write_link_failed", error=str(e))
 
         # Create explicit relationships (BELONGS_TO, DEPENDS_ON, etc.)
         relationships_created = 0
