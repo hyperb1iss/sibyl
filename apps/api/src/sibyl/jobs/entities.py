@@ -54,6 +54,7 @@ async def create_entity(  # noqa: PLR0915
         Entity,
         Episode,
         Pattern,
+        Procedure,
         Relationship,
         RelationshipType,
     )
@@ -82,6 +83,8 @@ async def create_entity(  # noqa: PLR0915
             entity = Epic.model_validate(entity_data)
         elif entity_type == "pattern":
             entity = Pattern.model_validate(entity_data)
+        elif entity_type == "procedure":
+            entity = Procedure.model_validate(entity_data)
         else:
             entity = Episode.model_validate(entity_data)
 
@@ -130,7 +133,7 @@ async def create_entity(  # noqa: PLR0915
 
         if deduplicated and existing_id:
             created_id = existing_id
-        elif entity_type in ("task", "project", "epic", "pattern"):
+        elif entity_type in ("task", "project", "epic", "pattern", "procedure"):
             created_id = await entity_manager.create_direct(entity)
         else:
             created_id = await entity_manager.create(entity)

@@ -12,12 +12,11 @@ Run:
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-
-from dataclasses import dataclass, field
 
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.retrieval.fusion import rrf_merge
@@ -27,7 +26,6 @@ from sibyl_core.retrieval.temporal import (
     temporal_boost,
     temporal_boost_single,
 )
-
 
 # =============================================================================
 # Helpers
@@ -102,9 +100,7 @@ class _MockEntityManager:
                 score = 0.9
             elif query_lower in (entity.description or "").lower():
                 score = 0.7
-            elif query_lower in (entity.content or "").lower():
-                score = 0.5
-            elif not query_lower:
+            elif query_lower in (entity.content or "").lower() or not query_lower:
                 score = 0.5
             if score > 0:
                 results.append((entity, score))
@@ -177,7 +173,6 @@ class TestTemporalBoostBenchmark:
 
     def test_min_boost_prevents_zero(self):
         """Very old entities should get min_boost, not zero."""
-        ancient = _entity_with_time("dinosaur", days_ago=3650)
         boost = calculate_boost(age_days=3650, decay_days=365.0, min_boost=0.1)
         assert boost == 0.1
 

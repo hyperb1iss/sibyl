@@ -34,6 +34,9 @@ class EntityType(StrEnum):
     SOURCE = "source"  # A crawlable documentation source (URL, repo, local)
     DOCUMENT = "document"  # A crawled document/page from a source
 
+    # Procedural memory
+    PROCEDURE = "procedure"  # Step-by-step workflow or process
+
     # Graph-RAG types
     COMMUNITY = "community"  # Entity cluster from community detection
 
@@ -75,6 +78,7 @@ class RelationshipType(StrEnum):
     ENCOUNTERED = "ENCOUNTERED"  # Task -> ErrorPattern
     IMPLEMENTED = "IMPLEMENTED"  # Task -> Pattern/Feature
     VALIDATED_BY = "VALIDATED_BY"  # Task -> Rule (verified compliance)
+    USES_PROCEDURE = "USES_PROCEDURE"  # Task -> Procedure (workflow used)
 
     # Documentation crawling relationships
     CRAWLED_FROM = "CRAWLED_FROM"  # Document -> Source
@@ -181,6 +185,33 @@ class Episode(Entity):
     )
     valid_to: datetime | None = Field(
         default=None, description="When this knowledge was superseded"
+    )
+
+
+class ProcedureStep(BaseModel):
+    """A single step in a procedure."""
+
+    order: int = Field(description="Step sequence number (1-based)")
+    title: str = Field(description="Brief step title")
+    description: str = Field(default="", description="Detailed instructions")
+    success_criteria: str | None = Field(default=None, description="How to verify this step")
+
+
+class Procedure(Entity):
+    """A reusable workflow or process with ordered steps.
+
+    Procedural memory captures *how to do things* — deployment flows,
+    debugging runbooks, incident response playbooks. Extracted from
+    task completions with learnings or created directly.
+    """
+
+    entity_type: EntityType = EntityType.PROCEDURE
+    steps: list[ProcedureStep] = Field(default_factory=list, description="Ordered steps")
+    required_tools: list[str] = Field(default_factory=list, description="Tools needed")
+    category: str = Field(default="", description="Category (deployment, debugging, etc.)")
+    estimated_minutes: int | None = Field(default=None, description="Estimated duration")
+    automation_level: str = Field(
+        default="manual", description="manual, semi-automated, or automated"
     )
 
 

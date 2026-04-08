@@ -8,7 +8,14 @@ import structlog
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.graph.relationships import RelationshipManager
-from sibyl_core.models.entities import EntityType, Episode, Pattern, Relationship, RelationshipType
+from sibyl_core.models.entities import (
+    EntityType,
+    Episode,
+    Pattern,
+    Procedure,
+    Relationship,
+    RelationshipType,
+)
 from sibyl_core.models.tasks import (
     Epic,
     EpicStatus,
@@ -175,7 +182,7 @@ async def add(
 
         # Detect potential conflicts (duplicates, contradictions) before creating
         conflicts: list[ConflictWarning] = []
-        if check_conflicts and entity_type in ("episode", "pattern", "rule", "template"):
+        if check_conflicts and entity_type in ("episode", "pattern", "rule", "template", "procedure"):
             # Only check for knowledge types, not workflow items (tasks/projects/epics)
             try:
                 conflicts = await detect_conflicts(
@@ -209,7 +216,7 @@ async def add(
         }
 
         # Create appropriate entity type
-        entity: Episode | Pattern | Task | Project
+        entity: Episode | Pattern | Procedure | Task | Project
         relationship_manager = RelationshipManager(client, group_id=org_id)
 
         if entity_type == "task":
@@ -336,6 +343,17 @@ async def add(
                 content=content,
                 category=category or "",
                 languages=languages or [],
+                metadata=full_metadata,
+            )
+
+        elif entity_type == "procedure":
+            entity = Procedure(
+                id=entity_id,
+                entity_type=EntityType.PROCEDURE,
+                name=title,
+                description=content[:500] if len(content) > 500 else content,
+                content=content,
+                category=category or "",
                 metadata=full_metadata,
             )
 
