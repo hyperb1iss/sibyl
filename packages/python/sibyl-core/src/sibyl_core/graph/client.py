@@ -65,7 +65,7 @@ _patch_semaphore_gather()
 
 
 def _patch_falkordb_driver() -> None:
-    """Monkey-patch FalkorDriver to skip index rebuilding on clone().
+    """Monkey-patch FalkorDriver FalkorDB behavior we rely on.
 
     Graphiti's FalkorDriver auto-runs build_indices_and_constraints() on every __init__,
     including when clone() creates a new driver for a different database. This causes
@@ -79,7 +79,9 @@ def _patch_falkordb_driver() -> None:
     """
     import copy
 
+    from graphiti_core.driver.falkordb import STOPWORDS
     from graphiti_core.driver.falkordb_driver import FalkorDriver
+    from graphiti_core.search.search_utils import validate_group_ids
 
     def patched_clone(self, database: str):
         """Clone using shallow copy to avoid triggering __init__ and index rebuilding."""
@@ -92,7 +94,31 @@ def _patch_falkordb_driver() -> None:
         cloned._database = database
         return cloned
 
+    def patched_build_fulltext_query(
+        self, query: str, group_ids: list[str] | None = None, max_query_length: int = 128
+    ) -> str:
+        """Build FalkorDB fulltext queries without quoting org UUID filters.
+
+        Graphiti 0.28.2 started quoting FalkorDB group_id filters, producing
+        `@group_id:"uuid"`. FalkorDB rejects that syntax for our UUID-backed
+        group_ids with `Syntax error at offset 20`, while the unquoted form works.
+        """
+        validate_group_ids(group_ids)
+
+        group_filter = "" if not group_ids else f"(@group_id:{'|'.join(group_ids)})"
+
+        sanitized_query = self.sanitize(query)
+        query_words = sanitized_query.split()
+        filtered_words = [word for word in query_words if word and word.lower() not in STOPWORDS]
+        sanitized_query = " | ".join(filtered_words)
+
+        if len(sanitized_query.split(" ")) + len(group_ids or []) >= max_query_length:
+            return ""
+
+        return group_filter + " (" + sanitized_query + ")"
+
     FalkorDriver.clone = patched_clone
+    FalkorDriver.build_fulltext_query = patched_build_fulltext_query
 
 
 _patch_falkordb_driver()
