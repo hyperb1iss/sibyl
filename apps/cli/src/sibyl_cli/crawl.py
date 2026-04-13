@@ -193,7 +193,7 @@ def ingest(
 
             # Table output
             status = response.get("status", "unknown")
-            if status == "started":
+            if status in {"queued", "started"}:
                 success(response.get("message", "Ingestion started"))
                 info("Use 'sibyl crawl status <source_id>' to check progress")
             elif status == "already_running":

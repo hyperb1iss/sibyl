@@ -120,16 +120,11 @@ def add_source(
         try:
             source_name = name or url.split("//")[-1].split("/")[0]
 
-            response = await client.create_entity(
+            response = await client.create_crawl_source(
                 name=source_name,
-                content=f"Documentation source: {url}",
-                entity_type="source",
-                metadata={
-                    "url": url,
-                    "source_type": source_type,
-                    "crawl_depth": depth,
-                    "crawl_status": "pending",
-                },
+                url=url,
+                source_type=source_type,
+                crawl_depth=depth,
             )
 
             # JSON output (default)
@@ -164,27 +159,26 @@ def show_source(
         client = get_client()
 
         try:
-            entity = await client.get_entity(source_id)
+            source = await client.get_crawl_source(source_id)
 
             # JSON output (default)
             if json_out:
-                print_json(entity)
+                print_json(source)
                 return
 
             # Table output
-            meta = entity.get("metadata", {})
-
             console.print(f"\n[{ELECTRIC_PURPLE}]Source Details[/{ELECTRIC_PURPLE}]\n")
-            console.print(f"  Name: [{NEON_CYAN}]{entity.get('name', '')}[/{NEON_CYAN}]")
-            console.print(f"  ID: {entity.get('id', '')}")
-            console.print(f"  URL: {meta.get('url', '-')}")
-            console.print(f"  Type: {meta.get('source_type', 'website')}")
-            console.print(f"  Status: {meta.get('crawl_status', 'pending')}")
-            console.print(f"  Documents: {meta.get('document_count', 0)}")
-            console.print(f"  Last Crawled: {meta.get('last_crawled', 'never')}")
+            console.print(f"  Name: [{NEON_CYAN}]{source.get('name', '')}[/{NEON_CYAN}]")
+            console.print(f"  ID: {source.get('id', '')}")
+            console.print(f"  URL: {source.get('url', '-')}")
+            console.print(f"  Type: {source.get('source_type', 'website')}")
+            console.print(f"  Status: {source.get('crawl_status', 'pending')}")
+            console.print(f"  Documents: {source.get('document_count', 0)}")
+            console.print(f"  Chunks: {source.get('chunk_count', 0)}")
+            console.print(f"  Last Crawled: {source.get('last_crawled_at', 'never') or 'never'}")
 
-            if meta.get("crawl_error"):
-                error(f"Last Error: {meta['crawl_error']}")
+            if source.get("last_error"):
+                error(f"Last Error: {source['last_error']}")
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -197,8 +191,27 @@ def crawl_source(
     source_id: Annotated[str, typer.Argument(help="Source ID to crawl")],
 ) -> None:
     """Trigger a crawl for a documentation source."""
-    info(f"Crawl source {source_id} - Use 'sibyl crawl start {source_id}' for crawler")
-    info("The source crawl workflow is handled by the crawler module")
+
+    @run_async
+    async def _crawl() -> None:
+        client = get_client()
+
+        try:
+            response = await client.start_crawl(source_id)
+            status = response.get("status", "unknown")
+
+            if status in {"queued", "started"}:
+                success(response.get("message", "Crawl queued"))
+                info("Use 'sibyl source status <source_id>' to check progress")
+            elif status == "already_running":
+                info(response.get("message", "Crawl already in progress"))
+            else:
+                error(f"Crawl failed: {response.get('message', 'Unknown error')}")
+
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    _crawl()
 
 
 @app.command("status")
@@ -215,33 +228,50 @@ def source_status(
         client = get_client()
 
         try:
-            entity = await client.get_entity(source_id)
-            meta = entity.get("metadata", {})
+            source = await client.get_crawl_source(source_id)
+            status_response = await client.get_crawl_status(source_id)
 
             # JSON output (default)
             if json_out:
                 status_data = {
-                    "id": entity.get("id"),
-                    "name": entity.get("name"),
-                    "url": meta.get("url"),
-                    "crawl_status": meta.get("crawl_status", "pending"),
-                    "document_count": meta.get("document_count", 0),
-                    "last_crawled": meta.get("last_crawled"),
-                    "crawl_error": meta.get("crawl_error"),
+                    "id": source.get("id"),
+                    "name": source.get("name"),
+                    "url": source.get("url"),
+                    "crawl_status": status_response.get(
+                        "crawl_status", source.get("crawl_status", "pending")
+                    ),
+                    "document_count": status_response.get(
+                        "document_count", source.get("document_count", 0)
+                    ),
+                    "chunk_count": status_response.get("chunk_count", source.get("chunk_count", 0)),
+                    "current_job_id": status_response.get("current_job_id"),
+                    "last_crawled_at": status_response.get("last_crawled_at"),
+                    "last_error": status_response.get("last_error"),
                 }
                 print_json(status_data)
                 return
 
             # Table output
             console.print(f"\n[{ELECTRIC_PURPLE}]Source Status[/{ELECTRIC_PURPLE}]\n")
-            console.print(f"  Name: [{NEON_CYAN}]{entity.get('name', '')}[/{NEON_CYAN}]")
-            console.print(f"  URL: {meta.get('url', '-')}")
-            console.print(f"  Status: {meta.get('crawl_status', 'pending')}")
-            console.print(f"  Documents: {meta.get('document_count', 0)}")
-            console.print(f"  Last Crawled: {meta.get('last_crawled', 'never')}")
+            console.print(f"  Name: [{NEON_CYAN}]{source.get('name', '')}[/{NEON_CYAN}]")
+            console.print(f"  URL: {source.get('url', '-')}")
+            console.print(
+                f"  Status: {status_response.get('crawl_status', source.get('crawl_status', 'pending'))}"
+            )
+            console.print(
+                f"  Documents: {status_response.get('document_count', source.get('document_count', 0))}"
+            )
+            console.print(
+                f"  Chunks: {status_response.get('chunk_count', source.get('chunk_count', 0))}"
+            )
+            console.print(
+                f"  Last Crawled: {status_response.get('last_crawled_at', source.get('last_crawled_at', 'never')) or 'never'}"
+            )
 
-            if meta.get("crawl_error"):
-                error(f"Last Error: {meta['crawl_error']}")
+            if status_response.get("current_job_id"):
+                console.print(f"  Job ID: {status_response['current_job_id']}")
+            if status_response.get("last_error"):
+                error(f"Last Error: {status_response['last_error']}")
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -264,21 +294,12 @@ def list_documents(
         client = get_client()
 
         try:
-            response = await client.explore(
-                mode="list",
-                types=["document"],
-                limit=limit * 5,  # Fetch more to filter
-            )
-
-            # Filter by source
-            all_entities = response.get("entities", [])
-            entities = [
-                e for e in all_entities if e.get("metadata", {}).get("source_id") == source_id
-            ][:limit]
+            response = await client.list_crawl_documents(source_id=source_id, limit=limit)
+            entities = response.get("documents", [])
 
             # JSON output (default)
             if json_out:
-                print_json(entities)
+                print_json(response)
                 return
 
             # Table output
@@ -288,12 +309,11 @@ def list_documents(
 
             table = create_table("Documents", "ID", "Title", "URL", "Words")
             for e in entities:
-                meta = e.get("metadata", {})
                 table.add_row(
                     e.get("id", ""),
-                    truncate(e.get("name", ""), 35),
-                    truncate(meta.get("url", "-"), 30),
-                    str(meta.get("word_count", 0)),
+                    truncate(e.get("title", ""), 35),
+                    truncate(e.get("url", "-"), 30),
+                    str(e.get("word_count", 0)),
                 )
 
             console.print(table)
