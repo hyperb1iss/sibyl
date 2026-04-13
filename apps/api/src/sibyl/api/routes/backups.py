@@ -19,9 +19,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_admin
+from sibyl.backup_ids import generate_backup_id
 from sibyl.db.connection import get_session
 from sibyl.db.models import Backup, BackupSettings, BackupStatus, Organization, User
-from sibyl.jobs.backup import _generate_backup_id
 
 log = structlog.get_logger()
 
@@ -219,7 +219,7 @@ async def create_backup(
 
     Returns a job ID that can be used to track progress.
     """
-    backup_id = _generate_backup_id(str(org.id))
+    backup_id = generate_backup_id(str(org.id))
 
     async with get_session() as session:
         # Create backup record

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 from sibyl.api.routes.backups import router as backups_router
 from sibyl.api.routes.crawler import router as crawler_router
-from sibyl.jobs.backup import _generate_backup_id
+from sibyl.backup_ids import generate_backup_id
 
 
 class TestBackupIds:
@@ -13,7 +17,7 @@ class TestBackupIds:
     def test_backup_ids_include_org_fragment_and_nonce(self) -> None:
         org_id = "12345678-1234-5678-9abc-def012345678"
 
-        backup_id = _generate_backup_id(org_id)
+        backup_id = generate_backup_id(org_id)
         prefix, org_fragment, date_part, time_part, nonce = backup_id.split("_")
 
         assert backup_id.startswith("backup_12345678_")
@@ -26,10 +30,21 @@ class TestBackupIds:
     def test_backup_ids_are_unique_per_call(self) -> None:
         org_id = "12345678-1234-5678-9abc-def012345678"
 
-        first = _generate_backup_id(org_id)
-        second = _generate_backup_id(org_id)
+        first = generate_backup_id(org_id)
+        second = generate_backup_id(org_id)
 
         assert first != second
+
+    def test_jobs_package_imports_without_backup_cycle(self) -> None:
+        result = subprocess.run(  # noqa: S603
+            [sys.executable, "-c", "from sibyl.jobs import WorkerSettings"],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
 
 
 class TestRouteOrdering:

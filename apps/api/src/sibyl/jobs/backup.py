@@ -18,11 +18,11 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import structlog
 
 from sibyl.api.event_types import WSEvent
+from sibyl.backup_ids import generate_backup_id
 from sibyl.config import settings
 
 log = structlog.get_logger()
@@ -117,18 +117,6 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(8192), b""):
             sha256.update(chunk)
     return sha256.hexdigest()
-
-
-def _generate_backup_id(organization_id: str | None = None) -> str:
-    """Generate a unique backup ID.
-
-    Includes an organization fragment plus a nonce so concurrent
-    backups cannot collide on timestamp alone.
-    """
-    org_fragment = (organization_id or "global").replace("-", "")[:8]
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    nonce = uuid4().hex[:10]
-    return f"backup_{org_fragment}_{timestamp}_{nonce}"
 
 
 async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | None) -> None:
@@ -248,7 +236,7 @@ async def run_backup(  # noqa: PLR0915
 
     start_time = time.time()
     started_at = datetime.now(UTC)
-    backup_id = backup_id or _generate_backup_id(organization_id)
+    backup_id = backup_id or generate_backup_id(organization_id)
 
     # Update DB to mark as in progress
     await _update_backup_db(backup_id, status="in_progress", started_at=started_at)
@@ -671,7 +659,7 @@ async def run_scheduled_backups(
                 org_id = str(org_settings.organization_id)
 
                 try:
-                    backup_id = _generate_backup_id(org_id)
+                    backup_id = generate_backup_id(org_id)
 
                     # Create backup record
                     backup = Backup(
