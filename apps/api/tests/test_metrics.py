@@ -551,6 +551,8 @@ class TestGetOrgMetrics:
             assert result.top_assignees[0].name == "alice"
             assert result.top_assignees[0].total == 2
             assert len(result.projects_summary) == 2
+            assert result.projects_summary[0].doing == 1
+            assert result.projects_summary[0].high == 1
 
     @pytest.mark.asyncio
     async def test_org_metrics_empty(self) -> None:
@@ -620,8 +622,84 @@ class TestGetOrgMetrics:
             result = await get_org_metrics(org=mock_org)
 
             # First project should be the one with more tasks
-            assert result.projects_summary[0]["id"] == "proj_l"
-            assert result.projects_summary[0]["total"] == 2
+            assert result.projects_summary[0].id == "proj_l"
+            assert result.projects_summary[0].total == 2
+
+    @pytest.mark.asyncio
+    async def test_org_metrics_projects_summary_includes_open_priority_and_overdue_counts(
+        self,
+    ) -> None:
+        """Project summaries include the counts used by the projects view."""
+        from sibyl.api.routes.metrics import get_org_metrics
+
+        mock_org = create_mock_org()
+        mock_client = AsyncMock()
+
+        mock_projects = [
+            create_mock_entity(entity_type="project", name="Alpha", entity_id="proj_a"),
+        ]
+
+        mock_tasks = [
+            create_mock_entity(
+                entity_type="task",
+                metadata={
+                    "status": "doing",
+                    "priority": "critical",
+                    "project_id": "proj_a",
+                    "due_date": "2026-04-01",
+                },
+            ),
+            create_mock_entity(
+                entity_type="task",
+                metadata={
+                    "status": "review",
+                    "priority": "high",
+                    "project_id": "proj_a",
+                },
+            ),
+            create_mock_entity(
+                entity_type="task",
+                metadata={
+                    "status": "blocked",
+                    "priority": "high",
+                    "project_id": "proj_a",
+                    "due_date": "2026-04-30",
+                },
+            ),
+            create_mock_entity(
+                entity_type="task",
+                metadata={
+                    "status": "done",
+                    "priority": "critical",
+                    "project_id": "proj_a",
+                    "due_date": "2026-04-01",
+                },
+            ),
+        ]
+
+        mock_entity_manager = AsyncMock()
+        mock_entity_manager.list_by_type.side_effect = lambda t, **_: (
+            mock_projects if t == "project" else mock_tasks
+        )
+
+        with (
+            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
+            patch(
+                "sibyl.api.routes.metrics.EntityManager",
+                return_value=mock_entity_manager,
+            ),
+        ):
+            result = await get_org_metrics(org=mock_org)
+
+            summary = result.projects_summary[0]
+            assert summary.total == 4
+            assert summary.completed == 1
+            assert summary.doing == 1
+            assert summary.review == 1
+            assert summary.blocked == 1
+            assert summary.critical == 1
+            assert summary.high == 2
+            assert summary.overdue == 1
 
 
 class TestMetricsErrorHandling:

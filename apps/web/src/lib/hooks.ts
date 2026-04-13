@@ -161,6 +161,7 @@ function invalidateByEntityType(
   switch (entityType) {
     case 'task':
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
+      queryClient.invalidateQueries({ queryKey: ['metrics'] });
       if (entityId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.tasks.detail(entityId) });
       }
@@ -168,6 +169,7 @@ function invalidateByEntityType(
 
     case 'project':
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+      queryClient.invalidateQueries({ queryKey: ['metrics'] });
       if (entityId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(entityId) });
       }
@@ -890,11 +892,14 @@ export function useRealtimeUpdates(isAuthenticated = false) {
 // Task Hooks
 // =============================================================================
 
-export function useTasks(params?: {
-  project?: string;
-  project_ids?: string[];
-  status?: TaskStatus;
-}) {
+export function useTasks(
+  params?: {
+    project?: string;
+    project_ids?: string[];
+    status?: TaskStatus;
+  },
+  options?: { enabled?: boolean; initialData?: import('./api').TaskListResponse }
+) {
   const normalized =
     params && (params.project || params.project_ids?.length || params.status)
       ? {
@@ -907,6 +912,8 @@ export function useTasks(params?: {
   return useQuery({
     queryKey: queryKeys.tasks.list(normalized),
     queryFn: () => api.tasks.list(normalized),
+    enabled: options?.enabled ?? true,
+    initialData: options?.initialData,
   });
 }
 
@@ -977,6 +984,7 @@ export function useTaskManage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
+      queryClient.invalidateQueries({ queryKey: ['metrics'] });
     },
   });
 }
@@ -991,6 +999,7 @@ export function useTaskUpdateStatus() {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.detail(id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.entities.detail(id) });
+      queryClient.invalidateQueries({ queryKey: ['metrics'] });
     },
   });
 }

@@ -425,6 +425,14 @@ export interface ProjectSummary {
   name: string;
   total: number;
   completed: number;
+  doing: number;
+  blocked: number;
+  review: number;
+  todo: number;
+  backlog: number;
+  critical: number;
+  high: number;
+  overdue: number;
   completion_rate: number;
 }
 

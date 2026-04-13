@@ -31,11 +31,19 @@ import {
 } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
 import { ErrorState, Tooltip } from '@/components/ui/tooltip';
-import type { ProjectRole, TaskListResponse, TaskStatus, TaskSummary } from '@/lib/api';
+import type {
+  OrgMetricsResponse,
+  ProjectRole,
+  ProjectSummary,
+  TaskListResponse,
+  TaskStatus,
+  TaskSummary,
+} from '@/lib/api';
 import { TASK_STATUS_CONFIG } from '@/lib/constants';
 import {
   useDeleteEntity,
   useMe,
+  useOrgMetrics,
   useProjectMembers,
   useProjectMetrics,
   useProjects,
@@ -48,6 +56,7 @@ import { useClientPrefs } from '@/lib/storage';
 
 interface ProjectsContentProps {
   initialProjects: TaskListResponse;
+  initialOrgMetrics?: OrgMetricsResponse;
 }
 
 // Project sort options
@@ -78,48 +87,19 @@ interface ProjectStats {
   overdue: number;
 }
 
-// Calculate stats for a project from its tasks
-function calculateProjectStats(tasks: TaskSummary[]): ProjectStats {
-  const stats: ProjectStats = {
-    total: tasks.length,
-    done: 0,
-    doing: 0,
-    blocked: 0,
-    review: 0,
-    todo: 0,
-    backlog: 0,
-    critical: 0,
-    high: 0,
-    overdue: 0,
+function projectStatsFromSummary(summary?: ProjectSummary): ProjectStats {
+  return {
+    total: summary?.total ?? 0,
+    done: summary?.completed ?? 0,
+    doing: summary?.doing ?? 0,
+    blocked: summary?.blocked ?? 0,
+    review: summary?.review ?? 0,
+    todo: summary?.todo ?? 0,
+    backlog: summary?.backlog ?? 0,
+    critical: summary?.critical ?? 0,
+    high: summary?.high ?? 0,
+    overdue: summary?.overdue ?? 0,
   };
-
-  const now = new Date();
-
-  for (const task of tasks) {
-    const status = task.metadata.status as TaskStatus | undefined;
-    const priority = task.metadata.priority as string | undefined;
-    const dueDate = task.metadata.due_date as string | undefined;
-
-    // Count by status
-    if (status === 'done') stats.done++;
-    else if (status === 'doing') stats.doing++;
-    else if (status === 'blocked') stats.blocked++;
-    else if (status === 'review') stats.review++;
-    else if (status === 'todo') stats.todo++;
-    else if (status === 'backlog') stats.backlog++;
-
-    // Count urgent priorities (only for open tasks)
-    const isOpen = status && !['done', 'archived'].includes(status);
-    if (isOpen && priority === 'critical') stats.critical++;
-    if (isOpen && priority === 'high') stats.high++;
-
-    // Count overdue (not done, has due date in past)
-    if (dueDate && status !== 'done' && new Date(dueDate) < now) {
-      stats.overdue++;
-    }
-  }
-
-  return stats;
 }
 
 interface ProjectsPrefs {
@@ -127,7 +107,7 @@ interface ProjectsPrefs {
   showArchived: boolean;
 }
 
-export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
+export function ProjectsContent({ initialProjects, initialOrgMetrics }: ProjectsContentProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -149,36 +129,26 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
     isLoading: projectsLoading,
     error: projectsError,
   } = useProjects({ includeArchived: showArchived }, initialProjects);
+  const { data: orgMetricsData, isLoading: orgMetricsLoading } = useOrgMetrics(initialOrgMetrics);
 
-  // Fetch ALL tasks (not filtered) to calculate counts per project
-  const { data: allTasksData, isLoading: tasksLoading } = useTasks();
+  const { data: selectedProjectTasksData, isLoading: selectedProjectTasksLoading } = useTasks(
+    selectedProjectId ? { project: selectedProjectId } : undefined,
+    { enabled: Boolean(selectedProjectId) }
+  );
 
   const projects = projectsData?.entities ?? [];
-  const allTasks = allTasksData?.entities ?? [];
+  const selectedProjectTasks = selectedProjectTasksData?.entities ?? [];
 
-  // Group tasks by project and calculate stats
   const projectStatsMap = useMemo(() => {
+    const summaries = new Map(
+      (orgMetricsData?.projects_summary ?? []).map(summary => [summary.id, summary])
+    );
     const map = new Map<string, ProjectStats>();
-
-    // Group tasks by project_id
-    const tasksByProject = new Map<string, TaskSummary[]>();
-    for (const task of allTasks) {
-      const projectId = task.metadata.project_id as string | undefined;
-      if (projectId) {
-        const existing = tasksByProject.get(projectId) ?? [];
-        existing.push(task);
-        tasksByProject.set(projectId, existing);
-      }
-    }
-
-    // Calculate stats for each project
     for (const project of projects) {
-      const projectTasks = tasksByProject.get(project.id) ?? [];
-      map.set(project.id, calculateProjectStats(projectTasks));
+      map.set(project.id, projectStatsFromSummary(summaries.get(project.id)));
     }
-
     return map;
-  }, [projects, allTasks]);
+  }, [projects, orgMetricsData?.projects_summary]);
 
   // Sort projects based on selected sort option
   const sortedProjects = useMemo(() => {
@@ -222,12 +192,6 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
     return sorted;
   }, [projects, projectStatsMap, sortBy]);
 
-  // Get tasks for selected project
-  const selectedProjectTasks = useMemo(() => {
-    if (!selectedProjectId) return [];
-    return allTasks.filter(t => t.metadata.project_id === selectedProjectId);
-  }, [allTasks, selectedProjectId]);
-
   const selectedProject = sortedProjects.find(p => p.id === selectedProjectId);
   const selectedStats = selectedProjectId ? projectStatsMap.get(selectedProjectId) : null;
 
@@ -249,7 +213,8 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
       ]
     : undefined;
 
-  const isLoading = projectsLoading || tasksLoading;
+  const isLoading = projectsLoading || orgMetricsLoading;
+  const detailLoading = Boolean(selectedProjectId) && selectedProjectTasksLoading;
 
   // Calculate total stats across all projects (must be before early returns)
   const totalStats = useMemo(() => {
@@ -400,7 +365,7 @@ export function ProjectsContent({ initialProjects }: ProjectsContentProps) {
 
         {/* Main Content - Project Detail */}
         <div className="flex-1 min-w-0">
-          {isLoading ? (
+          {isLoading || detailLoading ? (
             <ProjectDetailSkeleton />
           ) : !selectedProject ? (
             <div className="flex items-center justify-center h-64 text-sc-fg-subtle">

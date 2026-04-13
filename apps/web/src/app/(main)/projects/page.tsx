@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 
 import { ProjectsSkeleton } from '@/components/suspense-boundary';
-import { fetchProjects } from '@/lib/api-server';
+import { fetchOrgMetrics, fetchProjects } from '@/lib/api-server';
 import { ProjectsContent } from './projects-content';
 
 export const metadata: Metadata = {
@@ -11,11 +11,14 @@ export const metadata: Metadata = {
 };
 
 export default async function ProjectsPage() {
-  const projects = await fetchProjects();
+  const [projects, orgMetrics] = await Promise.all([
+    fetchProjects(),
+    fetchOrgMetrics().catch(() => undefined),
+  ]);
 
   return (
     <Suspense fallback={<ProjectsSkeleton />}>
-      <ProjectsContent initialProjects={projects} />
+      <ProjectsContent initialProjects={projects} initialOrgMetrics={orgMetrics} />
     </Suspense>
   );
 }

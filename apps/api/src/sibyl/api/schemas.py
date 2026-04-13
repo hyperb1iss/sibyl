@@ -858,6 +858,24 @@ class ProjectMetricsResponse(BaseModel):
     metrics: ProjectMetrics
 
 
+class ProjectSummary(BaseModel):
+    """Task rollup for a single project in org-wide metrics."""
+
+    id: str
+    name: str
+    total: int = 0
+    completed: int = 0
+    doing: int = 0
+    blocked: int = 0
+    review: int = 0
+    todo: int = 0
+    backlog: int = 0
+    critical: int = 0
+    high: int = 0
+    overdue: int = 0
+    completion_rate: float = 0.0
+
+
 class OrgMetricsResponse(BaseModel):
     """Organization-level metrics aggregating all projects."""
 
@@ -870,4 +888,4 @@ class OrgMetricsResponse(BaseModel):
     tasks_created_last_7d: int
     tasks_completed_last_7d: int
     velocity_trend: list[TimeSeriesPoint]
-    projects_summary: list[dict[str, Any]]  # [{id, name, total, completed, completion_rate}]
+    projects_summary: list[ProjectSummary]

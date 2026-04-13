@@ -11,6 +11,7 @@ from sibyl.api.schemas import (
     OrgMetricsResponse,
     ProjectMetrics,
     ProjectMetricsResponse,
+    ProjectSummary,
     TaskPriorityDistribution,
     TaskStatusDistribution,
     TimeSeriesPoint,
@@ -41,9 +42,17 @@ def _parse_iso_date(date_str: str | None) -> datetime | None:
     if not date_str:
         return None
     try:
-        return datetime.fromisoformat(date_str)
+        parsed = datetime.fromisoformat(date_str)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
     except (ValueError, TypeError):
         return None
+
+
+def _is_open_status(status: str) -> bool:
+    """Return whether a task status should count toward open-work metrics."""
+    return status not in {"done", "archived"}
 
 
 def _compute_status_distribution(tasks: list[dict]) -> TaskStatusDistribution:
@@ -239,30 +248,91 @@ async def get_org_metrics(
         )
 
         # Build project summaries
-        project_task_counts: dict[str, dict] = defaultdict(lambda: {"total": 0, "completed": 0})
+        project_task_counts: dict[str, dict[str, int]] = defaultdict(
+            lambda: {
+                "total": 0,
+                "completed": 0,
+                "doing": 0,
+                "blocked": 0,
+                "review": 0,
+                "todo": 0,
+                "backlog": 0,
+                "critical": 0,
+                "high": 0,
+                "overdue": 0,
+            }
+        )
+        now = datetime.now(UTC)
         for task in tasks:
-            proj_id = task.get("metadata", {}).get("project_id", "")
+            metadata = task.get("metadata", {})
+            proj_id = metadata.get("project_id", "")
             if proj_id:
-                project_task_counts[proj_id]["total"] += 1
-                if task.get("metadata", {}).get("status") == "done":
-                    project_task_counts[proj_id]["completed"] += 1
+                counts = project_task_counts[proj_id]
+                counts["total"] += 1
 
-        projects_summary = []
+                status = metadata.get("status", "backlog")
+                if status == "done":
+                    counts["completed"] += 1
+                elif status == "doing":
+                    counts["doing"] += 1
+                elif status == "blocked":
+                    counts["blocked"] += 1
+                elif status == "review":
+                    counts["review"] += 1
+                elif status == "todo":
+                    counts["todo"] += 1
+                elif status == "backlog":
+                    counts["backlog"] += 1
+
+                if _is_open_status(status):
+                    priority = metadata.get("priority", "")
+                    if priority == "critical":
+                        counts["critical"] += 1
+                    elif priority == "high":
+                        counts["high"] += 1
+
+                    due_date = _parse_iso_date(metadata.get("due_date"))
+                    if due_date and due_date < now:
+                        counts["overdue"] += 1
+
+        projects_summary: list[ProjectSummary] = []
         for project in projects:
-            counts = project_task_counts.get(project.id, {"total": 0, "completed": 0})
+            counts = project_task_counts.get(
+                project.id,
+                {
+                    "total": 0,
+                    "completed": 0,
+                    "doing": 0,
+                    "blocked": 0,
+                    "review": 0,
+                    "todo": 0,
+                    "backlog": 0,
+                    "critical": 0,
+                    "high": 0,
+                    "overdue": 0,
+                },
+            )
             rate = (counts["completed"] / counts["total"] * 100) if counts["total"] > 0 else 0.0
             projects_summary.append(
-                {
-                    "id": project.id,
-                    "name": project.name,
-                    "total": counts["total"],
-                    "completed": counts["completed"],
-                    "completion_rate": round(rate, 1),
-                }
+                ProjectSummary(
+                    id=project.id,
+                    name=project.name,
+                    total=counts["total"],
+                    completed=counts["completed"],
+                    doing=counts["doing"],
+                    blocked=counts["blocked"],
+                    review=counts["review"],
+                    todo=counts["todo"],
+                    backlog=counts["backlog"],
+                    critical=counts["critical"],
+                    high=counts["high"],
+                    overdue=counts["overdue"],
+                    completion_rate=round(rate, 1),
+                )
             )
 
         # Sort by total tasks descending
-        projects_summary.sort(key=lambda x: x["total"], reverse=True)
+        projects_summary.sort(key=lambda summary: summary.total, reverse=True)
 
         return OrgMetricsResponse(
             total_projects=len(projects),
@@ -274,7 +344,7 @@ async def get_org_metrics(
             tasks_created_last_7d=tasks_created_7d,
             tasks_completed_last_7d=tasks_completed_7d,
             velocity_trend=velocity,
-            projects_summary=projects_summary[:20],  # Top 20 projects
+            projects_summary=projects_summary,
         )
 
     except Exception as e:
