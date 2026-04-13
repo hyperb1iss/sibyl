@@ -88,6 +88,24 @@ app.add_typer(logs_app, name="logs")
 app.add_typer(update_app, name="update")
 
 
+SEARCH_PREVIEW_CHARS = 220
+
+
+def _format_search_preview(content: str, max_chars: int = SEARCH_PREVIEW_CHARS) -> str:
+    """Format search result previews for terminal display."""
+    preview = content.strip()
+    if preview.startswith("[") and "] " in preview:
+        preview = preview.split("] ", 1)[1]
+    preview = " ".join(preview.split())
+    if len(preview) <= max_chars:
+        return preview
+
+    cutoff = preview.rfind(" ", 0, max_chars + 1)
+    if cutoff < max_chars // 2:
+        cutoff = max_chars
+    return preview[:cutoff].rstrip() + "…"
+
+
 def _handle_client_error(e: SibylClientError) -> None:
     """Handle client errors with helpful messages and exit with code 1."""
     if "Cannot connect" in str(e):
@@ -242,16 +260,9 @@ def search(
                         path_str = " > ".join(heading_path)
                         console.print(f"    [dim]{path_str}[/dim]")
 
-                    # Content preview (first 100 chars)
+                    # Content preview
                     if content:
-                        # Strip heading prefix if present
-                        preview = content
-                        if preview.startswith("[") and "] " in preview:
-                            preview = preview.split("] ", 1)[1]
-                        preview = " ".join(preview.split())[:100]
-                        if len(content) > 100:
-                            preview += "…"
-                        console.print(f"    {preview}")
+                        console.print(f"    {_format_search_preview(content)}", soft_wrap=True)
 
                     # Show IDs for fetching
                     document_id = metadata.get("document_id")
