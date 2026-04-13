@@ -43,17 +43,17 @@ cd sibyl
 uv sync
 
 # Install the CLI tool globally
-uv tool install sibyl-cli
+uv tool install sibyl-dev
 
 # Or install in development mode (editable)
-moon run install-dev
+moon run cli:install-dev
 ```
 
 ### Install Individual Components
 
 ```bash
 # Install just the CLI
-uv tool install sibyl-cli
+uv tool install sibyl-dev
 
 # Install sibyl-core library
 uv add sibyl-core
@@ -183,10 +183,10 @@ cd apps/api && uv run arq sibyl.jobs.WorkerSettings
 ```bash
 # Start the API server
 cd apps/api
-uv run sibyl-serve
+uv run sibyld serve
 
 # Start in stdio mode (for MCP subprocess)
-uv run sibyl-serve -t stdio
+uv run sibyld serve -t stdio
 ```
 
 ## Verify Installation

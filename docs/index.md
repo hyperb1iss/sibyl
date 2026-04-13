@@ -28,8 +28,8 @@ features:
   - icon: 📋
     title: Project-Centric Tasks
     details:
-      Track work across sessions. Full lifecycle from backlog to completion, with
-      learnings captured along the way.
+      Track work across sessions. Full lifecycle from backlog to completion, with learnings captured
+      along the way.
   - icon: 🔍
     title: Find by Meaning
     details:
@@ -37,8 +37,7 @@ features:
       relevant patterns instantly.
   - icon: 📚
     title: Ingest External Docs
-    details:
-      Crawl documentation sites and make them searchable beside your own project knowledge.
+    details: Crawl documentation sites and make them searchable beside your own project knowledge.
 ---
 
 ## The Problem
@@ -126,7 +125,7 @@ before you have to go looking for it.
 
 ```bash
 # Install the CLI
-pip install sibyl-cli
+uv tool install sibyl-dev
 
 # Start the infrastructure
 docker run -d --name falkordb -p 6380:6379 falkordb/falkordb:latest
@@ -142,7 +141,7 @@ sibyl add "Redis insight" "Connection pool must be >= concurrent requests"
 
 # Manage tasks
 sibyl task list --status doing
-sibyl task complete task_xyz --learnings "OAuth tokens expire after 1 hour"
+sibyl task complete <task_id> --learnings "OAuth tokens expire after 1 hour"
 ```
 
 ## The Workflow
@@ -159,13 +158,13 @@ Sibyl enforces a simple but powerful cycle:
 ┌─────────────────────────────────────────────────────┐
 │  2. DO                                              │
 │     Work on your task with context from search      │
-│     sibyl task start task_xyz                       │
+│     sibyl task start <task_id>                      │
 └─────────────────────────┬───────────────────────────┘
                           ▼
 ┌─────────────────────────────────────────────────────┐
 │  3. REFLECT                                         │
 │     Capture learnings for future sessions           │
-│     sibyl task complete task_xyz --learnings "..."  │
+│     sibyl task complete <task_id> --learnings "..." │
 └─────────────────────────────────────────────────────┘
 ```
 

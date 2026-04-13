@@ -28,12 +28,9 @@ sibyl task show <task_id> [options]
 
 ### Arguments
 
-| Argument  | Required | Description              |
-| --------- | -------- | ------------------------ |
-| `task_id` | Yes      | Task ID (full or prefix) |
-
-::: tip Short IDs You can use ID prefixes: `task_abc` instead of `task_abc123def456`. The CLI
-resolves to the full ID. :::
+| Argument  | Required | Description  |
+| --------- | -------- | ------------ |
+| `task_id` | Yes      | Full task ID |
 
 ### Options
 
@@ -44,7 +41,7 @@ resolves to the full ID. :::
 ### Example
 
 ```bash
-sibyl task show task_abc123
+sibyl task show <task_id>
 ```
 
 Output:
@@ -401,12 +398,12 @@ sibyl task note <task_id> <content> [options]
 
 ### Options
 
-| Option          | Short | Description                                 |
-| --------------- | ----- | ------------------------------------------- |
-| `--assistant`   |       | Mark as assistant-authored (default: user)  |
-| `--agent`       |       | Backward-compatible alias for `--assistant` |
-| `--author`      | `-a`  | Author name/identifier                      |
-| `--json`        | `-j`  | JSON output                                 |
+| Option        | Short | Description                                 |
+| ------------- | ----- | ------------------------------------------- |
+| `--assistant` |       | Mark as assistant-authored (default: user)  |
+| `--agent`     |       | Backward-compatible alias for `--assistant` |
+| `--author`    | `-a`  | Author name/identifier                      |
+| `--json`      | `-j`  | JSON output                                 |
 
 ### Examples
 

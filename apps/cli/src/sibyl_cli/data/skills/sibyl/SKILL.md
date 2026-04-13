@@ -514,5 +514,5 @@ sibyl task show task_c24fc3228e7c  # Full ID required (17 chars)
 
 ```bash
 sibyl health   # Check connectivity
-sibyl setup    # First-time setup
+sibyl local setup    # First-time assistant setup
 ```

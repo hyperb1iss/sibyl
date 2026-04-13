@@ -29,8 +29,7 @@ Skills teach your agent HOW to use Sibyl. Hooks inject context AUTOMATICALLY.
 
 ```bash
 # From the sibyl directory
-moon run install-skills   # Installs /sibyl skill
-moon run install-hooks    # Installs automatic context injection
+moon run cli:setup-assistants   # Installs Claude/Codex skills and Claude hooks
 ```
 
 Restart Claude Code after installation.
@@ -295,7 +294,7 @@ Help future sessions (and other agents) by documenting state:
 ### Agent Isn't Using Sibyl
 
 1. Did you run `/sibyl` at session start?
-2. Are hooks installed? (`moon run install-hooks`)
+2. Are skills and hooks installed? (`sibyl local setup --status`)
 3. Is the server running? (`sibyl health`)
 
 ### No Results from Searches

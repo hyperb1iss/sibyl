@@ -74,7 +74,7 @@ The hook automatically:
 
 ```bash
 # Install hooks to ~/.claude/hooks/sibyl
-moon run install-hooks
+moon run hooks:install
 
 # Restart Claude Code to activate
 ```
@@ -82,7 +82,7 @@ moon run install-hooks
 ### Uninstalling Hooks
 
 ```bash
-moon run uninstall-hooks
+moon run hooks:uninstall
 # Or: rm -rf ~/.claude/hooks/sibyl
 ```
 
@@ -155,13 +155,19 @@ allowed-tools: Bash, Grep, Glob, Read
 
 ## Installing Skills
 
+For one-shot setup from the repo root, install both skills and hooks with:
+
+```bash
+moon run cli:setup-assistants
+```
+
 ### Using moon
 
 ```bash
-moon run install-skills
+moon run skills:install
 ```
 
-This copies skills to `~/.claude/skills/`.
+This copies the skill to `~/.claude/skills/` and `~/.codex/skills/`.
 
 ### Manual Installation
 
@@ -183,6 +189,13 @@ Skills are stored in:
     ├── SKILL.md
     ├── WORKFLOWS.md
     └── EXAMPLES.md
+```
+
+Codex installs the same skill to:
+
+```
+~/.codex/skills/
+└── sibyl/
 ```
 
 ## Creating Custom Skills

@@ -59,7 +59,7 @@ docs ingestion, and graph exploration keep hard-won context close at hand for bo
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
 | 🔮 **Collective Intelligence** | Every session compounds. The graph gets smarter as your team and tools capture real work                    |
 | 🎯 **Semantic Search**         | Find knowledge by meaning—"authentication patterns" finds OAuth solutions even if "OAuth" isn't in the text |
-| 🧠 **Persistent Memory**       | What you learn today helps tomorrow. Patterns, decisions, and gotchas stay searchable across sessions      |
+| 🧠 **Persistent Memory**       | What you learn today helps tomorrow. Patterns, decisions, and gotchas stay searchable across sessions       |
 | 🦋 **Task Workflow**           | Plan with epics and tasks. Track execution across sessions and teammates in one place                       |
 | 📚 **Doc Ingestion**           | Crawl and index external documentation into your graph                                                      |
 | 🏢 **Multi-Tenancy**           | Isolated graphs per organization. Enterprise-ready from day one                                             |
@@ -165,14 +165,15 @@ Sibyl is strongest when it stays close to the work itself:
 
 ## The CLI
 
-The CLI is the power-user interface. Clean output, optimized for scripting and durable project workflows.
+The CLI is the power-user interface. Clean output, optimized for scripting and durable project
+workflows.
 
 ```bash
 # Install globally
-moon run install-cli
+moon run cli:install
 
-# Or use directly
-uv tool install sibyl-cli
+# Or install the published package directly
+uv tool install sibyl-dev
 ```
 
 ### Core Commands
@@ -187,12 +188,12 @@ sibyl add "Redis connection pooling" "Pool size must be >= concurrent requests t
 
 # Task workflow
 sibyl task list --status todo,doing
-sibyl task start task_abc
-sibyl task complete task_abc --learnings "Key insight: always check TTL first"
+sibyl task start <task_id>
+sibyl task complete <task_id> --learnings "Key insight: always check TTL first"
 
 # Explore the graph
 sibyl explore related ent_xyz    # Find connected entities
-sibyl explore communities        # View knowledge clusters
+sibyl explore traverse ent_xyz   # Walk outward from an entity
 ```
 
 ### Task Workflow
@@ -207,8 +208,8 @@ backlog ──▶ todo ──▶ doing ──▶ review ──▶ done ──▶
 ### Output Formats
 
 ```bash
-sibyl task list                  # JSON (default, for scripts)
-sibyl task list --table          # Human-friendly table
+sibyl task list                  # Table output (default)
+sibyl task list --json           # JSON for scripts
 sibyl task list --csv            # For spreadsheets
 ```
 
@@ -398,8 +399,8 @@ session.
 
 ### Do I need AI agents to use Sibyl?
 
-No. The knowledge graph and task system are the core product: documentation, task tracking,
-captured learnings, and semantic search over what your team already knows.
+No. The knowledge graph and task system are the core product: documentation, task tracking, captured
+learnings, and semantic search over what your team already knows.
 
 ### How does it compare to Mem0 / LangMem / similar?
 
@@ -430,7 +431,8 @@ system itself.
 **Where we're headed:**
 
 - **Stronger project boundaries** — Finish project membership and permission flows end to end
-- **Deeper graph retrieval** — Better ranking, traversal, deduplication, and relationship-aware search
+- **Deeper graph retrieval** — Better ranking, traversal, deduplication, and relationship-aware
+  search
 - **Brainstorming spaces** — Dedicated areas for ideation before execution
 - **External data connectors** — Feed more docs, repos, and notes into the graph
 - **Workflow polish** — Sharper epic/task planning, progress views, and review loops

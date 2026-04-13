@@ -87,9 +87,9 @@ sibyl epic show <epic_id> [options]
 
 ### Arguments
 
-| Argument  | Required | Description              |
-| --------- | -------- | ------------------------ |
-| `epic_id` | Yes      | Epic ID (full or prefix) |
+| Argument  | Required | Description  |
+| --------- | -------- | ------------ |
+| `epic_id` | Yes      | Full epic ID |
 
 ### Options
 
@@ -100,7 +100,7 @@ sibyl epic show <epic_id> [options]
 ### Example
 
 ```bash
-sibyl epic show epic_abc123
+sibyl epic show <epic_id>
 ```
 
 Output:

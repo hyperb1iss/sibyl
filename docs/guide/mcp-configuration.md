@@ -26,7 +26,7 @@ Sibyl Combined App (Starlette, port 3334)
 Sibyl runs as an HTTP server, accepting MCP requests at `/mcp`:
 
 ```bash
-uv run sibyl-serve
+uv run sibyld serve
 # Server listening on http://localhost:3334
 # MCP endpoint: http://localhost:3334/mcp
 ```
@@ -49,7 +49,7 @@ Configuration:
 Run Sibyl as a subprocess communicating via stdin/stdout:
 
 ```bash
-uv run sibyl-serve -t stdio
+uv run sibyld serve -t stdio
 ```
 
 Configuration:
@@ -59,7 +59,7 @@ Configuration:
   "mcpServers": {
     "sibyl": {
       "command": "uv",
-      "args": ["--directory", "/path/to/sibyl/apps/api", "run", "sibyl-serve", "-t", "stdio"],
+      "args": ["--directory", "/path/to/sibyl/apps/api", "run", "sibyld", "serve", "-t", "stdio"],
       "env": {
         "SIBYL_OPENAI_API_KEY": "sk-...",
         "SIBYL_JWT_SECRET": "your-secret",
@@ -372,7 +372,7 @@ curl http://localhost:3334/api/metrics
   "mcpServers": {
     "sibyl": {
       "command": "uv",
-      "args": ["--directory", "/opt/sibyl/apps/api", "run", "sibyl-serve", "-t", "stdio"],
+      "args": ["--directory", "/opt/sibyl/apps/api", "run", "sibyld", "serve", "-t", "stdio"],
       "env": {
         "SIBYL_OPENAI_API_KEY": "sk-...",
         "SIBYL_JWT_SECRET": "...",

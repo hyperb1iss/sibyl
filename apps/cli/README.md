@@ -1,12 +1,13 @@
-# sibyl-cli
+# Sibyl CLI
 
-Command-line interface for Sibyl. REST API client with Rich terminal output, designed for humans, external assistants, and scripts.
+Command-line interface for Sibyl. REST API client with Rich terminal output, designed for humans,
+external assistants, and scripts.
 
 ## Quick Reference
 
 ```bash
 # Install
-uv tool install sibyl-cli     # or: moon run install-cli
+uv tool install sibyl-dev     # or: moon run cli:install
 
 # Configure
 sibyl config set server.url http://localhost:3334/api
@@ -28,28 +29,28 @@ sibyl task complete <id> --learnings "..." # Complete with learnings
 
 ## All Commands
 
-| Command | Purpose |
-|---------|---------|
-| `search` | Semantic search |
-| `add` | Add knowledge |
-| `task` | Task lifecycle (list, start, complete, block, review) |
-| `project` | Project management (list, link, create) |
-| `epic` | Epic management (list, start, complete, roadmap) |
-| `entity` | Entity CRUD |
-| `explore` | Graph navigation (related, dependencies, communities) |
-| `source` | Documentation sources (list, create, crawl) |
-| `document` | View crawled documents |
-| `auth` | Login, logout, API keys |
-| `org` | Organization switching, member management |
-| `config` | Configuration |
-| `context` | Multi-server context management |
-| `local` | Supabase-style local dev (start, stop, logs, reset) |
+| Command    | Purpose                                                  |
+| ---------- | -------------------------------------------------------- |
+| `search`   | Semantic search                                          |
+| `add`      | Add knowledge                                            |
+| `task`     | Task lifecycle (list, start, complete, block, review)    |
+| `project`  | Project management (list, link, create)                  |
+| `epic`     | Epic management (list, start, complete, roadmap)         |
+| `entity`   | Entity CRUD                                              |
+| `explore`  | Graph navigation (related, traverse, dependencies, path) |
+| `source`   | Documentation sources (list, create, crawl)              |
+| `document` | View crawled documents                                   |
+| `auth`     | Login, logout, API keys                                  |
+| `org`      | Organization switching, member management                |
+| `config`   | Configuration                                            |
+| `context`  | Multi-server context management                          |
+| `local`    | Supabase-style local dev (start, stop, logs, reset)      |
 
 ## Output Formats
 
 ```bash
-sibyl task list              # JSON (default, for scripts)
-sibyl task list --table      # Human-friendly
+sibyl task list              # Table output (default)
+sibyl task list --json       # JSON for scripts
 sibyl task list --csv        # Spreadsheets
 ```
 
@@ -74,6 +75,7 @@ moon run cli:test         # Tests
 ## SilkCircuit Colors
 
 Terminal output uses the SilkCircuit palette:
+
 - `#e135ff` Electric Purple — Headers
 - `#80ffea` Neon Cyan — Interactions
 - `#ff6ac1` Coral — Data/IDs

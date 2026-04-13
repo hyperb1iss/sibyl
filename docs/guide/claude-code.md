@@ -48,7 +48,7 @@ Run Sibyl as a subprocess:
   "mcpServers": {
     "sibyl": {
       "command": "uv",
-      "args": ["--directory", "/path/to/sibyl/apps/api", "run", "sibyl-serve", "-t", "stdio"],
+      "args": ["--directory", "/path/to/sibyl/apps/api", "run", "sibyld", "serve", "-t", "stdio"],
       "env": {
         "SIBYL_OPENAI_API_KEY": "sk-...",
         "SIBYL_JWT_SECRET": "your-secret"
@@ -239,10 +239,10 @@ use the knowledge graph effectively.
 ### Installing Skills
 
 ```bash
-moon run install-skills
+moon run cli:setup-assistants
 ```
 
-This installs skills to `~/.claude/skills/`.
+This installs Claude Code skills and hooks, and also installs the Codex skill copy.
 
 ### Using Skills
 

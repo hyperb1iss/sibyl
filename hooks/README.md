@@ -5,7 +5,7 @@ Automatic integration between Sibyl and Claude Code.
 ## Install
 
 ```bash
-moon run install-hooks
+moon run hooks:install
 ```
 
 Then restart Claude Code.
@@ -18,22 +18,22 @@ For smarter semantic search queries, set your Anthropic API key:
 export ANTHROPIC_API_KEY=sk-...
 ```
 
-With this enabled, the hook uses Haiku 4.5 to generate contextual search queries
-based on the conversation history. Falls back to keyword extraction without it.
+With this enabled, the hook uses Haiku 4.5 to generate contextual search queries based on the
+conversation history. Falls back to keyword extraction without it.
 
 No SDK needed - uses raw HTTP requests.
 
 ## What It Does
 
-| Hook | Trigger | Action |
-|------|---------|--------|
-| **SessionStart** | Session begins | Loads active tasks, reminds about `sibyl add` |
-| **UserPromptSubmit** | Before processing prompt | Searches Sibyl, injects relevant knowledge |
+| Hook                 | Trigger                  | Action                                        |
+| -------------------- | ------------------------ | --------------------------------------------- |
+| **SessionStart**     | Session begins           | Loads active tasks, reminds about `sibyl add` |
+| **UserPromptSubmit** | Before processing prompt | Searches Sibyl, injects relevant knowledge    |
 
 ## Uninstall
 
 ```bash
-moon run uninstall-hooks
+moon run hooks:uninstall
 ```
 
 Or manually: `rm -rf ~/.claude/hooks/sibyl`

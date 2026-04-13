@@ -4,8 +4,6 @@ Commands for epic lifecycle: list, show, create, start, complete, archive.
 
 Epics group related tasks within a project. They have a simpler lifecycle
 than tasks: planning -> in_progress -> completed/archived.
-
-All commands output JSON by default for LLM consumption. Use -t for table output.
 """
 
 from typing import Annotated
@@ -191,7 +189,7 @@ def _format_task_line(task: dict, include_id: bool = True) -> str:
 
 @app.command("show")
 def show_epic(
-    epic_id: Annotated[str, typer.Argument(help="Epic ID (full or prefix)")],
+    epic_id: Annotated[str, typer.Argument(help="Full epic ID")],
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -494,7 +492,7 @@ def create_epic(
 
 @app.command("start")
 def start_epic(
-    epic_id: Annotated[str, typer.Argument(help="Epic ID to start (full or prefix)")],
+    epic_id: Annotated[str, typer.Argument(help="Full epic ID to start")],
     assignee: Annotated[str | None, typer.Option("--assignee", "-a", help="Epic lead")] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
@@ -533,7 +531,7 @@ def start_epic(
 
 @app.command("complete")
 def complete_epic(
-    epic_id: Annotated[str, typer.Argument(help="Epic ID to complete (full or prefix)")],
+    epic_id: Annotated[str, typer.Argument(help="Full epic ID to complete")],
     learnings: Annotated[
         str | None, typer.Option("--learnings", "-l", help="Key learnings from the epic")
     ] = None,

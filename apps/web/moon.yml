@@ -70,6 +70,12 @@ tasks:
       - "@group(sources)"
       - "@group(tests)"
 
+  check:
+    deps:
+      - ~:lint
+      - ~:typecheck
+      - ~:test
+
   # Development
   dev:
     command: pnpm next dev --port 3337

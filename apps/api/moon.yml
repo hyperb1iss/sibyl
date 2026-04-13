@@ -71,6 +71,12 @@ tasks:
     options:
       envFile: .env
 
+  check:
+    deps:
+      - ~:lint
+      - ~:typecheck
+      - ~:test
+
   # Live model tests (requires ANTHROPIC_API_KEY)
   test-live:
     command: uv run pytest tests/live/ --live-models --cost-limit=1.0 --no-cov -v

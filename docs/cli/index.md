@@ -8,10 +8,10 @@ palette.
 
 ```bash
 # As a tool (recommended)
-uv tool install sibyl-cli
+uv tool install sibyl-dev
 
 # As a dependency
-uv add sibyl-cli
+uv add sibyl-dev
 
 # For development
 cd apps/cli
@@ -66,11 +66,11 @@ sibyl -C <project_id> <command>          # Short form
 
 Most commands support three output formats:
 
-| Option          | Description  | Use Case                             |
-| --------------- | ------------ | ------------------------------------ |
-| (default)       | Table format | Human-readable terminal output       |
+| Option          | Description  | Use Case                              |
+| --------------- | ------------ | ------------------------------------- |
+| (default)       | Table format | Human-readable terminal output        |
 | `--json` / `-j` | JSON output  | Automation, scripting, piping to `jq` |
-| `--csv`         | CSV output   | Spreadsheets, data analysis          |
+| `--csv`         | CSV output   | Spreadsheets, data analysis           |
 
 ```bash
 # Table output (default)
@@ -174,7 +174,7 @@ The CLI is designed for AI agent consumption with JSON-first output:
 
 ```bash
 # Get task status
-sibyl task show task_abc --json | jq '.metadata.status'
+sibyl task show <task_id> --json | jq '.metadata.status'
 
 # Filter and process
 sibyl task list --status todo --json | jq '[.[] | {id, name, priority}]'

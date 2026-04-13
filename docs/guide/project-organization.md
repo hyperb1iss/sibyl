@@ -56,9 +56,6 @@ sibyl project create \
 # List all projects
 sibyl project list
 
-# With table output (default)
-sibyl project list --table
-
 # JSON for scripting
 sibyl project list --json
 ```

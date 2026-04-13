@@ -51,7 +51,7 @@ SIBYL_JWT_SECRET=any-secret-string-for-development
 moon run dev
 
 # Or just the API
-cd apps/api && uv run sibyl-serve
+cd apps/api && uv run sibyld serve
 ```
 
 The server is now running on `http://localhost:3334`.
@@ -100,7 +100,7 @@ Tasks require a project, so let's create one:
 sibyl project create --name "My First Project" --description "Learning Sibyl"
 
 # Note the project ID from the output, then create a task
-sibyl task create --title "Try Sibyl features" --project proj_abc123
+sibyl task create --title "Try Sibyl features" --project <project_id>
 ```
 
 ## Step 8: Manage Task Lifecycle
@@ -110,13 +110,13 @@ sibyl task create --title "Try Sibyl features" --project proj_abc123
 sibyl task list --status todo
 
 # Start working on a task
-sibyl task start task_xyz
+sibyl task start <task_id>
 
 # Check what's in progress
 sibyl task list --status doing
 
 # Complete with learnings
-sibyl task complete task_xyz --learnings "Sibyl CLI is intuitive!"
+sibyl task complete <task_id> --learnings "Sibyl CLI is intuitive!"
 ```
 
 ## Step 9: Link a Directory (Optional)
