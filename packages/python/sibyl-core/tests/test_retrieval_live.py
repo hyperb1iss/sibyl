@@ -20,17 +20,6 @@ import pytest
 SIBYL_API = "http://localhost:3334"
 
 
-def _api_available() -> bool:
-    try:
-        r = httpx.get(f"{SIBYL_API}/api/health", timeout=3)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(not _api_available(), reason="Sibyl API not reachable")
-
-
 def _get_client_headers() -> dict[str, str]:
     """Borrow auth headers from the CLI client."""
     try:
@@ -43,6 +32,34 @@ def _get_client_headers() -> dict[str, str]:
 
 
 _headers = _get_client_headers()
+
+
+def _live_search_available() -> bool:
+    """Return True only when the live search endpoint is actually usable.
+
+    Health can be public while search requires auth, so probe the real endpoint
+    with the same headers the CLI would send.
+    """
+    try:
+        health = httpx.get(f"{SIBYL_API}/api/health", timeout=3)
+        if health.status_code != 200:
+            return False
+
+        search = httpx.post(
+            f"{SIBYL_API}/api/search",
+            json={"query": "test", "limit": 1},
+            headers=_headers,
+            timeout=5,
+        )
+        return search.status_code == 200
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _live_search_available(),
+    reason="Sibyl live search unavailable or CLI auth missing",
+)
 
 
 def _search(query: str, **kwargs: Any) -> tuple[dict[str, Any], float]:
