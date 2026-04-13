@@ -12,6 +12,7 @@ Our optimized version uses startNode(rel)/endNode(rel) directly on the
 fulltext result, avoiding the expensive MATCH and running in ~0.3ms.
 """
 
+from copy import copy
 from typing import Any
 
 import structlog
@@ -26,6 +27,17 @@ class FalkorDBSearchInterface(SearchInterface):
     Overrides Graphiti's default search methods with more efficient queries
     that avoid cartesian products when looking up edges by UUID.
     """
+
+    @staticmethod
+    def _fallback_driver(driver: Any) -> Any:
+        """Return a driver clone without the custom search interface.
+
+        Graphiti's fallback helpers expect the default search interface.
+        Copying the driver avoids mutating the shared singleton driver across awaits.
+        """
+        fallback_driver = copy(driver)
+        fallback_driver.search_interface = None
+        return fallback_driver
 
     async def edge_fulltext_search(
         self,
@@ -154,22 +166,16 @@ class FalkorDBSearchInterface(SearchInterface):
         """Delegate to default Graphiti implementation."""
         from graphiti_core.search import search_utils
 
-        # Temporarily clear search_interface to use default implementation
-        original = driver.search_interface
-        driver.search_interface = None
-        try:
-            return await search_utils.edge_similarity_search(
-                driver,
-                search_vector,
-                source_node_uuid,
-                target_node_uuid,
-                search_filter,
-                group_ids,
-                limit,
-                min_score,
-            )
-        finally:
-            driver.search_interface = original
+        return await search_utils.edge_similarity_search(
+            self._fallback_driver(driver),
+            search_vector,
+            source_node_uuid,
+            target_node_uuid,
+            search_filter,
+            group_ids,
+            limit,
+            min_score,
+        )
 
     async def node_fulltext_search(
         self,
@@ -182,14 +188,9 @@ class FalkorDBSearchInterface(SearchInterface):
         """Delegate to default Graphiti implementation."""
         from graphiti_core.search import search_utils
 
-        original = driver.search_interface
-        driver.search_interface = None
-        try:
-            return await search_utils.node_fulltext_search(
-                driver, query, search_filter, group_ids, limit
-            )
-        finally:
-            driver.search_interface = original
+        return await search_utils.node_fulltext_search(
+            self._fallback_driver(driver), query, search_filter, group_ids, limit
+        )
 
     async def node_similarity_search(
         self,
@@ -203,14 +204,14 @@ class FalkorDBSearchInterface(SearchInterface):
         """Delegate to default Graphiti implementation."""
         from graphiti_core.search import search_utils
 
-        original = driver.search_interface
-        driver.search_interface = None
-        try:
-            return await search_utils.node_similarity_search(
-                driver, search_vector, search_filter, group_ids, limit, min_score
-            )
-        finally:
-            driver.search_interface = original
+        return await search_utils.node_similarity_search(
+            self._fallback_driver(driver),
+            search_vector,
+            search_filter,
+            group_ids,
+            limit,
+            min_score,
+        )
 
     async def episode_fulltext_search(
         self,
@@ -223,14 +224,9 @@ class FalkorDBSearchInterface(SearchInterface):
         """Delegate to default Graphiti implementation."""
         from graphiti_core.search import search_utils
 
-        original = driver.search_interface
-        driver.search_interface = None
-        try:
-            return await search_utils.episode_fulltext_search(
-                driver, query, search_filter, group_ids, limit
-            )
-        finally:
-            driver.search_interface = original
+        return await search_utils.episode_fulltext_search(
+            self._fallback_driver(driver), query, search_filter, group_ids, limit
+        )
 
     def build_node_search_filters(self, search_filters: Any) -> Any:
         """Not used - Graphiti handles filter building internally."""

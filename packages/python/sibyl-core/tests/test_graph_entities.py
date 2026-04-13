@@ -739,6 +739,9 @@ class TestEntityListByType:
 
         assert len(results) == 1
         assert results[0].id == "task-001"
+        query = mock_driver.execute_query.await_args.args[0]
+        assert "toLower(n.status) IN $status_values" in query
+        assert mock_driver.execute_query.await_args.kwargs["status_values"] == ["doing"]
 
     @pytest.mark.asyncio
     async def test_list_by_type_multiple_statuses(
@@ -961,7 +964,7 @@ class TestEntityListByType:
                     "group_id": "test-org-123",
                     "metadata": json.dumps({"status": "todo"}),
                 }
-                for i in range(10)
+                for i in range(5)
             ],
             None,
             None,
@@ -970,10 +973,96 @@ class TestEntityListByType:
         results = await entity_manager.list_by_type(EntityType.TASK, limit=3, offset=2)
 
         assert len(results) == 3
-        # Should skip first 2 and return next 3
         assert results[0].id == "task-002"
         assert results[1].id == "task-003"
         assert results[2].id == "task-004"
+        query = mock_driver.execute_query.await_args.args[0]
+        assert "SKIP $query_offset" in query
+        assert "LIMIT $query_limit" in query
+        assert mock_driver.execute_query.await_args.kwargs["query_offset"] == 0
+        assert mock_driver.execute_query.await_args.kwargs["query_limit"] == 5
+
+    @pytest.mark.asyncio
+    async def test_list_by_type_pagination_survives_legacy_metadata_rechecks(
+        self,
+        entity_manager: EntityManager,
+        mock_driver: MagicMock,
+    ) -> None:
+        """Legacy metadata rows should not collapse a page after DB-side filtering."""
+        mock_driver.execute_query.side_effect = [
+            (
+                [
+                    {
+                        "uuid": "task-001",
+                        "name": "Legacy mismatch",
+                        "entity_type": "task",
+                        "group_id": "test-org-123",
+                        "metadata": json.dumps({"status": "todo"}),
+                    },
+                    {
+                        "uuid": "task-002",
+                        "name": "Task 2",
+                        "entity_type": "task",
+                        "group_id": "test-org-123",
+                        "metadata": json.dumps({"status": "doing"}),
+                    },
+                ],
+                None,
+                None,
+            ),
+            (
+                [
+                    {
+                        "uuid": "task-003",
+                        "name": "Task 3",
+                        "entity_type": "task",
+                        "group_id": "test-org-123",
+                        "metadata": json.dumps({"status": "doing"}),
+                    }
+                ],
+                None,
+                None,
+            ),
+        ]
+
+        results = await entity_manager.list_by_type(EntityType.TASK, status="doing", limit=2)
+
+        assert [result.id for result in results] == ["task-002", "task-003"]
+        assert mock_driver.execute_query.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_list_by_type_stops_on_repeated_page(
+        self,
+        entity_manager: EntityManager,
+        mock_driver: MagicMock,
+    ) -> None:
+        """Repeated pages should not duplicate results or loop indefinitely."""
+        repeated_page = (
+            [
+                {
+                    "uuid": "task-001",
+                    "name": "Task 1",
+                    "entity_type": "task",
+                    "group_id": "test-org-123",
+                    "metadata": json.dumps({"status": "doing"}),
+                },
+                {
+                    "uuid": "task-002",
+                    "name": "Task 2",
+                    "entity_type": "task",
+                    "group_id": "test-org-123",
+                    "metadata": json.dumps({"status": "todo"}),
+                },
+            ],
+            None,
+            None,
+        )
+        mock_driver.execute_query.side_effect = [repeated_page, repeated_page]
+
+        results = await entity_manager.list_by_type(EntityType.TASK, status="doing", limit=2)
+
+        assert [result.id for result in results] == ["task-001"]
+        assert mock_driver.execute_query.await_count == 2
 
     @pytest.mark.asyncio
     async def test_list_by_type_empty_results(
@@ -1783,33 +1872,90 @@ class TestGetProjectSummary:
         mock_driver: MagicMock,
     ) -> None:
         """get_project_summary() returns task counts and actionable tasks."""
-        # Mock task query results
-        mock_driver.execute_query.return_value = (
-            [
-                {
-                    "uuid": "task-001",
-                    "name": "CRITICAL Bug",
-                    "metadata": json.dumps({"status": "doing", "priority": "critical"}),
-                },
-                {
-                    "uuid": "task-002",
-                    "name": "Regular task",
-                    "metadata": json.dumps({"status": "todo", "priority": "medium"}),
-                },
-                {
-                    "uuid": "task-003",
-                    "name": "Blocked task",
-                    "metadata": json.dumps({"status": "blocked", "priority": "high"}),
-                },
-                {
-                    "uuid": "task-004",
-                    "name": "Done task",
-                    "metadata": json.dumps({"status": "done", "priority": "medium"}),
-                },
-            ],
-            None,
-            None,
-        )
+        mock_driver.execute_query.side_effect = [
+            (
+                [
+                    {
+                        "uuid": "task-001",
+                        "name": "CRITICAL Bug",
+                        "project_id": None,
+                        "metadata": json.dumps(
+                            {
+                                "project_id": "project-001",
+                                "status": "doing",
+                                "priority": "critical",
+                                "epic_id": "epic-001",
+                            }
+                        ),
+                    },
+                    {
+                        "uuid": "task-002",
+                        "name": "Regular task",
+                        "project_id": None,
+                        "metadata": json.dumps(
+                            {
+                                "project_id": "project-001",
+                                "status": "todo",
+                                "priority": "medium",
+                                "epic_id": "epic-001",
+                            }
+                        ),
+                    },
+                    {
+                        "uuid": "task-003",
+                        "name": "Blocked task",
+                        "project_id": None,
+                        "metadata": json.dumps(
+                            {
+                                "project_id": "project-001",
+                                "status": "blocked",
+                                "priority": "high",
+                                "epic_id": "epic-001",
+                            }
+                        ),
+                    },
+                    {
+                        "uuid": "task-004",
+                        "name": "Done task",
+                        "project_id": None,
+                        "metadata": json.dumps(
+                            {
+                                "project_id": "project-001",
+                                "status": "done",
+                                "priority": "medium",
+                                "epic_id": "epic-001",
+                            }
+                        ),
+                    },
+                    {
+                        "uuid": "task-005",
+                        "name": "Other project task",
+                        "project_id": None,
+                        "metadata": json.dumps(
+                            {
+                                "project_id": "project-999",
+                                "status": "doing",
+                                "priority": "high",
+                                "epic_id": "epic-001",
+                            }
+                        ),
+                    },
+                ],
+                None,
+                None,
+            ),
+            (
+                [
+                    {
+                        "uuid": "epic-001",
+                        "name": "Auth Epic",
+                        "status": "in_progress",
+                    }
+                ],
+                None,
+                None,
+            ),
+        ]
 
         result = await entity_manager.get_project_summary("project-001")
 
@@ -1823,3 +1969,6 @@ class TestGetProjectSummary:
         assert len(result["actionable_tasks"]) > 0
         # Critical task should be in critical_tasks
         assert len(result["critical_tasks"]) > 0
+        assert result["epics"][0]["progress_pct"] == 25.0
+        assert result["epics"][0]["total_tasks"] == 4
+        assert mock_driver.execute_query.await_count == 2

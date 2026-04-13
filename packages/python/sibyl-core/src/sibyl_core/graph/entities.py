@@ -649,9 +649,9 @@ class EntityManager:
     ) -> list[Entity]:
         """List all entities of a specific type using direct Cypher query.
 
-        Note: Filters like status, priority, epic_id are stored in metadata JSON,
-        not as top-level node properties. We use BELONGS_TO relationship for epic
-        filtering and parse metadata for other filters in Python.
+        Structured task and epic fields are persisted as top-level node properties
+        for fast filtering. We still re-check metadata in Python so legacy rows
+        without normalized properties remain readable.
 
         Args:
             entity_type: The type of entities to list.
@@ -681,137 +681,179 @@ class EntityManager:
             priority=priority,
         )
 
-        # Build base query - filters are applied in Python from metadata
         params: dict[str, Any] = {
             "entity_type": entity_type.value,
             "group_id": self._group_id,
+            "query_limit": max(limit + offset, 1),
+            "query_offset": 0,
         }
+        match_clause = "MATCH (n)"
+        where_clauses = [
+            "n.entity_type = $entity_type",
+            "n.group_id = $group_id",
+        ]
+
+        status_list = [s.strip().lower() for s in status.split(",")] if status else []
+        priority_list = [p.strip().lower() for p in priority.split(",")] if priority else []
+        complexity_list = [c.strip().lower() for c in complexity.split(",")] if complexity else []
 
         # Use BELONGS_TO relationship for epic filtering (most reliable)
         if epic_id:
-            query = """
-                MATCH (n)-[:BELONGS_TO]->(e)
-                WHERE n.entity_type = $entity_type
-                  AND n.group_id = $group_id
-                  AND e.uuid = $epic_id
-                RETURN n.uuid AS uuid,
-                       n.name AS name,
-                       n.entity_type AS entity_type,
-                       n.group_id AS group_id,
-                       n.content AS content,
-                       n.description AS description,
-                       n.summary AS summary,
-                       n.metadata AS metadata,
-                       n.created_at AS created_at,
-                       n.updated_at AS updated_at,
-                       labels(n) AS labels
-                ORDER BY n.created_at DESC
-            """
+            match_clause = "MATCH (n)-[:BELONGS_TO]->(e)"
             params["epic_id"] = epic_id
-        else:
-            query = """
-                MATCH (n)
-                WHERE n.entity_type = $entity_type
-                  AND n.group_id = $group_id
-                RETURN n.uuid AS uuid,
-                       n.name AS name,
-                       n.entity_type AS entity_type,
-                       n.group_id AS group_id,
-                       n.content AS content,
-                       n.description AS description,
-                       n.summary AS summary,
-                       n.metadata AS metadata,
-                       n.created_at AS created_at,
-                       n.updated_at AS updated_at,
-                       labels(n) AS labels
-                ORDER BY n.created_at DESC
-            """
+            where_clauses.append("e.uuid = $epic_id")
+
+        if project_id:
+            params["project_id"] = project_id
+            where_clauses.append("(n.project_id = $project_id OR n.project_id IS NULL)")
+
+        if status_list:
+            params["status_values"] = status_list
+            where_clauses.append("(n.status IS NULL OR toLower(n.status) IN $status_values)")
+
+        if priority_list:
+            params["priority_values"] = priority_list
+            where_clauses.append(
+                "(n.priority IS NULL OR toLower(n.priority) IN $priority_values)"
+            )
+
+        if complexity_list:
+            params["complexity_values"] = complexity_list
+            where_clauses.append(
+                "(n.complexity IS NULL OR toLower(n.complexity) IN $complexity_values)"
+            )
+
+        if feature:
+            params["feature"] = feature
+            where_clauses.append("(n.feature = $feature OR n.feature IS NULL)")
+
+        if tags:
+            params["tags"] = tags
+            where_clauses.append(
+                "(n.tags IS NULL OR any(tag IN coalesce(n.tags, []) WHERE tag IN $tags))"
+            )
+
+        if no_epic:
+            where_clauses.append("(n.epic_id IS NULL OR n.epic_id = '')")
+
+        if not include_archived:
+            where_clauses.append("(n.status IS NULL OR toLower(n.status) <> 'archived')")
+
+        query = f"""
+            {match_clause}
+            WHERE {' AND '.join(where_clauses)}
+            RETURN n.uuid AS uuid,
+                   n.name AS name,
+                   n.entity_type AS entity_type,
+                   n.group_id AS group_id,
+                   n.content AS content,
+                   n.description AS description,
+                   n.summary AS summary,
+                   n.metadata AS metadata,
+                   n.created_at AS created_at,
+                   n.updated_at AS updated_at,
+                   labels(n) AS labels
+            ORDER BY n.created_at DESC, n.uuid DESC
+            SKIP $query_offset
+            LIMIT $query_limit
+        """
 
         try:
-            result = await self._driver.execute_query(query, **params)
-
             entities: list[Entity] = []
-            skipped = 0
+            seen_entity_ids: set[str] = set()
+            seen_pages: set[tuple[str | None, ...]] = set()
+            while len(entities) < offset + limit:
+                result = await self._driver.execute_query(query, **params)
 
-            # Handle FalkorDB result format using normalize helper
-            records = GraphClient.normalize_result(result)
-            for record in records:
-                try:
-                    entity = self._record_to_entity(record)
-                    entity = self._coerce_entity(entity)
+                # Handle FalkorDB result format using normalize helper
+                records = GraphClient.normalize_result(result)
+                if not records:
+                    break
 
-                    # Parse metadata for filtering (stored as JSON string)
-                    metadata = entity.metadata or {}
+                page_signature = tuple(record.get("uuid") for record in records)
+                if page_signature in seen_pages:
+                    log.warning(
+                        "list_by_type repeated page, stopping pagination",
+                        entity_type=entity_type,
+                        query_offset=params["query_offset"],
+                        query_limit=params["query_limit"],
+                    )
+                    break
+                seen_pages.add(page_signature)
 
-                    # Filter by project_id from metadata
-                    if project_id and metadata.get("project_id") != project_id:
-                        continue
+                for record in records:
+                    try:
+                        entity = self._record_to_entity(record)
+                        entity = self._coerce_entity(entity)
 
-                    # Filter by status from metadata (supports comma-separated)
-                    if status:
-                        entity_status = metadata.get("status", "").lower()
-                        status_list = [s.strip().lower() for s in status.split(",")]
-                        if entity_status not in status_list:
+                        # Parse metadata for filtering (stored as JSON string)
+                        metadata = entity.metadata or {}
+
+                        # Filter by project_id from metadata
+                        if project_id and metadata.get("project_id") != project_id:
                             continue
 
-                    # Filter by priority from metadata (supports comma-separated)
-                    if priority:
-                        entity_priority = metadata.get("priority", "").lower()
-                        priority_list = [p.strip().lower() for p in priority.split(",")]
-                        if entity_priority not in priority_list:
+                        # Filter by status from metadata (supports comma-separated)
+                        if status:
+                            entity_status = metadata.get("status", "").lower()
+                            if entity_status not in status_list:
+                                continue
+
+                        # Filter by priority from metadata (supports comma-separated)
+                        if priority:
+                            entity_priority = metadata.get("priority", "").lower()
+                            if entity_priority not in priority_list:
+                                continue
+
+                        # Filter by complexity from metadata (supports comma-separated)
+                        if complexity:
+                            entity_complexity = metadata.get("complexity", "").lower()
+                            if entity_complexity not in complexity_list:
+                                continue
+
+                        # Filter by feature from metadata
+                        if feature:
+                            entity_feature = metadata.get("feature")
+                            if entity_feature != feature:
+                                continue
+
+                        # Filter by tags from metadata (match if ANY tag present)
+                        if tags:
+                            entity_tags = metadata.get("tags", [])
+                            if not any(t in entity_tags for t in tags):
+                                continue
+
+                        # Filter for entities without an epic
+                        if no_epic:
+                            entity_epic = metadata.get("epic_id")
+                            if entity_epic:  # Has an epic, skip it
+                                continue
+
+                        # Filter archived unless include_archived is True
+                        if not include_archived:
+                            entity_status = metadata.get("status")
+                            if entity_status == "archived":
+                                continue
+
+                        if entity.id in seen_entity_ids:
                             continue
 
-                    # Filter by complexity from metadata (supports comma-separated)
-                    if complexity:
-                        entity_complexity = metadata.get("complexity", "").lower()
-                        complexity_list = [c.strip().lower() for c in complexity.split(",")]
-                        if entity_complexity not in complexity_list:
-                            continue
+                        seen_entity_ids.add(entity.id)
+                        entities.append(entity)
 
-                    # Filter by feature from metadata
-                    if feature:
-                        entity_feature = metadata.get("feature")
-                        if entity_feature != feature:
-                            continue
+                    except Exception as e:
+                        log.debug("Failed to convert record to entity", error=str(e))
 
-                    # Filter by tags from metadata (match if ANY tag present)
-                    if tags:
-                        entity_tags = metadata.get("tags", [])
-                        if not any(t in entity_tags for t in tags):
-                            continue
-
-                    # Filter for entities without an epic
-                    if no_epic:
-                        entity_epic = metadata.get("epic_id")
-                        if entity_epic:  # Has an epic, skip it
-                            continue
-
-                    # Filter archived unless include_archived is True
-                    if not include_archived:
-                        entity_status = metadata.get("status")
-                        if entity_status == "archived":
-                            continue
-
-                    # Apply pagination
-                    if skipped < offset:
-                        skipped += 1
-                        continue
-
-                    entities.append(entity)
-
-                    # Check limit
-                    if len(entities) >= limit:
-                        break
-
-                except Exception as e:
-                    log.debug("Failed to convert record to entity", error=str(e))
+                params["query_offset"] += len(records)
+                if len(records) < params["query_limit"]:
+                    break
 
             log.debug(
                 "Listed entities",
                 entity_type=entity_type,
-                returned=len(entities),
+                returned=min(len(entities[offset : offset + limit]), limit),
             )
-            return entities
+            return entities[offset : offset + limit]
 
         except Exception as e:
             log.exception("Failed to list entities", entity_type=entity_type, error=str(e))
@@ -1074,9 +1116,13 @@ class EntityManager:
                 MATCH (n)
                 WHERE n.entity_type = 'task'
                   AND n.group_id = $group_id
-                  AND n.project_id = $project_id
+                  AND (n.project_id = $project_id OR n.project_id IS NULL)
                 RETURN n.uuid AS uuid,
                        n.name AS name,
+                       n.project_id AS project_id,
+                       n.status AS status,
+                       n.priority AS priority,
+                       n.epic_id AS epic_id,
                        n.metadata AS metadata,
                        n.updated_at AS updated_at
                 ORDER BY n.updated_at DESC
@@ -1094,6 +1140,7 @@ class EntityManager:
             review_tasks: list[dict[str, Any]] = []
             critical_tasks: list[dict[str, Any]] = []
             recent_tasks: list[dict[str, Any]] = []
+            epic_progress: dict[str, dict[str, int]] = {}
 
             for record in records:
                 metadata = record.get("metadata")
@@ -1103,11 +1150,36 @@ class EntityManager:
                     except json.JSONDecodeError:
                         metadata = {}
 
-                status = (metadata.get("status") if metadata else None) or "todo"
-                priority = (metadata.get("priority") if metadata else None) or ""
+                task_project_id = (
+                    record.get("project_id")
+                    or (metadata.get("project_id") if metadata else None)
+                )
+                if task_project_id != project_id:
+                    continue
+
+                status = (
+                    record.get("status")
+                    or (metadata.get("status") if metadata else None)
+                    or "todo"
+                )
+                priority = (
+                    record.get("priority")
+                    or (metadata.get("priority") if metadata else None)
+                    or ""
+                )
                 name = record.get("name") or ""
+                epic_id = record.get("epic_id") or (metadata.get("epic_id") if metadata else None)
 
                 status_counts[status] = status_counts.get(status, 0) + 1
+
+                if epic_id:
+                    counters = epic_progress.setdefault(
+                        str(epic_id),
+                        {"total_tasks": 0, "completed_tasks": 0},
+                    )
+                    counters["total_tasks"] += 1
+                    if status == "done":
+                        counters["completed_tasks"] += 1
 
                 task_info = {
                     "id": record.get("uuid"),
@@ -1154,16 +1226,15 @@ class EntityManager:
             try:
                 epic_result = await self._driver.execute_query(
                     """
-                    MATCH (n)
-                    WHERE n.entity_type = 'epic'
-                      AND n.group_id = $group_id
-                      AND n.project_id = $project_id
-                      AND (n.status IS NULL OR n.status <> 'archived')
-                    RETURN n.uuid AS uuid,
-                           n.name AS name,
-                           n.status AS status,
-                           n.priority AS priority
-                    ORDER BY n.priority ASC, n.created_at DESC
+                    MATCH (e)
+                    WHERE e.entity_type = 'epic'
+                      AND e.group_id = $group_id
+                      AND e.project_id = $project_id
+                      AND (e.status IS NULL OR e.status <> 'archived')
+                    RETURN e.uuid AS uuid,
+                           e.name AS name,
+                           coalesce(e.status, 'planning') AS status
+                    ORDER BY e.priority ASC, e.created_at DESC
                     LIMIT $limit
                     """,
                     group_id=self._group_id,
@@ -1172,20 +1243,21 @@ class EntityManager:
                 )
                 epic_records = GraphClient.normalize_result(epic_result)
                 for rec in epic_records:
-                    epic_info = {
-                        "id": rec.get("uuid"),
-                        "name": rec.get("name"),
-                        "status": rec.get("status") or "planning",
-                    }
-                    # Get epic progress
-                    try:
-                        progress = await self.get_epic_progress(epic_info["id"])
-                        epic_info["progress_pct"] = progress.get("completion_pct", 0.0)
-                        epic_info["total_tasks"] = progress.get("total_tasks", 0)
-                    except Exception:
-                        epic_info["progress_pct"] = 0.0
-                        epic_info["total_tasks"] = 0
-                    epics.append(epic_info)
+                    progress = epic_progress.get(str(rec.get("uuid")), {})
+                    total_tasks = progress.get("total_tasks", 0)
+                    completed_tasks = progress.get("completed_tasks", 0)
+                    epics.append(
+                        {
+                            "id": rec.get("uuid"),
+                            "name": rec.get("name"),
+                            "status": rec.get("status") or "planning",
+                            "progress_pct": round(
+                                (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0,
+                                1,
+                            ),
+                            "total_tasks": total_tasks,
+                        }
+                    )
             except Exception as epic_err:
                 log.debug("Failed to fetch epics", error=str(epic_err))
 
