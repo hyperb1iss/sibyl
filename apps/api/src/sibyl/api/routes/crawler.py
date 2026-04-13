@@ -496,6 +496,72 @@ async def list_sources(
     )
 
 
+@router.get("/link-graph/status", response_model=LinkGraphStatusResponse)
+async def get_link_graph_status(
+    org: Organization = Depends(get_current_organization),
+) -> LinkGraphStatusResponse:
+    """Get status of pending graph linking work (org-scoped).
+
+    Shows how many chunks still need entity extraction per source.
+    """
+    async with get_session() as session:
+        # Total chunks
+        total_result = await session.execute(
+            select(func.count(DocumentChunk.id))
+            .join(CrawledDocument, col(CrawledDocument.id) == col(DocumentChunk.document_id))
+            .join(CrawlSource, col(CrawlSource.id) == col(CrawledDocument.source_id))
+            .where(col(CrawlSource.organization_id) == org.id)
+        )
+        total_chunks = total_result.scalar() or 0
+
+        # Chunks with entities
+        linked_result = await session.execute(
+            select(func.count(DocumentChunk.id))
+            .join(CrawledDocument, col(CrawledDocument.id) == col(DocumentChunk.document_id))
+            .join(CrawlSource, col(CrawlSource.id) == col(CrawledDocument.source_id))
+            .where(col(CrawlSource.organization_id) == org.id)
+            .where(col(DocumentChunk.has_entities) == True)  # noqa: E712
+        )
+        chunks_with_entities = linked_result.scalar() or 0
+
+        # Pending per source
+        pending_query = (
+            select(
+                CrawlSource.name,
+                func.count(DocumentChunk.id).label("pending"),
+            )
+            .join(CrawledDocument, CrawledDocument.source_id == CrawlSource.id)
+            .join(DocumentChunk, DocumentChunk.document_id == CrawledDocument.id)
+            .where(col(CrawlSource.organization_id) == org.id)
+            .where(col(DocumentChunk.has_entities) == False)  # noqa: E712
+            .group_by(CrawlSource.name)
+        )
+        pending_result = await session.execute(pending_query)
+        sources = [{"name": row.name, "pending": row.pending} for row in pending_result.all()]
+
+    return LinkGraphStatusResponse(
+        total_chunks=total_chunks,
+        chunks_with_entities=chunks_with_entities,
+        chunks_pending=total_chunks - chunks_with_entities,
+        sources=sources,
+    )
+
+
+@router.post("/link-graph", response_model=LinkGraphResponse)
+async def link_all_sources_to_graph(
+    request: LinkGraphRequest,
+    org: Organization = Depends(get_current_organization),
+) -> LinkGraphResponse:
+    """Extract entities from all source chunks and link to knowledge graph.
+
+    Processes chunks that haven't been entity-linked yet (has_entities=False).
+    Uses LLM to extract entities and matches them to existing graph entities.
+    """
+    return await _process_graph_linking(
+        source_id=None, request=request, organization_id=str(org.id)
+    )
+
+
 @router.get("/{source_id}", response_model=CrawlSourceResponse)
 async def get_source(
     source_id: str,
@@ -818,72 +884,6 @@ async def sync_source(
 # =============================================================================
 # Graph Integration
 # =============================================================================
-
-
-@router.get("/link-graph/status", response_model=LinkGraphStatusResponse)
-async def get_link_graph_status(
-    org: Organization = Depends(get_current_organization),
-) -> LinkGraphStatusResponse:
-    """Get status of pending graph linking work (org-scoped).
-
-    Shows how many chunks still need entity extraction per source.
-    """
-    async with get_session() as session:
-        # Total chunks
-        total_result = await session.execute(
-            select(func.count(DocumentChunk.id))
-            .join(CrawledDocument, col(CrawledDocument.id) == col(DocumentChunk.document_id))
-            .join(CrawlSource, col(CrawlSource.id) == col(CrawledDocument.source_id))
-            .where(col(CrawlSource.organization_id) == org.id)
-        )
-        total_chunks = total_result.scalar() or 0
-
-        # Chunks with entities
-        linked_result = await session.execute(
-            select(func.count(DocumentChunk.id))
-            .join(CrawledDocument, col(CrawledDocument.id) == col(DocumentChunk.document_id))
-            .join(CrawlSource, col(CrawlSource.id) == col(CrawledDocument.source_id))
-            .where(col(CrawlSource.organization_id) == org.id)
-            .where(col(DocumentChunk.has_entities) == True)  # noqa: E712
-        )
-        chunks_with_entities = linked_result.scalar() or 0
-
-        # Pending per source
-        pending_query = (
-            select(
-                CrawlSource.name,
-                func.count(DocumentChunk.id).label("pending"),
-            )
-            .join(CrawledDocument, CrawledDocument.source_id == CrawlSource.id)
-            .join(DocumentChunk, DocumentChunk.document_id == CrawledDocument.id)
-            .where(col(CrawlSource.organization_id) == org.id)
-            .where(col(DocumentChunk.has_entities) == False)  # noqa: E712
-            .group_by(CrawlSource.name)
-        )
-        pending_result = await session.execute(pending_query)
-        sources = [{"name": row.name, "pending": row.pending} for row in pending_result.all()]
-
-    return LinkGraphStatusResponse(
-        total_chunks=total_chunks,
-        chunks_with_entities=chunks_with_entities,
-        chunks_pending=total_chunks - chunks_with_entities,
-        sources=sources,
-    )
-
-
-@router.post("/link-graph", response_model=LinkGraphResponse)
-async def link_all_sources_to_graph(
-    request: LinkGraphRequest,
-    org: Organization = Depends(get_current_organization),
-) -> LinkGraphResponse:
-    """Extract entities from all source chunks and link to knowledge graph.
-
-    Processes chunks that haven't been entity-linked yet (has_entities=False).
-    Uses LLM to extract entities and matches them to existing graph entities.
-    """
-    return await _process_graph_linking(
-        source_id=None, request=request, organization_id=str(org.id)
-    )
 
 
 @router.post("/{source_id}/link-graph", response_model=LinkGraphResponse)

@@ -286,12 +286,14 @@ class TestDeduplicationIntegration:
         """Create mock graph client."""
         client = MagicMock()
         client.client.driver.execute_query = AsyncMock(return_value=[])
+        client.execute_read_org = AsyncMock(return_value=[])
         return client
 
     @pytest.fixture
     def mock_entity_manager(self) -> MagicMock:
         """Create mock entity manager."""
         manager = MagicMock()
+        manager._group_id = "org-123"
         manager.get = AsyncMock(return_value=None)
         manager.update = AsyncMock(return_value=None)
         manager.delete = AsyncMock(return_value=True)
@@ -317,7 +319,7 @@ class TestDeduplicationIntegration:
     ) -> None:
         """Deduplicator finds entities with similar embeddings."""
         # Mock entities with embeddings
-        mock_client.client.driver.execute_query = AsyncMock(
+        mock_client.execute_read_org = AsyncMock(
             return_value=[
                 ("e1", "Error Handling Pattern", "pattern", [1.0, 0.0, 0.0]),
                 ("e2", "Error Handling Best Practices", "pattern", [0.99, 0.01, 0.0]),  # Similar

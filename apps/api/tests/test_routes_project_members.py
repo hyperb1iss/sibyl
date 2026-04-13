@@ -187,6 +187,7 @@ class TestGetProjectAndUserRole:
         org.id = uuid4()
 
         project = MagicMock()
+        project.id = uuid4()
         project.organization_id = org.id
         project.owner_user_id = uuid4()  # Different owner
 
@@ -206,6 +207,12 @@ class TestGetProjectAndUserRole:
 
         assert result_project == project
         assert role == ProjectRole.CONTRIBUTOR
+
+        statement = session.execute.await_args.args[0]
+        compiled = statement.compile()
+
+        assert project.id in compiled.params.values()
+        assert str(project.id) not in compiled.params.values()
 
     @pytest.mark.asyncio
     async def test_non_member_gets_none(self) -> None:

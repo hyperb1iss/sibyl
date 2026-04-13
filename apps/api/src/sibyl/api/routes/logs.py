@@ -7,13 +7,17 @@ Requires OWNER role (super admin equivalent).
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketException, status
+from sqlmodel import select
 
 from sibyl.auth.dependencies import require_org_role
 from sibyl.auth.jwt import JwtError, verify_access_token
-from sibyl.db.models import OrganizationRole
+from sibyl.config import settings
+from sibyl.db.connection import get_session
+from sibyl.db.models import OrganizationMember, OrganizationRole
 from sibyl_core.logging import LogBuffer
 
 log = structlog.get_logger()
@@ -73,19 +77,34 @@ async def get_log_stats() -> dict:
 async def _validate_owner_token(token: str | None) -> bool:
     """Validate that a token belongs to an OWNER.
 
-    For WebSocket auth, we verify the token and check org membership.
-    This is a simplified check - full validation would require DB lookup.
+    For WebSocket auth, we verify the token and confirm the current
+    org membership still grants OWNER access.
     """
+    if settings.disable_auth:
+        return True
+
     if not token:
         return False
 
     try:
         claims = verify_access_token(token)
-        # For now, trust the token claims - full validation would check DB
-        # In production, you'd verify the user is actually an OWNER
-        return claims.get("org") is not None
     except JwtError:
         return False
+
+    try:
+        user_id = UUID(str(claims.get("sub", "")))
+        org_id = UUID(str(claims.get("org", "")))
+    except ValueError:
+        return False
+
+    async with get_session() as session:
+        result = await session.execute(
+            select(OrganizationMember.role).where(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none() == OrganizationRole.OWNER
 
 
 @router.websocket("/stream")

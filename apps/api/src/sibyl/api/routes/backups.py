@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_admin
 from sibyl.db.connection import get_session
 from sibyl.db.models import Backup, BackupSettings, BackupStatus, Organization, User
+from sibyl.jobs.backup import _generate_backup_id
 
 log = structlog.get_logger()
 
@@ -218,9 +219,7 @@ async def create_backup(
 
     Returns a job ID that can be used to track progress.
     """
-    # Generate backup ID
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    backup_id = f"backup_{timestamp}"
+    backup_id = _generate_backup_id(str(org.id))
 
     async with get_session() as session:
         # Create backup record
@@ -315,6 +314,35 @@ async def list_backups(
             ],
             total=total,
         )
+
+
+@router.post("/cleanup")
+async def run_cleanup(
+    request: CleanupRequest,
+    org: Organization = Depends(get_current_organization),
+) -> CleanupResponse:
+    """Trigger a backup cleanup job.
+
+    Removes backup archives older than the retention period.
+    """
+    async with get_session() as session:
+        settings = await get_or_create_settings(session, org.id)
+        retention = request.retention_days or settings.retention_days
+
+    log.info(
+        "backup_cleanup_requested",
+        organization_id=str(org.id),
+        retention_days=retention,
+    )
+
+    from sibyl.jobs.queue import enqueue_backup_cleanup
+
+    job_id = await enqueue_backup_cleanup(retention_days=retention)
+
+    return CleanupResponse(
+        job_id=job_id,
+        message="Cleanup job queued successfully",
+    )
 
 
 @router.get("/{backup_id}")
@@ -435,35 +463,6 @@ async def delete_backup(
         await session.commit()
 
         return {"deleted": True, "backup_id": backup_id}
-
-
-@router.post("/cleanup")
-async def run_cleanup(
-    request: CleanupRequest,
-    org: Organization = Depends(get_current_organization),
-) -> CleanupResponse:
-    """Trigger a backup cleanup job.
-
-    Removes backup archives older than the retention period.
-    """
-    async with get_session() as session:
-        settings = await get_or_create_settings(session, org.id)
-        retention = request.retention_days or settings.retention_days
-
-    log.info(
-        "backup_cleanup_requested",
-        organization_id=str(org.id),
-        retention_days=retention,
-    )
-
-    from sibyl.jobs.queue import enqueue_backup_cleanup
-
-    job_id = await enqueue_backup_cleanup(retention_days=retention)
-
-    return CleanupResponse(
-        job_id=job_id,
-        message="Cleanup job queued successfully",
-    )
 
 
 @router.get("/jobs/{job_id}")

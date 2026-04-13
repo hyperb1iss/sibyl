@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import structlog
 
@@ -118,10 +119,16 @@ def _sha256_file(path: Path) -> str:
     return sha256.hexdigest()
 
 
-def _generate_backup_id() -> str:
-    """Generate a unique backup ID with timestamp."""
+def _generate_backup_id(organization_id: str | None = None) -> str:
+    """Generate a unique backup ID.
+
+    Includes an organization fragment plus a nonce so concurrent
+    backups cannot collide on timestamp alone.
+    """
+    org_fragment = (organization_id or "global").replace("-", "")[:8]
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    return f"backup_{timestamp}"
+    nonce = uuid4().hex[:10]
+    return f"backup_{org_fragment}_{timestamp}_{nonce}"
 
 
 async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | None) -> None:
@@ -241,7 +248,7 @@ async def run_backup(  # noqa: PLR0915
 
     start_time = time.time()
     started_at = datetime.now(UTC)
-    backup_id = backup_id or _generate_backup_id()
+    backup_id = backup_id or _generate_backup_id(organization_id)
 
     # Update DB to mark as in progress
     await _update_backup_db(backup_id, status="in_progress", started_at=started_at)
@@ -664,9 +671,7 @@ async def run_scheduled_backups(
                 org_id = str(org_settings.organization_id)
 
                 try:
-                    # Generate backup ID
-                    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-                    backup_id = f"backup_{timestamp}"
+                    backup_id = _generate_backup_id(org_id)
 
                     # Create backup record
                     backup = Backup(

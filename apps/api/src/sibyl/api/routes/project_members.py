@@ -93,7 +93,7 @@ async def _get_project_and_user_role(
     # Check direct membership
     result = await session.execute(
         select(ProjectMember).where(
-            ProjectMember.project_id == project_id,
+            ProjectMember.project_id == project.id,
             ProjectMember.user_id == user.id,
         )
     )
