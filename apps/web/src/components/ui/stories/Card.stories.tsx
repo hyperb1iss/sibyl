@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
-import { Card, CardHeader, CollapsibleCard, StatCard } from '../card';
-import { AlertTriangle, Database, Sparkles } from '../icons';
+import { Card } from '../card';
+import { AlertTriangle } from '../icons';
 
 const meta = {
   title: 'UI/Card',
@@ -75,59 +75,6 @@ export const WithGlow: Story = {
     variant: 'default',
     glow: true,
   },
-};
-
-export const WithHeader: Story = {
-  args: {
-    children: <p className="text-sc-fg-muted">Card content goes here.</p>,
-    className: 'w-80',
-  },
-  render: args => (
-    <Card {...args}>
-      <CardHeader
-        title="Card Title"
-        description="This is a description"
-        icon={<Database className="w-5 h-5" />}
-      />
-      {args.children}
-    </Card>
-  ),
-};
-
-export const StatCardExample: Story = {
-  args: {
-    children: null,
-  },
-  render: () => (
-    <div className="grid grid-cols-2 gap-4">
-      <StatCard label="Total Users" value="1,234" trend="up" sublabel="+12% from last month" />
-      <StatCard
-        label="Active Sessions"
-        value="42"
-        icon={<Sparkles className="w-5 h-5" />}
-        trend="neutral"
-        sublabel="No change"
-      />
-    </div>
-  ),
-};
-
-export const CollapsibleExample: Story = {
-  args: {
-    children: null,
-  },
-  render: () => (
-    <CollapsibleCard
-      title="Expandable Section"
-      description="Click to expand"
-      icon={<Database className="w-5 h-5" />}
-      defaultOpen
-    >
-      <p className="text-sc-fg-muted">
-        This content is hidden by default and can be expanded by clicking the header.
-      </p>
-    </CollapsibleCard>
-  ),
 };
 
 export const AllVariants: Story = {
