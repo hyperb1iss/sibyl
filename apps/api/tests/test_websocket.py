@@ -1,10 +1,12 @@
 """Tests for WebSocket org scoping and auth integration."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
+import sibyl.api.websocket as websocket_module
 from sibyl.api.websocket import (
     Connection,
     ConnectionManager,
@@ -103,6 +105,50 @@ class TestConnectionManagerOrgScoping:
 
         # Should not error, just not send anything
         assert not ws1.send_json.called
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_does_not_hold_lock_while_sending(
+        self,
+        manager: ConnectionManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Heartbeat sends should not block connect/disconnect operations."""
+        send_started = asyncio.Event()
+        release_send = asyncio.Event()
+
+        async def slow_send(_message: dict[str, object]) -> None:
+            send_started.set()
+            await release_send.wait()
+
+        slow_ws = MagicMock()
+        slow_ws.send_json = AsyncMock(side_effect=slow_send)
+        manager.active_connections = [Connection(websocket=slow_ws, org_id="org_a")]
+
+        sleep_calls = 0
+
+        async def fake_sleep(_interval: float) -> None:
+            nonlocal sleep_calls
+            sleep_calls += 1
+            if sleep_calls == 1:
+                return
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(websocket_module.asyncio, "sleep", fake_sleep)
+
+        heartbeat_task = asyncio.create_task(manager._heartbeat_loop())
+        manager._heartbeat_task = heartbeat_task
+
+        await asyncio.wait_for(send_started.wait(), timeout=1)
+
+        new_ws = MagicMock()
+        new_ws.accept = AsyncMock()
+        await asyncio.wait_for(manager.connect(new_ws, org_id="org_b"), timeout=0.1)
+
+        assert any(conn.websocket == new_ws for conn in manager.active_connections)
+
+        release_send.set()
+        with pytest.raises(asyncio.CancelledError):
+            await heartbeat_task
 
 
 class TestExtractOrgFromToken:

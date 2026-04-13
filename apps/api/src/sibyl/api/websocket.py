@@ -141,38 +141,46 @@ class ConnectionManager:
                 conn.pending_pong = False
                 break
 
+    async def _prepare_heartbeat_batch(self) -> tuple[list[Connection], list[WebSocket]]:
+        """Snapshot heartbeat work while keeping network I/O outside the lock."""
+        async with self._lock:
+            if not self.active_connections:
+                return [], []
+
+            heartbeat_connections: list[Connection] = []
+            dead_connections: list[WebSocket] = []
+            for conn in self.active_connections:
+                if conn.pending_pong:
+                    dead_connections.append(conn.websocket)
+                    continue
+
+                conn.pending_pong = True
+                heartbeat_connections.append(conn)
+
+        return heartbeat_connections, dead_connections
+
     async def _heartbeat_loop(self) -> None:
         """Background task that sends heartbeat pings and cleans up dead connections."""
         while True:
             await asyncio.sleep(self.HEARTBEAT_INTERVAL)
 
-            if not self.active_connections:
+            heartbeat_connections, dead_connections = await self._prepare_heartbeat_batch()
+            if not heartbeat_connections and not dead_connections:
                 log.debug("heartbeat_stopped", reason="no_connections")
                 break
 
-            dead_connections: list[WebSocket] = []
             now = datetime.now(UTC)
-
-            async with self._lock:
-                for conn in self.active_connections:
-                    # Check if previous ping was answered
-                    if conn.pending_pong:
-                        # No pong received - connection is dead
-                        dead_connections.append(conn.websocket)
-                        continue
-
-                    # Send heartbeat ping
-                    try:
-                        await conn.websocket.send_json(
-                            {
-                                "event": "heartbeat",
-                                "data": {"server_time": now.isoformat()},
-                                "timestamp": now.isoformat(),
-                            }
-                        )
-                        conn.pending_pong = True
-                    except Exception:
-                        dead_connections.append(conn.websocket)
+            for conn in heartbeat_connections:
+                try:
+                    await conn.websocket.send_json(
+                        {
+                            "event": "heartbeat",
+                            "data": {"server_time": now.isoformat()},
+                            "timestamp": now.isoformat(),
+                        }
+                    )
+                except Exception:
+                    dead_connections.append(conn.websocket)
 
             # Clean up dead connections
             for ws in dead_connections:
