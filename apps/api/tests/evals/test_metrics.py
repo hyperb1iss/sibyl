@@ -1,6 +1,6 @@
-"""Tests for RAG evaluation metrics."""
+"""Tests for shared retrieval evaluation metrics."""
 
-from tests.evals.metrics import (
+from sibyl_core.evals import (
     EvalMetrics,
     EvalQuery,
     RetrievalResult,

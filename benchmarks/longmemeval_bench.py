@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-Sibyl × LongMemEval Benchmark
-================================
+Sibyl × LongMemEval Offline Baseline
+====================================
 
-Evaluates Sibyl's retrieval pipeline against the LongMemEval benchmark using
-the same dataset and metrics as MemPalace, enabling direct comparison.
+Evaluates an offline Sibyl-style retrieval baseline against LongMemEval using
+the same dataset and metrics as MemPalace.
 
 For each of the 500 questions:
 1. Ingest all haystack sessions into a fresh in-memory search index
 2. Query using Sibyl's hybrid retrieval pipeline (vector + temporal + RRF)
 3. Score retrieval against ground-truth answer sessions
 
-This benchmark does NOT touch the live Sibyl graph. It creates ephemeral
-in-memory indexes per question, identical to how MemPalace benchmarks.
+This script intentionally does NOT touch the live Sibyl graph or `/api/search`.
+For live runtime evaluation against the production search stack, use
+`benchmarks/live_runtime_eval.py`.
 
 Usage:
     uv run python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json
@@ -30,8 +31,12 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
-import chromadb
+try:
+    import chromadb
+except ModuleNotFoundError:
+    chromadb = None
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "python" / "sibyl-core" / "src"))
 
@@ -66,7 +71,7 @@ def recall_at_k(rankings: list[int], correct_ids: set[str], corpus_ids: list[str
 # RETRIEVAL MODES
 # =============================================================================
 
-_bench_client = chromadb.EphemeralClient()
+_bench_client = chromadb.EphemeralClient() if chromadb is not None else None
 
 _HYBRID_STOP_WORDS = {
     "what",
@@ -130,12 +135,22 @@ def _extract_keywords(text: str) -> list[str]:
     return [word for word in re.findall(r"\b[a-z]{3,}\b", text.lower()) if word not in _HYBRID_STOP_WORDS]
 
 
-def _fresh_collection(name: str = "sibyl_bench") -> chromadb.Collection:
+def _require_bench_client() -> Any:
+    if _bench_client is None:
+        raise RuntimeError(
+            "chromadb is required for benchmarks/longmemeval_bench.py. "
+            "Use benchmarks/live_runtime_eval.py for the live runtime path."
+        )
+    return _bench_client
+
+
+def _fresh_collection(name: str = "sibyl_bench") -> Any:
+    client = _require_bench_client()
     try:
-        _bench_client.delete_collection(name)
+        client.delete_collection(name)
     except Exception:
         pass
-    return _bench_client.create_collection(name)
+    return client.create_collection(name)
 
 
 def retrieve_raw(entry: dict, n_results: int = 50) -> tuple[list[int], list[str]]:
