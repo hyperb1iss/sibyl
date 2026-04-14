@@ -1,10 +1,10 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { IconComponent } from '@/components/ui/icons';
 import { Activity, Archive, Database, Flash, Settings, User, Users } from '@/components/ui/icons';
 import { useMe } from '@/lib/hooks';
+import { NavLink } from './nav-link';
 
 interface SettingsNavItem {
   name: string;
@@ -73,45 +73,6 @@ const ADMIN_NAVIGATION: SettingsNavItem[] = [
   },
 ];
 
-function NavLink({ item, isActive }: { item: SettingsNavItem; isActive: boolean }) {
-  const Icon = item.icon;
-
-  return (
-    <Link
-      href={item.href}
-      className={`
-        flex items-center gap-3 px-3 py-2.5 rounded-lg
-        transition-all duration-200 group relative
-        ${
-          isActive
-            ? 'bg-sc-purple/10 text-sc-purple'
-            : 'text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight/50'
-        }
-      `}
-    >
-      {/* Active indicator */}
-      {isActive && (
-        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full bg-sc-purple shadow-[0_0_10px_rgba(225,53,255,0.5)]" />
-      )}
-
-      <Icon
-        width={18}
-        height={18}
-        className={`transition-all duration-200 ${
-          isActive
-            ? 'text-sc-purple drop-shadow-[0_0_6px_rgba(225,53,255,0.5)]'
-            : 'text-sc-cyan/70 group-hover:text-sc-cyan'
-        }`}
-      />
-
-      <div className="flex-1 min-w-0">
-        <span className="block text-sm font-medium">{item.name}</span>
-        <span className="block text-xs text-sc-fg-subtle truncate">{item.description}</span>
-      </div>
-    </Link>
-  );
-}
-
 export function SettingsNav() {
   const pathname = usePathname();
   const { data: me } = useMe();
@@ -125,9 +86,14 @@ export function SettingsNav() {
       {SETTINGS_NAVIGATION.map(item => (
         <NavLink
           key={item.name}
-          item={item}
+          href={item.href}
+          icon={item.icon}
+          description={item.description}
           isActive={pathname === item.href || pathname.startsWith(`${item.href}/`)}
-        />
+          preserveProjectsContext={false}
+        >
+          {item.name}
+        </NavLink>
       ))}
 
       {/* Admin section - only visible to owners/admins */}
@@ -141,9 +107,14 @@ export function SettingsNav() {
           {ADMIN_NAVIGATION.map(item => (
             <NavLink
               key={item.name}
-              item={item}
+              href={item.href}
+              icon={item.icon}
+              description={item.description}
               isActive={pathname === item.href || pathname.startsWith(`${item.href}/`)}
-            />
+              preserveProjectsContext={false}
+            >
+              {item.name}
+            </NavLink>
           ))}
         </>
       )}

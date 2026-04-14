@@ -16,6 +16,10 @@ describe('navigation constants', () => {
     expect(NAVIGATION.map(item => item.href)).toContain('/archive');
   });
 
+  it('does not expose a dead top-level documents route', () => {
+    expect(ROUTE_CONFIG.documents).toBeUndefined();
+  });
+
   it('preserves project context when navigating', () => {
     expect(withProjectsContext('/tasks', 'proj-a,proj-b')).toBe('/tasks?projects=proj-a,proj-b');
     expect(withProjectsContext('/search?view=all', 'proj-a')).toBe(
