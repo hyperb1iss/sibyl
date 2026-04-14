@@ -79,10 +79,10 @@ sibyl/
 
 ### CLI Executables
 
-| Binary         | Package       | Purpose                                    |
-| -------------- | ------------- | ------------------------------------------ |
-| `sibyld`       | `apps/api`    | Server daemon (serve, worker, db, up/down) |
-| `sibyl`        | `apps/cli`    | Client CLI (task, search, add, explore)    |
+| Binary   | Package    | Purpose                                    |
+| -------- | ---------- | ------------------------------------------ |
+| `sibyld` | `apps/api` | Server daemon (serve, worker, db, up/down) |
+| `sibyl`  | `apps/cli` | Client CLI (task, search, add, explore)    |
 
 ### Development Commands
 

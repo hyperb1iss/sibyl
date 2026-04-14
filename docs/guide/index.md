@@ -161,14 +161,14 @@ The good entry includes:
 
 Sibyl offers three interfaces, each suited to different users:
 
-| Interface  | Best For                       | Token Usage              |
-| ---------- | ------------------------------ | ------------------------ |
-| **CLI**    | Scripts, workflows, quick ops  | Low—text output only     |
-| **MCP**    | Direct tool invocation         | Higher—full JSON schemas |
-| **Web UI** | Humans managing projects       | N/A—visual interface     |
+| Interface  | Best For                      | Token Usage              |
+| ---------- | ----------------------------- | ------------------------ |
+| **CLI**    | Scripts, workflows, quick ops | Low—text output only     |
+| **MCP**    | Direct tool invocation        | Higher—full JSON schemas |
+| **Web UI** | Humans managing projects      | N/A—visual interface     |
 
-For routine operations, **prefer the CLI**. It's expressive, scriptable, and lighter-weight than
-MCP tool calls.
+For routine operations, **prefer the CLI**. It's expressive, scriptable, and lighter-weight than MCP
+tool calls.
 
 ## Next Steps
 

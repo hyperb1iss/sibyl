@@ -170,8 +170,8 @@ Here's the actual CLAUDE.md from the Sibyl project:
 
 ## Project Overview
 
-**Sibyl** is a knowledge graph and task workflow server that gives assistants durable project
-memory through a Graphiti-powered knowledge graph.
+**Sibyl** is a knowledge graph and task workflow server that gives assistants durable project memory
+through a Graphiti-powered knowledge graph.
 
 ## Sibyl Integration
 

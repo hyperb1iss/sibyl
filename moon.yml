@@ -105,11 +105,13 @@ tasks:
     preset: server
 
   quickstart-test-stop:
-    command: docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml down
+    command:
+      docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml down
     preset: server
 
   quickstart-test-logs:
-    command: docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml logs -f
+    command:
+      docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml logs -f
     preset: server
     options:
       persistent: true
