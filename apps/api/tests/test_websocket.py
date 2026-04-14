@@ -1,6 +1,7 @@
 """Tests for WebSocket org scoping and auth integration."""
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -113,6 +114,7 @@ class TestConnectionManagerOrgScoping:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Heartbeat sends should not block connect/disconnect operations."""
+        manager.HEARTBEAT_INTERVAL = 0
         send_started = asyncio.Event()
         release_send = asyncio.Event()
 
@@ -149,6 +151,58 @@ class TestConnectionManagerOrgScoping:
         release_send.set()
         with pytest.raises(asyncio.CancelledError):
             await heartbeat_task
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_disconnects_only_after_timeout(
+        self,
+        manager: ConnectionManager,
+    ) -> None:
+        """Pending heartbeat connections should expire by elapsed timeout."""
+        ws = MagicMock()
+        now = datetime.now(UTC)
+        manager.active_connections = [
+            Connection(
+                websocket=ws,
+                org_id="org_a",
+                last_activity=now - timedelta(seconds=30),
+                last_heartbeat_sent_at=now - timedelta(seconds=manager.PONG_TIMEOUT - 1),
+                pending_pong=True,
+            )
+        ]
+
+        heartbeat_connections, dead_connections = await manager._prepare_heartbeat_batch(
+            now=now,
+            send_heartbeats=False,
+        )
+        assert heartbeat_connections == []
+        assert dead_connections == []
+
+        heartbeat_connections, dead_connections = await manager._prepare_heartbeat_batch(
+            now=now + timedelta(seconds=manager.PONG_TIMEOUT + 1),
+            send_heartbeats=False,
+        )
+        assert heartbeat_connections == []
+        assert dead_connections == [ws]
+
+    def test_heartbeat_ack_clears_pending_state(self, manager: ConnectionManager) -> None:
+        """mark_activity should clear pending heartbeat state."""
+        ws = MagicMock()
+        now = datetime.now(UTC)
+        connection = Connection(
+            websocket=ws,
+            org_id="org_a",
+            last_activity=now - timedelta(seconds=5),
+            last_heartbeat_sent_at=now - timedelta(seconds=1),
+            pending_pong=True,
+        )
+        manager.active_connections = [connection]
+
+        manager.mark_activity(ws)
+
+        assert connection.pending_pong is False
+        assert connection.last_heartbeat_sent_at is None
+        assert connection.last_activity is not None
+        assert connection.last_activity >= now
 
 
 class TestExtractOrgFromToken:

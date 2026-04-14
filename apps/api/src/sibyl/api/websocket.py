@@ -15,7 +15,7 @@ For single-pod deployments, broadcasts work locally without Redis.
 
 import asyncio
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -38,6 +38,7 @@ class Connection:
     websocket: WebSocket
     org_id: str | None = None
     last_activity: datetime | None = None
+    last_heartbeat_sent_at: datetime | None = None
     pending_pong: bool = False
 
 
@@ -138,10 +139,16 @@ class ConnectionManager:
         for conn in self.active_connections:
             if conn.websocket == websocket:
                 conn.last_activity = datetime.now(UTC)
+                conn.last_heartbeat_sent_at = None
                 conn.pending_pong = False
                 break
 
-    async def _prepare_heartbeat_batch(self) -> tuple[list[Connection], list[WebSocket]]:
+    async def _prepare_heartbeat_batch(
+        self,
+        *,
+        now: datetime,
+        send_heartbeats: bool,
+    ) -> tuple[list[Connection], list[WebSocket]]:
         """Snapshot heartbeat work while keeping network I/O outside the lock."""
         async with self._lock:
             if not self.active_connections:
@@ -151,25 +158,37 @@ class ConnectionManager:
             dead_connections: list[WebSocket] = []
             for conn in self.active_connections:
                 if conn.pending_pong:
-                    dead_connections.append(conn.websocket)
+                    sent_at = conn.last_heartbeat_sent_at or conn.last_activity or now
+                    if (now - sent_at).total_seconds() >= self.PONG_TIMEOUT:
+                        dead_connections.append(conn.websocket)
                     continue
 
-                conn.pending_pong = True
-                heartbeat_connections.append(conn)
+                if send_heartbeats:
+                    conn.pending_pong = True
+                    conn.last_heartbeat_sent_at = now
+                    heartbeat_connections.append(conn)
 
         return heartbeat_connections, dead_connections
 
     async def _heartbeat_loop(self) -> None:
         """Background task that sends heartbeat pings and cleans up dead connections."""
+        next_heartbeat_at = datetime.now(UTC) + timedelta(seconds=self.HEARTBEAT_INTERVAL)
         while True:
-            await asyncio.sleep(self.HEARTBEAT_INTERVAL)
-
-            heartbeat_connections, dead_connections = await self._prepare_heartbeat_batch()
-            if not heartbeat_connections and not dead_connections:
-                log.debug("heartbeat_stopped", reason="no_connections")
-                break
-
             now = datetime.now(UTC)
+            send_heartbeats = now >= next_heartbeat_at
+            heartbeat_connections, dead_connections = await self._prepare_heartbeat_batch(
+                now=now,
+                send_heartbeats=send_heartbeats,
+            )
+            if not heartbeat_connections and not dead_connections:
+                async with self._lock:
+                    if not self.active_connections:
+                        log.debug("heartbeat_stopped", reason="no_connections")
+                        break
+
+            if send_heartbeats:
+                next_heartbeat_at = now + timedelta(seconds=self.HEARTBEAT_INTERVAL)
+
             for conn in heartbeat_connections:
                 try:
                     await conn.websocket.send_json(
@@ -186,6 +205,13 @@ class ConnectionManager:
             for ws in dead_connections:
                 log.info("heartbeat_timeout", reason="no_pong")
                 await self.disconnect(ws)
+
+            await asyncio.sleep(
+                min(
+                    self.PONG_TIMEOUT,
+                    max(0.1, (next_heartbeat_at - datetime.now(UTC)).total_seconds()),
+                )
+            )
 
 
 # Global connection manager instance
