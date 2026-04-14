@@ -55,6 +55,23 @@ def sanitize_search_query(query: str) -> str:
     return _REDISEARCH_SPECIAL_CHARS.sub(r" ", query)
 
 
+def _metadata_json_contains_params(prefix: str, field: str, value: str) -> tuple[dict[str, str], str]:
+    """Build CONTAINS params for legacy JSON-string metadata matching."""
+    compact_key = f"{prefix}_compact"
+    spaced_key = f"{prefix}_spaced"
+    normalized_value = value.lower()
+    return (
+        {
+            compact_key: f'"{field}":"{normalized_value}"',
+            spaced_key: f'"{field}": "{normalized_value}"',
+        },
+        (
+            f"toLower(toString(n.metadata)) CONTAINS ${compact_key} "
+            f"OR toLower(toString(n.metadata)) CONTAINS ${spaced_key}"
+        ),
+    )
+
+
 class EntityManager:
     """Manages entity CRUD operations in the knowledge graph."""
 
@@ -1131,13 +1148,24 @@ class EntityManager:
         log.debug("Getting project summary", project_id=project_id)
 
         try:
+            legacy_project_params, legacy_project_match = _metadata_json_contains_params(
+                "legacy_project",
+                "project_id",
+                project_id,
+            )
             # Fetch all tasks for the project
             result = await self._driver.execute_query(
-                """
+                f"""
                 MATCH (n)
                 WHERE n.entity_type = 'task'
                   AND n.group_id = $group_id
-                  AND (n.project_id = $project_id OR n.project_id IS NULL)
+                  AND (
+                      n.project_id = $project_id
+                      OR (
+                          (n.project_id IS NULL OR n.project_id = '')
+                          AND ({legacy_project_match})
+                      )
+                  )
                 RETURN n.uuid AS uuid,
                        n.name AS name,
                        n.project_id AS project_id,
@@ -1150,6 +1178,7 @@ class EntityManager:
                 """,
                 group_id=self._group_id,
                 project_id=project_id,
+                **legacy_project_params,
             )
 
             records = GraphClient.normalize_result(result)
