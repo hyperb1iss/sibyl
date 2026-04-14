@@ -619,19 +619,19 @@ Your directory is not linked. Run `sibyl context` — if `Project: none`, link i
 
 ## Common Pitfalls
 
-| Wrong                            | Correct                                           |
-| -------------------------------- | ------------------------------------------------- |
-| `sibyl task add "..."`           | `sibyl task create --title "..."`                 |
-| `sibyl task list --todo`         | `sibyl task list --status todo`                   |
-| `sibyl task create -t "..."`     | `sibyl task create --title "..."` (`-t` is type) |
-| `sibyl task update --learnings`  | `sibyl task complete --learnings` (!)             |
-| `sibyl task note` for completion | `sibyl task complete --learnings` (!)             |
-| `sibyl add note "content..."`    | `sibyl add "Title" "content..." --type note`      |
-| `sibyl search ... 2>/dev/null`   | `sibyl search ...` (never suppress stderr)        |
-| `sibyl search ... \|\| true`     | `sibyl search ...` (let errors surface)           |
-| `sibyl config`                   | `sibyl config show`                               |
-| `sibyl explore path A B`         | Not a real command — use `explore related`        |
-| `sibyl auth token`               | Not a real command — use `sibyl auth status`      |
+| Wrong                                | Correct                                          |
+| ------------------------------------ | ------------------------------------------------ |
+| `sibyl task add "..."`               | `sibyl task create --title "..."`                |
+| `sibyl task list --todo`             | `sibyl task list --status todo`                  |
+| `sibyl task create -t "..."`         | `sibyl task create --title "..."` (`-t` is type) |
+| `sibyl task update --learnings`      | `sibyl task complete --learnings` (!)            |
+| `sibyl task note` for completion     | `sibyl task complete --learnings` (!)            |
+| `sibyl add note "content..."`        | `sibyl add "Title" "content..." --type note`     |
+| `sibyl search ... 2>/dev/null`       | `sibyl search ...` (never suppress stderr)       |
+| `sibyl search ... \|\| true`         | `sibyl search ...` (let errors surface)          |
+| `sibyl config`                       | `sibyl config show`                              |
+| `sibyl explore path A B`             | Not a real command — use `explore related`       |
+| `sibyl auth token`                   | Not a real command — use `sibyl auth status`     |
 | Using `--type rule` or `--type tool` | These types don't exist — use `pattern`/`note`   |
 
 ### Notes vs Learnings
