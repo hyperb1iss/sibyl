@@ -413,6 +413,35 @@ class TestListAccessibleProjectGraphIds:
 
     @pytest.mark.asyncio
     @patch("sibyl.auth.authorization.get_graph_projects")
+    async def test_migration_mode_accepts_uuid_fallback(
+        self, mock_get_graph_projects: MagicMock
+    ) -> None:
+        """Accepts graph project payloads that only expose `uuid`."""
+        ctx = MagicMock()
+        ctx.organization = MagicMock()
+        ctx.organization.id = uuid4()
+        ctx.user = MagicMock()
+        ctx.user.id = uuid4()
+        ctx.org_role = OrganizationRole.MEMBER
+
+        migration_result = MagicMock()
+        migration_result.first.return_value = None
+        mock_get_graph_projects.return_value = [
+            {"uuid": "project_alpha", "name": "Alpha"},
+            {"uuid": "project_beta", "name": "Beta"},
+        ]
+
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = migration_result
+
+        result = await list_accessible_project_graph_ids(mock_session, ctx)
+
+        assert result == {"project_alpha", "project_beta"}
+        assert mock_session.execute.call_count == 1
+        mock_get_graph_projects.assert_awaited_once_with(str(ctx.organization.id))
+
+    @pytest.mark.asyncio
+    @patch("sibyl.auth.authorization.get_graph_projects")
     async def test_migration_mode_no_org_role_returns_empty(
         self, mock_get_graph_projects: MagicMock
     ) -> None:
