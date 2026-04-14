@@ -82,6 +82,7 @@ describe('ArchivePage', () => {
     expect(screen.getByText('Verbatim Content')).toBeInTheDocument();
     expect(screen.getByText('remember this exact text from the dashboard')).toBeInTheDocument();
     expect(screen.getAllByText('Quick memory').length).toBeGreaterThan(0);
+    expect(screen.getByText('Needs link')).toBeInTheDocument();
   });
 
   it('updates the route when selecting a different capture', async () => {
@@ -100,5 +101,19 @@ describe('ArchivePage', () => {
     await user.type(screen.getByPlaceholderText(/search titles, tags, metadata/i), 'alpha');
 
     expect(replace).toHaveBeenCalledWith('/archive?id=raw-1', { scroll: false });
+  });
+
+  it('filters the archive down to captures that still need linking', async () => {
+    const { user } = render(<ArchivePage />);
+
+    await user.click(screen.getByRole('button', { name: /needs link1/i }));
+
+    expect(
+      screen.getByRole('button', { name: /select capture deep thought/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /select capture quick memory/i })
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('remember this exact text from the terminal')).toBeInTheDocument();
   });
 });

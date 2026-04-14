@@ -80,6 +80,7 @@ export default function ArchivePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [surfaceFilter, setSurfaceFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [linkFilter, setLinkFilter] = useState<'all' | 'linked' | 'unlinked'>('all');
 
   const { data, isLoading, error } = useRawCaptures({
     limit: MAX_CAPTURE_RESULTS,
@@ -106,11 +107,17 @@ export default function ArchivePage() {
 
   const filteredCaptures = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    if (!query) {
-      return captures;
-    }
-
     return captures.filter(capture => {
+      if (linkFilter === 'linked' && !capture.entity_id) {
+        return false;
+      }
+      if (linkFilter === 'unlinked' && capture.entity_id) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+
       const tags = capture.tags.join(' ').toLowerCase();
       const metadata = JSON.stringify(capture.metadata).toLowerCase();
       return (
@@ -121,7 +128,7 @@ export default function ArchivePage() {
         metadata.includes(query)
       );
     });
-  }, [captures, searchQuery]);
+  }, [captures, linkFilter, searchQuery]);
 
   const requestedCaptureId = searchParams.get('id');
   const activeCaptureId = useMemo(() => {
@@ -158,6 +165,7 @@ export default function ArchivePage() {
     setSearchQuery('');
     setSurfaceFilter('all');
     setTypeFilter('all');
+    setLinkFilter('all');
   }, []);
 
   useEffect(() => {
@@ -173,6 +181,7 @@ export default function ArchivePage() {
       total: captures.length,
       surfaces: new Set(captures.map(capture => capture.capture_surface).filter(Boolean)).size,
       linked: captures.filter(capture => capture.entity_id).length,
+      unlinked: captures.filter(capture => !capture.entity_id).length,
     };
   }, [captures]);
 
@@ -237,11 +246,9 @@ export default function ArchivePage() {
           <p className="mt-1 text-sm text-sc-fg-muted">Verbatim quick-capture snapshots</p>
         </div>
         <div className="rounded-2xl border border-sc-fg-subtle/20 bg-sc-bg-base p-4 shadow-card">
-          <p className="text-xs uppercase tracking-[0.12em] text-sc-fg-subtle">Surfaces</p>
-          <p className="mt-2 text-2xl font-semibold text-sc-fg-primary">{stats.surfaces}</p>
-          <p className="mt-1 text-sm text-sc-fg-muted">
-            Distinct entry points preserving source context
-          </p>
+          <p className="text-xs uppercase tracking-[0.12em] text-sc-fg-subtle">Needs Link</p>
+          <p className="mt-2 text-2xl font-semibold text-sc-fg-primary">{stats.unlinked}</p>
+          <p className="mt-1 text-sm text-sc-fg-muted">Captures that still need graph linkage</p>
         </div>
         <div className="rounded-2xl border border-sc-fg-subtle/20 bg-sc-bg-base p-4 shadow-card">
           <p className="text-xs uppercase tracking-[0.12em] text-sc-fg-subtle">Linked Entities</p>
@@ -253,6 +260,33 @@ export default function ArchivePage() {
       <div className="grid gap-4 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
         <section className="space-y-3 rounded-2xl border border-sc-fg-subtle/20 bg-sc-bg-base p-4 shadow-card">
           <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: 'all', label: 'All', count: captures.length },
+                { value: 'linked', label: 'Linked', count: stats.linked },
+                { value: 'unlinked', label: 'Needs Link', count: stats.unlinked },
+              ].map(option => {
+                const active = linkFilter === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setLinkFilter(option.value as typeof linkFilter)}
+                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      active
+                        ? 'border-sc-purple/30 bg-sc-purple/15 text-sc-purple'
+                        : 'border-sc-fg-subtle/20 bg-sc-bg-highlight text-sc-fg-muted hover:border-sc-cyan/30 hover:text-sc-fg-primary'
+                    }`}
+                  >
+                    <span>{option.label}</span>
+                    <span className="rounded-full bg-black/20 px-1.5 py-0.5 text-[10px]">
+                      {option.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
             <Input
               type="text"
               value={searchQuery}
@@ -291,7 +325,10 @@ export default function ArchivePage() {
               </Select>
             </div>
 
-            {(searchQuery || surfaceFilter !== 'all' || typeFilter !== 'all') && (
+            {(searchQuery ||
+              surfaceFilter !== 'all' ||
+              typeFilter !== 'all' ||
+              linkFilter !== 'all') && (
               <div className="flex justify-end">
                 <Button variant="ghost" size="sm" onClick={clearFilters}>
                   Clear filters
@@ -338,6 +375,11 @@ export default function ArchivePage() {
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <EntityBadge type={capture.entity_type} />
+                      {!capture.entity_id && (
+                        <span className="rounded border border-sc-yellow/30 bg-sc-yellow/10 px-2 py-0.5 text-xs font-medium text-sc-yellow">
+                          Needs link
+                        </span>
+                      )}
                       {capture.tags.slice(0, 3).map(tag => (
                         <span
                           key={`${capture.id}-${tag}`}
