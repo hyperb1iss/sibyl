@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import ANY, AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, call, patch
 
 import pytest
 
+from sibyl_core.models.entities import EntityType
 from sibyl_core.tools.admin import (
     backfill_task_project_relationships,
     get_stats,
@@ -117,6 +118,71 @@ class TestHealthAndStats:
 
 class TestBackfillTaskProjectRelationships:
     """Project validation should page through the full project set."""
+
+    @pytest.mark.asyncio
+    async def test_backfill_task_project_relationships_pages_task_batches(self) -> None:
+        """Tasks beyond the first page should still be processed."""
+        org_id = "00000000-0000-0000-0000-000000000111"
+        client = AsyncMock()
+        entity_manager = AsyncMock()
+        relationship_manager = AsyncMock()
+
+        page_size = 2
+        task_page_one = [
+            SimpleNamespace(id="task-1", metadata={"project_id": "project-1"}),
+            SimpleNamespace(id="task-2", metadata={"project_id": "project-1"}),
+        ]
+        task_page_two = [SimpleNamespace(id="task-3", metadata={"project_id": "project-1"})]
+        project_page_one = [SimpleNamespace(id="project-1")]
+
+        async def list_by_type(entity_type: EntityType, limit: int = 50, offset: int = 0, **_: object) -> list[SimpleNamespace]:
+            assert limit == page_size
+            if entity_type == EntityType.TASK:
+                if offset == 0:
+                    return task_page_one
+                if offset == page_size:
+                    return task_page_two
+                return []
+            if entity_type == EntityType.PROJECT:
+                if offset == 0:
+                    return project_page_one
+                if offset == page_size:
+                    return []
+            raise AssertionError(f"Unexpected page request: {entity_type=} {offset=}")
+
+        entity_manager.list_by_type = AsyncMock(side_effect=list_by_type)
+        relationship_manager.get_for_entity = AsyncMock(return_value=[])
+
+        with (
+            patch(
+                "sibyl_core.tools.admin.get_graph_client",
+                AsyncMock(return_value=client),
+            ),
+            patch(
+                "sibyl_core.tools.admin.EntityManager",
+                return_value=entity_manager,
+            ),
+            patch(
+                "sibyl_core.tools.admin.RelationshipManager",
+                return_value=relationship_manager,
+            ),
+            patch("sibyl_core.tools.admin.BACKFILL_PAGE_SIZE", page_size),
+        ):
+            result = await backfill_task_project_relationships(organization_id=org_id, dry_run=True)
+
+        assert result.relationships_created == 3
+        assert result.errors == []
+        assert result.tasks_without_project == 0
+        assert result.tasks_already_linked == 0
+        assert relationship_manager.get_for_entity.await_count == 3
+        entity_manager.list_by_type.assert_has_awaits(
+            [
+                call(EntityType.TASK, limit=page_size, offset=0),
+                call(EntityType.TASK, limit=page_size, offset=page_size),
+                call(EntityType.PROJECT, limit=page_size, offset=0, include_archived=True),
+            ],
+            any_order=False,
+        )
 
     @pytest.mark.asyncio
     async def test_backfill_task_project_relationships_pages_project_validation(self) -> None:

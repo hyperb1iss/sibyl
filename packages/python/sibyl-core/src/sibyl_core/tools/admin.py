@@ -17,6 +17,8 @@ from sibyl_core.models.entities import Entity, EntityType, Relationship, Relatio
 
 log = structlog.get_logger()
 
+BACKFILL_PAGE_SIZE = 1000
+
 
 async def _get_entity_counts(client: GraphClient, organization_id: str) -> dict[str, int]:
     """Count entities by type with a single org-scoped aggregation query."""
@@ -719,18 +721,33 @@ async def backfill_task_project_relationships(
         entity_manager = EntityManager(client, group_id=organization_id)
         relationship_manager = RelationshipManager(client, group_id=organization_id)
 
-        # Get all tasks
-        tasks = await entity_manager.list_by_type(EntityType.TASK, limit=10000)
+        # Get all tasks in pages so large organizations are fully processed.
+        tasks: list[Entity] = []
+        task_offset = 0
+        while True:
+            batch = await entity_manager.list_by_type(
+                EntityType.TASK,
+                limit=BACKFILL_PAGE_SIZE,
+                offset=task_offset,
+            )
+            if not batch:
+                break
+
+            tasks.extend(batch)
+            task_offset += BACKFILL_PAGE_SIZE
+
+            if len(batch) < BACKFILL_PAGE_SIZE:
+                break
+
         log.info("Found tasks to process", count=len(tasks))
 
         # Get all projects for validation.
         project_ids: set[str] = set()
         project_offset = 0
-        project_page_size = 1000
         while True:
             projects = await entity_manager.list_by_type(
                 EntityType.PROJECT,
-                limit=project_page_size,
+                limit=BACKFILL_PAGE_SIZE,
                 offset=project_offset,
                 include_archived=True,
             )
@@ -738,9 +755,9 @@ async def backfill_task_project_relationships(
                 break
 
             project_ids.update(p.id for p in projects)
-            project_offset += project_page_size
+            project_offset += BACKFILL_PAGE_SIZE
 
-            if len(projects) < project_page_size:
+            if len(projects) < BACKFILL_PAGE_SIZE:
                 break
 
         log.info("Found projects", count=len(project_ids))
