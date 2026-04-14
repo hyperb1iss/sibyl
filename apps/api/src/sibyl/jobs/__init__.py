@@ -31,9 +31,11 @@ from sibyl.jobs.queue import (
     JobStatus,
     enqueue_backup,
     enqueue_backup_cleanup,
+    enqueue_consolidation,
     enqueue_crawl,
     enqueue_create_entity,
     enqueue_create_learning_episode,
+    enqueue_priority_decay,
     enqueue_sync,
     enqueue_update_entity,
     enqueue_update_task,
@@ -69,6 +71,8 @@ __all__ = [
     # Backup queue
     "enqueue_backup",
     "enqueue_backup_cleanup",
+    "enqueue_consolidation",
+    "enqueue_priority_decay",
     # Job functions (for direct testing)
     "crawl_source",
     "sync_source",

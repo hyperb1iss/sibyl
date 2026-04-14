@@ -644,3 +644,79 @@ async def enqueue_backup_cleanup(
 
     await _record_recent_job(pool, job.job_id)
     return job.job_id
+
+
+async def enqueue_consolidation(
+    group_id: str,
+    *,
+    similarity_threshold: float = 0.90,
+    max_merges_per_run: int = 50,
+) -> str:
+    """Enqueue an org-scoped consolidation job."""
+    pool = await get_pool()
+
+    job_id = f"consolidate:{group_id}"
+    result_key = f"arq:result:{job_id}"
+    await pool.delete(result_key)
+
+    job = await pool.enqueue_job(
+        "consolidate_org",
+        group_id,
+        similarity_threshold=similarity_threshold,
+        max_merges_per_run=max_merges_per_run,
+        _job_id=job_id,
+    )
+
+    if job is None:
+        log.info("Consolidation job already running", job_id=job_id, group_id=group_id)
+        await _record_recent_job(pool, job_id)
+        return job_id
+
+    log.info(
+        "Enqueued consolidation job",
+        job_id=job.job_id,
+        group_id=group_id,
+        similarity_threshold=similarity_threshold,
+        max_merges_per_run=max_merges_per_run,
+    )
+
+    await _record_recent_job(pool, job.job_id)
+    return job.job_id
+
+
+async def enqueue_priority_decay(
+    group_id: str,
+    *,
+    min_age_days: int = 180,
+    max_archives_per_run: int = 100,
+) -> str:
+    """Enqueue an org-scoped forgetting sweep."""
+    pool = await get_pool()
+
+    job_id = f"priority_decay:{group_id}"
+    result_key = f"arq:result:{job_id}"
+    await pool.delete(result_key)
+
+    job = await pool.enqueue_job(
+        "priority_decay",
+        group_id,
+        min_age_days=min_age_days,
+        max_archives_per_run=max_archives_per_run,
+        _job_id=job_id,
+    )
+
+    if job is None:
+        log.info("Priority decay job already running", job_id=job_id, group_id=group_id)
+        await _record_recent_job(pool, job_id)
+        return job_id
+
+    log.info(
+        "Enqueued priority decay job",
+        job_id=job.job_id,
+        group_id=group_id,
+        min_age_days=min_age_days,
+        max_archives_per_run=max_archives_per_run,
+    )
+
+    await _record_recent_job(pool, job.job_id)
+    return job.job_id

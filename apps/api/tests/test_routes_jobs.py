@@ -9,7 +9,13 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
-from sibyl.api.routes.jobs import _job_visible_to_org, cancel_job, list_jobs
+from sibyl.api.routes.jobs import (
+    _job_visible_to_org,
+    cancel_job,
+    list_jobs,
+    trigger_consolidation,
+    trigger_priority_decay,
+)
 
 
 class TestJobVisibility:
@@ -54,6 +60,25 @@ class TestJobVisibility:
 
         assert await _job_visible_to_org(job, org=org, session=session) is True
         session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_maintenance_jobs_use_group_id_argument(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        session = AsyncMock()
+        visible = SimpleNamespace(
+            function="consolidate_org",
+            args=(str(org.id),),
+            kwargs=None,
+        )
+        hidden = SimpleNamespace(
+            function="priority_decay",
+            args=("00000000-0000-0000-0000-000000000999",),
+            kwargs=None,
+        )
+
+        assert await _job_visible_to_org(visible, org=org, session=session) is True
+        assert await _job_visible_to_org(hidden, org=org, session=session) is False
+        session.execute.assert_not_called()
 
 
 class TestListJobsRoute:
@@ -156,3 +181,41 @@ class TestCancelJobRoute:
 
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail == "Job not found: crawl:source-123"
+
+
+class TestMaintenanceTriggers:
+    @pytest.mark.asyncio
+    async def test_trigger_consolidation_enqueues_for_current_org(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+
+        with patch(
+            "sibyl.jobs.queue.enqueue_consolidation",
+            AsyncMock(return_value="consolidate:00000000-0000-0000-0000-000000000111"),
+        ) as enqueue:
+            response = await trigger_consolidation(org=org)
+
+        enqueue.assert_awaited_once_with("00000000-0000-0000-0000-000000000111")
+        assert response == {
+            "job_id": "consolidate:00000000-0000-0000-0000-000000000111",
+            "function": "consolidate_org",
+            "status": "queued",
+            "message": "Consolidation run queued",
+        }
+
+    @pytest.mark.asyncio
+    async def test_trigger_priority_decay_enqueues_for_current_org(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+
+        with patch(
+            "sibyl.jobs.queue.enqueue_priority_decay",
+            AsyncMock(return_value="priority_decay:00000000-0000-0000-0000-000000000111"),
+        ) as enqueue:
+            response = await trigger_priority_decay(org=org)
+
+        enqueue.assert_awaited_once_with("00000000-0000-0000-0000-000000000111")
+        assert response == {
+            "job_id": "priority_decay:00000000-0000-0000-0000-000000000111",
+            "function": "priority_decay",
+            "status": "queued",
+            "message": "Forgetting sweep queued",
+        }

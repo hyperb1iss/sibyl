@@ -1111,6 +1111,31 @@ export interface CleanupResponse {
   message: string;
 }
 
+export type BackgroundJobStatus = 'queued' | 'in_progress' | 'complete' | 'deferred' | 'not_found';
+
+export interface BackgroundJobSummary {
+  job_id: string;
+  function: string;
+  status: BackgroundJobStatus;
+  enqueue_time: string | null;
+  start_time: string | null;
+  finish_time: string | null;
+  error: string | null;
+}
+
+export interface BackgroundJobListResponse {
+  jobs: BackgroundJobSummary[];
+  total: number;
+  error?: string;
+}
+
+export interface MaintenanceJobResponse {
+  job_id: string;
+  function: 'consolidate_org' | 'priority_decay';
+  status: 'queued';
+  message: string;
+}
+
 // =============================================================================
 // API Functions
 // =============================================================================
@@ -1492,6 +1517,24 @@ export const api = {
           backup_data: backupData,
           skip_existing: skipExisting,
         }),
+      }),
+  },
+
+  jobs: {
+    list: (params?: { function?: string; limit?: number }) => {
+      const search = new URLSearchParams();
+      if (params?.function) search.set('function', params.function);
+      if (params?.limit) search.set('limit', String(params.limit));
+      const suffix = search.toString();
+      return fetchApi<BackgroundJobListResponse>(`/jobs${suffix ? `?${suffix}` : ''}`);
+    },
+    runConsolidation: () =>
+      fetchApi<MaintenanceJobResponse>('/jobs/consolidation', {
+        method: 'POST',
+      }),
+    runPriorityDecay: () =>
+      fetchApi<MaintenanceJobResponse>('/jobs/forgetting', {
+        method: 'POST',
       }),
   },
 

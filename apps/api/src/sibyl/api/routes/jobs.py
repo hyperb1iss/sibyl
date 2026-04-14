@@ -49,6 +49,8 @@ async def _job_visible_to_org(
         return str(args[2]) == str(org.id)
     if fn == "update_entity" and len(args) >= 4:
         return str(args[3]) == str(org.id)
+    if fn in {"consolidate_org", "priority_decay"} and args:
+        return str(args[0]) == str(org.id)
 
     # Source jobs are keyed by source_id; resolve org ownership from DB.
     if fn in {"crawl_source", "sync_source"} and len(args) >= 1:
@@ -176,6 +178,54 @@ async def list_jobs(
     except Exception as e:
         log.warning("Failed to list jobs", error=str(e))
         return {"jobs": [], "total": 0, "error": "Failed to list jobs"}
+
+
+@router.post("/consolidation")
+async def trigger_consolidation(
+    org: Organization = Depends(get_current_organization),
+) -> dict[str, Any]:
+    """Trigger an org-scoped consolidation run."""
+    from sibyl.jobs.queue import enqueue_consolidation
+
+    try:
+        job_id = await enqueue_consolidation(str(org.id))
+    except Exception as e:
+        log.warning("Failed to enqueue consolidation job", org_id=str(org.id), error=str(e))
+        raise HTTPException(
+            status_code=503,
+            detail="Failed to enqueue consolidation job",
+        ) from e
+
+    return {
+        "job_id": job_id,
+        "function": "consolidate_org",
+        "status": "queued",
+        "message": "Consolidation run queued",
+    }
+
+
+@router.post("/forgetting")
+async def trigger_priority_decay(
+    org: Organization = Depends(get_current_organization),
+) -> dict[str, Any]:
+    """Trigger an org-scoped forgetting sweep."""
+    from sibyl.jobs.queue import enqueue_priority_decay
+
+    try:
+        job_id = await enqueue_priority_decay(str(org.id))
+    except Exception as e:
+        log.warning("Failed to enqueue priority decay job", org_id=str(org.id), error=str(e))
+        raise HTTPException(
+            status_code=503,
+            detail="Failed to enqueue priority decay job",
+        ) from e
+
+    return {
+        "job_id": job_id,
+        "function": "priority_decay",
+        "status": "queued",
+        "message": "Forgetting sweep queued",
+    }
 
 
 @router.get("/{job_id}")

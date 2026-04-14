@@ -283,3 +283,39 @@ async def test_enqueue_backup_cleanup_indexes_recent_job(
     assert pool.calls[0][0] == "cleanup_old_backups"
     assert pool.calls[0][2]["retention_days"] == 7
     assert_recent_job_indexed(pool, "backup_cleanup")
+
+
+@pytest.mark.asyncio
+async def test_enqueue_consolidation_uses_org_scoped_job_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = RecordingEnqueuePool()
+    monkeypatch.setattr(queue_module, "get_pool", AsyncMock(return_value=pool))
+
+    job_id = await queue_module.enqueue_consolidation("org-123")
+
+    assert job_id == "consolidate:org-123"
+    assert pool.calls[0][0] == "consolidate_org"
+    assert pool.calls[0][1] == "org-123"
+    assert pool.calls[0][2]["similarity_threshold"] == 0.90
+    assert pool.calls[0][2]["max_merges_per_run"] == 50
+    assert pool.delete.await_args_list[-1].args == ("arq:result:consolidate:org-123",)
+    assert_recent_job_indexed(pool, "consolidate:org-123")
+
+
+@pytest.mark.asyncio
+async def test_enqueue_priority_decay_uses_org_scoped_job_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = RecordingEnqueuePool()
+    monkeypatch.setattr(queue_module, "get_pool", AsyncMock(return_value=pool))
+
+    job_id = await queue_module.enqueue_priority_decay("org-123")
+
+    assert job_id == "priority_decay:org-123"
+    assert pool.calls[0][0] == "priority_decay"
+    assert pool.calls[0][1] == "org-123"
+    assert pool.calls[0][2]["min_age_days"] == 180
+    assert pool.calls[0][2]["max_archives_per_run"] == 100
+    assert pool.delete.await_args_list[-1].args == ("arq:result:priority_decay:org-123",)
+    assert_recent_job_indexed(pool, "priority_decay:org-123")

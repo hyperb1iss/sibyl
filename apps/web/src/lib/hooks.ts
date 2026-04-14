@@ -151,6 +151,10 @@ export const queryKeys = {
     detail: (id: string) => ['backups', 'detail', id] as const,
     jobStatus: (jobId: string) => ['backups', 'job', jobId] as const,
   },
+  jobs: {
+    all: ['jobs'] as const,
+    list: (params?: Parameters<typeof api.jobs.list>[0]) => ['jobs', 'list', params] as const,
+  },
 };
 
 /**
@@ -1612,6 +1616,35 @@ export function useBackups(options?: { enabled?: boolean; limit?: number; offset
     enabled: options?.enabled ?? true,
     staleTime: 10000,
     refetchInterval: 30000, // Auto-refresh every 30 seconds
+  });
+}
+
+export function useJobs(options?: { enabled?: boolean; function?: string; limit?: number }) {
+  return useQuery({
+    queryKey: queryKeys.jobs.list({
+      function: options?.function,
+      limit: options?.limit ?? 25,
+    }),
+    queryFn: () =>
+      api.jobs.list({
+        function: options?.function,
+        limit: options?.limit ?? 25,
+      }),
+    enabled: options?.enabled ?? true,
+    staleTime: 5000,
+    refetchInterval: 15000,
+  });
+}
+
+export function useRunMaintenanceJob() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ action }: { action: 'consolidate' | 'forget' }) =>
+      action === 'consolidate' ? api.jobs.runConsolidation() : api.jobs.runPriorityDecay(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+    },
   });
 }
 
