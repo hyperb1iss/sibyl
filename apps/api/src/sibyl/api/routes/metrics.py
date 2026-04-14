@@ -359,7 +359,7 @@ async def _fetch_task_overview(
                count(
                    CASE
                        WHEN n.created_at IS NOT NULL
-                        AND datetime(n.created_at) >= datetime($recent_cutoff)
+                        AND n.created_at >= $recent_cutoff
                        THEN 1
                    END
                ) AS tasks_created_last_7d
@@ -424,7 +424,7 @@ async def _fetch_project_task_counts(client, organization_id: str, now: datetime
                        WHEN toLower(coalesce(n.status, 'backlog')) <> 'done'
                         AND n.due_date IS NOT NULL
                         AND n.due_date <> ''
-                        AND datetime(n.due_date) < datetime($now_iso)
+                        AND n.due_date < $now_iso
                        THEN 1
                    END
                ) AS overdue
