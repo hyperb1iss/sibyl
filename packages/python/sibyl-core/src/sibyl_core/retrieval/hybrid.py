@@ -51,9 +51,11 @@ class HybridConfig:
     """Configuration for hybrid retrieval.
 
     Attributes:
-        vector_weight: Weight for vector search results.
+        vector_weight: Weight for Graphiti node-hybrid seed results.
         graph_weight: Weight for graph traversal results.
-        bm25_weight: Weight for BM25 keyword results.
+        bm25_weight: Reserved for a future explicit BM25 leg. Runtime keyword
+            retrieval currently comes from Graphiti's node-hybrid search inside
+            EntityManager.search().
         rrf_k: RRF constant (higher = more uniform).
         graph_depth: Maximum depth for graph traversal.
         apply_temporal: Whether to apply temporal boosting.
@@ -65,6 +67,8 @@ class HybridConfig:
 
     vector_weight: float = 1.0
     graph_weight: float = 0.8
+    # Reserved for a future explicit BM25 branch. Current runtime keyword
+    # retrieval is handled inside Graphiti's node-hybrid search.
     bm25_weight: float = 0.5
     rrf_k: float = 60.0
     graph_depth: int = 2
@@ -105,7 +109,7 @@ async def vector_search(
     entity_types: list[Any] | None = None,
     limit: int = 20,
 ) -> list[tuple[Any, float]]:
-    """Perform vector similarity search.
+    """Perform Graphiti node-hybrid seed search.
 
     Args:
         query: Search query.
@@ -240,9 +244,9 @@ async def hybrid_search(
     """Perform hybrid search combining multiple retrieval strategies.
 
     Strategy:
-    1. Run vector search in parallel with BM25 search
-    2. Use top vector results as seeds for graph traversal
-    3. Merge all results using RRF
+    1. Run Graphiti node-hybrid search for initial seed results
+    2. Use top seed results as inputs for graph traversal
+    3. Merge seed and graph-traversal results using RRF
     4. Optionally apply temporal boosting
 
     Args:
@@ -264,7 +268,7 @@ async def hybrid_search(
 
     log.info("hybrid_search_start", query=query[:50], limit=limit)
 
-    # Phase 1: Parallel vector and BM25 search
+    # Phase 1: Graphiti node-hybrid seed search
     vector_task = asyncio.create_task(
         vector_search(query, entity_manager, entity_types, limit=limit * 2)
     )

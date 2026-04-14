@@ -319,7 +319,8 @@ async def search(
                 except ValueError:
                     log.warning("invalid_since_date", since=since)
 
-            # Perform search - try enhanced hybrid first, fall back to vector-only
+            # Perform search - try enhanced hybrid first, then fall back to
+            # Graphiti's node-hybrid search directly.
             raw_results: list[tuple[Any, float]] = []
 
             if use_enhanced:
@@ -355,7 +356,7 @@ async def search(
                 except Exception as e:
                     log.warning("enhanced_search_failed_fallback", error=str(e))
 
-            # Fall back to vector-only search
+            # Fall back to Graphiti's node-hybrid search
             if not raw_results:
                 raw_results = await with_timeout(
                     entity_manager.search(

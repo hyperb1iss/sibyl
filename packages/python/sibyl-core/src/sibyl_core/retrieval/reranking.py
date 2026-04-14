@@ -5,7 +5,7 @@ relevance scores than bi-encoder similarity. Applied after initial retrieval
 (RRF fusion) to refine the top-k results.
 
 Typical pipeline:
-1. Initial retrieval: Vector search + graph traversal + BM25
+1. Initial retrieval: Graphiti node-hybrid search + graph traversal
 2. RRF fusion: Merge into unified ranking
 3. Cross-encoder reranking: Refine top-k with pairwise scoring
 4. Temporal boost: Favor recent content
