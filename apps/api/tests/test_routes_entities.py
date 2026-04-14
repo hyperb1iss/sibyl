@@ -42,9 +42,12 @@ class TestListEntitiesRoute:
         client = object()
         manager = MagicMock()
         manager.list_by_type = AsyncMock(
-            return_value=[
-                _entity("ent-match", project_id="proj-1", name="Match"),
-                _entity("ent-other", project_id="proj-2", name="Other"),
+            side_effect=[
+                [
+                    _entity("ent-match", project_id="proj-1", name="Match"),
+                    _entity("ent-other", project_id="proj-2", name="Other"),
+                ],
+                [],
             ]
         )
         manager.list_all = AsyncMock()
@@ -66,11 +69,20 @@ class TestListEntitiesRoute:
                 sort_order=SortOrder.DESC,
             )
 
-        manager.list_by_type.assert_awaited_once_with(
-            EntityType.TASK,
-            limit=1000,
-            project_id="proj-1",
-        )
+        assert manager.list_by_type.await_args_list == [
+            call(
+                EntityType.TASK,
+                limit=1000,
+                offset=0,
+                project_id="proj-1",
+            ),
+            call(
+                EntityType.TASK,
+                limit=1000,
+                offset=1000,
+                project_id="proj-1",
+            ),
+        ]
         manager.list_all.assert_not_awaited()
         assert [entity.id for entity in response.entities] == ["ent-match"]
         assert response.total == 1
@@ -82,10 +94,13 @@ class TestListEntitiesRoute:
         client = object()
         manager = MagicMock()
         manager.list_by_type = AsyncMock(
-            return_value=[
-                _entity("ent-match", project_id="proj-1", name="Match"),
-                _entity("ent-unassigned", project_id=None, name="Unassigned"),
-                _entity("ent-other", project_id="proj-2", name="Other"),
+            side_effect=[
+                [
+                    _entity("ent-match", project_id="proj-1", name="Match"),
+                    _entity("ent-other", project_id="proj-2", name="Other"),
+                    _entity("ent-unassigned", project_id=None, name="Unassigned"),
+                ],
+                [],
             ]
         )
         manager.list_all = AsyncMock()
@@ -107,13 +122,71 @@ class TestListEntitiesRoute:
                 sort_order=SortOrder.DESC,
             )
 
-        manager.list_by_type.assert_awaited_once_with(EntityType.TASK, limit=1000)
+        assert manager.list_by_type.await_args_list == [
+            call(
+                EntityType.TASK,
+                limit=1000,
+                offset=0,
+            ),
+            call(
+                EntityType.TASK,
+                limit=1000,
+                offset=1000,
+            ),
+        ]
         manager.list_all.assert_not_awaited()
         assert [entity.id for entity in response.entities] == [
             "ent-match",
             "ent-unassigned",
         ]
         assert response.total == 2
+        assert response.has_more is False
+
+    @pytest.mark.asyncio
+    async def test_typed_entity_queries_page_past_first_batch(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        client = object()
+        manager = MagicMock()
+        manager.list_by_type = AsyncMock(
+            side_effect=[
+                [
+                    _entity("ent-1", project_id="proj-1", name="One"),
+                    _entity("ent-2", project_id="proj-2", name="Two"),
+                ],
+                [
+                    _entity("ent-3", project_id="proj-3", name="Three"),
+                ],
+                [],
+            ]
+        )
+        manager.list_all = AsyncMock()
+
+        with (
+            patch.object(entities_routes, "LIST_BY_TYPE_PAGE_SIZE", 2),
+            patch("sibyl.api.routes.entities.get_graph_client", AsyncMock(return_value=client)),
+            patch("sibyl.api.routes.entities.EntityManager", return_value=manager),
+        ):
+            response = await list_entities(
+                org=org,
+                entity_type=EntityType.TASK,
+                language=None,
+                category=None,
+                search=None,
+                project_ids=None,
+                page=1,
+                page_size=50,
+                sort_by=SortField.UPDATED_AT,
+                sort_order=SortOrder.DESC,
+            )
+
+        assert manager.list_by_type.await_args_list == [
+            call(EntityType.TASK, limit=2, offset=0),
+            call(EntityType.TASK, limit=2, offset=2),
+            call(EntityType.TASK, limit=2, offset=4),
+        ]
+        manager.list_all.assert_not_awaited()
+        assert [entity.id for entity in response.entities] == ["ent-1", "ent-2", "ent-3"]
+        assert response.total == 3
         assert response.has_more is False
 
     @pytest.mark.asyncio

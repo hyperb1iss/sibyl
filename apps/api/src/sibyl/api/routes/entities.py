@@ -75,6 +75,7 @@ router = APIRouter(
 )
 
 LIST_ALL_PAGE_SIZE = 2000
+LIST_BY_TYPE_PAGE_SIZE = 1000
 
 
 # =============================================================================
@@ -105,6 +106,35 @@ async def _list_all_entities_paginated(
             for entity in batch
             if not ((getattr(entity, "metadata", None) or {}).get("archived"))
         )
+        offset += batch_size
+
+    return entities
+
+
+async def _list_entities_by_type_paginated(
+    entity_manager: EntityManager,
+    entity_type: EntityType,
+    *,
+    project_id: str | None = None,
+    batch_size: int | None = None,
+) -> list[Any]:
+    batch_size = LIST_BY_TYPE_PAGE_SIZE if batch_size is None else batch_size
+    entities: list[Any] = []
+    offset = 0
+
+    while True:
+        list_kwargs: dict[str, Any] = {
+            "limit": batch_size,
+            "offset": offset,
+        }
+        if project_id:
+            list_kwargs["project_id"] = project_id
+
+        batch = await entity_manager.list_by_type(entity_type, **list_kwargs)
+        if not batch:
+            break
+
+        entities.extend(batch)
         offset += batch_size
 
     return entities
@@ -238,10 +268,11 @@ async def list_entities(
         )
 
         if entity_type:
-            list_kwargs: dict[str, Any] = {"limit": 1000}
-            if single_project_id:
-                list_kwargs["project_id"] = single_project_id
-            all_entities = await entity_manager.list_by_type(entity_type, **list_kwargs)
+            all_entities = await _list_entities_by_type_paginated(
+                entity_manager,
+                entity_type,
+                project_id=single_project_id,
+            )
         else:
             all_entities = await _list_all_entities_paginated(entity_manager)
 
