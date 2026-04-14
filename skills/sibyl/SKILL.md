@@ -12,36 +12,68 @@ allowed-tools: Bash, Grep, Glob, Read
 Sibyl gives you persistent memory across coding sessions. Search patterns, track tasks, capture
 learnings—all stored in a knowledge graph.
 
+## Agent Rules (READ FIRST)
+
+These rules exist because real agent sessions consistently fail without them.
+
+1. **NEVER redirect stderr.** Do not append `2>/dev/null` to sibyl commands. Error messages contain
+   diagnostic information you need. Suppressing them causes silent failures and blind retry spirals.
+
+2. **Link your project BEFORE doing anything else.** Run `sibyl context` first. If it shows
+   `Project: none`, you MUST run `sibyl project link <id>` before searching or listing tasks.
+   Without a link, searches return results from unrelated projects and task lists show global noise.
+
+3. **Always complete the retrieval pattern.** Search returns truncated previews. When you need
+   details, follow up with `sibyl entity show <id>` using the ID from the search result. Working
+   from truncated summaries leads to incomplete understanding.
+
+4. **Capture learnings proactively.** When you solve something non-obvious, run `sibyl add` or use
+   `--learnings` on task completion. Do not ask permission first—the whole point is building
+   institutional memory.
+
+5. **Check health before retrying.** If a command fails with a connection error, run `sibyl health`.
+   If the server is down, don't retry the same command. Report it and move on.
+
+6. **Never invent subcommands.** If you're unsure whether a command exists, run
+   `sibyl <group> --help`. Do not guess. Commands like `sibyl auth token`, `sibyl db backup`, and
+   `sibyl explore path` do not exist.
+
+---
+
 ## Quick Start
 
 ```bash
-# Link your directory to a project (one-time setup)
-sibyl project list                     # Find your project ID
+# 1. Check connection
+sibyl health
+
+# 2. Link your directory to a project (one-time, critical!)
+sibyl project list                        # Find your project ID
 sibyl project link proj_a1b2c3d4e5f6      # Link cwd to that project
+sibyl context                             # Verify: should show your project
 
-# Check current context
-sibyl context
-
-# Now task commands auto-scope to your project!
+# 3. Now task commands auto-scope to your project
 sibyl task list --status todo   # Only shows tasks for linked project
 
-# Search for knowledge
+# 4. Search for knowledge
 sibyl search "authentication patterns"
 
-# Quickly add a learning
+# 5. Get full content from a search result
+sibyl entity show "episode:abc123-uuid-here"
+
+# 6. Add a learning
 sibyl add "Redis insight" "Connection pool must be >= concurrent requests"
 
-# Start a task
+# 7. Start a task
 sibyl task start task_a1b2c3d4e5f6
 
-# Complete with learnings
+# 8. Complete with learnings
 sibyl task complete task_a1b2c3d4e5f6 --learnings "OAuth tokens expire..."
 ```
 
 **Pro tips:**
 
-- **Link your project first** - then task commands just work without `--project`
-- **Table output is default** - use `--json` only for scripting
+- **Link your project first** — then task commands just work without `--project`
+- **Table output is default** — use `--json` only for scripting
 - Use `--all` flag to bypass context and see all projects
 
 ---
@@ -226,17 +258,17 @@ Epics group related tasks into larger features or initiatives.
 
 ```bash
 sibyl epic list                                    # List epics
+sibyl epic list --status in_progress               # Filter by status
 sibyl epic create --title "Auth System"            # Create epic
-sibyl epic show epic_abc123                        # Show with progress
-sibyl epic start epic_abc123                       # Start epic
-sibyl epic tasks epic_abc123                       # List tasks in epic
-sibyl epic complete epic_abc123                    # Complete epic
-sibyl epic roadmap                                 # Generate markdown summary
-sibyl epic roadmap -o roadmap.md --include-done   # Save to file with done tasks
+sibyl epic show epic_a1b2c3d4e5f6                  # Show with progress
+sibyl epic start epic_a1b2c3d4e5f6                 # Start epic
+sibyl epic complete epic_a1b2c3d4e5f6              # Complete epic
+sibyl epic archive epic_a1b2c3d4e5f6               # Archive epic
 ```
 
-**Workflow:** Create epic → create tasks with `--epic` flag → work tasks → `epic roadmap` to review
-→ complete
+**Workflow:** Create epic → create tasks with `--epic` flag → work tasks → complete
+
+**Find tasks in an epic:** `sibyl task list --epic epic_a1b2c3d4e5f6`
 
 ---
 
@@ -286,7 +318,7 @@ sibyl entity related epsd_a1b2c3d4e5f6
 sibyl entity delete epsd_a1b2c3d4e5f6
 ```
 
-**Entity Types:** pattern, rule, template, tool, topic, episode, task, project, source, document
+**Entity Types:** task, epic, project, pattern, episode, document, note, source, placeholder
 
 ---
 
@@ -302,8 +334,8 @@ sibyl explore traverse ptrn_a1b2c3d4e5f6 --depth 2
 # Task dependency chain
 sibyl explore dependencies task_a1b2c3d4e5f6
 
-# Find path between entities
-sibyl explore path ptrn_a1b2c3d4e5f6 task_d4e5f6a1b2c3
+# Project-wide dependencies
+sibyl explore dependencies --project proj_a1b2c3d4e5f6
 ```
 
 ---
@@ -317,8 +349,96 @@ sibyl health
 # Show statistics
 sibyl stats
 
-# Show config
-sibyl config
+# Show configuration
+sibyl config show
+```
+
+---
+
+### Documentation & Sources
+
+Sibyl can crawl and index external documentation for RAG search.
+
+```bash
+# List crawl sources
+sibyl crawl sources
+
+# Add a documentation source
+sibyl crawl add "https://docs.example.com" --name "Example Docs" --depth 2
+
+# Start crawling
+sibyl crawl ingest source_a1b2c3d4e5f6
+
+# Check crawl status
+sibyl crawl status source_a1b2c3d4e5f6
+
+# List crawled documents
+sibyl document list --source source_a1b2c3d4e5f6
+
+# Read a crawled document
+sibyl document show doc_a1b2c3d4e5f6
+```
+
+---
+
+### Context Management
+
+Contexts bundle server, org, and project settings. Useful for switching between environments.
+
+```bash
+# Show current context
+sibyl context
+
+# List all contexts
+sibyl context list
+
+# Create a named context
+sibyl context create prod --server https://sibyl.example.com --org myorg --use
+
+# Switch contexts
+sibyl context use prod
+```
+
+---
+
+### Server Logs & Debugging
+
+Requires OWNER role. Useful when debugging graph issues or unexpected results.
+
+```bash
+# View recent logs
+sibyl logs tail
+sibyl logs tail -l error              # Filter by level
+sibyl logs tail -s api -n 100         # Filter by service, more entries
+
+# Search logs
+sibyl logs search "timeout" --from 2025-04-01
+
+# Inspect graph schema
+sibyl debug schema
+
+# Run read-only Cypher query
+sibyl debug query "MATCH (n:Entity) RETURN labels(n), count(*)"
+
+# Database metrics
+sibyl debug metrics
+```
+
+---
+
+### Entity History (Bi-Temporal)
+
+Query how entities and their relationships changed over time.
+
+```bash
+# Full history of an entity
+sibyl entity history entity_a1b2c3d4e5f6
+
+# Point-in-time snapshot
+sibyl entity history entity_a1b2c3d4e5f6 --as-of 2025-03-15
+
+# Timeline view
+sibyl entity history entity_a1b2c3d4e5f6 --mode timeline
 ```
 
 ---
@@ -376,15 +496,16 @@ sibyl task complete task_a1b2c3d4e5f6 --hours 4.5 --learnings "Key insight: The 
 
 ## Key Principles
 
-1. **Search Before Implementing** - Always check for existing knowledge
-2. **Project-First for Tasks** - Filter tasks by project, not globally
-3. **Capture Non-Obvious Learnings** - If it took time to figure out, save it
-4. **Complete with Learnings** - Always capture insights when finishing tasks
+1. **Search Before Implementing** — Always check for existing knowledge
+2. **Project-First for Tasks** — Link your directory, then filter by project
+3. **Capture Non-Obvious Learnings** — If it took time to figure out, save it
+4. **Complete with Learnings** — Always capture insights when finishing tasks
 5. **Use Entity Types Properly**:
-   - `episode` - Temporal insights, debugging discoveries
-   - `pattern` - Reusable coding patterns
-   - `rule` - Hard constraints, must-follow rules
-   - `task` - Work items with lifecycle
+   - `episode` — Temporal insights, debugging discoveries
+   - `pattern` — Reusable coding patterns
+   - `note` — Progress breadcrumbs, observations
+   - `task` — Work items with lifecycle
+   - `document` — Crawled documentation pages
 
 ---
 
@@ -458,28 +579,60 @@ values with a 422 validation error.
 sibyl health
 ```
 
-If unhealthy, verify the Sibyl server and FalkorDB are running.
+If unhealthy, the server or FalkorDB is down. Do not retry commands blindly. Report it and continue
+without Sibyl for this session.
 
 ### Task list shows wrong project's tasks
 
+This happens when your directory is not linked to a project. All commands return global results.
+
 ```bash
-sibyl context                      # See which project you're linked to
+sibyl context                      # Check — does it show your project?
 sibyl project list                 # Find correct project ID
-sibyl project link project_xxx     # Link to correct project
-sibyl task list --all              # Bypass context to see all
+sibyl project link proj_xxx        # Link to correct project
+sibyl context                      # Verify the link worked
 ```
+
+### "Entity not found" after search returns results
+
+Search results may reference entities by graph UUID. Use the exact ID from search output:
+
+```bash
+sibyl entity show "episode:abc123-full-uuid-here"
+```
+
+### "Failed to start task" with no details
+
+Usually a lock conflict or invalid state transition. Check the task's current state:
+
+```bash
+sibyl task show task_a1b2c3d4e5f6
+```
+
+If it's already in `doing`, you don't need to start it. If locked, wait a few seconds and retry.
+
+### Search returns results from other projects
+
+Your directory is not linked. Run `sibyl context` — if `Project: none`, link it first.
 
 ---
 
 ## Common Pitfalls
 
-| Wrong                            | Correct                               |
-| -------------------------------- | ------------------------------------- |
-| `sibyl task add "..."`           | `sibyl task create --title "..."`     |
-| `sibyl task list --todo`         | `sibyl task list --status todo`       |
-| `sibyl task create -t "..."`     | `sibyl task create --title "..."` (!) |
-| `sibyl task update --learnings`  | `sibyl task complete --learnings` (!) |
-| `sibyl task note` for completion | `sibyl task complete --learnings` (!) |
+| Wrong                                | Correct                                          |
+| ------------------------------------ | ------------------------------------------------ |
+| `sibyl task add "..."`               | `sibyl task create --title "..."`                |
+| `sibyl task list --todo`             | `sibyl task list --status todo`                  |
+| `sibyl task create -t "..."`         | `sibyl task create --title "..."` (`-t` is type) |
+| `sibyl task update --learnings`      | `sibyl task complete --learnings` (!)            |
+| `sibyl task note` for completion     | `sibyl task complete --learnings` (!)            |
+| `sibyl add note "content..."`        | `sibyl add "Title" "content..." --type note`     |
+| `sibyl search ... 2>/dev/null`       | `sibyl search ...` (never suppress stderr)       |
+| `sibyl search ... \|\| true`         | `sibyl search ...` (let errors surface)          |
+| `sibyl config`                       | `sibyl config show`                              |
+| `sibyl explore path A B`             | Not a real command — use `explore related`       |
+| `sibyl auth token`                   | Not a real command — use `sibyl auth status`     |
+| Using `--type rule` or `--type tool` | These types don't exist — use `pattern`/`note`   |
 
 ### Notes vs Learnings
 
@@ -513,6 +666,25 @@ sibyl task show task_c24fc3228e7c  # Full ID required (17 chars)
 ## Prerequisites
 
 ```bash
-sibyl health   # Check connectivity
+sibyl health         # Check connectivity
 sibyl local setup    # First-time assistant setup
+sibyl auth status    # Check authentication
 ```
+
+---
+
+## MCP Tools (Programmatic Access)
+
+When used as an MCP server, Sibyl exposes 5 tools. These are different from CLI commands.
+
+| MCP Tool  | Purpose                                     |
+| --------- | ------------------------------------------- |
+| `search`  | Unified semantic search (graph + docs)      |
+| `explore` | Browse graph: list, related, traverse, deps |
+| `add`     | Add knowledge, tasks, or projects           |
+| `manage`  | Task lifecycle, source ops, analysis, admin |
+| `logs`    | View server logs (OWNER role required)      |
+
+The `manage` tool accepts an `action` parameter: `start_task`, `block_task`, `unblock_task`,
+`submit_review`, `complete_task`, `archive_task`, `update_task`, `crawl`, `sync`, `health`, `stats`,
+`estimate`, `prioritize`, `detect_cycles`, `suggest`.

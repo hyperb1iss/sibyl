@@ -36,7 +36,7 @@ sibyl entity show "episode:abc123-uuid-here"
 ```bash
 sibyl search "error handling" --type pattern
 sibyl search "debugging tips" --type episode
-sibyl search "security rules" --type rule
+sibyl search "security notes" --type note
 ```
 
 ### Search with Limit
@@ -170,11 +170,11 @@ sibyl project create \
 ```bash
 sibyl entity list --type pattern
 sibyl entity list --type episode
-sibyl entity list --type rule
+sibyl entity list --type note
 
 # With filters
 sibyl entity list --type pattern --language python
-sibyl entity list --type rule --category security
+sibyl entity list --type pattern --category security
 ```
 
 ### Show Entity
@@ -222,7 +222,7 @@ sibyl entity delete epsd_a1b2c3d4e5f6 --yes
 ### Related Entities (1-hop)
 
 ```bash
-sibyl explore related pattern_oauth
+sibyl explore related ptrn_a1b2c3d4e5f6
 ```
 
 ### Multi-hop Traversal
@@ -235,16 +235,10 @@ sibyl explore traverse proj_a1b2c3d4e5f6 --depth 2
 
 ```bash
 # Single task
-sibyl explore dependencies task_deploy
+sibyl explore dependencies task_a1b2c3d4e5f6
 
 # Project-wide
-sibyl explore dependencies --project proj_d4e5f6a1b2c3
-```
-
-### Find Path
-
-```bash
-sibyl explore path pattern_auth task_login
+sibyl explore dependencies --project proj_a1b2c3d4e5f6
 ```
 
 ---
@@ -339,11 +333,75 @@ sibyl stats
 ### Configuration
 
 ```bash
-sibyl config
+sibyl config show
 ```
 
 ### Setup (First Time)
 
 ```bash
 sibyl local setup
+```
+
+---
+
+## Document Examples
+
+### List Crawled Documents
+
+```bash
+sibyl document list
+sibyl document list --source source_a1b2c3d4e5f6
+```
+
+### Show Document Content
+
+```bash
+sibyl document show doc_a1b2c3d4e5f6
+sibyl document show doc_a1b2c3d4e5f6 --raw    # Raw markdown
+```
+
+---
+
+## Context Examples
+
+### Check and Link Project
+
+```bash
+# Check current context (always do this first!)
+sibyl context
+
+# If Project: none, link it
+sibyl project list
+sibyl project link proj_a1b2c3d4e5f6
+
+# Verify
+sibyl context
+```
+
+### Switch Between Contexts
+
+```bash
+sibyl context list
+sibyl context use prod
+sibyl context create staging --server https://staging.example.com --use
+```
+
+---
+
+## Debug Examples
+
+### Inspect Graph
+
+```bash
+sibyl debug schema                                           # Entity types and counts
+sibyl debug query "MATCH (n:Entity) RETURN n.name LIMIT 5"  # Read-only Cypher
+sibyl debug metrics                                          # Database metrics
+```
+
+### View Logs
+
+```bash
+sibyl logs tail -l error          # Recent errors
+sibyl logs tail -s worker -n 20   # Worker logs
+sibyl logs search "timeout"       # Search logs
 ```

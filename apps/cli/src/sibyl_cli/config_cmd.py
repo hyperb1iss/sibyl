@@ -62,6 +62,12 @@ def config_show() -> None:
     table.add_column("Setting", style=CORAL)
     table.add_column("Value", style="white")
 
+    _sensitive_fragments = {"key", "secret", "password", "token"}
+
+    def _is_sensitive(key: str) -> bool:
+        lower = key.lower()
+        return any(frag in lower for frag in _sensitive_fragments)
+
     # Flatten config for display
     def add_rows(d: dict, prefix: str = "") -> None:
         for key, value in d.items():
@@ -69,7 +75,12 @@ def config_show() -> None:
             if isinstance(value, dict):
                 add_rows(value, full_key)
             else:
-                display_value = str(value) if value else "[dim]not set[/dim]"
+                if not value:
+                    display_value = "[dim]not set[/dim]"
+                elif _is_sensitive(full_key) and isinstance(value, str) and len(value) > 8:
+                    display_value = f"{value[:4]}{'•' * 8}{value[-4:]}"
+                else:
+                    display_value = str(value)
                 table.add_row(full_key, display_value)
 
     add_rows(config)

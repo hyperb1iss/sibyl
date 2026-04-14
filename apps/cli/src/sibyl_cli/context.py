@@ -115,9 +115,17 @@ def callback(
             f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}]  {linked_project} [dim](linked)[/dim]"
         )
     else:
-        console.print(
-            f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}]  {active.default_project or '[dim]none[/dim]'}"
-        )
+        if active.default_project:
+            console.print(
+                f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}]  {active.default_project}"
+            )
+        else:
+            console.print(
+                f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}]  [{ELECTRIC_YELLOW}]none[/{ELECTRIC_YELLOW}]"
+            )
+            console.print(
+                f"  [{ELECTRIC_YELLOW}]⚠ Link a project:[/{ELECTRIC_YELLOW}] sibyl project list && sibyl project link <id>"
+            )
     if active.insecure:
         console.print(
             f"  [{ELECTRIC_YELLOW}]Insecure:[/{ELECTRIC_YELLOW}] SSL verification disabled"

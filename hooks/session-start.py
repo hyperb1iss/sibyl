@@ -46,6 +46,7 @@ def main():
     try:
         health = run_sibyl("health", timeout=3)
         if not health:
+            print("Sibyl server unreachable — skip sibyl commands this session.")
             sys.exit(0)
 
         lines = []

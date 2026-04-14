@@ -69,8 +69,8 @@ sibyl search "similar work" --type episode
 # Look for gotchas
 sibyl search "problems with X" --type episode
 
-# Check for rules/constraints
-sibyl search "requirements for X" --type rule
+# Check for documented constraints
+sibyl search "requirements for X" --type pattern
 
 # Get full content for any result (use ID from search output)
 sibyl entity show "pattern:abc123-uuid-here"
@@ -171,9 +171,6 @@ sibyl explore related ptrn_a1b2c3d4e5f6
 
 # Go deeper
 sibyl explore traverse ptrn_a1b2c3d4e5f6 --depth 2
-
-# Find connections between entities
-sibyl explore path entity_a entity_b
 ```
 
 ### Understanding Dependencies
@@ -196,7 +193,7 @@ sibyl entity list --type pattern
 sibyl entity list --type pattern --language rust
 
 # Filter by category
-sibyl entity list --type rule --category security
+sibyl entity list --type pattern --category security
 ```
 
 ---
@@ -243,17 +240,13 @@ sibyl health
 sibyl stats
 
 # Config verification
-sibyl config
-```
+sibyl config show
 
-### Database Operations
+# Graph schema and entity counts
+sibyl debug schema
 
-```bash
-# Backup (if needed)
-sibyl db backup
-
-# Check graph integrity
-sibyl db stats
+# Server logs (errors only)
+sibyl logs tail -l error
 ```
 
 ---
