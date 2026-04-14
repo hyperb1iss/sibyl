@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { WelcomeBanner } from '@/components/dashboard';
+import { CaptureMemoryDialog, WelcomeBanner } from '@/components/dashboard';
 import { VelocityLineChart } from '@/components/metrics/charts';
 import {
   Activity,
@@ -109,6 +109,7 @@ function EntityRingChart({ counts }: { counts: Record<string, number> }) {
 
 export function DashboardContent({ initialStats }: DashboardContentProps) {
   const [mounted, setMounted] = useState(false);
+  const [isCaptureOpen, setIsCaptureOpen] = useState(false);
   const { data: health, isLoading: healthLoading } = useHealth();
   const { data: stats } = useStats(initialStats);
   const { data: projectsData } = useProjects();
@@ -145,6 +146,8 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
 
   return (
     <div className="space-y-4 sm:space-y-6 animate-fade-in">
+      <CaptureMemoryDialog isOpen={isCaptureOpen} onClose={() => setIsCaptureOpen(false)} />
+
       {/* Dashboard breadcrumb */}
       <nav
         aria-label="Breadcrumb"
@@ -449,6 +452,33 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
             </div>
 
             <div className="space-y-2 sm:space-y-3">
+              <button
+                type="button"
+                onClick={() => setIsCaptureOpen(true)}
+                className="group flex w-full items-center gap-2 rounded-lg border border-sc-fg-subtle/10 bg-gradient-to-r from-sc-purple/10 via-sc-purple/5 to-sc-cyan/10 p-2.5 text-left transition-all hover:border-sc-purple/30 hover:bg-sc-bg-highlight sm:gap-3 sm:rounded-xl sm:p-3"
+              >
+                <div className="h-8 w-8 shrink-0 rounded-lg bg-sc-purple/15 flex items-center justify-center sm:h-9 sm:w-9">
+                  <Sparkles
+                    width={16}
+                    height={16}
+                    className="text-sc-purple sm:h-[18px] sm:w-[18px]"
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-xs font-medium text-sc-fg-primary transition-colors group-hover:text-sc-purple sm:text-sm">
+                    Capture Memory
+                  </div>
+                  <div className="truncate text-[10px] text-sc-fg-subtle sm:text-xs">
+                    Save a fresh learning right now
+                  </div>
+                </div>
+                <ArrowRight
+                  width={14}
+                  height={14}
+                  className="shrink-0 text-sc-fg-subtle transition-colors group-hover:text-sc-purple sm:h-4 sm:w-4"
+                />
+              </button>
+
               <Link
                 href="/search"
                 className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-cyan/30 hover:bg-sc-bg-highlight transition-all group"

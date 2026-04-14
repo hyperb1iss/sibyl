@@ -6,6 +6,8 @@ All commands communicate with the REST API.
 Server commands (serve, dev, db, generate, etc.) are in sibyl-server.
 """
 
+import re
+import sys
 from importlib.metadata import version as pkg_version
 from typing import Annotated
 
@@ -87,6 +89,7 @@ app.add_typer(update_app, name="update")
 
 
 SEARCH_PREVIEW_CHARS = 220
+CAPTURE_TITLE_CHARS = 72
 
 
 def _format_search_preview(content: str, max_chars: int = SEARCH_PREVIEW_CHARS) -> str:
@@ -102,6 +105,16 @@ def _format_search_preview(content: str, max_chars: int = SEARCH_PREVIEW_CHARS) 
     if cutoff < max_chars // 2:
         cutoff = max_chars
     return preview[:cutoff].rstrip() + "…"
+
+
+def _derive_capture_title(content: str) -> str:
+    """Create a compact default title for quick captures."""
+    compact = re.sub(r"\s+", " ", content).strip()
+    if not compact:
+        return "Untitled capture"
+    if len(compact) <= CAPTURE_TITLE_CHARS:
+        return compact
+    return compact[: CAPTURE_TITLE_CHARS - 1].rstrip(" ,;:-") + "…"
 
 
 def _handle_client_error(e: SibylClientError) -> None:
@@ -326,6 +339,60 @@ def add_knowledge(
             _handle_client_error(e)
 
     run_add()
+
+
+@app.command("capture")
+def capture_memory(
+    content: str | None = typer.Argument(
+        None,
+        help="What to capture. Reads stdin if omitted.",
+    ),
+    title: str | None = typer.Option(
+        None,
+        "--title",
+        "-t",
+        help="Optional title. Derived from content when omitted.",
+    ),
+    entity_type: str = typer.Option("episode", "--type", help="Entity type for the capture"),
+    tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Capture a quick memory without separate title and content fields."""
+
+    resolved_content = content
+    if resolved_content is None and not sys.stdin.isatty():
+        resolved_content = sys.stdin.read()
+
+    resolved_content = (resolved_content or "").strip()
+    if not resolved_content:
+        error("Provide capture content as an argument or via stdin.")
+        raise typer.Exit(code=1)
+
+    resolved_title = (title or "").strip() or _derive_capture_title(resolved_content)
+
+    @run_async
+    async def run_capture() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.create_entity(
+                    name=resolved_title,
+                    content=resolved_content,
+                    entity_type=entity_type,
+                    tags=[t.strip() for t in tags.split(",") if t.strip()] if tags else None,
+                    metadata={"capture_mode": "quick", "capture_surface": "cli"},
+                )
+
+                if json_output:
+                    print_json(data)
+                    return
+
+                entity_id = data.get("id", "unknown")
+                success(f"Captured {entity_type}: {resolved_title}")
+                console.print(f"  [dim]ID: {entity_id}[/dim]")
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_capture()
 
 
 @app.command()

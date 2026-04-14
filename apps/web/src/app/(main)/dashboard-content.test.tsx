@@ -3,6 +3,7 @@ import type { OrgMetricsResponse, StatsResponse } from '@/lib/api';
 import { render, screen } from '@/test/utils';
 
 const hooks = vi.hoisted(() => ({
+  useCreateEntity: vi.fn(),
   useHealth: vi.fn(),
   useOrgMetrics: vi.fn(),
   useProjects: vi.fn(),
@@ -13,6 +14,7 @@ const hooks = vi.hoisted(() => ({
 vi.mock('@/lib/hooks', () => hooks);
 
 vi.mock('@/components/dashboard', () => ({
+  CaptureMemoryDialog: () => <div data-testid="capture-memory-dialog" />,
   WelcomeBanner: () => <div data-testid="welcome-banner" />,
 }));
 
@@ -58,6 +60,10 @@ describe('DashboardContent', () => {
   };
 
   beforeEach(() => {
+    hooks.useCreateEntity.mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    });
     hooks.useHealth.mockReturnValue({
       data: {
         status: 'healthy',
@@ -89,5 +95,11 @@ describe('DashboardContent', () => {
     expect(screen.getByText('3 in progress')).toBeInTheDocument();
     expect(screen.getByText('40% complete')).toBeInTheDocument();
     expect(hooks.useTasks).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a capture-first quick action', () => {
+    render(<DashboardContent initialStats={initialStats} />);
+
+    expect(screen.getByRole('button', { name: /capture memory/i })).toBeInTheDocument();
   });
 });
