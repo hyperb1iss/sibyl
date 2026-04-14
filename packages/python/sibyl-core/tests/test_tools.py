@@ -1561,11 +1561,12 @@ class TestAddEntityTypes:
         async def capture_create(entity):
             return entity.id
 
-        async def capture_rel_create(rel):
-            created_relationships.append(rel)
+        async def capture_rel_create_bulk(rels):
+            created_relationships.extend(rels)
+            return len(rels), 0
 
         mock_entity_manager.create_direct = capture_create
-        mock_rel_manager.create = capture_rel_create
+        mock_rel_manager.create_bulk = AsyncMock(side_effect=capture_rel_create_bulk)
 
         with (
             patch("sibyl_core.tools.add.get_graph_client", return_value=mock_client),
@@ -1591,6 +1592,7 @@ class TestAddEntityTypes:
             assert len(created_relationships) >= 2
             rel_types = [r.relationship_type.value for r in created_relationships]
             assert "BELONGS_TO" in rel_types
+            mock_rel_manager.create_bulk.assert_called_once()
 
 
 # =============================================================================

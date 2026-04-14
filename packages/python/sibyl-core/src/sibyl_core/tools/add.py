@@ -41,6 +41,32 @@ log = structlog.get_logger()
 __all__ = ["add"]
 
 
+def _build_relationship(rel_data: dict[str, Any]) -> Relationship:
+    return Relationship(
+        id=rel_data["id"],
+        source_id=rel_data["source_id"],
+        target_id=rel_data["target_id"],
+        relationship_type=RelationshipType(rel_data["type"]),
+        metadata=rel_data.get("metadata", {}),
+    )
+
+
+async def _create_relationships_bulk(
+    relationship_manager: RelationshipManager,
+    relationships_to_create: list[dict[str, Any]],
+    log_event: str,
+) -> tuple[int, int]:
+    if not relationships_to_create:
+        return 0, 0
+
+    created, failed = await relationship_manager.create_bulk(
+        [_build_relationship(rel_data) for rel_data in relationships_to_create]
+    )
+    if failed:
+        log.warning(log_event, created=created, failed=failed)
+    return created, failed
+
+
 async def add(
     title: str,
     content: str,
@@ -446,19 +472,11 @@ async def add(
             else:
                 created_id = await entity_manager.create(entity)
 
-            # Create explicit relationships
-            for rel_data in relationships_to_create:
-                try:
-                    rel = Relationship(
-                        id=rel_data["id"],
-                        source_id=rel_data["source_id"],
-                        target_id=rel_data["target_id"],
-                        relationship_type=RelationshipType(rel_data["type"]),
-                        metadata=rel_data.get("metadata", {}),
-                    )
-                    await relationship_manager.create(rel)
-                except Exception as e:
-                    log.warning("relationship_creation_failed", error=str(e), rel=rel_data)
+            await _create_relationships_bulk(
+                relationship_manager,
+                relationships_to_create,
+                "relationship_creation_partial_failure",
+            )
 
             # Auto-link to related patterns/rules/templates in sync mode
             try:
@@ -472,22 +490,25 @@ async def add(
                     threshold=0.75,
                     limit=5,
                 )
-                for linked_id, score in auto_link_results:
-                    try:
-                        rel = Relationship(
-                            id=f"rel_{created_id}_references_{linked_id}",
-                            source_id=created_id,
-                            target_id=linked_id,
-                            relationship_type=RelationshipType.RELATED_TO,
-                            metadata={
-                                "created_at": datetime.now(UTC).isoformat(),
-                                "auto_linked": True,
-                                "similarity_score": score,
-                            },
-                        )
-                        await relationship_manager.create(rel)
-                    except Exception as e:
-                        log.warning("auto_link_failed", error=str(e), target=linked_id)
+                auto_relationships = [
+                    {
+                        "id": f"rel_{created_id}_references_{linked_id}",
+                        "source_id": created_id,
+                        "target_id": linked_id,
+                        "type": RelationshipType.RELATED_TO.value,
+                        "metadata": {
+                            "created_at": datetime.now(UTC).isoformat(),
+                            "auto_linked": True,
+                            "similarity_score": score,
+                        },
+                    }
+                    for linked_id, score in auto_link_results
+                ]
+                await _create_relationships_bulk(
+                    relationship_manager,
+                    auto_relationships,
+                    "auto_link_partial_failure",
+                )
             except Exception as e:
                 log.warning("auto_link_search_failed", error=str(e))
 
@@ -533,18 +554,11 @@ async def add(
             else:
                 created_id = await entity_manager.create(entity)
 
-            for rel_data in relationships_to_create:
-                try:
-                    rel = Relationship(
-                        id=rel_data["id"],
-                        source_id=rel_data["source_id"],
-                        target_id=rel_data["target_id"],
-                        relationship_type=RelationshipType(rel_data["type"]),
-                        metadata=rel_data.get("metadata", {}),
-                    )
-                    await relationship_manager.create(rel)
-                except Exception as rel_e:
-                    log.warning("relationship_creation_failed", error=str(rel_e))
+            await _create_relationships_bulk(
+                relationship_manager,
+                relationships_to_create,
+                "relationship_creation_partial_failure",
+            )
 
             fallback_message = f"Added (sync fallback): {title}"
             if conflicts:
