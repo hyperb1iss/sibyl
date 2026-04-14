@@ -6,6 +6,7 @@ using Graphiti's native edge system rather than custom Cypher queries.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -139,6 +140,20 @@ class RelationshipManager:
             metadata=attributes,
         )
 
+    def _build_bulk_relationship_row(self, relationship: Relationship) -> dict[str, object]:
+        """Build the property map used for batched relationship upserts."""
+        edge = self._to_graphiti_edge(relationship)
+        return {
+            "uuid": edge.uuid,
+            "source_uuid": relationship.source_id,
+            "target_uuid": relationship.target_id,
+            "name": relationship.relationship_type.value,
+            "group_id": self._group_id,
+            "created_at": edge.created_at.isoformat(),
+            "weight": relationship.weight,
+            "fact": edge.fact,
+        }
+
     async def create(self, relationship: Relationship) -> str:
         """Create a new relationship between entities.
 
@@ -237,13 +252,48 @@ class RelationshipManager:
         created = 0
         failed = 0
 
-        for rel in relationships:
+        groups: dict[str, list[Relationship]] = defaultdict(list)
+        for relationship in relationships:
+            groups[relationship.relationship_type.value].append(relationship)
+
+        for rel_type, group in groups.items():
+            batch_query = f"""
+                UNWIND $relationships AS rel
+                MATCH (source {{uuid: rel.source_uuid}})
+                MATCH (target {{uuid: rel.target_uuid}})
+                MERGE (source)-[r:{rel_type}]->(target)
+                ON CREATE SET
+                    r.uuid = rel.uuid,
+                    r.name = rel.name,
+                    r.group_id = rel.group_id,
+                    r.source_node_uuid = rel.source_uuid,
+                    r.target_node_uuid = rel.target_uuid,
+                    r.created_at = rel.created_at,
+                    r.weight = rel.weight,
+                    r.fact = rel.fact
+                RETURN count(r) AS processed
+            """
+
             try:
-                await self.create(rel)
-                created += 1
+                await self._driver.execute_query(
+                    batch_query,
+                    relationships=[self._build_bulk_relationship_row(rel) for rel in group],
+                )
+                created += len(group)
             except Exception as e:
-                log.warning("Failed to create relationship", error=str(e))
-                failed += 1
+                log.warning(
+                    "bulk relationship upsert failed, falling back to per-relationship create",
+                    relationship_type=rel_type,
+                    batch_size=len(group),
+                    error=str(e),
+                )
+                for rel in group:
+                    try:
+                        await self.create(rel)
+                        created += 1
+                    except Exception as item_error:
+                        log.warning("Failed to create relationship", error=str(item_error))
+                        failed += 1
 
         log.info("Bulk create complete", created=created, failed=failed)
         return created, failed

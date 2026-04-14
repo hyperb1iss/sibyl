@@ -276,14 +276,16 @@ class TestCreateBulk:
             for i in range(3)
         ]
 
-        with patch.object(relationship_manager, "create", new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = "created_id"
+        relationship_manager._driver.execute_query = AsyncMock(
+            return_value=([{"processed": 3}], None, None)
+        )
 
-            created, failed = await relationship_manager.create_bulk(rels)
+        created, failed = await relationship_manager.create_bulk(rels)
 
-            assert created == 3
-            assert failed == 0
-            assert mock_create.call_count == 3
+        assert created == 3
+        assert failed == 0
+        query = relationship_manager._driver.execute_query.await_args.args[0]
+        assert "UNWIND $relationships AS rel" in query
 
     @pytest.mark.asyncio
     async def test_counts_failures(
@@ -301,6 +303,7 @@ class TestCreateBulk:
             for i in range(3)
         ]
 
+        relationship_manager._driver.execute_query = AsyncMock(side_effect=RuntimeError("Batch failed"))
         with patch.object(relationship_manager, "create", new_callable=AsyncMock) as mock_create:
             # First succeeds, second fails, third succeeds
             mock_create.side_effect = ["id_1", RuntimeError("Failed"), "id_3"]
@@ -309,6 +312,7 @@ class TestCreateBulk:
 
             assert created == 2
             assert failed == 1
+            assert relationship_manager._driver.execute_query.await_count == 1
 
 
 class TestGetForEntity:

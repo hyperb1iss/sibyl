@@ -304,16 +304,14 @@ class TestRelationshipBulkCreate:
             for i in range(5)
         ]
 
-        with patch.object(
-            EntityEdge,
-            "get_between_nodes",
-            new_callable=AsyncMock,
-            return_value=[],
-        ):
-            created, failed = await relationship_manager.create_bulk(relationships)
+        mock_driver.execute_query.return_value = ([{"processed": 5}], None, None)
 
-            assert created == 5
-            assert failed == 0
+        created, failed = await relationship_manager.create_bulk(relationships)
+
+        assert created == 5
+        assert failed == 0
+        query = mock_driver.execute_query.await_args.args[0]
+        assert "UNWIND $relationships AS rel" in query
 
     @pytest.mark.asyncio
     async def test_bulk_create_partial_failure(
@@ -333,25 +331,18 @@ class TestRelationshipBulkCreate:
             for i in range(3)
         ]
 
-        call_count = 0
-
-        async def flaky_get_between(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:
-                raise Exception("Random failure")
-            return []
-
+        mock_driver.execute_query.side_effect = Exception("Batch failed")
         with patch.object(
-            EntityEdge,
-            "get_between_nodes",
+            relationship_manager,
+            "create",
             new_callable=AsyncMock,
-            side_effect=flaky_get_between,
+            side_effect=["rel-0", Exception("Random failure"), "rel-2"],
         ):
             created, failed = await relationship_manager.create_bulk(relationships)
 
-            assert created == 2
-            assert failed == 1
+        assert created == 2
+        assert failed == 1
+        assert mock_driver.execute_query.await_count == 1
 
 
 # =============================================================================
