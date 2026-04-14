@@ -49,9 +49,13 @@ export function EntityBadge({
 interface RelationshipBadgeProps {
   type: string;
   direction?: 'outgoing' | 'incoming';
-  size?: 'xs' | 'sm';
+  size?: 'xs';
   className?: string;
 }
+
+const relationshipBadgeSizes = {
+  xs: 'px-1.5 py-0.5 text-[10px]',
+} as const;
 
 export function RelationshipBadge({
   type,
@@ -60,7 +64,7 @@ export function RelationshipBadge({
   className = '',
 }: RelationshipBadgeProps) {
   const config = getRelationshipConfig(type);
-  const sizeClasses = size === 'xs' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs';
+  const sizeClasses = relationshipBadgeSizes[size];
 
   return (
     <span
