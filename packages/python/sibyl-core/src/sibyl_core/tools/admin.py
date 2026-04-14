@@ -18,6 +18,37 @@ from sibyl_core.models.entities import Entity, EntityType, Relationship, Relatio
 log = structlog.get_logger()
 
 
+async def _get_entity_counts(client: GraphClient, organization_id: str) -> dict[str, int]:
+    """Count entities by type with a single org-scoped aggregation query."""
+    rows = await client.execute_read_org(
+        """
+        MATCH (n)
+        WHERE n.entity_type IS NOT NULL
+          AND n.group_id = $group_id
+          AND (n.status IS NULL OR toLower(n.status) <> 'archived')
+          AND (
+            n.metadata IS NULL
+            OR (
+              NOT toLower(toString(n.metadata)) CONTAINS '"status":"archived"'
+              AND NOT toLower(toString(n.metadata)) CONTAINS '"status": "archived"'
+            )
+          )
+        RETURN n.entity_type AS type, count(*) AS count
+        """,
+        organization_id,
+        group_id=organization_id,
+    )
+
+    counts = {entity_type.value: 0 for entity_type in EntityType}
+    for row in rows:
+        entity_type = row.get("type")
+        count = row.get("count", 0)
+        if entity_type in counts:
+            counts[entity_type] = int(count)
+
+    return counts
+
+
 @dataclass
 class HealthStatus:
     """Server health status."""
@@ -91,15 +122,15 @@ async def health_check(*, organization_id: str | None = None) -> HealthStatus:
 
         # Entity counts and search latency require org context
         if organization_id:
-            entity_manager = EntityManager(client, group_id=organization_id)
-
-            # Get entity counts
             for entity_type in EntityType:
-                try:
-                    entities = await entity_manager.list_by_type(entity_type, limit=1000)
-                    entity_counts[entity_type.value] = len(entities)
-                except Exception:
-                    entity_counts[entity_type.value] = -1  # Unknown
+                entity_counts[entity_type.value] = -1
+
+            try:
+                entity_counts = await _get_entity_counts(client, organization_id)
+            except Exception as e:
+                errors.append(f"Entity count query failed: {e}")
+
+            entity_manager = EntityManager(client, group_id=organization_id)
 
             # Test search latency
             try:
@@ -204,19 +235,11 @@ async def get_stats(*, organization_id: str | None = None) -> dict[str, object]:
 
     try:
         client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=organization_id)
 
-        # Count entities by type
-        entity_stats: dict[str, int] = {}
-        for entity_type in EntityType:
-            try:
-                entities = await entity_manager.list_by_type(entity_type, limit=10000)
-                entity_stats[entity_type.value] = len(entities)
-            except Exception:
-                entity_stats[entity_type.value] = -1
+        entity_stats = await _get_entity_counts(client, organization_id)
 
         stats["entities"] = entity_stats
-        stats["total_entities"] = sum(v for v in entity_stats.values() if v > 0)
+        stats["total_entities"] = sum(entity_stats.values())
 
         # TODO: Add relationship stats from RelationshipManager
         # TODO: Add storage stats from Graphiti
