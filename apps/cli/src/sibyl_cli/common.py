@@ -213,7 +213,13 @@ def truncate(text: str, max_length: int = 50) -> str:
     return text[: max_length - 3] + "..."
 
 
-def handle_client_error(e: SibylClientError) -> None:
+def handle_client_error(
+    e: SibylClientError,
+    *,
+    not_found_label: str = "Not found",
+    invalid_request_label: str = "Invalid request",
+    conflict_label: str = "Conflict",
+) -> None:
     """Handle client errors with helpful messages and exit with code 1.
 
     This is the centralized error handler for all CLI commands.
@@ -222,9 +228,11 @@ def handle_client_error(e: SibylClientError) -> None:
     if "Cannot connect" in str(e):
         error(str(e))
     elif e.status_code == 404:
-        error(f"Not found: {e.detail}")
+        error(f"{not_found_label}: {e.detail}")
     elif e.status_code == 400:
-        error(f"Invalid request: {e.detail}")
+        error(f"{invalid_request_label}: {e.detail}")
+    elif e.status_code == 409:
+        error(f"{conflict_label}: {e.detail}")
     else:
         error(str(e))
     raise typer.Exit(1)

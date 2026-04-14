@@ -3,6 +3,7 @@
 Commands for viewing crawled documents and their chunks.
 """
 
+from functools import partial
 from typing import Annotated, Any
 
 import typer
@@ -13,7 +14,7 @@ from sibyl_cli.common import (
     NEON_CYAN,
     console,
     create_panel,
-    error,
+    handle_client_error,
     info,
     print_json,
     run_async,
@@ -26,18 +27,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-
-def _handle_client_error(e: SibylClientError) -> None:
-    """Handle client errors with helpful messages and exit with code 1."""
-    if "Cannot connect" in str(e):
-        error(str(e))
-    elif e.status_code == 404:
-        error(f"Document not found: {e.detail}")
-    elif e.status_code == 400:
-        error(f"Invalid request: {e.detail}")
-    else:
-        error(str(e))
-    raise typer.Exit(1)
+_handle_client_error = partial(handle_client_error, not_found_label="Document not found")
 
 
 @app.command("show")

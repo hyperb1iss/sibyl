@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from typer.testing import CliRunner
 
 from sibyl_cli import crawl
+from sibyl_cli.client import SibylClientError
 
 
 class TestCrawlCliSurface:
@@ -72,6 +73,27 @@ class TestCrawlCliSurface:
 
         assert result.exit_code == 0
         mock_client.list_crawl_documents.assert_called_once_with(source_id="src_123", limit=20)
+
+    @patch("sibyl_cli.document.get_client")
+    def test_crawl_documents_show_keeps_document_specific_404_message(
+        self, mock_get_client: MagicMock
+    ) -> None:
+        """crawl documents show should preserve its document-specific not-found wording."""
+        mock_client = MagicMock()
+        mock_client.get_crawl_document = AsyncMock(
+            side_effect=SibylClientError(
+                "Document missing",
+                status_code=404,
+                detail="doc_123",
+            )
+        )
+        mock_get_client.return_value = mock_client
+
+        runner = CliRunner()
+        result = runner.invoke(crawl.app, ["documents", "show", "doc_123"])
+
+        assert result.exit_code == 1
+        assert "Document not found: doc_123" in result.stdout
 
     @patch("sibyl_cli.crawl_shared.get_client")
     def test_crawl_ingest_treats_queued_as_success(self, mock_get_client: MagicMock) -> None:
@@ -162,6 +184,25 @@ class TestCrawlCliSurface:
             create_new_entities=True,
         )
         assert "New entities created" in result.stdout
+
+    @patch("sibyl_cli.crawl_shared.get_client")
+    def test_crawl_show_keeps_conflict_message(self, mock_get_client: MagicMock) -> None:
+        """crawl show should preserve conflict wording through the shared handler."""
+        mock_client = MagicMock()
+        mock_client.get_crawl_source = AsyncMock(
+            side_effect=SibylClientError(
+                "Conflict",
+                status_code=409,
+                detail="source is busy",
+            )
+        )
+        mock_get_client.return_value = mock_client
+
+        runner = CliRunner()
+        result = runner.invoke(crawl.app, ["show", "src_123"])
+
+        assert result.exit_code == 1
+        assert "Conflict: source is busy" in result.stdout
 
 
 class TestCrawlCliAddFlags:

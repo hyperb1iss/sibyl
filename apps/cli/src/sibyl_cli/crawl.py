@@ -4,6 +4,7 @@ Commands for crawling documentation sites and managing the ingestion pipeline.
 All commands communicate with the REST API.
 """
 
+from functools import partial
 from typing import Annotated
 
 import typer
@@ -18,6 +19,7 @@ from sibyl_cli.common import (
     console,
     create_table,
     error,
+    handle_client_error,
     info,
     print_json,
     run_async,
@@ -39,20 +41,7 @@ app = typer.Typer(
 )
 app.add_typer(document_app, name="documents")
 
-
-def _handle_client_error(e: SibylClientError) -> None:
-    """Handle client errors with helpful messages and exit with code 1."""
-    if "Cannot connect" in str(e):
-        error(str(e))
-    elif e.status_code == 404:
-        error(f"Not found: {e.detail}")
-    elif e.status_code == 400:
-        error(f"Invalid request: {e.detail}")
-    elif e.status_code == 409:
-        error(f"Conflict: {e.detail}")
-    else:
-        error(str(e))
-    raise typer.Exit(1)
+_handle_client_error = partial(handle_client_error, conflict_label="Conflict")
 
 
 @app.command("list")
