@@ -1,7 +1,99 @@
 from collections.abc import Callable
 
 from sibyl_cli.client import SibylClientError, get_client
-from sibyl_cli.common import ELECTRIC_PURPLE, NEON_CYAN, console, error, print_json, run_async
+from sibyl_cli.common import (
+    ELECTRIC_PURPLE,
+    NEON_CYAN,
+    console,
+    error,
+    info,
+    print_json,
+    run_async,
+    success,
+)
+
+
+def add_crawl_source(
+    url: str,
+    *,
+    name: str | None,
+    source_type: str,
+    depth: int,
+    include_patterns: list[str] | None,
+    json_out: bool,
+    handle_client_error: Callable[[SibylClientError], None],
+    next_step_command: str,
+) -> None:
+    @run_async
+    async def _add() -> None:
+        client = get_client()
+
+        try:
+            source_name = name or url.split("//")[-1].split("/")[0]
+
+            response = await client.create_crawl_source(
+                name=source_name,
+                url=url,
+                source_type=source_type,
+                crawl_depth=depth,
+                include_patterns=include_patterns or [],
+            )
+
+            if json_out:
+                print_json(response)
+                return
+
+            if response.get("id"):
+                success(f"Source added: {response['id']}")
+                info(f"Run '{next_step_command} {response['id']}' to start crawling")
+            else:
+                error("Failed to add source")
+
+        except SibylClientError as e:
+            handle_client_error(e)
+
+    _add()
+
+
+def start_crawl_source(
+    source_id: str,
+    *,
+    max_pages: int = 50,
+    max_depth: int = 3,
+    generate_embeddings: bool = True,
+    json_out: bool = False,
+    handle_client_error: Callable[[SibylClientError], None],
+    status_command: str,
+) -> None:
+    @run_async
+    async def _crawl() -> None:
+        client = get_client()
+
+        try:
+            response = await client.start_crawl(
+                source_id=source_id,
+                max_pages=max_pages,
+                max_depth=max_depth,
+                generate_embeddings=generate_embeddings,
+            )
+            status = response.get("status", "unknown")
+
+            if json_out:
+                print_json(response)
+                return
+
+            if status in {"queued", "started"}:
+                success(response.get("message", "Crawl queued"))
+                info(f"Use '{status_command}' to check progress")
+            elif status == "already_running":
+                info(response.get("message", "Crawl already in progress"))
+            else:
+                error(f"Crawl failed: {response.get('message', 'Unknown error')}")
+
+        except SibylClientError as e:
+            handle_client_error(e)
+
+    _crawl()
 
 
 def show_source_status(

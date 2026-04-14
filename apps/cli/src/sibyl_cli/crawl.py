@@ -24,7 +24,7 @@ from sibyl_cli.common import (
     success,
     truncate,
 )
-from sibyl_cli.crawl_shared import show_source_status
+from sibyl_cli.crawl_shared import add_crawl_source, show_source_status, start_crawl_source
 
 app = typer.Typer(
     name="crawl",
@@ -128,38 +128,16 @@ def add_source(
     ] = False,
 ) -> None:
     """Add a new documentation source. Default: table output."""
-
-    @run_async
-    async def _add() -> None:
-        client = get_client()
-
-        try:
-            source_name = name or url.split("//")[-1].split("/")[0]
-
-            response = await client.create_crawl_source(
-                name=source_name,
-                url=url,
-                source_type=source_type,
-                crawl_depth=depth,
-                include_patterns=pattern or [],
-            )
-
-            # JSON output (default)
-            if json_out:
-                print_json(response)
-                return
-
-            # Table output
-            if response.get("id"):
-                success(f"Source added: {response['id']}")
-                info(f"Run 'sibyl crawl ingest {response['id']}' to start crawling")
-            else:
-                error("Failed to add source")
-
-        except SibylClientError as e:
-            _handle_client_error(e)
-
-    _add()
+    add_crawl_source(
+        url,
+        name=name,
+        source_type=source_type,
+        depth=depth,
+        include_patterns=pattern,
+        json_out=json_out,
+        handle_client_error=_handle_client_error,
+        next_step_command="sibyl crawl ingest",
+    )
 
 
 @app.command("ingest")
@@ -181,37 +159,15 @@ def ingest(
         sibyl crawl ingest abc123 --depth 2 --no-embed
     """
 
-    @run_async
-    async def _ingest() -> None:
-        client = get_client()
-
-        try:
-            response = await client.start_crawl(
-                source_id=source_id,
-                max_pages=max_pages,
-                max_depth=max_depth,
-                generate_embeddings=not no_embed,
-            )
-
-            # JSON output (default)
-            if json_out:
-                print_json(response)
-                return
-
-            # Table output
-            status = response.get("status", "unknown")
-            if status in {"queued", "started"}:
-                success(response.get("message", "Ingestion started"))
-                info("Use 'sibyl crawl status <source_id>' to check progress")
-            elif status == "already_running":
-                info(response.get("message", "Ingestion already in progress"))
-            else:
-                error(f"Ingestion failed: {response.get('message', 'Unknown error')}")
-
-        except SibylClientError as e:
-            _handle_client_error(e)
-
-    _ingest()
+    start_crawl_source(
+        source_id,
+        max_pages=max_pages,
+        max_depth=max_depth,
+        generate_embeddings=not no_embed,
+        json_out=json_out,
+        handle_client_error=_handle_client_error,
+        status_command="sibyl crawl status <source_id>",
+    )
 
 
 @app.command("status")

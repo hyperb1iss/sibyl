@@ -10,7 +10,7 @@ from sibyl_cli import crawl, source
 class TestSourceCliCompatibility:
     """Legacy source commands should use the crawl-source backend."""
 
-    @patch("sibyl_cli.source.get_client")
+    @patch("sibyl_cli.crawl_shared.get_client")
     def test_source_add_uses_crawl_source_api(self, mock_get_client: MagicMock) -> None:
         """source add should create a relational crawl source, not a graph entity."""
         mock_client = MagicMock()
@@ -32,7 +32,7 @@ class TestSourceCliCompatibility:
             include_patterns=[],
         )
 
-    @patch("sibyl_cli.source.get_client")
+    @patch("sibyl_cli.crawl_shared.get_client")
     def test_source_add_accepts_include_alias(self, mock_get_client: MagicMock) -> None:
         """source add should accept the same include-pattern flag as crawl add."""
         mock_client = MagicMock()
@@ -109,7 +109,7 @@ class TestSourceCliCompatibility:
         assert result.exit_code == 0
         mock_client.list_crawl_documents.assert_called_once_with(source_id="src_123", limit=50)
 
-    @patch("sibyl_cli.source.get_client")
+    @patch("sibyl_cli.crawl_shared.get_client")
     def test_source_crawl_accepts_queued_status(self, mock_get_client: MagicMock) -> None:
         """source crawl should treat queued jobs as success."""
         mock_client = MagicMock()
@@ -122,7 +122,12 @@ class TestSourceCliCompatibility:
         result = runner.invoke(source.app, ["crawl", "src_123"])
 
         assert result.exit_code == 0
-        mock_client.start_crawl.assert_called_once_with("src_123")
+        mock_client.start_crawl.assert_called_once_with(
+            source_id="src_123",
+            max_pages=50,
+            max_depth=3,
+            generate_embeddings=True,
+        )
 
     @patch("sibyl_cli.source.get_client")
     def test_source_link_graph_can_create_new_entities(
@@ -158,7 +163,7 @@ class TestSourceCliCompatibility:
 class TestCrawlCliQueuedStatus:
     """Crawler ingest CLI should accept the API's queued success status."""
 
-    @patch("sibyl_cli.crawl.get_client")
+    @patch("sibyl_cli.crawl_shared.get_client")
     def test_ingest_treats_queued_as_success(self, mock_get_client: MagicMock) -> None:
         """crawl ingest should not report queued jobs as failures."""
         mock_client = MagicMock()
@@ -215,7 +220,7 @@ class TestCrawlCliQueuedStatus:
 class TestCrawlCliAddFlags:
     """Crawler add CLI should accept both include flag spellings."""
 
-    @patch("sibyl_cli.crawl.get_client")
+    @patch("sibyl_cli.crawl_shared.get_client")
     def test_add_accepts_include_alias(self, mock_get_client: MagicMock) -> None:
         """crawl add should forward --include to include_patterns."""
         mock_client = MagicMock()
@@ -246,7 +251,7 @@ class TestCrawlCliAddFlags:
             include_patterns=["docs/**", "guides/**"],
         )
 
-    @patch("sibyl_cli.crawl.get_client")
+    @patch("sibyl_cli.crawl_shared.get_client")
     def test_add_still_accepts_pattern_flag(self, mock_get_client: MagicMock) -> None:
         """crawl add should keep the legacy --pattern spelling working."""
         mock_client = MagicMock()

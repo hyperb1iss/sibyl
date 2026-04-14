@@ -20,10 +20,9 @@ from sibyl_cli.common import (
     info,
     print_json,
     run_async,
-    success,
     truncate,
 )
-from sibyl_cli.crawl_shared import show_source_status
+from sibyl_cli.crawl_shared import add_crawl_source, show_source_status, start_crawl_source
 
 app = typer.Typer(
     name="source",
@@ -122,38 +121,16 @@ def add_source(
     ] = False,
 ) -> None:
     """Add a new documentation source. Default: table output."""
-
-    @run_async
-    async def _add() -> None:
-        client = get_client()
-
-        try:
-            source_name = name or url.split("//")[-1].split("/")[0]
-
-            response = await client.create_crawl_source(
-                name=source_name,
-                url=url,
-                source_type=source_type,
-                crawl_depth=depth,
-                include_patterns=pattern or [],
-            )
-
-            # JSON output (default)
-            if json_out:
-                print_json(response)
-                return
-
-            # Table output
-            if response.get("id"):
-                success(f"Source added: {response['id']}")
-                info(f"Run 'sibyl source crawl {response['id']}' to start crawling")
-            else:
-                error("Failed to add source")
-
-        except SibylClientError as e:
-            _handle_client_error(e)
-
-    _add()
+    add_crawl_source(
+        url,
+        name=name,
+        source_type=source_type,
+        depth=depth,
+        include_patterns=pattern,
+        json_out=json_out,
+        handle_client_error=_handle_client_error,
+        next_step_command="sibyl source crawl",
+    )
 
 
 @app.command("show")
@@ -202,27 +179,11 @@ def crawl_source(
     source_id: Annotated[str, typer.Argument(help="Source ID to crawl")],
 ) -> None:
     """Trigger a crawl for a documentation source."""
-
-    @run_async
-    async def _crawl() -> None:
-        client = get_client()
-
-        try:
-            response = await client.start_crawl(source_id)
-            status = response.get("status", "unknown")
-
-            if status in {"queued", "started"}:
-                success(response.get("message", "Crawl queued"))
-                info("Use 'sibyl source status <source_id>' to check progress")
-            elif status == "already_running":
-                info(response.get("message", "Crawl already in progress"))
-            else:
-                error(f"Crawl failed: {response.get('message', 'Unknown error')}")
-
-        except SibylClientError as e:
-            _handle_client_error(e)
-
-    _crawl()
+    start_crawl_source(
+        source_id,
+        handle_client_error=_handle_client_error,
+        status_command="sibyl source status <source_id>",
+    )
 
 
 @app.command("status")
