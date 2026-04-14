@@ -1,7 +1,7 @@
 'use client';
 
 import { AnimatePresence, motion } from 'motion/react';
-import { Xmark } from '@/components/ui/icons';
+import { Check, RefreshDouble, Xmark } from '@/components/ui/icons';
 import { ENTITY_COLORS, type EntityType, getRelationshipConfig } from '@/lib/constants';
 import { EntityIcon } from './entity-icon';
 
@@ -79,25 +79,102 @@ export function RelationshipBadge({
 }
 
 // Status indicator badges
-type StatusType = 'healthy' | 'unhealthy' | 'warning' | 'idle' | 'running';
+type StatusType = 'healthy' | 'unhealthy' | 'warning' | 'idle' | 'running' | 'unknown';
+type StatusValue = StatusType | boolean;
 
 interface StatusBadgeProps {
-  status: StatusType;
+  status: StatusValue;
   label?: string;
   pulse?: boolean;
+  variant?: 'dot' | 'chip';
 }
 
-const statusStyles: Record<StatusType, { bg: string; text: string; dot: string }> = {
-  healthy: { bg: 'bg-sc-green/20', text: 'text-sc-green', dot: 'bg-sc-green' },
-  unhealthy: { bg: 'bg-sc-red/20', text: 'text-sc-red', dot: 'bg-sc-red' },
-  warning: { bg: 'bg-sc-yellow/20', text: 'text-sc-yellow', dot: 'bg-sc-yellow' },
-  idle: { bg: 'bg-sc-green/20', text: 'text-sc-green', dot: 'bg-sc-green' },
-  running: { bg: 'bg-sc-yellow/20', text: 'text-sc-yellow', dot: 'bg-sc-yellow' },
+const statusStyles: Record<
+  StatusType,
+  { bg: string; text: string; dot: string; border: string; icon: React.ReactNode }
+> = {
+  healthy: {
+    bg: 'bg-sc-green/20',
+    text: 'text-sc-green',
+    dot: 'bg-sc-green',
+    border: 'border-sc-green/20',
+    icon: <Check width={14} height={14} />,
+  },
+  unhealthy: {
+    bg: 'bg-sc-red/20',
+    text: 'text-sc-red',
+    dot: 'bg-sc-red',
+    border: 'border-sc-red/20',
+    icon: <Xmark width={14} height={14} />,
+  },
+  warning: {
+    bg: 'bg-sc-yellow/20',
+    text: 'text-sc-yellow',
+    dot: 'bg-sc-yellow',
+    border: 'border-sc-yellow/20',
+    icon: <RefreshDouble width={14} height={14} />,
+  },
+  idle: {
+    bg: 'bg-sc-green/20',
+    text: 'text-sc-green',
+    dot: 'bg-sc-green',
+    border: 'border-sc-green/20',
+    icon: <RefreshDouble width={14} height={14} />,
+  },
+  running: {
+    bg: 'bg-sc-yellow/20',
+    text: 'text-sc-yellow',
+    dot: 'bg-sc-yellow',
+    border: 'border-sc-yellow/20',
+    icon: <RefreshDouble width={14} height={14} />,
+  },
+  unknown: {
+    bg: 'bg-sc-fg-subtle/10',
+    text: 'text-sc-fg-muted',
+    dot: 'bg-sc-fg-subtle',
+    border: 'border-sc-fg-subtle/20',
+    icon: <RefreshDouble width={14} height={14} />,
+  },
 };
 
-export function StatusBadge({ status, label, pulse = false }: StatusBadgeProps) {
-  const style = statusStyles[status];
-  const displayLabel = label ?? status.charAt(0).toUpperCase() + status.slice(1);
+function resolveStatus(status: StatusValue): StatusType {
+  if (status === true || status === 'healthy') {
+    return 'healthy';
+  }
+
+  if (status === false || status === 'unhealthy') {
+    return 'unhealthy';
+  }
+
+  if (status === 'warning' || status === 'idle' || status === 'running' || status === 'unknown') {
+    return status;
+  }
+
+  return 'unknown';
+}
+
+function formatStatusLabel(status: StatusType): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+export function StatusBadge({ status, label, pulse = false, variant = 'dot' }: StatusBadgeProps) {
+  const resolvedStatus = resolveStatus(status);
+  const style = statusStyles[resolvedStatus];
+  const displayLabel = label ?? formatStatusLabel(resolvedStatus);
+
+  if (variant === 'chip') {
+    return (
+      <span
+        className={`
+          inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium
+          ${style.bg} ${style.text} ${style.border}
+        `}
+      >
+        <span className={pulse ? 'animate-pulse' : ''}>{style.icon}</span>
+        <span>{displayLabel}</span>
+      </span>
+    );
+  }
 
   return (
     <span

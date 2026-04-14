@@ -62,12 +62,35 @@ describe('StatusBadge', () => {
     expect(dot).not.toBeInTheDocument();
   });
 
+  it('accepts boolean and unknown statuses', () => {
+    render(
+      <div>
+        <StatusBadge status={true} />
+        <StatusBadge status={false} />
+        <StatusBadge status="unknown" />
+      </div>
+    );
+
+    expect(screen.getByText('Healthy')).toBeInTheDocument();
+    expect(screen.getByText('Unhealthy')).toBeInTheDocument();
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
+  });
+
+  it('renders chip variant with icon styling', () => {
+    const { container } = render(<StatusBadge status="healthy" variant="chip" />);
+
+    expect(screen.getByText('Healthy')).toBeInTheDocument();
+    expect(container.querySelector('svg')).toBeInTheDocument();
+    expect(container.firstElementChild).toHaveClass('border');
+  });
+
   it.each([
     'healthy',
     'unhealthy',
     'warning',
     'idle',
     'running',
+    'unknown',
   ] as const)('renders %s status correctly', status => {
     render(<StatusBadge status={status} />);
     const capitalizedStatus = status.charAt(0).toUpperCase() + status.slice(1);

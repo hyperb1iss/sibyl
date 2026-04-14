@@ -1,14 +1,7 @@
 'use client';
 
-import {
-  Activity,
-  Check,
-  Clock,
-  Database,
-  Network,
-  RefreshDouble,
-  Xmark,
-} from '@/components/ui/icons';
+import { StatusBadge } from '@/components/ui/badge';
+import { Activity, Clock, Database, Network, RefreshDouble } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
 import { useHealth, useStats } from '@/lib/hooks';
 
@@ -24,48 +17,6 @@ function formatUptime(seconds: number): string {
   if (parts.length === 0) parts.push(`${seconds}s`);
 
   return parts.join(' ');
-}
-
-function StatusBadge({
-  status,
-  label,
-}: {
-  status: 'healthy' | 'unhealthy' | 'unknown' | boolean;
-  label?: string;
-}) {
-  const isHealthy = status === 'healthy' || status === true;
-  const isUnhealthy = status === 'unhealthy' || status === false;
-
-  let bgColor: string;
-  let textColor: string;
-  let icon: React.ReactNode;
-  let text: string;
-
-  if (isHealthy) {
-    bgColor = 'bg-sc-green/10 border-sc-green/20';
-    textColor = 'text-sc-green';
-    icon = <Check width={14} height={14} />;
-    text = label || 'Healthy';
-  } else if (isUnhealthy) {
-    bgColor = 'bg-sc-red/10 border-sc-red/20';
-    textColor = 'text-sc-red';
-    icon = <Xmark width={14} height={14} />;
-    text = label || 'Unhealthy';
-  } else {
-    bgColor = 'bg-sc-fg-subtle/10 border-sc-fg-subtle/20';
-    textColor = 'text-sc-fg-muted';
-    icon = <RefreshDouble width={14} height={14} />;
-    text = label || 'Unknown';
-  }
-
-  return (
-    <div
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${bgColor} ${textColor}`}
-    >
-      {icon}
-      <span>{text}</span>
-    </div>
-  );
 }
 
 function StatCard({
@@ -148,7 +99,7 @@ export default function SystemStatusPage() {
             <Activity width={20} height={20} className="text-sc-cyan" />
             <h2 className="text-lg font-semibold text-sc-fg-primary">System Status</h2>
           </div>
-          <StatusBadge status={health?.status || 'unknown'} />
+          <StatusBadge status={health?.status ?? 'unknown'} variant="chip" />
         </div>
         <p className="text-sc-fg-muted">
           Real-time health and diagnostics for the Sibyl server and its connected services.
@@ -194,6 +145,7 @@ export default function SystemStatusPage() {
             <StatusBadge
               status={health?.graph_connected ?? false}
               label={health?.graph_connected ? 'Connected' : 'Disconnected'}
+              variant="chip"
             />
           </div>
 
@@ -208,6 +160,7 @@ export default function SystemStatusPage() {
             <StatusBadge
               status={health?.status === 'healthy'}
               label={health?.status === 'healthy' ? 'Connected' : 'Error'}
+              variant="chip"
             />
           </div>
         </div>
