@@ -874,6 +874,7 @@ async def _enqueue_source_crawl(
 
     job_id = await enqueue_crawl(
         source_id,
+        organization_id=organization_id,
         max_pages=max_pages,
         max_depth=max_depth,
         generate_embeddings=generate_embeddings,
@@ -897,11 +898,11 @@ async def _enqueue_source_crawl(
     return job_id
 
 
-async def _enqueue_source_sync(source_id: str) -> str:
+async def _enqueue_source_sync(source_id: str, *, organization_id: str) -> str:
     """Enqueue a source-stat sync job."""
     from sibyl.jobs.queue import enqueue_sync
 
-    return await enqueue_sync(source_id)
+    return await enqueue_sync(source_id, organization_id=organization_id)
 
 
 async def _crawl_source(
@@ -959,7 +960,7 @@ async def _sync_source(
             message=f"Source not found: {source_id}",
         )
 
-    job_id = await _enqueue_source_sync(source_id)
+    job_id = await _enqueue_source_sync(source_id, organization_id=organization_id)
 
     return ManageResponse(
         success=True,
@@ -977,7 +978,7 @@ async def _refresh_all_sources(
     source_ids = await _list_crawl_source_ids(organization_id)
 
     for source_id in source_ids:
-        await _enqueue_source_sync(source_id)
+        await _enqueue_source_sync(source_id, organization_id=organization_id)
 
     return ManageResponse(
         success=True,

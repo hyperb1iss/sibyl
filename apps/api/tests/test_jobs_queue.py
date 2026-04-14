@@ -40,8 +40,8 @@ class RecordingEnqueuePool:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict[str, object]]] = []
 
-    async def enqueue_job(self, function: str, organization_id: str, **kwargs: object):
-        self.calls.append((function, organization_id, kwargs))
+    async def enqueue_job(self, function: str, first_arg: str, **kwargs: object):
+        self.calls.append((function, first_arg, kwargs))
         return SimpleNamespace(job_id=kwargs["_job_id"])
 
 
@@ -163,3 +163,33 @@ async def test_enqueue_backup_generates_backup_id_when_missing(
 
     assert job_id == "backup:backup_generated_for_org-123"
     assert pool.calls[0][2]["backup_id"] == "backup_generated_for_org-123"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_crawl_includes_org_metadata_when_provided(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = RecordingEnqueuePool()
+    monkeypatch.setattr(queue_module, "get_pool", AsyncMock(return_value=pool))
+
+    job_id = await queue_module.enqueue_crawl("source-123", organization_id="org-123")
+
+    assert job_id == "crawl:source-123"
+    assert pool.calls[0][0] == "crawl_source"
+    assert pool.calls[0][1] == "source-123"
+    assert pool.calls[0][2]["organization_id"] == "org-123"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_sync_includes_org_metadata_when_provided(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = RecordingEnqueuePool()
+    monkeypatch.setattr(queue_module, "get_pool", AsyncMock(return_value=pool))
+
+    job_id = await queue_module.enqueue_sync("source-123", organization_id="org-123")
+
+    assert job_id == "sync:source-123"
+    assert pool.calls[0][0] == "sync_source"
+    assert pool.calls[0][1] == "source-123"
+    assert pool.calls[0][2]["organization_id"] == "org-123"

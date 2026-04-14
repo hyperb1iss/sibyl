@@ -41,6 +41,7 @@ async def _job_visible_to_org(
     """
     fn = getattr(job, "function", "") or ""
     args: list[Any] = list(getattr(job, "args", None) or ())
+    kwargs = dict(getattr(job, "kwargs", None) or {})
 
     # Graph jobs include group_id explicitly.
     if fn == "create_entity" and len(args) >= 3:
@@ -50,6 +51,9 @@ async def _job_visible_to_org(
 
     # Source jobs are keyed by source_id; resolve org ownership from DB.
     if fn in {"crawl_source", "sync_source"} and len(args) >= 1:
+        metadata_org_id = kwargs.get("organization_id")
+        if metadata_org_id is not None:
+            return str(metadata_org_id) == str(org.id)
         try:
             source_uuid = UUID(str(args[0]))
         except ValueError:

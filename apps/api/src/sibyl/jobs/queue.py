@@ -86,6 +86,7 @@ async def close_pool() -> None:
 async def enqueue_crawl(
     source_id: str | UUID,
     *,
+    organization_id: str | None = None,
     max_pages: int = 100,
     max_depth: int = 3,
     generate_embeddings: bool = True,
@@ -98,6 +99,7 @@ async def enqueue_crawl(
 
     Args:
         source_id: UUID of the source to crawl
+        organization_id: Optional org ID metadata for route-side visibility checks
         max_pages: Maximum pages to crawl
         max_depth: Maximum link depth
         generate_embeddings: Whether to generate embeddings
@@ -117,14 +119,16 @@ async def enqueue_crawl(
         await pool.delete(result_key)
         log.debug("Cleared old result for re-crawl", job_id=job_id)
 
-    job = await pool.enqueue_job(
-        "crawl_source",
-        str(source_id),
-        max_pages=max_pages,
-        max_depth=max_depth,
-        generate_embeddings=generate_embeddings,
-        _job_id=job_id,
-    )
+    job_kwargs: dict[str, Any] = {
+        "max_pages": max_pages,
+        "max_depth": max_depth,
+        "generate_embeddings": generate_embeddings,
+        "_job_id": job_id,
+    }
+    if organization_id is not None:
+        job_kwargs["organization_id"] = organization_id
+
+    job = await pool.enqueue_job("crawl_source", str(source_id), **job_kwargs)
 
     if job is None:
         # Job already exists (queued/running) - return the existing job ID
@@ -141,7 +145,7 @@ async def enqueue_crawl(
     return job.job_id
 
 
-async def enqueue_sync(source_id: str | UUID) -> str:
+async def enqueue_sync(source_id: str | UUID, *, organization_id: str | None = None) -> str:
     """Enqueue a source sync job.
 
     Uses a deterministic job ID based on source_id to prevent duplicate jobs.
@@ -149,6 +153,7 @@ async def enqueue_sync(source_id: str | UUID) -> str:
 
     Args:
         source_id: UUID of the source to sync
+        organization_id: Optional org ID metadata for route-side visibility checks
 
     Returns:
         Job ID for tracking
@@ -158,7 +163,11 @@ async def enqueue_sync(source_id: str | UUID) -> str:
     # Deterministic job ID prevents duplicate jobs
     job_id = f"sync:{source_id}"
 
-    job = await pool.enqueue_job("sync_source", str(source_id), _job_id=job_id)
+    job_kwargs: dict[str, Any] = {"_job_id": job_id}
+    if organization_id is not None:
+        job_kwargs["organization_id"] = organization_id
+
+    job = await pool.enqueue_job("sync_source", str(source_id), **job_kwargs)
 
     if job is None:
         # Job already exists

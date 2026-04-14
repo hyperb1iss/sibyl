@@ -634,6 +634,7 @@ async def ingest_source(
     try:
         job_id = await enqueue_crawl(
             source_id,
+            organization_id=str(org.id),
             max_pages=request.max_pages,
             max_depth=request.max_depth,
             generate_embeddings=request.generate_embeddings,

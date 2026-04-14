@@ -31,6 +31,7 @@ async def crawl_source(
     ctx: dict[str, Any],  # noqa: ARG001
     source_id: str,
     *,
+    organization_id: str | None = None,
     max_pages: int = 100,
     max_depth: int = 3,
     generate_embeddings: bool = True,
@@ -172,7 +173,12 @@ async def crawl_source(
         raise
 
 
-async def sync_source(ctx: dict[str, Any], source_id: str) -> dict[str, Any]:  # noqa: ARG001
+async def sync_source(
+    ctx: dict[str, Any],  # noqa: ARG001
+    source_id: str,
+    *,
+    organization_id: str | None = None,
+) -> dict[str, Any]:
     """Sync source stats from actual data.
 
     Recalculates document_count, chunk_count, and fixes status.
