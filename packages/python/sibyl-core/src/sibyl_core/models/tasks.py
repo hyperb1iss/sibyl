@@ -347,6 +347,9 @@ class TaskKnowledgeSuggestion(BaseModel):
     templates: list[tuple[str, float]] = Field(
         default_factory=list, description="Relevant templates (id, score)"
     )
+    procedures: list[tuple[str, float]] = Field(
+        default_factory=list, description="Relevant procedures (id, score)"
+    )
     past_learnings: list[tuple[str, float]] = Field(
         default_factory=list, description="Related episodes (id, score)"
     )

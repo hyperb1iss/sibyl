@@ -101,6 +101,7 @@ async def main():
     print(f"   - Patterns: {len(suggestions.patterns)}")
     print(f"   - Rules: {len(suggestions.rules)}")
     print(f"   - Templates: {len(suggestions.templates)}")
+    print(f"   - Procedures: {len(suggestions.procedures)}")
     print(f"   - Past Learnings: {len(suggestions.past_learnings)}")
 
     # Create second task with dependency

@@ -104,6 +104,7 @@ class TestCreateTaskWithKnowledgeLinks:
         first_call = mock_entity_manager.search.call_args_list[0]
         assert EntityType.PATTERN in first_call.kwargs["entity_types"]
         assert EntityType.RULE in first_call.kwargs["entity_types"]
+        assert EntityType.PROCEDURE in first_call.kwargs["entity_types"]
 
     @pytest.mark.asyncio
     async def test_auto_links_high_relevance_knowledge(
@@ -213,6 +214,33 @@ class TestCreateTaskWithKnowledgeLinks:
         # Should create relationship with lower threshold
         mock_relationship_manager.create.assert_called()
 
+    @pytest.mark.asyncio
+    async def test_auto_links_procedures_with_uses_procedure_relationship(
+        self,
+        task_manager: TaskManager,
+        sample_task: Task,
+        mock_entity_manager: MagicMock,
+        mock_relationship_manager: MagicMock,
+    ) -> None:
+        """Procedure matches should auto-link with USES_PROCEDURE edges."""
+        procedure = Entity(
+            id="procedure_123",
+            entity_type=EntityType.PROCEDURE,
+            name="Deploy rollback",
+            description="Rollback safely",
+            content="",
+        )
+
+        mock_entity_manager.search = AsyncMock(return_value=[(procedure, 0.91)])
+        sample_task.project_id = None
+        sample_task.domain = None
+
+        await task_manager.create_task_with_knowledge_links(sample_task)
+
+        rel = mock_relationship_manager.create.await_args.args[0]
+        assert rel.target_id == "procedure_123"
+        assert rel.relationship_type == RelationshipType.USES_PROCEDURE
+
 
 class TestSuggestTaskKnowledge:
     """Tests for suggest_task_knowledge method."""
@@ -231,6 +259,7 @@ class TestSuggestTaskKnowledge:
         assert hasattr(result, "patterns")
         assert hasattr(result, "rules")
         assert hasattr(result, "templates")
+        assert hasattr(result, "procedures")
         assert hasattr(result, "past_learnings")
         assert hasattr(result, "error_patterns")
 
@@ -238,15 +267,15 @@ class TestSuggestTaskKnowledge:
     async def test_searches_all_knowledge_types(
         self, task_manager: TaskManager, mock_entity_manager: MagicMock
     ) -> None:
-        """Should search for patterns, rules, templates, episodes, error_patterns."""
+        """Should search for patterns, rules, templates, procedures, episodes, error patterns."""
         await task_manager.suggest_task_knowledge(
             task_title="Implement feature",
             task_description="New feature",
             technologies=["python"],
         )
 
-        # Should make 5 search calls (one per knowledge type)
-        assert mock_entity_manager.search.call_count == 5
+        # Should make 6 search calls (one per knowledge type)
+        assert mock_entity_manager.search.call_count == 6
 
     @pytest.mark.asyncio
     async def test_formats_results_as_id_score_tuples(
@@ -284,6 +313,44 @@ class TestSuggestTaskKnowledge:
         # All search calls should use the specified limit
         for call in mock_entity_manager.search.call_args_list:
             assert call.kwargs.get("limit") == 3
+
+    @pytest.mark.asyncio
+    async def test_surfaces_procedures_in_suggestions(
+        self, task_manager: TaskManager, mock_entity_manager: MagicMock
+    ) -> None:
+        """Should return procedure suggestions as id-score tuples."""
+        results = {
+            EntityType.PATTERN: [],
+            EntityType.RULE: [],
+            EntityType.TEMPLATE: [],
+            EntityType.PROCEDURE: [
+                (
+                    Entity(
+                        id="procedure_1",
+                        entity_type=EntityType.PROCEDURE,
+                        name="Rollback deploy",
+                        description="Rollback a deployment safely",
+                        content="",
+                    ),
+                    0.88,
+                )
+            ],
+            EntityType.EPISODE: [],
+            EntityType.ERROR_PATTERN: [],
+        }
+
+        async def search(*, entity_types: list[EntityType], **_: object):
+            return results[entity_types[0]]
+
+        mock_entity_manager.search = AsyncMock(side_effect=search)
+
+        result = await task_manager.suggest_task_knowledge(
+            task_title="Recover bad deploy",
+            task_description="Need a safe rollback path",
+            technologies=["python"],
+        )
+
+        assert result.procedures == [("procedure_1", 0.88)]
 
 
 class TestFindSimilarTasks:

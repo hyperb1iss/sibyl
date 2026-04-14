@@ -59,6 +59,7 @@ class TaskManager:
                 EntityType.PATTERN,
                 EntityType.RULE,
                 EntityType.TEMPLATE,
+                EntityType.PROCEDURE,
                 EntityType.EPISODE,
             ],
             limit=10,
@@ -132,13 +133,16 @@ class TaskManager:
         query = f"{task_title} {task_description} {' '.join(technologies)}"
 
         # Search across all knowledge types in parallel
-        patterns, rules, templates, episodes, error_patterns = await asyncio.gather(
+        patterns, rules, templates, procedures, episodes, error_patterns = await asyncio.gather(
             self._entity_manager.search(
                 query=query, entity_types=[EntityType.PATTERN], limit=limit
             ),
             self._entity_manager.search(query=query, entity_types=[EntityType.RULE], limit=limit),
             self._entity_manager.search(
                 query=query, entity_types=[EntityType.TEMPLATE], limit=limit
+            ),
+            self._entity_manager.search(
+                query=query, entity_types=[EntityType.PROCEDURE], limit=limit
             ),
             self._entity_manager.search(
                 query=query, entity_types=[EntityType.EPISODE], limit=limit
@@ -152,6 +156,7 @@ class TaskManager:
             patterns=[(e.id, s) for e, s in patterns],
             rules=[(e.id, s) for e, s in rules],
             templates=[(e.id, s) for e, s in templates],
+            procedures=[(e.id, s) for e, s in procedures],
             past_learnings=[(e.id, s) for e, s in episodes],
             error_patterns=[(e.id, s) for e, s in error_patterns],
         )
@@ -353,6 +358,7 @@ class TaskManager:
             EntityType.PATTERN: RelationshipType.REFERENCES,
             EntityType.RULE: RelationshipType.REQUIRES,
             EntityType.TEMPLATE: RelationshipType.REFERENCES,
+            EntityType.PROCEDURE: RelationshipType.USES_PROCEDURE,
             EntityType.EPISODE: RelationshipType.REFERENCES,
             EntityType.ERROR_PATTERN: RelationshipType.REFERENCES,
         }

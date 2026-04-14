@@ -1310,6 +1310,7 @@ async def _suggest_knowledge(
             "patterns": suggestions.patterns,
             "rules": suggestions.rules,
             "templates": suggestions.templates,
+            "procedures": suggestions.procedures,
             "past_learnings": suggestions.past_learnings,
             "error_patterns": suggestions.error_patterns,
         },

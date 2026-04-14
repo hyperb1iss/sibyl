@@ -398,8 +398,10 @@ class TestTaskKnowledgeSuggestion:
             patterns=[("pat-001", 0.92), ("pat-002", 0.85)],
             rules=[("rule-001", 0.88)],
             templates=[("tpl-001", 0.75)],
+            procedures=[("proc-001", 0.8)],
             past_learnings=[("ep-001", 0.82)],
             error_patterns=[("err-001", 0.90)],
         )
         assert len(suggestion.patterns) == 2
         assert suggestion.patterns[0][1] == 0.92
+        assert suggestion.procedures == [("proc-001", 0.8)]
