@@ -1185,11 +1185,25 @@ async def _prioritize_tasks(
     project_id: str,
 ) -> ManageResponse:
     """Get smart task ordering for a project."""
-    project_tasks = await entity_manager.list_by_type(
-        EntityType.TASK,
-        limit=500,
-        project_id=project_id,
-    )
+    batch_size = 500
+    project_tasks: list[Any] = []
+    offset = 0
+
+    while True:
+        batch = await entity_manager.list_by_type(
+            EntityType.TASK,
+            limit=batch_size,
+            offset=offset,
+            project_id=project_id,
+        )
+        if not batch:
+            break
+
+        project_tasks.extend(batch)
+        if len(batch) < batch_size:
+            break
+
+        offset += batch_size
 
     if not project_tasks:
         return ManageResponse(

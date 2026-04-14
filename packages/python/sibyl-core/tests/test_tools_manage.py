@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -1284,8 +1284,84 @@ class TestAnalysisActions:
         mock_entity_manager.list_by_type.assert_awaited_once_with(
             EntityType.TASK,
             limit=500,
+            offset=0,
             project_id="project_123",
         )
+
+    @pytest.mark.asyncio
+    async def test_prioritize_pages_past_first_500_tasks(self) -> None:
+        """prioritize should keep loading tasks until the project is exhausted."""
+        mock_client = AsyncMock()
+        mock_entity_manager = AsyncMock()
+        mock_rel_manager = AsyncMock()
+        first_page = [
+            make_entity(
+                entity_id=f"task_{index:03}",
+                name=f"Task {index}",
+                entity_type=EntityType.TASK,
+                metadata={
+                    "project_id": "project_123",
+                    "priority": "low",
+                    "status": "todo",
+                    "task_order": index,
+                },
+            )
+            for index in range(500)
+        ]
+        second_page = [
+            make_entity(
+                entity_id="task_critical",
+                name="Critical",
+                entity_type=EntityType.TASK,
+                metadata={
+                    "project_id": "project_123",
+                    "priority": "critical",
+                    "status": "doing",
+                    "task_order": 999,
+                },
+            )
+        ]
+        mock_entity_manager.list_by_type = AsyncMock(side_effect=[first_page, second_page])
+
+        with (
+            patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
+            patch(
+                "sibyl_core.tools.manage.EntityManager",
+                return_value=mock_entity_manager,
+            ),
+            patch(
+                "sibyl_core.tools.manage.RelationshipManager",
+                return_value=mock_rel_manager,
+            ),
+        ):
+            response = await manage(
+                action="prioritize",
+                entity_id="project_123",
+                organization_id="org_123",
+            )
+
+        assert response.success is True
+        assert response.message == "Prioritized 501 tasks"
+        assert response.data["tasks"][0] == {
+            "id": "task_critical",
+            "name": "Critical",
+            "priority": "critical",
+            "status": "doing",
+        }
+        assert mock_entity_manager.list_by_type.await_args_list == [
+            call(
+                EntityType.TASK,
+                limit=500,
+                offset=0,
+                project_id="project_123",
+            ),
+            call(
+                EntityType.TASK,
+                limit=500,
+                offset=500,
+                project_id="project_123",
+            ),
+        ]
 
     @pytest.mark.asyncio
     async def test_detect_cycles_returns_result(self) -> None:
