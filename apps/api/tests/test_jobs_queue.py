@@ -26,29 +26,60 @@ JobStatus = queue_module.JobStatus
 
 
 class FakePool:
-    def __init__(self, keys: list[str | bytes]) -> None:
-        self._keys = keys
+    def __init__(self, recent_ids: list[str | bytes], scan_ids: list[str | bytes] | None = None) -> None:
+        self._recent_ids = recent_ids
+        self._scan_ids = scan_ids
         self.keys = AsyncMock(side_effect=AssertionError("list_jobs should not call KEYS"))
+        self.zadd_calls = 0
+        self.zrevrange_calls = 0
+        self.scan_iter_calls = 0
+
+    async def zrevrange(self, key: str, start: int, stop: int):
+        assert key == queue_module.RECENT_JOB_INDEX_KEY
+        assert start == 0
+        assert stop == -1
+        self.zrevrange_calls += 1
+        return self._recent_ids
 
     async def scan_iter(self, match: str):
         assert match == "arq:job:*"
-        for key in self._keys:
+        self.scan_iter_calls += 1
+        if self._scan_ids is None:
+            raise AssertionError("list_jobs should not call scan_iter when the index is populated")
+        for key in self._scan_ids:
             yield key
 
 
 class RecordingEnqueuePool:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str, dict[str, object]]] = []
+        self.calls: list[tuple[str, str | None, dict[str, object]]] = []
+        self.delete = AsyncMock()
+        self.zadd = AsyncMock()
+        self.zremrangebyrank = AsyncMock()
 
-    async def enqueue_job(self, function: str, first_arg: str, **kwargs: object):
+    async def enqueue_job(self, function: str, first_arg: str | None = None, **kwargs: object):
         self.calls.append((function, first_arg, kwargs))
         return SimpleNamespace(job_id=kwargs["_job_id"])
 
 
+def assert_recent_job_indexed(pool: RecordingEnqueuePool, job_id: str) -> None:
+    assert pool.zadd.await_count >= 1
+    key, mapping = pool.zadd.await_args_list[-1].args
+    assert key == queue_module.RECENT_JOB_INDEX_KEY
+    assert mapping == {job_id: mapping[job_id]}
+    pool.zremrangebyrank.assert_awaited_with(
+        queue_module.RECENT_JOB_INDEX_KEY,
+        0,
+        -(queue_module.RECENT_JOB_INDEX_LIMIT + 1),
+    )
+
+
 @pytest.mark.asyncio
-async def test_list_jobs_uses_scan_and_sorts_newest_first(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_list_jobs_uses_recent_index_and_sorts_newest_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     now = datetime.now(UTC)
-    pool = FakePool([b"arq:job:older", b"arq:job:newest", "arq:job:no-time"])
+    pool = FakePool([b"newest", b"older", "no-time"])
     infos = {
         "older": JobInfo(
             job_id="older",
@@ -80,6 +111,8 @@ async def test_list_jobs_uses_scan_and_sorts_newest_first(monkeypatch: pytest.Mo
 
     assert [job.job_id for job in jobs] == ["newest", "older", "no-time"]
     pool.keys.assert_not_called()
+    assert pool.scan_iter_calls == 0
+    assert pool.zrevrange_calls == 1
 
 
 @pytest.mark.asyncio
@@ -89,10 +122,10 @@ async def test_list_jobs_filters_limits_and_skips_failed_statuses(
     now = datetime.now(UTC)
     pool = FakePool(
         [
-            "arq:job:alpha",
-            "arq:job:beta",
-            "arq:job:gamma",
-            "arq:job:broken",
+            "alpha",
+            "beta",
+            "gamma",
+            "broken",
         ]
     )
     infos = {
@@ -129,6 +162,43 @@ async def test_list_jobs_filters_limits_and_skips_failed_statuses(
 
     assert [job.job_id for job in jobs] == ["gamma"]
     assert get_job_status.await_count == 4
+    assert pool.scan_iter_calls == 0
+    assert pool.zrevrange_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_falls_back_to_scan_when_index_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime.now(UTC)
+    pool = FakePool([], scan_ids=["arq:job:older", b"arq:job:newest"])
+    infos = {
+        "older": JobInfo(
+            job_id="older",
+            function="crawl_source",
+            status=JobStatus.QUEUED,
+            enqueue_time=now - timedelta(minutes=5),
+        ),
+        "newest": JobInfo(
+            job_id="newest",
+            function="crawl_source",
+            status=JobStatus.IN_PROGRESS,
+            enqueue_time=now,
+        ),
+    }
+
+    monkeypatch.setattr(queue_module, "get_pool", AsyncMock(return_value=pool))
+    monkeypatch.setattr(
+        queue_module,
+        "get_job_status",
+        AsyncMock(side_effect=lambda job_id: infos[job_id]),
+    )
+
+    jobs = await queue_module.list_jobs(limit=10)
+
+    assert [job.job_id for job in jobs] == ["newest", "older"]
+    assert pool.scan_iter_calls == 1
+    assert pool.zrevrange_calls == 1
 
 
 @pytest.mark.asyncio
@@ -145,6 +215,8 @@ async def test_enqueue_backup_uses_unique_backup_id_for_job_id(
     assert second_job_id == "backup:backup_b"
     assert pool.calls[0][2]["backup_id"] == "backup_a"
     assert pool.calls[1][2]["backup_id"] == "backup_b"
+    assert_recent_job_indexed(pool, "backup:backup_b")
+    assert pool.zadd.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -163,6 +235,7 @@ async def test_enqueue_backup_generates_backup_id_when_missing(
 
     assert job_id == "backup:backup_generated_for_org-123"
     assert pool.calls[0][2]["backup_id"] == "backup_generated_for_org-123"
+    assert_recent_job_indexed(pool, "backup:backup_generated_for_org-123")
 
 
 @pytest.mark.asyncio
@@ -178,6 +251,7 @@ async def test_enqueue_crawl_includes_org_metadata_when_provided(
     assert pool.calls[0][0] == "crawl_source"
     assert pool.calls[0][1] == "source-123"
     assert pool.calls[0][2]["organization_id"] == "org-123"
+    assert_recent_job_indexed(pool, "crawl:source-123")
 
 
 @pytest.mark.asyncio
@@ -193,3 +267,19 @@ async def test_enqueue_sync_includes_org_metadata_when_provided(
     assert pool.calls[0][0] == "sync_source"
     assert pool.calls[0][1] == "source-123"
     assert pool.calls[0][2]["organization_id"] == "org-123"
+    assert_recent_job_indexed(pool, "sync:source-123")
+
+
+@pytest.mark.asyncio
+async def test_enqueue_backup_cleanup_indexes_recent_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = RecordingEnqueuePool()
+    monkeypatch.setattr(queue_module, "get_pool", AsyncMock(return_value=pool))
+
+    job_id = await queue_module.enqueue_backup_cleanup(retention_days=7)
+
+    assert job_id == "backup_cleanup"
+    assert pool.calls[0][0] == "cleanup_old_backups"
+    assert pool.calls[0][2]["retention_days"] == 7
+    assert_recent_job_indexed(pool, "backup_cleanup")

@@ -7,7 +7,7 @@ and checking their status. Jobs are processed by the worker.
 import asyncio
 import contextlib
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID
@@ -21,6 +21,9 @@ from sibyl.backup_ids import generate_backup_id
 from sibyl.config import settings
 
 log = structlog.get_logger()
+
+RECENT_JOB_INDEX_KEY = "sibyl:jobs:recent"
+RECENT_JOB_INDEX_LIMIT = 1000
 
 
 def get_redis_settings() -> RedisSettings:
@@ -83,6 +86,33 @@ async def close_pool() -> None:
         _pool = None
 
 
+def _decode_job_id(job_id: bytes | str) -> str:
+    return job_id.decode() if isinstance(job_id, bytes) else job_id
+
+
+async def _record_recent_job(pool: ArqRedis, job_id: str) -> None:
+    """Record a job in the recent-job index."""
+    score = datetime.now(UTC).timestamp()
+    await pool.zadd(RECENT_JOB_INDEX_KEY, {job_id: score})
+    await pool.zremrangebyrank(RECENT_JOB_INDEX_KEY, 0, -(RECENT_JOB_INDEX_LIMIT + 1))
+
+
+async def _list_recent_job_ids(pool: ArqRedis) -> list[str]:
+    """Get recent job IDs from the index, with a legacy scan fallback."""
+    try:
+        job_ids = await pool.zrevrange(RECENT_JOB_INDEX_KEY, 0, -1)
+    except Exception:
+        job_ids = []
+
+    if job_ids:
+        return [_decode_job_id(job_id) for job_id in job_ids]
+
+    return [
+        _decode_job_id(key).removeprefix("arq:job:")
+        async for key in pool.scan_iter(match="arq:job:*")
+    ]
+
+
 async def enqueue_crawl(
     source_id: str | UUID,
     *,
@@ -133,6 +163,7 @@ async def enqueue_crawl(
     if job is None:
         # Job already exists (queued/running) - return the existing job ID
         log.info("Crawl job already exists", job_id=job_id, source_id=str(source_id))
+        await _record_recent_job(pool, job_id)
         return job_id
 
     log.info(
@@ -142,6 +173,7 @@ async def enqueue_crawl(
         max_pages=max_pages,
     )
 
+    await _record_recent_job(pool, job.job_id)
     return job.job_id
 
 
@@ -172,10 +204,12 @@ async def enqueue_sync(source_id: str | UUID, *, organization_id: str | None = N
     if job is None:
         # Job already exists
         log.info("Sync job already exists", job_id=job_id, source_id=str(source_id))
+        await _record_recent_job(pool, job_id)
         return job_id
 
     log.info("Enqueued sync job", job_id=job.job_id, source_id=str(source_id))
 
+    await _record_recent_job(pool, job.job_id)
     return job.job_id
 
 
@@ -223,6 +257,7 @@ async def enqueue_create_entity(
 
     if job is None:
         log.info("Create entity job already exists", job_id=job_id, entity_id=entity_id)
+        await _record_recent_job(pool, job_id)
         return job_id
 
     # Mark entity as pending so operations can queue against it
@@ -235,6 +270,7 @@ async def enqueue_create_entity(
         entity_type=entity_type,
     )
 
+    await _record_recent_job(pool, job.job_id)
     return job.job_id
 
 
@@ -274,6 +310,7 @@ async def enqueue_update_entity(
 
     if job is None:
         log.info("Update entity job already exists", job_id=job_id, entity_id=entity_id)
+        await _record_recent_job(pool, job_id)
         return job_id
 
     log.info(
@@ -284,6 +321,7 @@ async def enqueue_update_entity(
         fields=list(updates.keys()),
     )
 
+    await _record_recent_job(pool, job.job_id)
     return job.job_id
 
 
@@ -317,6 +355,7 @@ async def enqueue_create_learning_episode(
 
     if job is None:
         log.info("Learning episode job already exists", job_id=job_id, task_id=task_id)
+        await _record_recent_job(pool, job_id)
         return job_id
 
     log.info(
@@ -325,6 +364,7 @@ async def enqueue_create_learning_episode(
         task_id=task_id,
     )
 
+    await _record_recent_job(pool, job.job_id)
     return job.job_id
 
 
@@ -380,6 +420,7 @@ async def enqueue_update_task(
 
     if job is None:
         log.info("Update task job already exists", job_id=job_id, task_id=task_id)
+        await _record_recent_job(pool, job_id)
         return job_id
 
     log.info(
@@ -389,6 +430,7 @@ async def enqueue_update_task(
         fields=list(updates.keys()),
     )
 
+    await _record_recent_job(pool, job.job_id)
     return job.job_id
 
 
@@ -459,12 +501,7 @@ async def list_jobs(
     """
     pool = await get_pool()
 
-    job_ids = [
-        key.decode().removeprefix("arq:job:")
-        if isinstance(key, bytes)
-        else key.removeprefix("arq:job:")
-        async for key in pool.scan_iter(match="arq:job:*")
-    ]
+    job_ids = await _list_recent_job_ids(pool)
 
     if not job_ids:
         return []
@@ -550,6 +587,7 @@ async def enqueue_backup(
     if job is None:
         # Shouldn't happen with unique backup IDs, but handle gracefully
         log.info("Backup job already exists", job_id=job_id)
+        await _record_recent_job(pool, job_id)
         return job_id
 
     log.info(
@@ -561,6 +599,7 @@ async def enqueue_backup(
         backup_id=backup_id,
     )
 
+    await _record_recent_job(pool, job.job_id)
     return job.job_id
 
 
@@ -598,8 +637,10 @@ async def enqueue_backup_cleanup(
 
     if job is None:
         log.info("Backup cleanup job already running", job_id=job_id)
+        await _record_recent_job(pool, job_id)
         return job_id
 
     log.info("Enqueued backup cleanup job", job_id=job.job_id, retention_days=retention_days)
 
+    await _record_recent_job(pool, job.job_id)
     return job.job_id
