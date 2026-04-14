@@ -112,7 +112,9 @@ def _remember_next(
         )
 
     if relevant_entities:
-        return f"Review {relevant_entities[0].get('name', 'the top memory')} before you dive back in."
+        return (
+            f"Review {relevant_entities[0].get('name', 'the top memory')} before you dive back in."
+        )
 
     if has_project:
         return "No active tasks yet. Start one or capture the next useful learning."
@@ -141,7 +143,9 @@ async def _build_session_bundle(
         "project_name": None,
         "project_description": None,
         "scope": "all_projects" if all_projects else "project",
-        "source": "path_mapping" if linked_project else ("active_context" if active_context else "legacy"),
+        "source": "path_mapping"
+        if linked_project
+        else ("active_context" if active_context else "legacy"),
     }
 
     async with get_client() as client:
@@ -204,25 +208,15 @@ def _render_bundle(bundle: dict[str, Any]) -> None:
     ]
 
     if context.get("context_name"):
-        lines.append(
-            f"[{NEON_CYAN}]Context:[/{NEON_CYAN}] {context.get('context_name')}"
-        )
+        lines.append(f"[{NEON_CYAN}]Context:[/{NEON_CYAN}] {context.get('context_name')}")
     if context.get("project_name"):
-        lines.append(
-            f"[{NEON_CYAN}]Project:[/{NEON_CYAN}] {context.get('project_name')}"
-        )
+        lines.append(f"[{NEON_CYAN}]Project:[/{NEON_CYAN}] {context.get('project_name')}")
     elif context.get("project_id"):
-        lines.append(
-            f"[{NEON_CYAN}]Project:[/{NEON_CYAN}] {context.get('project_id')}"
-        )
+        lines.append(f"[{NEON_CYAN}]Project:[/{NEON_CYAN}] {context.get('project_id')}")
     if context.get("matched_path"):
-        lines.append(
-            f"[{NEON_CYAN}]Path:[/{NEON_CYAN}] {context.get('matched_path')}"
-        )
+        lines.append(f"[{NEON_CYAN}]Path:[/{NEON_CYAN}] {context.get('matched_path')}")
     if bundle.get("query"):
-        lines.append(
-            f"[{NEON_CYAN}]Focus:[/{NEON_CYAN}] {bundle.get('query')}"
-        )
+        lines.append(f"[{NEON_CYAN}]Focus:[/{NEON_CYAN}] {bundle.get('query')}")
 
     tasks = bundle.get("tasks", [])
     if tasks:

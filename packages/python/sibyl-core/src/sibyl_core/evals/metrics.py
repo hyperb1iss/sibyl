@@ -165,12 +165,12 @@ def aggregate_metrics(all_metrics: list[EvalMetrics]) -> EvalMetrics:
         aggregated.ndcg_at_k[k] = sum(m.ndcg_at_k.get(k, 0.0) for m in all_metrics) / len(
             all_metrics
         )
-        aggregated.success_at_k[k] = sum(
-            m.success_at_k.get(k, 0.0) for m in all_metrics
-        ) / len(all_metrics)
-        aggregated.precision_at_k[k] = sum(
-            m.precision_at_k.get(k, 0.0) for m in all_metrics
-        ) / len(all_metrics)
+        aggregated.success_at_k[k] = sum(m.success_at_k.get(k, 0.0) for m in all_metrics) / len(
+            all_metrics
+        )
+        aggregated.precision_at_k[k] = sum(m.precision_at_k.get(k, 0.0) for m in all_metrics) / len(
+            all_metrics
+        )
         aggregated.recall_at_k[k] = sum(m.recall_at_k.get(k, 0.0) for m in all_metrics) / len(
             all_metrics
         )

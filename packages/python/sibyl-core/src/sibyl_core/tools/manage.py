@@ -788,12 +788,8 @@ async def _create_or_get_crawl_source(
     except ValueError:
         source_type_enum = SourceType.WEBSITE
 
-    include_patterns = _normalize_pattern_list(
-        data.get("include_patterns") or data.get("patterns")
-    )
-    exclude_patterns = _normalize_pattern_list(
-        data.get("exclude_patterns") or data.get("exclude")
-    )
+    include_patterns = _normalize_pattern_list(data.get("include_patterns") or data.get("patterns"))
+    exclude_patterns = _normalize_pattern_list(data.get("exclude_patterns") or data.get("exclude"))
 
     async with get_session() as session:
         result = await session.execute(

@@ -923,9 +923,7 @@ def _resolve_backup_source(
     Handles both .tar.gz archives and directories. For archives, extracts to a
     temp dir and reads metadata.json for org_id if not provided.
     """
-    if source.is_file() and (
-        source.name.endswith(".tar.gz") or source.name.endswith(".tgz")
-    ):
+    if source.is_file() and (source.name.endswith(".tar.gz") or source.name.endswith(".tgz")):
         # Extract archive to temp dir
         extract_dir = Path(tempfile.mkdtemp(prefix="sibyl_restore_"))
         info(f"Extracting {source.name}...")
@@ -948,9 +946,7 @@ def _resolve_backup_source(
                 info(f"Organization: {org_id} (from metadata)")
 
     # Find PG file — check both archive format (postgres.sql) and backup-all format (*_pg.sql)
-    pg_path = _find_backup_file(
-        backup_dir, pg_file, ["postgres.sql", "*_pg.sql", "*pg_backup.sql"]
-    )
+    pg_path = _find_backup_file(backup_dir, pg_file, ["postgres.sql", "*_pg.sql", "*pg_backup.sql"])
     # Find graph file — check both archive format (graph.json) and backup-all format (*_graph.json)
     graph_path = _find_backup_file(
         backup_dir, graph_file, ["graph.json", "*_graph.json", "*graph_backup.json"]
@@ -965,9 +961,7 @@ def _resolve_backup_source(
 
 @app.command("restore-all")
 def restore_all(
-    source: Annotated[
-        Path, typer.Argument(help="Backup .tar.gz archive or directory")
-    ],
+    source: Annotated[Path, typer.Argument(help="Backup .tar.gz archive or directory")],
     org_id: Annotated[
         str,
         typer.Option("--org-id", help="Organization UUID (auto-detected from archive metadata)"),

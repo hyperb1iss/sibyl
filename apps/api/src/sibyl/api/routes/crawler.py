@@ -497,10 +497,7 @@ async def get_link_graph_status(
         total_chunks=status.total_chunks,
         chunks_with_entities=status.chunks_with_entities,
         chunks_pending=status.chunks_pending,
-        sources=[
-            LinkGraphSourceStatusResponse(**asdict(source))
-            for source in status.sources
-        ],
+        sources=[LinkGraphSourceStatusResponse(**asdict(source)) for source in status.sources],
     )
 
 

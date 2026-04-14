@@ -766,9 +766,15 @@ class TestGetOrgMetrics:
         mock_entity_manager.list_by_type.return_value = mock_projects
         mock_client.execute_read_org = AsyncMock(
             return_value=[
-                create_metric_task_row(project_id="proj_l", status="done", updated_at="2026-04-12T10:00:00+00:00"),
-                create_metric_task_row(project_id="proj_l", status="todo", updated_at="2026-04-11T10:00:00+00:00"),
-                create_metric_task_row(project_id="proj_s", status="todo", updated_at="2026-04-10T10:00:00+00:00"),
+                create_metric_task_row(
+                    project_id="proj_l", status="done", updated_at="2026-04-12T10:00:00+00:00"
+                ),
+                create_metric_task_row(
+                    project_id="proj_l", status="todo", updated_at="2026-04-11T10:00:00+00:00"
+                ),
+                create_metric_task_row(
+                    project_id="proj_s", status="todo", updated_at="2026-04-10T10:00:00+00:00"
+                ),
             ]
         )
 
@@ -940,7 +946,9 @@ class TestGetOrgMetrics:
         mock_org = create_mock_org()
         mock_client = AsyncMock()
         first_page = [
-            create_mock_entity(entity_type="project", name=f"Project {index}", entity_id=f"proj_{index}")
+            create_mock_entity(
+                entity_type="project", name=f"Project {index}", entity_id=f"proj_{index}"
+            )
             for index in range(500)
         ]
         second_page = [
@@ -1058,7 +1066,9 @@ class TestGetProjectSummaries:
         mock_org = create_mock_org()
         mock_client = AsyncMock()
         first_page = [
-            create_mock_entity(entity_type="project", name=f"Project {index}", entity_id=f"proj_{index}")
+            create_mock_entity(
+                entity_type="project", name=f"Project {index}", entity_id=f"proj_{index}"
+            )
             for index in range(500)
         ]
         second_page = [

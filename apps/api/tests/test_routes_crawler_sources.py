@@ -105,7 +105,7 @@ class TestCrawlSourceRoutes:
             ),
             pytest.raises(HTTPException) as exc_info,
         ):
-                await create_source(request=request, org=org)
+            await create_source(request=request, org=org)
 
         assert exc_info.value.status_code == 409
         assert exc_info.value.detail == "Source with URL https://docs.example.com/ already exists"

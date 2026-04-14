@@ -53,6 +53,7 @@ async def startup(ctx: dict[str, Any]) -> None:
 
     await load_api_keys_from_db()
 
+
 async def shutdown(ctx: dict[str, Any]) -> None:  # noqa: ARG001
     """Worker shutdown - cleanup resources."""
     log.info("Job worker shutting down")

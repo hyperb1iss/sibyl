@@ -982,6 +982,7 @@ class SibylClient:
         """
         return await self._request("GET", "/sources/link-graph/status")
 
+
 # Client cache by context name (None = default/active context)
 _clients: dict[str | None, SibylClient] = {}
 

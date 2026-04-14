@@ -145,7 +145,9 @@ def test_export_graph_pages_entities_and_relationships(tmp_path: Path, monkeypat
     ]
     relationship_page_two = [_FakeRelationship("rel-4", "pattern-1", "pattern-3")]
 
-    async def list_by_type(entity_type: EntityType, *, limit: int, offset: int) -> list[_FakeEntity]:
+    async def list_by_type(
+        entity_type: EntityType, *, limit: int, offset: int
+    ) -> list[_FakeEntity]:
         assert limit == 2
         if entity_type == EntityType.PATTERN:
             if offset == 0:
@@ -171,7 +173,9 @@ def test_export_graph_pages_entities_and_relationships(tmp_path: Path, monkeypat
     with (
         patch("sibyl_core.graph.client.get_graph_client", AsyncMock(return_value=AsyncMock())),
         patch("sibyl_core.graph.entities.EntityManager", return_value=entity_manager),
-        patch("sibyl_core.graph.relationships.RelationshipManager", return_value=relationship_manager),
+        patch(
+            "sibyl_core.graph.relationships.RelationshipManager", return_value=relationship_manager
+        ),
     ):
         result = runner.invoke(
             export_cli.app,

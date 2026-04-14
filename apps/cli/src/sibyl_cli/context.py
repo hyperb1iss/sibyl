@@ -116,9 +116,7 @@ def callback(
         )
     else:
         if active.default_project:
-            console.print(
-                f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}]  {active.default_project}"
-            )
+            console.print(f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}]  {active.default_project}")
         else:
             console.print(
                 f"  [{NEON_CYAN}]Project:[/{NEON_CYAN}]  [{ELECTRIC_YELLOW}]none[/{ELECTRIC_YELLOW}]"

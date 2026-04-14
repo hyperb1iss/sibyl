@@ -258,7 +258,9 @@ def _prefer_metadata_value(metadata: dict[str, Any], row: dict[str, Any], field:
     return None
 
 
-def _prefer_valid_datetime_value(metadata: dict[str, Any], row: dict[str, Any], field: str) -> str | None:
+def _prefer_valid_datetime_value(
+    metadata: dict[str, Any], row: dict[str, Any], field: str
+) -> str | None:
     """Prefer the first parseable datetime value, falling back across representations."""
     metadata_value = metadata.get(field)
     if _parse_iso_date(metadata_value):
@@ -391,7 +393,9 @@ async def _fetch_task_overview(
     return status_distribution, priority_distribution, total_tasks, tasks_created_last_7d
 
 
-async def _fetch_project_task_counts(client, organization_id: str, now: datetime) -> dict[str, dict]:
+async def _fetch_project_task_counts(
+    client, organization_id: str, now: datetime
+) -> dict[str, dict]:
     """Fetch per-project task rollups for org-wide metrics."""
     rows = await client.execute_read_org(
         f"""
@@ -509,9 +513,7 @@ async def _fetch_velocity_trend(
     )
 
     counts_by_date = {
-        str(row.get("date")): int(row.get("value", 0) or 0)
-        for row in rows
-        if row.get("date")
+        str(row.get("date")): int(row.get("value", 0) or 0) for row in rows if row.get("date")
     }
     trend: list[TimeSeriesPoint] = []
     for i in range(13, -1, -1):

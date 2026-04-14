@@ -259,9 +259,7 @@ class Settings(BaseSettings):
             if fallback:
                 object.__setattr__(self, "jwt_secret", SecretStr(fallback))
             elif self.environment != "production":
-                object.__setattr__(
-                    self, "jwt_secret", SecretStr(_get_or_create_jwt_secret())
-                )
+                object.__setattr__(self, "jwt_secret", SecretStr(_get_or_create_jwt_secret()))
 
         return self
 

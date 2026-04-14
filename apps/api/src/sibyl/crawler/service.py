@@ -912,7 +912,9 @@ async def list_org_sources(
 
         result = await session.execute(query)
         count_result = await session.execute(
-            select(func.count(CrawlSource.id)).where(col(CrawlSource.organization_id) == organization_id)
+            select(func.count(CrawlSource.id)).where(
+                col(CrawlSource.organization_id) == organization_id
+            )
         )
 
         return CrawlSourcePage(

@@ -128,7 +128,9 @@ class TestLiveSearchLatency:
             total_results += result.get("total", 0)
 
         avg_ms = total_ms / len(queries)
-        print(f"\n  5 queries: {total_ms:.0f}ms total, {avg_ms:.0f}ms avg, {total_results} total results")
+        print(
+            f"\n  5 queries: {total_ms:.0f}ms total, {avg_ms:.0f}ms avg, {total_results} total results"
+        )
         assert avg_ms < 3000, f"Average query latency {avg_ms:.0f}ms (budget: 3000ms)"
 
 
@@ -192,7 +194,12 @@ class TestLiveGraphStats:
 
     def test_entity_distribution(self):
         """Report entity counts per type (informational, not assertive)."""
-        queries = {"task": "implement", "pattern": "pattern", "episode": "learned", "project": "sibyl"}
+        queries = {
+            "task": "implement",
+            "pattern": "pattern",
+            "episode": "learned",
+            "project": "sibyl",
+        }
         for t, q in queries.items():
             result, ms = _search(q, types=[t], limit=1)
             print(f"\n  {t}: {result.get('total', 0)} results ({ms:.0f}ms)")

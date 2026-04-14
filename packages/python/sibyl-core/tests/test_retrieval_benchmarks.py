@@ -141,9 +141,7 @@ class TestTemporalBoostBenchmark:
 
     def test_decay_reorders_equal_relevance(self):
         """When relevance is equal, temporal decay should reorder by recency."""
-        entities = [
-            (_entity_with_time(f"entity_{i}", days_ago=i * 30), 0.9) for i in range(10)
-        ]
+        entities = [(_entity_with_time(f"entity_{i}", days_ago=i * 30), 0.9) for i in range(10)]
         boosted = temporal_boost(entities, decay_days=90.0)
 
         names = [e.name for e, _ in boosted]
@@ -181,25 +179,22 @@ class TestTemporalBoostBenchmark:
         episode = _entity_with_time("episode", days_ago=60, entity_type=EntityType.EPISODE)
         pattern = _entity_with_time("pattern", days_ago=60, entity_type=EntityType.PATTERN)
 
-        episode_score = temporal_boost_single(
-            episode, 0.8, TemporalConfig(decay_days=30.0)
-        )
-        pattern_score = temporal_boost_single(
-            pattern, 0.8, TemporalConfig(decay_days=365.0)
-        )
+        episode_score = temporal_boost_single(episode, 0.8, TemporalConfig(decay_days=30.0))
+        pattern_score = temporal_boost_single(pattern, 0.8, TemporalConfig(decay_days=365.0))
 
         assert pattern_score > episode_score
 
     def test_benchmark_throughput_1k_entities(self):
         """Measure temporal boost throughput for 1000 entities."""
         entities = [
-            (_entity_with_time(f"e_{i}", days_ago=i), 0.5 + (i % 50) / 100)
-            for i in range(1000)
+            (_entity_with_time(f"e_{i}", days_ago=i), 0.5 + (i % 50) / 100) for i in range(1000)
         ]
 
         _, elapsed_ms = _timed(temporal_boost, entities, decay_days=365.0)
 
-        assert elapsed_ms < 500, f"Temporal boost for 1K entities took {elapsed_ms:.1f}ms (budget: 500ms)"
+        assert elapsed_ms < 500, (
+            f"Temporal boost for 1K entities took {elapsed_ms:.1f}ms (budget: 500ms)"
+        )
 
     def test_benchmark_throughput_10k_entities(self):
         """Measure temporal boost throughput for 10000 entities."""
@@ -210,7 +205,9 @@ class TestTemporalBoostBenchmark:
 
         _, elapsed_ms = _timed(temporal_boost, entities, decay_days=365.0)
 
-        assert elapsed_ms < 2000, f"Temporal boost for 10K entities took {elapsed_ms:.1f}ms (budget: 2000ms)"
+        assert elapsed_ms < 2000, (
+            f"Temporal boost for 10K entities took {elapsed_ms:.1f}ms (budget: 2000ms)"
+        )
 
 
 # =============================================================================
@@ -241,12 +238,8 @@ class TestRRFFusionBenchmark:
         vector_results = [(a, 0.9), (b, 0.5)]
         graph_results = [(b, 0.9), (a, 0.5)]
 
-        merged_vector_heavy = rrf_merge(
-            [vector_results, graph_results], k=60.0, weights=[2.0, 1.0]
-        )
-        merged_graph_heavy = rrf_merge(
-            [vector_results, graph_results], k=60.0, weights=[1.0, 2.0]
-        )
+        merged_vector_heavy = rrf_merge([vector_results, graph_results], k=60.0, weights=[2.0, 1.0])
+        merged_graph_heavy = rrf_merge([vector_results, graph_results], k=60.0, weights=[1.0, 2.0])
 
         assert merged_vector_heavy[0][0].name == "vector_fav"
         assert merged_graph_heavy[0][0].name == "graph_fav"
@@ -263,9 +256,7 @@ class TestRRFFusionBenchmark:
         """Measure RRF merge throughput for 100 results per list."""
         lists = []
         for _list_idx in range(3):
-            results = [
-                (_make_entity(name=f"e_{i}"), 1.0 - i / 100) for i in range(100)
-            ]
+            results = [(_make_entity(name=f"e_{i}"), 1.0 - i / 100) for i in range(100)]
             lists.append(results)
 
         _, elapsed_ms = _timed(rrf_merge, lists, k=60.0)
@@ -276,9 +267,7 @@ class TestRRFFusionBenchmark:
         """Measure RRF merge for 1000 results per list."""
         lists = []
         for _list_idx in range(3):
-            results = [
-                (_make_entity(name=f"e_{i}"), 1.0 - i / 1000) for i in range(1000)
-            ]
+            results = [(_make_entity(name=f"e_{i}"), 1.0 - i / 1000) for i in range(1000)]
             lists.append(results)
 
         _, elapsed_ms = _timed(rrf_merge, lists, k=60.0)
@@ -307,23 +296,58 @@ class TestMiniLongMemEval:
         knowledge = [
             ("Redis connection pooling", "episode", 7, "Use pool_size >= concurrent_requests"),
             ("OAuth token refresh", "pattern", 14, "Refresh tokens 5 min before expiry"),
-            ("FalkorDB port config", "episode", 30, "Port 6380, not 6379, to avoid Redis conflicts"),
+            (
+                "FalkorDB port config",
+                "episode",
+                30,
+                "Port 6380, not 6379, to avoid Redis conflicts",
+            ),
             ("JWT validation middleware", "pattern", 45, "Validate audience and issuer claims"),
             ("PostgreSQL vacuum strategy", "episode", 60, "Autovacuum with scale_factor=0.05"),
             ("GraphQL N+1 prevention", "pattern", 90, "Use DataLoader for batching"),
-            ("Kubernetes pod affinity", "episode", 120, "Use preferredDuringScheduling for flexibility"),
+            (
+                "Kubernetes pod affinity",
+                "episode",
+                120,
+                "Use preferredDuringScheduling for flexibility",
+            ),
             ("Python async context managers", "pattern", 150, "Always use async with for cleanup"),
             ("WebSocket reconnection", "episode", 180, "Exponential backoff with jitter"),
             ("Docker multi-stage builds", "pattern", 200, "Separate build and runtime stages"),
-            ("Memory leak in event listeners", "episode", 3, "Remove listeners on component unmount"),
-            ("Rate limiting with sliding window", "pattern", 10, "Sliding window counter algorithm"),
+            (
+                "Memory leak in event listeners",
+                "episode",
+                3,
+                "Remove listeners on component unmount",
+            ),
+            (
+                "Rate limiting with sliding window",
+                "pattern",
+                10,
+                "Sliding window counter algorithm",
+            ),
             ("Database migration rollback", "episode", 25, "Always write reversible migrations"),
             ("API versioning strategy", "pattern", 50, "URL prefix versioning for public APIs"),
             ("Terraform state locking", "episode", 75, "Use DynamoDB for state lock backend"),
             ("CORS preflight caching", "pattern", 100, "Cache OPTIONS responses for 86400s"),
-            ("gRPC deadline propagation", "episode", 130, "Propagate deadlines across service boundaries"),
-            ("React hydration mismatch", "episode", 160, "Ensure server and client render identical output"),
-            ("Nginx proxy buffering", "pattern", 190, "Disable proxy_buffering for streaming responses"),
+            (
+                "gRPC deadline propagation",
+                "episode",
+                130,
+                "Propagate deadlines across service boundaries",
+            ),
+            (
+                "React hydration mismatch",
+                "episode",
+                160,
+                "Ensure server and client render identical output",
+            ),
+            (
+                "Nginx proxy buffering",
+                "pattern",
+                190,
+                "Disable proxy_buffering for streaming responses",
+            ),
             ("TLS certificate rotation", "episode", 220, "Rotate certs 30 days before expiry"),
         ]
 
@@ -446,9 +470,7 @@ class TestRerankingBenchmark:
         """Content extractor should handle various entity shapes."""
         from sibyl_core.retrieval.reranking import _extract_content
 
-        entity_with_content = _make_entity(
-            name="test", content="detailed content here"
-        )
+        entity_with_content = _make_entity(name="test", content="detailed content here")
         assert _extract_content(entity_with_content) == "detailed content here"
 
         entity_no_content = _make_entity(name="fallback_name", content="")

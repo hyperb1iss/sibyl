@@ -455,7 +455,8 @@ class TestGraphIntegrationService:
             stats = await service.process_chunks(mock_document_chunks, "Test Source")
 
         created_types = [
-            call.args[0].entity_type.value for call in service.entity_manager.create_direct.await_args_list
+            call.args[0].entity_type.value
+            for call in service.entity_manager.create_direct.await_args_list
         ]
         assert created_types == ["tool", "error_pattern"]
         assert stats.entities_linked == 3

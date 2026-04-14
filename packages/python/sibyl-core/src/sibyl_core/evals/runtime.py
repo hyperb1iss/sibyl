@@ -165,7 +165,9 @@ class EvalRunner:
             await self._http_client.aclose()
         self._http_client = None
 
-    def _build_request(self, query: EvalQuery, search_type: SearchType) -> tuple[str, dict[str, Any]]:
+    def _build_request(
+        self, query: EvalQuery, search_type: SearchType
+    ) -> tuple[str, dict[str, Any]]:
         if search_type == "unified":
             return "/search", {"query": query.query, "limit": 20, "include_content": True}
         if search_type == "code-examples":
@@ -174,7 +176,9 @@ class EvalRunner:
             return "/rag/hybrid-search", {"query": query.query, "match_count": 20}
         return "/rag/search", {"query": query.query, "match_count": 20}
 
-    def _parse_results(self, data: dict[str, Any], search_type: SearchType) -> list[RetrievalResult]:
+    def _parse_results(
+        self, data: dict[str, Any], search_type: SearchType
+    ) -> list[RetrievalResult]:
         if search_type == "code-examples":
             return [
                 RetrievalResult(

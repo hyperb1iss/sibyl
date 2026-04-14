@@ -115,7 +115,9 @@ async def test_consolidate_org_returns_zeroes_when_no_duplicates(
     deduplicator.find_duplicates = AsyncMock(return_value=[])
     deduplicator.merge_entities = AsyncMock()
 
-    monkeypatch.setattr(graph_client_module, "get_graph_client", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        graph_client_module, "get_graph_client", AsyncMock(return_value=MagicMock())
+    )
     monkeypatch.setattr(entities_module, "EntityManager", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(dedup_module, "DedupConfig", MagicMock(return_value=object()))
     monkeypatch.setattr(dedup_module, "EntityDeduplicator", MagicMock(return_value=deduplicator))
@@ -147,7 +149,9 @@ async def test_consolidate_org_counts_merge_exceptions_as_failures(
     )
     deduplicator.merge_entities = AsyncMock(side_effect=RuntimeError("boom"))
 
-    monkeypatch.setattr(graph_client_module, "get_graph_client", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        graph_client_module, "get_graph_client", AsyncMock(return_value=MagicMock())
+    )
     monkeypatch.setattr(entities_module, "EntityManager", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(dedup_module, "DedupConfig", MagicMock(return_value=object()))
     monkeypatch.setattr(dedup_module, "EntityDeduplicator", MagicMock(return_value=deduplicator))

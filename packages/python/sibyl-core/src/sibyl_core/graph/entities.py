@@ -55,7 +55,9 @@ def sanitize_search_query(query: str) -> str:
     return _REDISEARCH_SPECIAL_CHARS.sub(r" ", query)
 
 
-def _metadata_json_contains_params(prefix: str, field: str, value: str) -> tuple[dict[str, str], str]:
+def _metadata_json_contains_params(
+    prefix: str, field: str, value: str
+) -> tuple[dict[str, str], str]:
     """Build CONTAINS params for legacy JSON-string metadata matching."""
     compact_key = f"{prefix}_compact"
     spaced_key = f"{prefix}_spaced"
@@ -847,7 +849,7 @@ class EntityManager:
 
         query = f"""
             {match_clause}
-            WHERE {' AND '.join(where_clauses)}
+            WHERE {" AND ".join(where_clauses)}
             RETURN n.uuid AS uuid,
                    n.name AS name,
                    n.entity_type AS entity_type,
@@ -961,7 +963,9 @@ class EntityManager:
                 "Listed entities",
                 entity_type=entity_type,
                 returned=min(
-                    len(entities[offset : offset + limit]) if requires_legacy_rechecks else len(entities[:limit]),
+                    len(entities[offset : offset + limit])
+                    if requires_legacy_rechecks
+                    else len(entities[:limit]),
                     limit,
                 ),
             )
@@ -1276,22 +1280,17 @@ class EntityManager:
                     except json.JSONDecodeError:
                         metadata = {}
 
-                task_project_id = (
-                    record.get("project_id")
-                    or (metadata.get("project_id") if metadata else None)
+                task_project_id = record.get("project_id") or (
+                    metadata.get("project_id") if metadata else None
                 )
                 if task_project_id != project_id:
                     continue
 
                 status = (
-                    record.get("status")
-                    or (metadata.get("status") if metadata else None)
-                    or "todo"
+                    record.get("status") or (metadata.get("status") if metadata else None) or "todo"
                 )
                 priority = (
-                    record.get("priority")
-                    or (metadata.get("priority") if metadata else None)
-                    or ""
+                    record.get("priority") or (metadata.get("priority") if metadata else None) or ""
                 )
                 name = record.get("name") or ""
                 epic_id = record.get("epic_id") or (metadata.get("epic_id") if metadata else None)

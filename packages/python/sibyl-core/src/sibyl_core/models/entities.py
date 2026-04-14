@@ -80,7 +80,6 @@ class RelationshipType(StrEnum):
     MENTIONS = "MENTIONS"  # Document -> Entity (extracted reference)
 
 
-
 class Entity(BaseModel):
     """Base entity model for all knowledge graph nodes."""
 

@@ -213,7 +213,9 @@ async def _search_documents(
                     .order_by(similarity_expr.desc())
                     .limit(limit * 5)
                 )
-                vector_rows = _dedupe_document_rows((await session.execute(vector_query)).all())[:limit]
+                vector_rows = _dedupe_document_rows((await session.execute(vector_query)).all())[
+                    :limit
+                ]
                 vector_results = [
                     _build_document_result(
                         chunk=chunk,
@@ -235,7 +237,9 @@ async def _search_documents(
                 .order_by(fts_rank.desc())
                 .limit(limit * 5)
             )
-            lexical_rows = _dedupe_document_rows((await session.execute(lexical_query)).all())[:limit]
+            lexical_rows = _dedupe_document_rows((await session.execute(lexical_query)).all())[
+                :limit
+            ]
             lexical_results = [
                 _build_document_result(
                     chunk=chunk,

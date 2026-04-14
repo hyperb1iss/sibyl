@@ -194,8 +194,7 @@ async def rebuild_indices(
             indices_rebuilt=[],
             duration_seconds=time.time() - start_time,
             message=(
-                f"Unknown index type: {target}. "
-                "Valid options are: search, relationships, all."
+                f"Unknown index type: {target}. Valid options are: search, relationships, all."
             ),
         )
 

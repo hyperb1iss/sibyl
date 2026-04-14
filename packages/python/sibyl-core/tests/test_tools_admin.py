@@ -135,7 +135,9 @@ class TestBackfillTaskProjectRelationships:
         task_page_two = [SimpleNamespace(id="task-3", metadata={"project_id": "project-1"})]
         project_page_one = [SimpleNamespace(id="project-1")]
 
-        async def list_by_type(entity_type: EntityType, limit: int = 50, offset: int = 0, **_: object) -> list[SimpleNamespace]:
+        async def list_by_type(
+            entity_type: EntityType, limit: int = 50, offset: int = 0, **_: object
+        ) -> list[SimpleNamespace]:
             assert limit == page_size
             if entity_type == EntityType.TASK:
                 if offset == 0:
@@ -195,9 +197,7 @@ class TestBackfillTaskProjectRelationships:
         task = SimpleNamespace(id="task-1", metadata={"project_id": "project-1001"})
         first_page = [SimpleNamespace(id=f"project-{i}") for i in range(1000)]
         second_page = [SimpleNamespace(id="project-1001")]
-        entity_manager.list_by_type = AsyncMock(
-            side_effect=[[task], first_page, second_page, []]
-        )
+        entity_manager.list_by_type = AsyncMock(side_effect=[[task], first_page, second_page, []])
         relationship_manager.get_for_entity = AsyncMock(return_value=[])
 
         with (
@@ -220,7 +220,9 @@ class TestBackfillTaskProjectRelationships:
         assert result.errors == []
         assert result.tasks_without_project == 0
         assert result.tasks_already_linked == 0
-        entity_manager.list_by_type.assert_any_await(ANY, limit=1000, offset=0, include_archived=True)
+        entity_manager.list_by_type.assert_any_await(
+            ANY, limit=1000, offset=0, include_archived=True
+        )
         entity_manager.list_by_type.assert_any_await(
             ANY, limit=1000, offset=1000, include_archived=True
         )

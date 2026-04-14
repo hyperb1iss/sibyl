@@ -1319,6 +1319,7 @@ class Backup(TimestampMixin, table=True):
     def __repr__(self) -> str:
         return f"<Backup {self.backup_id} status={self.status}>"
 
+
 # =============================================================================
 # Utility functions
 # =============================================================================

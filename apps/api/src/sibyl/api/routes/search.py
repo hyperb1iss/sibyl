@@ -143,7 +143,11 @@ async def explore(
 
         # If user specified projects, validate they have access
         invalid_project_id = next(
-            (project_id for project_id in (project_ids or []) if project_id not in accessible_projects),
+            (
+                project_id
+                for project_id in (project_ids or [])
+                if project_id not in accessible_projects
+            ),
             None,
         )
         if invalid_project_id:

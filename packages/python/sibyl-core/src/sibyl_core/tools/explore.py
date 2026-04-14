@@ -369,7 +369,11 @@ async def _explore_list(
     # Parse tags into list if provided
     tag_list = [t.strip() for t in tags.split(",")] if tags else None
     requested_project_ids = _normalize_project_ids(project, project_ids)
-    project_id_filter = requested_project_ids[0] if requested_project_ids and len(requested_project_ids) == 1 else None
+    project_id_filter = (
+        requested_project_ids[0]
+        if requested_project_ids and len(requested_project_ids) == 1
+        else None
+    )
     requested_project_id_set = set(requested_project_ids) if requested_project_ids else None
 
     # Fetch with DB-level filtering for efficiency

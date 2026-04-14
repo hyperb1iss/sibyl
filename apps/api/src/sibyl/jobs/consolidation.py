@@ -241,11 +241,13 @@ async def consolidate_all_orgs(
             try:
                 consolidation = await consolidate_org(ctx, group_id=org_id)
                 decay = await priority_decay(ctx, group_id=org_id)
-                results.append({
-                    "org_id": org_id,
-                    "consolidation": consolidation,
-                    "decay": decay,
-                })
+                results.append(
+                    {
+                        "org_id": org_id,
+                        "consolidation": consolidation,
+                        "decay": decay,
+                    }
+                )
             except Exception as e:
                 log.warning("consolidate_org_failed", org_id=org_id, error=str(e))
                 results.append({"org_id": org_id, "error": str(e)})

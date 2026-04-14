@@ -591,7 +591,8 @@ class TestGetHealth:
             assert result["entity_counts"]["rule"] == 1001
             assert result["entity_counts"]["episode"] == 0
             assert any(
-                call.kwargs.get("offset") == 1000 for call in ctx.entity_manager.list_by_type.await_args_list
+                call.kwargs.get("offset") == 1000
+                for call in ctx.entity_manager.list_by_type.await_args_list
             )
 
     @pytest.mark.asyncio

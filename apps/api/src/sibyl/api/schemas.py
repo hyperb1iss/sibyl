@@ -90,7 +90,9 @@ class RawCaptureSummary(BaseModel):
     tags: list[str] = Field(default_factory=list, description="Captured tags")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Original request metadata")
     capture_surface: str | None = Field(default=None, description="Where the capture originated")
-    created_by_user_id: str | None = Field(default=None, description="User who initiated the capture")
+    created_by_user_id: str | None = Field(
+        default=None, description="User who initiated the capture"
+    )
     created_at: datetime = Field(..., description="Archive creation timestamp")
 
 

@@ -303,7 +303,9 @@ class TestCreateBulk:
             for i in range(3)
         ]
 
-        relationship_manager._driver.execute_query = AsyncMock(side_effect=RuntimeError("Batch failed"))
+        relationship_manager._driver.execute_query = AsyncMock(
+            side_effect=RuntimeError("Batch failed")
+        )
         with patch.object(relationship_manager, "create", new_callable=AsyncMock) as mock_create:
             # First succeeds, second fails, third succeeds
             mock_create.side_effect = ["id_1", RuntimeError("Failed"), "id_3"]

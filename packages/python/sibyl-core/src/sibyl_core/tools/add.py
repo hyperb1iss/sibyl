@@ -208,7 +208,13 @@ async def add(
 
         # Detect potential conflicts (duplicates, contradictions) before creating
         conflicts: list[ConflictWarning] = []
-        if check_conflicts and entity_type in ("episode", "pattern", "rule", "template", "procedure"):
+        if check_conflicts and entity_type in (
+            "episode",
+            "pattern",
+            "rule",
+            "template",
+            "procedure",
+        ):
             # Only check for knowledge types, not workflow items (tasks/projects/epics)
             try:
                 conflicts = await detect_conflicts(

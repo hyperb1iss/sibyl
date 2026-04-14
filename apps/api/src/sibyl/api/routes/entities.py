@@ -113,7 +113,9 @@ async def _archive_raw_capture(
             entity_type=entity_type,
             tags=tags,
             metadata_=metadata,
-            capture_surface=str(metadata.get("capture_surface")) if metadata.get("capture_surface") else None,
+            capture_surface=str(metadata.get("capture_surface"))
+            if metadata.get("capture_surface")
+            else None,
             created_by_user_id=user_id,
         )
     )
@@ -138,11 +140,7 @@ async def _list_all_entities_paginated(
         if not batch:
             break
 
-        entities.extend(
-            entity
-            for entity in batch
-            if not _entity_is_archived(entity)
-        )
+        entities.extend(entity for entity in batch if not _entity_is_archived(entity))
         offset += batch_size
 
     return entities
@@ -172,11 +170,7 @@ async def _list_entities_by_type_paginated(
         if not batch:
             break
 
-        entities.extend(
-            entity
-            for entity in batch
-            if not _entity_is_archived(entity)
-        )
+        entities.extend(entity for entity in batch if not _entity_is_archived(entity))
         offset += batch_size
 
     return entities
@@ -403,7 +397,9 @@ async def list_entities(
         real_project_ids = [pid for pid in (project_ids or []) if pid != unassigned_marker]
         unique_real_project_ids = list(dict.fromkeys(real_project_ids))
         single_project_id = (
-            unique_real_project_ids[0] if len(unique_real_project_ids) == 1 and unassigned_marker not in (project_ids or []) else None
+            unique_real_project_ids[0]
+            if len(unique_real_project_ids) == 1 and unassigned_marker not in (project_ids or [])
+            else None
         )
 
         if entity_type:

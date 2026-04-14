@@ -87,9 +87,7 @@ class MockGraphClientForDedup:
         self.read_calls.append(query)
         return await self.MockDriver(self).execute_query(query, **params)
 
-    async def execute_read_org(
-        self, query: str, organization_id: str, **params: Any
-    ) -> list[Any]:
+    async def execute_read_org(self, query: str, organization_id: str, **params: Any) -> list[Any]:
         """Execute an org-scoped read."""
         self.read_org_calls.append((organization_id, query))
         return await self.MockDriver(self).execute_query(query, **params)
@@ -98,9 +96,7 @@ class MockGraphClientForDedup:
         """Execute an unscoped write."""
         return await self.MockDriver(self).execute_query(query, **params)
 
-    async def execute_write_org(
-        self, query: str, organization_id: str, **params: Any
-    ) -> list[Any]:
+    async def execute_write_org(self, query: str, organization_id: str, **params: Any) -> list[Any]:
         """Execute an org-scoped write."""
         self.write_org_calls.append((organization_id, query))
         return await self.MockDriver(self).execute_query(query, **params)

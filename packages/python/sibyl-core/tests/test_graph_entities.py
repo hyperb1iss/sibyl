@@ -482,6 +482,7 @@ class TestTypedHydration:
         assert result.priority == TaskPriority.HIGH
         assert result.project_id == "project-typed-001"
 
+
 # =============================================================================
 # Entity Update Tests
 # =============================================================================
@@ -2098,6 +2099,8 @@ class TestGetProjectSummary:
         assert result["epics"][0]["total_tasks"] == 4
         assert mock_driver.execute_query.await_count == 2
         task_query = mock_driver.execute_query.await_args_list[0]
-        assert "toLower(toString(n.metadata)) CONTAINS $legacy_project_compact" in task_query.args[0]
+        assert (
+            "toLower(toString(n.metadata)) CONTAINS $legacy_project_compact" in task_query.args[0]
+        )
         assert task_query.kwargs["legacy_project_compact"] == '"project_id":"project-001"'
         assert task_query.kwargs["legacy_project_spaced"] == '"project_id": "project-001"'

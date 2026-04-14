@@ -659,9 +659,7 @@ async def update_task(
 
             # Create relationship manager if any relationship changes needed
             needs_rel_mgr = (
-                request.epic_id is not None
-                or request.add_depends_on
-                or request.remove_depends_on
+                request.epic_id is not None or request.add_depends_on or request.remove_depends_on
             )
             if needs_rel_mgr:
                 relationship_manager = RelationshipManager(client, group_id=group_id)
