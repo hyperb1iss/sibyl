@@ -19,6 +19,7 @@ from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.graph.relationships import RelationshipManager
 from sibyl_core.models.entities import EntityType
+from sibyl_core.tasks.dependencies import detect_dependency_cycles
 
 log = structlog.get_logger()
 
@@ -1135,7 +1136,7 @@ async def _handle_analysis_action(
         return await _prioritize_tasks(entity_manager, relationship_manager, entity_id)
 
     if action == "detect_cycles":
-        return await _detect_cycles(relationship_manager, entity_id)
+        return await _detect_cycles(client, organization_id, entity_id)
 
     if action == "suggest":
         return await _suggest_knowledge(entity_manager, relationship_manager, entity_id)
@@ -1242,23 +1243,26 @@ async def _prioritize_tasks(
 
 
 async def _detect_cycles(
-    _relationship_manager: RelationshipManager,
+    client: Any,
+    organization_id: str,
     project_id: str,
 ) -> ManageResponse:
-    """Detect circular dependencies in a project."""
-    # Get all DEPENDS_ON relationships
-    # Note: This is a simplified implementation
-    # A full implementation would traverse the graph
-
-    # For now, return empty (no cycles detected)
-    # TODO: Implement actual cycle detection via graph traversal
-
+    """Detect circular dependencies in a project's task graph."""
+    cycle_result = await detect_dependency_cycles(
+        client,
+        organization_id,
+        project_id=project_id,
+    )
     return ManageResponse(
         success=True,
         action="detect_cycles",
         entity_id=project_id,
-        message="No circular dependencies detected",
-        data={"cycles": [], "has_cycles": False},
+        message=cycle_result.message,
+        data={
+            "cycles": cycle_result.cycles,
+            "has_cycles": cycle_result.has_cycles,
+            "cycle_count": len(cycle_result.cycles),
+        },
     )
 
 

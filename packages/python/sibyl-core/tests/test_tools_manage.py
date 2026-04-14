@@ -17,6 +17,7 @@ import pytest
 from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
 from sibyl_core.models.entities import EntityType
 from sibyl_core.models.tasks import TaskStatus
+from sibyl_core.tasks.dependencies import CycleResult
 from sibyl_core.tools.manage import (
     ALL_ACTIONS,
     ANALYSIS_ACTIONS,
@@ -1069,6 +1070,11 @@ class TestAnalysisActions:
         mock_client = AsyncMock()
         mock_entity_manager = AsyncMock()
         mock_rel_manager = AsyncMock()
+        cycle_result = CycleResult(
+            has_cycles=True,
+            cycles=[["task-a", "task-b", "task-a"]],
+            message="Found 1 cycle(s)",
+        )
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
@@ -1080,6 +1086,10 @@ class TestAnalysisActions:
                 "sibyl_core.tools.manage.RelationshipManager",
                 return_value=mock_rel_manager,
             ),
+            patch(
+                "sibyl_core.tools.manage.detect_dependency_cycles",
+                AsyncMock(return_value=cycle_result),
+            ) as mock_detect_cycles,
         ):
             response = await manage(
                 action="detect_cycles",
@@ -1087,8 +1097,15 @@ class TestAnalysisActions:
                 organization_id="org_123",
             )
             assert response.success is True
-            assert "has_cycles" in response.data
-            assert response.data["has_cycles"] is False
+            assert response.message == "Found 1 cycle(s)"
+            assert response.data["has_cycles"] is True
+            assert response.data["cycles"] == [["task-a", "task-b", "task-a"]]
+            assert response.data["cycle_count"] == 1
+            mock_detect_cycles.assert_awaited_once_with(
+                mock_client,
+                "org_123",
+                project_id="project_123",
+            )
 
 
 # =============================================================================

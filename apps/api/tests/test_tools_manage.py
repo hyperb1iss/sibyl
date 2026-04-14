@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from sibyl_core.models.tasks import TaskStatus
+from sibyl_core.tasks.dependencies import CycleResult
 from sibyl_core.tools.manage import (
     ALL_ACTIONS,
     ANALYSIS_ACTIONS,
@@ -589,12 +590,21 @@ class TestAnalysisActions:
             assert tasks[2]["priority"] == "low"
 
     @pytest.mark.asyncio
-    async def test_detect_cycles_returns_no_cycles(self) -> None:
-        """detect_cycles action should return empty cycles (placeholder impl)."""
+    async def test_detect_cycles_returns_detected_cycles(self) -> None:
+        """detect_cycles action should surface real cycle detector results."""
+        cycle_result = CycleResult(
+            has_cycles=True,
+            cycles=[["task-a", "task-b", "task-a"]],
+            message="Found 1 cycle(s)",
+        )
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
             patch("sibyl_core.tools.manage.EntityManager"),
             patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch(
+                "sibyl_core.tools.manage.detect_dependency_cycles",
+                AsyncMock(return_value=cycle_result),
+            ) as mock_detect_cycles,
         ):
             mock_client.return_value = MagicMock()
 
@@ -605,8 +615,15 @@ class TestAnalysisActions:
             )
 
             assert result.success is True
-            assert result.data["has_cycles"] is False
-            assert result.data["cycles"] == []
+            assert result.message == "Found 1 cycle(s)"
+            assert result.data["has_cycles"] is True
+            assert result.data["cycles"] == [["task-a", "task-b", "task-a"]]
+            assert result.data["cycle_count"] == 1
+            mock_detect_cycles.assert_awaited_once_with(
+                mock_client.return_value,
+                TEST_ORG_ID,
+                project_id="proj_123",
+            )
 
 
 class TestManageOrganizationRequired:
