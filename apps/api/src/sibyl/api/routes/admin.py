@@ -39,12 +39,14 @@ _ADMIN_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN)
     response_model=HealthResponse,
     dependencies=[Depends(require_org_role(*_READ_ROLES))],
 )
-async def health() -> HealthResponse:
+async def health(
+    org: Organization = Depends(get_current_organization),
+) -> HealthResponse:
     """Get server health status."""
     try:
         from sibyl_core.tools.core import get_health
 
-        health_data = await get_health()
+        health_data = await get_health(organization_id=str(org.id))
 
         return HealthResponse(
             status=health_data.get("status", "unknown"),
