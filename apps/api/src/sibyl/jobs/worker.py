@@ -4,7 +4,7 @@ Run with: uv run arq sibyl.jobs.WorkerSettings
 
 This is the worker entrypoint. Job implementations are in:
 - crawl.py: crawl_source, sync_source, sync_all_sources
-- entities.py: create_entity, create_learning_episode, update_entity
+- entities.py: create_entity, create_learning_episode, create_learning_procedure, update_entity
 - backup.py: run_backup, cleanup_old_backups
 """
 
@@ -21,7 +21,13 @@ from sibyl.config import settings
 from sibyl.jobs.backup import cleanup_old_backups, run_backup, run_scheduled_backups
 from sibyl.jobs.consolidation import consolidate_all_orgs, consolidate_org, priority_decay
 from sibyl.jobs.crawl import crawl_source, sync_all_sources, sync_source
-from sibyl.jobs.entities import create_entity, create_learning_episode, update_entity, update_task
+from sibyl.jobs.entities import (
+    create_entity,
+    create_learning_episode,
+    create_learning_procedure,
+    update_entity,
+    update_task,
+)
 
 log = structlog.get_logger()
 
@@ -104,6 +110,7 @@ class WorkerSettings:
         # Entity jobs
         create_entity,
         create_learning_episode,
+        create_learning_procedure,
         update_entity,
         update_task,
         # Backup jobs

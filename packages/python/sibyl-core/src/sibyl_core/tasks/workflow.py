@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING
 import structlog
 
 from sibyl_core.errors import InvalidTransitionError
-from sibyl_core.models.entities import EntityType, Episode, Relationship, RelationshipType
+from sibyl_core.models.entities import Relationship, RelationshipType
 from sibyl_core.models.tasks import EpicStatus, Task, TaskStatus
+from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
 
 if TYPE_CHECKING:
     from sibyl_core.graph.client import GraphClient
@@ -305,10 +306,11 @@ class TaskWorkflowEngine:
         updated_entity = await self._entity_manager.update(task_id, updates)
         updated_task = self._entity_to_task(updated_entity)
 
-        # Create episode from completed task if learnings provided
-        # Skip if create_episode=False (caller will handle async)
+        # Create learning artifacts from completed task if learnings provided.
+        # Skip if create_episode=False (caller will handle async jobs instead).
         if learnings and create_episode:
             await self._create_learning_episode(updated_task)
+            await self._create_learning_procedure(updated_task)
 
         # Update project progress
         if task.project_id:
@@ -450,79 +452,7 @@ class TaskWorkflowEngine:
         """
         log.info("Creating learning episode from task", task_id=task.id)
 
-        # Format episode content
-        content_parts = [
-            f"## Task: {task.title}",
-            "",
-            f"**Status**: {task.status}",
-            f"**Feature**: {task.feature or 'N/A'}",
-            f"**Technologies**: {', '.join(task.technologies)}",
-        ]
-
-        if task.actual_hours:
-            content_parts.append(f"**Time Spent**: {task.actual_hours} hours")
-
-        if task.estimated_hours and task.actual_hours:
-            accuracy = (task.estimated_hours / task.actual_hours) * 100
-            content_parts.append(f"**Estimation Accuracy**: {accuracy:.1f}%")
-
-        content_parts.extend(
-            [
-                "",
-                "### What Was Done",
-                "",
-                task.description,
-                "",
-                "### Learnings",
-                "",
-                task.learnings,
-            ]
-        )
-
-        if task.blockers_encountered:
-            content_parts.extend(
-                [
-                    "",
-                    "### Blockers Encountered",
-                    "",
-                ]
-            )
-            content_parts.extend(f"- {b}" for b in task.blockers_encountered)
-
-        if task.commit_shas:
-            content_parts.extend(
-                [
-                    "",
-                    "### Related Commits",
-                    "",
-                ]
-            )
-            content_parts.extend(f"- `{sha}`" for sha in task.commit_shas)
-
-        # Create episode
-        episode = Episode(
-            id=f"episode_{task.id}",
-            entity_type=EntityType.EPISODE,
-            name=f"Task Completed: {task.title}",
-            description=task.description,
-            content="\n".join(content_parts),
-            episode_type="task_completion",
-            metadata={
-                "task_id": task.id,
-                "project_id": task.project_id,
-                "feature": task.feature,
-                "technologies": task.technologies,
-                "complexity": task.complexity.value,
-                "estimated_hours": task.estimated_hours,
-                "actual_hours": task.actual_hours,
-                "estimation_accuracy": (
-                    task.estimated_hours / task.actual_hours
-                    if task.estimated_hours and task.actual_hours
-                    else None
-                ),
-            },
-            valid_from=task.completed_at,
-        )
+        episode = build_learning_episode(task)
 
         # Use Graphiti create for proper relationship discovery from learnings
         episode_id = await self._entity_manager.create(episode)
@@ -537,9 +467,65 @@ class TaskWorkflowEngine:
             )
         )
 
-        # Inherit knowledge relationships from task
+        await self._inherit_task_knowledge(episode_id, task.id)
+
+        log.info("Learning episode created", episode_id=episode_id, task_id=task.id)
+        return episode_id
+
+    async def _create_learning_procedure(self, task: Task) -> str | None:
+        """Convert completed task learnings into a reusable procedure."""
+        log.info("Creating learning procedure from task", task_id=task.id)
+
+        note_contents = await self._get_task_note_contents(task.id)
+        procedure = build_learning_procedure(task, note_contents)
+        if procedure is None:
+            log.info("Learning procedure skipped", task_id=task.id)
+            return None
+
+        procedure_id = await self._entity_manager.create_direct(procedure)
+
+        await self._relationship_manager.create(
+            Relationship(
+                id=f"rel_task_{task.id}_procedure",
+                source_id=task.id,
+                target_id=procedure_id,
+                relationship_type=RelationshipType.USES_PROCEDURE,
+            )
+        )
+        await self._relationship_manager.create(
+            Relationship(
+                id=f"rel_procedure_{task.id}",
+                source_id=procedure_id,
+                target_id=task.id,
+                relationship_type=RelationshipType.DERIVED_FROM,
+            )
+        )
+
+        await self._inherit_task_knowledge(procedure_id, task.id)
+
+        log.info("Learning procedure created", procedure_id=procedure_id, task_id=task.id)
+        return procedure_id
+
+    async def _get_task_note_contents(self, task_id: str) -> list[str]:
+        get_notes = getattr(self._entity_manager, "get_notes_for_task", None)
+        if not callable(get_notes):
+            return []
+
+        try:
+            notes = await get_notes(task_id, limit=20)
+        except Exception as exc:
+            log.debug(
+                "Failed to load task notes for distillation",
+                task_id=task_id,
+                error=str(exc),
+            )
+            return []
+
+        return [note.content for note in notes if getattr(note, "content", "").strip()]
+
+    async def _inherit_task_knowledge(self, source_id: str, task_id: str) -> None:
         task_relationships = await self._relationship_manager.get_for_entity(
-            task.id,
+            task_id,
             relationship_types=[
                 RelationshipType.REQUIRES,
                 RelationshipType.REFERENCES,
@@ -550,16 +536,13 @@ class TaskWorkflowEngine:
         for rel in task_relationships:
             await self._relationship_manager.create(
                 Relationship(
-                    id=f"rel_episode_{episode_id}_{rel.target_id}",
-                    source_id=episode_id,
+                    id=f"rel_inherit_{source_id}_{rel.target_id}",
+                    source_id=source_id,
                     target_id=rel.target_id,
                     relationship_type=RelationshipType.REFERENCES,
-                    metadata={"inherited_from_task": task.id},
+                    metadata={"inherited_from_task": task_id},
                 )
             )
-
-        log.info("Learning episode created", episode_id=episode_id, task_id=task.id)
-        return episode_id
 
     async def update_project_activity(self, project_id: str) -> None:
         """Update project's last_activity_at timestamp.

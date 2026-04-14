@@ -17,7 +17,13 @@ from sibyl.jobs.backup import (
     run_backup,
 )
 from sibyl.jobs.crawl import crawl_source, sync_all_sources, sync_source
-from sibyl.jobs.entities import create_entity, create_learning_episode, update_entity, update_task
+from sibyl.jobs.entities import (
+    create_entity,
+    create_learning_episode,
+    create_learning_procedure,
+    update_entity,
+    update_task,
+)
 from sibyl.jobs.pending import (
     clear_pending,
     clear_pending_operations,
@@ -35,6 +41,7 @@ from sibyl.jobs.queue import (
     enqueue_crawl,
     enqueue_create_entity,
     enqueue_create_learning_episode,
+    enqueue_create_learning_procedure,
     enqueue_priority_decay,
     enqueue_sync,
     enqueue_update_entity,
@@ -58,6 +65,7 @@ __all__ = [
     # Entity queue
     "enqueue_create_entity",
     "enqueue_create_learning_episode",
+    "enqueue_create_learning_procedure",
     "enqueue_update_entity",
     "enqueue_update_task",
     # Pending entity registry
@@ -79,6 +87,7 @@ __all__ = [
     "sync_all_sources",
     "create_entity",
     "create_learning_episode",
+    "create_learning_procedure",
     "update_entity",
     "update_task",
     # Backup

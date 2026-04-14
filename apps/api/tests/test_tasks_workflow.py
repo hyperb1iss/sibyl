@@ -3,6 +3,7 @@
 import pytest
 
 from sibyl_core.errors import InvalidTransitionError
+from sibyl_core.models.entities import EntityType
 from sibyl_core.models.tasks import Task, TaskComplexity, TaskStatus
 from sibyl_core.tasks.workflow import (
     ALL_STATUSES,
@@ -581,7 +582,7 @@ async def test_cannot_transition_from_archived() -> None:
 
 @pytest.mark.asyncio
 async def test_complete_task_with_learnings_creates_episode() -> None:
-    """Test that completing task with learnings triggers episode creation."""
+    """Test that completing task with learnings creates both learning artifacts."""
     from sibyl_core.tasks.workflow import TaskWorkflowEngine
 
     task = Task(
@@ -599,10 +600,14 @@ async def test_complete_task_with_learnings_creates_episode() -> None:
 
         def __init__(self, task: Task) -> None:
             super().__init__(task)
-            self.episodes_created: list = []
+            self.created_entities: list = []
 
         async def create(self, entity) -> str:
-            self.episodes_created.append(entity)
+            self.created_entities.append(entity)
+            return entity.id
+
+        async def create_direct(self, entity) -> str:
+            self.created_entities.append(entity)
             return entity.id
 
     entity_manager = TrackingEntityManager(task)
@@ -616,9 +621,13 @@ async def test_complete_task_with_learnings_creates_episode() -> None:
     )
     assert completed.status == TaskStatus.DONE
     assert completed.learnings == "Redis connection pooling is essential"
-    # Verify episode was created
-    assert len(entity_manager.episodes_created) == 1
-    episode = entity_manager.episodes_created[0]
+    created_types = {entity.entity_type for entity in entity_manager.created_entities}
+    assert created_types == {EntityType.EPISODE, EntityType.PROCEDURE}
+    episode = next(
+        entity
+        for entity in entity_manager.created_entities
+        if entity.entity_type == EntityType.EPISODE
+    )
     assert "task-learning" in episode.metadata.get("task_id", "")
 
 

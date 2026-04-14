@@ -15,7 +15,7 @@ import pytest
 
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.graph.entities import EntityManager, sanitize_search_query
-from sibyl_core.models.entities import Entity, EntityType
+from sibyl_core.models.entities import Entity, EntityType, Procedure, ProcedureStep
 from sibyl_core.models.tasks import Epic, EpicStatus, Project, Task, TaskPriority, TaskStatus
 
 
@@ -885,6 +885,50 @@ class TestNodeToEntityConversion:
         assert entity.metadata.get("category") == "testing"
         assert entity.metadata.get("priority") == "high"
 
+    def test_converts_procedure_entity_from_attributes(self) -> None:
+        """node_to_entity should hydrate procedures from stored metadata."""
+        client = MockGraphClient()
+        manager = EntityManager(client, group_id=TEST_ORG_ID)
+
+        metadata = {
+            "category": "debugging",
+            "required_tools": ["gh", "python"],
+            "estimated_minutes": 45,
+            "automation_level": "semi-automated",
+            "steps": [
+                {
+                    "order": 1,
+                    "title": "Inspect logs",
+                    "description": "Inspect the failing logs",
+                }
+            ],
+        }
+        mock_node = MagicMock()
+        mock_node.uuid = "p1"
+        mock_node.name = "Procedure: Inspect logs"
+        mock_node.group_id = TEST_ORG_ID
+        mock_node.labels = ["procedure"]
+        mock_node.summary = "Summary"
+        mock_node.created_at = datetime.now(UTC)
+        mock_node.attributes = {
+            "entity_type": "procedure",
+            "metadata": json.dumps(metadata),
+        }
+        mock_node.name_embedding = None
+
+        entity = manager.node_to_entity(mock_node)
+
+        assert isinstance(entity, Procedure)
+        assert entity.category == "debugging"
+        assert entity.required_tools == ["gh", "python"]
+        assert entity.estimated_minutes == 45
+        assert entity.automation_level == "semi-automated"
+        assert entity.steps[0] == ProcedureStep(
+            order=1,
+            title="Inspect logs",
+            description="Inspect the failing logs",
+        )
+
 
 class TestEpisodicToEntityConversion:
     """Tests for _episodic_to_entity conversion method."""
@@ -969,6 +1013,38 @@ class TestEntityToMetadata:
         assert metadata["tech_stack"] == ["python", "fastapi"]
         assert metadata["repository_url"] == "https://github.com/org/repo"
 
+    def test_procedure_metadata_extraction(self) -> None:
+        """_entity_to_metadata should preserve structured procedure fields."""
+        client = MockGraphClient()
+        manager = EntityManager(client, group_id=TEST_ORG_ID)
+
+        procedure = Procedure(
+            id="procedure_123",
+            name="Deploy service",
+            description="Ship a service update safely",
+            content="Step-by-step deployment instructions",
+            category="deployment",
+            required_tools=["docker", "kubectl"],
+            estimated_minutes=20,
+            automation_level="semi-automated",
+            steps=[
+                ProcedureStep(order=1, title="Build image", description="Build and tag the image"),
+                ProcedureStep(
+                    order=2,
+                    title="Roll out",
+                    description="Apply manifests and verify rollout",
+                ),
+            ],
+        )
+
+        metadata = manager._entity_to_metadata(procedure)
+
+        assert metadata["required_tools"] == ["docker", "kubectl"]
+        assert metadata["estimated_minutes"] == 20
+        assert metadata["automation_level"] == "semi-automated"
+        assert metadata["steps"][0]["title"] == "Build image"
+        assert metadata["steps"][1]["description"] == "Apply manifests and verify rollout"
+
 
 class TestCollectProperties:
     """Tests for _collect_properties helper."""
@@ -1016,6 +1092,60 @@ class TestCollectProperties:
         assert props["priority"] == "medium"
         assert props["project_id"] == "proj_456"
         assert props["task_order"] == 10
+
+    def test_collects_procedure_properties(self) -> None:
+        """_collect_properties should expose procedure filter fields."""
+        client = MockGraphClient()
+        manager = EntityManager(client, group_id=TEST_ORG_ID)
+
+        procedure = Procedure(
+            id="procedure_123",
+            name="Rotate secrets",
+            entity_type=EntityType.PROCEDURE,
+            category="operations",
+            required_tools=["vault"],
+            estimated_minutes=15,
+            automation_level="manual",
+        )
+
+        props = manager._collect_properties(procedure)
+
+        assert props["category"] == "operations"
+        assert props["required_tools"] == ["vault"]
+        assert props["estimated_minutes"] == 15
+        assert props["automation_level"] == "manual"
+
+
+class TestCoerceEntity:
+    """Tests for typed entity coercion helpers."""
+
+    def test_coerces_procedure_entity(self) -> None:
+        """_coerce_entity should hydrate Procedure models from metadata."""
+        client = MockGraphClient()
+        manager = EntityManager(client, group_id=TEST_ORG_ID)
+
+        entity = Entity(
+            id="procedure_123",
+            name="Incident response",
+            entity_type=EntityType.PROCEDURE,
+            metadata={
+                "category": "operations",
+                "required_tools": ["pagerduty"],
+                "estimated_minutes": 30,
+                "automation_level": "manual",
+                "steps": [
+                    {"order": 1, "title": "Assess", "description": "Assess the alert"},
+                    {"order": 2, "title": "Mitigate", "description": "Mitigate the issue"},
+                ],
+            },
+        )
+
+        procedure = manager._coerce_entity(entity)
+
+        assert isinstance(procedure, Procedure)
+        assert procedure.required_tools == ["pagerduty"]
+        assert procedure.steps[0].title == "Assess"
+        assert procedure.steps[1].description == "Mitigate the issue"
 
 
 class TestBulkCreateDirect:

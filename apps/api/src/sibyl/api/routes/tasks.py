@@ -3,6 +3,7 @@
 Dedicated endpoints for task lifecycle operations with proper event broadcasting.
 """
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -482,7 +483,10 @@ async def complete_task(
     request: CompleteTaskRequest | None = None,
 ) -> TaskActionResponse:
     """Complete a task and optionally capture learnings."""
-    from sibyl.jobs.queue import enqueue_create_learning_episode
+    from sibyl.jobs.queue import (
+        enqueue_create_learning_episode,
+        enqueue_create_learning_procedure,
+    )
 
     await _verify_task_access(task_id, org, auth.ctx, auth.session)
 
@@ -507,9 +511,10 @@ async def complete_task(
 
     # Enqueue learning episode creation as background job (fast response)
     if learnings:
-        await enqueue_create_learning_episode(
-            task.model_dump(mode="json"),
-            group_id,
+        task_data = task.model_dump(mode="json")
+        await asyncio.gather(
+            enqueue_create_learning_episode(task_data, group_id),
+            enqueue_create_learning_procedure(task_data, group_id),
         )
 
     await _broadcast_task_update(

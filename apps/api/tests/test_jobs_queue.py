@@ -53,12 +53,20 @@ class FakePool:
 class RecordingEnqueuePool:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str | None, dict[str, object]]] = []
+        self.extra_args: list[tuple[object, ...]] = []
         self.delete = AsyncMock()
         self.zadd = AsyncMock()
         self.zremrangebyrank = AsyncMock()
 
-    async def enqueue_job(self, function: str, first_arg: str | None = None, **kwargs: object):
+    async def enqueue_job(
+        self,
+        function: str,
+        first_arg: object | None = None,
+        *args: object,
+        **kwargs: object,
+    ):
         self.calls.append((function, first_arg, kwargs))
+        self.extra_args.append(args)
         return SimpleNamespace(job_id=kwargs["_job_id"])
 
 
@@ -283,6 +291,26 @@ async def test_enqueue_backup_cleanup_indexes_recent_job(
     assert pool.calls[0][0] == "cleanup_old_backups"
     assert pool.calls[0][2]["retention_days"] == 7
     assert_recent_job_indexed(pool, "backup_cleanup")
+
+
+@pytest.mark.asyncio
+async def test_enqueue_create_learning_procedure_indexes_recent_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = RecordingEnqueuePool()
+    monkeypatch.setattr(queue_module, "get_pool", AsyncMock(return_value=pool))
+
+    job_id = await queue_module.enqueue_create_learning_procedure(
+        {"id": "task-123", "title": "Ship the thing"},
+        "org-123",
+    )
+
+    assert job_id == "learning_procedure:task-123"
+    assert pool.calls[0][0] == "create_learning_procedure"
+    assert pool.calls[0][1] == {"id": "task-123", "title": "Ship the thing"}
+    assert pool.calls[0][2] == {"_job_id": "learning_procedure:task-123"}
+    assert pool.extra_args[0] == ("org-123",)
+    assert_recent_job_indexed(pool, "learning_procedure:task-123")
 
 
 @pytest.mark.asyncio

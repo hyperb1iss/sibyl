@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from sibyl_core.errors import InvalidTransitionError
-from sibyl_core.models.entities import Entity, EntityType
+from sibyl_core.models.entities import Entity, EntityType, RelationshipType
 from sibyl_core.models.tasks import (
     Task,
     TaskComplexity,
@@ -68,6 +68,7 @@ class MockEntityManager:
 
     entities: dict[str, Entity]
     search_results: list[tuple[Entity, float]]
+    notes_by_task: dict[str, list[Entity]] | None = None
 
     async def get(self, entity_id: str) -> Entity:
         """Get entity by ID."""
@@ -94,6 +95,16 @@ class MockEntityManager:
         """Create new entity."""
         self.entities[entity.id] = entity
         return entity.id
+
+    async def create_direct(self, entity: Entity) -> str:
+        """Create new structured entity."""
+        self.entities[entity.id] = entity
+        return entity.id
+
+    async def get_notes_for_task(self, task_id: str, limit: int = 50) -> list[Entity]:
+        """Return stored task notes."""
+        notes = (self.notes_by_task or {}).get(task_id, [])
+        return notes[:limit]
 
     async def search(
         self,
@@ -122,7 +133,13 @@ class MockRelationshipManager:
         relationship_types: list[Any] | None = None,
     ) -> list[Any]:
         """Get relationships for entity."""
-        return []
+        if relationship_types is None:
+            return list(self.relationships)
+        return [
+            relationship
+            for relationship in self.relationships
+            if getattr(relationship, "relationship_type", None) in relationship_types
+        ]
 
 
 @dataclass
@@ -535,6 +552,64 @@ class TestWorkflowEngine:
         assert result.actual_hours == 4.5
         assert result.learnings == "Learned about async patterns"
         assert result.completed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_complete_task_with_step_learnings_creates_procedure(
+        self,
+        workflow_engine: TaskWorkflowEngine,
+        mock_entity_manager: MockEntityManager,
+        mock_relationship_manager: MockRelationshipManager,
+        mock_graph_client: MockGraphClient,
+    ) -> None:
+        """complete_task distills reusable procedures from step-like learnings."""
+        task = make_task(
+            task_id="task_procedure",
+            title="Rotate API keys",
+            status=TaskStatus.DOING,
+            description="Rotate production keys and verify all services recover.",
+            technologies=["vault", "terraform"],
+        )
+        mock_entity_manager.entities[task.id] = make_entity(
+            entity_id=task.id,
+            name=task.title,
+            metadata={"status": TaskStatus.DOING},
+        )
+        mock_entity_manager.notes_by_task = {
+            task.id: [
+                Entity(
+                    id="note_1",
+                    name="Support note",
+                    entity_type=EntityType.NOTE,
+                    content="- Notify dependents\n- Verify traffic and logs",
+                )
+            ]
+        }
+        mock_relationship_manager.relationships.extend(
+            [
+                MagicMock(
+                    target_id="pattern_deploy",
+                    relationship_type=RelationshipType.REFERENCES,
+                )
+            ]
+        )
+        mock_graph_client.query_results = []
+
+        result = await workflow_engine.complete_task(
+            task.id,
+            actual_hours=1.5,
+            learnings="- Rotate credentials in Vault\n- Apply Terraform and restart workers",
+        )
+
+        assert result.status == TaskStatus.DONE
+        procedure = mock_entity_manager.entities["procedure_task_procedure"]
+        assert procedure.entity_type == EntityType.PROCEDURE
+        assert procedure.metadata["distillation_mode"] == "explicit_steps"
+        assert procedure.metadata["notes_used"] == 1
+        assert procedure.metadata["task_id"] == task.id
+        relationship_types = [rel.relationship_type for rel in mock_relationship_manager.relationships]
+        assert RelationshipType.USES_PROCEDURE in relationship_types
+        assert RelationshipType.DERIVED_FROM in relationship_types
+        assert RelationshipType.REFERENCES in relationship_types
 
     @pytest.mark.asyncio
     async def test_archive_task_sets_archived_status(

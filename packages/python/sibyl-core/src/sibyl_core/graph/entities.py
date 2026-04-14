@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from sibyl_core.errors import EntityNotFoundError, SearchError
 from sibyl_core.graph.client import GraphClient
-from sibyl_core.models.entities import Entity, EntityType
+from sibyl_core.models.entities import Entity, EntityType, Procedure, ProcedureStep
 from sibyl_core.models.sources import Community, Document, Source
 from sibyl_core.models.tasks import (
     Epic,
@@ -1638,12 +1638,7 @@ class EntityManager:
                 if value is None:
                     value = entity.metadata.get(field)
                 if value is not None:
-                    if isinstance(value, datetime):
-                        props[field] = value.isoformat()
-                    elif hasattr(value, "value"):
-                        props[field] = value.value
-                    else:
-                        props[field] = value
+                    props[field] = self._serialize_metadata_value(value)
 
         # Common optional fields
         for field in (
@@ -1656,12 +1651,16 @@ class EntityManager:
             "severity",
             "template_type",
             "file_extension",
+            "steps",
+            "required_tools",
+            "estimated_minutes",
+            "automation_level",
         ):
             value = getattr(entity, field, None)
             if value is None:
                 value = entity.metadata.get(field)
             if value is not None:
-                props[field] = value
+                props[field] = self._serialize_metadata_value(value)
 
         # Task/Epic-specific fields (if present)
         task_fields = (
@@ -1690,19 +1689,52 @@ class EntityManager:
         )
         add_fields(task_fields)
 
+        procedure_fields = (
+            "steps",
+            "required_tools",
+            "estimated_minutes",
+            "automation_level",
+        )
+        add_fields(procedure_fields)
+
         return props
 
     def _serialize_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
         """Convert metadata values to JSON-serializable forms."""
         serialized: dict[str, Any] = {}
         for key, value in metadata.items():
-            if isinstance(value, datetime):
-                serialized[key] = value.isoformat()
-            elif hasattr(value, "value"):  # Enum
-                serialized[key] = value.value
-            elif value is not None:
-                serialized[key] = value
+            serialized_value = self._serialize_metadata_value(value)
+            if serialized_value is not None:
+                serialized[key] = serialized_value
         return serialized
+
+    def _serialize_metadata_value(self, value: Any) -> Any:
+        """Normalize nested metadata values into JSON-safe primitives."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if hasattr(value, "value"):
+            return value.value
+        if isinstance(value, BaseModel):
+            return {
+                key: serialized
+                for key, nested in value.model_dump(mode="python").items()
+                if (serialized := self._serialize_metadata_value(nested)) is not None
+            }
+        if isinstance(value, dict):
+            return {
+                key: serialized
+                for key, nested in value.items()
+                if (serialized := self._serialize_metadata_value(nested)) is not None
+            }
+        if isinstance(value, (list, tuple, set)):
+            return [
+                serialized
+                for nested in value
+                if (serialized := self._serialize_metadata_value(nested)) is not None
+            ]
+        return value
 
     def _entity_to_metadata(self, entity: Entity) -> dict[str, Any]:
         """Extract all entity fields as metadata for storage.
@@ -1763,6 +1795,17 @@ class EntityManager:
             metadata["author_type"] = entity.author_type.value if entity.author_type else "user"
             metadata["author_name"] = entity.author_name
 
+        # Add Procedure-specific fields
+        elif isinstance(entity, Procedure):
+            if entity.steps:
+                metadata["steps"] = entity.steps
+            if entity.required_tools:
+                metadata["required_tools"] = entity.required_tools
+            if entity.estimated_minutes is not None:
+                metadata["estimated_minutes"] = entity.estimated_minutes
+            if entity.automation_level:
+                metadata["automation_level"] = entity.automation_level
+
         # Common fields (use getattr since not all entity types have these)
         if languages := getattr(entity, "languages", None):
             metadata["languages"] = languages
@@ -1786,12 +1829,14 @@ class EntityManager:
 
     def _coerce_entity(self, entity: Entity) -> Entity:
         """Convert generic entities into their typed models when possible."""
-        if isinstance(entity, Task):
+        if isinstance(entity, (Task, Procedure)):
             return entity
 
         try:
             if entity.entity_type == EntityType.TASK:
                 return self._entity_to_task(entity)
+            if entity.entity_type == EntityType.PROCEDURE:
+                return self._entity_to_procedure(entity)
         except Exception as exc:
             log.debug(
                 "Failed to coerce entity",
@@ -1847,6 +1892,37 @@ class EntityManager:
             started_at=meta.get("started_at"),
             completed_at=meta.get("completed_at"),
             reviewed_at=meta.get("reviewed_at"),
+        )
+
+    def _entity_to_procedure(self, entity: Entity) -> Procedure:
+        """Hydrate a Procedure from a generic entity + metadata."""
+        meta = entity.metadata or {}
+        steps: list[ProcedureStep] = []
+        for raw_step in meta.get("steps", []):
+            if isinstance(raw_step, ProcedureStep):
+                steps.append(raw_step)
+            elif isinstance(raw_step, dict):
+                steps.append(ProcedureStep.model_validate(raw_step))
+
+        return Procedure(
+            id=entity.id,
+            entity_type=EntityType.PROCEDURE,
+            name=entity.name,
+            description=entity.description or meta.get("description") or "",
+            content=entity.content or meta.get("content") or "",
+            organization_id=entity.organization_id,
+            created_by=entity.created_by,
+            modified_by=entity.modified_by,
+            metadata=meta,
+            created_at=entity.created_at,
+            updated_at=entity.updated_at,
+            source_file=entity.source_file,
+            embedding=entity.embedding,
+            steps=steps,
+            required_tools=meta.get("required_tools", []),
+            category=meta.get("category", ""),
+            estimated_minutes=meta.get("estimated_minutes"),
+            automation_level=meta.get("automation_level", "manual"),
         )
 
     def _build_bulk_direct_row(self, entity: Entity) -> dict[str, Any]:
@@ -2149,7 +2225,8 @@ class EntityManager:
             elif isinstance(raw_metadata, dict):
                 metadata.update(raw_metadata)
 
-        return Entity(
+        return self._coerce_entity(
+            Entity(
             id=node.uuid,
             entity_type=entity_type,
             name=node.name,
@@ -2163,6 +2240,7 @@ class EntityManager:
             updated_at=node.created_at,  # Graphiti doesn't track updated_at
             source_file=source_file,
             embedding=node.name_embedding if node.name_embedding else None,
+        )
         )
 
     async def _get_node_entity_type(self, entity_id: str) -> EntityType | None:
@@ -2262,4 +2340,4 @@ class EntityManager:
             # Use created_at for updated_at if no explicit updated_at
             entity_kwargs["updated_at"] = created_at
 
-        return Entity(**entity_kwargs)
+        return self._coerce_entity(Entity(**entity_kwargs))

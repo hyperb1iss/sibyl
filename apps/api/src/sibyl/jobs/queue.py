@@ -368,6 +368,38 @@ async def enqueue_create_learning_episode(
     return job.job_id
 
 
+async def enqueue_create_learning_procedure(
+    task_data: dict[str, Any],
+    group_id: str,
+) -> str:
+    """Enqueue a learning procedure creation job."""
+    pool = await get_pool()
+
+    task_id = task_data.get("id", "unknown")
+    job_id = f"learning_procedure:{task_id}"
+
+    job = await pool.enqueue_job(
+        "create_learning_procedure",
+        task_data,
+        group_id,
+        _job_id=job_id,
+    )
+
+    if job is None:
+        log.info("Learning procedure job already exists", job_id=job_id, task_id=task_id)
+        await _record_recent_job(pool, job_id)
+        return job_id
+
+    log.info(
+        "Enqueued learning procedure job",
+        job_id=job.job_id,
+        task_id=task_id,
+    )
+
+    await _record_recent_job(pool, job.job_id)
+    return job.job_id
+
+
 async def enqueue_update_task(
     task_id: str,
     updates: dict[str, Any],

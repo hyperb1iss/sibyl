@@ -9,6 +9,7 @@ from typing import Any
 import structlog
 
 from sibyl.api.event_types import WSEvent
+from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
 
 log = structlog.get_logger()
 
@@ -21,6 +22,48 @@ async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | Non
         await publish_event(event, data, org_id=org_id)
     except Exception:
         log.debug("Broadcast failed (Redis unavailable)", event=event)
+
+
+async def _inherit_task_knowledge(
+    relationship_manager: Any,
+    *,
+    source_id: str,
+    task_id: str,
+) -> int:
+    """Copy task knowledge edges onto a derived learning artifact."""
+    from sibyl_core.models.entities import Relationship, RelationshipType
+
+    task_relationships = await relationship_manager.get_for_entity(
+        task_id,
+        relationship_types=[
+            RelationshipType.REQUIRES,
+            RelationshipType.REFERENCES,
+            RelationshipType.PART_OF,
+        ],
+    )
+
+    inherited_count = 0
+    for rel in task_relationships:
+        try:
+            await relationship_manager.create(
+                Relationship(
+                    id=f"rel_{source_id}_{rel.target_id}",
+                    source_id=source_id,
+                    target_id=rel.target_id,
+                    relationship_type=RelationshipType.REFERENCES,
+                    metadata={"inherited_from_task": task_id},
+                )
+            )
+            inherited_count += 1
+        except Exception as e:
+            log.warning(
+                "learning_artifact_inherit_failed",
+                error=str(e),
+                source_id=source_id,
+                target_id=getattr(rel, "target_id", None),
+            )
+
+    return inherited_count
 
 
 async def create_entity(  # noqa: PLR0915
@@ -293,8 +336,6 @@ async def create_learning_episode(
     from sibyl_core.graph.entities import EntityManager
     from sibyl_core.graph.relationships import RelationshipManager
     from sibyl_core.models.entities import (
-        EntityType,
-        Episode,
         Relationship,
         RelationshipType,
     )
@@ -313,79 +354,7 @@ async def create_learning_episode(
         entity_manager = EntityManager(client, group_id=group_id)
         relationship_manager = RelationshipManager(client, group_id=group_id)
 
-        # Format episode content
-        content_parts = [
-            f"## Task: {task.title}",
-            "",
-            f"**Status**: {task.status}",
-            f"**Feature**: {task.feature or 'N/A'}",
-            f"**Technologies**: {', '.join(task.technologies)}",
-        ]
-
-        if task.actual_hours:
-            content_parts.append(f"**Time Spent**: {task.actual_hours} hours")
-
-        if task.estimated_hours and task.actual_hours:
-            accuracy = (task.estimated_hours / task.actual_hours) * 100
-            content_parts.append(f"**Estimation Accuracy**: {accuracy:.1f}%")
-
-        content_parts.extend(
-            [
-                "",
-                "### What Was Done",
-                "",
-                task.description,
-                "",
-                "### Learnings",
-                "",
-                task.learnings or "",
-            ]
-        )
-
-        if task.blockers_encountered:
-            content_parts.extend(
-                [
-                    "",
-                    "### Blockers Encountered",
-                    "",
-                ]
-            )
-            content_parts.extend(f"- {b}" for b in task.blockers_encountered)
-
-        if task.commit_shas:
-            content_parts.extend(
-                [
-                    "",
-                    "### Related Commits",
-                    "",
-                ]
-            )
-            content_parts.extend(f"- `{sha}`" for sha in task.commit_shas)
-
-        # Create episode
-        episode = Episode(
-            id=f"episode_{task.id}",
-            entity_type=EntityType.EPISODE,
-            name=f"Task Completed: {task.title}",
-            description=task.description,
-            content="\n".join(content_parts),
-            episode_type="task_completion",
-            metadata={
-                "task_id": task.id,
-                "project_id": task.project_id,
-                "feature": task.feature,
-                "technologies": task.technologies,
-                "complexity": task.complexity.value if task.complexity else None,
-                "estimated_hours": task.estimated_hours,
-                "actual_hours": task.actual_hours,
-                "estimation_accuracy": (
-                    task.estimated_hours / task.actual_hours
-                    if task.estimated_hours and task.actual_hours
-                    else None
-                ),
-            },
-            valid_from=task.completed_at,
-        )
+        episode = build_learning_episode(task)
 
         # Use Graphiti create for relationship discovery from learnings
         episode_id = await entity_manager.create(episode)
@@ -406,35 +375,11 @@ async def create_learning_episode(
             )
         )
 
-        # Inherit knowledge relationships from task
-        task_relationships = await relationship_manager.get_for_entity(
-            task.id,
-            relationship_types=[
-                RelationshipType.REQUIRES,
-                RelationshipType.REFERENCES,
-                RelationshipType.PART_OF,
-            ],
+        inherited_count = await _inherit_task_knowledge(
+            relationship_manager,
+            source_id=episode_id,
+            task_id=task.id,
         )
-
-        inherited_count = 0
-        for rel in task_relationships:
-            try:
-                await relationship_manager.create(
-                    Relationship(
-                        id=f"rel_episode_{episode_id}_{rel.target_id}",
-                        source_id=episode_id,
-                        target_id=rel.target_id,
-                        relationship_type=RelationshipType.REFERENCES,
-                        metadata={"inherited_from_task": task.id},
-                    )
-                )
-                inherited_count += 1
-            except Exception as e:
-                log.warning(
-                    "create_learning_episode_inherit_failed",
-                    error=str(e),
-                    target_id=rel.target_id,
-                )
 
         result = {
             "episode_id": episode_id,
@@ -460,6 +405,113 @@ async def create_learning_episode(
     except Exception as e:
         log.exception(
             "create_learning_episode_failed",
+            task_id=task.id,
+            error=str(e),
+        )
+        raise
+
+
+async def create_learning_procedure(
+    ctx: dict[str, Any],  # noqa: ARG001
+    task_data: dict[str, Any],
+    group_id: str,
+) -> dict[str, Any]:
+    """Create a reusable procedure from a completed task."""
+    from sibyl_core.graph.client import get_graph_client
+    from sibyl_core.graph.entities import EntityManager
+    from sibyl_core.graph.relationships import RelationshipManager
+    from sibyl_core.models.entities import Relationship, RelationshipType
+    from sibyl_core.models.tasks import Task
+
+    task = Task.model_validate(task_data)
+
+    log.info(
+        "create_learning_procedure_started",
+        task_id=task.id,
+        task_title=task.title,
+    )
+
+    try:
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=group_id)
+        relationship_manager = RelationshipManager(client, group_id=group_id)
+
+        notes_getter = getattr(entity_manager, "get_notes_for_task", None)
+        note_contents: list[str] = []
+        if callable(notes_getter):
+            try:
+                notes = await notes_getter(task.id, limit=20)
+                note_contents = [
+                    note.content for note in notes if getattr(note, "content", "").strip()
+                ]
+            except Exception as exc:
+                log.debug(
+                    "create_learning_procedure_notes_failed",
+                    task_id=task.id,
+                    error=str(exc),
+                )
+
+        procedure = build_learning_procedure(task, note_contents)
+        if procedure is None:
+            result = {
+                "procedure_id": None,
+                "task_id": task.id,
+                "notes_used": len(note_contents),
+                "created": False,
+            }
+            log.info("create_learning_procedure_skipped", **result)
+            return result
+
+        procedure_id = await entity_manager.create_direct(procedure)
+
+        await relationship_manager.create(
+            Relationship(
+                id=f"rel_task_{task.id}_procedure",
+                source_id=task.id,
+                target_id=procedure_id,
+                relationship_type=RelationshipType.USES_PROCEDURE,
+            )
+        )
+        await relationship_manager.create(
+            Relationship(
+                id=f"rel_procedure_{task.id}",
+                source_id=procedure_id,
+                target_id=task.id,
+                relationship_type=RelationshipType.DERIVED_FROM,
+            )
+        )
+
+        inherited_count = await _inherit_task_knowledge(
+            relationship_manager,
+            source_id=procedure_id,
+            task_id=task.id,
+        )
+
+        result = {
+            "procedure_id": procedure_id,
+            "task_id": task.id,
+            "notes_used": len(note_contents),
+            "inherited_relationships": inherited_count,
+            "created": True,
+        }
+
+        await _safe_broadcast(
+            WSEvent.ENTITY_CREATED,
+            {
+                "id": procedure_id,
+                "entity_type": "procedure",
+                "name": procedure.name,
+                "derived_from": task.id,
+            },
+            org_id=group_id,
+        )
+
+        log.info("create_learning_procedure_completed", **result)
+        return result
+
+    except Exception as e:
+        log.exception(
+            "create_learning_procedure_failed",
             task_id=task.id,
             error=str(e),
         )
