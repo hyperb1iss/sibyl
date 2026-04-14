@@ -20,7 +20,6 @@
 | **tools/helpers.py** | 485 | 0% | P0 | High (pure functions) |
 | **graph/client.py** | 472 | 0% | P1 | Low (infra) |
 | **tools/search.py** | 467 | 0% | P1 | Medium (needs mocks) |
-| **graph/summarize.py** | 445 | 0% | P2 | Low (LLM calls) |
 | **tasks/dependencies.py** | 439 | 0% | P1 | High (pure algorithms) |
 | **models/tasks.py** | 407 | 83% | P0 | High (pure) |
 | **tasks/manager.py** | 403 | 0% | P1 | Medium (async) |
