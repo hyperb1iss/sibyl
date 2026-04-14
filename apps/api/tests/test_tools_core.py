@@ -562,6 +562,39 @@ class TestGetHealth:
             assert "status" in result
 
     @pytest.mark.asyncio
+    async def test_health_paginates_counts_beyond_page_size(self) -> None:
+        """Health should count all entities even when a type exceeds 1000 rows."""
+
+        counts = {
+            EntityType.PATTERN: 1250,
+            EntityType.RULE: 1001,
+            EntityType.EPISODE: 0,
+        }
+
+        async def list_by_type(
+            entity_type: EntityType,
+            limit: int = 50,
+            offset: int = 0,
+            **kwargs: object,
+        ) -> list[object]:
+            remaining = counts[entity_type] - offset
+            if remaining <= 0:
+                return []
+            return [object()] * min(limit, remaining)
+
+        async with mock_tools() as ctx:
+            ctx.entity_manager.list_by_type = AsyncMock(side_effect=list_by_type)
+
+            result = await get_health(organization_id=TEST_ORG_ID)
+
+            assert result["entity_counts"]["pattern"] == 1250
+            assert result["entity_counts"]["rule"] == 1001
+            assert result["entity_counts"]["episode"] == 0
+            assert any(
+                call.kwargs.get("offset") == 1000 for call in ctx.entity_manager.list_by_type.await_args_list
+            )
+
+    @pytest.mark.asyncio
     async def test_health_handles_connection_failure(self) -> None:
         """Health should report unhealthy on connection failure."""
 

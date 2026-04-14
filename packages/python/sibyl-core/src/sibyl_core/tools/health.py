@@ -11,6 +11,24 @@ from sibyl_core.models.entities import EntityType
 _server_start_time: float | None = None
 
 
+async def _count_entities(entity_manager: EntityManager, entity_type: EntityType) -> int:
+    """Count entities of a type without truncating large orgs."""
+    total = 0
+    offset = 0
+    page_size = 1000
+
+    while True:
+        entities = await entity_manager.list_by_type(
+            entity_type,
+            limit=page_size,
+            offset=offset,
+        )
+        total += len(entities)
+        if len(entities) < page_size:
+            return total
+        offset += page_size
+
+
 async def get_health(*, organization_id: str | None = None) -> dict[str, Any]:
     """Get server health status.
 
@@ -46,8 +64,10 @@ async def get_health(*, organization_id: str | None = None) -> dict[str, Any]:
             # Get entity counts
             for entity_type in [EntityType.PATTERN, EntityType.RULE, EntityType.EPISODE]:
                 try:
-                    entities = await entity_manager.list_by_type(entity_type, limit=1000)
-                    health["entity_counts"][entity_type.value] = len(entities)
+                    health["entity_counts"][entity_type.value] = await _count_entities(
+                        entity_manager,
+                        entity_type,
+                    )
                 except Exception:
                     health["entity_counts"][entity_type.value] = -1
 
