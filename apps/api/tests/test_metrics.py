@@ -15,7 +15,7 @@ from sibyl.api.routes.metrics import (
     _count_recent_tasks,
     _parse_iso_date,
 )
-from sibyl_core.models.entities import Entity
+from sibyl_core.models.entities import Entity, EntityType
 
 # =============================================================================
 # Helper Function Tests
@@ -491,44 +491,71 @@ class TestGetOrgMetrics:
             create_mock_entity(entity_type="project", name="Project B", entity_id="proj_b"),
         ]
 
-        # Create mock tasks
         now = datetime.now(UTC)
-        mock_tasks = [
-            create_mock_entity(
-                entity_type="task",
-                name="Task 1",
-                metadata={
-                    "status": "done",
-                    "priority": "critical",
-                    "project_id": "proj_a",
-                    "assignees": ["alice"],
-                    "completed_at": (now - timedelta(days=2)).isoformat(),
-                },
-            ),
-            create_mock_entity(
-                entity_type="task",
-                name="Task 2",
-                metadata={
-                    "status": "doing",
-                    "priority": "high",
-                    "project_id": "proj_a",
-                    "assignees": ["alice"],
-                },
-            ),
-            create_mock_entity(
-                entity_type="task",
-                name="Task 3",
-                metadata={
-                    "status": "todo",
-                    "priority": "medium",
-                    "project_id": "proj_b",
-                },
-            ),
-        ]
 
         mock_entity_manager = AsyncMock()
-        mock_entity_manager.list_by_type.side_effect = lambda t, **_: (
-            mock_projects if t == "project" else mock_tasks
+        mock_entity_manager.list_by_type.return_value = mock_projects
+        mock_client.execute_read_org = AsyncMock(
+            side_effect=[
+                [
+                    {
+                        "total_tasks": 3,
+                        "backlog_tasks": 0,
+                        "todo_tasks": 1,
+                        "doing_tasks": 1,
+                        "blocked_tasks": 0,
+                        "review_tasks": 0,
+                        "done_tasks": 1,
+                        "medium_tasks": 1,
+                        "critical_tasks": 1,
+                        "high_tasks": 1,
+                        "low_tasks": 0,
+                        "someday_tasks": 0,
+                        "tasks_created_last_7d": 3,
+                    }
+                ],
+                [
+                    {
+                        "project_id": "proj_a",
+                        "total": 2,
+                        "completed": 1,
+                        "doing": 1,
+                        "blocked": 0,
+                        "review": 0,
+                        "todo": 0,
+                        "backlog": 0,
+                        "critical": 1,
+                        "high": 1,
+                        "overdue": 0,
+                    },
+                    {
+                        "project_id": "proj_b",
+                        "total": 1,
+                        "completed": 0,
+                        "doing": 0,
+                        "blocked": 0,
+                        "review": 0,
+                        "todo": 1,
+                        "backlog": 0,
+                        "critical": 0,
+                        "high": 0,
+                        "overdue": 0,
+                    },
+                ],
+                [
+                    {
+                        "name": "alice",
+                        "total": 2,
+                        "completed": 1,
+                        "in_progress": 1,
+                    }
+                ],
+                [
+                    {"date": (now - timedelta(days=2)).strftime("%Y-%m-%d"), "value": 1},
+                    {"date": (now - timedelta(days=1)).strftime("%Y-%m-%d"), "value": 1},
+                    {"date": now.strftime("%Y-%m-%d"), "value": 1},
+                ],
+            ]
         )
 
         with (
@@ -540,6 +567,11 @@ class TestGetOrgMetrics:
         ):
             result = await get_org_metrics(org=mock_org)
 
+            mock_entity_manager.list_by_type.assert_awaited_once_with(
+                EntityType.PROJECT,
+                limit=500,
+            )
+            assert mock_client.execute_read_org.call_count == 4
             assert result.total_projects == 2
             assert result.total_tasks == 3
             assert result.status_distribution.done == 1
@@ -564,6 +596,7 @@ class TestGetOrgMetrics:
 
         mock_entity_manager = AsyncMock()
         mock_entity_manager.list_by_type.return_value = []
+        mock_client.execute_read_org = AsyncMock(side_effect=[[], [], [], []])
 
         with (
             patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
@@ -574,9 +607,16 @@ class TestGetOrgMetrics:
         ):
             result = await get_org_metrics(org=mock_org)
 
+            mock_entity_manager.list_by_type.assert_awaited_once_with(
+                EntityType.PROJECT,
+                limit=500,
+            )
+            assert mock_client.execute_read_org.call_count == 4
             assert result.total_projects == 0
             assert result.total_tasks == 0
             assert result.completion_rate == 0.0
+            assert result.top_assignees == []
+            assert len(result.velocity_trend) == 14
 
     @pytest.mark.asyncio
     async def test_org_metrics_projects_summary_sorted(self) -> None:
@@ -591,25 +631,58 @@ class TestGetOrgMetrics:
             create_mock_entity(entity_type="project", name="Large", entity_id="proj_l"),
         ]
 
-        # More tasks for proj_l
-        mock_tasks = [
-            create_mock_entity(
-                entity_type="task",
-                metadata={"status": "done", "project_id": "proj_l"},
-            ),
-            create_mock_entity(
-                entity_type="task",
-                metadata={"status": "todo", "project_id": "proj_l"},
-            ),
-            create_mock_entity(
-                entity_type="task",
-                metadata={"status": "todo", "project_id": "proj_s"},
-            ),
-        ]
-
         mock_entity_manager = AsyncMock()
-        mock_entity_manager.list_by_type.side_effect = lambda t, **_: (
-            mock_projects if t == "project" else mock_tasks
+        mock_entity_manager.list_by_type.return_value = mock_projects
+        mock_client.execute_read_org = AsyncMock(
+            side_effect=[
+                [
+                    {
+                        "total_tasks": 3,
+                        "backlog_tasks": 0,
+                        "todo_tasks": 2,
+                        "doing_tasks": 0,
+                        "blocked_tasks": 0,
+                        "review_tasks": 0,
+                        "done_tasks": 1,
+                        "medium_tasks": 3,
+                        "critical_tasks": 0,
+                        "high_tasks": 0,
+                        "low_tasks": 0,
+                        "someday_tasks": 0,
+                        "tasks_created_last_7d": 3,
+                    }
+                ],
+                [
+                    {
+                        "project_id": "proj_l",
+                        "total": 2,
+                        "completed": 1,
+                        "doing": 0,
+                        "blocked": 0,
+                        "review": 0,
+                        "todo": 1,
+                        "backlog": 0,
+                        "critical": 0,
+                        "high": 0,
+                        "overdue": 0,
+                    },
+                    {
+                        "project_id": "proj_s",
+                        "total": 1,
+                        "completed": 0,
+                        "doing": 0,
+                        "blocked": 0,
+                        "review": 0,
+                        "todo": 1,
+                        "backlog": 0,
+                        "critical": 0,
+                        "high": 0,
+                        "overdue": 0,
+                    },
+                ],
+                [],
+                [],
+            ]
         )
 
         with (
@@ -621,6 +694,10 @@ class TestGetOrgMetrics:
         ):
             result = await get_org_metrics(org=mock_org)
 
+            mock_entity_manager.list_by_type.assert_awaited_once_with(
+                EntityType.PROJECT,
+                limit=500,
+            )
             # First project should be the one with more tasks
             assert result.projects_summary[0].id == "proj_l"
             assert result.projects_summary[0].total == 2
@@ -639,47 +716,45 @@ class TestGetOrgMetrics:
             create_mock_entity(entity_type="project", name="Alpha", entity_id="proj_a"),
         ]
 
-        mock_tasks = [
-            create_mock_entity(
-                entity_type="task",
-                metadata={
-                    "status": "doing",
-                    "priority": "critical",
-                    "project_id": "proj_a",
-                    "due_date": "2026-04-01",
-                },
-            ),
-            create_mock_entity(
-                entity_type="task",
-                metadata={
-                    "status": "review",
-                    "priority": "high",
-                    "project_id": "proj_a",
-                },
-            ),
-            create_mock_entity(
-                entity_type="task",
-                metadata={
-                    "status": "blocked",
-                    "priority": "high",
-                    "project_id": "proj_a",
-                    "due_date": "2026-04-30",
-                },
-            ),
-            create_mock_entity(
-                entity_type="task",
-                metadata={
-                    "status": "done",
-                    "priority": "critical",
-                    "project_id": "proj_a",
-                    "due_date": "2026-04-01",
-                },
-            ),
-        ]
-
         mock_entity_manager = AsyncMock()
-        mock_entity_manager.list_by_type.side_effect = lambda t, **_: (
-            mock_projects if t == "project" else mock_tasks
+        mock_entity_manager.list_by_type.return_value = mock_projects
+        mock_client.execute_read_org = AsyncMock(
+            side_effect=[
+                [
+                    {
+                        "total_tasks": 4,
+                        "backlog_tasks": 0,
+                        "todo_tasks": 0,
+                        "doing_tasks": 1,
+                        "blocked_tasks": 1,
+                        "review_tasks": 1,
+                        "done_tasks": 1,
+                        "medium_tasks": 0,
+                        "critical_tasks": 2,
+                        "high_tasks": 2,
+                        "low_tasks": 0,
+                        "someday_tasks": 0,
+                        "tasks_created_last_7d": 4,
+                    }
+                ],
+                [
+                    {
+                        "project_id": "proj_a",
+                        "total": 4,
+                        "completed": 1,
+                        "doing": 1,
+                        "blocked": 1,
+                        "review": 1,
+                        "todo": 0,
+                        "backlog": 0,
+                        "critical": 1,
+                        "high": 2,
+                        "overdue": 1,
+                    }
+                ],
+                [],
+                [],
+            ]
         )
 
         with (
@@ -691,6 +766,10 @@ class TestGetOrgMetrics:
         ):
             result = await get_org_metrics(org=mock_org)
 
+            mock_entity_manager.list_by_type.assert_awaited_once_with(
+                EntityType.PROJECT,
+                limit=500,
+            )
             summary = result.projects_summary[0]
             assert summary.total == 4
             assert summary.completed == 1
