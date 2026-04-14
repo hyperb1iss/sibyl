@@ -17,6 +17,8 @@ from sibyl.db.models import Project, ProjectVisibility
 
 log = structlog.get_logger()
 
+GRAPH_PROJECT_PAGE_SIZE = 1000
+
 
 class SyncResult(TypedDict):
     """Result of a sync operation."""
@@ -180,18 +182,23 @@ async def get_graph_projects(organization_id: str) -> list[dict]:
 
     projects = []
     offset = 0
-    page_size = 1000
+    page_size = GRAPH_PROJECT_PAGE_SIZE
 
     while True:
         batch = await manager.list_by_type(
             entity_type=EntityType.PROJECT,
             limit=page_size,
             offset=offset,
+            include_archived=True,
         )
         if not batch:
             break
 
-        projects.extend(batch)
+        projects.extend(
+            project
+            for project in batch
+            if (getattr(project, "metadata", None) or {}).get("status") != "archived"
+        )
         offset += page_size
 
     return [

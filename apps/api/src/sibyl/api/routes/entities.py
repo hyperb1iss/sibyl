@@ -74,6 +74,8 @@ router = APIRouter(
     dependencies=[Depends(require_org_role(*_READ_ROLES))],
 )
 
+LIST_ALL_PAGE_SIZE = 2000
+
 
 # =============================================================================
 # Helpers
@@ -83,17 +85,26 @@ router = APIRouter(
 async def _list_all_entities_paginated(
     entity_manager: EntityManager,
     *,
-    batch_size: int = 2000,
+    batch_size: int | None = None,
 ) -> list[Any]:
+    batch_size = LIST_ALL_PAGE_SIZE if batch_size is None else batch_size
     entities: list[Any] = []
     offset = 0
 
     while True:
-        batch = await entity_manager.list_all(limit=batch_size, offset=offset)
+        batch = await entity_manager.list_all(
+            limit=batch_size,
+            offset=offset,
+            include_archived=True,
+        )
         if not batch:
             break
 
-        entities.extend(batch)
+        entities.extend(
+            entity
+            for entity in batch
+            if not ((getattr(entity, "metadata", None) or {}).get("archived"))
+        )
         offset += batch_size
 
     return entities

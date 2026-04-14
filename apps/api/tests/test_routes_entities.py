@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 
+from sibyl.api.routes import entities as entities_routes
 from sibyl.api.routes.entities import SortField, SortOrder, list_entities
 from sibyl_core.models.entities import EntityType
 
@@ -17,8 +18,11 @@ def _entity(
     *,
     project_id: str | None,
     name: str,
+    archived: bool = False,
 ) -> SimpleNamespace:
     metadata = {"project_id": project_id} if project_id else {}
+    if archived:
+        metadata["archived"] = True
     return SimpleNamespace(
         id=entity_id,
         entity_type=EntityType.TASK,
@@ -113,19 +117,23 @@ class TestListEntitiesRoute:
         assert response.has_more is False
 
     @pytest.mark.asyncio
-    async def test_untyped_project_filters_page_list_all_fallback(self) -> None:
+    async def test_untyped_project_filters_skip_archived_only_pages(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
         client = object()
         manager = MagicMock()
-        first_page = [
-            _entity(f"ent-{index}", project_id="proj-1", name=f"Match {index}")
-            for index in range(2000)
+        archived_page = [
+            _entity("ent-archived-1", project_id="proj-1", name="Archived 1", archived=True),
+            _entity("ent-archived-2", project_id="proj-1", name="Archived 2", archived=True),
         ]
-        second_page = [_entity("ent-unassigned", project_id=None, name="Unassigned")]
+        live_page = [
+            _entity("ent-match", project_id="proj-1", name="Match"),
+            _entity("ent-unassigned", project_id=None, name="Unassigned"),
+        ]
         manager.list_by_type = AsyncMock()
-        manager.list_all = AsyncMock(side_effect=[first_page, second_page, []])
+        manager.list_all = AsyncMock(side_effect=[archived_page, live_page, []])
 
         with (
+            patch.object(entities_routes, "LIST_ALL_PAGE_SIZE", 2),
             patch("sibyl.api.routes.entities.get_graph_client", AsyncMock(return_value=client)),
             patch("sibyl.api.routes.entities.EntityManager", return_value=manager),
         ):
@@ -144,10 +152,10 @@ class TestListEntitiesRoute:
 
         manager.list_by_type.assert_not_awaited()
         assert manager.list_all.await_args_list == [
-            call(limit=2000, offset=0),
-            call(limit=2000, offset=2000),
-            call(limit=2000, offset=4000),
+            call(limit=2, offset=0, include_archived=True),
+            call(limit=2, offset=2, include_archived=True),
+            call(limit=2, offset=4, include_archived=True),
         ]
-        assert response.total == 2001
-        assert len(response.entities) == 50
-        assert response.has_more is True
+        assert [entity.id for entity in response.entities] == ["ent-match", "ent-unassigned"]
+        assert response.total == 2
+        assert response.has_more is False
