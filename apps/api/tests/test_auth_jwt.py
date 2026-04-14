@@ -2,7 +2,14 @@ from uuid import uuid4
 
 import pytest
 
-from sibyl.auth.jwt import JwtError, create_access_token, verify_access_token
+from sibyl.auth.jwt import (
+    JwtError,
+    create_access_token,
+    create_refresh_token,
+    decode_token_unverified,
+    verify_access_token,
+    verify_refresh_token,
+)
 from sibyl.config import Settings
 
 
@@ -37,3 +44,21 @@ def test_jwt_rejects_wrong_secret(monkeypatch) -> None:
 
     with pytest.raises(JwtError):
         verify_access_token(token)
+
+
+def test_jwt_compatibility_surface_includes_refresh_helpers(monkeypatch) -> None:
+    monkeypatch.setenv("SIBYL_JWT_SECRET", "secret")
+    monkeypatch.setenv("SIBYL_JWT_ALGORITHM", "HS256")
+
+    from sibyl import config as config_module
+
+    config_module.settings = Settings(_env_file=None)  # type: ignore[assignment]
+
+    user_id = uuid4()
+    refresh_token, expires_at = create_refresh_token(user_id=user_id)
+
+    claims = verify_refresh_token(refresh_token)
+    assert claims["sub"] == str(user_id)
+    assert claims["typ"] == "refresh"
+    assert decode_token_unverified(refresh_token)["jti"] == claims["jti"]
+    assert expires_at.tzinfo is not None
