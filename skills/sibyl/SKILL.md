@@ -35,8 +35,8 @@ These rules exist because real agent sessions consistently fail without them.
    If the server is down, don't retry the same command. Report it and move on.
 
 6. **Never invent subcommands.** If you're unsure whether a command exists, run
-   `sibyl <group> --help`. Do not guess. Commands like `sibyl auth token`, `sibyl db backup`, and
-   `sibyl explore path` do not exist.
+   `sibyl <group> --help`. Do not guess. Commands like `sibyl auth token` and `sibyl db backup` do
+   not exist.
 
 ---
 
@@ -318,7 +318,8 @@ sibyl entity related epsd_a1b2c3d4e5f6
 sibyl entity delete epsd_a1b2c3d4e5f6
 ```
 
-**Entity Types:** task, epic, project, pattern, episode, document, note, source, placeholder
+**Common Entity Types:** pattern, rule, episode, task, epic, project, document, note, source,
+convention, tool, topic, template, procedure
 
 ---
 
@@ -336,6 +337,9 @@ sibyl explore dependencies task_a1b2c3d4e5f6
 
 # Project-wide dependencies
 sibyl explore dependencies --project proj_a1b2c3d4e5f6
+
+# Find path between two entities
+sibyl explore path entity_a entity_b --depth 3
 ```
 
 ---
@@ -411,8 +415,8 @@ sibyl logs tail
 sibyl logs tail -l error              # Filter by level
 sibyl logs tail -s api -n 100         # Filter by service, more entries
 
-# Search logs
-sibyl logs search "timeout" --from 2025-04-01
+# Log buffer stats
+sibyl logs stats
 
 # Inspect graph schema
 sibyl debug schema
@@ -420,8 +424,8 @@ sibyl debug schema
 # Run read-only Cypher query
 sibyl debug query "MATCH (n:Entity) RETURN labels(n), count(*)"
 
-# Database metrics
-sibyl debug metrics
+# System status
+sibyl debug status
 ```
 
 ---
@@ -503,7 +507,8 @@ sibyl task complete task_a1b2c3d4e5f6 --hours 4.5 --learnings "Key insight: The 
 5. **Use Entity Types Properly**:
    - `episode` — Temporal insights, debugging discoveries
    - `pattern` — Reusable coding patterns
-   - `note` — Progress breadcrumbs, observations
+   - `rule` — Hard constraints, must-follow rules
+   - `convention` — Coding standards, style guides
    - `task` — Work items with lifecycle
    - `document` — Crawled documentation pages
 
@@ -619,20 +624,20 @@ Your directory is not linked. Run `sibyl context` — if `Project: none`, link i
 
 ## Common Pitfalls
 
-| Wrong                                | Correct                                          |
-| ------------------------------------ | ------------------------------------------------ |
-| `sibyl task add "..."`               | `sibyl task create --title "..."`                |
-| `sibyl task list --todo`             | `sibyl task list --status todo`                  |
-| `sibyl task create -t "..."`         | `sibyl task create --title "..."` (`-t` is type) |
-| `sibyl task update --learnings`      | `sibyl task complete --learnings` (!)            |
-| `sibyl task note` for completion     | `sibyl task complete --learnings` (!)            |
-| `sibyl add note "content..."`        | `sibyl add "Title" "content..." --type note`     |
-| `sibyl search ... 2>/dev/null`       | `sibyl search ...` (never suppress stderr)       |
-| `sibyl search ... \|\| true`         | `sibyl search ...` (let errors surface)          |
-| `sibyl config`                       | `sibyl config show`                              |
-| `sibyl explore path A B`             | Not a real command — use `explore related`       |
-| `sibyl auth token`                   | Not a real command — use `sibyl auth status`     |
-| Using `--type rule` or `--type tool` | These types don't exist — use `pattern`/`note`   |
+| Wrong                            | Correct                                           |
+| -------------------------------- | ------------------------------------------------- |
+| `sibyl task add "..."`           | `sibyl task create --title "..."`                 |
+| `sibyl task list --todo`         | `sibyl task list --status todo`                   |
+| `sibyl task create -t "..."`     | `sibyl task create --title "..."` (no `-t` short) |
+| `sibyl task update --learnings`  | `sibyl task complete --learnings` (!)             |
+| `sibyl task note` for completion | `sibyl task complete --learnings` (!)             |
+| `sibyl add note "content..."`    | `sibyl add "Title" "content..." --type note`      |
+| `sibyl search ... 2>/dev/null`   | `sibyl search ...` (never suppress stderr)        |
+| `sibyl search ... \|\| true`     | `sibyl search ...` (let errors surface)           |
+| `sibyl config`                   | `sibyl config show`                               |
+| `sibyl auth token`               | Not a real command — use `sibyl auth status`      |
+| `sibyl logs search`              | Not a real command — use `sibyl logs tail`        |
+| `sibyl debug metrics`            | Not a real command — use `sibyl debug status`     |
 
 ### Notes vs Learnings
 

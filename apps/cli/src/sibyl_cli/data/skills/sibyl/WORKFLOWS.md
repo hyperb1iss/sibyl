@@ -88,8 +88,8 @@ sibyl project create \
   --description "What this feature does and its scope"
 
 # Create tasks for the project
-# (Use the MCP add tool or create via API for now)
-# Tasks should break down the feature into steps
+sibyl task create --title "Step 1: Setup auth middleware" --priority high
+sibyl task create --title "Step 2: Add login endpoint" --priority medium
 ```
 
 ### Phase 3: Implementation
@@ -171,6 +171,9 @@ sibyl explore related ptrn_a1b2c3d4e5f6
 
 # Go deeper
 sibyl explore traverse ptrn_a1b2c3d4e5f6 --depth 2
+
+# Find path between entities
+sibyl explore path entity_a entity_b
 ```
 
 ### Understanding Dependencies

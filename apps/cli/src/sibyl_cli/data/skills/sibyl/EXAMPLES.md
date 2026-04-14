@@ -241,6 +241,12 @@ sibyl explore dependencies task_a1b2c3d4e5f6
 sibyl explore dependencies --project proj_a1b2c3d4e5f6
 ```
 
+### Find Path Between Entities
+
+```bash
+sibyl explore path ptrn_a1b2c3d4e5f6 task_a1b2c3d4e5f6 --depth 3
+```
+
 ---
 
 ## Output Formats
@@ -395,7 +401,7 @@ sibyl context create staging --server https://staging.example.com --use
 ```bash
 sibyl debug schema                                           # Entity types and counts
 sibyl debug query "MATCH (n:Entity) RETURN n.name LIMIT 5"  # Read-only Cypher
-sibyl debug metrics                                          # Database metrics
+sibyl debug status                                           # System status
 ```
 
 ### View Logs
@@ -403,5 +409,5 @@ sibyl debug metrics                                          # Database metrics
 ```bash
 sibyl logs tail -l error          # Recent errors
 sibyl logs tail -s worker -n 20   # Worker logs
-sibyl logs search "timeout"       # Search logs
+sibyl logs stats                  # Log buffer stats
 ```
