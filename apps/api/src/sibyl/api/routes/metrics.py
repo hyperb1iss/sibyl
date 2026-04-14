@@ -13,6 +13,7 @@ from sibyl.api.schemas import (
     OrgMetricsResponse,
     ProjectMetrics,
     ProjectMetricsResponse,
+    ProjectSummariesResponse,
     ProjectSummary,
     TaskPriorityDistribution,
     TaskStatusDistribution,
@@ -152,6 +153,36 @@ def _count_recent_tasks(tasks: list[dict], days: int, field: str = "created_at")
             count += 1
 
     return count
+
+
+def _build_project_summaries(
+    projects: list[Any], counts_by_project: dict[str, dict[str, int]]
+) -> list[ProjectSummary]:
+    """Build project summaries from per-project task counts."""
+    projects_summary: list[ProjectSummary] = []
+    for project in projects:
+        counts = counts_by_project.get(str(project.id), _empty_project_task_counts())
+        rate = (counts["completed"] / counts["total"] * 100) if counts["total"] > 0 else 0.0
+        projects_summary.append(
+            ProjectSummary(
+                id=project.id,
+                name=project.name,
+                total=counts["total"],
+                completed=counts["completed"],
+                doing=counts["doing"],
+                blocked=counts["blocked"],
+                review=counts["review"],
+                todo=counts["todo"],
+                backlog=counts["backlog"],
+                critical=counts["critical"],
+                high=counts["high"],
+                overdue=counts["overdue"],
+                completion_rate=round(rate, 1),
+            )
+        )
+
+    projects_summary.sort(key=lambda summary: summary.total, reverse=True)
+    return projects_summary
 
 
 def _empty_project_task_counts() -> dict[str, int]:
@@ -526,6 +557,30 @@ async def get_project_metrics(
         ) from e
 
 
+@router.get("/projects-summary", response_model=ProjectSummariesResponse)
+async def get_project_summaries(
+    org: Organization = Depends(get_current_organization),
+) -> ProjectSummariesResponse:
+    """Get the lean project-summary payload for the projects page."""
+    try:
+        group_id = str(org.id)
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=group_id)
+
+        projects = await entity_manager.list_by_type(EntityType.PROJECT, limit=500)
+        counts_by_project = await _fetch_project_task_counts(client, group_id, datetime.now(UTC))
+
+        return ProjectSummariesResponse(
+            projects_summary=_build_project_summaries(projects, counts_by_project)
+        )
+
+    except Exception as e:
+        log.exception("get_project_summaries_failed", error=str(e))
+        raise HTTPException(
+            status_code=500, detail="Failed to get project summaries. Please try again."
+        ) from e
+
+
 @router.get("", response_model=OrgMetricsResponse)
 async def get_org_metrics(
     org: Organization = Depends(get_current_organization),
@@ -590,30 +645,7 @@ async def get_org_metrics(
                     if due_date and due_date < now:
                         counts["overdue"] += 1
 
-        projects_summary: list[ProjectSummary] = []
-        for project in projects:
-            counts = project_task_counts.get(project.id, _empty_project_task_counts())
-            rate = (counts["completed"] / counts["total"] * 100) if counts["total"] > 0 else 0.0
-            projects_summary.append(
-                ProjectSummary(
-                    id=project.id,
-                    name=project.name,
-                    total=counts["total"],
-                    completed=counts["completed"],
-                    doing=counts["doing"],
-                    blocked=counts["blocked"],
-                    review=counts["review"],
-                    todo=counts["todo"],
-                    backlog=counts["backlog"],
-                    critical=counts["critical"],
-                    high=counts["high"],
-                    overdue=counts["overdue"],
-                    completion_rate=round(rate, 1),
-                )
-            )
-
-        # Sort by total tasks descending
-        projects_summary.sort(key=lambda summary: summary.total, reverse=True)
+        projects_summary = _build_project_summaries(projects, project_task_counts)
 
         return OrgMetricsResponse(
             total_projects=len(projects),

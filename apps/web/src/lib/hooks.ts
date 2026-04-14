@@ -135,6 +135,7 @@ export const queryKeys = {
   },
   metrics: {
     org: ['metrics', 'org'] as const,
+    projectsSummary: ['metrics', 'projects-summary'] as const,
     project: (id: string) => ['metrics', 'project', id] as const,
   },
   backups: {
@@ -1416,6 +1417,16 @@ export function useOrgMetrics(initialData?: import('./api').OrgMetricsResponse) 
   return useQuery({
     queryKey: queryKeys.metrics.org,
     queryFn: api.metrics.org,
+    initialData,
+    staleTime: TIMING.STALE_TIME,
+  });
+}
+
+/** Fetch lean project summaries for the projects page. */
+export function useProjectSummaries(initialData?: import('./api').ProjectSummariesResponse) {
+  return useQuery({
+    queryKey: queryKeys.metrics.projectsSummary,
+    queryFn: api.metrics.projectsSummary,
     initialData,
     staleTime: TIMING.STALE_TIME,
   });

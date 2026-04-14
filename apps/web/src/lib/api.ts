@@ -436,6 +436,10 @@ export interface ProjectSummary {
   completion_rate: number;
 }
 
+export interface ProjectSummariesResponse {
+  projects_summary: ProjectSummary[];
+}
+
 export interface OrgMetricsResponse {
   total_projects: number;
   total_tasks: number;
@@ -1932,6 +1936,9 @@ export const api = {
   metrics: {
     // Get org-level metrics
     org: () => fetchApi<OrgMetricsResponse>('/metrics'),
+
+    // Get lean project summaries
+    projectsSummary: () => fetchApi<ProjectSummariesResponse>('/metrics/projects-summary'),
 
     // Get project-level metrics
     project: (projectId: string) =>

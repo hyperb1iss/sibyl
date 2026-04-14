@@ -889,6 +889,12 @@ class ProjectSummary(BaseModel):
     completion_rate: float = 0.0
 
 
+class ProjectSummariesResponse(BaseModel):
+    """Lean response for project-summary views."""
+
+    projects_summary: list[ProjectSummary]
+
+
 class OrgMetricsResponse(BaseModel):
     """Organization-level metrics aggregating all projects."""
 

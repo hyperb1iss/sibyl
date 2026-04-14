@@ -7,6 +7,7 @@ import type {
   EntityListResponse,
   GraphData,
   HealthResponse,
+  ProjectSummariesResponse,
   SearchResponse,
   StatsResponse,
   TaskListResponse,
@@ -230,6 +231,17 @@ export async function fetchProjects(): Promise<TaskListResponse> {
     }),
     ...CACHE_CONFIG.userScoped,
   });
+}
+
+/**
+ * Fetch lean project summaries for the projects page.
+ * User-scoped: summaries are filtered by org access.
+ */
+export async function fetchProjectSummaries(): Promise<ProjectSummariesResponse> {
+  return serverFetch<ProjectSummariesResponse>(
+    '/metrics/projects-summary',
+    CACHE_CONFIG.userScoped
+  );
 }
 
 /**

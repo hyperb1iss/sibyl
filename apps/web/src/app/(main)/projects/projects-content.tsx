@@ -32,8 +32,8 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { ErrorState, Tooltip } from '@/components/ui/tooltip';
 import type {
-  OrgMetricsResponse,
   ProjectRole,
+  ProjectSummariesResponse,
   ProjectSummary,
   TaskListResponse,
   TaskStatus,
@@ -43,9 +43,9 @@ import { TASK_STATUS_CONFIG } from '@/lib/constants';
 import {
   useDeleteEntity,
   useMe,
-  useOrgMetrics,
   useProjectMembers,
   useProjectMetrics,
+  useProjectSummaries,
   useProjects,
   useRemoveProjectMember,
   useTasks,
@@ -56,7 +56,7 @@ import { useClientPrefs } from '@/lib/storage';
 
 interface ProjectsContentProps {
   initialProjects: TaskListResponse;
-  initialOrgMetrics?: OrgMetricsResponse;
+  initialProjectSummaries?: ProjectSummariesResponse;
 }
 
 // Project sort options
@@ -107,7 +107,10 @@ interface ProjectsPrefs {
   showArchived: boolean;
 }
 
-export function ProjectsContent({ initialProjects, initialOrgMetrics }: ProjectsContentProps) {
+export function ProjectsContent({
+  initialProjects,
+  initialProjectSummaries,
+}: ProjectsContentProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -129,7 +132,8 @@ export function ProjectsContent({ initialProjects, initialOrgMetrics }: Projects
     isLoading: projectsLoading,
     error: projectsError,
   } = useProjects({ includeArchived: showArchived }, initialProjects);
-  const { data: orgMetricsData, isLoading: orgMetricsLoading } = useOrgMetrics(initialOrgMetrics);
+  const { data: projectSummariesData, isLoading: projectSummariesLoading } =
+    useProjectSummaries(initialProjectSummaries);
 
   const { data: selectedProjectTasksData, isLoading: selectedProjectTasksLoading } = useTasks(
     selectedProjectId ? { project: selectedProjectId } : undefined,
@@ -141,14 +145,14 @@ export function ProjectsContent({ initialProjects, initialOrgMetrics }: Projects
 
   const projectStatsMap = useMemo(() => {
     const summaries = new Map(
-      (orgMetricsData?.projects_summary ?? []).map(summary => [summary.id, summary])
+      (projectSummariesData?.projects_summary ?? []).map(summary => [summary.id, summary])
     );
     const map = new Map<string, ProjectStats>();
     for (const project of projects) {
       map.set(project.id, projectStatsFromSummary(summaries.get(project.id)));
     }
     return map;
-  }, [projects, orgMetricsData?.projects_summary]);
+  }, [projects, projectSummariesData?.projects_summary]);
 
   // Sort projects based on selected sort option
   const sortedProjects = useMemo(() => {
@@ -213,7 +217,7 @@ export function ProjectsContent({ initialProjects, initialOrgMetrics }: Projects
       ]
     : undefined;
 
-  const isLoading = projectsLoading || orgMetricsLoading;
+  const isLoading = projectsLoading || projectSummariesLoading;
   const detailLoading = Boolean(selectedProjectId) && selectedProjectTasksLoading;
 
   // Calculate total stats across all projects (must be before early returns)
