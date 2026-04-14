@@ -9,7 +9,7 @@ DEPRECATION NOTICE:
 - Source/analysis actions: Still use this tool (no REST equivalent yet)
 """
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -20,6 +20,7 @@ from sibyl_core.graph.entities import EntityManager
 from sibyl_core.graph.relationships import RelationshipManager
 from sibyl_core.models.entities import EntityType
 from sibyl_core.tasks.dependencies import detect_dependency_cycles
+from sibyl_core.tools.link_graph_status import get_link_graph_status_data
 
 log = structlog.get_logger()
 
@@ -1073,66 +1074,20 @@ async def _link_graph(
 
 async def _link_graph_status(organization_id: str) -> ManageResponse:
     """Get status of graph linking (pending chunks per source)."""
-    from uuid import UUID
-
-    from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
-    from sqlalchemy import func, select
-    from sqlmodel import col
-
-    org_uuid = UUID(organization_id)
+    from sibyl.db import get_session
 
     async with get_session() as session:
-        # Total chunks (pyright doesn't understand SQLAlchemy func.count)
-        total_result = await session.execute(
-            select(func.count(DocumentChunk.id))
-            .join(CrawledDocument, col(CrawledDocument.id) == col(DocumentChunk.document_id))
-            .join(CrawlSource, col(CrawlSource.id) == col(CrawledDocument.source_id))
-            .where(col(CrawlSource.organization_id) == org_uuid)
-        )
-        total_chunks = total_result.scalar() or 0
-
-        # Chunks with entities
-        linked_result = await session.execute(
-            select(func.count(DocumentChunk.id))
-            .join(CrawledDocument, col(CrawledDocument.id) == col(DocumentChunk.document_id))
-            .join(CrawlSource, col(CrawlSource.id) == col(CrawledDocument.source_id))
-            .where(
-                col(CrawlSource.organization_id) == org_uuid,
-                col(DocumentChunk.has_entities) == True,  # noqa: E712
-            )
-        )
-        chunks_with_entities = linked_result.scalar() or 0
-
-        # Pending per source (complex select with joins)
-        pending_query = (
-            select(  # type: ignore[call-overload]
-                col(CrawlSource.id).label("source_id"),
-                CrawlSource.name,
-                func.count(DocumentChunk.id).label("pending"),
-            )
-            .join(CrawledDocument, col(CrawledDocument.source_id) == col(CrawlSource.id))
-            .join(DocumentChunk, col(DocumentChunk.document_id) == col(CrawledDocument.id))
-            .where(
-                col(CrawlSource.organization_id) == org_uuid,
-                col(DocumentChunk.has_entities) == False,  # noqa: E712
-            )
-            .group_by(CrawlSource.id, CrawlSource.name)
-        )
-        pending_result = await session.execute(pending_query)
-        sources = [
-            {"source_id": str(row.source_id), "name": row.name, "pending": row.pending}
-            for row in pending_result.all()
-        ]
+        status = await get_link_graph_status_data(session, organization_id)
 
     return ManageResponse(
         success=True,
         action="link_graph_status",
-        message=f"{total_chunks - chunks_with_entities} chunks pending linking",
+        message=f"{status.chunks_pending} chunks pending linking",
         data={
-            "total_chunks": total_chunks,
-            "chunks_with_entities": chunks_with_entities,
-            "chunks_pending": total_chunks - chunks_with_entities,
-            "sources": sources,
+            "total_chunks": status.total_chunks,
+            "chunks_with_entities": status.chunks_with_entities,
+            "chunks_pending": status.chunks_pending,
+            "sources": [asdict(source) for source in status.sources],
         },
     )
 

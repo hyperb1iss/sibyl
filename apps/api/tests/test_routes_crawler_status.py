@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
 
 from sibyl.api.routes.crawler import get_link_graph_status
+from sibyl_core.tools.link_graph_status import (
+    LinkGraphSourceStatusData,
+    LinkGraphStatusData,
+)
 
 
 class TestLinkGraphStatusRoute:
@@ -22,38 +26,35 @@ class TestLinkGraphStatusRoute:
         org = SimpleNamespace(id=org_id)
 
         session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                MagicMock(scalar=MagicMock(return_value=12)),
-                MagicMock(scalar=MagicMock(return_value=5)),
-                MagicMock(
-                    all=MagicMock(
-                        return_value=[
-                            SimpleNamespace(
-                                source_id=UUID("00000000-0000-0000-0000-000000000aaa"),
-                                name="Docs",
-                                pending=4,
-                            ),
-                            SimpleNamespace(
-                                source_id=UUID("00000000-0000-0000-0000-000000000bbb"),
-                                name="Docs",
-                                pending=3,
-                            ),
-                        ]
-                    )
+        status = LinkGraphStatusData(
+            total_chunks=12,
+            chunks_with_entities=5,
+            sources=[
+                LinkGraphSourceStatusData(
+                    source_id="00000000-0000-0000-0000-000000000aaa",
+                    name="Docs",
+                    pending=4,
                 ),
-            ]
+                LinkGraphSourceStatusData(
+                    source_id="00000000-0000-0000-0000-000000000bbb",
+                    name="Docs",
+                    pending=3,
+                ),
+            ],
         )
 
         @asynccontextmanager
         async def mock_session():
             yield session
 
-        with patch("sibyl.api.routes.crawler.get_session", mock_session):
+        helper = AsyncMock(return_value=status)
+        with (
+            patch("sibyl.api.routes.crawler.get_session", mock_session),
+            patch("sibyl.api.routes.crawler.get_link_graph_status_data", helper),
+        ):
             response = await get_link_graph_status(org=org)
 
-        rendered_queries = [str(call.args[0]) for call in session.execute.await_args_list]
-
+        helper.assert_awaited_once_with(session, org.id)
         assert response.total_chunks == 12
         assert response.chunks_with_entities == 5
         assert response.chunks_pending == 7
@@ -69,4 +70,3 @@ class TestLinkGraphStatusRoute:
                 "pending": 3,
             },
         ]
-        assert all("organization_id" in query for query in rendered_queries)

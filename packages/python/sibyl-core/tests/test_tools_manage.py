@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,6 +19,10 @@ from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
 from sibyl_core.models.entities import EntityType
 from sibyl_core.models.tasks import TaskStatus
 from sibyl_core.tasks.dependencies import CycleResult
+from sibyl_core.tools.link_graph_status import (
+    LinkGraphSourceStatusData,
+    LinkGraphStatusData,
+)
 from sibyl_core.tools.manage import (
     ALL_ACTIONS,
     ANALYSIS_ACTIONS,
@@ -1131,41 +1134,40 @@ class TestSourceActions:
         """link_graph_status should scope counts by org and avoid merging same-name sources."""
         org_id = "00000000-0000-0000-0000-000000000111"
         session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                MagicMock(scalar=MagicMock(return_value=12)),
-                MagicMock(scalar=MagicMock(return_value=5)),
-                MagicMock(
-                    all=MagicMock(
-                        return_value=[
-                            SimpleNamespace(
-                                source_id="00000000-0000-0000-0000-000000000aaa",
-                                name="Docs",
-                                pending=4,
-                            ),
-                            SimpleNamespace(
-                                source_id="00000000-0000-0000-0000-000000000bbb",
-                                name="Docs",
-                                pending=3,
-                            ),
-                        ]
-                    )
+        status = LinkGraphStatusData(
+            total_chunks=12,
+            chunks_with_entities=5,
+            sources=[
+                LinkGraphSourceStatusData(
+                    source_id="00000000-0000-0000-0000-000000000aaa",
+                    name="Docs",
+                    pending=4,
                 ),
-            ]
+                LinkGraphSourceStatusData(
+                    source_id="00000000-0000-0000-0000-000000000bbb",
+                    name="Docs",
+                    pending=3,
+                ),
+            ],
         )
 
         @asynccontextmanager
         async def mock_session():
             yield session
 
-        with patch("sibyl.db.get_session", mock_session):
+        helper = AsyncMock(return_value=status)
+        with (
+            patch("sibyl.db.get_session", mock_session),
+            patch("sibyl_core.tools.manage.get_link_graph_status_data", helper),
+        ):
             response = await manage(
                 action="link_graph_status",
                 organization_id=org_id,
             )
 
-        rendered_queries = [str(call.args[0]) for call in session.execute.await_args_list]
+        helper.assert_awaited_once_with(session, org_id)
         assert response.success is True
+        assert response.message == "7 chunks pending linking"
         assert response.data["total_chunks"] == 12
         assert response.data["chunks_with_entities"] == 5
         assert response.data["chunks_pending"] == 7
@@ -1181,7 +1183,6 @@ class TestSourceActions:
                 "pending": 3,
             },
         ]
-        assert all("organization_id" in query for query in rendered_queries)
 
 
 # =============================================================================
