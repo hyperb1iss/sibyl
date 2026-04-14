@@ -11,6 +11,7 @@ import {
   Network,
   Search,
   Settings,
+  Sparks,
 } from '@/components/ui/icons';
 
 export interface NavigationItem {
@@ -25,6 +26,13 @@ export interface RouteConfigItem {
   icon: IconComponent;
   navLabel?: string;
   showInNavigation?: boolean;
+}
+
+export interface SidebarCaptureCta {
+  label: string;
+  description: string;
+  surface: string;
+  icon: IconComponent;
 }
 
 export const ROUTE_CONFIG: Record<string, RouteConfigItem> = {
@@ -54,6 +62,13 @@ export const NAVIGATION: NavigationItem[] = Object.values(ROUTE_CONFIG)
     href: route.href,
     icon: route.icon,
   }));
+
+export const SIDEBAR_CAPTURE_CTA: SidebarCaptureCta = {
+  label: 'Capture Memory',
+  description: 'Save a thought, decision, or loose end before it slips away.',
+  surface: 'sidebar',
+  icon: Sparks,
+};
 
 export function withProjectsContext(href: string, projects: string | null): string {
   if (!projects) {
