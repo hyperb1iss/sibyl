@@ -8,6 +8,7 @@ All commands output table format by default. Use --json for JSON output.
 """
 
 from typing import Annotated
+from uuid import UUID
 
 import typer
 
@@ -52,11 +53,58 @@ def _output_response(response: dict, json_out: bool, success_msg: str | None = N
         error(f"Failed: {response.get('message', 'Unknown error')}")
 
 
+def _normalize_created_task_response(
+    response: dict,
+    *,
+    title: str,
+    project_id: str,
+    description: str | None,
+    priority: str,
+    complexity: str,
+    assignees: list[str] | None,
+    epic_id: str | None,
+    feature: str | None,
+    tags: list[str] | None,
+    technologies: list[str] | None,
+    depends_on: list[str] | None,
+) -> dict:
+    payload = dict(response)
+    task_id = payload.get("id") or payload.get("task_id")
+    if task_id is not None:
+        payload.setdefault("id", task_id)
+
+    payload.setdefault("name", title)
+    if description:
+        payload.setdefault("description", description)
+
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    metadata.setdefault("project_id", project_id)
+    metadata.setdefault("priority", priority)
+    metadata.setdefault("complexity", complexity)
+    metadata.setdefault("status", "todo")
+    if assignees:
+        metadata.setdefault("assignees", assignees)
+    if epic_id:
+        metadata.setdefault("epic_id", epic_id)
+    if feature:
+        metadata.setdefault("feature", feature)
+    if tags:
+        metadata.setdefault("tags", tags)
+    if technologies:
+        metadata.setdefault("technologies", technologies)
+    if depends_on:
+        metadata.setdefault("depends_on", depends_on)
+    payload["metadata"] = metadata
+    return payload
+
+
 def _validate_task_id(task_id: str) -> str:
     """Validate that a task ID has the expected format.
 
     Full task IDs are required - no prefix matching or guessing.
-    Format: task_<12 hex chars> (17 chars total)
+    Accepts legacy task_<hex> IDs and canonical UUIDs returned by the API.
 
     Args:
         task_id: The task ID to validate.
@@ -67,18 +115,24 @@ def _validate_task_id(task_id: str) -> str:
     Raises:
         SibylClientError: If the ID format is invalid.
     """
-    if not task_id.startswith("task_"):
+    if task_id.startswith("task_"):
+        if len(task_id) < 17:
+            raise SibylClientError(
+                f"Task ID too short: {task_id}. Full task ID required (17 chars).",
+                status_code=400,
+                detail=f"Full task ID required, got: {task_id}",
+            )
+        return task_id
+
+    try:
+        UUID(task_id)
+    except ValueError as exc:
         raise SibylClientError(
-            f"Invalid task ID format: {task_id}. Expected format: task_<12 hex chars>",
+            f"Invalid task ID format: {task_id}. Expected a full task_ ID or UUID.",
             status_code=400,
             detail=f"Invalid task ID: {task_id}",
-        )
-    if len(task_id) < 17:
-        raise SibylClientError(
-            f"Task ID too short: {task_id}. Full task ID required (17 chars).",
-            status_code=400,
-            detail=f"Full task ID required, got: {task_id}",
-        )
+        ) from exc
+
     return task_id
 
 
@@ -747,6 +801,14 @@ def create_task(
     depends_on: Annotated[
         str | None, typer.Option("--depends-on", help="Comma-separated task IDs this depends on")
     ] = None,
+    sync: Annotated[
+        bool,
+        typer.Option(
+            "--sync",
+            hidden=True,
+            help="Wait for task creation (kept as a compatibility alias)",
+        ),
+    ] = False,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -770,6 +832,7 @@ def create_task(
         client = get_client()
 
         try:
+            _ = sync
             tech_list = [t.strip() for t in technologies.split(",")] if technologies else None
             tag_list = [t.strip() for t in tags.split(",")] if tags else None
             assignee_list = [assignee] if assignee else None
@@ -788,12 +851,26 @@ def create_task(
                 technologies=tech_list,
                 depends_on=dep_list,
             )
+            normalized_response = _normalize_created_task_response(
+                response,
+                title=title,
+                project_id=effective_project,
+                description=description,
+                priority=priority,
+                complexity=complexity,
+                assignees=assignee_list,
+                epic_id=epic,
+                feature=feature,
+                tags=tag_list,
+                technologies=tech_list,
+                depends_on=dep_list,
+            )
 
             if json_out:
-                print_json(response)
+                print_json(normalized_response)
                 return
 
-            task_id = response.get("task_id") or response.get("id")
+            task_id = normalized_response.get("id")
             if response.get("success") or task_id:
                 success(f"Task created: {task_id}")
                 if assignee:
