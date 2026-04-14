@@ -266,7 +266,7 @@ export const ClusterGraph = forwardRef<ClusterGraphRef, ClusterGraphProps>(funct
       />
 
       {/* Cluster count overlay */}
-      <div className="absolute bottom-4 left-4 bg-sc-bg-elevated/90 backdrop-blur-sm rounded-lg px-3 py-2 border border-sc-purple/20">
+      <div className="absolute bottom-4 left-4 bg-sc-bg-elevated rounded-lg px-3 py-2 border border-sc-purple/20 shadow-card">
         <div className="text-xs text-sc-fg-muted">
           {clusters.length} cluster{clusters.length !== 1 ? 's' : ''}
         </div>

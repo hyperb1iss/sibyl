@@ -84,7 +84,7 @@ function MobileEntitySheet({ entityId, onClose }: { entityId: string; onClose: (
     <div className="fixed inset-0 z-50 md:hidden">
       <button
         type="button"
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm cursor-default"
+        className="absolute inset-0 bg-black/75 cursor-default"
         onClick={onClose}
         onKeyDown={e => e.key === 'Escape' && onClose()}
         aria-label="Close panel"
@@ -244,7 +244,7 @@ function StatsOverlay({
   const showingAll = displayedNodes >= totalNodes;
 
   return (
-    <div className="absolute top-4 right-4 z-10 bg-sc-bg-elevated/90 backdrop-blur-sm rounded-lg px-3 py-2 border border-sc-fg-subtle/20 hidden md:flex items-center gap-4 text-xs">
+    <div className="absolute top-4 right-4 z-10 bg-sc-bg-elevated rounded-lg px-3 py-2 border border-sc-fg-subtle/20 hidden md:flex items-center gap-4 text-xs shadow-card">
       <div className="flex items-center gap-1.5">
         <span className="text-sc-purple font-bold">{totalNodes.toLocaleString()}</span>
         <span className="text-sc-fg-subtle">nodes</span>

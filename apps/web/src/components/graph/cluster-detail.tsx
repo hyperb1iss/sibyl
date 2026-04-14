@@ -43,7 +43,7 @@ export function ClusterDetail({
         <button
           type="button"
           onClick={onBack}
-          className="absolute top-4 left-4 z-10 flex items-center gap-2 px-4 py-2 bg-sc-bg-elevated/90 backdrop-blur-sm border border-sc-purple/30 rounded-lg text-sc-fg-primary hover:bg-sc-purple/20 transition-colors"
+          className="absolute top-4 left-4 z-10 flex items-center gap-2 px-4 py-2 bg-sc-bg-elevated border border-sc-purple/30 rounded-lg text-sc-fg-primary hover:bg-sc-purple/20 transition-colors shadow-card"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Back to clusters</span>
@@ -65,14 +65,14 @@ export function ClusterDetail({
       <button
         type="button"
         onClick={onBack}
-        className="absolute top-4 left-4 z-10 flex items-center gap-2 px-4 py-2 bg-sc-bg-elevated/90 backdrop-blur-sm border border-sc-purple/30 rounded-lg text-sc-fg-primary hover:bg-sc-purple/20 transition-colors"
+        className="absolute top-4 left-4 z-10 flex items-center gap-2 px-4 py-2 bg-sc-bg-elevated border border-sc-purple/30 rounded-lg text-sc-fg-primary hover:bg-sc-purple/20 transition-colors shadow-card"
       >
         <ArrowLeft className="w-4 h-4" />
         <span>Back to clusters</span>
       </button>
 
       {/* Cluster info overlay */}
-      <div className="absolute top-4 right-4 z-10 bg-sc-bg-elevated/90 backdrop-blur-sm rounded-xl p-4 border border-sc-purple/20 min-w-[140px]">
+      <div className="absolute top-4 right-4 z-10 bg-sc-bg-elevated rounded-xl p-4 border border-sc-purple/20 min-w-[140px] shadow-card">
         <div className="text-sm text-sc-fg-muted">Cluster Nodes</div>
         <div className="text-2xl font-bold text-sc-purple">{data?.node_count ?? 0}</div>
         <div className="text-sm text-sc-fg-muted mt-2">Edges</div>
@@ -84,7 +84,7 @@ export function ClusterDetail({
         <button
           type="button"
           onClick={() => graphRef.current?.zoomIn()}
-          className="w-8 h-8 flex items-center justify-center bg-sc-bg-elevated/90 backdrop-blur-sm border border-sc-purple/20 rounded-lg text-sc-fg-primary hover:bg-sc-purple/20 transition-colors"
+          className="w-8 h-8 flex items-center justify-center bg-sc-bg-elevated border border-sc-purple/20 rounded-lg text-sc-fg-primary hover:bg-sc-purple/20 transition-colors shadow-card"
           title="Zoom in"
         >
           +
@@ -92,7 +92,7 @@ export function ClusterDetail({
         <button
           type="button"
           onClick={() => graphRef.current?.zoomOut()}
-          className="w-8 h-8 flex items-center justify-center bg-sc-bg-elevated/90 backdrop-blur-sm border border-sc-purple/20 rounded-lg text-sc-fg-primary hover:bg-sc-purple/20 transition-colors"
+          className="w-8 h-8 flex items-center justify-center bg-sc-bg-elevated border border-sc-purple/20 rounded-lg text-sc-fg-primary hover:bg-sc-purple/20 transition-colors shadow-card"
           title="Zoom out"
         >
           -
@@ -100,7 +100,7 @@ export function ClusterDetail({
         <button
           type="button"
           onClick={() => graphRef.current?.fitView()}
-          className="px-3 h-8 flex items-center justify-center bg-sc-bg-elevated/90 backdrop-blur-sm border border-sc-purple/20 rounded-lg text-sc-fg-primary text-sm hover:bg-sc-purple/20 transition-colors"
+          className="px-3 h-8 flex items-center justify-center bg-sc-bg-elevated border border-sc-purple/20 rounded-lg text-sc-fg-primary text-sm hover:bg-sc-purple/20 transition-colors shadow-card"
           title="Fit view"
         >
           Fit
