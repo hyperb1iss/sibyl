@@ -915,44 +915,6 @@ a:hover .tagline-separator {
   animation: gradient-text 3s ease infinite;
 }
 
-/* Success celebration sparkles */
-@keyframes sparkle {
-  0%,
-  100% {
-    opacity: 0;
-    transform: scale(0);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.success-sparkle {
-  position: relative;
-}
-
-.success-sparkle::before,
-.success-sparkle::after {
-  content: "✦";
-  position: absolute;
-  font-size: 1.5rem;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.success-sparkle::before {
-  top: -10px;
-  left: -10px;
-  animation: sparkle 1s ease-out;
-}
-
-.success-sparkle::after {
-  bottom: -10px;
-  right: -10px;
-  animation: sparkle 1s ease-out 0.2s;
-}
-
 /* Reduced motion support - respect user preferences */
 @media (prefers-reduced-motion: reduce) {
   *,

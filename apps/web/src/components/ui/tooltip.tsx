@@ -11,11 +11,13 @@ import {
 import {
   AlertTriangle,
   BarChart3,
+  CheckCircle2,
   Cube,
   Flash,
   InfoCircle,
+  LightBulb,
+  PlusCircle,
   Search,
-  Sparkles,
   WifiOff,
 } from '@/components/ui/icons';
 
@@ -90,7 +92,7 @@ const EMPTY_STATE_DEFAULTS = {
     floatingClass: 'animate-wiggle',
   },
   create: {
-    icon: <Sparkles width={48} height={48} className="text-sc-yellow" />,
+    icon: <PlusCircle width={48} height={48} className="text-sc-yellow" />,
     floatingClass: 'animate-bounce-in',
   },
   default: {
@@ -177,8 +179,8 @@ interface SuccessStateProps {
 export function SuccessState({ title, message, action, celebratory = true }: SuccessStateProps) {
   return (
     <div className="text-center py-12 animate-bounce-in">
-      <div className={`mb-4 flex justify-center ${celebratory ? 'success-sparkle' : ''}`}>
-        <Sparkles width={48} height={48} className="text-sc-green" />
+      <div className={`mb-4 flex justify-center ${celebratory ? 'animate-glow-pulse' : ''}`}>
+        <CheckCircle2 width={48} height={48} className="text-sc-green" />
       </div>
       <p className="text-sc-green text-xl font-semibold gradient-text">{title}</p>
       {message && <p className="text-sc-fg-muted text-sm mt-2 max-w-md mx-auto">{message}</p>}
@@ -241,7 +243,7 @@ const HINT_VARIANTS = {
     text: 'text-sc-cyan',
   },
   tip: {
-    icon: <Sparkles width={20} height={20} className="text-sc-purple" />,
+    icon: <LightBulb width={20} height={20} className="text-sc-purple" />,
     bg: 'bg-sc-purple/10',
     border: 'border-sc-purple/30',
     text: 'text-sc-purple',

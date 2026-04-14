@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Eye, Globe, Network, Settings, Sparks } from '@/components/ui/icons';
+import { Eye, Flash, Globe, Network, Settings } from '@/components/ui/icons';
 import type { UserPreferences } from '@/lib/api';
 import { usePreferences, useUpdatePreferences } from '@/lib/hooks';
 import { type ThemePreference, useTheme } from '@/lib/theme';
@@ -301,7 +301,7 @@ function NotificationsSection({ prefs, onUpdate, isUpdating }: SectionProps) {
   return (
     <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
       <div className="flex items-center gap-3 mb-4">
-        <Sparks width={18} height={18} className="text-sc-yellow" />
+        <Flash width={18} height={18} className="text-sc-yellow" />
         <h3 className="font-semibold text-sc-fg-primary">Notifications</h3>
       </div>
 

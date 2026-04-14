@@ -8,8 +8,8 @@ import {
   ArrowUpDown,
   Calendar,
   Check,
+  Clock,
   Flame,
-  Sparkles,
   Zap,
 } from '@/components/ui/icons';
 import type { TaskStatus, TaskSummary } from '@/lib/api';
@@ -22,7 +22,7 @@ type SortOption = 'priority' | 'due_date' | 'created' | 'name' | 'manual';
 const SORT_OPTIONS: Array<{ value: SortOption; label: string; icon: React.ReactNode }> = [
   { value: 'priority', label: 'Priority', icon: <Zap width={14} height={14} /> },
   { value: 'due_date', label: 'Due Date', icon: <Calendar width={14} height={14} /> },
-  { value: 'created', label: 'Newest First', icon: <Sparkles width={14} height={14} /> },
+  { value: 'created', label: 'Newest First', icon: <Clock width={14} height={14} /> },
   { value: 'name', label: 'Alphabetical', icon: <ArrowDownAZ width={14} height={14} /> },
   { value: 'manual', label: 'Manual', icon: <ArrowUpDown width={14} height={14} /> },
 ];

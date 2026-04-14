@@ -14,6 +14,7 @@ import {
   ChevronUp,
   Filter,
   Focus,
+  Layers,
   Loader2,
   Maximize2,
   Minimize2,
@@ -21,7 +22,6 @@ import {
   PlusCircle,
   RotateCcw,
   Search,
-  Sparkles,
   X,
 } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
@@ -382,7 +382,7 @@ function GraphToolbar({
                 : 'bg-sc-bg-base/90 text-sc-fg-subtle border-sc-fg-subtle/20 hover:text-sc-fg-primary'
             }`}
           >
-            <Sparkles width={18} height={18} />
+            <Layers width={18} height={18} />
           </button>
         )}
         {canToggleFocus && (
@@ -647,7 +647,7 @@ function GraphToolbar({
                     : 'text-sc-fg-muted hover:text-sc-fg-primary'
                 }`}
               >
-                <Sparkles width={14} height={14} />
+                <Layers width={14} height={14} />
                 <span>{sharedLabel || 'Shared'}</span>
               </button>
             </>

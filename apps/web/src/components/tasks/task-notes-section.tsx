@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { EditPencil, Send, Sparkles, User } from '@/components/ui/icons';
+import { Command, EditPencil, Send, User } from '@/components/ui/icons';
 import { formatDistanceToNow } from '@/lib/constants';
 import { useAddTaskNote, useTaskNotes } from '@/lib/hooks';
 
@@ -95,7 +95,7 @@ export function TaskNotesSection({ taskId }: TaskNotesSectionProps) {
                   }`}
                 >
                   {note.author_type === 'agent' ? (
-                    <Sparkles width={14} height={14} />
+                    <Command width={14} height={14} />
                   ) : (
                     <User width={14} height={14} />
                   )}

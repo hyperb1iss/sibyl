@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowRight, Brain, CheckSquare, Search, Sparkles } from 'lucide-react';
+import { ArrowRight, Brain, CheckSquare, Search } from 'lucide-react';
 
 interface WelcomeStepProps {
   onNext: () => void;
@@ -16,7 +16,7 @@ export function WelcomeStep({ onNext, onSkip }: WelcomeStepProps) {
           <div className="absolute w-20 h-20 rounded-full bg-sc-purple/10 animate-pulse" />
           <div className="absolute w-16 h-16 rounded-full bg-sc-purple/15 animate-pulse delay-75" />
           <div className="relative inline-flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-br from-sc-purple to-sc-coral text-white">
-            <Sparkles className="w-7 h-7" />
+            <Brain className="w-7 h-7" />
           </div>
         </div>
         <h1 className="text-2xl font-bold text-sc-fg-primary mb-2">

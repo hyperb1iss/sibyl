@@ -22,7 +22,6 @@ import {
   GitBranch,
   Pause,
   Plus,
-  Sparkles,
   Trash,
   TrendingUp,
   User,
@@ -987,7 +986,7 @@ function ProjectDetail({ project, stats, tasks, onDeleted }: ProjectDetailProps)
       {(!stats || stats.total === 0) && (
         <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-xl p-8 text-center shadow-card">
           <div className="mb-4 flex justify-center">
-            <Sparkles width={40} height={40} className="text-sc-yellow" />
+            <FolderKanban width={40} height={40} className="text-sc-yellow" />
           </div>
           <h3 className="text-lg font-semibold text-sc-fg-primary mb-2">No tasks yet</h3>
           <p className="text-sc-fg-muted mb-4">Create your first task to get started</p>

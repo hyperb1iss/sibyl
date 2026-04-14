@@ -72,7 +72,6 @@ import {
   Sort,
   SortDown,
   SortUp,
-  Sparks,
   Square,
   Star,
   Timer,
@@ -122,7 +121,6 @@ export {
   XmarkCircle as CircleX,
   Clock,
   Archive,
-  Sparks as Sparkles,
   Activity,
   Wifi,
   WifiOff,
@@ -187,7 +185,6 @@ export {
   MinusCircle,
   ZoomIn as Focus, // Using ZoomIn for focus/fit-to-view
   // Direct exports (same name in both)
-  Sparks,
   Flash,
   Pause,
   Xmark,

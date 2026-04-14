@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowRight, Command, Sparkles } from 'lucide-react';
+import { ArrowRight, Check, Command } from 'lucide-react';
 
 interface CompletionStepProps {
   onFinish: () => void;
@@ -16,7 +16,7 @@ export function CompletionStep({ onFinish }: CompletionStepProps) {
           <div className="absolute w-20 h-20 rounded-full bg-sc-green/10 animate-pulse" />
           <div className="absolute w-16 h-16 rounded-full bg-sc-green/15 animate-pulse delay-75" />
           <div className="relative inline-flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-br from-sc-green to-sc-cyan text-sc-bg-dark">
-            <Sparkles className="w-7 h-7" />
+            <Check className="w-7 h-7" />
           </div>
         </div>
 
