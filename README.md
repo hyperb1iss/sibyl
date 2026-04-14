@@ -148,15 +148,32 @@ curl http://localhost:3334/api/health
 ### Retrieval Benchmarks
 
 ```bash
-# Synthetic retrieval and ranking benchmarks
+# Live artifact-producing evaluation against your running Sibyl stack
+moon run bench-live -- --no-save
+
+# Live read-only smoke and latency checks against the same stack
+moon run bench-live-smoke
+
+# Synthetic retrieval and ranking component benchmarks
 moon run bench-retrieval
 
-# Live read-only benchmark against your running Sibyl stack
-moon run bench-live
+# Offline LongMemEval-style baseline (not the live runtime path)
+uv run python benchmarks/longmemeval_bench.py /path/to/longmemeval.json --mode hybrid
 ```
 
-`bench-live` exercises the real `/api/search` path with your CLI auth context and auto-skips when
-the local stack or auth is unavailable.
+`bench-live` is the canonical runtime evaluation entry point. It exercises the real `/api/search`
+and RAG surfaces with your CLI auth context and writes JSON artifacts to `benchmarks/results/`
+unless you pass `--no-save`.
+
+`bench-live-smoke` keeps the existing read-only pytest latency and shape checks for local health
+verification.
+
+`bench-retrieval` and `benchmarks/longmemeval_bench.py` are intentionally offline. They are useful
+for relative tuning and apples-to-apples baselines, but they do not measure the production HTTP
+runtime path.
+
+See [`docs/testing/benchmark-methodology.md`](./docs/testing/benchmark-methodology.md) for the
+measurement ladder, artifact expectations, and how to avoid benchmark drift.
 
 **Ports:**
 

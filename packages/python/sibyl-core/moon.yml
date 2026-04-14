@@ -44,6 +44,11 @@ tasks:
     - '@group(sources)'
     - '@group(tests)'
   bench-live:
+    command: uv run python ../../../benchmarks/live_runtime_eval.py
+    inputs:
+    - '@group(sources)'
+    - '@group(tests)'
+  bench-live-smoke:
     command: uv run pytest tests/test_retrieval_live.py -v -s
     inputs:
     - '@group(sources)'
