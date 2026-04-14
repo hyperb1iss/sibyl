@@ -39,9 +39,14 @@ function deriveCaptureTitle(content: string) {
 interface CaptureMemoryDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  captureSurface?: string;
 }
 
-export function CaptureMemoryDialog({ isOpen, onClose }: CaptureMemoryDialogProps) {
+export function CaptureMemoryDialog({
+  isOpen,
+  onClose,
+  captureSurface = 'dashboard',
+}: CaptureMemoryDialogProps) {
   const createEntity = useCreateEntity();
   const titleRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState('');
@@ -79,7 +84,7 @@ export function CaptureMemoryDialog({ isOpen, onClose }: CaptureMemoryDialogProp
                 .map(tag => tag.trim())
                 .filter(Boolean)
             : undefined,
-          metadata: { capture_mode: 'quick', capture_surface: 'dashboard' },
+          metadata: { capture_mode: 'quick', capture_surface: captureSurface },
         });
         toast.success(`Captured ${entityType.replace('_', ' ')}`);
         onClose();
@@ -87,7 +92,7 @@ export function CaptureMemoryDialog({ isOpen, onClose }: CaptureMemoryDialogProp
         toast.error('Failed to capture memory');
       }
     },
-    [content, createEntity, entityType, onClose, resolvedTitle, tags]
+    [captureSurface, content, createEntity, entityType, onClose, resolvedTitle, tags]
   );
 
   const handleKeyDown = useCallback(

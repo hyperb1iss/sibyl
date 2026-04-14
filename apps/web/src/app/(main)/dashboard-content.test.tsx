@@ -9,14 +9,15 @@ const hooks = vi.hoisted(() => ({
   useProjects: vi.fn(),
   useStats: vi.fn(),
   useTasks: vi.fn(),
+  useCaptureMemory: vi.fn(),
 }));
 
 vi.mock('@/lib/hooks', () => hooks);
 
 vi.mock('@/components/dashboard', () => ({
-  CaptureMemoryDialog: () => <div data-testid="capture-memory-dialog" />,
   WelcomeBanner: () => <div data-testid="welcome-banner" />,
 }));
+vi.mock('@/components/layout/capture-memory-context', () => hooks);
 
 vi.mock('@/components/metrics/charts', () => ({
   VelocityLineChart: () => <div data-testid="velocity-chart" />,
@@ -86,6 +87,12 @@ describe('DashboardContent', () => {
     });
     hooks.useOrgMetrics.mockReturnValue({ data: orgMetrics });
     hooks.useTasks.mockReset();
+    hooks.useCaptureMemory.mockReturnValue({
+      openCaptureMemory: vi.fn(),
+      closeCaptureMemory: vi.fn(),
+      isOpen: false,
+      captureSurface: 'dashboard',
+    });
   });
 
   it('renders task overview from org metrics without fetching task entities', () => {
@@ -97,9 +104,20 @@ describe('DashboardContent', () => {
     expect(hooks.useTasks).not.toHaveBeenCalled();
   });
 
-  it('surfaces a capture-first quick action', () => {
-    render(<DashboardContent initialStats={initialStats} />);
+  it('surfaces a capture-first quick action', async () => {
+    const openCaptureMemory = vi.fn();
+    hooks.useCaptureMemory.mockReturnValue({
+      openCaptureMemory,
+      closeCaptureMemory: vi.fn(),
+      isOpen: false,
+      captureSurface: 'dashboard',
+    });
+
+    const { user } = render(<DashboardContent initialStats={initialStats} />);
 
     expect(screen.getByRole('button', { name: /capture memory/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /capture memory/i }));
+
+    expect(openCaptureMemory).toHaveBeenCalledWith('dashboard');
   });
 });

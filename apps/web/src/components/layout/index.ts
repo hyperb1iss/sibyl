@@ -1,5 +1,7 @@
 export * from './breadcrumb';
+export { CaptureMemoryProvider, useCaptureMemory } from './capture-memory-context';
 export * from './header';
+export * from './main-shell';
 export * from './mobile-nav-context';
 export * from './nav-link';
 export * from './org-switcher';

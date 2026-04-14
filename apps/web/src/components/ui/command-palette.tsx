@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { KanbanBoard, List, Search } from '@/components/ui/icons';
+import { KanbanBoard, List, Search, Sparkles } from '@/components/ui/icons';
 import { NAVIGATION, withProjectsContext } from '@/lib/constants';
 
 interface CommandItem {
@@ -21,6 +21,7 @@ interface CommandPaletteProps {
   onClose: () => void;
   onCreateTask?: () => void;
   onCreateProject?: () => void;
+  onCaptureMemory?: () => void;
 }
 
 export function CommandPalette({
@@ -28,6 +29,7 @@ export function CommandPalette({
   onClose,
   onCreateTask,
   onCreateProject,
+  onCaptureMemory,
 }: CommandPaletteProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -99,6 +101,22 @@ export function CommandPalette({
       },
       category: 'action',
     },
+    ...(onCaptureMemory
+      ? [
+          {
+            id: 'capture-memory',
+            label: 'Capture Memory',
+            description: 'Save a quick learning from anywhere',
+            icon: <Sparkles width={18} height={18} />,
+            shortcut: 'M',
+            action: () => {
+              onClose();
+              onCaptureMemory();
+            },
+            category: 'action' as const,
+          },
+        ]
+      : []),
   ];
 
   // Filter commands by query

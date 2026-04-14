@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { Command, Menu, Search, Sparkles } from '@/components/ui/icons';
+import { useCaptureMemory } from './capture-memory-context';
 import { useMobileNav } from './mobile-nav-context';
 import { ProjectSelector } from './project-selector';
 import { UserMenu } from './user-menu';
@@ -11,6 +12,7 @@ import { UserMenu } from './user-menu';
 export function Header() {
   const router = useRouter();
   const { toggle } = useMobileNav();
+  const { openCaptureMemory } = useCaptureMemory();
   const [searchQuery, setSearchQuery] = useState('');
   const [isFocused, setIsFocused] = useState(false);
 
@@ -125,6 +127,19 @@ export function Header() {
 
       {/* Right section: Project Selector + User Menu */}
       <div className="flex items-center gap-2 sm:gap-3">
+        <button
+          type="button"
+          onClick={() => openCaptureMemory('shell')}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-sc-purple/20 bg-sc-purple/10 px-3 py-1.5 text-xs font-medium text-sc-purple transition-all hover:border-sc-purple/30 hover:bg-sc-purple/20 sm:text-sm"
+          aria-label="Capture memory"
+        >
+          <Sparkles width={14} height={14} />
+          <span className="hidden sm:inline">Capture Memory</span>
+          <span className="sm:hidden">Capture</span>
+          <kbd className="hidden lg:inline text-[10px] font-mono rounded bg-sc-bg-base/70 px-1.5 py-0.5 text-sc-fg-subtle">
+            M
+          </kbd>
+        </button>
         <ProjectSelector />
         <UserMenu />
       </div>

@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { CaptureMemoryDialog, WelcomeBanner } from '@/components/dashboard';
+import { WelcomeBanner } from '@/components/dashboard';
+import { useCaptureMemory } from '@/components/layout/capture-memory-context';
 import { VelocityLineChart } from '@/components/metrics/charts';
 import {
   Activity,
@@ -109,7 +110,7 @@ function EntityRingChart({ counts }: { counts: Record<string, number> }) {
 
 export function DashboardContent({ initialStats }: DashboardContentProps) {
   const [mounted, setMounted] = useState(false);
-  const [isCaptureOpen, setIsCaptureOpen] = useState(false);
+  const { openCaptureMemory } = useCaptureMemory();
   const { data: health, isLoading: healthLoading } = useHealth();
   const { data: stats } = useStats(initialStats);
   const { data: projectsData } = useProjects();
@@ -146,8 +147,6 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
 
   return (
     <div className="space-y-4 sm:space-y-6 animate-fade-in">
-      <CaptureMemoryDialog isOpen={isCaptureOpen} onClose={() => setIsCaptureOpen(false)} />
-
       {/* Dashboard breadcrumb */}
       <nav
         aria-label="Breadcrumb"
@@ -454,7 +453,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
             <div className="space-y-2 sm:space-y-3">
               <button
                 type="button"
-                onClick={() => setIsCaptureOpen(true)}
+                onClick={() => openCaptureMemory('dashboard')}
                 className="group flex w-full items-center gap-2 rounded-lg border border-sc-fg-subtle/10 bg-gradient-to-r from-sc-purple/10 via-sc-purple/5 to-sc-cyan/10 p-2.5 text-left transition-all hover:border-sc-purple/30 hover:bg-sc-bg-highlight sm:gap-3 sm:rounded-xl sm:p-3"
               >
                 <div className="h-8 w-8 shrink-0 rounded-lg bg-sc-purple/15 flex items-center justify-center sm:h-9 sm:w-9">
