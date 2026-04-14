@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@/test/utils';
 import { ApiKeysStep } from './api-keys-step';
 
@@ -48,11 +48,7 @@ describe('ApiKeysStep', () => {
   describe('Initial State', () => {
     it('renders the configure API keys header', () => {
       render(
-        <ApiKeysStep
-          initialStatus={undefined}
-          onBack={mockOnBack}
-          onValidated={mockOnValidated}
-        />
+        <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
       expect(screen.getByText('Configure API Keys')).toBeInTheDocument();
@@ -60,11 +56,7 @@ describe('ApiKeysStep', () => {
 
     it('shows disabled button when no keys entered', () => {
       render(
-        <ApiKeysStep
-          initialStatus={undefined}
-          onBack={mockOnBack}
-          onValidated={mockOnValidated}
-        />
+        <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
       const button = screen.getByRole('button', { name: /enter api keys/i });
@@ -73,11 +65,7 @@ describe('ApiKeysStep', () => {
 
     it('shows OpenAI and Anthropic input sections', () => {
       render(
-        <ApiKeysStep
-          initialStatus={undefined}
-          onBack={mockOnBack}
-          onValidated={mockOnValidated}
-        />
+        <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
       // Check for input placeholders instead (more specific)
@@ -98,11 +86,7 @@ describe('ApiKeysStep', () => {
       });
 
       render(
-        <ApiKeysStep
-          initialStatus={undefined}
-          onBack={mockOnBack}
-          onValidated={mockOnValidated}
-        />
+        <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
       const continueButton = screen.getByRole('button', { name: /continue/i });
@@ -120,16 +104,10 @@ describe('ApiKeysStep', () => {
       });
 
       render(
-        <ApiKeysStep
-          initialStatus={undefined}
-          onBack={mockOnBack}
-          onValidated={mockOnValidated}
-        />
+        <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
-      expect(
-        screen.getByText(/OpenAI key saved! Now add your Anthropic key/i)
-      ).toBeInTheDocument();
+      expect(screen.getByText(/OpenAI key saved! Now add your Anthropic key/i)).toBeInTheDocument();
     });
 
     it('shows progress message when only Anthropic is configured', () => {
@@ -143,27 +121,17 @@ describe('ApiKeysStep', () => {
       });
 
       render(
-        <ApiKeysStep
-          initialStatus={undefined}
-          onBack={mockOnBack}
-          onValidated={mockOnValidated}
-        />
+        <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
-      expect(
-        screen.getByText(/Anthropic key saved! Now add your OpenAI key/i)
-      ).toBeInTheDocument();
+      expect(screen.getByText(/Anthropic key saved! Now add your OpenAI key/i)).toBeInTheDocument();
     });
   });
 
   describe('Save Flow', () => {
     it('shows Save Key button when user enters a key', async () => {
       const { user } = render(
-        <ApiKeysStep
-          initialStatus={undefined}
-          onBack={mockOnBack}
-          onValidated={mockOnValidated}
-        />
+        <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
       // Type in the OpenAI key input (password type, use placeholder)
@@ -176,11 +144,7 @@ describe('ApiKeysStep', () => {
 
     it('shows "Save Keys" when both inputs have values', async () => {
       const { user } = render(
-        <ApiKeysStep
-          initialStatus={undefined}
-          onBack={mockOnBack}
-          onValidated={mockOnValidated}
-        />
+        <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
       const openaiInput = screen.getByPlaceholderText('sk-...');
@@ -204,27 +168,17 @@ describe('ApiKeysStep', () => {
       });
 
       render(
-        <ApiKeysStep
-          initialStatus={undefined}
-          onBack={mockOnBack}
-          onValidated={mockOnValidated}
-        />
+        <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
-      expect(
-        screen.getByText(/failed to save settings/i)
-      ).toBeInTheDocument();
+      expect(screen.getByText(/failed to save settings/i)).toBeInTheDocument();
     });
   });
 
   describe('Navigation', () => {
     it('calls onBack when Back button is clicked', async () => {
       const { user } = render(
-        <ApiKeysStep
-          initialStatus={undefined}
-          onBack={mockOnBack}
-          onValidated={mockOnValidated}
-        />
+        <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
       await user.click(screen.getByRole('button', { name: /back/i }));
@@ -242,11 +196,7 @@ describe('ApiKeysStep', () => {
       });
 
       const { user } = render(
-        <ApiKeysStep
-          initialStatus={undefined}
-          onBack={mockOnBack}
-          onValidated={mockOnValidated}
-        />
+        <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
       await user.click(screen.getByRole('button', { name: /continue/i }));

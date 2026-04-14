@@ -1,4 +1,5 @@
 import {
+  Archive,
   BookOpen,
   Boxes,
   FolderKanban,
@@ -22,6 +23,7 @@ export const NAVIGATION: NavigationItem[] = [
   { name: 'Epics', href: '/epics', icon: Layers },
   { name: 'Tasks', href: '/tasks', icon: ListTodo },
   { name: 'Sources', href: '/sources', icon: BookOpen },
+  { name: 'Archive', href: '/archive', icon: Archive },
   { name: 'Graph', href: '/graph', icon: Network },
   { name: 'Entities', href: '/entities', icon: Boxes },
   { name: 'Search', href: '/search', icon: Search },

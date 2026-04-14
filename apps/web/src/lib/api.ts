@@ -173,6 +173,29 @@ export interface EntityListResponse {
   has_more: boolean;
 }
 
+export interface RawCaptureSummary {
+  id: string;
+  entity_id: string | null;
+  title: string;
+  entity_type: string;
+  tags: string[];
+  metadata: Record<string, unknown>;
+  capture_surface: string | null;
+  created_by_user_id: string | null;
+  created_at: string;
+}
+
+export interface RawCapture extends RawCaptureSummary {
+  raw_content: string;
+}
+
+export interface RawCaptureListResponse {
+  captures: RawCaptureSummary[];
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
 export type EntitySortField = 'name' | 'created_at' | 'updated_at' | 'entity_type';
 export type SortOrder = 'asc' | 'desc';
 
@@ -1306,6 +1329,25 @@ export const api = {
       fetchApi<void>(`/entities/${id}`, {
         method: 'DELETE',
       }),
+  },
+
+  rawCaptures: {
+    list: (params?: {
+      entity_type?: string;
+      capture_surface?: string;
+      limit?: number;
+      offset?: number;
+    }) => {
+      const searchParams = new URLSearchParams();
+      if (params?.entity_type) searchParams.set('entity_type', params.entity_type);
+      if (params?.capture_surface) searchParams.set('capture_surface', params.capture_surface);
+      if (params?.limit) searchParams.set('limit', params.limit.toString());
+      if (params?.offset) searchParams.set('offset', params.offset.toString());
+      const query = searchParams.toString();
+      return fetchApi<RawCaptureListResponse>(`/entities/captures${query ? `?${query}` : ''}`);
+    },
+
+    get: (id: string) => fetchApi<RawCapture>(`/entities/captures/${encodeURIComponent(id)}`),
   },
 
   // Search

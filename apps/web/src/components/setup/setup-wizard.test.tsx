@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // Test the step persistence utility functions directly
 const STEPS = ['welcome', 'api-keys', 'admin', 'connect'] as const;

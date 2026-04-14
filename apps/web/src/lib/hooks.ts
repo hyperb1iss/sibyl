@@ -49,6 +49,12 @@ export const queryKeys = {
       ['entities', 'list', params] as const,
     detail: (id: string) => ['entities', 'detail', id] as const,
   },
+  rawCaptures: {
+    all: ['raw-captures'] as const,
+    list: (params?: Parameters<typeof api.rawCaptures.list>[0]) =>
+      ['raw-captures', 'list', params] as const,
+    detail: (id: string) => ['raw-captures', 'detail', id] as const,
+  },
   search: {
     all: ['search'] as const,
     query: (params: Parameters<typeof api.search.query>[0]) => ['search', 'query', params] as const,
@@ -499,6 +505,30 @@ export function useEntity(id: string, initialData?: import('./api').Entity) {
     queryFn: () => api.entities.get(id),
     enabled: !!id,
     initialData,
+  });
+}
+
+export function useRawCaptures(
+  params?: Parameters<typeof api.rawCaptures.list>[0],
+  options?: { enabled?: boolean; initialData?: import('./api').RawCaptureListResponse }
+) {
+  return useQuery({
+    queryKey: queryKeys.rawCaptures.list(params),
+    queryFn: () => api.rawCaptures.list(params),
+    enabled: options?.enabled ?? true,
+    initialData: options?.initialData,
+  });
+}
+
+export function useRawCapture(
+  id: string,
+  options?: { enabled?: boolean; initialData?: import('./api').RawCapture }
+) {
+  return useQuery({
+    queryKey: queryKeys.rawCaptures.detail(id),
+    queryFn: () => api.rawCaptures.get(id),
+    enabled: (options?.enabled ?? true) && !!id,
+    initialData: options?.initialData,
   });
 }
 

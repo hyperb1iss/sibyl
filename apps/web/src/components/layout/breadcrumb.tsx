@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Fragment, memo, useCallback, useMemo } from 'react';
 import {
+  Archive,
   BookOpen,
   Boxes,
   ChevronRight,
@@ -27,6 +28,7 @@ export const ROUTE_CONFIG: Record<string, { label: string; icon: IconComponent }
   epics: { label: 'Epics', icon: Layers },
   tasks: { label: 'Tasks', icon: ListTodo },
   sources: { label: 'Sources', icon: BookOpen },
+  archive: { label: 'Archive', icon: Archive },
   documents: { label: 'Documents', icon: FileText },
   graph: { label: 'Graph', icon: Network },
   entities: { label: 'Entities', icon: Boxes },

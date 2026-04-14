@@ -22,11 +22,7 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
   // API hooks
   const { data: settings } = useSettings();
   const updateSettings = useUpdateSettings();
-  const {
-    data: validation,
-    refetch: revalidate,
-    isLoading: isValidating,
-  } = useValidateApiKeys({ enabled: false });
+  const { data: validation } = useValidateApiKeys({ enabled: false });
 
   // Determine configuration status from settings or initial status
   const openaiConfigured =
@@ -82,13 +78,6 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
       setAnthropicKey('');
     }
   }, [openaiKey, anthropicKey, updateSettings, openaiValid, anthropicValid]);
-
-  const handleValidateExisting = useCallback(async () => {
-    const result = await revalidate();
-    if (result.data?.openai_valid && result.data?.anthropic_valid) {
-      onValidated(true);
-    }
-  }, [revalidate, onValidated]);
 
   const handleContinue = useCallback(() => {
     // Both keys are configured (and were validated before being saved)
@@ -161,8 +150,12 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
           <div className="flex gap-3">
             <Check width={20} height={20} className="text-sc-green flex-shrink-0 mt-0.5" />
             <p className="text-sm text-sc-green">
-              {openaiConfigured && !anthropicConfigured && 'OpenAI key saved! Now add your Anthropic key below.'}
-              {anthropicConfigured && !openaiConfigured && 'Anthropic key saved! Now add your OpenAI key below.'}
+              {openaiConfigured &&
+                !anthropicConfigured &&
+                'OpenAI key saved! Now add your Anthropic key below.'}
+              {anthropicConfigured &&
+                !openaiConfigured &&
+                'Anthropic key saved! Now add your OpenAI key below.'}
             </p>
           </div>
         </div>
@@ -283,9 +276,9 @@ function ApiKeyInput({
   masked: string | null | undefined;
   isValidating: boolean;
 }) {
-  let statusIcon: React.ReactNode;
-  let statusColor: string;
-  let statusText: string;
+  let statusIcon: React.ReactNode = null;
+  let statusColor = '';
+  let statusText = '';
 
   if (isValidating) {
     statusIcon = <Spinner size="sm" color="cyan" />;
