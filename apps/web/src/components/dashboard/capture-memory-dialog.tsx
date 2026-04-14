@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Sparkles, Xmark } from '@/components/ui/icons';
+import { EditPencil, Xmark } from '@/components/ui/icons';
 import { useCreateEntity } from '@/lib/hooks';
 
 const CAPTURE_TITLE_CHARS = 72;
@@ -137,7 +137,7 @@ export function CaptureMemoryDialog({
                 id="capture-memory-title"
                 className="flex items-center gap-2 text-lg font-semibold text-sc-fg-primary"
               >
-                <Sparkles width={18} height={18} className="text-sc-cyan" />
+                <EditPencil width={18} height={18} className="text-sc-cyan" />
                 Capture Memory
               </h2>
               <p className="mt-1 text-sm text-sc-fg-muted">
@@ -234,7 +234,7 @@ export function CaptureMemoryDialog({
                 type="submit"
                 loading={createEntity.isPending}
                 disabled={!content.trim()}
-                icon={<Sparkles width={16} height={16} />}
+                icon={<EditPencil width={16} height={16} />}
               >
                 Capture Memory
               </Button>

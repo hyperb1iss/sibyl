@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Check, Copy, Sparks } from '@/components/ui/icons';
+import { Check, Copy, Network } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
 import { useMcpCommand } from '@/lib/hooks';
 
@@ -38,7 +38,7 @@ export function ConnectClaudeModal({ open, onOpenChange }: ConnectClaudeModalPro
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sc-purple via-sc-magenta to-sc-coral flex items-center justify-center shadow-lg shadow-sc-purple/30">
-              <Sparks aria-hidden="true" width={20} height={20} className="text-white" />
+              <Network aria-hidden="true" width={20} height={20} className="text-white" />
             </div>
             <div>
               <DialogTitle>Connect Claude Code</DialogTitle>

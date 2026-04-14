@@ -4,11 +4,8 @@ import { AnimatePresence, motion } from 'motion/react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect } from 'react';
-import { GradientButton } from '@/components/ui/button';
 import { X } from '@/components/ui/icons';
 import { APP_CONFIG, NAVIGATION } from '@/lib/constants';
-import { SIDEBAR_CAPTURE_CTA } from '@/lib/constants/navigation';
-import { useCaptureMemory } from './capture-memory-context';
 import { useMobileNav } from './mobile-nav-context';
 import { NavLink } from './nav-link';
 
@@ -17,13 +14,6 @@ interface SidebarContentProps {
 }
 
 function SidebarContent({ onNavClick }: SidebarContentProps) {
-  const { openCaptureMemory } = useCaptureMemory();
-
-  const handleCaptureClick = () => {
-    onNavClick?.();
-    openCaptureMemory(SIDEBAR_CAPTURE_CTA.surface);
-  };
-
   return (
     <>
       {/* Logo */}
@@ -55,28 +45,6 @@ function SidebarContent({ onNavClick }: SidebarContentProps) {
           </NavLink>
         ))}
       </nav>
-
-      <div className="px-3 pb-3 md:px-4 md:pb-4">
-        <div className="rounded-2xl border border-sc-purple/20 bg-gradient-to-br from-sc-purple/10 via-sc-bg-highlight to-sc-cyan/10 p-3 shadow-[0_0_28px_rgba(225,53,255,0.12)]">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-sc-purple/80">Quick capture</p>
-          <p className="mt-1 text-sm font-semibold text-sc-fg-primary">
-            {SIDEBAR_CAPTURE_CTA.label}
-          </p>
-          <p className="mt-1 text-xs leading-5 text-sc-fg-muted">
-            {SIDEBAR_CAPTURE_CTA.description}
-          </p>
-          <GradientButton
-            gradient="purple-cyan"
-            size="sm"
-            className="mt-3 w-full justify-start"
-            icon={<SIDEBAR_CAPTURE_CTA.icon width={16} height={16} />}
-            onClick={handleCaptureClick}
-            aria-label={SIDEBAR_CAPTURE_CTA.label}
-          >
-            {SIDEBAR_CAPTURE_CTA.label}
-          </GradientButton>
-        </div>
-      </div>
 
       {/* Footer */}
       <div className="p-3 md:p-4 border-t border-sc-fg-subtle/10">

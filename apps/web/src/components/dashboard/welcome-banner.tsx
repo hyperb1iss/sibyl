@@ -3,16 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ConnectClaudeModal } from '@/components/dashboard/connect-claude-modal';
-import {
-  ArrowRight,
-  BookOpen,
-  Check,
-  Network,
-  Search,
-  Sparkles,
-  Sparks,
-  Xmark,
-} from '@/components/ui/icons';
+import { ArrowRight, BookOpen, Check, Network, Search, Xmark } from '@/components/ui/icons';
 import { useOnboardingProgress, useSetupStatus } from '@/lib/hooks';
 
 /** Minimum entities before automatically hiding the welcome banner */
@@ -80,7 +71,7 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
         {/* Header */}
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-sc-purple via-sc-magenta to-sc-coral flex items-center justify-center shadow-lg shadow-sc-purple/30">
-            <Sparkles width={20} height={20} className="text-white sm:w-6 sm:h-6" />
+            <Network width={20} height={20} className="text-white sm:w-6 sm:h-6" />
           </div>
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-sc-fg-primary">
@@ -119,7 +110,7 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
                   </>
                 ) : (
                   <>
-                    <Sparks width={14} height={14} />
+                    <ArrowRight width={14} height={14} />
                     Connect
                   </>
                 )}

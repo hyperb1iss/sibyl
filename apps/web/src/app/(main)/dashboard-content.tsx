@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   Clock,
   Database,
+  EditPencil,
   FolderKanban,
   Layers,
   LayoutDashboard,
@@ -21,7 +22,6 @@ import {
   Network,
   Play,
   Search,
-  Sparkles,
   Target,
   TrendingUp,
   Zap,
@@ -169,7 +169,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
           <div className="flex-1 space-y-3 sm:space-y-4 min-w-0">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-sc-purple via-sc-magenta to-sc-coral flex items-center justify-center shadow-lg shadow-sc-purple/30 shrink-0">
-                <Sparkles width={20} height={20} className="text-white sm:w-6 sm:h-6" />
+                <Database width={20} height={20} className="text-white sm:w-6 sm:h-6" />
               </div>
               <div className="min-w-0">
                 <h1 className="text-xl sm:text-2xl font-bold text-sc-fg-primary truncate">
@@ -457,7 +457,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 className="group flex w-full items-center gap-2 rounded-lg border border-sc-fg-subtle/10 bg-gradient-to-r from-sc-purple/10 via-sc-purple/5 to-sc-cyan/10 p-2.5 text-left transition-all hover:border-sc-purple/30 hover:bg-sc-bg-highlight sm:gap-3 sm:rounded-xl sm:p-3"
               >
                 <div className="h-8 w-8 shrink-0 rounded-lg bg-sc-purple/15 flex items-center justify-center sm:h-9 sm:w-9">
-                  <Sparkles
+                  <EditPencil
                     width={16}
                     height={16}
                     className="text-sc-purple sm:h-[18px] sm:w-[18px]"

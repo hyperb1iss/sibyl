@@ -51,8 +51,8 @@ describe('MainShell', () => {
     });
   });
 
-  it('shows a global capture launcher in the shell and opens the dialog', async () => {
-    const { user } = render(
+  it('keeps capture launchers out of the shell chrome', () => {
+    render(
       <MobileNavProvider>
         <MainShell>
           <div>Shell content</div>
@@ -60,12 +60,10 @@ describe('MainShell', () => {
       </MobileNavProvider>
     );
 
-    await user.click(screen.getByRole('button', { name: /capture memory/i }));
-
-    expect(screen.getByRole('heading', { name: /capture memory/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /capture memory/i })).not.toBeInTheDocument();
   });
 
-  it('opens the capture dialog from the global command palette path', async () => {
+  it('omits capture from the global command palette', async () => {
     const { user } = render(
       <MobileNavProvider>
         <MainShell>
@@ -76,8 +74,9 @@ describe('MainShell', () => {
 
     await user.keyboard('{Meta>}{Shift>}{k}{/Shift}{/Meta}');
     const palette = screen.getByRole('dialog', { name: /command palette/i });
-    await user.click(within(palette).getByRole('button', { name: /capture memory/i }));
 
-    expect(screen.getByRole('heading', { name: /capture memory/i })).toBeInTheDocument();
+    expect(
+      within(palette).queryByRole('button', { name: /capture memory/i })
+    ).not.toBeInTheDocument();
   });
 });

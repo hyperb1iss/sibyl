@@ -10,7 +10,7 @@ import { Header } from './header';
 import { Sidebar } from './sidebar';
 
 function MainShellContent({ children }: { children: ReactNode }) {
-  const { isOpen, captureSurface, openCaptureMemory, closeCaptureMemory } = useCaptureMemory();
+  const { isOpen, captureSurface, closeCaptureMemory } = useCaptureMemory();
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   useEffect(() => {
@@ -26,18 +26,12 @@ function MainShellContent({ children }: { children: ReactNode }) {
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setIsCommandPaletteOpen(true);
-        return;
-      }
-
-      if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key === 'm') {
-        event.preventDefault();
-        openCaptureMemory('shell');
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [openCaptureMemory]);
+  }, []);
 
   return (
     <div className="flex h-dvh overflow-hidden">
@@ -57,10 +51,6 @@ function MainShellContent({ children }: { children: ReactNode }) {
       <CommandPalette
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
-        onCaptureMemory={() => {
-          setIsCommandPaletteOpen(false);
-          openCaptureMemory('shell');
-        }}
       />
     </div>
   );

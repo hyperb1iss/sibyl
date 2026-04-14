@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { NAVIGATION, ROUTE_CONFIG, SIDEBAR_CAPTURE_CTA, withProjectsContext } from './navigation';
+import { NAVIGATION, ROUTE_CONFIG, withProjectsContext } from './navigation';
 
 describe('navigation constants', () => {
   it('derives dashboard navigation from the shared route config', () => {
@@ -14,13 +14,6 @@ describe('navigation constants', () => {
 
   it('surfaces the raw archive in shared navigation', () => {
     expect(NAVIGATION.map(item => item.href)).toContain('/archive');
-  });
-
-  it('exposes the sidebar capture cta without routing away', () => {
-    expect(SIDEBAR_CAPTURE_CTA).toMatchObject({
-      label: 'Capture Memory',
-      surface: 'sidebar',
-    });
   });
 
   it('preserves project context when navigating', () => {

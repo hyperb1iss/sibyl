@@ -4,7 +4,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
-import { useCaptureMemory } from '@/components/layout/capture-memory-context';
 import { KanbanBoard } from '@/components/tasks/kanban-board';
 import { type QuickTaskData, QuickTaskModal } from '@/components/tasks/quick-task-modal';
 import { TaskListMobile } from '@/components/tasks/task-list-mobile';
@@ -30,7 +29,6 @@ function TasksPageContent() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isQuickTaskOpen, setIsQuickTaskOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const { openCaptureMemory } = useCaptureMemory();
 
   const { data: tasksData, isLoading, error } = useTasks({ project_ids: projectFilters });
   const { data: projectsData } = useProjects();
@@ -278,7 +276,6 @@ function TasksPageContent() {
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
         onCreateTask={() => setIsQuickTaskOpen(true)}
-        onCaptureMemory={() => openCaptureMemory('tasks')}
       />
     </div>
   );
