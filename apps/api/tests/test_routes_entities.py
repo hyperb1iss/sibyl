@@ -19,10 +19,13 @@ def _entity(
     project_id: str | None,
     name: str,
     archived: bool = False,
+    status: str | None = None,
 ) -> SimpleNamespace:
     metadata = {"project_id": project_id} if project_id else {}
     if archived:
         metadata["archived"] = True
+    if status is not None:
+        metadata["status"] = status
     return SimpleNamespace(
         id=entity_id,
         entity_type=EntityType.TASK,
@@ -74,12 +77,14 @@ class TestListEntitiesRoute:
                 EntityType.TASK,
                 limit=1000,
                 offset=0,
+                include_archived=True,
                 project_id="proj-1",
             ),
             call(
                 EntityType.TASK,
                 limit=1000,
                 offset=1000,
+                include_archived=True,
                 project_id="proj-1",
             ),
         ]
@@ -127,11 +132,13 @@ class TestListEntitiesRoute:
                 EntityType.TASK,
                 limit=1000,
                 offset=0,
+                include_archived=True,
             ),
             call(
                 EntityType.TASK,
                 limit=1000,
                 offset=1000,
+                include_archived=True,
             ),
         ]
         manager.list_all.assert_not_awaited()
@@ -149,6 +156,20 @@ class TestListEntitiesRoute:
         manager = MagicMock()
         manager.list_by_type = AsyncMock(
             side_effect=[
+                [
+                    _entity(
+                        "ent-archived-1",
+                        project_id="proj-1",
+                        name="Archived 1",
+                        status="archived",
+                    ),
+                    _entity(
+                        "ent-archived-2",
+                        project_id="proj-2",
+                        name="Archived 2",
+                        status="archived",
+                    ),
+                ],
                 [
                     _entity("ent-1", project_id="proj-1", name="One"),
                     _entity("ent-2", project_id="proj-2", name="Two"),
@@ -180,9 +201,10 @@ class TestListEntitiesRoute:
             )
 
         assert manager.list_by_type.await_args_list == [
-            call(EntityType.TASK, limit=2, offset=0),
-            call(EntityType.TASK, limit=2, offset=2),
-            call(EntityType.TASK, limit=2, offset=4),
+            call(EntityType.TASK, limit=2, offset=0, include_archived=True),
+            call(EntityType.TASK, limit=2, offset=2, include_archived=True),
+            call(EntityType.TASK, limit=2, offset=4, include_archived=True),
+            call(EntityType.TASK, limit=2, offset=6, include_archived=True),
         ]
         manager.list_all.assert_not_awaited()
         assert [entity.id for entity in response.entities] == ["ent-1", "ent-2", "ent-3"]

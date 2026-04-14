@@ -126,6 +126,7 @@ async def _list_entities_by_type_paginated(
         list_kwargs: dict[str, Any] = {
             "limit": batch_size,
             "offset": offset,
+            "include_archived": True,
         }
         if project_id:
             list_kwargs["project_id"] = project_id
@@ -134,7 +135,11 @@ async def _list_entities_by_type_paginated(
         if not batch:
             break
 
-        entities.extend(batch)
+        entities.extend(
+            entity
+            for entity in batch
+            if (getattr(entity, "metadata", None) or {}).get("status") != "archived"
+        )
         offset += batch_size
 
     return entities
