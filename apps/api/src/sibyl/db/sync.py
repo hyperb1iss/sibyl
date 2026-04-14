@@ -192,9 +192,6 @@ async def get_graph_projects(organization_id: str) -> list[dict]:
             break
 
         projects.extend(batch)
-        if len(batch) < page_size:
-            break
-
         offset += page_size
 
     return [

@@ -94,9 +94,6 @@ async def _list_all_entities_paginated(
             break
 
         entities.extend(batch)
-        if len(batch) < batch_size:
-            break
-
         offset += batch_size
 
     return entities

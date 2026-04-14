@@ -27,7 +27,7 @@ async def test_get_graph_projects_pages_past_1000() -> None:
     ]
 
     manager = MagicMock()
-    manager.list_by_type = AsyncMock(side_effect=[page_one, page_two])
+    manager.list_by_type = AsyncMock(side_effect=[page_one, page_two, []])
 
     with (
         patch("sibyl_core.graph.client.get_graph_client", AsyncMock(return_value=object())),
@@ -49,4 +49,5 @@ async def test_get_graph_projects_pages_past_1000() -> None:
     assert manager.list_by_type.await_args_list == [
         call(entity_type=EntityType.PROJECT, limit=1000, offset=0),
         call(entity_type=EntityType.PROJECT, limit=1000, offset=1000),
+        call(entity_type=EntityType.PROJECT, limit=1000, offset=2000),
     ]

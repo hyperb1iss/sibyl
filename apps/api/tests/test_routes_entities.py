@@ -123,7 +123,7 @@ class TestListEntitiesRoute:
         ]
         second_page = [_entity("ent-unassigned", project_id=None, name="Unassigned")]
         manager.list_by_type = AsyncMock()
-        manager.list_all = AsyncMock(side_effect=[first_page, second_page])
+        manager.list_all = AsyncMock(side_effect=[first_page, second_page, []])
 
         with (
             patch("sibyl.api.routes.entities.get_graph_client", AsyncMock(return_value=client)),
@@ -146,6 +146,7 @@ class TestListEntitiesRoute:
         assert manager.list_all.await_args_list == [
             call(limit=2000, offset=0),
             call(limit=2000, offset=2000),
+            call(limit=2000, offset=4000),
         ]
         assert response.total == 2001
         assert len(response.entities) == 50
