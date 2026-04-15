@@ -42,7 +42,9 @@ def test_capture_command_derives_title_and_marks_quick_capture(mock_get_client: 
         entity_type="episode",
         tags=None,
         metadata={"capture_mode": "quick", "capture_surface": "cli"},
+        sync=False,
     )
+    assert "Queued episode" in result.stdout
 
 
 @patch("sibyl_cli.main.get_client")
@@ -64,4 +66,80 @@ def test_capture_command_title_override_wins(mock_get_client: MagicMock) -> None
         entity_type="pattern",
         tags=None,
         metadata={"capture_mode": "quick", "capture_surface": "cli"},
+        sync=False,
     )
+    assert "Queued pattern" in result.stdout
+
+
+@patch("sibyl_cli.main.asyncio.sleep", new_callable=AsyncMock)
+@patch("sibyl_cli.main.get_client")
+def test_add_command_waits_for_searchability(
+    mock_get_client: MagicMock, mock_sleep: AsyncMock
+) -> None:
+    mock_client = MagicMock()
+    mock_client.create_entity = AsyncMock(return_value={"id": "pattern_123"})
+    mock_client.search = AsyncMock(
+        side_effect=[
+            {"results": []},
+            {"results": [{"id": "pattern_123", "name": "Waitable Pattern"}]},
+        ]
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["add", "Waitable Pattern", "Pattern body", "--type", "pattern", "--wait-searchable"],
+    )
+
+    assert result.exit_code == 0
+    mock_client.create_entity.assert_awaited_once_with(
+        name="Waitable Pattern",
+        content="Pattern body",
+        entity_type="pattern",
+        category=None,
+        languages=None,
+        tags=None,
+        sync=True,
+    )
+    assert mock_client.search.await_count == 2
+    mock_sleep.assert_awaited_once()
+    assert "Added pattern" in result.stdout
+
+
+@patch("sibyl_cli.main.asyncio.sleep", new_callable=AsyncMock)
+@patch("sibyl_cli.main.get_client")
+def test_capture_command_waits_for_searchability(
+    mock_get_client: MagicMock, mock_sleep: AsyncMock
+) -> None:
+    mock_client = MagicMock()
+    mock_client.create_entity = AsyncMock(return_value={"id": "episode_123"})
+    mock_client.search = AsyncMock(
+        return_value={"results": [{"id": "episode_123", "name": "Manual title"}]}
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "capture",
+            "Longer memory body",
+            "--title",
+            "Manual title",
+            "--wait-searchable",
+        ],
+    )
+
+    assert result.exit_code == 0
+    mock_client.create_entity.assert_awaited_once_with(
+        name="Manual title",
+        content="Longer memory body",
+        entity_type="episode",
+        tags=None,
+        metadata={"capture_mode": "quick", "capture_surface": "cli"},
+        sync=True,
+    )
+    mock_client.search.assert_awaited_once_with("Manual title", types=["episode"], limit=10)
+    mock_sleep.assert_not_awaited()
+    assert "Captured episode" in result.stdout

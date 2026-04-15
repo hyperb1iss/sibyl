@@ -6,10 +6,11 @@ All commands communicate with the REST API.
 Server commands (serve, dev, db, generate, etc.) are in sibyl-server.
 """
 
+import asyncio
 import re
 import sys
 from importlib.metadata import version as pkg_version
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -93,6 +94,8 @@ app.add_typer(update_app, name="update")
 
 SEARCH_PREVIEW_CHARS = 220
 CAPTURE_TITLE_CHARS = 72
+WAIT_SEARCHABLE_TIMEOUT_SECONDS = 30.0
+WAIT_SEARCHABLE_INTERVAL_SECONDS = 0.5
 
 
 def _format_search_preview(content: str, max_chars: int = SEARCH_PREVIEW_CHARS) -> str:
@@ -118,6 +121,30 @@ def _derive_capture_title(content: str) -> str:
     if len(compact) <= CAPTURE_TITLE_CHARS:
         return compact
     return compact[: CAPTURE_TITLE_CHARS - 1].rstrip(" ,;:-") + "…"
+
+
+async def _wait_for_entity_searchability(
+    client: Any,
+    *,
+    query: str,
+    entity_id: str,
+    entity_type: str,
+    timeout: float = WAIT_SEARCHABLE_TIMEOUT_SECONDS,
+    interval: float = WAIT_SEARCHABLE_INTERVAL_SECONDS,
+) -> None:
+    """Wait until a created entity is returned by search."""
+    deadline = asyncio.get_running_loop().time() + timeout
+
+    while asyncio.get_running_loop().time() < deadline:
+        data = await client.search(query, types=[entity_type], limit=10)
+        results = data.get("results", []) if isinstance(data, dict) else []
+        if any(result.get("id") == entity_id for result in results if isinstance(result, dict)):
+            return
+        await asyncio.sleep(interval)
+
+    raise SibylClientError(
+        f"{entity_type} was created but did not become searchable within {timeout:.0f}s"
+    )
 
 
 def _handle_client_error(e: SibylClientError) -> None:
@@ -310,6 +337,11 @@ def add_knowledge(
     category: str | None = typer.Option(None, "--category", "-c", help="Category"),
     language: str | None = typer.Option(None, "--language", "-l", help="Language"),
     tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
+    wait_searchable: bool = typer.Option(
+        False,
+        "--wait-searchable",
+        help="Wait until the new entity is visible in search",
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ) -> None:
     """Add knowledge to the graph."""
@@ -325,14 +357,26 @@ def add_knowledge(
                     category=category,
                     languages=[language] if language else None,
                     tags=[t.strip() for t in tags.split(",")] if tags else None,
+                    sync=wait_searchable,
                 )
+
+                entity_id = data.get("id", "unknown")
+                if wait_searchable and entity_id != "unknown":
+                    await _wait_for_entity_searchability(
+                        client,
+                        query=title,
+                        entity_id=entity_id,
+                        entity_type=entity_type,
+                    )
 
                 if json_output:
                     print_json(data)
                     return
 
-                entity_id = data.get("id", "unknown")
-                success(f"Added {entity_type}: {title}")
+                if wait_searchable:
+                    success(f"Added {entity_type}: {title}")
+                else:
+                    info(f"Queued {entity_type}: {title}")
                 console.print(f"  [dim]ID: {entity_id}[/dim]")
         except SibylClientError as e:
             _handle_client_error(e)
@@ -354,6 +398,11 @@ def capture_memory(
     ),
     entity_type: str = typer.Option("episode", "--type", help="Entity type for the capture"),
     tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
+    wait_searchable: bool = typer.Option(
+        False,
+        "--wait-searchable",
+        help="Wait until the new entity is visible in search",
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ) -> None:
     """Capture a quick memory without separate title and content fields."""
@@ -379,14 +428,26 @@ def capture_memory(
                     entity_type=entity_type,
                     tags=[t.strip() for t in tags.split(",") if t.strip()] if tags else None,
                     metadata={"capture_mode": "quick", "capture_surface": "cli"},
+                    sync=wait_searchable,
                 )
+
+                entity_id = data.get("id", "unknown")
+                if wait_searchable and entity_id != "unknown":
+                    await _wait_for_entity_searchability(
+                        client,
+                        query=resolved_title,
+                        entity_id=entity_id,
+                        entity_type=entity_type,
+                    )
 
                 if json_output:
                     print_json(data)
                     return
 
-                entity_id = data.get("id", "unknown")
-                success(f"Captured {entity_type}: {resolved_title}")
+                if wait_searchable:
+                    success(f"Captured {entity_type}: {resolved_title}")
+                else:
+                    info(f"Queued {entity_type}: {resolved_title}")
                 console.print(f"  [dim]ID: {entity_id}[/dim]")
         except SibylClientError as e:
             _handle_client_error(e)

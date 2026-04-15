@@ -56,16 +56,14 @@ class TestEntityOperations:
         title = f"Searchable E2E {unique_id}"
         content = f"Unique searchable content {unique_id} for verification"
 
-        # Add as pattern (uses create_direct, no LLM needed)
-        add_result = cli.add(title, content, entity_type="pattern")
+        add_result = cli.add(title, content, entity_type="pattern", wait_searchable=True)
         assert add_result.success
 
-        results = cli.wait_for_search_results(
-            title,
-            limit=10,
-            entity_type="pattern",
-            match=lambda result: self._matches_unique_result(result, unique_id),
-        )
+        search_result = cli.search(title, limit=10, entity_type="pattern")
+        assert search_result.success, f"Search failed: {search_result.stderr}"
+
+        payload = search_result.json()
+        results = payload.get("results", []) if isinstance(payload, dict) else []
 
         assert any(self._matches_unique_result(result, unique_id) for result in results)
 

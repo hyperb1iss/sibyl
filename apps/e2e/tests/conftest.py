@@ -186,6 +186,7 @@ class CLIRunner:
         entity_type: str = "pattern",
         category: str | None = None,
         language: str | None = None,
+        wait_searchable: bool = False,
     ) -> CLIResult:
         """Add knowledge to the graph."""
         args = ["add", title, content, "--type", entity_type, "--json"]
@@ -193,6 +194,8 @@ class CLIRunner:
             args.extend(["-c", category])
         if language:
             args.extend(["-l", language])
+        if wait_searchable:
+            args.append("--wait-searchable")
         return self.run(*args)
 
     def capture(
@@ -202,6 +205,7 @@ class CLIRunner:
         title: str | None = None,
         entity_type: str = "episode",
         tags: str | None = None,
+        wait_searchable: bool = False,
     ) -> CLIResult:
         """Capture a quick memory."""
         args = ["capture", content, "--type", entity_type, "--json"]
@@ -209,6 +213,8 @@ class CLIRunner:
             args.extend(["--title", title])
         if tags:
             args.extend(["--tags", tags])
+        if wait_searchable:
+            args.append("--wait-searchable")
         return self.run(*args)
 
     def search(
