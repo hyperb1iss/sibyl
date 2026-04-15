@@ -24,6 +24,7 @@ FRONTEND_URL = os.getenv("SIBYL_FRONTEND_URL", "http://localhost:3337")
 HEALTH_TIMEOUT = 30  # seconds to wait for services
 HEALTH_INTERVAL = 0.5  # seconds between health checks
 EVENTUAL_TIMEOUT = float(os.getenv("SIBYL_E2E_EVENTUAL_TIMEOUT", "15"))
+WAIT_SEARCHABLE_COMMAND_TIMEOUT = float(os.getenv("SIBYL_E2E_WAIT_SEARCHABLE_TIMEOUT", "60"))
 E2E_TEST_EMAIL = "e2e-test@sibyl.dev"
 E2E_TEST_PASSWORD = "e2e-test-password-secure-123!"
 CLI_COMMAND = tuple(shlex.split(os.getenv("SIBYL_E2E_CLI_COMMAND", "sibyl")))
@@ -196,7 +197,8 @@ class CLIRunner:
             args.extend(["-l", language])
         if wait_searchable:
             args.append("--wait-searchable")
-        return self.run(*args)
+        timeout = WAIT_SEARCHABLE_COMMAND_TIMEOUT if wait_searchable else 30
+        return self.run(*args, timeout=timeout)
 
     def capture(
         self,
@@ -215,7 +217,8 @@ class CLIRunner:
             args.extend(["--tags", tags])
         if wait_searchable:
             args.append("--wait-searchable")
-        return self.run(*args)
+        timeout = WAIT_SEARCHABLE_COMMAND_TIMEOUT if wait_searchable else 30
+        return self.run(*args, timeout=timeout)
 
     def search(
         self,
