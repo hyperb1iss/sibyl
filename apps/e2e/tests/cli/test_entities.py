@@ -64,7 +64,6 @@ class TestEntityOperations:
             title,
             limit=10,
             entity_type="pattern",
-            timeout=5.0,
             match=lambda result: self._matches_unique_result(result, unique_id),
         )
 

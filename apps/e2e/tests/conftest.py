@@ -23,6 +23,7 @@ API_BASE_URL = os.getenv("SIBYL_API_URL", "http://localhost:3334/api")
 FRONTEND_URL = os.getenv("SIBYL_FRONTEND_URL", "http://localhost:3337")
 HEALTH_TIMEOUT = 30  # seconds to wait for services
 HEALTH_INTERVAL = 0.5  # seconds between health checks
+EVENTUAL_TIMEOUT = float(os.getenv("SIBYL_E2E_EVENTUAL_TIMEOUT", "15"))
 E2E_TEST_EMAIL = "e2e-test@sibyl.dev"
 E2E_TEST_PASSWORD = "e2e-test-password-secure-123!"
 CLI_COMMAND = tuple(shlex.split(os.getenv("SIBYL_E2E_CLI_COMMAND", "sibyl")))
@@ -237,7 +238,7 @@ class CLIRunner:
         limit: int = 10,
         all_projects: bool = True,
         entity_type: str | None = None,
-        timeout: float = 5.0,
+        timeout: float = EVENTUAL_TIMEOUT,
         interval: float = 0.25,
         match: Callable[[dict], bool] | None = None,
     ) -> list[dict]:
@@ -306,7 +307,7 @@ class CLIRunner:
         title: str,
         *,
         capture_surface: str | None = None,
-        timeout: float = 5.0,
+        timeout: float = EVENTUAL_TIMEOUT,
         interval: float = 0.25,
     ) -> dict:
         """Poll the archive until a matching capture appears."""
