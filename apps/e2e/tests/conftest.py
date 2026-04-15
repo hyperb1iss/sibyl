@@ -5,9 +5,10 @@ Shared fixtures for running tests against a live Sibyl system.
 
 import json
 import os
+import shlex
 import subprocess
 import time
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
 from dataclasses import dataclass
 
 import httpx
@@ -24,6 +25,7 @@ HEALTH_TIMEOUT = 30  # seconds to wait for services
 HEALTH_INTERVAL = 0.5  # seconds between health checks
 E2E_TEST_EMAIL = "e2e-test@sibyl.dev"
 E2E_TEST_PASSWORD = "e2e-test-password-secure-123!"
+CLI_COMMAND = tuple(shlex.split(os.getenv("SIBYL_E2E_CLI_COMMAND", "sibyl")))
 
 
 # =============================================================================
@@ -41,11 +43,13 @@ class CLIResult:
 
     @property
     def success(self) -> bool:
-        """Check if command succeeded (exit code 0 and no error markers)."""
+        """Check if command succeeded."""
         if self.returncode != 0:
             return False
-        # Check for error markers in output (CLI may return 0 on API errors)
-        return not (self.stdout.startswith("\u2717") or "error" in self.stdout.lower()[:50])
+        if not self.is_json:
+            return True
+        payload = self.json()
+        return not (isinstance(payload, dict) and payload.get("success") is False)
 
     @property
     def is_json(self) -> bool:
@@ -78,7 +82,7 @@ class CLIRunner:
         Returns:
             CLIResult with returncode, stdout, stderr
         """
-        cmd = ["sibyl", *args]
+        cmd = [*CLI_COMMAND, *args]
         env = os.environ.copy()
         if self.auth_token:
             env["SIBYL_AUTH_TOKEN"] = self.auth_token
@@ -190,7 +194,13 @@ class CLIRunner:
             args.extend(["-l", language])
         return self.run(*args)
 
-    def search(self, query: str, limit: int = 5, all_projects: bool = True) -> CLIResult:
+    def search(
+        self,
+        query: str,
+        limit: int = 5,
+        all_projects: bool = True,
+        entity_type: str | None = None,
+    ) -> CLIResult:
         """Search the knowledge graph.
 
         Args:
@@ -198,9 +208,55 @@ class CLIRunner:
                           Defaults to True for E2E tests to avoid picking up host machine's project.
         """
         args = ["search", query, "--limit", str(limit), "--json"]
+        if entity_type:
+            args.extend(["--type", entity_type])
         if all_projects:
             args.append("--all")
         return self.run(*args)
+
+    def wait_for_search_results(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        all_projects: bool = True,
+        entity_type: str | None = None,
+        timeout: float = 5.0,
+        interval: float = 0.25,
+        match: Callable[[dict], bool] | None = None,
+    ) -> list[dict]:
+        """Poll search until matching results are available."""
+
+        def extract_results(payload: dict | list) -> list[dict]:
+            if isinstance(payload, list):
+                return payload
+            if isinstance(payload, dict):
+                results = payload.get("results")
+                if isinstance(results, list):
+                    return results
+            return []
+
+        matcher = match or (lambda _: True)
+        deadline = time.monotonic() + timeout
+        last_stdout = ""
+
+        while time.monotonic() < deadline:
+            result = self.search(
+                query,
+                limit=limit,
+                all_projects=all_projects,
+                entity_type=entity_type,
+            )
+            last_stdout = result.stdout
+            if result.success and result.is_json:
+                matched = [item for item in extract_results(result.json()) if matcher(item)]
+                if matched:
+                    return matched
+            time.sleep(interval)
+
+        raise AssertionError(
+            f"Timed out waiting for search results for {query!r}. Last output: {last_stdout}"
+        )
 
     def entity_list(self, entity_type: str | None = None) -> CLIResult:
         """List entities."""

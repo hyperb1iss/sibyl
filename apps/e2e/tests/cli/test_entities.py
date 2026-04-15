@@ -4,14 +4,19 @@ Note: Tests use 'pattern' type which uses create_direct() - no LLM needed.
 This allows e2e tests to run without real OpenAI API keys.
 """
 
-import time
-
 import pytest
 
 
 @pytest.mark.cli
 class TestEntityOperations:
     """Test entity creation and search."""
+
+    @staticmethod
+    def _matches_unique_result(result: dict, unique_id: str) -> bool:
+        haystack = " ".join(
+            str(result.get(field, "")) for field in ("id", "name", "content", "source")
+        )
+        return unique_id in haystack
 
     def test_add_pattern(self, cli, unique_id) -> None:
         """Add a pattern to the knowledge graph."""
@@ -55,17 +60,15 @@ class TestEntityOperations:
         add_result = cli.add(title, content, entity_type="pattern")
         assert add_result.success
 
-        # Search - give it a moment to index
-        time.sleep(0.5)
+        results = cli.wait_for_search_results(
+            title,
+            limit=10,
+            entity_type="pattern",
+            timeout=5.0,
+            match=lambda result: self._matches_unique_result(result, unique_id),
+        )
 
-        search_result = cli.search(unique_id, limit=10)
-        assert search_result.success, f"Search failed: {search_result.stderr}"
-
-        # Should find our content (search may return results in different formats)
-        data = search_result.json()
-        # Results might be in 'results' key or be a list directly
-        results = data.get("results", data) if isinstance(data, dict) else data
-        assert isinstance(results, list)
+        assert any(self._matches_unique_result(result, unique_id) for result in results)
 
     def test_entity_list_multiple_types(self, cli) -> None:
         """List entities of different types."""

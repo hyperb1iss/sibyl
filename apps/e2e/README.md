@@ -29,6 +29,10 @@ moon run e2e:test-api
 moon run e2e:test-browser
 ```
 
+Moon runs the CLI E2E suite against the repo checkout by setting
+`SIBYL_E2E_CLI_COMMAND="uv run --project ../cli sibyl"`, so local test runs do
+not depend on a separately installed global `sibyl`.
+
 ## Test Categories
 
 | Marker    | Description                          |

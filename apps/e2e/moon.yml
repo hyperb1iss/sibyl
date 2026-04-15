@@ -5,16 +5,22 @@ toolchains:
 tasks:
   test:
     command: uv run pytest
+    env:
+      SIBYL_E2E_CLI_COMMAND: uv run --project ../cli sibyl
     inputs:
     - '@group(tests)'
     preset: server
   test-api:
     command: uv run pytest -m 'api or cli'
+    env:
+      SIBYL_E2E_CLI_COMMAND: uv run --project ../cli sibyl
     inputs:
     - '@group(tests)'
     preset: server
   test-browser:
     command: uv run pytest -m browser
+    env:
+      SIBYL_E2E_CLI_COMMAND: uv run --project ../cli sibyl
     inputs:
     - '@group(tests)'
     preset: server
