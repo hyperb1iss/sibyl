@@ -71,19 +71,10 @@ def test_capture_command_title_override_wins(mock_get_client: MagicMock) -> None
     assert "Queued pattern" in result.stdout
 
 
-@patch("sibyl_cli.main.asyncio.sleep", new_callable=AsyncMock)
 @patch("sibyl_cli.main.get_client")
-def test_add_command_waits_for_searchability(
-    mock_get_client: MagicMock, mock_sleep: AsyncMock
-) -> None:
+def test_add_command_waits_for_direct_readiness(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.create_entity = AsyncMock(return_value={"id": "pattern_123"})
-    mock_client.search = AsyncMock(
-        side_effect=[
-            {"results": []},
-            {"results": [{"id": "pattern_123", "name": "Waitable Pattern"}]},
-        ]
-    )
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
@@ -102,21 +93,14 @@ def test_add_command_waits_for_searchability(
         tags=None,
         sync=True,
     )
-    assert mock_client.search.await_count == 2
-    mock_sleep.assert_awaited_once()
+    mock_client.search.assert_not_called()
     assert "Added pattern" in result.stdout
 
 
-@patch("sibyl_cli.main.asyncio.sleep", new_callable=AsyncMock)
 @patch("sibyl_cli.main.get_client")
-def test_capture_command_waits_for_searchability(
-    mock_get_client: MagicMock, mock_sleep: AsyncMock
-) -> None:
+def test_capture_command_waits_for_direct_readiness(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.create_entity = AsyncMock(return_value={"id": "episode_123"})
-    mock_client.search = AsyncMock(
-        return_value={"results": [{"id": "episode_123", "name": "Manual title"}]}
-    )
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
@@ -140,6 +124,5 @@ def test_capture_command_waits_for_searchability(
         metadata={"capture_mode": "quick", "capture_surface": "cli"},
         sync=True,
     )
-    mock_client.search.assert_awaited_once_with("Manual title", types=["episode"], limit=10)
-    mock_sleep.assert_not_awaited()
+    mock_client.search.assert_not_called()
     assert "Captured episode" in result.stdout

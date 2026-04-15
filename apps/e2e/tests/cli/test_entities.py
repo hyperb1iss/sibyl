@@ -59,13 +59,14 @@ class TestEntityOperations:
         add_result = cli.add(title, content, entity_type="pattern", wait_searchable=True)
         assert add_result.success
 
-        search_result = cli.search(title, limit=10, entity_type="pattern")
-        assert search_result.success, f"Search failed: {search_result.stderr}"
+        results = cli.wait_for_search_results(
+            title,
+            limit=10,
+            entity_type="pattern",
+            match=lambda result: self._matches_unique_result(result, unique_id),
+        )
 
-        payload = search_result.json()
-        results = payload.get("results", []) if isinstance(payload, dict) else []
-
-        assert any(self._matches_unique_result(result, unique_id) for result in results)
+        assert results
 
     def test_entity_list_multiple_types(self, cli) -> None:
         """List entities of different types."""
