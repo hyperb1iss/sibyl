@@ -6,7 +6,8 @@ description: Configure CLAUDE.md for effective agent collaboration
 # Setting Up Prompts
 
 Your `CLAUDE.md` file is the most important configuration for agent collaboration. It's the first
-thing your AI agent reads. Use it to establish workflows, project context, and the Sibyl integration.
+thing your AI agent reads. Use it to establish workflows, project context, and the Sibyl
+integration.
 
 ## The Two-Level System
 
@@ -222,8 +223,8 @@ Every graph operation requires org context:
 
 ### FalkorDB Write Concurrency
 
-FalkorDB's connection pool handles write concurrency natively. No application-level locking
-is needed.
+FalkorDB's connection pool handles write concurrency natively. No application-level locking is
+needed.
 
 ## Common Gotchas
 

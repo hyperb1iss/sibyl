@@ -17,14 +17,14 @@ sibyl add <title> <content> [options]
 
 ## Options
 
-| Option       | Short | Default   | Description               |
-| ------------ | ----- | --------- | ------------------------- |
-| `--type`     | `-t`  | `episode` | Entity type to create     |
-| `--category` | `-c`  | (none)    | Category for organization |
-| `--language` | `-l`  | (none)    | Programming language      |
-| `--tags`     |       | (none)    | Comma-separated tags      |
-| `--wait-searchable` |  | false     | Wait for the episode to become searchable before returning |
-| `--json`     | `-j`  | false     | Output as JSON            |
+| Option              | Short | Default   | Description                                                |
+| ------------------- | ----- | --------- | ---------------------------------------------------------- |
+| `--type`            | `-t`  | `episode` | Entity type to create                                      |
+| `--category`        | `-c`  | (none)    | Category for organization                                  |
+| `--language`        | `-l`  | (none)    | Programming language                                       |
+| `--tags`            |       | (none)    | Comma-separated tags                                       |
+| `--wait-searchable` |       | false     | Wait for the episode to become searchable before returning |
+| `--json`            | `-j`  | false     | Output as JSON                                             |
 
 ## Entity Types
 

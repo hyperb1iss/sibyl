@@ -17,9 +17,9 @@ AI agents are brilliant but amnesiac. Every session starts from zero. They can't
 - The pattern that finally made your tests pass
 - The architectural decision that took hours to reach
 
-**Sibyl fixes this.** It gives your agent persistent memory, a knowledge graph that survives forever.
-When you set things up correctly, your agent starts every session with relevant context instead of a
-blank slate.
+**Sibyl fixes this.** It gives your agent persistent memory, a knowledge graph that survives
+forever. When you set things up correctly, your agent starts every session with relevant context
+instead of a blank slate.
 
 ## Setting Up Your Environment
 

@@ -156,8 +156,8 @@ sibyl auth api-key create --name "MCP Client" --scopes mcp
 
 ### Authentication Settings
 
-| Variable                 | Default | Description                            |
-| ------------------------ | ------- | -------------------------------------- |
+| Variable                            | Default | Description                            |
+| ----------------------------------- | ------- | -------------------------------------- |
 | `SIBYL_JWT_SECRET`                  | -       | JWT signing secret (required for auth) |
 | `SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES` | `60`    | Access token TTL in minutes            |
 | `SIBYL_MCP_AUTH_MODE`               | `auto`  | Auth mode: auto, on, off               |

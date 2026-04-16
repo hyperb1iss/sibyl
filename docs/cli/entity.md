@@ -312,13 +312,13 @@ sibyl entity history <entity_id> [options]
 
 ### Options
 
-| Option              | Short | Default   | Description                                          |
-| ------------------- | ----- | --------- | ---------------------------------------------------- |
-| `--as-of`           | `-d`  | (now)     | Show state as of a specific datetime                 |
-| `--mode`            | `-m`  | `history` | Display mode: `history`, `timeline`, or `conflicts`  |
-| `--include-expired` | `-e`  | false     | Include expired versions                             |
-| `--limit`           | `-n`  | 20        | Max results                                          |
-| `--json`            | `-j`  | false     | JSON output                                          |
+| Option              | Short | Default   | Description                                         |
+| ------------------- | ----- | --------- | --------------------------------------------------- |
+| `--as-of`           | `-d`  | (now)     | Show state as of a specific datetime                |
+| `--mode`            | `-m`  | `history` | Display mode: `history`, `timeline`, or `conflicts` |
+| `--include-expired` | `-e`  | false     | Include expired versions                            |
+| `--limit`           | `-n`  | 20        | Max results                                         |
+| `--json`            | `-j`  | false     | JSON output                                         |
 
 ### Examples
 

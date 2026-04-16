@@ -51,8 +51,8 @@ interface AddInput {
 
 ### Entity Types
 
-| Type      | Description                     | Requirements           |
-| --------- | ------------------------------- | ---------------------- |
+| Type        | Description                     | Requirements           |
+| ----------- | ------------------------------- | ---------------------- |
 | `episode`   | Temporal learning (default)     | None                   |
 | `pattern`   | Coding pattern or best practice | None                   |
 | `procedure` | Step-by-step procedure          | None                   |

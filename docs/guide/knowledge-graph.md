@@ -137,7 +137,8 @@ or break isolation. :::
 
 ## Write Concurrency
 
-FalkorDB's connection pool handles write concurrency natively. No application-level locking is needed.
+FalkorDB's connection pool handles write concurrency natively. No application-level locking is
+needed.
 
 ## Hybrid Search
 
@@ -301,8 +302,8 @@ MATCH (n) WHERE (n:Episodic OR n:Entity) AND n.entity_type = 'pattern'
 
 ### 3. Write Concurrency
 
-FalkorDB's connection pool handles write concurrency natively. `EntityManager` methods are
-safe to call concurrently without application-level locking.
+FalkorDB's connection pool handles write concurrency natively. `EntityManager` methods are safe to
+call concurrently without application-level locking.
 
 ### 4. Filter Early in Queries
 

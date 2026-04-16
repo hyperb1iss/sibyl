@@ -27,12 +27,12 @@ sibyl add "Redis timeout root cause" "Connection pool exhaustion happens when...
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
+| Field          | Description                          |
+| -------------- | ------------------------------------ |
 | `episode_type` | Type: "wisdom", "discovery", "debug" |
-| `source_url` | Original source URL |
-| `valid_from` | When knowledge became valid |
-| `valid_to` | When knowledge was superseded |
+| `source_url`   | Original source URL                  |
+| `valid_from`   | When knowledge became valid          |
+| `valid_to`     | When knowledge was superseded        |
 
 ### Pattern
 
@@ -53,11 +53,11 @@ sibyl add "Retry with exponential backoff" "Implementation pattern for resilient
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `category` | Pattern category (e.g., "error-handling") |
-| `languages` | Applicable programming languages |
-| `confidence` | Confidence score (0-1) |
+| Field        | Description                               |
+| ------------ | ----------------------------------------- |
+| `category`   | Pattern category (e.g., "error-handling") |
+| `languages`  | Applicable programming languages          |
+| `confidence` | Confidence score (0-1)                    |
 
 ### Rule
 
@@ -78,11 +78,11 @@ sibyl entity create --type rule \
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `severity` | Violation severity: error, warning, info |
-| `enforcement` | How the rule is enforced |
-| `exceptions` | Known valid exceptions |
+| Field         | Description                              |
+| ------------- | ---------------------------------------- |
+| `severity`    | Violation severity: error, warning, info |
+| `enforcement` | How the rule is enforced                 |
+| `exceptions`  | Known valid exceptions                   |
 
 ### Template
 
@@ -97,11 +97,11 @@ Code or configuration templates.
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `template_type` | Type: code, config, project |
-| `file_extension` | Expected file extension |
-| `variables` | Template variables to replace |
+| Field            | Description                   |
+| ---------------- | ----------------------------- |
+| `template_type`  | Type: code, config, project   |
+| `file_extension` | Expected file extension       |
+| `variables`      | Template variables to replace |
 
 ### Tool
 
@@ -116,11 +116,11 @@ Development tools and utilities.
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `tool_type` | Type: cli, library, service |
-| `installation` | Installation instructions |
-| `version` | Recommended version |
+| Field          | Description                 |
+| -------------- | --------------------------- |
+| `tool_type`    | Type: cli, library, service |
+| `installation` | Installation instructions   |
+| `version`      | Recommended version         |
 
 ### Topic
 
@@ -135,8 +135,8 @@ High-level concepts and knowledge areas.
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
+| Field          | Description                |
+| -------------- | -------------------------- |
 | `parent_topic` | Parent topic for hierarchy |
 
 ## Task Management Types
@@ -158,19 +158,19 @@ sibyl task create --title "Implement OAuth" --project proj_abc --priority high
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `status` | Workflow state (see below) |
-| `priority` | critical, high, medium, low, someday |
-| `project_id` | Parent project UUID |
-| `epic_id` | Parent epic UUID (optional) |
-| `assignees` | List of assignees |
-| `due_date` | Due date |
-| `estimated_hours` | Effort estimate |
-| `actual_hours` | Time spent |
-| `learnings` | What was learned |
-| `branch_name` | Git branch |
-| `pr_url` | Pull request URL |
+| Field             | Description                          |
+| ----------------- | ------------------------------------ |
+| `status`          | Workflow state (see below)           |
+| `priority`        | critical, high, medium, low, someday |
+| `project_id`      | Parent project UUID                  |
+| `epic_id`         | Parent epic UUID (optional)          |
+| `assignees`       | List of assignees                    |
+| `due_date`        | Due date                             |
+| `estimated_hours` | Effort estimate                      |
+| `actual_hours`    | Time spent                           |
+| `learnings`       | What was learned                     |
+| `branch_name`     | Git branch                           |
+| `pr_url`          | Pull request URL                     |
 
 **Task Status Flow:**
 
@@ -195,14 +195,14 @@ sibyl project create --name "Auth System" --description "Authentication and auth
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `status` | planning, active, on_hold, completed, archived |
-| `repository_url` | GitHub repo URL |
-| `features` | Major feature areas |
-| `tech_stack` | Technologies used |
-| `total_tasks` | Task count |
-| `completed_tasks` | Completed count |
+| Field             | Description                                    |
+| ----------------- | ---------------------------------------------- |
+| `status`          | planning, active, on_hold, completed, archived |
+| `repository_url`  | GitHub repo URL                                |
+| `features`        | Major feature areas                            |
+| `tech_stack`      | Technologies used                              |
+| `total_tasks`     | Task count                                     |
+| `completed_tasks` | Completed count                                |
 
 ### Epic
 
@@ -221,13 +221,13 @@ sibyl epic create --name "OAuth Integration" --project proj_abc
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `status` | planning, in_progress, blocked, completed, archived |
-| `priority` | critical, high, medium, low, someday |
-| `project_id` | Parent project UUID (required) |
-| `total_tasks` | Tasks in epic |
-| `completed_tasks` | Completed tasks |
+| Field             | Description                                         |
+| ----------------- | --------------------------------------------------- |
+| `status`          | planning, in_progress, blocked, completed, archived |
+| `priority`        | critical, high, medium, low, someday                |
+| `project_id`      | Parent project UUID (required)                      |
+| `total_tasks`     | Tasks in epic                                       |
+| `completed_tasks` | Completed tasks                                     |
 
 ### Note
 
@@ -246,9 +246,9 @@ sibyl task note task_xyz "Found the root cause of the bug"
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `task_id` | Parent task UUID |
+| Field         | Description       |
+| ------------- | ----------------- |
+| `task_id`     | Parent task UUID  |
 | `author_type` | "agent" or "user" |
 | `author_name` | Author identifier |
 
@@ -271,12 +271,12 @@ sibyl crawl add https://react.dev --name "React Docs" --depth 3
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `url` | Source URL |
-| `source_type` | website, github, local, api_docs |
-| `crawl_status` | pending, in_progress, completed, failed, partial |
-| `document_count` | Crawled document count |
+| Field            | Description                                      |
+| ---------------- | ------------------------------------------------ |
+| `url`            | Source URL                                       |
+| `source_type`    | website, github, local, api_docs                 |
+| `crawl_status`   | pending, in_progress, completed, failed, partial |
+| `document_count` | Crawled document count                           |
 
 ### Document
 
@@ -290,12 +290,12 @@ A crawled document/page from a source.
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `url` | Document URL |
-| `title` | Page title |
-| `headings` | Extracted headings |
-| `has_code` | Contains code blocks |
+| Field      | Description               |
+| ---------- | ------------------------- |
+| `url`      | Document URL              |
+| `title`    | Page title                |
+| `headings` | Extracted headings        |
+| `has_code` | Contains code blocks      |
 | `language` | Primary language detected |
 
 ## Specialized Types
@@ -313,13 +313,13 @@ Recurring errors and their solutions.
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `error_message` | Error message pattern |
-| `root_cause` | Why it happens |
-| `solution` | How to fix it |
-| `prevention` | How to prevent it |
-| `occurrence_count` | Times encountered |
+| Field              | Description           |
+| ------------------ | --------------------- |
+| `error_message`    | Error message pattern |
+| `root_cause`       | Why it happens        |
+| `solution`         | How to fix it         |
+| `prevention`       | How to prevent it     |
+| `occurrence_count` | Times encountered     |
 
 ### Team
 
@@ -333,9 +333,9 @@ Team information and membership.
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `members` | Team member IDs |
+| Field         | Description             |
+| ------------- | ----------------------- |
+| `members`     | Team member IDs         |
 | `focus_areas` | Areas of responsibility |
 
 ### Milestone
@@ -350,11 +350,11 @@ Project timeline markers.
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
-| `project_id` | Parent project |
-| `start_date` | Milestone start |
-| `end_date` | Milestone end |
+| Field         | Description       |
+| ------------- | ----------------- |
+| `project_id`  | Parent project    |
+| `start_date`  | Milestone start   |
+| `end_date`    | Milestone end     |
 | `target_date` | Target completion |
 
 ### Community
@@ -369,11 +369,11 @@ Entity clusters from graph analysis.
 
 **Properties:**
 
-| Field | Description |
-|-------|-------------|
+| Field          | Description                |
+| -------------- | -------------------------- |
 | `key_concepts` | Main concepts in community |
-| `member_count` | Entities in community |
-| `level` | Hierarchy level |
+| `member_count` | Entities in community      |
+| `level`        | Hierarchy level            |
 
 ## Type Selection Guide
 

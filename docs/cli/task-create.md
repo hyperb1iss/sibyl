@@ -19,20 +19,20 @@ This is intentional for clarity and to avoid ambiguity with descriptions. :::
 
 ## Options
 
-| Option          | Short | Default    | Description                                               |
-| --------------- | ----- | ---------- | --------------------------------------------------------- |
-| `--title`       |       | (required) | Task title                                                |
-| `--project`     | `-p`  | (auto)     | Project ID (auto-resolves from linked path)               |
-| `--description` | `-d`  | (none)     | Task description                                          |
-| `--priority`    |       | `medium`   | Priority: critical, high, medium, low, someday            |
-| `--complexity`  |       | `medium`   | Complexity: trivial, simple, medium, complex, epic        |
-| `--assignee`    | `-a`  | (none)     | Initial assignee                                          |
-| `--epic`        | `-e`  | (none)     | Epic ID to group under                                    |
-| `--feature`     | `-f`  | (none)     | Feature area                                              |
-| `--tags`        |       | (none)     | Comma-separated tags                                      |
-| `--tech`        |       | (none)     | Comma-separated technologies                              |
-| `--depends-on`  |       | (none)     | Comma-separated task IDs this task depends on             |
-| `--json`        | `-j`  | false      | JSON output                                               |
+| Option          | Short | Default    | Description                                        |
+| --------------- | ----- | ---------- | -------------------------------------------------- |
+| `--title`       |       | (required) | Task title                                         |
+| `--project`     | `-p`  | (auto)     | Project ID (auto-resolves from linked path)        |
+| `--description` | `-d`  | (none)     | Task description                                   |
+| `--priority`    |       | `medium`   | Priority: critical, high, medium, low, someday     |
+| `--complexity`  |       | `medium`   | Complexity: trivial, simple, medium, complex, epic |
+| `--assignee`    | `-a`  | (none)     | Initial assignee                                   |
+| `--epic`        | `-e`  | (none)     | Epic ID to group under                             |
+| `--feature`     | `-f`  | (none)     | Feature area                                       |
+| `--tags`        |       | (none)     | Comma-separated tags                               |
+| `--tech`        |       | (none)     | Comma-separated technologies                       |
+| `--depends-on`  |       | (none)     | Comma-separated task IDs this task depends on      |
+| `--json`        | `-j`  | false      | JSON output                                        |
 
 ## Priority Levels
 

@@ -5,9 +5,9 @@ description: Ingest external documentation and make it searchable
 
 # External Sources
 
-Sibyl can ingest external documentation (API references, framework guides, library docs) and make them
-searchable alongside your knowledge graph. Your agents can reference React docs, AWS documentation,
-or any web content as easily as they search your own patterns.
+Sibyl can ingest external documentation (API references, framework guides, library docs) and make
+them searchable alongside your knowledge graph. Your agents can reference React docs, AWS
+documentation, or any web content as easily as they search your own patterns.
 
 ## The Big Picture
 

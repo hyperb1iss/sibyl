@@ -161,8 +161,8 @@ The good entry includes:
 
 Sibyl offers three interfaces, each suited to different users:
 
-| Interface  | Best For                      | Token Usage              |
-| ---------- | ----------------------------- | ------------------------ |
+| Interface  | Best For                      | Token Usage                |
+| ---------- | ----------------------------- | -------------------------- |
 | **CLI**    | Scripts, workflows, quick ops | Low (text output only)     |
 | **MCP**    | Direct tool invocation        | Higher (full JSON schemas) |
 | **Web UI** | Humans managing projects      | N/A (visual interface)     |

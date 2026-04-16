@@ -318,8 +318,8 @@ Switch the active organization for the current session:
 POST /api/orgs/{slug}/switch
 ```
 
-Returns rotated access and refresh tokens scoped to the target organization. The user must
-be a member of that organization.
+Returns rotated access and refresh tokens scoped to the target organization. The user must be a
+member of that organization.
 
 ## Security Considerations
 

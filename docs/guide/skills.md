@@ -6,7 +6,8 @@ description: Teaching agents how to work with Sibyl
 # Skills & Hooks
 
 Sibyl's power comes from two complementary systems: **Skills** teach agents structured workflows,
-and **Hooks** inject knowledge automatically. Together, they give Claude structured workflows and automatic context from your knowledge graph.
+and **Hooks** inject knowledge automatically. Together, they give Claude structured workflows and
+automatic context from your knowledge graph.
 
 ## The Two Systems
 

@@ -37,23 +37,23 @@ sibyl search "authentication"
 
 ## Command Groups
 
-| Command                         | Description                                  |
-| ------------------------------- | -------------------------------------------- |
-| [`sibyl search`](./search.md)   | Semantic search across the knowledge graph   |
-| [`sibyl add`](./add.md)         | Add knowledge to the graph                   |
+| Command                         | Description                                    |
+| ------------------------------- | ---------------------------------------------- |
+| [`sibyl search`](./search.md)   | Semantic search across the knowledge graph     |
+| [`sibyl add`](./add.md)         | Add knowledge to the graph                     |
 | `sibyl capture`                 | Quick knowledge capture (content + auto-title) |
-| [`sibyl archive`](./archive.md) | Browse archived raw quick captures           |
-| [`sibyl session`](./session.md) | Package wake-up context for the next session |
-| [`sibyl task`](./task-list.md)  | Task lifecycle management                    |
-| [`sibyl project`](./project.md) | Project management                           |
-| [`sibyl epic`](./epic.md)       | Epic (feature group) management              |
-| [`sibyl entity`](./entity.md)   | Generic entity CRUD operations               |
-| [`sibyl explore`](./explore.md) | Graph traversal and exploration              |
-| [`sibyl context`](./context.md) | Manage CLI contexts                          |
-| `sibyl auth`                    | Authentication and API keys                  |
-| `sibyl org`                     | Organization management                      |
-| `sibyl config`                  | Configuration management                     |
-| `sibyl crawl`                   | Documentation source management and crawling |
+| [`sibyl archive`](./archive.md) | Browse archived raw quick captures             |
+| [`sibyl session`](./session.md) | Package wake-up context for the next session   |
+| [`sibyl task`](./task-list.md)  | Task lifecycle management                      |
+| [`sibyl project`](./project.md) | Project management                             |
+| [`sibyl epic`](./epic.md)       | Epic (feature group) management                |
+| [`sibyl entity`](./entity.md)   | Generic entity CRUD operations                 |
+| [`sibyl explore`](./explore.md) | Graph traversal and exploration                |
+| [`sibyl context`](./context.md) | Manage CLI contexts                            |
+| `sibyl auth`                    | Authentication and API keys                    |
+| `sibyl org`                     | Organization management                        |
+| `sibyl config`                  | Configuration management                       |
+| `sibyl crawl`                   | Documentation source management and crawling   |
 
 ## Global Options
 

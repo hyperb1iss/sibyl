@@ -2,8 +2,8 @@
 
 Local Kubernetes development with Tilt for hot-reload and automatic rebuilds.
 
-> **Note:** The current Tiltfile targets OrbStack by default (`k8s_context('orbstack')`). Adjust
-> the `k8s_context()` call in the Tiltfile if using Minikube.
+> **Note:** The current Tiltfile targets OrbStack by default (`k8s_context('orbstack')`). Adjust the
+> `k8s_context()` call in the Tiltfile if using Minikube.
 
 ## Architecture
 

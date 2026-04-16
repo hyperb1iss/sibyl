@@ -399,9 +399,9 @@ explore(mode="dependencies", entity_id="task_xyz")
 
 ## Concurrency
 
-Task updates are serialized with `entity_lock()` in the API layer. When two writers attempt
-to modify the same task simultaneously, the second receives a `409 Conflict` response.
-Callers should implement retry with backoff when contention is expected.
+Task updates are serialized with `entity_lock()` in the API layer. When two writers attempt to
+modify the same task simultaneously, the second receives a `409 Conflict` response. Callers should
+implement retry with backoff when contention is expected.
 
 ## Best Practices
 
