@@ -24,7 +24,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-      id-token: write  # PyPI trusted publishing
+      id-token: write # PyPI trusted publishing
 
     steps:
       - name: "◆ Checkout"

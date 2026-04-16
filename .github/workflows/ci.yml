@@ -6,65 +6,215 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  SIBYL_ENVIRONMENT: production
+  SIBYL_JWT_SECRET: test-secret-for-ci
+  SIBYL_FALKORDB_HOST: localhost
+  SIBYL_FALKORDB_PORT: 6380
+  SIBYL_FALKORDB_PASSWORD: ""
+  SIBYL_POSTGRES_HOST: localhost
+  SIBYL_POSTGRES_PORT: 5433
+  SIBYL_POSTGRES_USER: sibyl_ci
+  SIBYL_POSTGRES_PASSWORD: sibyl_ci_password
+  SIBYL_POSTGRES_DB: sibyl_ci
+  SIBYL_OPENAI_API_KEY: sk-test-key
+  SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
+  SIBYL_MOCK_LLM: true
+
 jobs:
-  ci:
-    name: CI
+  changes:
+    name: Detect Changes
     runs-on: ubuntu-latest
-
-    services:
-      falkordb:
-        image: falkordb/falkordb:latest
-        ports:
-          - 6380:6379
-        options: >-
-          --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
-
-      postgres:
-        image: pgvector/pgvector:pg18
-        ports:
-          - 5433:5432
-        env:
-          POSTGRES_USER: sibyl_ci
-          POSTGRES_PASSWORD: sibyl_ci_password
-          POSTGRES_DB: sibyl_ci
-        options: >-
-          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
-
-    env:
-      SIBYL_ENVIRONMENT: production
-      SIBYL_JWT_SECRET: test-secret-for-ci
-      SIBYL_FALKORDB_HOST: localhost
-      SIBYL_FALKORDB_PORT: 6380
-      SIBYL_FALKORDB_PASSWORD: ""
-      SIBYL_POSTGRES_HOST: localhost
-      SIBYL_POSTGRES_PORT: 5433
-      SIBYL_POSTGRES_USER: sibyl_ci
-      SIBYL_POSTGRES_PASSWORD: sibyl_ci_password
-      SIBYL_POSTGRES_DB: sibyl_ci
-      SIBYL_OPENAI_API_KEY: sk-test-key
-      SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
-      SIBYL_MOCK_LLM: true
-
+    outputs:
+      docs_changed: ${{ steps.classify.outputs.docs_changed }}
+      hooks_changed: ${{ steps.classify.outputs.hooks_changed }}
+      infra_changed: ${{ steps.classify.outputs.infra_changed }}
+      skills_changed: ${{ steps.classify.outputs.skills_changed }}
+      runtime_changed: ${{ steps.classify.outputs.runtime_changed }}
+      web_changed: ${{ steps.classify.outputs.web_changed }}
+      ci_changed: ${{ steps.classify.outputs.ci_changed }}
+      run_static: ${{ steps.classify.outputs.run_static }}
+      run_build: ${{ steps.classify.outputs.run_build }}
+      run_tests: ${{ steps.classify.outputs.run_tests }}
+      run_e2e: ${{ steps.classify.outputs.run_e2e }}
+      run_storybook: ${{ steps.classify.outputs.run_storybook }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      # =========================================================================
-      # System Dependencies
-      # =========================================================================
+      - name: Classify changed files
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base_ref="$PR_BASE_SHA"
+            diff_range="$base_ref...HEAD"
+          elif [[ -n "$BEFORE_SHA" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            base_ref="$BEFORE_SHA"
+            diff_range="$base_ref..HEAD"
+          else
+            base_ref="$(git rev-list --max-count=1 HEAD^ 2>/dev/null || true)"
+            if [[ -n "$base_ref" ]]; then
+              diff_range="$base_ref..HEAD"
+            else
+              diff_range=""
+            fi
+          fi
+
+          if [[ -n "$base_ref" ]]; then
+            git fetch --no-tags --depth=1 origin "$base_ref" || true
+          fi
+
+          if [[ -n "$diff_range" ]]; then
+            mapfile -t changed_files < <(git diff --name-only "$diff_range")
+          else
+            mapfile -t changed_files < <(git ls-files)
+          fi
+
+          docs_changed=false
+          hooks_changed=false
+          infra_changed=false
+          skills_changed=false
+          runtime_changed=false
+          web_changed=false
+          ci_changed=false
+
+          for file in "${changed_files[@]}"; do
+            [[ -z "$file" ]] && continue
+
+            case "$file" in
+              docs/*|README.md|docs.md|.github/workflows/docs.yml)
+                docs_changed=true
+                ;;
+            esac
+
+            case "$file" in
+              hooks/*)
+                hooks_changed=true
+                ;;
+            esac
+
+            case "$file" in
+              skills/*)
+                skills_changed=true
+                ;;
+            esac
+
+            case "$file" in
+              infra/*)
+                infra_changed=true
+                ;;
+            esac
+
+            case "$file" in
+              .github/workflows/ci.yml|.github/actions/*)
+                ci_changed=true
+                ;;
+            esac
+
+            case "$file" in
+              apps/web/*)
+                web_changed=true
+                runtime_changed=true
+                ;;
+              apps/api/*|apps/cli/*|apps/e2e/*|packages/python/sibyl-core/*|moon.yml|.moon/*|.prototools|pnpm-lock.yaml|compose.e2e.yml|docker-compose*.yml)
+                runtime_changed=true
+                ;;
+            esac
+          done
+
+          if [[ ${#changed_files[@]} -eq 0 ]]; then
+            runtime_changed=true
+            web_changed=true
+            ci_changed=true
+          fi
+
+          run_static=false
+          run_build=false
+          run_tests=false
+          run_e2e=false
+          run_storybook=false
+
+          if [[ "$docs_changed" == true || "$hooks_changed" == true || "$infra_changed" == true || "$skills_changed" == true || "$runtime_changed" == true || "$ci_changed" == true ]]; then
+            run_static=true
+          fi
+
+          if [[ "$runtime_changed" == true || "$ci_changed" == true ]]; then
+            run_build=true
+            run_tests=true
+            run_e2e=true
+          fi
+
+          if [[ "$web_changed" == true ]]; then
+            run_storybook=true
+          fi
+
+          {
+            echo "docs_changed=$docs_changed"
+            echo "hooks_changed=$hooks_changed"
+            echo "infra_changed=$infra_changed"
+            echo "skills_changed=$skills_changed"
+            echo "runtime_changed=$runtime_changed"
+            echo "web_changed=$web_changed"
+            echo "ci_changed=$ci_changed"
+            echo "run_static=$run_static"
+            echo "run_build=$run_build"
+            echo "run_tests=$run_tests"
+            echo "run_e2e=$run_e2e"
+            echo "run_storybook=$run_storybook"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Changed Files"
+            echo
+            if [[ ${#changed_files[@]} -eq 0 ]]; then
+              echo "No diff detected; defaulting to the full CI path."
+            else
+              printf -- "- \`%s\`\n" "${changed_files[@]}"
+            fi
+            echo
+            echo "### CI Plan"
+            echo
+            echo "- static: $run_static"
+            echo "- build: $run_build"
+            echo "- tests: $run_tests"
+            echo "- e2e: $run_e2e"
+            echo "- storybook: $run_storybook"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  static:
+    name: Static Checks
+    needs: changes
+    if: needs.changes.outputs.run_static == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libxml2-dev libxslt-dev
 
-      # =========================================================================
-      # Moonrepo Toolchain (proto + moon + all tools)
-      # =========================================================================
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6
         with:
@@ -72,18 +222,11 @@ jobs:
 
       - name: Warm up proto toolchain
         run: |
-          # Install all tools defined in .prototools BEFORE parallel tasks run
-          # This prevents race conditions where multiple tasks try to auto-install simultaneously
           proto use --log debug
-          # Ensure shims have execute permissions
           chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
           chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
-          # Verify uv is working
           uv --version
 
-      # =========================================================================
-      # Caching
-      # =========================================================================
       - name: Cache moon outputs
         uses: actions/cache@v5
         with:
@@ -112,56 +255,298 @@ jobs:
           restore-keys: |
             uv-${{ runner.os }}-
 
-      # =========================================================================
-      # Install Dependencies
-      # =========================================================================
       - name: Install Node dependencies
         run: cd apps/web && pnpm install --frozen-lockfile
-      # Python deps: uv run handles this automatically, no explicit sync needed
 
-      # =========================================================================
-      # Lint & Typecheck (all projects in parallel via moon)
-      # =========================================================================
-      - name: Lint
-        run: moon run :lint
+      - name: Run static checks
+        env:
+          DOCS_CHANGED: ${{ needs.changes.outputs.docs_changed }}
+          HOOKS_CHANGED: ${{ needs.changes.outputs.hooks_changed }}
+          INFRA_CHANGED: ${{ needs.changes.outputs.infra_changed }}
+          SKILLS_CHANGED: ${{ needs.changes.outputs.skills_changed }}
+          RUNTIME_CHANGED: ${{ needs.changes.outputs.runtime_changed }}
+          CI_CHANGED: ${{ needs.changes.outputs.ci_changed }}
+        run: |
+          set -euo pipefail
 
-      - name: Typecheck
-        run: moon run :typecheck
+          if [[ "$RUNTIME_CHANGED" == "true" || "$CI_CHANGED" == "true" ]]; then
+            moon run :lint
+            moon run :typecheck
+            exit 0
+          fi
 
-      # =========================================================================
-      # Build (all projects)
-      # =========================================================================
-      - name: Build
-        run: moon run :build
+          ran_any=false
 
-      - name: Build Storybook
-        run: moon run web:build-storybook
+          if [[ "$DOCS_CHANGED" == "true" ]]; then
+            moon run docs:lint
+            ran_any=true
+          fi
 
-      # =========================================================================
-      # Database Setup
-      # =========================================================================
+          if [[ "$HOOKS_CHANGED" == "true" ]]; then
+            moon run hooks:lint hooks:typecheck
+            ran_any=true
+          fi
+
+          if [[ "$SKILLS_CHANGED" == "true" ]]; then
+            moon run skills:lint
+            ran_any=true
+          fi
+
+          if [[ "$INFRA_CHANGED" == "true" ]]; then
+            moon run infra:lint
+            ran_any=true
+          fi
+
+          if [[ "$ran_any" == false ]]; then
+            echo "No static tasks matched the change set."
+          fi
+
+  build:
+    name: Build
+    needs: changes
+    if: needs.changes.outputs.run_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+
+      - name: Warm up proto toolchain
+        run: |
+          proto use --log debug
+          chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          uv --version
+
+      - name: Cache moon outputs
+        uses: actions/cache@v5
+        with:
+          path: |
+            .moon/cache
+            apps/web/.next/cache
+          key:
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock',
+            'apps/web/pnpm-lock.yaml') }}
+          restore-keys: |
+            moon-${{ runner.os }}-
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Install Node dependencies
+        run: cd apps/web && pnpm install --frozen-lockfile
+
+      - name: Build API and web
+        run: moon run api:build web:build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: warn
+
+  tests:
+    name: Package Tests
+    needs: changes
+    if: needs.changes.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      falkordb:
+        image: falkordb/falkordb:latest
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+      postgres:
+        image: pgvector/pgvector:pg18
+        ports:
+          - 5433:5432
+        env:
+          POSTGRES_USER: sibyl_ci
+          POSTGRES_PASSWORD: sibyl_ci_password
+          POSTGRES_DB: sibyl_ci
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+
+      - name: Warm up proto toolchain
+        run: |
+          proto use --log debug
+          chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          uv --version
+
+      - name: Cache moon outputs
+        uses: actions/cache@v5
+        with:
+          path: |
+            .moon/cache
+            apps/web/.next/cache
+          key:
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock',
+            'apps/web/pnpm-lock.yaml') }}
+          restore-keys: |
+            moon-${{ runner.os }}-
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Install Node dependencies
+        run: cd apps/web && pnpm install --frozen-lockfile
+
       - name: Run database migrations
         run: moon run api:db-migrate
 
-      # =========================================================================
-      # Package Test Suites
-      # =========================================================================
       - name: Run package test suites
         run: moon run api:test-cov cli:test-cov core:test-cov web:test-cov
 
-      # =========================================================================
-      # E2E Tests
-      # =========================================================================
-      - name: Install tools for E2E tests
-        run: moon run cli:install api:install
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: apps/api/coverage.xml,apps/cli/coverage.xml,packages/python/sibyl-core/coverage.xml,apps/web/coverage.xml
+          fail_ci_if_error: false
+
+  e2e:
+    name: E2E
+    needs: changes
+    if: needs.changes.outputs.run_e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      falkordb:
+        image: falkordb/falkordb:latest
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+      postgres:
+        image: pgvector/pgvector:pg18
+        ports:
+          - 5433:5432
+        env:
+          POSTGRES_USER: sibyl_ci
+          POSTGRES_PASSWORD: sibyl_ci_password
+          POSTGRES_DB: sibyl_ci
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxslt-dev
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+
+      - name: Warm up proto toolchain
+        run: |
+          proto use --log debug
+          chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          uv --version
+
+      - name: Cache moon outputs
+        uses: actions/cache@v5
+        with:
+          path: |
+            .moon/cache
+            apps/web/.next/cache
+          key:
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock',
+            'apps/web/pnpm-lock.yaml') }}
+          restore-keys: |
+            moon-${{ runner.os }}-
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
+
+      - name: Cache uv
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Install Node dependencies
+        run: cd apps/web && pnpm install --frozen-lockfile
+
+      - name: Build frontend for E2E
+        run: moon run web:build
+
+      - name: Run database migrations
+        run: moon run api:db-migrate
 
       - name: Start backend server
         run: |
           cd apps/api
-          uv run sibyld serve &
+          uv run sibyld serve > /tmp/sibyld.log 2>&1 &
           echo "Waiting for backend to start..."
           for i in {1..60}; do
-            if curl -s http://localhost:3334/api/health > /dev/null; then
+            if curl -fsS http://localhost:3334/api/health > /dev/null; then
               echo "Backend is ready!"
               sleep 2
               break
@@ -169,22 +554,22 @@ jobs:
             echo "Attempt $i: Backend not ready yet..."
             sleep 1
           done
-          curl -s http://localhost:3334/api/health | head -c 200
+          curl -fsS http://localhost:3334/api/health | head -c 200
 
       - name: Start background job worker
         run: |
           cd apps/api
-          uv run sibyld worker &
+          uv run sibyld worker > /tmp/sibyl-worker.log 2>&1 &
           echo "Background job worker started"
           sleep 2
 
       - name: Start frontend server
         run: |
           cd apps/web
-          pnpm start &
+          pnpm start > /tmp/sibyl-web.log 2>&1 &
           echo "Waiting for frontend to start..."
           for i in {1..60}; do
-            if curl -s http://localhost:3337 > /dev/null 2>&1; then
+            if curl -fsS http://localhost:3337 > /dev/null; then
               echo "Frontend is ready!"
               break
             fi
@@ -202,23 +587,61 @@ jobs:
       - name: Collect diagnostics on failure
         if: failure()
         run: |
+          container_id="$(docker ps -q --filter ancestor=falkordb/falkordb:latest | head -n 1)"
           echo "=== Backend server logs ==="
-          curl -s http://localhost:3334/api/health || echo "Backend not responding"
+          tail -n 200 /tmp/sibyld.log || true
+          echo ""
+          echo "=== Worker logs ==="
+          tail -n 200 /tmp/sibyl-worker.log || true
+          echo ""
+          echo "=== Frontend logs ==="
+          tail -n 200 /tmp/sibyl-web.log || true
           echo ""
           echo "=== FalkorDB graph contents ==="
-          docker exec $(docker ps -q --filter ancestor=falkordb/falkordb:latest) redis-cli GRAPH.QUERY default "MATCH (n) RETURN labels(n), count(*) LIMIT 10" 2>/dev/null || echo "Could not query FalkorDB"
+          if [[ -n "$container_id" ]]; then
+            docker exec "$container_id" redis-cli GRAPH.QUERY default "MATCH (n) RETURN labels(n), count(*) LIMIT 10" || echo "Could not query FalkorDB"
+          else
+            echo "Could not find FalkorDB container"
+          fi
 
-      # =========================================================================
-      # Upload Artifacts
-      # =========================================================================
-      - name: Upload coverage
-        uses: codecov/codecov-action@v5
+  storybook:
+    name: Storybook
+    needs: changes
+    if: needs.changes.outputs.run_storybook == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
         with:
-          files: apps/api/coverage.xml,apps/cli/coverage.xml,packages/python/sibyl-core/coverage.xml,apps/web/coverage.xml
-          fail_ci_if_error: false
+          fetch-depth: 0
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v6
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
         with:
-          name: dist
-          path: apps/api/dist/
+          auto-install: true
+
+      - name: Cache moon outputs
+        uses: actions/cache@v5
+        with:
+          path: |
+            .moon/cache
+            apps/web/.next/cache
+          key:
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock',
+            'apps/web/pnpm-lock.yaml') }}
+          restore-keys: |
+            moon-${{ runner.os }}-
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
+
+      - name: Install Node dependencies
+        run: cd apps/web && pnpm install --frozen-lockfile
+
+      - name: Build Storybook
+        run: moon run web:build-storybook
