@@ -56,6 +56,7 @@ dependencies = [
     "arq>=0.26.3",
     "greenlet>=3.3.0",
     "slowapi>=0.1.9",
+    "surrealdb>=1.0.8,<3.0",
 ]
 
 [project.optional-dependencies]
