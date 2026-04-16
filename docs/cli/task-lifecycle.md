@@ -360,6 +360,8 @@ sibyl task update <task_id> [options]
 | `--feature`     | `-f`  | Feature area                                                  |
 | `--tags`        |       | Comma-separated tags (replaces existing)                      |
 | `--tech`        |       | Comma-separated technologies (replaces existing)              |
+| `--add-dep`     |       | Add dependency on another task (task ID)                      |
+| `--remove-dep`  |       | Remove dependency on another task (task ID)                   |
 | `--json`        | `-j`  | JSON output                                                   |
 
 ### Examples

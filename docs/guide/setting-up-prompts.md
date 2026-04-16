@@ -6,7 +6,7 @@ description: Configure CLAUDE.md for effective agent collaboration
 # Setting Up Prompts
 
 Your `CLAUDE.md` file is the most important configuration for agent collaboration. It's the first
-thing your AI agent reads—use it to establish workflows, project context, and the Sibyl integration.
+thing your AI agent reads. Use it to establish workflows, project context, and the Sibyl integration.
 
 ## The Two-Level System
 
@@ -32,7 +32,7 @@ Your global instructions apply to every project. This is where you establish:
 ```markdown
 ## Sibyl - Your Persistent Memory
 
-Sibyl is your knowledge graph—extended memory that persists across sessions.
+Sibyl is your knowledge graph, extended memory that persists across sessions.
 
 ### Session Start (MANDATORY)
 
@@ -41,9 +41,9 @@ and relevant patterns. No exceptions.
 
 ### Workflow
 
-1. **Research first** — Search for patterns, past learnings, known issues before implementing
-2. **Track tasks** — Never do significant work without a task. Update status as you go
-3. **Capture learnings** — When you solve something non-obvious, add it to the graph
+1. **Research first**: Search for patterns, past learnings, known issues before implementing
+2. **Track tasks**: Never do significant work without a task. Update status as you go
+3. **Capture learnings**: When you solve something non-obvious, add it to the graph
 
 ### What to Capture
 
@@ -68,11 +68,11 @@ Customize how the agent works with you:
 - Be concise. No fluff.
 - When unsure, ask. Don't guess.
 - Prefer editing existing code over creating new files.
-- Always check sibyl before implementing—we may have solved this before.
+- Always check sibyl before implementing. We may have solved this before.
 
 ## Notes
 
-I'm ADHD—I will interrupt with random ideas. If I do this while you're mid-task:
+I'm ADHD. I will interrupt with random ideas. If I do this while you're mid-task:
 
 1. Quickly note it in a TODO or Sibyl task
 2. Let me know you captured it
@@ -222,10 +222,8 @@ Every graph operation requires org context:
 
 ### FalkorDB Write Concurrency
 
-All writes use a semaphore:
-
-\`\`\`python async with client.write_lock: await client.execute_write_org(org_id, query, \*\*params)
-\`\`\`
+FalkorDB's connection pool handles write concurrency natively. No application-level locking
+is needed.
 
 ## Common Gotchas
 
@@ -275,7 +273,7 @@ This project follows conventions from `~/dev/conventions`.
 ```markdown
 ## Don't
 
-- Use `sibyl task add` (wrong command—use `sibyl task create`)
+- Use `sibyl task add` (wrong command, use `sibyl task create`)
 - Commit without --no-verify
 - Start implementing without searching first
 ```

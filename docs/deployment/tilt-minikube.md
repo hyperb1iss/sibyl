@@ -2,6 +2,9 @@
 
 Local Kubernetes development with Tilt for hot-reload and automatic rebuilds.
 
+> **Note:** The current Tiltfile targets OrbStack by default (`k8s_context('orbstack')`). Adjust
+> the `k8s_context()` call in the Tiltfile if using Minikube.
+
 ## Architecture
 
 ```
@@ -58,8 +61,10 @@ caddy version
 ## Quick Start
 
 ```bash
-# 1. Start minikube with sufficient resources
+# 1. Start your Kubernetes environment
+# If using Minikube:
 minikube start --cpus=4 --memory=8192 --driver=docker
+# If using OrbStack: no separate start needed (OrbStack manages the cluster)
 
 # 2. Export API keys (picked up by Tiltfile)
 export OPENAI_API_KEY=sk-...

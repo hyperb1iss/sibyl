@@ -106,7 +106,6 @@ moon run api:test         # Test API
 moon run core:check       # Full check on sibyl-core
 
 # Build & Install
-moon run :build           # Build current project
 moon run install-dev      # Install everything editable (sibyl, sibyld, skills)
 moon run install          # Install everything (production)
 ```
@@ -170,12 +169,8 @@ or breaks isolation.
 
 ### FalkorDB Write Concurrency
 
-All writes use a semaphore to prevent corruption:
-
-```python
-async with client.write_lock:
-    await client.execute_write_org(org_id, query, **params)
-```
+FalkorDB's `BlockingConnectionPool` (50 connections, 60s timeout) handles write concurrency
+natively. No application-level locking is needed.
 
 ### Node Labels
 
@@ -198,7 +193,7 @@ from sibyl_core.models import Task, Entity
 from sibyl_core.graph import EntityManager
 
 # Server-side (apps/api)
-from sibyl.auth.context import get_current_user
+from sibyl.auth.dependencies import get_current_user
 from sibyl.cli.common import ELECTRIC_PURPLE
 ```
 

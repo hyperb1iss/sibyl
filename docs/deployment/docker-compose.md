@@ -60,11 +60,11 @@ services:
       - "6380:6379" # Redis port (mapped to avoid conflicts)
       - "3335:3000" # FalkorDB Browser UI
     volumes:
-      - falkordb_data:/data
+      - falkordb_data:/var/lib/falkordb/data
     environment:
-      - FALKORDB_ARGS=--requirepass ${FALKORDB_PASSWORD:-conventions}
+      - FALKORDB_ARGS=--requirepass ${SIBYL_FALKORDB_PASSWORD:-conventions}
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${FALKORDB_PASSWORD:-conventions}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${SIBYL_FALKORDB_PASSWORD:-conventions}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -152,7 +152,32 @@ services:
     ports:
       - "3334:3334"
     environment:
-      SIBYL_DATABASE_URL: postgresql://sibyl:password@postgres:5432/sibyl
+      SIBYL_POSTGRES_HOST: postgres
+      SIBYL_POSTGRES_PORT: 5432
+      SIBYL_POSTGRES_USER: ${SIBYL_POSTGRES_USER:-sibyl}
+      SIBYL_POSTGRES_PASSWORD: ${SIBYL_POSTGRES_PASSWORD:-sibyl_dev}
+      SIBYL_POSTGRES_DB: ${SIBYL_POSTGRES_DB:-sibyl}
+      SIBYL_FALKORDB_HOST: falkordb
+      SIBYL_FALKORDB_PORT: 6379
+      SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET}
+      SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      falkordb:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["sibyld", "worker"]
+    environment:
+      SIBYL_POSTGRES_HOST: postgres
+      SIBYL_POSTGRES_PORT: 5432
+      SIBYL_POSTGRES_USER: ${SIBYL_POSTGRES_USER:-sibyl}
+      SIBYL_POSTGRES_PASSWORD: ${SIBYL_POSTGRES_PASSWORD:-sibyl_dev}
+      SIBYL_POSTGRES_DB: ${SIBYL_POSTGRES_DB:-sibyl}
       SIBYL_FALKORDB_HOST: falkordb
       SIBYL_FALKORDB_PORT: 6379
       SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET}

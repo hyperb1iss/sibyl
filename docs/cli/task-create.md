@@ -31,7 +31,7 @@ This is intentional for clarity and to avoid ambiguity with descriptions. :::
 | `--feature`     | `-f`  | (none)     | Feature area                                              |
 | `--tags`        |       | (none)     | Comma-separated tags                                      |
 | `--tech`        |       | (none)     | Comma-separated technologies                              |
-| `--sync`        |       | false      | Wait for task creation (slower but immediately available) |
+| `--depends-on`  |       | (none)     | Comma-separated task IDs this task depends on             |
 | `--json`        | `-j`  | false      | JSON output                                               |
 
 ## Priority Levels
@@ -138,20 +138,15 @@ sibyl project link proj_abc123
 sibyl task create --title "Fix bug"  # Uses proj_abc123
 ```
 
-## Sync Mode
+## Dependencies
 
-By default, task creation is asynchronous. Use `--sync` to wait:
+Create tasks that depend on other tasks:
 
 ```bash
-# Async (default) - returns immediately
-sibyl task create --title "Quick task"
-
-# Sync - waits for task to be fully created
-sibyl task create --title "Important task" --sync
+sibyl task create \
+  --title "Deploy to production" \
+  --depends-on "task_abc123,task_def456"
 ```
-
-::: tip When to Use --sync Use `--sync` when you need to immediately reference the task (e.g., in
-scripts that chain operations). :::
 
 ## Integration with Epics
 

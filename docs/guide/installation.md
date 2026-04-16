@@ -97,10 +97,10 @@ moon run api:db-migrate
 
 ### Environment Variables
 
-Create a `.env` file in `apps/api/`:
+Create a `.env` file from the repo root example:
 
 ```bash
-cp apps/api/.env.example apps/api/.env
+cp .env.example .env
 ```
 
 Edit the file with your configuration:
@@ -261,8 +261,6 @@ echo $SIBYL_OPENAI_API_KEY
 ```
 
 ## Docker Deployment
-
-[SCREENSHOT: Docker compose architecture diagram]
 
 A production Docker Compose configuration is planned. For now, use the individual Docker commands
 above.

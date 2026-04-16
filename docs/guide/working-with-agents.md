@@ -5,8 +5,8 @@ description: The human guide to collaborating with AI agents through Sibyl
 
 # Working with AI Agents
 
-This guide is for **you**—the human working with AI agents. It explains how to set up your
-environment, communicate effectively with agents, and leverage Sibyl to make every session more
+This guide is for **you**, the human working with AI agents. It explains how to set up your
+environment, communicate effectively with agents, and use Sibyl to make every session more
 productive than the last.
 
 ## The Core Insight
@@ -17,7 +17,7 @@ AI agents are brilliant but amnesiac. Every session starts from zero. They can't
 - The pattern that finally made your tests pass
 - The architectural decision that took hours to reach
 
-**Sibyl fixes this.** It gives your agent persistent memory—a knowledge graph that survives forever.
+**Sibyl fixes this.** It gives your agent persistent memory, a knowledge graph that survives forever.
 When you set things up correctly, your agent starts every session with relevant context instead of a
 blank slate.
 
@@ -37,7 +37,7 @@ Restart Claude Code after installation.
 ### 2. Configure Your CLAUDE.md
 
 Your project's `CLAUDE.md` is the most important file for agent collaboration. It's the first thing
-your agent reads—use it to establish the Sibyl workflow.
+your agent reads. Use it to establish the Sibyl workflow.
 
 **Essential sections:**
 
@@ -58,9 +58,9 @@ Run `/sibyl` at the start of every session. This loads:
 
 ### Workflow
 
-1. **Research first** — Search before implementing
-2. **Track tasks** — Never do significant work without a task
-3. **Capture learnings** — Add non-obvious discoveries to the graph
+1. **Research first**: Search before implementing
+2. **Track tasks**: Never do significant work without a task
+3. **Capture learnings**: Add non-obvious discoveries to the graph
 ```
 
 See [Setting Up Prompts](./setting-up-prompts.md) for a complete template.
@@ -80,7 +80,7 @@ For direct tool access, add Sibyl to your MCP configuration:
 }
 ```
 
-The CLI is preferred for most operations—it uses fewer tokens and is more expressive.
+The CLI is preferred for most operations. It uses fewer tokens and is more expressive.
 
 ## The Research → Do → Reflect Cycle
 
@@ -213,7 +213,7 @@ Not everything belongs in the knowledge graph. Focus on signal, not noise.
 
 ## Quality Bar
 
-The knowledge graph gets smarter with every entry—but only if entries are high quality.
+The knowledge graph gets smarter with every entry, but only if entries are high quality.
 
 **Bad entry:**
 
@@ -307,7 +307,7 @@ Help future sessions (and other agents) by documenting state:
 
 1. Search explicitly: "Search sibyl for what we worked on yesterday"
 2. Check task history: "List completed tasks from the past week"
-3. The knowledge is there—help the agent find it
+3. The knowledge is there. Help the agent find it
 
 ### Knowledge Quality Is Low
 
@@ -352,6 +352,6 @@ Agent: [Captures learning]
 ## Next Steps
 
 - [Setting Up Prompts](./setting-up-prompts.md) - Complete CLAUDE.md template
-- [Skills & Hooks](./skills.md) - Deep dive into the skill system
+- [Skills & Hooks](./skills.md) - Learn about the skill system
 - [Task Management](./task-management.md) - Full task workflow
 - [Capturing Knowledge](./capturing-knowledge.md) - What to save

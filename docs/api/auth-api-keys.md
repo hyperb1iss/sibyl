@@ -41,7 +41,8 @@ POST /api/auth/api-keys
 {
   "name": "CI/CD Pipeline",
   "scopes": ["mcp", "api:read"],
-  "expires_at": "2025-12-31T23:59:59Z"
+  "expires_days": 365,
+  "live": true
 }
 ```
 
@@ -51,11 +52,11 @@ POST /api/auth/api-keys
 {
   "id": "key_uuid",
   "name": "CI/CD Pipeline",
-  "key_prefix": "sk_live_abc123...",
+  "prefix": "sk_live_abc123...",
   "scopes": ["mcp", "api:read"],
   "created_at": "2024-12-30T10:00:00Z",
   "expires_at": "2025-12-31T23:59:59Z",
-  "key": "sk_live_abc123def456ghi789..."
+  "api_key": "sk_live_abc123def456ghi789..."
 }
 ```
 
@@ -111,7 +112,7 @@ GET /api/auth/api-keys
     {
       "id": "key_uuid",
       "name": "CI/CD Pipeline",
-      "key_prefix": "sk_live_abc123...",
+      "prefix": "sk_live_abc123...",
       "scopes": ["mcp", "api:read"],
       "created_at": "2024-12-30T10:00:00Z",
       "expires_at": "2025-12-31T23:59:59Z",
@@ -125,10 +126,17 @@ GET /api/auth/api-keys
 ### Revoke Key
 
 ```http
-DELETE /api/auth/api-keys/{key_id}
+POST /api/auth/api-keys/{api_key_id}/revoke
 ```
 
-**Response:** `204 No Content`
+**Response:**
+
+```json
+{
+  "success": true,
+  "id": "key_uuid"
+}
+```
 
 Revoked keys immediately stop working.
 

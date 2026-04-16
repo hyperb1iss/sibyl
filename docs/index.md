@@ -16,7 +16,7 @@ hero:
       link: https://github.com/hyperb1iss/sibyl
 
 features:
-  - icon: 🧠
+  - icon: 🔮
     title: Memory That Sticks
     details:
       Knowledge survives across sessions. Patterns, gotchas, and hard-won lessons stay searchable.
@@ -25,17 +25,17 @@ features:
     details:
       Skills teach your tools and teammates HOW to work. Hooks inject relevant knowledge
       automatically. No manual prompting needed.
-  - icon: 📋
+  - icon: 🎯
     title: Project-Centric Tasks
     details:
       Track work across sessions. Full lifecycle from backlog to completion, with learnings captured
       along the way.
-  - icon: 🔍
+  - icon: ⚡
     title: Find by Meaning
     details:
       Semantic search finds knowledge by intent, not keywords. Ask "how do I handle auth?" and find
       relevant patterns instantly.
-  - icon: 📚
+  - icon: 🌊
     title: Ingest External Docs
     details: Crawl documentation sites and make them searchable beside your own project knowledge.
 ---
@@ -124,14 +124,8 @@ before you have to go looking for it.
 ## Quick Start
 
 ```bash
-# Install the CLI
-uv tool install sibyl-dev
-
 # Start the infrastructure
-docker run -d --name falkordb -p 6380:6379 falkordb/falkordb:latest
-
-# Configure and start
-cd sibyl && moon run dev
+sibyld up
 
 # Search your knowledge
 sibyl search "authentication patterns"
@@ -146,7 +140,7 @@ sibyl task complete <task_id> --learnings "OAuth tokens expire after 1 hour"
 
 ## The Workflow
 
-Sibyl enforces a simple but powerful cycle:
+Sibyl enforces a simple cycle:
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -183,10 +177,10 @@ sessions move faster. **The system learns as you work.**
 
 ## Get Started
 
-1. **[Installation](./guide/installation)** — Set up Sibyl in 5 minutes
-2. **[Quick Start](./guide/quick-start)** — Your first knowledge graph session
-3. **[Skills & Hooks](./guide/skills)** — Teach your tools and teammates the workflow
-4. **[Web UI Tour](./guide/)** — Manage your knowledge visually
+1. **[Installation](./guide/installation)** Set up Sibyl in 5 minutes
+2. **[Quick Start](./guide/quick-start)** Your first knowledge graph session
+3. **[Skills & Hooks](./guide/skills)** Teach your tools and teammates the workflow
+4. **[Web UI Tour](./guide/)** Manage your knowledge visually
 
 ---
 

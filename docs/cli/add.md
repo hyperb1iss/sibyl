@@ -23,6 +23,7 @@ sibyl add <title> <content> [options]
 | `--category` | `-c`  | (none)    | Category for organization |
 | `--language` | `-l`  | (none)    | Programming language      |
 | `--tags`     |       | (none)    | Comma-separated tags      |
+| `--wait-searchable` |  | false     | Wait for the episode to become searchable before returning |
 | `--json`     | `-j`  | false     | Output as JSON            |
 
 ## Entity Types
@@ -47,7 +48,7 @@ sibyl add "JWT Refresh Bug Fix" "Token refresh was failing silently when Redis T
 Output:
 
 ```
-Added episode: JWT Refresh Bug Fix
+Queued episode: JWT Refresh Bug Fix
   ID: ent_abc123def456
 ```
 

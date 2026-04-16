@@ -58,12 +58,12 @@ docs ingestion, and graph exploration keep hard-won context close at hand for bo
 | Capability                     | What It Means                                                                                               |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
 | 🔮 **Collective Intelligence** | Every session compounds. The graph gets smarter as your team and tools capture real work                    |
-| 🎯 **Semantic Search**         | Find knowledge by meaning—"authentication patterns" finds OAuth solutions even if "OAuth" isn't in the text |
-| 🧠 **Persistent Memory**       | What you learn today helps tomorrow. Patterns, decisions, and gotchas stay searchable across sessions       |
+| 🎯 **Semantic Search**         | Find knowledge by meaning. "Authentication patterns" finds OAuth solutions even if "OAuth" isn't in the text |
+| 🔮 **Persistent Memory**       | What you learn today helps tomorrow. Patterns, decisions, and gotchas stay searchable across sessions       |
 | 🦋 **Task Workflow**           | Plan with epics and tasks. Track execution across sessions and teammates in one place                       |
-| 📚 **Doc Ingestion**           | Crawl and index external documentation into your graph                                                      |
-| 🏢 **Multi-Tenancy**           | Isolated graphs per organization. Enterprise-ready from day one                                             |
-| 🌐 **Graph Visualization**     | Interactive D3 visualization of your knowledge connections                                                  |
+| 🌊 **Doc Ingestion**           | Crawl and index external documentation into your graph                                                      |
+| 💎 **Multi-Tenancy**           | Isolated graphs per organization. Enterprise-ready from day one                                             |
+| ⚡ **Graph Visualization**     | Interactive D3 visualization of your knowledge connections                                                  |
 
 <table>
   <tr>
@@ -154,10 +154,10 @@ proto install moon
 uv sync && pnpm install
 
 # Configure
-cp apps/api/.env.example apps/api/.env
+cp .env.example .env
 # Add SIBYL_OPENAI_API_KEY + SIBYL_JWT_SECRET
 
-# Install CLIs globally (editable — source changes reflect immediately)
+# Install CLIs globally (editable, source changes reflect immediately)
 moon run install-dev
 
 # Launch everything
@@ -203,9 +203,9 @@ measurement ladder, artifact expectations, and how to avoid benchmark drift.
 | --------- | ---- | --------------------- |
 | API + MCP | 3334 | http://localhost:3334 |
 | Web UI    | 3337 | http://localhost:3337 |
-| FalkorDB  | 6380 | —                     |
+| FalkorDB  | 6380 | -                     |
 
-## 🗂️ Core Workflow
+## 🔮 Core Workflow
 
 Sibyl is strongest when it stays close to the work itself:
 
@@ -272,12 +272,12 @@ sibyl task list --csv            # For spreadsheets
 
 A full admin interface at `http://localhost:3337`:
 
-- **Dashboard** — Stats overview, recent activity, quick actions
-- **Tasks** — Kanban-style workflow with inline editing
-- **Graph** — Interactive D3 visualization of knowledge connections
-- **Search** — Semantic search with filters
-- **Sources** — Configure documentation crawling
-- **Settings** — Organizations, API keys, preferences
+- **Dashboard:** Stats overview, recent activity, quick actions
+- **Tasks:** Kanban-style workflow with inline editing
+- **Graph:** Interactive D3 visualization of knowledge connections
+- **Search:** Semantic search with filters
+- **Sources:** Configure documentation crawling
+- **Settings:** Organizations, API keys, preferences
 
 **Built with:** Next.js 16, React 19, React Query, Tailwind CSS, SilkCircuit design system
 
@@ -311,7 +311,7 @@ Connect Claude Code, Cursor, or any MCP client to Sibyl:
 ### Claude Code Skills & Hooks
 
 Sibyl ships with [skills](https://docs.anthropic.com/en/docs/claude-code/skills) and
-[hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) for seamless Claude Code integration.
+[hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) for built-in Claude Code integration.
 
 **Install:**
 
@@ -320,7 +320,7 @@ moon run skills:install    # Install /sibyl skill
 moon run hooks:install     # Install context hooks
 ```
 
-**`/sibyl` skill** — Full CLI access from Claude Code:
+**`/sibyl` skill:** Full CLI access from Claude Code:
 
 ```bash
 /sibyl search "authentication patterns"
@@ -328,7 +328,7 @@ moon run hooks:install     # Install context hooks
 /sibyl add "OAuth insight" "Token refresh needs..."
 ```
 
-**Hooks** — Automatic context injection:
+**Hooks:** Automatic context injection:
 
 | Hook                 | Trigger        | Action                                           |
 | -------------------- | -------------- | ------------------------------------------------ |
@@ -336,7 +336,7 @@ moon run hooks:install     # Install context hooks
 | **UserPromptSubmit** | Every prompt   | Searches graph, injects relevant patterns        |
 
 The `UserPromptSubmit` hook extracts keywords from your prompt, searches Sibyl, and injects matching
-patterns as context—so Claude always knows what you've learned before.
+patterns as context, so Claude always knows what you've learned before.
 
 See [`skills/`](skills/) and [`hooks/`](hooks/) for implementation details.
 
@@ -369,7 +369,7 @@ sibyl/
 
 ```bash
 SIBYL_JWT_SECRET=your-secret-key    # Required
-SIBYL_JWT_EXPIRY_HOURS=24            # Optional
+SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES=60  # Optional (default: 60)
 ```
 
 ### API Keys (Programmatic Access)
@@ -413,7 +413,7 @@ See [`docs/deployment/`](docs/deployment/) for detailed guides:
 ## Development
 
 ```bash
-# Install CLIs globally (editable — picks up source changes)
+# Install CLIs globally (editable, picks up source changes)
 moon run install-dev
 
 # Install CLIs globally (frozen copy, for CI / production)
@@ -465,7 +465,7 @@ learnings, and semantic search over what your team already knows.
 
 ### How does it compare to Mem0 / LangMem / similar?
 
-Sibyl is **self-hosted and open source**—you own your data. It includes a full **task workflow
+Sibyl is **self-hosted and open source**. You own your data. It includes a full **task workflow
 system**, not just memory. It has a **web UI** for humans, not just APIs for machines. And it keeps
 knowledge, tasks, and docs connected in one graph instead of scattering them across tools.
 
@@ -484,19 +484,19 @@ assign tasks, and collaborate on the same graph.
 ### Is it production-ready?
 
 Sibyl is in active development (v0.1.x). The core features work well, but expect rough edges. **We
-use Sibyl to build Sibyl**—every feature, task, and learning you see here was tracked inside the
+use Sibyl to build Sibyl**. Every feature, task, and learning you see here was tracked inside the
 system itself.
 
-## 🗺️ Roadmap
+## 🎯 Roadmap
 
 **Where we're headed:**
 
-- **Stronger project boundaries** — Finish project membership and permission flows end to end
-- **Deeper graph retrieval** — Better ranking, traversal, deduplication, and relationship-aware
+- **Stronger project boundaries:** Finish project membership and permission flows end to end
+- **Deeper graph retrieval:** Better ranking, traversal, deduplication, and relationship-aware
   search
-- **Brainstorming spaces** — Dedicated areas for ideation before execution
-- **External data connectors** — Feed more docs, repos, and notes into the graph
-- **Workflow polish** — Sharper epic/task planning, progress views, and review loops
+- **Brainstorming spaces:** Dedicated areas for ideation before execution
+- **External data connectors:** Feed more docs, repos, and notes into the graph
+- **Workflow polish:** Sharper epic/task planning, progress views, and review loops
 
 The graph gets smarter. The workflow gets sharper.
 
@@ -550,7 +550,7 @@ moon run :check           # Lint + typecheck + test
 
 ## License
 
-AGPL-3.0 — See [LICENSE](LICENSE)
+AGPL-3.0. See [LICENSE](LICENSE)
 
 ---
 

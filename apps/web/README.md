@@ -17,13 +17,13 @@ moon run web:generate-types
 
 ## Features
 
-- **Dashboard** — Stats, activity, onboarding checklist
-- **Tasks** — Kanban workflow with inline editing
-- **Projects & Epics** — Plan work across larger efforts
-- **Graph** — Interactive D3 visualization
-- **Search** — Semantic search with filters
-- **Sources** — Documentation crawl management
-- **Settings** — Org, API keys, preferences
+- **Dashboard:** Stats, activity, onboarding checklist
+- **Tasks:** Kanban workflow with inline editing
+- **Projects & Epics:** Plan work across larger efforts
+- **Graph:** Interactive D3 visualization
+- **Search:** Semantic search with filters
+- **Sources:** Documentation crawl management
+- **Settings:** Org, API keys, preferences
 
 ## Stack
 
@@ -73,6 +73,6 @@ Themes: Neon (default), Vibrant, Soft, Glow, Dawn (light)
 ## Testing
 
 ```bash
-pnpm test              # Vitest
+moon run web:test      # Vitest
 pnpm storybook         # Component stories on :6006
 ```

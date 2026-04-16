@@ -10,6 +10,7 @@ episodes, templates, and other types.
 - `sibyl entity create` - Create an entity
 - `sibyl entity delete` - Delete an entity
 - `sibyl entity related` - Show related entities
+- `sibyl entity history` - Show entity version history
 
 ---
 
@@ -37,6 +38,8 @@ episodes, templates, and other types.
 | `source`           | Web sources                            |
 | `document`         | Crawled documents                      |
 | `community`        | Community groupings                    |
+| `procedure`        | Procedures and processes               |
+| `note`             | Standalone notes                       |
 
 ---
 
@@ -287,6 +290,53 @@ task_jkl... Implement auth flow       task         USED_IN
 proj_mno... Backend API               project      BELONGS_TO
 
 Found 4 related entity(ies)
+```
+
+---
+
+## entity history
+
+Show version history for an entity, including changes over time.
+
+### Synopsis
+
+```bash
+sibyl entity history <entity_id> [options]
+```
+
+### Arguments
+
+| Argument    | Required | Description |
+| ----------- | -------- | ----------- |
+| `entity_id` | Yes      | Entity ID   |
+
+### Options
+
+| Option              | Short | Default   | Description                                          |
+| ------------------- | ----- | --------- | ---------------------------------------------------- |
+| `--as-of`           | `-d`  | (now)     | Show state as of a specific datetime                 |
+| `--mode`            | `-m`  | `history` | Display mode: `history`, `timeline`, or `conflicts`  |
+| `--include-expired` | `-e`  | false     | Include expired versions                             |
+| `--limit`           | `-n`  | 20        | Max results                                          |
+| `--json`            | `-j`  | false     | JSON output                                          |
+
+### Examples
+
+```bash
+# Show full version history
+sibyl entity history ent_abc123
+
+# Show state at a specific point in time
+sibyl entity history ent_abc123 --as-of "2024-06-01T00:00:00Z"
+
+# Show timeline view
+sibyl entity history ent_abc123 --mode timeline
+
+# Show conflicting versions
+sibyl entity history ent_abc123 --mode conflicts
+
+# Include expired versions
+sibyl entity history ent_abc123 --include-expired
 ```
 
 ---

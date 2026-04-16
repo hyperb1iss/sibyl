@@ -234,7 +234,7 @@ sibyl project progress proj_abc123 --json
 
 ## project link
 
-Link a directory to a project for automatic context. This is the key to seamless project-scoped
+Link a directory to a project for automatic context. This is the key to automatic project-scoped
 operations.
 
 ### Synopsis

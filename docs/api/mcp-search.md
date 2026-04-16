@@ -88,7 +88,7 @@ interface SearchResult {
   type: string; // Entity type or "document"
   name: string;
   content: string; // Truncated preview
-  score: float; // Relevance score (0-1)
+  score: number; // Relevance score (0-1)
   source?: string; // Source file or doc source
   url?: string; // URL for documents
   result_origin: "graph" | "document";

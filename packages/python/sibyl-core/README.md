@@ -1,6 +1,6 @@
 # sibyl-core
 
-Core library for Sibyl — domain models, graph operations, retrieval algorithms, and tool
+Core library for Sibyl. Domain models, graph operations, retrieval algorithms, and tool
 implementations. Shared foundation for the API server and CLI.
 
 ## Quick Reference
@@ -17,12 +17,12 @@ moon run core:test        # Pytest
 
 ## What's Here
 
-- **models/** — Domain entities (Task, Project, Epic, Source, etc.)
-- **graph/** — FalkorDB/Graphiti client, entity management
-- **retrieval/** — Graphiti node-hybrid search, fusion, deduplication
-- **tools/** — MCP tool implementations (search, explore, add, manage)
-- **tasks/** — Workflow engine, dependency resolution
-- **auth/** — JWT primitives, password hashing
+- **models/:** Domain entities (Task, Project, Epic, Source, etc.)
+- **graph/:** FalkorDB/Graphiti client, entity management
+- **retrieval/:** Graphiti node-hybrid search, fusion, deduplication
+- **tools/:** MCP tool implementations (search, explore, add, manage)
+- **tasks/:** Workflow engine, dependency resolution
+- **auth/:** JWT primitives, password hashing
 
 ## Structure
 
@@ -72,12 +72,13 @@ task = Task(
 ```python
 from sibyl_core.graph import GraphClient, EntityManager
 
-client = await GraphClient.create()
+client = GraphClient()
+await client.connect()
 manager = EntityManager(client, group_id=str(org_id))
 
 # CRUD
 await manager.create(entity)
-entity = await manager.get_by_id("entity_abc")
+# Retrieval uses search or list_by_type rather than direct ID lookup
 results = await manager.search("authentication patterns", limit=20)
 ```
 
@@ -88,7 +89,7 @@ No application-level locking is required.
 
 ```python
 # Direct writes are safe - connection pool handles concurrency
-await client.execute_write_org(org_id, query, **params)
+await client.execute_write_org(query, org_id, **params)
 
 # Or use EntityManager
 await manager.create(entity)
@@ -99,10 +100,10 @@ await manager.create(entity)
 ```python
 from sibyl_core.tasks import TaskManager
 
-manager = TaskManager(entity_manager)
-await manager.start_task(task_id)
-await manager.complete_task(task_id, learnings="Key insight...")
-await manager.block_task(task_id, reason="Waiting on API")
+manager = TaskManager(entity_manager, relationship_manager)
+await manager.create_task_with_knowledge_links(task)
+await manager.find_similar_tasks(task)
+await manager.estimate_task_effort(task)
 ```
 
 ## Entity Types

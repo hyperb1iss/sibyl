@@ -153,7 +153,10 @@ worker:
     enabled: true
     minAvailable: 1
 
-# Create ingress (adjust for your ingress controller)
+# Ingress (adjust for your ingress controller)
+# NOTE: The Helm chart does not include an ingress template.
+# Ingress must be created separately (see examples below) or
+# an ingress template must be added to the chart.
 ingress:
   enabled: true
   className: "nginx"

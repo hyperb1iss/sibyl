@@ -40,7 +40,8 @@ sibyl search "authentication"
 | Command                         | Description                                  |
 | ------------------------------- | -------------------------------------------- |
 | [`sibyl search`](./search.md)   | Semantic search across the knowledge graph   |
-| [`sibyl add`](./add.md)         | Quick knowledge capture                      |
+| [`sibyl add`](./add.md)         | Add knowledge to the graph                   |
+| `sibyl capture`                 | Quick knowledge capture (content + auto-title) |
 | [`sibyl archive`](./archive.md) | Browse archived raw quick captures           |
 | [`sibyl session`](./session.md) | Package wake-up context for the next session |
 | [`sibyl task`](./task-list.md)  | Task lifecycle management                    |
@@ -59,8 +60,10 @@ sibyl search "authentication"
 These options are available on all commands:
 
 ```bash
-sibyl --context <project_id> <command>   # Override project context
-sibyl -C <project_id> <command>          # Short form
+sibyl --context <project_id_or_name> <command>   # Override project context
+sibyl -C <project_id_or_name> <command>          # Short form
+sibyl --version                                  # Show CLI version
+sibyl -V                                         # Short form
 ```
 
 ### Output Formats
@@ -262,6 +265,7 @@ sibyl
     create            Create entity
     delete            Delete entity
     related           Show related entities
+    history           Show entity version history
 
   explore             Graph traversal
     related           Find connected entities (1-hop)
@@ -346,5 +350,6 @@ No project specified and no linked project for current directory
 Either:
 
 - Link the directory: `sibyl project link <project_id>`
-- Specify project: `--project <project_id>` or `-p`
+- For task/epic commands: `--project <project_id>` or `-p`
+- For search: `--context <project_id_or_name>` or `-C`
 - Use global flag: `--all` or `-A` to bypass context

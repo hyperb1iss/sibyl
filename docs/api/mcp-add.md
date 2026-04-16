@@ -40,6 +40,10 @@ interface AddInput {
   // Project-Specific
   repository_url?: string; // Repository URL
 
+  // Conflict Detection
+  check_conflicts?: boolean; // Check for duplicates (default: true)
+  conflict_threshold?: number; // Similarity threshold 0-1 (default: 0.70)
+
   // Execution Mode
   sync?: boolean; // Wait for processing (default: false)
 }
@@ -49,11 +53,12 @@ interface AddInput {
 
 | Type      | Description                     | Requirements           |
 | --------- | ------------------------------- | ---------------------- |
-| `episode` | Temporal learning (default)     | None                   |
-| `pattern` | Coding pattern or best practice | None                   |
-| `task`    | Work item with workflow         | **Requires `project`** |
-| `epic`    | Feature initiative              | **Requires `project`** |
-| `project` | Container for epics/tasks       | None                   |
+| `episode`   | Temporal learning (default)     | None                   |
+| `pattern`   | Coding pattern or best practice | None                   |
+| `procedure` | Step-by-step procedure          | None                   |
+| `task`      | Work item with workflow         | **Requires `project`** |
+| `epic`      | Feature initiative              | **Requires `project`** |
+| `project`   | Container for epics/tasks       | None                   |
 
 ### Priority Values
 
@@ -69,6 +74,13 @@ interface AddResponse {
   id: string | null; // Created entity ID
   message: string;
   timestamp: string; // ISO timestamp
+  conflicts: ConflictWarning[]; // Duplicate detection warnings
+}
+
+interface ConflictWarning {
+  id: string;
+  name: string;
+  score: number;
 }
 ```
 

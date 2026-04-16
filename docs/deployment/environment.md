@@ -285,6 +285,10 @@ configuring different ports and container names.
 
 ### Port Configuration
 
+> **Note:** `SIBYL_WEB_PORT` and `SIBYL_FALKORDB_BROWSER_PORT` are docker-compose-level variables
+> used only for port mapping in `docker-compose.yml`. They are not consumed by Pydantic Settings or
+> the Python application. The remaining variables in this table are read by the application.
+
 | Variable                      | Default | Description             |
 | ----------------------------- | ------- | ----------------------- |
 | `SIBYL_SERVER_PORT`           | `3334`  | API/MCP server port     |

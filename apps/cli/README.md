@@ -39,7 +39,7 @@ sibyl task complete <id> --learnings "..." # Complete with learnings
 | `capture`   | Quick capture from CLI arguments or stdin                |
 | `stats`     | Show knowledge graph statistics                          |
 | `version`   | Show CLI version information                             |
-| `task`      | Task lifecycle (list, start, complete, block, review)    |
+| `task`      | Task lifecycle (list, show, create, start, block, unblock, review, complete, archive, update, note) |
 | `epic`      | Epic management (list, start, complete, roadmap)         |
 | `project`   | Project management (list, link, create)                  |
 | `archive`   | Browse archived raw captures                             |
@@ -107,9 +107,9 @@ moon run cli:test         # Tests
 
 Terminal output uses the SilkCircuit palette:
 
-- `#e135ff` Electric Purple — Headers
-- `#80ffea` Neon Cyan — Interactions
-- `#ff6ac1` Coral — Data/IDs
+- `#e135ff` Electric Purple: Headers
+- `#80ffea` Neon Cyan: Interactions
+- `#ff6ac1` Coral: Data/IDs
 - `#50fa7b` Success Green
 - `#ff6363` Error Red
 

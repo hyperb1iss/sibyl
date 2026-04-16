@@ -118,6 +118,8 @@ Entities connect through typed relationships:
 | `CHILD_OF`     | Document hierarchy |
 | `MENTIONS`     | Document -> Entity |
 
+Selected types shown. See [Entity Types](/guide/entity-types) for the complete list.
+
 ## Multi-Tenancy
 
 Each organization gets its own isolated graph:
@@ -135,14 +137,7 @@ or break isolation. :::
 
 ## Write Concurrency
 
-FalkorDB requires serialized writes to prevent corruption. Sibyl uses a semaphore:
-
-```python
-async with client.write_lock:
-    await client.execute_write_org(org_id, query, **params)
-```
-
-The `EntityManager` handles this automatically for all write operations.
+FalkorDB's connection pool handles write concurrency natively. No application-level locking is needed.
 
 ## Hybrid Search
 
@@ -304,13 +299,10 @@ MATCH (n:Entity) WHERE n.entity_type = 'pattern'
 MATCH (n) WHERE (n:Episodic OR n:Entity) AND n.entity_type = 'pattern'
 ```
 
-### 3. Use Write Lock for Mutations
+### 3. Write Concurrency
 
-```python
-# EntityManager handles this, but for direct queries:
-async with client.write_lock:
-    await driver.execute_query("CREATE ...")
-```
+FalkorDB's connection pool handles write concurrency natively. `EntityManager` methods are
+safe to call concurrently without application-level locking.
 
 ### 4. Filter Early in Queries
 

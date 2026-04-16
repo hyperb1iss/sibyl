@@ -164,7 +164,7 @@ If graph data is lost but PostgreSQL data exists:
    ```bash
    # In compose or k8s, ensure data volume is mounted
    volumes:
-     - falkordb_data:/data
+     - falkordb_data:/var/lib/falkordb/data
    ```
 
 2. **Graceful shutdowns:**
@@ -493,8 +493,10 @@ This commonly happens if you have Redis running locally.
 3. **Full reset:**
    ```bash
    tilt down
+   # If using Minikube:
    minikube delete
    minikube start --cpus=4 --memory=8192
+   # If using OrbStack: restart via OrbStack app or `orb restart`)
    tilt up
    ```
 

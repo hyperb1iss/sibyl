@@ -19,11 +19,11 @@ moon run api:typecheck    # Type check
 
 ## What's Here
 
-- **MCP Server** — 4-tool API for search, exploration, capture, and task management
-- **REST API** — Full CRUD for entities, tasks, projects, and sources
-- **Auth System** — JWT, OAuth (GitHub), API keys, RBAC
-- **Background Jobs** — arq workers for crawling and maintenance
-- **WebSocket** — Real-time updates for entities and tasks
+- **MCP Server:** 5-tool API for search, exploration, capture, and task management
+- **REST API:** Full CRUD for entities, tasks, projects, and sources
+- **Auth System:** JWT, OAuth (GitHub), API keys, RBAC
+- **Background Jobs:** arq workers for crawling and maintenance
+- **WebSocket:** Real-time updates for entities and tasks
 
 ## Architecture
 
@@ -39,7 +39,7 @@ Sibyl Combined App (port 3334)
 
 | Directory | Purpose |
 |-----------|---------|
-| `api/routes/` | REST endpoints (tasks, entities, auth, sources, admin) |
+| `api/routes/` | REST endpoints (tasks, entities, auth, crawler, admin, and more) |
 | `auth/` | JWT, sessions, API keys, RBAC, RLS |
 | `crawler/` | Documentation ingestion pipeline |
 | `jobs/` | Background job definitions |
@@ -56,9 +56,13 @@ SIBYL_JWT_SECRET=...              # Auth
 **Optional:**
 ```bash
 SIBYL_ANTHROPIC_API_KEY=...       # Optional model-powered extraction
-SIBYL_DATABASE_URL=...            # PostgreSQL
+SIBYL_POSTGRES_HOST=...           # PostgreSQL
+SIBYL_POSTGRES_PORT=...
+SIBYL_POSTGRES_USER=...
+SIBYL_POSTGRES_PASSWORD=...
+SIBYL_POSTGRES_DB=...
 SIBYL_FALKORDB_HOST=...           # Graph DB
-SIBYL_REDIS_URL=...               # Queue + pub/sub
+SIBYL_FALKORDB_PORT=...
 ```
 
 ## CLI Commands
@@ -70,8 +74,8 @@ sibyld worker             # Start background worker
 sibyld up                 # Start all services (Supabase-style)
 sibyld down               # Stop all services
 sibyld db migrate         # Run migrations
-sibyld db nuke            # Delete all data (dangerous!)
-sibyld generate quick     # Generate sample data
+sibyld db clear           # Delete all data (dangerous!)
+sibyld generate realistic # Generate sample data
 ```
 
 ## Key Patterns
@@ -81,15 +85,11 @@ sibyld generate quick     # Generate sample data
 manager = EntityManager(client, group_id=str(org.id))
 ```
 
-**Write concurrency:** FalkorDB writes use semaphore
-```python
-async with client.write_lock:
-    await client.execute_write_org(org_id, query, **params)
-```
+Write concurrency: FalkorDB's connection pool handles concurrency natively. No application-level locking required.
 
 **Request context:** Auth middleware injects user/org
 ```python
-from sibyl.auth.context import get_current_user, get_current_org
+from sibyl.auth.dependencies import get_current_user, get_current_organization
 ```
 
 ## Dependencies

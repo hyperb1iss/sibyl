@@ -42,6 +42,12 @@ interface Task {
   technologies: string[];
   branch_name?: string;
   pr_url?: string;
+  sprint?: string;
+  due_date?: string;
+  estimated_hours?: number;
+  actual_hours?: number;
+  domain?: string;
+  task_order?: number;
   created_at: string;
   updated_at: string;
 }

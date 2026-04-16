@@ -51,13 +51,13 @@ interface ExploreInput {
 ### Entity Types
 
 ```
-pattern, rule, template, topic, episode, task, project, epic, source, document
+pattern, rule, template, topic, episode, procedure, task, project, epic, source, document
 ```
 
 ### Relationship Types
 
 ```
-DEPENDS_ON, BELONGS_TO, RELATED_TO, REFERENCES, IMPLEMENTS
+DEPENDS_ON, BELONGS_TO, RELATED_TO, REFERENCES, IMPLEMENTED
 ```
 
 ### Task Filters

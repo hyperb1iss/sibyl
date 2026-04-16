@@ -5,19 +5,19 @@ description: Build a knowledge graph your team can actually reuse
 
 # Introduction
 
-Welcome to Sibyl—the knowledge graph and task workflow that turns scattered notes, tasks, and
+Welcome to Sibyl, the knowledge graph and task workflow that turns scattered notes, tasks, and
 hard-won debugging lessons into reusable project memory.
 
 ## What You'll Learn
 
 This guide teaches you how to:
 
-1. **Set up your prompts** — Configure CLAUDE.md for effective workflows
-2. **Use skills and hooks** — Automatic context injection
-3. **Build a conventions repo** — Centralize team patterns
-4. **Manage knowledge** — Through the web UI and CLI
-5. **Track execution** — Projects, epics, and tasks across sessions
-6. **Capture durable learnings** — Turn debugging into reusable memory
+1. **Set up your prompts**: Configure CLAUDE.md for effective workflows
+2. **Use skills and hooks**: Automatic context injection
+3. **Build a conventions repo**: Centralize team patterns
+4. **Manage knowledge**: Through the web UI and CLI
+5. **Track execution**: Projects, epics, and tasks across sessions
+6. **Capture durable learnings**: Turn debugging into reusable memory
 
 ## The Philosophy
 
@@ -74,7 +74,7 @@ priority, assignee, and more.
 
 ![Entity Browser](/screenshots/web-entities.png)
 
-**Entity Browser**: Browse all knowledge types—patterns, episodes, conventions, rules. Search and
+**Entity Browser**: Browse all knowledge types (patterns, episodes, conventions, rules). Search and
 filter to find what you need.
 
 ![Semantic Search](/screenshots/web-search.png)
@@ -138,7 +138,7 @@ Not everything belongs in the knowledge graph. Focus on:
 
 ## Quality Bar
 
-The knowledge graph gets smarter with every entry—but only if entries are high quality.
+The knowledge graph gets smarter with every entry, but only if entries are high quality.
 
 **Bad entry:**
 
@@ -163,9 +163,9 @@ Sibyl offers three interfaces, each suited to different users:
 
 | Interface  | Best For                      | Token Usage              |
 | ---------- | ----------------------------- | ------------------------ |
-| **CLI**    | Scripts, workflows, quick ops | Low—text output only     |
-| **MCP**    | Direct tool invocation        | Higher—full JSON schemas |
-| **Web UI** | Humans managing projects      | N/A—visual interface     |
+| **CLI**    | Scripts, workflows, quick ops | Low (text output only)     |
+| **MCP**    | Direct tool invocation        | Higher (full JSON schemas) |
+| **Web UI** | Humans managing projects      | N/A (visual interface)     |
 
 For routine operations, **prefer the CLI**. It's expressive, scriptable, and lighter-weight than MCP
 tool calls.
@@ -174,17 +174,17 @@ tool calls.
 
 ### Getting Started
 
-1. **[Installation](./installation)** — Get Sibyl running locally
-2. **[Quick Start](./quick-start)** — Create your first knowledge entries
+1. **[Installation](./installation)**: Get Sibyl running locally
+2. **[Quick Start](./quick-start)**: Create your first knowledge entries
 
 ### Working Effectively
 
-3. **[Setting Up Prompts](./setting-up-prompts)** — Configure your CLAUDE.md
-4. **[Skills & Hooks](./skills)** — Automatic context injection
-5. **[Conventions Repository](./conventions-repository)** — Centralize team patterns
+3. **[Setting Up Prompts](./setting-up-prompts)**: Configure your CLAUDE.md
+4. **[Skills & Hooks](./skills)**: Automatic context injection
+5. **[Conventions Repository](./conventions-repository)**: Centralize team patterns
 
 ### Core Concepts
 
-6. **[Knowledge Graph](./knowledge-graph)** — Understand the data model
-7. **[Task Management](./task-management)** — Track work across sessions
-8. **[Sources](./capturing-knowledge)** — Ingest external documentation
+6. **[Knowledge Graph](./knowledge-graph)**: Understand the data model
+7. **[Task Management](./task-management)**: Track work across sessions
+8. **[Sources](./capturing-knowledge)**: Ingest external documentation

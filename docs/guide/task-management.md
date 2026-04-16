@@ -16,7 +16,7 @@ Tasks move through these states:
 
 ```
 backlog <-> todo <-> doing <-> blocked <-> review <-> done -> archived
-           ^_______________________________|
+                     ^_________________________|
 ```
 
 | Status     | Description                    |
@@ -397,19 +397,11 @@ explore(mode="list", types=["task"], project="proj_abc", status="todo")
 explore(mode="dependencies", entity_id="task_xyz")
 ```
 
-## Concurrency and Locking
+## Concurrency
 
-Sibyl uses distributed locks for task updates:
-
-- **Lock TTL**: 30 seconds
-- **Wait timeout**: 45 seconds
-- **Conflict response**: 409 status
-
-```bash
-# If you get a 409 error
-sleep 2
-sibyl task update task_xyz --status doing  # Retry
-```
+Task updates are serialized with `entity_lock()` in the API layer. When two writers attempt
+to modify the same task simultaneously, the second receives a `409 Conflict` response.
+Callers should implement retry with backoff when contention is expected.
 
 ## Best Practices
 

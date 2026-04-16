@@ -167,7 +167,7 @@ PostgreSQL RLS provides database-level isolation.
      USING (organization_id::text = current_setting('app.org_id', true));
    ```
 
-3. Queries only return allowed rows—no application filtering needed.
+3. Queries only return allowed rows. No application filtering needed.
 
 ### Protected Tables
 
@@ -195,7 +195,7 @@ await session.execute(
     select(Project).where(Project.organization_id == org_id)
 )
 
-# With RLS, just query—policies handle filtering:
+# With RLS, just query. Policies handle filtering:
 await session.execute(select(Project))  # Only returns user's org projects
 ```
 
@@ -207,7 +207,7 @@ For migrations and admin operations, use a session without RLS:
 from sibyl.db.connection import get_session
 
 async with get_session() as session:
-    # No RLS context set—sees all data
+    # No RLS context set, sees all data
     # Use only for migrations/admin
     ...
 ```

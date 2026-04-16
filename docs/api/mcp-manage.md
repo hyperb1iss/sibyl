@@ -332,7 +332,7 @@ Trigger crawl of a URL.
     "source_id": "source_abc123",
     "url": "https://docs.example.com",
     "depth": 3,
-    "status": "pending"
+    "status": "queued"
   }
 }
 ```
@@ -551,6 +551,7 @@ Suggest relevant knowledge for a task.
   "data": {
     "patterns": [{ "id": "pattern_oauth", "name": "OAuth 2.0 PKCE Flow", "score": 0.92 }],
     "rules": [{ "id": "rule_token", "name": "Token Rotation Rules", "score": 0.85 }],
+    "procedures": [],
     "templates": [],
     "past_learnings": [{ "id": "episode_xyz", "name": "OAuth state bug fix", "score": 0.78 }],
     "error_patterns": []

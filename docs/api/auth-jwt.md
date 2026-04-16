@@ -123,8 +123,14 @@ POST /api/auth/local/signup
     "email": "user@example.com",
     "name": "User Name"
   },
+  "organization": {
+    "id": "org_uuid",
+    "name": "My Org",
+    "slug": "my-org"
+  },
   "access_token": "eyJhbGciOiJIUzI1NiIs...",
-  "token_type": "bearer"
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+  "expires_in": 3600
 }
 ```
 
@@ -147,9 +153,18 @@ POST /api/auth/local/login
 
 ```json
 {
+  "user": {
+    "id": "user_uuid",
+    "email": "user@example.com",
+    "name": "User Name"
+  },
+  "organization": {
+    "id": "org_uuid",
+    "name": "My Org",
+    "slug": "my-org"
+  },
   "access_token": "eyJhbGciOiJIUzI1NiIs...",
   "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
-  "token_type": "bearer",
   "expires_in": 3600
 }
 ```
@@ -161,7 +176,7 @@ Also sets `sibyl_access_token` cookie for web clients.
 #### Start OAuth Flow
 
 ```http
-GET /api/auth/github/authorize
+GET /api/auth/github
 ```
 
 Redirects to GitHub OAuth consent screen.
@@ -213,11 +228,20 @@ Returns current authenticated user.
 
 ```json
 {
-  "id": "user_uuid",
-  "email": "user@example.com",
-  "name": "User Name",
-  "organization_id": "org_uuid",
-  "role": "member"
+  "user": {
+    "id": "user_uuid",
+    "github_id": 12345,
+    "email": "user@example.com",
+    "name": "User Name",
+    "avatar_url": "https://avatars.githubusercontent.com/u/12345",
+    "is_admin": false
+  },
+  "organization": {
+    "id": "org_uuid",
+    "name": "My Org",
+    "slug": "my-org"
+  },
+  "org_role": "owner"
 }
 ```
 
@@ -242,6 +266,7 @@ Exchange refresh token for new access token.
 ```json
 {
   "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
   "token_type": "bearer",
   "expires_in": 3600
 }
@@ -287,19 +312,14 @@ All API operations are scoped to this organization:
 
 ### Switching Organizations
 
-To switch organizations, obtain a new token with different org context:
+Switch the active organization for the current session:
 
-```http
-POST /api/auth/switch-org
+```
+POST /api/orgs/{slug}/switch
 ```
 
-**Request:**
-
-```json
-{
-  "organization_id": "new_org_uuid"
-}
-```
+Returns rotated access and refresh tokens scoped to the target organization. The user must
+be a member of that organization.
 
 ## Security Considerations
 

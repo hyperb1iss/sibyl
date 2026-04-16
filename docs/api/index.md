@@ -43,7 +43,7 @@ Full CRUD operations with OpenAPI documentation:
 | -------- | ----------------------------------- | -------------------------------------- |
 | Entities | `/api/entities/*`                   | [rest-entities.md](./rest-entities.md) |
 | Tasks    | `/api/tasks/*`                      | [rest-tasks.md](./rest-tasks.md)       |
-| Projects | `/api/entities?entity_type=project` | [rest-entities.md](./rest-entities.md) |
+| Projects | `/api/entities?entity_type=project` | [rest-projects.md](./rest-projects.md) |
 | Search   | `/api/search`                       | [rest-search.md](./rest-search.md)     |
 
 **OpenAPI Spec:** Available at `/api/docs` (Swagger UI) and `/api/openapi.json`
@@ -101,11 +101,12 @@ Sibyl is multi-tenant by design. Each organization gets:
 
 REST endpoints are rate-limited using SlowAPI:
 
-| Tier             | Limit               |
-| ---------------- | ------------------- |
-| Default          | 100 requests/minute |
-| Search           | 30 requests/minute  |
-| Write operations | 60 requests/minute  |
+| Tier    | Limit               |
+| ------- | ------------------- |
+| Default | 100 requests/minute |
+| Search  | 30 requests/minute  |
+| Auth    | 5 requests/minute   |
+| Crawl   | 10 requests/minute  |
 
 Rate limit headers are included in responses:
 

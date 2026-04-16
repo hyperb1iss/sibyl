@@ -186,8 +186,8 @@ export default defineConfig({
         socialLinks: [{ icon: 'github', link: 'https://github.com/hyperb1iss/sibyl' }],
 
         footer: {
-            message: 'Released under the MIT License.',
-            copyright: 'Copyright © 2024-2025 Stefanie Jane',
+            message: 'Released under the AGPL-3.0 License.',
+            copyright: 'Copyright © 2024-2026 Stefanie Jane',
         },
 
         search: {

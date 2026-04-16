@@ -163,7 +163,7 @@ result = await org_driver.execute_query(query)
 API routes extract org context from the authenticated user:
 
 ```python
-from sibyl.auth.context import get_current_org
+from sibyl.auth.dependencies import get_current_organization
 
 @router.get("/entities")
 async def list_entities():

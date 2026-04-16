@@ -7,7 +7,7 @@ Complete reference for the Sibyl Helm chart (`charts/sibyl`).
 ```yaml
 apiVersion: v2
 name: sibyl
-description: Graph-RAG Knowledge Oracle - MCP server for AI agent development wisdom
+description: Knowledge graph and task workflow for durable development memory
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
@@ -408,9 +408,6 @@ ingress:
     - host: sibyl.local
       paths:
         - path: /api
-          pathType: Prefix
-          service: backend
-        - path: /mcp
           pathType: Prefix
           service: backend
         - path: /

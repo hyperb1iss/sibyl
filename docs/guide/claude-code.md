@@ -11,7 +11,7 @@ Code. This guide explains how to set up and use Sibyl as your AI agent's persist
 ## What is MCP?
 
 The Model Context Protocol (MCP) allows AI assistants like Claude to interact with external tools
-and data sources. Sibyl exposes 4 MCP tools:
+and data sources. Sibyl exposes 5 MCP tools:
 
 | Tool      | Purpose                   |
 | --------- | ------------------------- |
@@ -19,6 +19,7 @@ and data sources. Sibyl exposes 4 MCP tools:
 | `explore` | Navigate graph structure  |
 | `add`     | Create knowledge entries  |
 | `manage`  | Task workflow and admin   |
+| `logs`    | Developer log access      |
 
 ## Configuration
 

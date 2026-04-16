@@ -1,4 +1,4 @@
-# Multi-Tier Permission System (Org + Project) — Code-Audited Plan
+# Multi-Tier Permission System (Org + Project): Code-Audited Plan
 
 This is the updated, code-audited permission plan for Sibyl. It reconciles the desired model with
 what already exists in the schema and runtime, and enumerates the minimal missing pieces needed to

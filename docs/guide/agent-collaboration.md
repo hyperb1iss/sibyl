@@ -191,8 +191,7 @@ search("conflicting topic")
 
 # Check timestamps and merge manually if needed
 add("Merged insight",
-    "Combined understanding from multiple sources...",
-    supersedes=["old_entry_1", "old_entry_2"])
+    "Combined understanding from multiple sources...")
 ```
 
 ## Agent Specialization
@@ -310,7 +309,7 @@ add("New team rule",
 search("deprecated", since="1y")
 
 # Archive or update
-manage("archive_entity", entity_id="outdated_pattern",
+manage("archive_task", entity_id="outdated_pattern",
        data={"reason": "Superseded by new approach"})
 ```
 

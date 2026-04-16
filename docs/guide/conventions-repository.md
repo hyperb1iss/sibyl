@@ -189,7 +189,8 @@ Ask explicitly: "Am I investigating or fixing?"
 Sibyl can crawl local directories:
 
 ```bash
-sibyl crawl ~/dev/conventions --depth 3 --include "*.md"
+sibyl crawl add "file:///Users/bliss/dev/conventions" --name "Conventions"
+sibyl crawl ingest <source_id>
 ```
 
 This creates `CONVENTION` entities in your knowledge graph.
@@ -215,7 +216,8 @@ Set up a hook to re-crawl when conventions change:
 # In conventions repo
 # .git/hooks/post-commit
 #!/bin/bash
-sibyl crawl ~/dev/conventions --depth 3 --include "*.md" --refresh
+sibyl crawl add "file:///Users/bliss/dev/conventions" --name "Conventions"
+sibyl crawl ingest <source_id>
 ```
 
 ## Using Conventions in Projects
@@ -443,7 +445,7 @@ Use consistent categories:
 
 ### 3. Include Context
 
-Don't just say what—explain why:
+Don't just say what. Explain why:
 
 ```markdown
 # Bad

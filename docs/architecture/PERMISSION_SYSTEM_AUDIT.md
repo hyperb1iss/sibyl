@@ -80,7 +80,7 @@ Severity rubric (rough): **Critical** (tenant/project isolation bypass or takeov
 (unintended cross-user control, broad data exposure), **Medium** (abuse/DoS or policy drift),
 **Low** (hardening/ergonomics).
 
-### A. Critical — Project RBAC is likely non-functional in practice
+### A. Critical: Project RBAC is likely non-functional in practice
 
 **What**: Project RBAC enforcement relies on the Postgres `projects` table being populated with
 `graph_project_id` rows. If _no_ projects exist in Postgres for an org,
@@ -120,7 +120,7 @@ members” even for project-scoped writes when the project cannot be resolved in
 
 ---
 
-### B. Critical — Project membership endpoint uses the wrong identifier + missing org RBAC invariant
+### B. Critical: Project membership endpoint uses the wrong identifier + missing org RBAC invariant
 
 **What**: `/api/projects/{project_id}/members` expects `project_id: UUID` (Postgres project primary
 key), but the web app calls it using graph project IDs (e.g. `project_<hash>`).
@@ -161,7 +161,7 @@ not require org membership** (`OrganizationMember`) and does not use `require_or
 
 ---
 
-### C. High — `verify_entity_project_access()` bypasses `required_role` in important cases
+### C. High: `verify_entity_project_access()` bypasses `required_role` in important cases
 
 **What**:
 
@@ -190,7 +190,7 @@ not require org membership** (`OrganizationMember`) and does not use `require_or
 
 ---
 
-### D. High — MCP bypasses project RBAC and lacks user context
+### D. High: MCP bypasses project RBAC and lacks user context
 
 **What**: MCP tools are scoped by org only (`_require_org_id()` reads `org` claim). They do not
 compute accessible projects for a user and therefore cannot filter per-project. This is a direct
@@ -214,7 +214,7 @@ grant MCP access unless a more explicit “audience/scope” strategy is adopted
 
 ---
 
-### E. Medium/High — Postgres RLS is “allow-all on NULL context” and is not wired into request sessions
+### E. Medium/High: Postgres RLS is “allow-all on NULL context” and is not wired into request sessions
 
 **What**:
 
@@ -247,7 +247,7 @@ grant MCP access unless a more explicit “audience/scope” strategy is adopted
 
 ---
 
-### F. Medium — Setup endpoints stay unauthenticated after setup
+### F. Medium: Setup endpoints stay unauthenticated after setup
 
 **What**: `/api/setup/*` endpoints have no auth and remain callable after users/orgs exist.
 
@@ -263,7 +263,7 @@ for rate/usage pressure even if it doesn’t leak secrets.
 
 ---
 
-### G. Medium — Web server-side caching may risk cross-user cache pollution
+### G. Medium: Web server-side caching may risk cross-user cache pollution
 
 **What**: `apps/web/src/lib/api-server.ts` performs `fetch()` with cookies attached and uses Next
 fetch caching strategies (`force-cache`, `revalidate`). Depending on Next.js caching semantics, this
@@ -279,7 +279,7 @@ can risk caching authenticated responses across users/orgs.
 
 ---
 
-### H. Low/Medium — API keys: coarse scopes; project scoping not enforced
+### H. Low/Medium: API keys: coarse scopes; project scoping not enforced
 
 **What**:
 
@@ -309,7 +309,7 @@ can risk caching authenticated responses across users/orgs.
 
 ## 4) Suggested Remediation Plan (Prioritized)
 
-### Phase 0 — Safety fixes (fast, high impact)
+### Phase 0: Safety fixes (fast, high impact)
 
 1. Fix project membership routing:
    - Accept graph project IDs, not Postgres UUIDs, and resolve Postgres project row internally.
@@ -318,14 +318,14 @@ can risk caching authenticated responses across users/orgs.
 4. Remove/write-gate `verify_entity_project_access()` bypasses for write paths.
 5. Gate setup endpoints after initial bootstrap.
 
-### Phase 1 — Hardening / defense-in-depth
+### Phase 1: Hardening / defense-in-depth
 
 1. Decide RLS posture:
    - enforce in app sessions + remove NULL-bypass for app DB role
 2. Ensure org-scoped tables are always queried with `organization_id` filters (even with RLS).
 3. Decide MCP scope/audience strategy and add user-derived project filtering.
 
-### Phase 2 — Tests + tooling
+### Phase 2: Tests + tooling
 
 1. Add tests proving:
    - “removed org member cannot manage project members”
