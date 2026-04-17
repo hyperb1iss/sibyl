@@ -124,46 +124,23 @@ async def _get_accessible_projects(ctx: McpContext) -> set[str] | None:
             return set(ctx.api_key_project_ids)
         return None
 
-    from sibyl.auth.context import AuthContext
     from sibyl.db.connection import get_session
+    from sibyl.persistence.legacy.auth import LegacyAuthContextResolver, UserNotFoundError
 
     async with get_session() as session:
-        # Build a minimal AuthContext for authorization lookup
-        from sqlmodel import select
-
-        from sibyl.db.models import Organization, OrganizationMember, User
-
-        # Get user
-        user_result = await session.execute(select(User).where(User.id == UUID(ctx.user_id)))
-        user = user_result.scalar_one_or_none()
-        if not user:
-            return set()  # User not found - no access
-
-        # Get organization
-        org_result = await session.execute(
-            select(Organization).where(Organization.id == UUID(ctx.org_id))
-        )
-        org = org_result.scalar_one_or_none()
-        if not org:
-            return set()  # Org not found - no access
-
-        # Get org role
-        member_result = await session.execute(
-            select(OrganizationMember).where(
-                OrganizationMember.organization_id == org.id,
-                OrganizationMember.user_id == user.id,
+        resolver = LegacyAuthContextResolver.from_session(session)
+        try:
+            auth_ctx = await resolver.resolve(
+                {
+                    "sub": ctx.user_id,
+                    "org": ctx.org_id,
+                    "scopes": ctx.scopes or [],
+                }
             )
-        )
-        member = member_result.scalar_one_or_none()
-        org_role = member.role if member else None
-
-        # Build AuthContext
-        auth_ctx = AuthContext(
-            user=user,
-            organization=org,
-            org_role=org_role,
-            scopes=ctx.scopes or [],
-        )
+        except UserNotFoundError:
+            return set()
+        if auth_ctx.organization is None:
+            return set()
 
         # Get accessible projects based on user permissions
         from sibyl.auth.authorization import list_accessible_project_graph_ids
