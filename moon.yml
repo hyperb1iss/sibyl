@@ -170,6 +170,7 @@ tasks:
   lint:
     deps:
       - ~:inventory-lint
+      - ~:storage-access-check
       - core:lint
       - api:lint
       - cli:lint
@@ -203,6 +204,8 @@ tasks:
       - ~:inventory-lint
       - ~:inventory-typecheck
       - ~:inventory-test
+      - ~:storage-access-check
+      - ~:storage-access-test
       - ~:baseline-test
       - core:check
       - api:check
@@ -216,6 +219,7 @@ tasks:
   test:
     deps:
       - ~:inventory-test
+      - ~:storage-access-test
       - ~:baseline-test
       - core:test
       - api:test
@@ -270,6 +274,23 @@ tasks:
       - apps/api/pyproject.toml
       - apps/cli/pyproject.toml
       - packages/python/sibyl-core/pyproject.toml
+
+  storage-access-check:
+    command: uv run python -m tools.lint.no_direct_storage_access
+    inputs:
+      - tools/**/*.py
+      - apps/api/src/sibyl/api/routes/**/*.py
+      - apps/api/src/sibyl/server.py
+      - apps/api/src/sibyl/auth/mcp_auth.py
+      - apps/api/src/sibyl/auth/mcp_oauth.py
+      - packages/python/sibyl-core/src/sibyl_core/tools/**/*.py
+      - pyproject.toml
+
+  storage-access-test:
+    command: uv run pytest tools/tests/test_no_direct_storage_access.py -v
+    inputs:
+      - tools/**/*.py
+      - pyproject.toml
 
   baseline-capture:
     command: uv run python -m tools.baselines.capture
