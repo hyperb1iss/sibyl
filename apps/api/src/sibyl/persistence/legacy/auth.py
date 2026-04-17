@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Self
 from uuid import UUID
 
@@ -41,6 +41,67 @@ class InvalidAuthClaimsError(ValueError):
 
 class UserNotFoundError(LookupError):
     """Claims referenced a user that no longer exists."""
+
+
+async def authenticate_legacy_api_key(raw_key: str):
+    """Authenticate an API key via the current relational auth runtime."""
+    from sibyl.auth.api_keys import ApiKeyManager
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        return await ApiKeyManager.from_session(session).authenticate(raw_key)
+
+
+async def resolve_legacy_accessible_project_graph_ids(
+    *,
+    user_id: str,
+    org_id: str,
+    scopes: Sequence[str] | None = None,
+    api_key_project_ids: Sequence[str] | None = None,
+) -> set[str] | None:
+    """Resolve project graph IDs accessible to the given user in an organization."""
+    from sibyl.auth.authorization import list_accessible_project_graph_ids
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        resolver = LegacyAuthContextResolver.from_session(session)
+        try:
+            auth_ctx = await resolver.resolve(
+                {
+                    "sub": user_id,
+                    "org": org_id,
+                    "scopes": list(scopes or []),
+                }
+            )
+        except UserNotFoundError:
+            return set()
+        if auth_ctx.organization is None:
+            return set()
+
+        user_accessible = await list_accessible_project_graph_ids(session, auth_ctx)
+
+    if api_key_project_ids is not None:
+        api_key_allowed = set(api_key_project_ids)
+        if user_accessible is None:
+            return api_key_allowed
+        return user_accessible & api_key_allowed
+
+    return user_accessible
+
+
+async def has_legacy_owner_membership(*, org_id: str, user_id: str | None) -> bool:
+    """Return whether the user is an owner in the current organization."""
+    from sibyl.db.connection import get_session
+
+    if user_id is None:
+        return False
+
+    async with get_session() as session:
+        membership = await OrganizationMembershipManager.from_session(session).get_for_user(
+            UUID(org_id),
+            UUID(user_id),
+        )
+    return bool(membership and getattr(membership.role, "value", membership.role) == "owner")
 
 
 def _to_auth_user(value: object | None) -> AuthUser | None:

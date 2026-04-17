@@ -7,13 +7,17 @@ Exposes 5 tools and 2 resources:
 
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
-from uuid import UUID
 
 import structlog
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.fastmcp import FastMCP
 
 from sibyl.config import settings
+from sibyl.persistence.legacy.auth import (
+    authenticate_legacy_api_key,
+    has_legacy_owner_membership,
+    resolve_legacy_accessible_project_graph_ids,
+)
 
 log = structlog.get_logger()
 
@@ -45,11 +49,7 @@ async def _get_mcp_context() -> McpContext | None:
 
     # API Key authentication
     if raw.startswith("sk_"):
-        from sibyl.auth.api_keys import ApiKeyManager
-        from sibyl.db.connection import get_session
-
-        async with get_session() as session:
-            auth = await ApiKeyManager.from_session(session).authenticate(raw)
+        auth = await authenticate_legacy_api_key(raw)
         if auth:
             # Convert project UUIDs to graph IDs (strings)
             project_ids = (
@@ -124,39 +124,12 @@ async def _get_accessible_projects(ctx: McpContext) -> set[str] | None:
             return set(ctx.api_key_project_ids)
         return None
 
-    from sibyl.db.connection import get_session
-    from sibyl.persistence.legacy.auth import LegacyAuthContextResolver, UserNotFoundError
-
-    async with get_session() as session:
-        resolver = LegacyAuthContextResolver.from_session(session)
-        try:
-            auth_ctx = await resolver.resolve(
-                {
-                    "sub": ctx.user_id,
-                    "org": ctx.org_id,
-                    "scopes": ctx.scopes or [],
-                }
-            )
-        except UserNotFoundError:
-            return set()
-        if auth_ctx.organization is None:
-            return set()
-
-        # Get accessible projects based on user permissions
-        from sibyl.auth.authorization import list_accessible_project_graph_ids
-
-        user_accessible = await list_accessible_project_graph_ids(session, auth_ctx)
-
-        # Intersect with API key project restrictions if present
-        if ctx.api_key_project_ids is not None:
-            api_key_allowed = set(ctx.api_key_project_ids)
-            if user_accessible is None:
-                # User has admin access but API key is restricted
-                return api_key_allowed
-            # Intersect: user must have access AND API key must allow it
-            return user_accessible & api_key_allowed
-
-        return user_accessible
+    return await resolve_legacy_accessible_project_graph_ids(
+        user_id=ctx.user_id,
+        org_id=ctx.org_id,
+        scopes=ctx.scopes,
+        api_key_project_ids=ctx.api_key_project_ids,
+    )
 
 
 async def _require_org_id() -> str:
@@ -172,6 +145,12 @@ async def _require_org_id() -> str:
     if not org_id:
         raise ValueError("Organization context required. Authenticate with an org-scoped token.")
     return org_id
+
+
+async def _require_owner_mcp_context(ctx: McpContext) -> None:
+    """Require OWNER membership for the current MCP context."""
+    if not await has_legacy_owner_membership(org_id=ctx.org_id, user_id=ctx.user_id):
+        raise ValueError("OWNER role required for log access")
 
 
 # Module-level server instance (created lazily)
@@ -666,26 +645,13 @@ def _register_tools(mcp: FastMCP) -> None:
             logs(service="worker")    # Worker logs only
             logs(level="error")       # Errors only
         """
-        from sqlmodel import select
-
-        from sibyl.db.connection import get_session
-        from sibyl.db.models import OrganizationMember, OrganizationRole
         from sibyl_core.logging import LogBuffer
 
         # Require auth context
         ctx = await _require_mcp_context()
 
         # Check OWNER role (super admin)
-        async with get_session() as session:
-            result = await session.execute(
-                select(OrganizationMember).where(
-                    OrganizationMember.organization_id == UUID(ctx.org_id),
-                    OrganizationMember.user_id == UUID(ctx.user_id) if ctx.user_id else False,
-                )
-            )
-            membership = result.scalar_one_or_none()
-            if not membership or membership.role != OrganizationRole.OWNER:
-                raise ValueError("OWNER role required for log access")
+        await _require_owner_mcp_context(ctx)
 
         # Clamp limit
         limit = min(max(1, limit), 500)
