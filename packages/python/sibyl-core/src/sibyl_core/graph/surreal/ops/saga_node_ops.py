@@ -116,23 +116,12 @@ class SurrealSagaNodeOperations(SagaNodeOperations):
         executor: QueryExecutor,
         node: SagaNode,
         tx: Transaction | None = None,
-    ) -> list[str]:
-        """Delete a saga and return the UUIDs of any removed edges.
+    ) -> None:
+        """Delete a saga and cascade any connected relation rows.
 
-        Sagas anchor ``has_episode`` RELATION rows; SurrealDB cascades
-        endpoint deletes so we snapshot edge uuids first.
+        Sagas anchor ``has_episode`` RELATION rows, and SurrealDB removes
+        those edges automatically when the saga endpoint is deleted.
         """
-        raw = await _run(
-            executor,
-            tx,
-            """
-            SELECT uuid FROM has_episode
-            WHERE in IN (SELECT id FROM saga WHERE uuid = $uuid);
-            """,
-            uuid=node.uuid,
-        )
-        edge_uuids = [r["uuid"] for r in normalize_records(raw)]
-
         await _run(
             executor,
             tx,
@@ -140,7 +129,6 @@ class SurrealSagaNodeOperations(SagaNodeOperations):
             uuid=node.uuid,
         )
         logger.debug("Deleted saga from SurrealDB: %s", node.uuid)
-        return edge_uuids
 
     async def delete_by_group_id(
         self,

@@ -119,24 +119,12 @@ class SurrealEntityNodeOperations(EntityNodeOperations):
         executor: QueryExecutor,
         node: EntityNode,
         tx: Transaction | None = None,
-    ) -> list[str]:
-        """Delete an entity and return the UUIDs of any removed edges.
+    ) -> None:
+        """Delete an entity and cascade any connected relation rows.
 
         SurrealDB RELATION tables cascade when their endpoints are deleted,
-        so we snapshot the edge uuids first.
+        so no explicit edge cleanup is required here.
         """
-        raw_edges = await _run(
-            executor,
-            tx,
-            """
-            SELECT id, uuid FROM relates_to
-            WHERE (in IN (SELECT id FROM entity WHERE uuid = $uuid))
-               OR (out IN (SELECT id FROM entity WHERE uuid = $uuid));
-            """,
-            uuid=node.uuid,
-        )
-        edge_uuids = [r["uuid"] for r in normalize_records(raw_edges)]
-
         await _run(
             executor,
             tx,
@@ -144,7 +132,6 @@ class SurrealEntityNodeOperations(EntityNodeOperations):
             uuid=node.uuid,
         )
         logger.debug("Deleted entity from SurrealDB: %s", node.uuid)
-        return edge_uuids
 
     async def delete_by_group_id(
         self,

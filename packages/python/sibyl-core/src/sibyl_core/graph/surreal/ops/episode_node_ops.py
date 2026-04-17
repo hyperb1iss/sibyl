@@ -130,27 +130,13 @@ class SurrealEpisodeNodeOperations(EpisodeNodeOperations):
         executor: QueryExecutor,
         node: EpisodicNode,
         tx: Transaction | None = None,
-    ) -> list[str]:
-        """Delete an episode and return the UUIDs of any removed edges.
+    ) -> None:
+        """Delete an episode and cascade any connected relation rows.
 
         Episodes sit at the tail of ``mentions``/``has_episode``/
-        ``next_episode`` RELATION tables; SurrealDB cascades the edge rows
-        when an endpoint is deleted, so we snapshot their uuids first.
+        ``next_episode`` RELATION tables, and SurrealDB removes those
+        edges automatically when the endpoint is deleted.
         """
-        edge_uuids: list[str] = []
-        for edge_table in ("mentions", "has_episode", "next_episode"):
-            raw = await _run(
-                executor,
-                tx,
-                f"""
-                SELECT uuid FROM {edge_table}
-                WHERE (in IN (SELECT id FROM episode WHERE uuid = $uuid))
-                   OR (out IN (SELECT id FROM episode WHERE uuid = $uuid));
-                """,
-                uuid=node.uuid,
-            )
-            edge_uuids.extend(r["uuid"] for r in normalize_records(raw))
-
         await _run(
             executor,
             tx,
@@ -158,7 +144,6 @@ class SurrealEpisodeNodeOperations(EpisodeNodeOperations):
             uuid=node.uuid,
         )
         logger.debug("Deleted episode from SurrealDB: %s", node.uuid)
-        return edge_uuids
 
     async def delete_by_group_id(
         self,

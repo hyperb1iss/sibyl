@@ -29,16 +29,13 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from graphiti_core.driver.driver import (
     GraphDriver,
     GraphDriverSession,
     GraphProvider,
 )
-
-if TYPE_CHECKING:
-    from surrealdb import AsyncSurreal
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +120,7 @@ class SurrealDriver(GraphDriver):
         self._default_database = default_database
         # _database stores the Graphiti group_id (org UUID). Set via clone().
         self._database: str = ""
-        self._client: AsyncSurreal | None = None
+        self._client: Any | None = None
 
     @property
     def namespace_prefix(self) -> str:
@@ -137,7 +134,7 @@ class SurrealDriver(GraphDriver):
     def group_id(self) -> str:
         return self._database
 
-    async def _ensure_client(self) -> AsyncSurreal:
+    async def _ensure_client(self) -> Any:
         if self._client is not None:
             return self._client
 

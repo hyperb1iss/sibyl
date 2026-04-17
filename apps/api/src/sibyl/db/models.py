@@ -22,6 +22,8 @@ from sqlalchemy import ARRAY, Column, DateTime, Enum, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
+from sibyl_core.auth.models import OrganizationRole
+
 
 def utcnow_naive() -> datetime:
     """Get current UTC time as naive datetime (for TIMESTAMP WITHOUT TIME ZONE)."""
@@ -231,15 +233,6 @@ class Organization(TimestampMixin, table=True):
 
     def __repr__(self) -> str:
         return f"<Organization slug={self.slug!r} personal={self.is_personal}>"
-
-
-class OrganizationRole(StrEnum):
-    """Role of a user within an organization."""
-
-    OWNER = "owner"
-    ADMIN = "admin"
-    MEMBER = "member"
-    VIEWER = "viewer"
 
 
 class OrganizationMember(TimestampMixin, table=True):

@@ -6,15 +6,41 @@ remains in sibyl-server.
 """
 
 from sibyl_core.auth.context import AuthContext
+from sibyl_core.auth.contracts import (
+    GitHubUserIdentity,
+    OrganizationMembershipRepository,
+    OrganizationRepository,
+    PasswordChange,
+    SessionRepository,
+    UserRepository,
+)
 from sibyl_core.auth.jwt import (
     create_access_token,
     decode_token_unverified,
     verify_access_token,
 )
+from sibyl_core.auth.models import (
+    AuthMembership,
+    AuthOrganization,
+    AuthSession,
+    AuthUser,
+    OrganizationRole,
+)
 from sibyl_core.auth.passwords import hash_password, verify_password
 
 __all__ = [
     "AuthContext",
+    "AuthMembership",
+    "AuthOrganization",
+    "AuthSession",
+    "AuthUser",
+    "GitHubUserIdentity",
+    "OrganizationMembershipRepository",
+    "OrganizationRepository",
+    "OrganizationRole",
+    "PasswordChange",
+    "SessionRepository",
+    "UserRepository",
     "create_access_token",
     "decode_token_unverified",
     "hash_password",

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from graphiti_core.nodes import EntityNode, EpisodicNode, EpisodeType
+from graphiti_core.nodes import EntityNode, EpisodeType, EpisodicNode
 
 from sibyl_core.graph.surreal import SurrealDriver
 from sibyl_core.graph.surreal.ops.entity_node_ops import SurrealEntityNodeOperations

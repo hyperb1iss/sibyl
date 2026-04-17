@@ -4,15 +4,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sibyl.db.models import Organization, OrganizationRole, User
+from sibyl_core.auth.models import (
+    AuthOrganization,
+    AuthUser,
+    OrganizationRole,
+    coerce_auth_organization,
+    coerce_auth_user,
+    coerce_organization_role,
+)
 
 
 @dataclass(frozen=True)
 class AuthContext:
-    user: User
-    organization: Organization | None
+    user: AuthUser
+    organization: AuthOrganization | None
     org_role: OrganizationRole | None
     scopes: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "user", coerce_auth_user(self.user))
+        object.__setattr__(self, "organization", coerce_auth_organization(self.organization))
+        object.__setattr__(self, "org_role", coerce_organization_role(self.org_role))
+        object.__setattr__(self, "scopes", frozenset(str(scope) for scope in self.scopes))
 
     @property
     def is_authenticated(self) -> bool:

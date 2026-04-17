@@ -2,34 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Self
 
-from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from sibyl.auth.passwords import PasswordError, hash_password, verify_password
 from sibyl.db.models import User
+from sibyl_core.auth.contracts import GitHubUserIdentity, PasswordChange
 
 if TYPE_CHECKING:
     from uuid import UUID
-
-
-@dataclass(frozen=True, slots=True)
-class PasswordChange:
-    current_password: str | None
-    new_password: str
-
-
-class GitHubUserIdentity(BaseModel):
-    """Normalized subset of the GitHub user payload."""
-
-    github_id: int = Field(..., alias="id")
-    login: str
-    email: str | None = None
-    name: str | None = None
-    avatar_url: str | None = None
 
 
 class UserManager:

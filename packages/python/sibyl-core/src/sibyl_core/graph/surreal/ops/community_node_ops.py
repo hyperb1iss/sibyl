@@ -120,25 +120,13 @@ class SurrealCommunityNodeOperations(CommunityNodeOperations):
         executor: QueryExecutor,
         node: CommunityNode,
         tx: Transaction | None = None,
-    ) -> list[str]:
-        """Delete a community and return the UUIDs of any removed edges.
+    ) -> None:
+        """Delete a community and cascade any connected relation rows.
 
         Communities anchor ``has_member`` RELATION rows on both sides
-        (community -> entity | community). Snapshot edge uuids first
-        because SurrealDB cascades endpoint deletes.
+        (community -> entity | community), and SurrealDB removes those
+        edges automatically when the endpoint disappears.
         """
-        raw = await _run(
-            executor,
-            tx,
-            """
-            SELECT uuid FROM has_member
-            WHERE (in IN (SELECT id FROM community WHERE uuid = $uuid))
-               OR (out IN (SELECT id FROM community WHERE uuid = $uuid));
-            """,
-            uuid=node.uuid,
-        )
-        edge_uuids = [r["uuid"] for r in normalize_records(raw)]
-
         await _run(
             executor,
             tx,
@@ -146,7 +134,6 @@ class SurrealCommunityNodeOperations(CommunityNodeOperations):
             uuid=node.uuid,
         )
         logger.debug("Deleted community from SurrealDB: %s", node.uuid)
-        return edge_uuids
 
     async def delete_by_group_id(
         self,
