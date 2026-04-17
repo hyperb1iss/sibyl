@@ -22,6 +22,7 @@ from tools.baselines.common import (
     baseline_base_url,
     dump_json,
     emit,
+    ensure_graph_fixture,
     ensure_rest_seed,
     login_or_signup,
     write_jsonl,
@@ -100,6 +101,131 @@ def build_rest_cases() -> list[dict[str, Any]]:
     ]
 
 
+def build_graph_cases(graph_fixture: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    project = graph_fixture["project"]
+    epic = graph_fixture["epic"]
+    task_a = graph_fixture["task_a"]
+    task_b = graph_fixture["task_b"]
+
+    return [
+        {
+            "id": "rest-entity-task-a",
+            "kind": "rest",
+            "auth": "bearer",
+            "method": "GET",
+            "path": f"/entities/{task_a['id']}",
+            "expect": {
+                "equals": {
+                    "/status_code": 200,
+                    "/body/id": task_a["id"],
+                    "/body/name": task_a["name"],
+                    "/body/entity_type": "task",
+                },
+                "list_contains": [
+                    {
+                        "pointer": "/body/related",
+                        "match": {
+                            "id": task_b["id"],
+                            "name": task_b["name"],
+                            "relationship": "DEPENDS_ON",
+                            "direction": "incoming",
+                        },
+                    },
+                    {
+                        "pointer": "/body/related",
+                        "match": {
+                            "id": epic["id"],
+                            "name": epic["name"],
+                            "relationship": "BELONGS_TO",
+                            "direction": "outgoing",
+                        },
+                    },
+                ],
+            },
+        },
+        {
+            "id": "rest-entity-task-b",
+            "kind": "rest",
+            "auth": "bearer",
+            "method": "GET",
+            "path": f"/entities/{task_b['id']}",
+            "expect": {
+                "equals": {
+                    "/status_code": 200,
+                    "/body/id": task_b["id"],
+                    "/body/name": task_b["name"],
+                    "/body/entity_type": "task",
+                },
+                "list_contains": [
+                    {
+                        "pointer": "/body/related",
+                        "match": {
+                            "id": task_a["id"],
+                            "name": task_a["name"],
+                            "relationship": "DEPENDS_ON",
+                            "direction": "outgoing",
+                        },
+                    },
+                    {
+                        "pointer": "/body/related",
+                        "match": {
+                            "id": project["id"],
+                            "name": project["name"],
+                            "relationship": "BELONGS_TO",
+                            "direction": "outgoing",
+                        },
+                    },
+                ],
+            },
+        },
+        {
+            "id": "rest-graph-full",
+            "kind": "rest",
+            "auth": "bearer",
+            "method": "GET",
+            "path": "/graph/full",
+            "expect": {
+                "equals": {"/status_code": 200},
+                "minimums": {
+                    "/body/node_count": 4,
+                    "/body/edge_count": 4,
+                },
+                "list_contains": [
+                    {
+                        "pointer": "/body/nodes",
+                        "match": {"id": project["id"], "label": project["name"]},
+                    },
+                    {"pointer": "/body/nodes", "match": {"id": epic["id"], "label": epic["name"]}},
+                    {
+                        "pointer": "/body/nodes",
+                        "match": {"id": task_a["id"], "label": task_a["name"]},
+                    },
+                    {
+                        "pointer": "/body/nodes",
+                        "match": {"id": task_b["id"], "label": task_b["name"]},
+                    },
+                    {
+                        "pointer": "/body/edges",
+                        "match": {
+                            "source": task_b["id"],
+                            "target": task_a["id"],
+                            "type": "DEPENDS_ON",
+                        },
+                    },
+                    {
+                        "pointer": "/body/edges",
+                        "match": {
+                            "source": task_b["id"],
+                            "target": project["id"],
+                            "type": "BELONGS_TO",
+                        },
+                    },
+                ],
+            },
+        },
+    ]
+
+
 def build_search_cases() -> list[dict[str, Any]]:
     return [
         {
@@ -119,11 +245,33 @@ def build_search_cases() -> list[dict[str, Any]]:
                     {"pointer": "/body/results", "match": {"name": REST_SEED_TITLE}},
                 ],
             },
-        }
+        },
+        {
+            "id": "search-graph-fixture-task-b",
+            "kind": "rest",
+            "auth": "bearer",
+            "method": "POST",
+            "path": "/search",
+            "json": {"query": "Silver Delta", "limit": 5},
+            "expect": {
+                "equals": {
+                    "/status_code": 200,
+                    "/body/query": "Silver Delta",
+                },
+                "minimums": {"/body/total": 1},
+                "list_contains": [
+                    {"pointer": "/body/results", "match": {"name": "Silver Delta"}},
+                ],
+            },
+        },
     ]
 
 
-def build_mcp_cases() -> list[dict[str, Any]]:
+def build_mcp_cases(graph_fixture: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    task_a = graph_fixture["task_a"]
+    task_b = graph_fixture["task_b"]
+    project = graph_fixture["project"]
+
     return [
         {
             "id": "mcp-list-tools",
@@ -175,6 +323,40 @@ def build_mcp_cases() -> list[dict[str, Any]]:
                         "pointer": "/structuredContent/entities",
                         "match": {"name": REST_SEED_TITLE},
                     }
+                ],
+            },
+        },
+        {
+            "id": "mcp-explore-related",
+            "kind": "mcp_tool",
+            "tool": "explore",
+            "arguments": {
+                "mode": "related",
+                "entity_id": task_b["id"],
+                "relationship_types": ["DEPENDS_ON", "BELONGS_TO"],
+                "limit": 10,
+            },
+            "expect": {
+                "equals": {"/isError": False, "/structuredContent/mode": "related"},
+                "list_contains": [
+                    {
+                        "pointer": "/structuredContent/entities",
+                        "match": {
+                            "id": task_a["id"],
+                            "name": task_a["name"],
+                            "relationship": "DEPENDS_ON",
+                            "direction": "outgoing",
+                        },
+                    },
+                    {
+                        "pointer": "/structuredContent/entities",
+                        "match": {
+                            "id": project["id"],
+                            "name": project["name"],
+                            "relationship": "BELONGS_TO",
+                            "direction": "outgoing",
+                        },
+                    },
                 ],
             },
         },
@@ -240,7 +422,14 @@ def build_mcp_cases() -> list[dict[str, Any]]:
     ]
 
 
-def write_manifest(path: Path, *, base_url: str, email: str, rest_seed: dict[str, Any]) -> None:
+def write_manifest(
+    path: Path,
+    *,
+    base_url: str,
+    email: str,
+    rest_seed: dict[str, Any],
+    graph_fixture: dict[str, dict[str, Any]],
+) -> None:
     manifest = {
         "captured_at": datetime.now(UTC).isoformat(),
         "base_url": base_url,
@@ -254,6 +443,14 @@ def write_manifest(path: Path, *, base_url: str, email: str, rest_seed: dict[str
         "mcp_add": {
             "title": MCP_ADD_TITLE,
             "note": "The replay corpus asserts current legacy behavior, including the MCP manage wrapper failure.",
+        },
+        "graph_fixture": {
+            name: {
+                "id": entity["id"],
+                "name": entity["name"],
+                "entity_type": entity["entity_type"],
+            }
+            for name, entity in graph_fixture.items()
         },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -302,21 +499,36 @@ async def amain() -> int:
             email=args.email,
             password=args.password,
         )
-        rest_seed = await ensure_rest_seed(api_client, str(auth_payload["access_token"]))
+        token = str(auth_payload["access_token"])
+        rest_seed = await ensure_rest_seed(api_client, token)
+        graph_fixture = await ensure_graph_fixture(api_client, token)
 
     write_jsonl(output_dir / "auth_smoke.jsonl", build_auth_cases(args.email))
     write_jsonl(output_dir / "rest_smoke.jsonl", build_rest_cases())
+    write_jsonl(output_dir / "graph_smoke.jsonl", build_graph_cases(graph_fixture))
     write_jsonl(output_dir / "search_queries.jsonl", build_search_cases())
-    write_jsonl(output_dir / "mcp_smoke.jsonl", build_mcp_cases())
+    write_jsonl(output_dir / "mcp_smoke.jsonl", build_mcp_cases(graph_fixture))
     write_manifest(
         output_dir / "manifest.json",
         base_url=args.base_url,
         email=args.email,
         rest_seed=rest_seed,
+        graph_fixture=graph_fixture,
     )
 
     emit(f"Wrote baseline corpus to {output_dir.as_posix()}")
-    emit(dump_json({"files": list(CASE_FILE_ORDER), "rest_seed": rest_seed}))
+    emit(
+        dump_json(
+            {
+                "files": list(CASE_FILE_ORDER),
+                "graph_fixture": {
+                    name: {"id": entity["id"], "name": entity["name"]}
+                    for name, entity in graph_fixture.items()
+                },
+                "rest_seed": rest_seed,
+            }
+        )
+    )
 
     if not args.skip_verify:
         await replay_all(

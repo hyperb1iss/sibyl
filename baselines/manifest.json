@@ -1,13 +1,36 @@
 {
   "base_url": "http://localhost:3334",
-  "captured_at": "2026-04-17T09:00:29.593651+00:00",
+  "captured_at": "2026-04-17T15:51:52.549736+00:00",
   "email": "baseline-corpus@sibyl.dev",
   "files": [
     "auth_smoke.jsonl",
     "rest_smoke.jsonl",
+    "graph_smoke.jsonl",
     "search_queries.jsonl",
     "mcp_smoke.jsonl"
   ],
+  "graph_fixture": {
+    "epic": {
+      "entity_type": "epic",
+      "id": "epic_fa4848809b11",
+      "name": "Velvet Quill"
+    },
+    "project": {
+      "entity_type": "project",
+      "id": "project_72925ca5af11",
+      "name": "Cinder Atlas"
+    },
+    "task_a": {
+      "entity_type": "task",
+      "id": "task_8ae76ad12487",
+      "name": "Obsidian Spire"
+    },
+    "task_b": {
+      "entity_type": "task",
+      "id": "task_9518f20f7193",
+      "name": "Silver Delta"
+    }
+  },
   "mcp_add": {
     "note": "The replay corpus asserts current legacy behavior, including the MCP manage wrapper failure.",
     "title": "Baseline MCP Smoke Pattern"

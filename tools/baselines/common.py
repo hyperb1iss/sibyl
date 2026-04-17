@@ -20,12 +20,25 @@ REST_SEED_DESCRIPTION = "Baseline corpus seed for search and graph smoke tests."
 REST_SEED_CONTENT = "Episode used as baseline corpus seed for search and graph smoke tests."
 MCP_ADD_TITLE = "Baseline MCP Smoke Pattern"
 MCP_ADD_CONTENT = "Baseline MCP smoke pattern for replay."
+GRAPH_PROJECT_NAME = "Cinder Atlas"
+GRAPH_PROJECT_DESCRIPTION = "Baseline project anchor for graph replay coverage."
+GRAPH_PROJECT_CONTENT = "Project focused on resilience hardening for deterministic graph replay."
+GRAPH_EPIC_NAME = "Velvet Quill"
+GRAPH_EPIC_DESCRIPTION = "Baseline epic bound to the project anchor."
+GRAPH_EPIC_CONTENT = "Epic that organizes the baseline dependency graph fixture."
+GRAPH_TASK_A_NAME = "Obsidian Spire"
+GRAPH_TASK_A_DESCRIPTION = "Baseline dependency predecessor task."
+GRAPH_TASK_A_CONTENT = "Task covering storage adapter extraction and seam isolation."
+GRAPH_TASK_B_NAME = "Silver Delta"
+GRAPH_TASK_B_DESCRIPTION = "Baseline dependency successor task."
+GRAPH_TASK_B_CONTENT = "Task covering replay verification and migration acceptance."
 BASELINE_TAGS = ["baseline-corpus"]
 HTTP_OK = 200
 AUTH_RETRY_DELAYS = (0.25, 0.5, 1.0)
 CASE_FILE_ORDER = (
     "auth_smoke.jsonl",
     "rest_smoke.jsonl",
+    "graph_smoke.jsonl",
     "search_queries.jsonl",
     "mcp_smoke.jsonl",
 )
@@ -135,6 +148,138 @@ async def ensure_rest_seed(client: httpx.AsyncClient, token: str) -> dict[str, A
     )
     create_response.raise_for_status()
     return parse_http_response(create_response)["body"]
+
+
+async def find_entity(
+    client: httpx.AsyncClient,
+    token: str,
+    *,
+    entity_type: str,
+    name: str,
+) -> dict[str, Any] | None:
+    headers = auth_headers(token)
+    response = await client.get(
+        "/entities",
+        headers=headers,
+        params={
+            "entity_type": entity_type,
+            "search": name,
+            "page_size": 25,
+            "sort_by": "name",
+            "sort_order": "asc",
+        },
+    )
+    response.raise_for_status()
+    payload = parse_http_response(response)["body"]
+    if not isinstance(payload, dict):
+        return None
+
+    for entity in payload.get("entities", []):
+        if entity.get("name") == name:
+            return entity
+    return None
+
+
+async def ensure_entity(
+    client: httpx.AsyncClient,
+    token: str,
+    *,
+    entity_type: str,
+    name: str,
+    description: str,
+    content: str,
+    metadata: dict[str, Any] | None = None,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    existing = await find_entity(client, token, entity_type=entity_type, name=name)
+    if existing is not None:
+        return existing
+
+    create_response = await client.post(
+        "/entities",
+        params={"sync": "true"},
+        headers=auth_headers(token),
+        json={
+            "name": name,
+            "description": description,
+            "content": content,
+            "entity_type": entity_type,
+            "category": "baseline",
+            "tags": [*(tags or BASELINE_TAGS)],
+            "metadata": metadata or {},
+        },
+    )
+    create_response.raise_for_status()
+    return parse_http_response(create_response)["body"]
+
+
+async def ensure_graph_fixture(client: httpx.AsyncClient, token: str) -> dict[str, dict[str, Any]]:
+    fixture_metadata = {
+        "capture_mode": "baseline",
+        "capture_surface": "graph",
+    }
+
+    project = await ensure_entity(
+        client,
+        token,
+        entity_type="project",
+        name=GRAPH_PROJECT_NAME,
+        description=GRAPH_PROJECT_DESCRIPTION,
+        content=GRAPH_PROJECT_CONTENT,
+        metadata=fixture_metadata,
+        tags=[*BASELINE_TAGS, "graph-fixture"],
+    )
+    epic = await ensure_entity(
+        client,
+        token,
+        entity_type="epic",
+        name=GRAPH_EPIC_NAME,
+        description=GRAPH_EPIC_DESCRIPTION,
+        content=GRAPH_EPIC_CONTENT,
+        metadata={
+            **fixture_metadata,
+            "project_id": project["id"],
+        },
+        tags=[*BASELINE_TAGS, "graph-fixture"],
+    )
+    task_a = await ensure_entity(
+        client,
+        token,
+        entity_type="task",
+        name=GRAPH_TASK_A_NAME,
+        description=GRAPH_TASK_A_DESCRIPTION,
+        content=GRAPH_TASK_A_CONTENT,
+        metadata={
+            **fixture_metadata,
+            "project_id": project["id"],
+            "epic_id": epic["id"],
+            "priority": "high",
+        },
+        tags=[*BASELINE_TAGS, "graph-fixture"],
+    )
+    task_b = await ensure_entity(
+        client,
+        token,
+        entity_type="task",
+        name=GRAPH_TASK_B_NAME,
+        description=GRAPH_TASK_B_DESCRIPTION,
+        content=GRAPH_TASK_B_CONTENT,
+        metadata={
+            **fixture_metadata,
+            "project_id": project["id"],
+            "epic_id": epic["id"],
+            "priority": "medium",
+            "depends_on": [task_a["id"]],
+        },
+        tags=[*BASELINE_TAGS, "graph-fixture"],
+    )
+
+    return {
+        "project": project,
+        "epic": epic,
+        "task_a": task_a,
+        "task_b": task_b,
+    }
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
