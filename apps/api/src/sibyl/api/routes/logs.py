@@ -7,17 +7,15 @@ Requires OWNER role (super admin equivalent).
 from __future__ import annotations
 
 from typing import Annotated
-from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketException, status
-from sqlmodel import select
 
 from sibyl.auth.dependencies import require_org_role
 from sibyl.auth.jwt import JwtError, verify_access_token
 from sibyl.config import settings
-from sibyl.db.connection import get_session
-from sibyl.db.models import OrganizationMember, OrganizationRole
+from sibyl.db.models import OrganizationRole
+from sibyl.persistence.legacy.auth import has_legacy_owner_membership
 from sibyl_core.logging import LogBuffer
 
 log = structlog.get_logger()
@@ -92,19 +90,14 @@ async def _validate_owner_token(token: str | None) -> bool:
         return False
 
     try:
-        user_id = UUID(str(claims.get("sub", "")))
-        org_id = UUID(str(claims.get("org", "")))
+        user_id = str(claims.get("sub", ""))
+        org_id = str(claims.get("org", ""))
     except ValueError:
         return False
+    if not user_id or not org_id:
+        return False
 
-    async with get_session() as session:
-        result = await session.execute(
-            select(OrganizationMember.role).where(
-                OrganizationMember.organization_id == org_id,
-                OrganizationMember.user_id == user_id,
-            )
-        )
-        return result.scalar_one_or_none() == OrganizationRole.OWNER
+    return await has_legacy_owner_membership(org_id=org_id, user_id=user_id)
 
 
 @router.websocket("/stream")

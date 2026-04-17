@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -16,7 +15,6 @@ from starlette.websockets import WebSocketDisconnect
 from sibyl.api.routes.logs import _validate_owner_token, router
 from sibyl.auth.jwt import create_access_token
 from sibyl.config import Settings
-from sibyl.db.models import OrganizationRole
 
 
 class TestValidateOwnerToken:
@@ -35,17 +33,13 @@ class TestValidateOwnerToken:
         org_id = uuid4()
         token = create_access_token(user_id=user_id, organization_id=org_id)
 
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = OrganizationRole.OWNER
-        session = AsyncMock()
-        session.execute.return_value = mock_result
-
-        @asynccontextmanager
-        async def fake_get_session():
-            yield session
-
-        with patch("sibyl.api.routes.logs.get_session", fake_get_session):
+        with patch(
+            "sibyl.api.routes.logs.has_legacy_owner_membership",
+            AsyncMock(return_value=True),
+        ) as has_owner:
             assert await _validate_owner_token(token) is True
+
+        has_owner.assert_awaited_once_with(org_id=str(org_id), user_id=str(user_id))
 
     @pytest.mark.asyncio
     async def test_rejects_non_owner_membership(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -60,17 +54,13 @@ class TestValidateOwnerToken:
         org_id = uuid4()
         token = create_access_token(user_id=user_id, organization_id=org_id)
 
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = OrganizationRole.MEMBER
-        session = AsyncMock()
-        session.execute.return_value = mock_result
-
-        @asynccontextmanager
-        async def fake_get_session():
-            yield session
-
-        with patch("sibyl.api.routes.logs.get_session", fake_get_session):
+        with patch(
+            "sibyl.api.routes.logs.has_legacy_owner_membership",
+            AsyncMock(return_value=False),
+        ) as has_owner:
             assert await _validate_owner_token(token) is False
+
+        has_owner.assert_awaited_once_with(org_id=str(org_id), user_id=str(user_id))
 
     @pytest.mark.asyncio
     async def test_rejects_missing_org_context(self, monkeypatch: pytest.MonkeyPatch) -> None:
