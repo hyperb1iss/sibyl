@@ -21,9 +21,11 @@ from sibyl.api.schemas import (
 )
 from sibyl.auth.dependencies import get_current_organization, require_org_role
 from sibyl.db.models import Organization, OrganizationRole
+from sibyl.persistence.legacy.graph import get_legacy_knowledge_read_adapter
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.models.entities import EntityType
+from sibyl_core.services import KnowledgeReadService
 
 log = structlog.get_logger()
 
@@ -181,6 +183,33 @@ async def _list_entities_by_type_paginated(
             break
 
         offset += batch_size
+
+    return entities
+
+
+async def _list_entities_by_type_paginated_via_service(
+    service: KnowledgeReadService,
+    entity_type: EntityType,
+    *,
+    batch_size: int = 1000,
+) -> list[Any]:
+    """List all entities of a type by following service cursors."""
+    entities: list[Any] = []
+    cursor: str | None = None
+
+    while True:
+        page = await service.list_entities(
+            entity_type,
+            limit=batch_size,
+            cursor=cursor,
+        )
+        if not page.items:
+            break
+
+        entities.extend(page.items)
+        if page.next_cursor is None:
+            break
+        cursor = page.next_cursor
 
     return entities
 
@@ -532,13 +561,15 @@ async def get_project_metrics(
     """Get metrics for a specific project."""
     try:
         group_id = str(org.id)
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
+        service = await get_legacy_knowledge_read_adapter(group_id)
 
         # Get project
-        project = await entity_manager.get(project_id)
+        project = await service.get_entity(project_id)
         if not project:
             raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
+
+        client = await get_graph_client()
+        entity_manager = EntityManager(client, group_id=group_id)
 
         project_tasks = await _list_entities_by_type_paginated(
             entity_manager,
@@ -598,11 +629,10 @@ async def get_project_summaries(
     """Get the lean project-summary payload for the projects page."""
     try:
         group_id = str(org.id)
+        service = await get_legacy_knowledge_read_adapter(group_id)
         client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-
-        projects = await _list_entities_by_type_paginated(
-            entity_manager,
+        projects = await _list_entities_by_type_paginated_via_service(
+            service,
             EntityType.PROJECT,
             batch_size=500,
         )
@@ -626,12 +656,12 @@ async def get_org_metrics(
     """Get organization-wide metrics aggregating all projects."""
     try:
         group_id = str(org.id)
+        service = await get_legacy_knowledge_read_adapter(group_id)
         client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
 
         # Get all projects
-        projects = await _list_entities_by_type_paginated(
-            entity_manager,
+        projects = await _list_entities_by_type_paginated_via_service(
+            service,
             EntityType.PROJECT,
             batch_size=500,
         )
