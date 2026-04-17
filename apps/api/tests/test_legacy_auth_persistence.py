@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -10,6 +12,8 @@ from sibyl.persistence.legacy.auth import (
     LegacyAuthContextResolver,
     LegacyUserRepository,
     UserNotFoundError,
+    list_legacy_user_organizations,
+    rotate_legacy_refresh_session_record,
 )
 from sibyl_core.auth import (
     AuthMembership,
@@ -168,3 +172,50 @@ async def test_auth_context_resolver_rejects_missing_user() -> None:
 
     with pytest.raises(UserNotFoundError, match="User not found"):
         await resolver.resolve({"sub": str(uuid4())})
+
+
+@pytest.mark.asyncio
+async def test_list_legacy_user_organizations_uses_relational_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    organization = SimpleNamespace(id=uuid4(), name="Sibyl", slug="sibyl", is_personal=True)
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [organization]
+    session = AsyncMock()
+    session.execute.return_value = result
+
+    @asynccontextmanager
+    async def fake_session():
+        yield session
+
+    monkeypatch.setattr("sibyl.db.connection.get_session", fake_session)
+
+    organizations = await list_legacy_user_organizations(user_id=uuid4())
+
+    assert organizations == [organization]
+
+
+@pytest.mark.asyncio
+async def test_rotate_legacy_refresh_session_record_returns_none_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = AsyncMock()
+    manager.get_session_by_refresh_token.return_value = None
+    session = object()
+
+    @asynccontextmanager
+    async def fake_session():
+        yield session
+
+    monkeypatch.setattr("sibyl.db.connection.get_session", fake_session)
+    monkeypatch.setattr("sibyl.persistence.legacy.auth.SessionManager", lambda _: manager)
+
+    rotated = await rotate_legacy_refresh_session_record(
+        "refresh-token",
+        new_access_token="access",
+        new_access_expires_at=object(),
+        new_refresh_token="refresh-2",
+        new_refresh_expires_at=object(),
+    )
+
+    assert rotated is None

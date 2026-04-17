@@ -34,19 +34,23 @@ from mcp.server.auth.provider import (
     TokenError,
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
-from sqlmodel import select
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from sibyl import config as config_module
-from sibyl.auth.api_keys import ApiKeyManager
 from sibyl.auth.jwt import JwtError, create_access_token, verify_access_token
-from sibyl.auth.memberships import OrganizationMembershipManager
-from sibyl.auth.organizations import OrganizationManager
-from sibyl.auth.sessions import SessionManager
-from sibyl.auth.users import UserManager
-from sibyl.db.connection import get_session
-from sibyl.db.models import Organization, OrganizationMember, OrganizationRole
+from sibyl.db.models import Organization
+from sibyl.persistence.legacy.auth import (
+    authenticate_legacy_api_key,
+    authenticate_legacy_local_user,
+    create_legacy_session_record,
+    ensure_legacy_personal_organization,
+    get_legacy_user_by_id,
+    list_legacy_user_organizations,
+    load_legacy_refresh_session_record,
+    revoke_legacy_refresh_session_record,
+    rotate_legacy_refresh_session_record,
+)
 
 OAUTH_SCOPE = "mcp"
 
@@ -196,17 +200,16 @@ class SibylMcpOAuthProvider(
         access_expires_at = datetime.now(UTC) + timedelta(
             minutes=config_module.settings.access_token_expire_minutes
         )
-        async with get_session() as session:
-            await SessionManager(session).create_session(
-                user_id=user_id,
-                token=access,
-                expires_at=access_expires_at,
-                organization_id=org_id,
-                refresh_token=refresh,
-                refresh_token_expires_at=refresh_expires_at,
-                device_name="mcp_oauth",
-                device_type="mcp",
-            )
+        await self._create_session_record(
+            user_id=user_id,
+            token=access,
+            expires_at=access_expires_at,
+            organization_id=org_id,
+            refresh_token=refresh,
+            refresh_token_expires_at=refresh_expires_at,
+            device_name="mcp_oauth",
+            device_type="mcp",
+        )
         return OAuthToken(
             access_token=access,
             refresh_token=refresh,
@@ -246,14 +249,13 @@ class SibylMcpOAuthProvider(
             except ValueError:
                 return None
 
-        async with get_session() as session:
-            existing = await SessionManager(session).get_session_by_refresh_token(refresh_token)
-            if existing is None:
-                return None
-            if existing.user_id != user_id:
-                return None
-            if org_id != existing.organization_id:
-                return None
+        existing = await self._load_refresh_session_record(refresh_token)
+        if existing is None:
+            return None
+        if existing.user_id != user_id:
+            return None
+        if org_id != existing.organization_id:
+            return None
 
         scopes = _parse_scopes_from_claims(claims)
         exp = claims.get("exp")
@@ -296,20 +298,15 @@ class SibylMcpOAuthProvider(
         access_expires_at = datetime.now(UTC) + timedelta(
             minutes=config_module.settings.access_token_expire_minutes
         )
-        async with get_session() as session:
-            mgr = SessionManager(session)
-            existing = await mgr.get_session_by_refresh_token(refresh_token.token)
-            if existing is None:
-                raise TokenError(
-                    error="invalid_grant", error_description="refresh token does not exist"
-                )
-            await mgr.rotate_tokens(
-                existing,
-                new_access_token=access,
-                new_access_expires_at=access_expires_at,
-                new_refresh_token=new_refresh,
-                new_refresh_expires_at=new_refresh_expires_at,
-            )
+        existing = await self._rotate_refresh_session_record(
+            refresh_token.token,
+            new_access_token=access,
+            new_access_expires_at=access_expires_at,
+            new_refresh_token=new_refresh,
+            new_refresh_expires_at=new_refresh_expires_at,
+        )
+        if existing is None:
+            raise TokenError(error="invalid_grant", error_description="refresh token does not exist")
         return OAuthToken(
             access_token=access,
             refresh_token=new_refresh,
@@ -323,8 +320,7 @@ class SibylMcpOAuthProvider(
 
     async def load_access_token(self, token: str) -> AccessToken | None:
         if token.startswith("sk_"):
-            async with get_session() as session:
-                auth = await ApiKeyManager.from_session(session).authenticate(token)
+            auth = await self._authenticate_api_key(token)
             if auth is None:
                 return None
             scopes = list(auth.scopes or []) or [OAUTH_SCOPE]
@@ -350,11 +346,7 @@ class SibylMcpOAuthProvider(
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
         if isinstance(token, RefreshToken):
-            async with get_session() as session:
-                mgr = SessionManager(session)
-                existing = await mgr.get_session_by_refresh_token(token.token)
-                if existing is not None:
-                    existing.revoked_at = datetime.now(UTC).replace(tzinfo=None)
+            await self._revoke_refresh_session_record(token.token)
 
     # ---------------------------------------------------------------------
     # UI helpers (custom routes)
@@ -379,14 +371,32 @@ class SibylMcpOAuthProvider(
             return None
         return authed
 
-    async def _list_user_orgs(self, session, *, user_id: UUID) -> list[Organization]:
-        result = await session.execute(
-            select(Organization)
-            .join(OrganizationMember, OrganizationMember.organization_id == Organization.id)
-            .where(OrganizationMember.user_id == user_id)
-            .order_by(Organization.is_personal.desc(), Organization.name.asc())
-        )
-        return list(result.scalars().all())
+    async def _create_session_record(self, **kwargs) -> object:
+        return await create_legacy_session_record(**kwargs)
+
+    async def _load_refresh_session_record(self, refresh_token: str):
+        return await load_legacy_refresh_session_record(refresh_token)
+
+    async def _rotate_refresh_session_record(self, refresh_token: str, **kwargs):
+        return await rotate_legacy_refresh_session_record(refresh_token, **kwargs)
+
+    async def _revoke_refresh_session_record(self, refresh_token: str) -> None:
+        await revoke_legacy_refresh_session_record(refresh_token)
+
+    async def _authenticate_api_key(self, raw_key: str):
+        return await authenticate_legacy_api_key(raw_key)
+
+    async def _authenticate_local_user(self, *, email: str, password: str):
+        return await authenticate_legacy_local_user(email=email, password=password)
+
+    async def _list_user_orgs(self, *, user_id: UUID) -> list[Organization]:
+        return await list_legacy_user_organizations(user_id=user_id)
+
+    async def _ensure_personal_org(self, *, user_id: UUID) -> Organization | None:
+        return await ensure_legacy_personal_organization(user_id=user_id)
+
+    async def _get_user(self, user_id: UUID):
+        return await get_legacy_user_by_id(user_id)
 
     async def ui_login_get(self, request: Request) -> Response:
         request_id = (request.query_params.get("req") or "").strip()
@@ -452,56 +462,48 @@ class SibylMcpOAuthProvider(
                 status_code=400,
             )
 
-        async with get_session() as session:
-            user = await UserManager(session).authenticate_local(email=email, password=password)
-            if user is None:
-                return RedirectResponse(
-                    url=_add_query_params("/_oauth/login", {"req": request_id}), status_code=302
-                )
+        user = await self._authenticate_local_user(email=email, password=password)
+        if user is None:
+            return RedirectResponse(
+                url=_add_query_params("/_oauth/login", {"req": request_id}), status_code=302
+            )
 
-            orgs = await self._list_user_orgs(session, user_id=user.id)
+        orgs = await self._list_user_orgs(user_id=user.id)
 
-            # No org memberships yet -> create personal org and continue.
-            if not orgs:
-                org = await OrganizationManager(session).create_personal_for_user(user)
-                await OrganizationMembershipManager(session).add_member(
-                    organization_id=org.id,
-                    user_id=user.id,
-                    role=OrganizationRole.OWNER,
-                )
+        if not orgs:
+            org = await self._ensure_personal_org(user_id=user.id)
+            if org is not None:
                 orgs = [org]
 
-            # Exactly one org -> continue immediately.
-            if len(orgs) == 1:
-                org = orgs[0]
-                code = secrets.token_urlsafe(32)
-                auth_code = SibylAuthorizationCode(
-                    code=code,
-                    client_id=pending.client_id,
-                    expires_at=time.time() + 10 * 60,
-                    scopes=pending.params.scopes or [OAUTH_SCOPE],
-                    code_challenge=pending.params.code_challenge,
-                    redirect_uri=pending.params.redirect_uri,
-                    redirect_uri_provided_explicitly=pending.params.redirect_uri_provided_explicitly,
-                    resource=pending.params.resource,
-                    user_id=str(user.id),
-                    organization_id=str(org.id),
-                )
-                self._codes[code] = auth_code
-                self._pending.pop(request_id, None)
-
-                params: dict[str, str] = {"code": code}
-                if pending.params.state:
-                    params["state"] = pending.params.state
-                return RedirectResponse(
-                    url=_add_query_params(str(pending.params.redirect_uri), params), status_code=302
-                )
-
-            # Multiple orgs -> require explicit selection.
-            self._authed[request_id] = _AuthedUser(
-                user_id=user.id,
-                expires_at=time.time() + 5 * 60,
+        if len(orgs) == 1:
+            org = orgs[0]
+            code = secrets.token_urlsafe(32)
+            auth_code = SibylAuthorizationCode(
+                code=code,
+                client_id=pending.client_id,
+                expires_at=time.time() + 10 * 60,
+                scopes=pending.params.scopes or [OAUTH_SCOPE],
+                code_challenge=pending.params.code_challenge,
+                redirect_uri=pending.params.redirect_uri,
+                redirect_uri_provided_explicitly=pending.params.redirect_uri_provided_explicitly,
+                resource=pending.params.resource,
+                user_id=str(user.id),
+                organization_id=str(org.id),
             )
+            self._codes[code] = auth_code
+            self._pending.pop(request_id, None)
+
+            params: dict[str, str] = {"code": code}
+            if pending.params.state:
+                params["state"] = pending.params.state
+            return RedirectResponse(
+                url=_add_query_params(str(pending.params.redirect_uri), params), status_code=302
+            )
+
+        self._authed[request_id] = _AuthedUser(
+            user_id=user.id,
+            expires_at=time.time() + 5 * 60,
+        )
 
         return RedirectResponse(
             url=_add_query_params("/_oauth/org", {"req": request_id}), status_code=302
@@ -522,8 +524,7 @@ class SibylMcpOAuthProvider(
                 url=_add_query_params("/_oauth/login", {"req": request_id}), status_code=302
             )
 
-        async with get_session() as session:
-            orgs = await self._list_user_orgs(session, user_id=authed.user_id)
+        orgs = await self._list_user_orgs(user_id=authed.user_id)
 
         if not orgs:
             return RedirectResponse(
@@ -597,28 +598,20 @@ class SibylMcpOAuthProvider(
                 url=_add_query_params("/_oauth/login", {"req": request_id}), status_code=302
             )
 
-        async with get_session() as session:
-            if create_personal:
-                # Personal org is deterministic; ensure membership.
-                user_obj = await UserManager(session).get_by_id(authed.user_id)
-                if user_obj is None:
-                    return RedirectResponse(
-                        url=_add_query_params("/_oauth/login", {"req": request_id}), status_code=302
-                    )
-                org = await OrganizationManager(session).create_personal_for_user(user_obj)
-                await OrganizationMembershipManager(session).add_member(
-                    organization_id=org.id,
-                    user_id=user_obj.id,
-                    role=OrganizationRole.OWNER,
+        if create_personal:
+            org = await self._ensure_personal_org(user_id=authed.user_id)
+            if org is None:
+                return RedirectResponse(
+                    url=_add_query_params("/_oauth/login", {"req": request_id}), status_code=302
                 )
-            else:
-                orgs = await self._list_user_orgs(session, user_id=authed.user_id)
-                org = next((o for o in orgs if str(o.id) == selected_org_id), None)
-                if org is None:
-                    return HTMLResponse(
-                        "<h1>OAuth Login</h1><p>Invalid organization selection.</p>",
-                        status_code=400,
-                    )
+        else:
+            orgs = await self._list_user_orgs(user_id=authed.user_id)
+            org = next((o for o in orgs if str(o.id) == selected_org_id), None)
+            if org is None:
+                return HTMLResponse(
+                    "<h1>OAuth Login</h1><p>Invalid organization selection.</p>",
+                    status_code=400,
+                )
 
         # Issue code outside the DB session; pending/auth mappings are in-memory.
         code = secrets.token_urlsafe(32)

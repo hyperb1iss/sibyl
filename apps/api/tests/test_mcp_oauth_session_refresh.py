@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -28,20 +28,8 @@ async def test_mcp_oauth_load_refresh_token_requires_db_session(monkeypatch) -> 
         "scope": "mcp",
     }
 
-    @asynccontextmanager
-    async def fake_session():  # type: ignore[no-untyped-def]
-        yield object()
-
-    class FakeSessionManager:
-        def __init__(self, session):  # type: ignore[no-untyped-def]
-            pass
-
-        async def get_session_by_refresh_token(self, token: str):  # type: ignore[no-untyped-def]
-            return None
-
-    monkeypatch.setattr("sibyl.auth.mcp_oauth.get_session", fake_session)
     monkeypatch.setattr("sibyl.auth.mcp_oauth._jwt_decode", lambda t: claims)
-    monkeypatch.setattr("sibyl.auth.mcp_oauth.SessionManager", FakeSessionManager)
+    monkeypatch.setattr(provider, "_load_refresh_session_record", AsyncMock(return_value=None))
 
     assert await provider.load_refresh_token(client, "refresh_token") is None
 
@@ -63,20 +51,12 @@ async def test_mcp_oauth_load_refresh_token_accepts_when_session_matches(monkeyp
         "scope": "mcp",
     }
 
-    @asynccontextmanager
-    async def fake_session():  # type: ignore[no-untyped-def]
-        yield object()
-
-    class FakeSessionManager:
-        def __init__(self, session):  # type: ignore[no-untyped-def]
-            pass
-
-        async def get_session_by_refresh_token(self, token: str):  # type: ignore[no-untyped-def]
-            return SimpleNamespace(user_id=user_id, organization_id=org_id)
-
-    monkeypatch.setattr("sibyl.auth.mcp_oauth.get_session", fake_session)
     monkeypatch.setattr("sibyl.auth.mcp_oauth._jwt_decode", lambda t: claims)
-    monkeypatch.setattr("sibyl.auth.mcp_oauth.SessionManager", FakeSessionManager)
+    monkeypatch.setattr(
+        provider,
+        "_load_refresh_session_record",
+        AsyncMock(return_value=SimpleNamespace(user_id=user_id, organization_id=org_id)),
+    )
 
     token = await provider.load_refresh_token(client, "refresh_token")
     assert token is not None
@@ -101,31 +81,14 @@ async def test_mcp_oauth_exchange_refresh_rotates_session(monkeypatch) -> None:
         "scope": "mcp",
     }
 
-    @asynccontextmanager
-    async def fake_session():  # type: ignore[no-untyped-def]
-        yield object()
-
-    rotated = {"called": False}
-
-    class FakeSessionManager:
-        def __init__(self, session):  # type: ignore[no-untyped-def]
-            pass
-
-        async def get_session_by_refresh_token(self, token: str):  # type: ignore[no-untyped-def]
-            return SimpleNamespace(user_id=user_id, organization_id=org_id)
-
-        async def rotate_tokens(self, session_record, **kwargs):  # type: ignore[no-untyped-def]
-            rotated["called"] = True
-            return session_record
-
-    monkeypatch.setattr("sibyl.auth.mcp_oauth.get_session", fake_session)
     monkeypatch.setattr("sibyl.auth.mcp_oauth._jwt_decode", lambda t: claims)
     monkeypatch.setattr(
         "sibyl.auth.mcp_oauth._create_refresh_token",
         lambda **k: ("new_refresh", datetime.now(UTC) + timedelta(days=30)),
     )
-    monkeypatch.setattr("sibyl.auth.mcp_oauth.SessionManager", FakeSessionManager)
     monkeypatch.setattr("sibyl.auth.mcp_oauth.create_access_token", lambda **k: "new_access")
+    rotate_refresh = AsyncMock(return_value=SimpleNamespace(user_id=user_id, organization_id=org_id))
+    monkeypatch.setattr(provider, "_rotate_refresh_session_record", rotate_refresh)
 
     incoming = RefreshToken(
         token="refresh_token",
@@ -136,4 +99,4 @@ async def test_mcp_oauth_exchange_refresh_rotates_session(monkeypatch) -> None:
     tok = await provider.exchange_refresh_token(client, incoming, ["mcp"])
     assert tok.refresh_token == "new_refresh"
     assert tok.access_token == "new_access"
-    assert rotated["called"] is True
+    rotate_refresh.assert_awaited_once()

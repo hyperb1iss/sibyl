@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlencode, urlsplit
 from uuid import uuid4
 
@@ -11,7 +11,6 @@ from pydantic.networks import AnyUrl
 from starlette.requests import Request
 
 from sibyl.auth.mcp_oauth import SibylMcpOAuthProvider, _AuthedUser, _PendingAuth
-from sibyl.auth.users import UserManager
 from sibyl.db.models import Organization, User
 
 
@@ -71,19 +70,16 @@ async def test_mcp_oauth_login_redirects_to_org_selection_for_multi_org_user(mon
         client_id="client1", expires_at=time.time() + 600, params=params
     )
 
-    @asynccontextmanager
-    async def fake_session():  # type: ignore[no-untyped-def]
-        yield object()
-
-    async def fake_authenticate_local(self, *, email: str, password: str):  # type: ignore[no-untyped-def]
-        return user
-
-    async def fake_list_user_orgs(self, session, *, user_id):  # type: ignore[no-untyped-def]
-        return [org1, org2]
-
-    monkeypatch.setattr("sibyl.auth.mcp_oauth.get_session", fake_session)
-    monkeypatch.setattr(UserManager, "authenticate_local", fake_authenticate_local)
-    monkeypatch.setattr(provider, "_list_user_orgs", fake_list_user_orgs.__get__(provider))
+    monkeypatch.setattr(
+        provider,
+        "_authenticate_local_user",
+        AsyncMock(return_value=user),
+    )
+    monkeypatch.setattr(
+        provider,
+        "_list_user_orgs",
+        AsyncMock(return_value=[org1, org2]),
+    )
 
     req = _make_form_post_request(
         path="/_oauth/login",
@@ -119,15 +115,11 @@ async def test_mcp_oauth_org_selection_issues_code(monkeypatch) -> None:
     )
     provider._authed["req123"] = _AuthedUser(user_id=user.id, expires_at=time.time() + 300)
 
-    @asynccontextmanager
-    async def fake_session():  # type: ignore[no-untyped-def]
-        yield object()
-
-    async def fake_list_user_orgs(self, session, *, user_id):  # type: ignore[no-untyped-def]
-        return [org1, org2]
-
-    monkeypatch.setattr("sibyl.auth.mcp_oauth.get_session", fake_session)
-    monkeypatch.setattr(provider, "_list_user_orgs", fake_list_user_orgs.__get__(provider))
+    monkeypatch.setattr(
+        provider,
+        "_list_user_orgs",
+        AsyncMock(return_value=[org1, org2]),
+    )
     monkeypatch.setattr("sibyl.auth.mcp_oauth.secrets.token_urlsafe", lambda n=32: "code_abc")  # type: ignore[assignment]
 
     req = _make_form_post_request(

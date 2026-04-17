@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any, Self
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col, select
 
 from sibyl.auth.memberships import OrganizationMembershipManager
 from sibyl.auth.organizations import OrganizationManager
 from sibyl.auth.sessions import SessionManager
 from sibyl.auth.users import UserManager
-from sibyl.db.models import Organization, User, UserSession
+from sibyl.db.models import (
+    Organization,
+    OrganizationMember,
+    OrganizationRole as LegacyOrgRole,
+    User,
+    UserSession,
+)
 from sibyl_core.auth import (
     AuthContext,
     AuthMembership,
@@ -113,6 +121,134 @@ async def list_legacy_accessible_project_graph_ids(
 
     async with get_session() as session:
         return await list_accessible_project_graph_ids(session, ctx)
+
+
+async def create_legacy_session_record(
+    *,
+    user_id: UUID,
+    token: str,
+    expires_at,
+    organization_id: UUID | None = None,
+    refresh_token: str | None = None,
+    refresh_token_expires_at=None,
+    device_name: str | None = None,
+    device_type: str | None = None,
+    browser: str | None = None,
+    os: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    location: str | None = None,
+) -> UserSession:
+    """Create a legacy session record in a fresh relational session."""
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        return await SessionManager(session).create_session(
+            user_id=user_id,
+            token=token,
+            expires_at=expires_at,
+            organization_id=organization_id,
+            refresh_token=refresh_token,
+            refresh_token_expires_at=refresh_token_expires_at,
+            device_name=device_name,
+            device_type=device_type,
+            browser=browser,
+            os=os,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            location=location,
+        )
+
+
+async def load_legacy_refresh_session_record(refresh_token: str) -> UserSession | None:
+    """Load a legacy session by refresh token."""
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        return await SessionManager(session).get_session_by_refresh_token(refresh_token)
+
+
+async def rotate_legacy_refresh_session_record(
+    refresh_token: str,
+    *,
+    new_access_token: str,
+    new_access_expires_at,
+    new_refresh_token: str,
+    new_refresh_expires_at,
+) -> UserSession | None:
+    """Rotate a legacy session's access and refresh tokens."""
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        manager = SessionManager(session)
+        existing = await manager.get_session_by_refresh_token(refresh_token)
+        if existing is None:
+            return None
+        return await manager.rotate_tokens(
+            existing,
+            new_access_token=new_access_token,
+            new_access_expires_at=new_access_expires_at,
+            new_refresh_token=new_refresh_token,
+            new_refresh_expires_at=new_refresh_expires_at,
+        )
+
+
+async def revoke_legacy_refresh_session_record(refresh_token: str) -> None:
+    """Best-effort revoke a legacy session identified by refresh token."""
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        existing = await SessionManager(session).get_session_by_refresh_token(refresh_token)
+        if existing is not None:
+            existing.revoked_at = datetime.now(UTC).replace(tzinfo=None)
+
+
+async def authenticate_legacy_local_user(*, email: str, password: str) -> User | None:
+    """Authenticate a local legacy user by email and password."""
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        return await UserManager(session).authenticate_local(email=email, password=password)
+
+
+async def get_legacy_user_by_id(user_id: UUID) -> User | None:
+    """Load a legacy user by identifier."""
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        return await UserManager(session).get_by_id(user_id)
+
+
+async def list_legacy_user_organizations(*, user_id: UUID) -> list[Organization]:
+    """List organizations the legacy user belongs to."""
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        result = await session.execute(
+            select(Organization)
+            .join(OrganizationMember, col(OrganizationMember.organization_id) == col(Organization.id))
+            .where(col(OrganizationMember.user_id) == user_id)
+            .order_by(col(Organization.is_personal).desc(), col(Organization.name).asc())
+        )
+        return list(result.scalars().all())
+
+
+async def ensure_legacy_personal_organization(*, user_id: UUID) -> Organization | None:
+    """Ensure the user has a personal organization and owner membership."""
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        user = await UserManager(session).get_by_id(user_id)
+        if user is None:
+            return None
+
+        organization = await OrganizationManager(session).create_personal_for_user(user)
+        await OrganizationMembershipManager(session).add_member(
+            organization_id=organization.id,
+            user_id=user.id,
+            role=LegacyOrgRole.OWNER,
+        )
+        return organization
 
 
 def _to_auth_user(value: object | None) -> AuthUser | None:
