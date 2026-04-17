@@ -11,16 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 
 from sibyl import config as config_module
 from sibyl.api.rate_limit import limiter
-from sibyl.auth.api_keys import ApiKeyManager
 from sibyl.auth.audit import AuditLogger
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import (
     get_auth_context,
-    get_current_user,
     require_org_admin,
     resolve_claims,
 )
@@ -37,7 +34,13 @@ from sibyl.auth.organizations import OrganizationManager
 from sibyl.auth.sessions import SessionManager
 from sibyl.auth.users import GitHubUserIdentity, UserManager
 from sibyl.db.connection import get_session_dependency
-from sibyl.db.models import ApiKey, Organization, OrganizationMember, OrganizationRole, User
+from sibyl.db.models import OrganizationRole, User
+from sibyl.persistence.legacy.auth import (
+    create_legacy_api_key_for_user,
+    list_legacy_api_keys_for_user,
+    revoke_legacy_api_key_for_user,
+    update_legacy_auth_user,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -1248,12 +1251,11 @@ async def logout(
 @router.get("/api-keys")
 async def list_api_keys(
     ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
 ):
     if ctx.organization is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No organization context")
 
-    keys = await ApiKeyManager(session).list_for_user(
+    keys = await list_legacy_api_keys_for_user(
         organization_id=ctx.organization.id,
         user_id=ctx.user.id,
     )
@@ -1280,7 +1282,6 @@ async def create_api_key(
     body: ApiKeyCreateRequest,
     ctx: AuthContext = Depends(get_auth_context),
     _admin: None = Depends(require_org_admin()),
-    session: AsyncSession = Depends(get_session_dependency),
 ):
     if ctx.organization is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No organization context")
@@ -1290,20 +1291,14 @@ async def create_api_key(
         if body.expires_days is not None
         else None
     )
-    record, raw = await ApiKeyManager(session).create(
+    record, raw = await create_legacy_api_key_for_user(
         organization_id=ctx.organization.id,
         user_id=ctx.user.id,
         name=body.name,
         live=body.live,
         scopes=body.scopes,
         expires_at=expires_at,
-    )
-    await AuditLogger(session).log(
-        action="auth.api_key.create",
-        user_id=ctx.user.id,
-        organization_id=ctx.organization.id,
         request=request,
-        details={"api_key_id": str(record.id), "name": record.name, "prefix": record.key_prefix},
     )
     return {
         "id": str(record.id),
@@ -1320,72 +1315,43 @@ async def revoke_api_key(
     request: Request,
     api_key_id: UUID,
     ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
 ):
     if ctx.organization is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No organization context")
 
-    key = await session.get(ApiKey, api_key_id)
-    if key is None or key.organization_id != ctx.organization.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
-
-    if key.user_id != ctx.user.id and ctx.org_role not in {
-        OrganizationRole.OWNER,
-        OrganizationRole.ADMIN,
-    }:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-
-    await ApiKeyManager(session).revoke(api_key_id)
-    await AuditLogger(session).log(
-        action="auth.api_key.revoke",
-        user_id=ctx.user.id,
+    await revoke_legacy_api_key_for_user(
+        api_key_id=api_key_id,
         organization_id=ctx.organization.id,
+        actor_user_id=ctx.user.id,
+        actor_org_role=ctx.org_role,
         request=request,
-        details={"api_key_id": str(api_key_id)},
     )
     return {"success": True, "id": str(api_key_id)}
 
 
 @router.get("/me")
 async def me(
-    request: Request,
-    user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session_dependency),
+    ctx: AuthContext = Depends(get_auth_context),
 ):
-    claims = await resolve_claims(request, session)
-    org = None
-    role = None
-
-    org_id = claims.get("org") if claims else None
-    if org_id:
-        try:
-            org_uuid = UUID(str(org_id))
-        except ValueError:
-            org_uuid = None
-
-        if org_uuid:
-            org = await session.get(Organization, org_uuid)
-        if org:
-            result = await session.execute(
-                select(OrganizationMember).where(
-                    OrganizationMember.organization_id == org.id,
-                    OrganizationMember.user_id == user.id,
-                )
-            )
-            membership = result.scalar_one_or_none()
-            role = membership.role.value if membership else None
-
     return {
         "user": {
-            "id": str(user.id),
-            "github_id": user.github_id,
-            "email": user.email,
-            "name": user.name,
-            "avatar_url": user.avatar_url,
-            "is_admin": user.is_admin,
+            "id": str(ctx.user.id),
+            "github_id": ctx.user.github_id,
+            "email": ctx.user.email,
+            "name": ctx.user.name,
+            "avatar_url": ctx.user.avatar_url,
+            "is_admin": ctx.user.is_admin,
         },
-        "organization": ({"id": str(org.id), "slug": org.slug, "name": org.name} if org else None),
-        "org_role": role,
+        "organization": (
+            {
+                "id": str(ctx.organization.id),
+                "slug": ctx.organization.slug,
+                "name": ctx.organization.name,
+            }
+            if ctx.organization
+            else None
+        ),
+        "org_role": ctx.org_role.value if ctx.org_role else None,
     }
 
 
@@ -1393,66 +1359,18 @@ async def me(
 async def update_me(
     request: Request,
     body: MeUpdateRequest,
-    user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session_dependency),
+    ctx: AuthContext = Depends(get_auth_context),
 ):
-    from sibyl.auth.users import PasswordChange
-
-    changes: list[str] = []
-    if body.email is not None:
-        changes.append("email")
-    if body.name is not None:
-        changes.append("name")
-    if body.avatar_url is not None:
-        changes.append("avatar_url")
-    if body.new_password is not None:
-        changes.append("password")
-    if not changes:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
-
-    manager = UserManager(session)
-    try:
-        await manager.update_profile(
-            user,
-            email=body.email,
-            name=body.name,
-            avatar_url=body.avatar_url,
-        )
-        if body.new_password is not None:
-            await manager.change_password(
-                user,
-                PasswordChange(
-                    current_password=body.current_password,
-                    new_password=body.new_password,
-                ),
-            )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
-
-    claims = await resolve_claims(request, session)
-    org_id: UUID | None = None
-    if claims and claims.get("org"):
-        try:
-            org_id = UUID(str(claims["org"]))
-        except ValueError:
-            org_id = None
-
-    if any(c != "password" for c in changes):
-        await AuditLogger(session).log(
-            action="user.update_profile",
-            user_id=user.id,
-            organization_id=org_id,
-            request=request,
-            details={"fields": [c for c in changes if c != "password"]},
-        )
-    if "password" in changes:
-        await AuditLogger(session).log(
-            action="user.change_password",
-            user_id=user.id,
-            organization_id=org_id,
-            request=request,
-            details={},
-        )
+    user = await update_legacy_auth_user(
+        user_id=ctx.user.id,
+        email=body.email,
+        name=body.name,
+        avatar_url=body.avatar_url,
+        current_password=body.current_password,
+        new_password=body.new_password,
+        organization_id=ctx.organization.id if ctx.organization else None,
+        request=request,
+    )
 
     return {
         "user": {

@@ -251,6 +251,169 @@ async def ensure_legacy_personal_organization(*, user_id: UUID) -> Organization 
         return organization
 
 
+async def list_legacy_api_keys_for_user(
+    *,
+    organization_id: UUID,
+    user_id: UUID,
+):
+    """List API keys visible to the user in an organization."""
+    from sibyl.auth.api_keys import ApiKeyManager
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        return await ApiKeyManager(session).list_for_user(
+            organization_id=organization_id,
+            user_id=user_id,
+        )
+
+
+async def create_legacy_api_key_for_user(
+    *,
+    organization_id: UUID,
+    user_id: UUID,
+    name: str,
+    live: bool,
+    scopes: list[str],
+    expires_at,
+    request,
+):
+    """Create and audit a legacy API key."""
+    from sibyl.auth.api_keys import ApiKeyManager
+    from sibyl.auth.audit import AuditLogger
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        record, raw = await ApiKeyManager(session).create(
+            organization_id=organization_id,
+            user_id=user_id,
+            name=name,
+            live=live,
+            scopes=scopes,
+            expires_at=expires_at,
+        )
+        await AuditLogger(session).log(
+            action="auth.api_key.create",
+            user_id=user_id,
+            organization_id=organization_id,
+            request=request,
+            details={"api_key_id": str(record.id), "name": record.name, "prefix": record.key_prefix},
+        )
+        return record, raw
+
+
+async def revoke_legacy_api_key_for_user(
+    *,
+    api_key_id: UUID,
+    organization_id: UUID,
+    actor_user_id: UUID,
+    actor_org_role: OrganizationRole | None,
+    request,
+) -> None:
+    """Revoke and audit a legacy API key when the actor is authorized."""
+    from sibyl.auth.api_keys import ApiKeyManager
+    from sibyl.auth.audit import AuditLogger
+    from sibyl.db.connection import get_session
+    from sibyl.db.models import ApiKey
+
+    async with get_session() as session:
+        key = await session.get(ApiKey, api_key_id)
+        if key is None or key.organization_id != organization_id:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="API key not found")
+
+        if key.user_id != actor_user_id and actor_org_role not in {
+            OrganizationRole.OWNER,
+            OrganizationRole.ADMIN,
+        }:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+        await ApiKeyManager(session).revoke(api_key_id)
+        await AuditLogger(session).log(
+            action="auth.api_key.revoke",
+            user_id=actor_user_id,
+            organization_id=organization_id,
+            request=request,
+            details={"api_key_id": str(api_key_id)},
+        )
+
+
+async def update_legacy_auth_user(
+    *,
+    user_id: UUID,
+    email: str | None,
+    name: str | None,
+    avatar_url: str | None,
+    current_password: str | None,
+    new_password: str | None,
+    organization_id: UUID | None,
+    request,
+) -> User:
+    """Update a legacy auth user profile and audit the changes."""
+    from fastapi import HTTPException
+
+    from sibyl.auth.audit import AuditLogger
+    from sibyl.auth.users import PasswordChange
+    from sibyl.db.connection import get_session
+
+    changes: list[str] = []
+    if email is not None:
+        changes.append("email")
+    if name is not None:
+        changes.append("name")
+    if avatar_url is not None:
+        changes.append("avatar_url")
+    if new_password is not None:
+        changes.append("password")
+    if not changes:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    async with get_session() as session:
+        manager = UserManager(session)
+        user = await manager.get_by_id(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        try:
+            await manager.update_profile(
+                user,
+                email=email,
+                name=name,
+                avatar_url=avatar_url,
+            )
+            if new_password is not None:
+                await manager.change_password(
+                    user,
+                    PasswordChange(
+                        current_password=current_password,
+                        new_password=new_password,
+                    ),
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if any(change != "password" for change in changes):
+            await AuditLogger(session).log(
+                action="user.update_profile",
+                user_id=user.id,
+                organization_id=organization_id,
+                request=request,
+                details={"fields": [change for change in changes if change != "password"]},
+            )
+        if "password" in changes:
+            await AuditLogger(session).log(
+                action="user.change_password",
+                user_id=user.id,
+                organization_id=organization_id,
+                request=request,
+                details={},
+            )
+
+        return user
+
+
 def _to_auth_user(value: object | None) -> AuthUser | None:
     if value is None:
         return None
