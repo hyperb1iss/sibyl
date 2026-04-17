@@ -104,6 +104,17 @@ async def has_legacy_owner_membership(*, org_id: str, user_id: str | None) -> bo
     return bool(membership and getattr(membership.role, "value", membership.role) == "owner")
 
 
+async def list_legacy_accessible_project_graph_ids(
+    ctx: AuthContext,
+) -> set[str] | None:
+    """Resolve accessible project graph IDs for an authenticated web context."""
+    from sibyl.auth.authorization import list_accessible_project_graph_ids
+    from sibyl.db.connection import get_session
+
+    async with get_session() as session:
+        return await list_accessible_project_graph_ids(session, ctx)
+
+
 def _to_auth_user(value: object | None) -> AuthUser | None:
     if value is None:
         return None

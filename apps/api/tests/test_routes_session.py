@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
@@ -18,7 +18,6 @@ class TestSessionBundleRoute:
             slug="hyper",
         )
         ctx = SimpleNamespace()
-        session = MagicMock()
 
         explore_result = SimpleNamespace(
             entities=[
@@ -55,7 +54,7 @@ class TestSessionBundleRoute:
 
         with (
             patch(
-                "sibyl.api.routes.session.list_accessible_project_graph_ids",
+                "sibyl.api.routes.session.list_legacy_accessible_project_graph_ids",
                 AsyncMock(return_value=["proj_1", "proj_2"]),
             ),
             patch(
@@ -70,7 +69,6 @@ class TestSessionBundleRoute:
                 project_ids=["proj_1"],
                 org=org,
                 ctx=ctx,
-                session=session,
             )
 
         assert response.context.scope == "project_selection"
@@ -98,7 +96,7 @@ class TestSessionBundleRoute:
 
         with (
             patch(
-                "sibyl.api.routes.session.list_accessible_project_graph_ids",
+                "sibyl.api.routes.session.list_legacy_accessible_project_graph_ids",
                 AsyncMock(return_value=["proj_1"]),
             ),
             pytest.raises(ProjectAccessDeniedError) as exc,
@@ -110,7 +108,6 @@ class TestSessionBundleRoute:
                 project_ids=["proj_2"],
                 org=org,
                 ctx=SimpleNamespace(),
-                session=MagicMock(),
             )
 
         assert exc.value.status_code == 403
@@ -125,7 +122,7 @@ class TestSessionBundleRoute:
 
         with (
             patch(
-                "sibyl.api.routes.session.list_accessible_project_graph_ids",
+                "sibyl.api.routes.session.list_legacy_accessible_project_graph_ids",
                 AsyncMock(return_value=["proj_1"]),
             ),
             patch(
@@ -141,7 +138,6 @@ class TestSessionBundleRoute:
                 project_ids=None,
                 org=org,
                 ctx=SimpleNamespace(),
-                session=MagicMock(),
             )
 
         assert response.context.scope == "all_projects"

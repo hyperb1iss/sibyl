@@ -7,15 +7,13 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from sibyl.api.schemas import SessionBundleContext, SessionBundleResponse
-from sibyl.auth.authorization import list_accessible_project_graph_ids
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.auth.errors import ProjectAccessDeniedError
-from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import Organization, OrganizationRole
+from sibyl.persistence.legacy.auth import list_legacy_accessible_project_graph_ids
 from sibyl_core.session_bundle import derive_query, remember_next, summarize_memory, summarize_task
 
 log = structlog.get_logger()
@@ -59,13 +57,12 @@ async def get_session_bundle(
     ),
     org: Organization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
 ) -> SessionBundleResponse:
     """Package wake-up context for the current org and optional project scope."""
     from sibyl_core.tools.core import explore as core_explore, search as core_search
 
     try:
-        accessible_projects = await list_accessible_project_graph_ids(session, ctx)
+        accessible_projects = await list_legacy_accessible_project_graph_ids(ctx)
         selected_project_ids = [project_id for project_id in (project_ids or []) if project_id]
 
         invalid_project_id = next(
