@@ -7,16 +7,16 @@ Provides REST API for:
 """
 
 from typing import Any
-from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col, select
 
 from sibyl.auth.dependencies import get_current_organization, require_org_admin
-from sibyl.db.connection import get_session_dependency
-from sibyl.db.models import CrawlSource, Organization
+from sibyl.db.models import Organization
+from sibyl.persistence.legacy.jobs import (
+    _job_visible_to_org,
+    _resolve_visible_legacy_source_ids,
+)
 
 log = structlog.get_logger()
 router = APIRouter(
@@ -26,89 +26,6 @@ router = APIRouter(
         Depends(require_org_admin()),
     ],
 )
-
-
-async def _job_visible_to_org(
-    job: Any,
-    *,
-    org: Organization,
-    session: AsyncSession,
-    legacy_source_ids: set[UUID] | None = None,
-) -> bool:
-    """Return True if job's target belongs to this org.
-
-    Prevents leaking job metadata across organizations. Jobs are best-effort
-    classified by function name + args.
-    """
-    fn = getattr(job, "function", "") or ""
-    args: list[Any] = list(getattr(job, "args", None) or ())
-    kwargs = dict(getattr(job, "kwargs", None) or {})
-
-    # Graph jobs include group_id explicitly.
-    if fn == "create_entity" and len(args) >= 3:
-        return str(args[2]) == str(org.id)
-    if fn == "update_entity" and len(args) >= 4:
-        return str(args[3]) == str(org.id)
-    if fn in {"consolidate_org", "priority_decay"} and args:
-        return str(args[0]) == str(org.id)
-
-    # Source jobs are keyed by source_id; resolve org ownership from DB.
-    if fn in {"crawl_source", "sync_source"} and len(args) >= 1:
-        metadata_org_id = kwargs.get("organization_id")
-        if metadata_org_id is not None:
-            return str(metadata_org_id) == str(org.id)
-        try:
-            source_uuid = UUID(str(args[0]))
-        except ValueError:
-            return False
-        if legacy_source_ids is not None:
-            return source_uuid in legacy_source_ids
-        result = await session.execute(
-            select(CrawlSource).where(
-                col(CrawlSource.id) == source_uuid,
-                col(CrawlSource.organization_id) == org.id,
-            )
-        )
-        return result.scalar_one_or_none() is not None
-
-    # Unknown job type: hide by default.
-    return False
-
-
-async def _resolve_visible_legacy_source_ids(
-    jobs: list[Any],
-    *,
-    org: Organization,
-    session: AsyncSession,
-) -> set[UUID]:
-    source_ids: set[UUID] = set()
-
-    for job in jobs:
-        fn = getattr(job, "function", "") or ""
-        if fn not in {"crawl_source", "sync_source"}:
-            continue
-
-        args: list[Any] = list(getattr(job, "args", None) or ())
-        kwargs = dict(getattr(job, "kwargs", None) or {})
-        if kwargs.get("organization_id") is not None or not args:
-            continue
-
-        try:
-            source_ids.add(UUID(str(args[0])))
-        except ValueError:
-            continue
-
-    if not source_ids:
-        return set()
-
-    result = await session.execute(
-        select(col(CrawlSource.id)).where(
-            col(CrawlSource.organization_id) == org.id,
-            col(CrawlSource.id).in_(source_ids),
-        )
-    )
-    return set(result.scalars().all())
-
 
 # IMPORTANT: Health endpoint must come before /{job_id} to avoid route matching issues
 @router.get("/health")
@@ -138,25 +55,19 @@ async def list_jobs(
     function: str | None = None,
     limit: int = 50,
     org: Organization = Depends(get_current_organization),
-    session: AsyncSession = Depends(get_session_dependency),
 ) -> dict[str, Any]:
     """List recent jobs."""
     from sibyl.jobs.queue import list_jobs as _list_jobs
 
     try:
         jobs = await _list_jobs(function=function, limit=limit)
-        legacy_source_ids = await _resolve_visible_legacy_source_ids(
-            jobs,
-            org=org,
-            session=session,
-        )
+        legacy_source_ids = await _resolve_visible_legacy_source_ids(jobs, org=org)
         visible = [
             j
             for j in jobs
             if await _job_visible_to_org(
                 j,
                 org=org,
-                session=session,
                 legacy_source_ids=legacy_source_ids,
             )
         ]
@@ -232,7 +143,6 @@ async def trigger_priority_decay(
 async def get_job(
     job_id: str,
     org: Organization = Depends(get_current_organization),
-    session: AsyncSession = Depends(get_session_dependency),
 ) -> dict[str, Any]:
     """Get status of a specific job."""
     from sibyl.jobs import JobStatus, get_job_status
@@ -242,7 +152,7 @@ async def get_job(
 
         if info.status == JobStatus.NOT_FOUND:
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
-        if not await _job_visible_to_org(info, org=org, session=session):
+        if not await _job_visible_to_org(info, org=org):
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
         return {
@@ -269,14 +179,13 @@ async def get_job(
 async def cancel_job(
     job_id: str,
     org: Organization = Depends(get_current_organization),
-    session: AsyncSession = Depends(get_session_dependency),
 ) -> dict[str, Any]:
     """Cancel a queued job."""
     from sibyl.jobs.queue import cancel_job as _cancel_job, get_job_status
 
     try:
         info = await get_job_status(job_id)
-        if not await _job_visible_to_org(info, org=org, session=session):
+        if not await _job_visible_to_org(info, org=org):
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
         cancelled = await _cancel_job(job_id)

@@ -85,11 +85,10 @@ class TestListJobsRoute:
     @pytest.mark.asyncio
     async def test_list_jobs_batches_legacy_source_visibility_checks(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        session = AsyncMock()
 
         visible_legacy_source_id = UUID("00000000-0000-0000-0000-000000000222")
-        invisible_legacy_source_id = UUID("00000000-0000-0000-0000-000000000333")
         embedded_visible_source_id = UUID("00000000-0000-0000-0000-000000000444")
+        invisible_legacy_source_id = UUID("00000000-0000-0000-0000-000000000333")
         embedded_hidden_source_id = UUID("00000000-0000-0000-0000-000000000555")
 
         jobs = [
@@ -150,14 +149,18 @@ class TestListJobsRoute:
             ),
         ]
 
-        result = MagicMock()
-        result.scalars.return_value.all.return_value = [visible_legacy_source_id]
-        session.execute.return_value = result
+        resolve_visible_source_ids = AsyncMock(return_value={visible_legacy_source_id})
 
-        with patch("sibyl.jobs.queue.list_jobs", AsyncMock(return_value=jobs)):
-            response = await list_jobs(org=org, session=session)
+        with (
+            patch("sibyl.jobs.queue.list_jobs", AsyncMock(return_value=jobs)),
+            patch(
+                "sibyl.api.routes.jobs._resolve_visible_legacy_source_ids",
+                resolve_visible_source_ids,
+            ),
+        ):
+            response = await list_jobs(org=org)
 
-        session.execute.assert_awaited_once()
+        resolve_visible_source_ids.assert_awaited_once_with(jobs, org=org)
         assert [job["job_id"] for job in response["jobs"]] == [
             "crawl:legacy-visible",
             "crawl:embedded-visible",
@@ -169,7 +172,6 @@ class TestCancelJobRoute:
     @pytest.mark.asyncio
     async def test_cancel_job_preserves_not_found_for_invisible_job(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        session = AsyncMock()
         job = SimpleNamespace(job_id="crawl:source-123")
 
         with (
@@ -177,7 +179,7 @@ class TestCancelJobRoute:
             patch("sibyl.api.routes.jobs._job_visible_to_org", AsyncMock(return_value=False)),
             pytest.raises(HTTPException) as exc_info,
         ):
-            await cancel_job("crawl:source-123", org=org, session=session)
+            await cancel_job("crawl:source-123", org=org)
 
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail == "Job not found: crawl:source-123"
