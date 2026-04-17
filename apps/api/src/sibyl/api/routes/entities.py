@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
+from sibyl.api.dependencies import get_legacy_knowledge_read_service
 from sibyl.api.event_types import WSEvent
 from sibyl.api.schemas import (
     EntityCreate,
@@ -39,11 +40,11 @@ from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
 from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import Organization, OrganizationRole, RawCapture
 from sibyl.db.project_sync import sync_project_create, sync_project_delete, sync_project_update
-from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.graph.relationships import RelationshipManager
 from sibyl_core.models.entities import EntityType
+from sibyl_core.services import KnowledgeReadService
 
 log = structlog.get_logger()
 
@@ -213,13 +214,14 @@ async def _enrich_entity_with_related(
     entity_manager: EntityManager,
     client: Any,
     group_id: str,
+    preloaded_related: list[RelatedEntitySummary] | None = None,
 ) -> tuple[dict[str, Any], list[RelatedEntitySummary] | None]:
     """Enrich entity metadata and fetch related entities based on entity type.
 
     Returns (metadata dict, related entities list or None).
     """
     metadata = getattr(entity, "metadata", {}) or {}
-    related: list[RelatedEntitySummary] | None = None
+    related = preloaded_related
 
     # Enrich projects with actionable task summary
     if entity.entity_type == "project":
@@ -291,6 +293,46 @@ async def _enrich_entity_with_related(
             log.debug("Failed to fetch related entities", error=str(rel_err))
 
     return metadata, related
+
+
+def _summarize_related_entities(
+    entity_id: str,
+    *,
+    related_entities: list[Any],
+    relationships: list[Any],
+) -> list[RelatedEntitySummary] | None:
+    if not related_entities or not relationships:
+        return None
+
+    relationships_by_other_id: dict[str, Any] = {}
+    for relationship in relationships:
+        if relationship.source_id == entity_id:
+            other_id = relationship.target_id
+            direction = "outgoing"
+        elif relationship.target_id == entity_id:
+            other_id = relationship.source_id
+            direction = "incoming"
+        else:
+            continue
+        relationships_by_other_id.setdefault(other_id, (relationship, direction))
+
+    summaries: list[RelatedEntitySummary] = []
+    for related_entity in related_entities:
+        relationship_pair = relationships_by_other_id.get(related_entity.id)
+        if relationship_pair is None:
+            continue
+        relationship, direction = relationship_pair
+        summaries.append(
+            RelatedEntitySummary(
+                id=related_entity.id,
+                name=related_entity.name,
+                entity_type=str(related_entity.entity_type),
+                relationship=str(relationship.relationship_type),
+                direction=direction,
+            )
+        )
+
+    return summaries or None
 
 
 # =============================================================================
@@ -583,6 +625,7 @@ async def list_entities(
 async def get_entity(
     entity_id: str,
     org: Organization = Depends(get_current_organization),
+    service: KnowledgeReadService = Depends(get_legacy_knowledge_read_service),
 ) -> EntityResponse:
     """Get a single entity by ID with related context.
 
@@ -593,18 +636,31 @@ async def get_entity(
     Always includes up to 5 related entities from the knowledge graph.
     """
     try:
-        group_id = str(org.id)
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-
-        # Try graph entity first
-        try:
-            entity = await entity_manager.get(entity_id)
-
-            # Enrich with related entities based on type
-            metadata, related = await _enrich_entity_with_related(
-                entity, entity_id, entity_manager, client, group_id
+        graph_bundle = await service.get_entity_bundle(entity_id)
+        if graph_bundle is not None:
+            entity = graph_bundle.entity
+            metadata = dict(getattr(entity, "metadata", {}) or {})
+            related = _summarize_related_entities(
+                entity_id,
+                related_entities=graph_bundle.related_entities,
+                relationships=graph_bundle.relationships,
             )
+
+            if entity.entity_type in {EntityType.PROJECT, EntityType.EPIC}:
+                group_id = str(org.id)
+                client = await get_graph_client()
+                entity_manager = EntityManager(client, group_id=group_id)
+
+                # Enrich with project and epic summaries via the current manager until
+                # those read models move behind the seam.
+                metadata, related = await _enrich_entity_with_related(
+                    entity,
+                    entity_id,
+                    entity_manager,
+                    client,
+                    group_id,
+                    preloaded_related=related,
+                )
 
             return EntityResponse(
                 id=entity.id,
@@ -623,8 +679,8 @@ async def get_entity(
                 updated_at=getattr(entity, "updated_at", None),
                 related=related,
             )
-        except EntityNotFoundError:
-            log.debug("Entity not in graph, checking document chunks", entity_id=entity_id)
+
+        log.debug("Entity not in graph, checking document chunks", entity_id=entity_id)
 
         # Fallback: check if it's a document chunk
         # Support both full UUIDs and prefix matching (e.g., "2cebcab8" matches "2cebcab8-...")
