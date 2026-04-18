@@ -15,8 +15,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from sibyl_core.graph.client import get_graph_client
-from sibyl_core.graph.entities import EntityManager
+from sibyl_core.services.legacy_graph import get_legacy_graph_runtime
 from sibyl_core.tools.responses import ConflictWarning
 
 if TYPE_CHECKING:
@@ -57,8 +56,8 @@ async def find_similar_entities(
     Returns:
         List of (id, name, content_preview, score) tuples sorted by score desc.
     """
-    client = await get_graph_client()
-    entity_manager = EntityManager(client, group_id=organization_id)
+    runtime = await get_legacy_graph_runtime(organization_id)
+    entity_manager = runtime.entity_manager
 
     # Build search query from title + content preview
     query = f"{title}. {content[:500]}" if content else title

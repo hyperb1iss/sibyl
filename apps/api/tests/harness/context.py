@@ -85,12 +85,9 @@ class ToolTestContext:
         patches = [
             # Patch at the module level where tools import from
             # Search tool
-            patch("sibyl_core.tools.search.get_graph_client", async_get_graph_client),
-            patch("sibyl_core.tools.search.EntityManager", make_entity_manager),
+            patch("sibyl_core.tools.search.get_legacy_graph_runtime", async_get_graph_runtime),
             # Explore tool
-            patch("sibyl_core.tools.explore.get_graph_client", async_get_graph_client),
-            patch("sibyl_core.tools.explore.EntityManager", make_entity_manager),
-            patch("sibyl_core.tools.explore.RelationshipManager", make_relationship_manager),
+            patch("sibyl_core.tools.explore.get_legacy_graph_runtime", async_get_graph_runtime),
             # Add tool
             patch("sibyl_core.tools.add.get_legacy_graph_runtime", async_get_graph_runtime),
             # Manage tool
@@ -147,8 +144,26 @@ async def mock_graph_connected() -> AsyncGenerator[MockGraphClient]:
         return client
 
     with (
-        patch("sibyl_core.tools.search.get_graph_client", async_get_client),
-        patch("sibyl_core.tools.explore.get_graph_client", async_get_client),
+        patch(
+            "sibyl_core.tools.search.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=LegacyGraphRuntime(
+                    client=client,
+                    entity_manager=MockEntityManager(),
+                    relationship_manager=MockRelationshipManager(),
+                )
+            ),
+        ),
+        patch(
+            "sibyl_core.tools.explore.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=LegacyGraphRuntime(
+                    client=client,
+                    entity_manager=MockEntityManager(),
+                    relationship_manager=MockRelationshipManager(),
+                )
+            ),
+        ),
         patch(
             "sibyl_core.tools.add.get_legacy_graph_runtime",
             AsyncMock(
@@ -190,8 +205,26 @@ async def mock_graph_disconnected() -> AsyncGenerator[MockGraphClient]:
         return client
 
     with (
-        patch("sibyl_core.tools.search.get_graph_client", async_get_client),
-        patch("sibyl_core.tools.explore.get_graph_client", async_get_client),
+        patch(
+            "sibyl_core.tools.search.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=LegacyGraphRuntime(
+                    client=client,
+                    entity_manager=MockEntityManager(),
+                    relationship_manager=MockRelationshipManager(),
+                )
+            ),
+        ),
+        patch(
+            "sibyl_core.tools.explore.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=LegacyGraphRuntime(
+                    client=client,
+                    entity_manager=MockEntityManager(),
+                    relationship_manager=MockRelationshipManager(),
+                )
+            ),
+        ),
         patch(
             "sibyl_core.tools.add.get_legacy_graph_runtime",
             AsyncMock(

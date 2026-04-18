@@ -2,15 +2,11 @@
 
 import hashlib
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 
 from sibyl_core.models.entities import EntityType
-
-if TYPE_CHECKING:
-    from sibyl_core.graph.client import GraphClient
-    from sibyl_core.graph.entities import EntityManager
 
 log = structlog.get_logger()
 
@@ -361,7 +357,7 @@ def auto_tag_task(
     return sorted(t for t in tags if t and len(t) >= 2)
 
 
-async def get_project_tags(client: "GraphClient", project_id: str) -> list[str]:
+async def get_project_tags(client: Any, project_id: str) -> list[str]:
     """Fetch all unique tags from a project's existing tasks.
 
     Args:
@@ -371,8 +367,6 @@ async def get_project_tags(client: "GraphClient", project_id: str) -> list[str]:
     Returns:
         List of unique tags used in the project
     """
-    from sibyl_core.graph.client import GraphClient
-
     try:
         # Query existing tasks in this project for their tags
         result = await client.driver.execute_query(
@@ -388,7 +382,7 @@ async def get_project_tags(client: "GraphClient", project_id: str) -> list[str]:
         )
 
         # Normalize FalkorDB result (returns tuple, not object with result_set)
-        rows = GraphClient.normalize_result(result)
+        rows = client.normalize_result(result)
 
         all_tags: set[str] = set()
         for row in rows:
@@ -412,7 +406,7 @@ async def get_project_tags(client: "GraphClient", project_id: str) -> list[str]:
 
 
 async def _auto_discover_links(
-    entity_manager: "EntityManager",
+    entity_manager: Any,
     title: str,
     content: str,
     technologies: list[str],

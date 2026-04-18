@@ -13,15 +13,12 @@ This module exposes that temporal information for:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal
+from typing import Any, Literal
 
 import structlog
 
-from sibyl_core.graph.client import get_graph_client
+from sibyl_core.services.legacy_graph import get_legacy_graph_client
 from sibyl_core.tools.responses import TemporalEdge, TemporalResponse
-
-if TYPE_CHECKING:
-    from sibyl_core.graph.client import GraphClient
 
 log = structlog.get_logger()
 
@@ -95,7 +92,7 @@ async def temporal_query(
                 message=f"Invalid as_of date format: {e}. Use ISO format like 2025-03-15",
             )
 
-    client = await get_graph_client()
+    client = await get_legacy_graph_client()
 
     if mode == "history":
         return await get_entity_history(
@@ -131,7 +128,7 @@ async def temporal_query(
 
 
 async def get_entity_history(
-    client: GraphClient,
+    client: Any,
     organization_id: str,
     entity_id: str | None,
     as_of: datetime | None = None,
@@ -219,7 +216,7 @@ async def get_entity_history(
 
 
 async def get_entity_timeline(
-    client: GraphClient,
+    client: Any,
     organization_id: str,
     entity_id: str | None,
     limit: int = 100,
@@ -288,7 +285,7 @@ async def get_entity_timeline(
 
 
 async def find_conflicts(
-    client: GraphClient,
+    client: Any,
     organization_id: str,
     entity_id: str | None = None,
     limit: int = 50,

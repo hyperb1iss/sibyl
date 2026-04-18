@@ -753,116 +753,106 @@ class TestSearchTool:
         """Search raises error without organization_id."""
         from sibyl_core.tools.search import search
 
-        # Mock the graph client to avoid real connections
-        with patch("sibyl_core.tools.search.get_graph_client"):
-            response = await search(
-                query="test query",
-                organization_id=None,  # Missing org ID
-                include_documents=False,  # Skip document search
-            )
-            # Search returns empty results when graph search fails due to missing org
-            assert response.total == 0
+        response = await search(
+            query="test query",
+            organization_id=None,  # Missing org ID
+            include_documents=False,  # Skip document search
+        )
+        # Search returns empty results when graph search fails due to missing org
+        assert response.total == 0
 
     @pytest.mark.asyncio
     async def test_search_clamps_limit(self) -> None:
         """Search clamps limit to valid range."""
         from sibyl_core.tools.search import search
 
-        with patch("sibyl_core.tools.search.get_graph_client"):
-            # Test limit clamping to max 50
-            response = await search(
-                query="test",
-                limit=100,  # Over max
-                organization_id="org_123",
-                include_documents=False,
-                include_graph=False,  # Skip graph search too
-            )
-            assert response.limit == 50
+        response = await search(
+            query="test",
+            limit=100,  # Over max
+            organization_id="org_123",
+            include_documents=False,
+            include_graph=False,  # Skip graph search too
+        )
+        assert response.limit == 50
 
     @pytest.mark.asyncio
     async def test_search_clamps_offset(self) -> None:
         """Search clamps offset to non-negative."""
         from sibyl_core.tools.search import search
 
-        with patch("sibyl_core.tools.search.get_graph_client"):
-            response = await search(
-                query="test",
-                offset=-10,  # Negative
-                organization_id="org_123",
-                include_documents=False,
-                include_graph=False,
-            )
-            assert response.offset == 0
+        response = await search(
+            query="test",
+            offset=-10,  # Negative
+            organization_id="org_123",
+            include_documents=False,
+            include_graph=False,
+        )
+        assert response.offset == 0
 
     @pytest.mark.asyncio
     async def test_search_builds_filters_dict(self) -> None:
         """Search builds filters dict from parameters."""
         from sibyl_core.tools.search import search
 
-        with patch("sibyl_core.tools.search.get_graph_client"):
-            response = await search(
-                query="test",
-                types=["pattern", "rule"],
-                language="python",
-                category="auth",
-                status="todo",
-                project="proj_123",
-                organization_id="org_123",
-                include_documents=False,
-                include_graph=False,
-            )
-            assert response.filters["types"] == ["pattern", "rule"]
-            assert response.filters["language"] == "python"
-            assert response.filters["category"] == "auth"
-            assert response.filters["status"] == "todo"
-            assert response.filters["project"] == "proj_123"
+        response = await search(
+            query="test",
+            types=["pattern", "rule"],
+            language="python",
+            category="auth",
+            status="todo",
+            project="proj_123",
+            organization_id="org_123",
+            include_documents=False,
+            include_graph=False,
+        )
+        assert response.filters["types"] == ["pattern", "rule"]
+        assert response.filters["language"] == "python"
+        assert response.filters["category"] == "auth"
+        assert response.filters["status"] == "todo"
+        assert response.filters["project"] == "proj_123"
 
     @pytest.mark.asyncio
     async def test_search_document_only_mode(self) -> None:
         """Search with types=['document'] skips graph search."""
         from sibyl_core.tools.search import search
 
-        mock_client = AsyncMock()
-        with patch("sibyl_core.tools.search.get_graph_client", return_value=mock_client):
-            response = await search(
-                query="test",
-                types=["document"],
-                organization_id="org_123",
-                include_documents=False,  # Still skip actual doc search
-            )
-            # Should not have created EntityManager for graph search
-            assert response.graph_count == 0
+        response = await search(
+            query="test",
+            types=["document"],
+            organization_id="org_123",
+            include_documents=False,  # Still skip actual doc search
+        )
+        # Should not have created EntityManager for graph search
+        assert response.graph_count == 0
 
     @pytest.mark.asyncio
     async def test_search_empty_query_skips_graph(self) -> None:
         """Empty query skips graph search."""
         from sibyl_core.tools.search import search
 
-        with patch("sibyl_core.tools.search.get_graph_client"):
-            response = await search(
-                query="",
-                organization_id="org_123",
-                include_documents=False,
-            )
-            assert response.total == 0
-            assert response.query == ""
+        response = await search(
+            query="",
+            organization_id="org_123",
+            include_documents=False,
+        )
+        assert response.total == 0
+        assert response.query == ""
 
     @pytest.mark.asyncio
     async def test_search_returns_response_structure(self) -> None:
         """Search returns properly structured SearchResponse."""
         from sibyl_core.tools.search import search
 
-        with patch("sibyl_core.tools.search.get_graph_client"):
-            response = await search(
-                query="test",
-                organization_id="org_123",
-                include_documents=False,
-                include_graph=False,
-            )
-            assert isinstance(response, SearchResponse)
-            assert isinstance(response.results, list)
-            assert isinstance(response.total, int)
-            assert isinstance(response.filters, dict)
+        response = await search(
+            query="test",
+            organization_id="org_123",
+            include_documents=False,
+            include_graph=False,
+        )
+        assert isinstance(response, SearchResponse)
+        assert isinstance(response.results, list)
+        assert isinstance(response.total, int)
+        assert isinstance(response.filters, dict)
 
     @pytest.mark.asyncio
     async def test_search_promotes_exact_title_match_over_noisy_hybrid_results(self) -> None:
@@ -889,8 +879,15 @@ class TestSearchTool:
         mock_entity_manager.search_exact_name = AsyncMock(return_value=[(exact, 2.0)])
 
         with (
-            patch("sibyl_core.tools.search.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.search.EntityManager", return_value=mock_entity_manager),
+            patch(
+                "sibyl_core.tools.search.get_legacy_graph_runtime",
+                AsyncMock(
+                    return_value=make_legacy_graph_runtime(
+                        client=mock_client,
+                        entity_manager=mock_entity_manager,
+                    )
+                ),
+            ),
             patch(
                 "sibyl_core.tools.search.hybrid_search",
                 new=AsyncMock(return_value=HybridResult(results=[(noisy, 0.95)])),
@@ -927,8 +924,15 @@ class TestSearchTool:
         mock_entity_manager.search_exact_name = AsyncMock(return_value=[(exact, 2.0)])
 
         with (
-            patch("sibyl_core.tools.search.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.search.EntityManager", return_value=mock_entity_manager),
+            patch(
+                "sibyl_core.tools.search.get_legacy_graph_runtime",
+                AsyncMock(
+                    return_value=make_legacy_graph_runtime(
+                        client=mock_client,
+                        entity_manager=mock_entity_manager,
+                    )
+                ),
+            ),
             patch(
                 "sibyl_core.tools.search.hybrid_search",
                 new=AsyncMock(return_value=HybridResult(results=[])),
@@ -966,8 +970,15 @@ class TestSearchTool:
         mock_entity_manager.search_exact_name = AsyncMock(return_value=[(exact, 2.0)])
 
         with (
-            patch("sibyl_core.tools.search.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.search.EntityManager", return_value=mock_entity_manager),
+            patch(
+                "sibyl_core.tools.search.get_legacy_graph_runtime",
+                AsyncMock(
+                    return_value=make_legacy_graph_runtime(
+                        client=mock_client,
+                        entity_manager=mock_entity_manager,
+                    )
+                ),
+            ),
             patch(
                 "sibyl_core.tools.search.hybrid_search",
                 new=AsyncMock(return_value=HybridResult(results=[])),
@@ -1131,14 +1142,13 @@ class TestExploreTool:
         mock_entity_manager = AsyncMock()
         mock_entity_manager.list_by_type = AsyncMock(return_value=[])
 
-        with (
-            patch(
-                "sibyl_core.tools.explore.get_graph_client",
-                return_value=mock_client,
-            ),
-            patch(
-                "sibyl_core.tools.explore.EntityManager",
-                return_value=mock_entity_manager,
+        with patch(
+            "sibyl_core.tools.explore.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=make_legacy_graph_runtime(
+                    client=mock_client,
+                    entity_manager=mock_entity_manager,
+                )
             ),
         ):
             response = await explore(
@@ -1157,14 +1167,13 @@ class TestExploreTool:
         mock_rel_manager = AsyncMock()
         mock_rel_manager.get_related_entities = AsyncMock(return_value=[])
 
-        with (
-            patch(
-                "sibyl_core.tools.explore.get_graph_client",
-                return_value=mock_client,
-            ),
-            patch(
-                "sibyl_core.tools.explore.RelationshipManager",
-                return_value=mock_rel_manager,
+        with patch(
+            "sibyl_core.tools.explore.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=make_legacy_graph_runtime(
+                    client=mock_client,
+                    relationship_manager=mock_rel_manager,
+                )
             ),
         ):
             response = await explore(
@@ -1185,14 +1194,13 @@ class TestExploreTool:
         mock_entity_manager = AsyncMock()
         mock_entity_manager.list_by_type = AsyncMock(return_value=[])
 
-        with (
-            patch(
-                "sibyl_core.tools.explore.get_graph_client",
-                return_value=mock_client,
-            ),
-            patch(
-                "sibyl_core.tools.explore.EntityManager",
-                return_value=mock_entity_manager,
+        with patch(
+            "sibyl_core.tools.explore.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=make_legacy_graph_runtime(
+                    client=mock_client,
+                    entity_manager=mock_entity_manager,
+                )
             ),
         ):
             response = await explore(
@@ -1217,14 +1225,13 @@ class TestExploreTool:
         mock_entity_manager = AsyncMock()
         mock_entity_manager.list_by_type = AsyncMock(return_value=[])
 
-        with (
-            patch(
-                "sibyl_core.tools.explore.get_graph_client",
-                return_value=mock_client,
-            ),
-            patch(
-                "sibyl_core.tools.explore.EntityManager",
-                return_value=mock_entity_manager,
+        with patch(
+            "sibyl_core.tools.explore.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=make_legacy_graph_runtime(
+                    client=mock_client,
+                    entity_manager=mock_entity_manager,
+                )
             ),
         ):
             response = await explore(
@@ -1243,45 +1250,39 @@ class TestExploreTool:
         """Explore related mode returns error without entity_id."""
         from sibyl_core.tools.explore import explore
 
-        mock_client = AsyncMock()
-        with patch("sibyl_core.tools.explore.get_graph_client", return_value=mock_client):
-            response = await explore(
-                mode="related",
-                entity_id=None,  # Missing
-                organization_id="org_123",
-            )
-            assert response.total == 0
-            assert "error" in response.filters
+        response = await explore(
+            mode="related",
+            entity_id=None,  # Missing
+            organization_id="org_123",
+        )
+        assert response.total == 0
+        assert "error" in response.filters
 
     @pytest.mark.asyncio
     async def test_explore_dependencies_requires_entity_id(self) -> None:
         """Explore dependencies mode returns error without entity_id."""
         from sibyl_core.tools.explore import explore
 
-        mock_client = AsyncMock()
-        with patch("sibyl_core.tools.explore.get_graph_client", return_value=mock_client):
-            response = await explore(
-                mode="dependencies",
-                entity_id=None,  # Missing
-                organization_id="org_123",
-            )
-            assert response.total == 0
-            assert "error" in response.filters
+        response = await explore(
+            mode="dependencies",
+            entity_id=None,  # Missing
+            organization_id="org_123",
+        )
+        assert response.total == 0
+        assert "error" in response.filters
 
     @pytest.mark.asyncio
     async def test_explore_traverse_requires_entity_id(self) -> None:
         """Explore traverse mode returns error without entity_id."""
         from sibyl_core.tools.explore import explore
 
-        mock_client = AsyncMock()
-        with patch("sibyl_core.tools.explore.get_graph_client", return_value=mock_client):
-            response = await explore(
-                mode="traverse",
-                entity_id=None,  # Missing
-                organization_id="org_123",
-            )
-            assert response.total == 0
-            assert "error" in response.filters
+        response = await explore(
+            mode="traverse",
+            entity_id=None,  # Missing
+            organization_id="org_123",
+        )
+        assert response.total == 0
+        assert "error" in response.filters
 
     @pytest.mark.asyncio
     async def test_explore_returns_response_structure(self) -> None:
@@ -1292,14 +1293,13 @@ class TestExploreTool:
         mock_entity_manager = AsyncMock()
         mock_entity_manager.list_by_type = AsyncMock(return_value=[])
 
-        with (
-            patch(
-                "sibyl_core.tools.explore.get_graph_client",
-                return_value=mock_client,
-            ),
-            patch(
-                "sibyl_core.tools.explore.EntityManager",
-                return_value=mock_entity_manager,
+        with patch(
+            "sibyl_core.tools.explore.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=make_legacy_graph_runtime(
+                    client=mock_client,
+                    entity_manager=mock_entity_manager,
+                )
             ),
         ):
             response = await explore(

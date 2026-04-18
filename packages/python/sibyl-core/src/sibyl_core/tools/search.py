@@ -7,10 +7,9 @@ from typing import Any
 
 import structlog
 
-from sibyl_core.graph.client import get_graph_client
-from sibyl_core.graph.entities import EntityManager
 from sibyl_core.models.entities import EntityType
 from sibyl_core.retrieval import HybridConfig, hybrid_search, temporal_boost
+from sibyl_core.services.legacy_graph import get_legacy_graph_runtime
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
     _build_entity_metadata,
@@ -437,12 +436,13 @@ async def search(
     # =========================================================================
     if search_graph and query:
         try:
-            client = await get_graph_client()
             if not organization_id:
                 raise ValueError(
                     "organization_id is required - cannot access graph without org context"
                 )
-            entity_manager = EntityManager(client, group_id=organization_id)
+            runtime = await get_legacy_graph_runtime(organization_id)
+            client = runtime.client
+            entity_manager = runtime.entity_manager
 
             # Determine entity types to search (exclude 'document' - that's for doc search)
             entity_types = None

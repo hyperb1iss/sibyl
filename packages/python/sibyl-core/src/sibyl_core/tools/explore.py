@@ -4,10 +4,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 
-from sibyl_core.graph.client import get_graph_client
-from sibyl_core.graph.entities import EntityManager
-from sibyl_core.graph.relationships import RelationshipManager
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
+from sibyl_core.services.legacy_graph import get_legacy_graph_runtime
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
     _build_entity_metadata,
@@ -350,8 +348,8 @@ async def _explore_list(
     group_id: str,
 ) -> ExploreResponse:
     """List entities by type with filters."""
-    client = await get_graph_client()
-    entity_manager = EntityManager(client, group_id=group_id)
+    runtime = await get_legacy_graph_runtime(group_id)
+    entity_manager = runtime.entity_manager
 
     # Default to listing all types if none specified
     target_types: list[EntityType] = []
@@ -466,9 +464,9 @@ async def _explore_dependencies(
             filters={**filters, "error": "entity_id required for dependencies mode"},
         )
 
-    client = await get_graph_client()
-    relationship_manager = RelationshipManager(client, group_id=group_id)
-    entity_manager = EntityManager(client, group_id=group_id)
+    runtime = await get_legacy_graph_runtime(group_id)
+    relationship_manager = runtime.relationship_manager
+    entity_manager = runtime.entity_manager
 
     # Track visited nodes and detect cycles
     visited: set[str] = set()
@@ -583,8 +581,8 @@ async def _explore_related(
             filters={**filters, "error": "entity_id required for related/traverse mode"},
         )
 
-    client = await get_graph_client()
-    relationship_manager = RelationshipManager(client, group_id=group_id)
+    runtime = await get_legacy_graph_runtime(group_id)
+    relationship_manager = runtime.relationship_manager
 
     # Convert relationship type strings to enum
     rel_types = None
