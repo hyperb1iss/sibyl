@@ -602,7 +602,7 @@ class TestGetHealth:
         async def failing_client() -> None:
             raise ConnectionError("Cannot connect to FalkorDB")
 
-        with patch("sibyl_core.tools.health.get_graph_client", failing_client):
+        with patch("sibyl_core.tools.health.get_legacy_graph_client", failing_client):
             result = await get_health()
 
             assert result["status"] == "unhealthy"
@@ -621,25 +621,13 @@ class TestGetStats:
     @pytest.mark.asyncio
     async def test_stats_returns_entity_counts(self) -> None:
         """Stats should return entity counts per type."""
-        mock_client = MagicMock()
-        mock_driver = MagicMock()
-        mock_client.client.driver.clone = MagicMock(return_value=mock_driver)
-
-        mock_driver.execute_query = AsyncMock(
-            return_value=[
-                {"type": "pattern", "count": 10},
-                {"type": "rule", "count": 5},
-            ]
-        )
-
-        with (
-            patch("sibyl_core.tools.health.get_graph_client", AsyncMock(return_value=mock_client)),
-            patch(
-                "sibyl_core.tools.health.GraphClient.normalize_result",
+        with patch(
+            "sibyl_core.tools.health.execute_legacy_graph_query",
+            AsyncMock(
                 return_value=[
                     {"type": "pattern", "count": 10},
                     {"type": "rule", "count": 5},
-                ],
+                ]
             ),
         ):
             result = await get_stats(organization_id=TEST_ORG_ID)

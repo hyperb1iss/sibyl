@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -67,6 +68,23 @@ class MockEnum:
 
     def __init__(self, value: str) -> None:
         self.value = value
+
+
+def make_legacy_graph_runtime(
+    *,
+    client: Any | None = None,
+    entity_manager: Any | None = None,
+    relationship_manager: Any | None = None,
+) -> SimpleNamespace:
+    """Build a lightweight legacy graph runtime for tool tests."""
+
+    return SimpleNamespace(
+        client=client if client is not None else MagicMock(),
+        entity_manager=entity_manager if entity_manager is not None else MagicMock(),
+        relationship_manager=(
+            relationship_manager if relationship_manager is not None else MagicMock()
+        ),
+    )
 
 
 # =============================================================================
@@ -1503,23 +1521,23 @@ class TestAddTool:
         """Add returns error without organization_id in metadata."""
         from sibyl_core.tools.add import add
 
-        mock_client = AsyncMock()
-        with patch("sibyl_core.tools.add.get_graph_client", return_value=mock_client):
-            response = await add(
-                title="Test",
-                content="Content",
-                metadata={},  # No org ID
-            )
-            assert response.success is False
-            assert "organization_id is required" in response.message
+        response = await add(
+            title="Test",
+            content="Content",
+            metadata={},  # No org ID
+        )
+        assert response.success is False
+        assert "organization_id is required" in response.message
 
     @pytest.mark.asyncio
     async def test_add_task_requires_project(self) -> None:
         """Add task returns error without project."""
         from sibyl_core.tools.add import add
 
-        mock_client = AsyncMock()
-        with patch("sibyl_core.tools.add.get_graph_client", return_value=mock_client):
+        with patch(
+            "sibyl_core.tools.add.get_legacy_graph_runtime",
+            AsyncMock(return_value=make_legacy_graph_runtime()),
+        ):
             response = await add(
                 title="Test Task",
                 content="Task content",
@@ -1535,8 +1553,10 @@ class TestAddTool:
         """Add epic returns error without project."""
         from sibyl_core.tools.add import add
 
-        mock_client = AsyncMock()
-        with patch("sibyl_core.tools.add.get_graph_client", return_value=mock_client):
+        with patch(
+            "sibyl_core.tools.add.get_legacy_graph_runtime",
+            AsyncMock(return_value=make_legacy_graph_runtime()),
+        ):
             response = await add(
                 title="Test Epic",
                 content="Epic content",
@@ -1569,10 +1589,14 @@ class TestAddTool:
         mock_entity_manager.create_direct = AsyncMock(return_value="episode_123")
         mock_entity_manager.create = AsyncMock(return_value="episode_123")
 
-        with (
-            patch("sibyl_core.tools.add.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.add.EntityManager", return_value=mock_entity_manager),
-            patch("sibyl_core.tools.add.RelationshipManager"),
+        with patch(
+            "sibyl_core.tools.add.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=make_legacy_graph_runtime(
+                    client=mock_client,
+                    entity_manager=mock_entity_manager,
+                )
+            ),
         ):
             response = await add(
                 title="  Test Title  ",
@@ -1600,10 +1624,14 @@ class TestAddTool:
         mock_entity_manager.create = capture_create
         mock_entity_manager.create_direct = capture_create
 
-        with (
-            patch("sibyl_core.tools.add.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.add.EntityManager", return_value=mock_entity_manager),
-            patch("sibyl_core.tools.add.RelationshipManager"),
+        with patch(
+            "sibyl_core.tools.add.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=make_legacy_graph_runtime(
+                    client=mock_client,
+                    entity_manager=mock_entity_manager,
+                )
+            ),
         ):
             response = await add(
                 title="Test Entity",
@@ -1637,10 +1665,14 @@ class TestAddEntityTypes:
 
         mock_entity_manager.create_direct = capture_create
 
-        with (
-            patch("sibyl_core.tools.add.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.add.EntityManager", return_value=mock_entity_manager),
-            patch("sibyl_core.tools.add.RelationshipManager"),
+        with patch(
+            "sibyl_core.tools.add.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=make_legacy_graph_runtime(
+                    client=mock_client,
+                    entity_manager=mock_entity_manager,
+                )
+            ),
         ):
             response = await add(
                 title="Error Handling Pattern",
@@ -1671,10 +1703,14 @@ class TestAddEntityTypes:
 
         mock_entity_manager.create_direct = capture_create
 
-        with (
-            patch("sibyl_core.tools.add.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.add.EntityManager", return_value=mock_entity_manager),
-            patch("sibyl_core.tools.add.RelationshipManager"),
+        with patch(
+            "sibyl_core.tools.add.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=make_legacy_graph_runtime(
+                    client=mock_client,
+                    entity_manager=mock_entity_manager,
+                )
+            ),
         ):
             response = await add(
                 title="Sibyl",
@@ -1709,11 +1745,15 @@ class TestAddEntityTypes:
         mock_rel_manager.create_bulk = AsyncMock(side_effect=capture_rel_create_bulk)
 
         with (
-            patch("sibyl_core.tools.add.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.add.EntityManager", return_value=mock_entity_manager),
             patch(
-                "sibyl_core.tools.add.RelationshipManager",
-                return_value=mock_rel_manager,
+                "sibyl_core.tools.add.get_legacy_graph_runtime",
+                AsyncMock(
+                    return_value=make_legacy_graph_runtime(
+                        client=mock_client,
+                        entity_manager=mock_entity_manager,
+                        relationship_manager=mock_rel_manager,
+                    )
+                ),
             ),
             patch("sibyl_core.tools.add.get_project_tags", return_value=[]),
             patch("sibyl_core.tools.add._auto_discover_links", return_value=[]),

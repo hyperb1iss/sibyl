@@ -81,6 +81,10 @@ class MockGraphitiClient:
 class MockDriver:
     """Mock FalkorDB driver for query execution."""
 
+    def clone(self, database: str) -> "MockDriver":
+        """Return a shallow clone for org-scoped queries."""
+        return self
+
     async def execute_query(self, query: str, **params: Any) -> list[Any]:
         """Execute a mock query - returns empty list by default."""
         return []

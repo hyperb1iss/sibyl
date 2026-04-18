@@ -3,15 +3,18 @@
 import time
 from typing import Any
 
-from sibyl_core.graph.client import GraphClient, get_graph_client
-from sibyl_core.graph.entities import EntityManager
 from sibyl_core.models.entities import EntityType
+from sibyl_core.services.legacy_graph import (
+    execute_legacy_graph_query,
+    get_legacy_graph_client,
+    get_legacy_graph_runtime,
+)
 
 # Module-level state for uptime tracking
 _server_start_time: float | None = None
 
 
-async def _count_entities(entity_manager: EntityManager, entity_type: EntityType) -> int:
+async def _count_entities(entity_manager: Any, entity_type: EntityType) -> int:
     """Count entities of a type without truncating large orgs."""
     total = 0
     offset = 0
@@ -52,14 +55,15 @@ async def get_health(*, organization_id: str | None = None) -> dict[str, Any]:
     }
 
     try:
-        client = await get_graph_client()
+        await get_legacy_graph_client()
 
         # Test connectivity
         health["graph_connected"] = True
 
         # Entity counts require org context
         if organization_id:
-            entity_manager = EntityManager(client, group_id=organization_id)
+            runtime = await get_legacy_graph_runtime(organization_id)
+            entity_manager = runtime.entity_manager
 
             # Get entity counts
             for entity_type in [EntityType.PATTERN, EntityType.RULE, EntityType.EPISODE]:
@@ -95,18 +99,13 @@ async def get_stats(organization_id: str | None = None) -> dict[str, Any]:
         raise ValueError("organization_id is required - cannot get stats without org context")
 
     try:
-        client = await get_graph_client()
-
-        # Clone driver for org-specific graph (multi-tenancy)
-        driver = client.client.driver.clone(organization_id)
-
-        # Single aggregation query - much faster than N separate list queries
-        result = await driver.execute_query(
+        data = await execute_legacy_graph_query(
+            organization_id,
             """
             MATCH (n)
             WHERE n.entity_type IS NOT NULL
             RETURN n.entity_type as type, count(*) as count
-            """
+            """,
         )
 
         stats: dict[str, Any] = {
@@ -119,7 +118,6 @@ async def get_stats(organization_id: str | None = None) -> dict[str, Any]:
             stats["entity_counts"][entity_type.value] = 0
 
         # Fill in actual counts from query
-        data = GraphClient.normalize_result(result)
         for row in data:
             if isinstance(row, dict):
                 etype = row.get("type")

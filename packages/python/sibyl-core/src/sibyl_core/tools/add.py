@@ -5,9 +5,6 @@ from typing import Any
 
 import structlog
 
-from sibyl_core.graph.client import get_graph_client
-from sibyl_core.graph.entities import EntityManager
-from sibyl_core.graph.relationships import RelationshipManager
 from sibyl_core.models.entities import (
     EntityType,
     Episode,
@@ -25,6 +22,7 @@ from sibyl_core.models.tasks import (
     TaskPriority,
     TaskStatus,
 )
+from sibyl_core.services.legacy_graph import get_legacy_graph_runtime
 from sibyl_core.tools.conflicts import detect_conflicts
 from sibyl_core.tools.helpers import (
     MAX_CONTENT_LENGTH,
@@ -52,7 +50,7 @@ def _build_relationship(rel_data: dict[str, Any]) -> Relationship:
 
 
 async def _create_relationships_bulk(
-    relationship_manager: RelationshipManager,
+    relationship_manager: Any,
     relationships_to_create: list[dict[str, Any]],
     log_event: str,
 ) -> tuple[int, int]:
@@ -194,14 +192,15 @@ async def add(
     )
 
     try:
-        client = await get_graph_client()
         org_id = (metadata or {}).get("organization_id") or (metadata or {}).get("group_id")
         if not org_id:
             raise ValueError(
                 "organization_id is required in metadata - cannot create entity without org context"
             )
         org_id = str(org_id)
-        entity_manager = EntityManager(client, group_id=org_id)
+        runtime = await get_legacy_graph_runtime(org_id)
+        client = runtime.client
+        entity_manager = runtime.entity_manager
 
         # Generate deterministic ID
         entity_id = _generate_id(entity_type, title, category or "general")
@@ -249,7 +248,7 @@ async def add(
 
         # Create appropriate entity type
         entity: Episode | Pattern | Procedure | Task | Project
-        relationship_manager = RelationshipManager(client, group_id=org_id)
+        relationship_manager = runtime.relationship_manager
 
         if entity_type == "task":
             # Validate project_id is provided for tasks
