@@ -30,7 +30,7 @@ ALLOWLIST: dict[str, tuple[str, ...]] = {
     "apps/api/src/sibyl/api/routes/crawler.py": ("sqlalchemy", "sqlmodel"),
     "apps/api/src/sibyl/api/routes/entities.py": (*ALLOW_SQL, *ALLOW_GRAPH),
     "apps/api/src/sibyl/api/routes/rag.py": ("sqlalchemy", "sqlmodel"),
-    "apps/api/src/sibyl/api/routes/tasks.py": ("sqlalchemy", "sibyl_core.graph"),
+    "apps/api/src/sibyl/api/routes/tasks.py": ("sqlalchemy",),
     "packages/python/sibyl-core/src/sibyl_core/tools/add.py": ALLOW_GRAPH,
     "packages/python/sibyl-core/src/sibyl_core/tools/admin.py": ALLOW_GRAPH,
     "packages/python/sibyl-core/src/sibyl_core/tools/conflicts.py": ALLOW_GRAPH,

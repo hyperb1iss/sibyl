@@ -15,6 +15,7 @@ from sibyl.persistence.legacy.graph import (
     LegacySearchIndex,
     get_legacy_graph_query_adapter,
     get_legacy_graph_stats_payload,
+    get_legacy_task_runtime,
     graph_stats_payload,
 )
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -259,3 +260,24 @@ async def test_get_legacy_graph_query_adapter_uses_graph_client() -> None:
     assert isinstance(adapter, LegacyGraphQueryAdapter)
     assert adapter._client is client
     assert adapter._driver is client.get_org_driver.return_value
+
+
+@pytest.mark.asyncio
+async def test_get_legacy_task_runtime_scopes_managers_to_org() -> None:
+    client = MagicMock()
+    entity_manager = MagicMock()
+    relationship_manager = MagicMock()
+
+    with (
+        patch("sibyl.persistence.legacy.graph.get_graph_client", AsyncMock(return_value=client)),
+        patch("sibyl.persistence.legacy.graph.EntityManager", return_value=entity_manager),
+        patch(
+            "sibyl.persistence.legacy.graph.RelationshipManager",
+            return_value=relationship_manager,
+        ),
+    ):
+        runtime = await get_legacy_task_runtime("org-1")
+
+    assert runtime.client is client
+    assert runtime.entity_manager is entity_manager
+    assert runtime.relationship_manager is relationship_manager

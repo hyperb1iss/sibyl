@@ -24,11 +24,14 @@ class TestCompleteTaskRoute:
             status=SimpleNamespace(value="done"),
             model_dump=MagicMock(return_value={"id": "task-123", "title": "Ship the thing"}),
         )
+        runtime = SimpleNamespace(
+            client=object(),
+            entity_manager=MagicMock(),
+            relationship_manager=MagicMock(),
+        )
         workflow = SimpleNamespace(
             complete_task=AsyncMock(return_value=completed_task),
         )
-        entity_manager = MagicMock()
-        relationship_manager = MagicMock()
         episode_enqueue = AsyncMock(return_value="learning_episode:task-123")
         procedure_enqueue = AsyncMock(return_value="learning_procedure:task-123")
 
@@ -39,9 +42,7 @@ class TestCompleteTaskRoute:
         with (
             patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
             patch("sibyl.api.routes.tasks.entity_lock", locked_entity),
-            patch("sibyl.api.routes.tasks.get_graph_client", AsyncMock(return_value=object())),
-            patch("sibyl.api.routes.tasks.EntityManager", return_value=entity_manager),
-            patch("sibyl.api.routes.tasks.RelationshipManager", return_value=relationship_manager),
+            patch("sibyl.api.routes.tasks.get_legacy_task_runtime", AsyncMock(return_value=runtime)),
             patch("sibyl.api.routes.tasks.TaskWorkflowEngine", return_value=workflow),
             patch("sibyl.jobs.queue.enqueue_create_learning_episode", episode_enqueue),
             patch("sibyl.jobs.queue.enqueue_create_learning_procedure", procedure_enqueue),
@@ -77,14 +78,14 @@ class TestListNotesRoute:
         manager = MagicMock()
         manager.get = AsyncMock()
         manager.get_notes_for_task = AsyncMock(return_value=[])
+        runtime = SimpleNamespace(entity_manager=manager)
 
         with (
             patch(
                 "sibyl.api.routes.tasks._verify_task_access",
                 AsyncMock(return_value=SimpleNamespace(id="task-123")),
             ),
-            patch("sibyl.api.routes.tasks.get_graph_client", AsyncMock(return_value=object())),
-            patch("sibyl.api.routes.tasks.EntityManager", return_value=manager),
+            patch("sibyl.api.routes.tasks.get_legacy_task_runtime", AsyncMock(return_value=runtime)),
         ):
             response = await list_notes("task-123", org=org, auth=auth)
 

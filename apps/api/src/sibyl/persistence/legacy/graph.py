@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self
 
 from sibyl_core.errors import EntityNotFoundError
@@ -505,6 +506,15 @@ class LegacyKnowledgeWriteAdapter(KnowledgeWriteService):
         return await self._store.relationships.delete(relationship_id)
 
 
+@dataclass(frozen=True, slots=True)
+class LegacyTaskRuntime:
+    """Scoped graph runtime for task routes on the legacy backend."""
+
+    client: GraphClient
+    entity_manager: EntityManager
+    relationship_manager: RelationshipManager
+
+
 class LegacyGraphQueryAdapter:
     """Thin graph query surface for routes that still need legacy reads."""
 
@@ -645,6 +655,15 @@ async def get_legacy_knowledge_read_adapter(group_id: str) -> LegacyKnowledgeRea
 async def get_legacy_graph_query_adapter(group_id: str) -> LegacyGraphQueryAdapter:
     client = await get_graph_client()
     return LegacyGraphQueryAdapter(client, group_id)
+
+
+async def get_legacy_task_runtime(group_id: str) -> LegacyTaskRuntime:
+    client = await get_graph_client()
+    return LegacyTaskRuntime(
+        client=client,
+        entity_manager=EntityManager(client, group_id=group_id),
+        relationship_manager=RelationshipManager(client, group_id=group_id),
+    )
 
 
 async def update_legacy_entity(

@@ -25,10 +25,10 @@ from sibyl.auth.dependencies import (
 from sibyl.auth.rls import AuthSession, get_auth_session
 from sibyl.db.models import Organization, OrganizationRole, User
 from sibyl.locks import entity_lock
-from sibyl.persistence.legacy.graph import get_legacy_knowledge_read_adapter
-from sibyl_core.graph.client import get_graph_client
-from sibyl_core.graph.entities import EntityManager
-from sibyl_core.graph.relationships import RelationshipManager
+from sibyl.persistence.legacy.graph import (
+    get_legacy_knowledge_read_adapter,
+    get_legacy_task_runtime,
+)
 from sibyl_core.models.tasks import AuthorType, Note, TaskComplexity, TaskPriority, TaskStatus
 from sibyl_core.tasks.workflow import TaskWorkflowEngine
 
@@ -173,9 +173,7 @@ async def create_task(
     )
 
     try:
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=str(org.id))
-        relationship_manager = RelationshipManager(client, group_id=str(org.id))
+        runtime = await get_legacy_task_runtime(str(org.id))
 
         # Create task entity with actor attribution
         task = Task(  # type: ignore[call-arg]  # model_validator sets name from title
@@ -195,7 +193,7 @@ async def create_task(
         )
 
         # Create in graph
-        task_id = await entity_manager.create_direct(task)
+        task_id = await runtime.entity_manager.create_direct(task)
 
         # Create BELONGS_TO relationship with project
         belongs_to = Relationship(
@@ -204,7 +202,7 @@ async def create_task(
             target_id=request.project_id,
             relationship_type=RelationshipType.BELONGS_TO,
         )
-        await relationship_manager.create(belongs_to)
+        await runtime.relationship_manager.create(belongs_to)
 
         # Create BELONGS_TO relationship with epic (if provided)
         if request.epic_id:
@@ -214,7 +212,7 @@ async def create_task(
                 target_id=request.epic_id,
                 relationship_type=RelationshipType.BELONGS_TO,
             )
-            await relationship_manager.create(belongs_to_epic)
+            await runtime.relationship_manager.create(belongs_to_epic)
 
         # Create DEPENDS_ON relationships
         for dep_id in request.depends_on:
@@ -224,7 +222,7 @@ async def create_task(
                 target_id=dep_id,
                 relationship_type=RelationshipType.DEPENDS_ON,
             )
-            await relationship_manager.create(depends_on)
+            await runtime.relationship_manager.create(depends_on)
 
         log.info(
             "create_task_success",
@@ -275,7 +273,7 @@ async def _broadcast_task_update(
 
 
 async def _maybe_start_epic(
-    entity_manager: "EntityManager",
+    entity_manager: Any,
     task_id: str,
     epic_id: str | None,
     task_status: str,
@@ -311,6 +309,17 @@ async def _maybe_start_epic(
     return True
 
 
+async def _get_task_workflow_runtime(group_id: str) -> tuple[Any, TaskWorkflowEngine]:
+    runtime = await get_legacy_task_runtime(group_id)
+    workflow = TaskWorkflowEngine(
+        runtime.entity_manager,
+        runtime.relationship_manager,
+        runtime.client,
+        group_id,
+    )
+    return runtime, workflow
+
+
 @router.post("/{task_id}/start", response_model=TaskActionResponse)
 @handle_workflow_errors("start_task")
 async def start_task(
@@ -330,10 +339,7 @@ async def start_task(
         if not lock_token:
             raise HTTPException(status_code=409, detail="Task is locked by another process")
 
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+        _, workflow = await _get_task_workflow_runtime(group_id)
 
         assignee = request.assignee if request else None
         task = await workflow.start_task(task_id, assignee or "system")
@@ -371,10 +377,7 @@ async def block_task(
         if not lock_token:
             raise HTTPException(status_code=409, detail="Task is locked by another process")
 
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+        _, workflow = await _get_task_workflow_runtime(group_id)
 
         task = await workflow.block_task(task_id, request.reason)
 
@@ -410,10 +413,7 @@ async def unblock_task(
         if not lock_token:
             raise HTTPException(status_code=409, detail="Task is locked by another process")
 
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+        _, workflow = await _get_task_workflow_runtime(group_id)
 
         task = await workflow.unblock_task(task_id)
 
@@ -450,10 +450,7 @@ async def submit_review(
         if not lock_token:
             raise HTTPException(status_code=409, detail="Task is locked by another process")
 
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+        _, workflow = await _get_task_workflow_runtime(group_id)
 
         pr_url = request.pr_url if request else None
         commit_shas = request.commit_shas if request else []
@@ -497,10 +494,7 @@ async def complete_task(
         if not lock_token:
             raise HTTPException(status_code=409, detail="Task is locked by another process")
 
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+        _, workflow = await _get_task_workflow_runtime(group_id)
 
         actual_hours = request.actual_hours if request else None
         learnings = request.learnings if request else None
@@ -551,10 +545,7 @@ async def archive_task(
         if not lock_token:
             raise HTTPException(status_code=409, detail="Task is locked by another process")
 
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
-        workflow = TaskWorkflowEngine(entity_manager, relationship_manager, client, group_id)
+        _, workflow = await _get_task_workflow_runtime(group_id)
 
         reason = request.reason if request else ""
         task = await workflow.archive_task(task_id, reason)
@@ -656,10 +647,9 @@ async def update_task(
                     detail="Task is being updated by another process. Please retry.",
                 )
 
-            client = await get_graph_client()
-            entity_manager = EntityManager(client, group_id=group_id)
+            runtime = await get_legacy_task_runtime(group_id)
 
-            updated = await entity_manager.update(task_id, update_data)
+            updated = await runtime.entity_manager.update(task_id, update_data)
             if not updated:
                 raise HTTPException(status_code=500, detail="Update failed")
 
@@ -667,8 +657,7 @@ async def update_task(
             needs_rel_mgr = (
                 request.epic_id is not None or request.add_depends_on or request.remove_depends_on
             )
-            if needs_rel_mgr:
-                relationship_manager = RelationshipManager(client, group_id=group_id)
+            relationship_manager = runtime.relationship_manager if needs_rel_mgr else None
 
             if request.epic_id is not None:
                 belongs_to_epic = Relationship(
@@ -695,7 +684,7 @@ async def update_task(
 
             if request.status:
                 epic_id = request.epic_id or updated.metadata.get("epic_id")
-                await _maybe_start_epic(entity_manager, task_id, epic_id, request.status)
+                await _maybe_start_epic(runtime.entity_manager, task_id, epic_id, request.status)
 
             await _broadcast_task_update(
                 task_id,
@@ -825,12 +814,10 @@ async def create_note(
             )
 
         # Task exists - create note synchronously
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
+        runtime = await get_legacy_task_runtime(group_id)
 
         # Verify task exists in graph
-        task = await entity_manager.get(task_id)
+        task = await runtime.entity_manager.get(task_id)
         if not task:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
 
@@ -845,7 +832,7 @@ async def create_note(
         )
 
         # Create in graph
-        await entity_manager.create_direct(note)
+        await runtime.entity_manager.create_direct(note)
 
         # Create BELONGS_TO relationship with task
         belongs_to = Relationship(
@@ -854,7 +841,7 @@ async def create_note(
             target_id=task_id,
             relationship_type=RelationshipType.BELONGS_TO,
         )
-        await relationship_manager.create(belongs_to)
+        await runtime.relationship_manager.create(belongs_to)
 
         log.info(
             "create_note_success",
@@ -902,11 +889,10 @@ async def list_notes(
 
     try:
         group_id = str(org.id)
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
+        runtime = await get_legacy_task_runtime(group_id)
 
         # Get notes for task
-        notes_entities = await entity_manager.get_notes_for_task(task_id, limit=limit)
+        notes_entities = await runtime.entity_manager.get_notes_for_task(task_id, limit=limit)
 
         notes = []
         for entity in notes_entities:
