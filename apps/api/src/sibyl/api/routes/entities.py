@@ -11,7 +11,6 @@ from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from sibyl.api.dependencies import get_legacy_knowledge_read_service
@@ -40,9 +39,7 @@ from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
 from sibyl.db.connection import get_session_dependency
 from sibyl.db.models import Organization, OrganizationRole, RawCapture
 from sibyl.db.project_sync import sync_project_create, sync_project_delete, sync_project_update
-from sibyl_core.graph.client import get_graph_client
-from sibyl_core.graph.entities import EntityManager
-from sibyl_core.graph.relationships import RelationshipManager
+from sibyl.persistence.legacy.graph import get_legacy_entity_runtime
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
 
@@ -98,7 +95,7 @@ def _entity_is_archived(entity: Any) -> bool:
 
 
 async def _archive_raw_capture(
-    session: AsyncSession,
+    session: Any,
     *,
     organization_id: UUID,
     user_id: UUID | None,
@@ -155,7 +152,7 @@ def _serialize_raw_capture(capture: RawCapture) -> RawCaptureResponse:
 
 
 async def _list_all_entities_paginated(
-    entity_manager: EntityManager,
+    entity_manager: Any,
     *,
     batch_size: int | None = None,
 ) -> list[Any]:
@@ -179,7 +176,7 @@ async def _list_all_entities_paginated(
 
 
 async def _list_entities_by_type_paginated(
-    entity_manager: EntityManager,
+    entity_manager: Any,
     entity_type: EntityType,
     *,
     project_id: str | None = None,
@@ -211,9 +208,8 @@ async def _list_entities_by_type_paginated(
 async def _enrich_entity_with_related(
     entity: Any,
     entity_id: str,
-    entity_manager: EntityManager,
-    client: Any,
-    group_id: str,
+    entity_manager: Any,
+    relationship_manager: Any,
     preloaded_related: list[RelatedEntitySummary] | None = None,
 ) -> tuple[dict[str, Any], list[RelatedEntitySummary] | None]:
     """Enrich entity metadata and fetch related entities based on entity type.
@@ -270,8 +266,7 @@ async def _enrich_entity_with_related(
     # For non-project/epic entities, fetch generic related entities
     if related is None:
         try:
-            rel_manager = RelationshipManager(client, group_id=group_id)
-            related_pairs = await rel_manager.get_related_entities(entity_id, limit=5)
+            related_pairs = await relationship_manager.get_related_entities(entity_id, limit=5)
             if related_pairs:
                 # Dedupe by entity ID
                 seen_ids: set[str] = set()
@@ -343,7 +338,7 @@ def _summarize_related_entities(
 @router.get("/captures", response_model=RawCaptureListResponse)
 async def list_raw_captures(
     org: Organization = Depends(get_current_organization),
-    session: AsyncSession = Depends(get_session_dependency),
+    session: Any = Depends(get_session_dependency),
     entity_type: str | None = Query(default=None, description="Filter by entity type"),
     capture_surface: str | None = Query(default=None, description="Filter by capture surface"),
     review_state: str | None = Query(default=None, description="Filter by review queue state"),
@@ -396,7 +391,7 @@ async def list_raw_captures(
 async def get_raw_capture(
     capture_id: UUID,
     org: Organization = Depends(get_current_organization),
-    session: AsyncSession = Depends(get_session_dependency),
+    session: Any = Depends(get_session_dependency),
 ) -> RawCaptureResponse:
     """Get a single archived raw quick capture."""
     try:
@@ -429,7 +424,7 @@ async def update_raw_capture_review_state(
     capture_id: UUID,
     update: RawCaptureReviewUpdate,
     org: Organization = Depends(get_current_organization),
-    session: AsyncSession = Depends(get_session_dependency),
+    session: Any = Depends(get_session_dependency),
 ) -> RawCaptureResponse:
     """Update review-state metadata for a raw capture."""
     try:
@@ -497,8 +492,8 @@ async def list_entities(
             project_ids=project_ids,
             page=page,
         )
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
+        runtime = await get_legacy_entity_runtime(group_id)
+        entity_manager = runtime.entity_manager
 
         # Get entities - single query for all types, or filtered by type
         unassigned_marker = "__unassigned__"
@@ -647,18 +642,15 @@ async def get_entity(
             )
 
             if entity.entity_type in {EntityType.PROJECT, EntityType.EPIC}:
-                group_id = str(org.id)
-                client = await get_graph_client()
-                entity_manager = EntityManager(client, group_id=group_id)
+                runtime = await get_legacy_entity_runtime(str(org.id))
 
                 # Enrich with project and epic summaries via the current manager until
                 # those read models move behind the seam.
                 metadata, related = await _enrich_entity_with_related(
                     entity,
                     entity_id,
-                    entity_manager,
-                    client,
-                    group_id,
+                    runtime.entity_manager,
+                    runtime.relationship_manager,
                     preloaded_related=related,
                 )
 
@@ -801,7 +793,7 @@ async def create_entity(
     entity: EntityCreate,
     org: Organization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    session: Any = Depends(get_session_dependency),
     sync: bool = Query(
         default=False,
         description="Wait for entity creation to complete (slower but entity is immediately available)",
@@ -895,9 +887,8 @@ async def create_entity(
             return response
 
         # Sync creation - fetch the created entity
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        created = await entity_manager.get(result.id)
+        runtime = await get_legacy_entity_runtime(group_id)
+        created = await runtime.entity_manager.get(result.id)
 
         if not created:
             raise HTTPException(status_code=500, detail="Entity created but not found")
@@ -971,7 +962,7 @@ async def update_entity(
     request: Request,
     org: Organization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    session: Any = Depends(get_session_dependency),
 ) -> EntityResponse:
     """Update an existing entity."""
     from sibyl.locks import LockAcquisitionError, entity_lock
@@ -987,11 +978,10 @@ async def update_entity(
                     detail="Entity is being updated by another process. Please retry.",
                 )
 
-            client = await get_graph_client()
-            entity_manager = EntityManager(client, group_id=group_id)
+            runtime = await get_legacy_entity_runtime(group_id)
 
             # Get existing entity
-            existing = await entity_manager.get(entity_id)
+            existing = await runtime.entity_manager.get(entity_id)
             if not existing:
                 raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
 
@@ -1024,7 +1014,7 @@ async def update_entity(
             update_data["updated_at"] = datetime.now(UTC)
 
             # Perform update
-            updated = await entity_manager.update(entity_id, update_data)
+            updated = await runtime.entity_manager.update(entity_id, update_data)
             if not updated:
                 raise HTTPException(status_code=500, detail="Update failed")
 
@@ -1100,7 +1090,7 @@ async def delete_entity(
     request: Request,
     org: Organization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_session_dependency),
+    session: Any = Depends(get_session_dependency),
 ) -> None:
     """Delete an entity."""
     from sibyl.locks import LockAcquisitionError, entity_lock
@@ -1116,11 +1106,10 @@ async def delete_entity(
                     detail="Entity is being modified by another process. Please retry.",
                 )
 
-            client = await get_graph_client()
-            entity_manager = EntityManager(client, group_id=group_id)
+            runtime = await get_legacy_entity_runtime(group_id)
 
             # Check existence
-            existing = await entity_manager.get(entity_id)
+            existing = await runtime.entity_manager.get(entity_id)
             if not existing:
                 raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
 
@@ -1140,7 +1129,7 @@ async def delete_entity(
                 )
 
             # Delete from graph
-            success = await entity_manager.delete(entity_id)
+            success = await runtime.entity_manager.delete(entity_id)
             if not success:
                 raise HTTPException(status_code=500, detail="Delete failed")
 

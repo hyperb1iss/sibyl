@@ -10,7 +10,6 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.event_types import WSEvent
@@ -44,7 +43,7 @@ async def _verify_task_access(
     task_id: str,
     org: Organization,
     ctx: AuthContext,
-    session: AsyncSession,
+    session: Any,
     required_role: ProjectRole = ProjectRole.CONTRIBUTOR,
 ) -> Any:
     """Fetch a task and verify project access.

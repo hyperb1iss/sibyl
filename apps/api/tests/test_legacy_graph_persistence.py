@@ -13,6 +13,7 @@ from sibyl.persistence.legacy.graph import (
     LegacyGraphStore,
     LegacyKnowledgeReadAdapter,
     LegacySearchIndex,
+    get_legacy_entity_runtime,
     get_legacy_graph_query_adapter,
     get_legacy_graph_stats_payload,
     get_legacy_task_runtime,
@@ -281,3 +282,16 @@ async def test_get_legacy_task_runtime_scopes_managers_to_org() -> None:
     assert runtime.client is client
     assert runtime.entity_manager is entity_manager
     assert runtime.relationship_manager is relationship_manager
+
+
+@pytest.mark.asyncio
+async def test_get_legacy_entity_runtime_reuses_task_runtime_factory() -> None:
+    runtime = MagicMock()
+
+    with patch(
+        "sibyl.persistence.legacy.graph.get_legacy_task_runtime",
+        AsyncMock(return_value=runtime),
+    ):
+        result = await get_legacy_entity_runtime("org-1")
+
+    assert result is runtime

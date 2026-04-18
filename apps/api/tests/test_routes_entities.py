@@ -42,7 +42,6 @@ class TestListEntitiesRoute:
     @pytest.mark.asyncio
     async def test_single_project_entities_push_project_filter_into_graph_query(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        client = object()
         manager = MagicMock()
         manager.list_by_type = AsyncMock(
             side_effect=[
@@ -54,10 +53,11 @@ class TestListEntitiesRoute:
             ]
         )
         manager.list_all = AsyncMock()
+        runtime = SimpleNamespace(entity_manager=manager)
 
-        with (
-            patch("sibyl.api.routes.entities.get_graph_client", AsyncMock(return_value=client)),
-            patch("sibyl.api.routes.entities.EntityManager", return_value=manager),
+        with patch(
+            "sibyl.api.routes.entities.get_legacy_entity_runtime",
+            AsyncMock(return_value=runtime),
         ):
             response = await list_entities(
                 org=org,
@@ -96,7 +96,6 @@ class TestListEntitiesRoute:
     @pytest.mark.asyncio
     async def test_mixed_project_and_unassigned_entities_keep_python_filtering(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        client = object()
         manager = MagicMock()
         manager.list_by_type = AsyncMock(
             side_effect=[
@@ -109,10 +108,11 @@ class TestListEntitiesRoute:
             ]
         )
         manager.list_all = AsyncMock()
+        runtime = SimpleNamespace(entity_manager=manager)
 
-        with (
-            patch("sibyl.api.routes.entities.get_graph_client", AsyncMock(return_value=client)),
-            patch("sibyl.api.routes.entities.EntityManager", return_value=manager),
+        with patch(
+            "sibyl.api.routes.entities.get_legacy_entity_runtime",
+            AsyncMock(return_value=runtime),
         ):
             response = await list_entities(
                 org=org,
@@ -152,7 +152,6 @@ class TestListEntitiesRoute:
     @pytest.mark.asyncio
     async def test_typed_entity_queries_page_past_first_batch(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        client = object()
         manager = MagicMock()
         manager.list_by_type = AsyncMock(
             side_effect=[
@@ -181,11 +180,14 @@ class TestListEntitiesRoute:
             ]
         )
         manager.list_all = AsyncMock()
+        runtime = SimpleNamespace(entity_manager=manager)
 
         with (
             patch.object(entities_routes, "LIST_BY_TYPE_PAGE_SIZE", 2),
-            patch("sibyl.api.routes.entities.get_graph_client", AsyncMock(return_value=client)),
-            patch("sibyl.api.routes.entities.EntityManager", return_value=manager),
+            patch(
+                "sibyl.api.routes.entities.get_legacy_entity_runtime",
+                AsyncMock(return_value=runtime),
+            ),
         ):
             response = await list_entities(
                 org=org,
@@ -214,7 +216,6 @@ class TestListEntitiesRoute:
     @pytest.mark.asyncio
     async def test_untyped_project_filters_skip_archived_only_pages(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        client = object()
         manager = MagicMock()
         archived_page = [
             _entity("ent-archived-1", project_id="proj-1", name="Archived 1", archived=True),
@@ -226,11 +227,14 @@ class TestListEntitiesRoute:
         ]
         manager.list_by_type = AsyncMock()
         manager.list_all = AsyncMock(side_effect=[archived_page, live_page, []])
+        runtime = SimpleNamespace(entity_manager=manager)
 
         with (
             patch.object(entities_routes, "LIST_ALL_PAGE_SIZE", 2),
-            patch("sibyl.api.routes.entities.get_graph_client", AsyncMock(return_value=client)),
-            patch("sibyl.api.routes.entities.EntityManager", return_value=manager),
+            patch(
+                "sibyl.api.routes.entities.get_legacy_entity_runtime",
+                AsyncMock(return_value=runtime),
+            ),
         ):
             response = await list_entities(
                 org=org,

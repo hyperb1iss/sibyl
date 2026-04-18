@@ -666,6 +666,10 @@ async def get_legacy_task_runtime(group_id: str) -> LegacyTaskRuntime:
     )
 
 
+async def get_legacy_entity_runtime(group_id: str) -> LegacyTaskRuntime:
+    return await get_legacy_task_runtime(group_id)
+
+
 async def update_legacy_entity(
     group_id: str,
     entity_id: str,
