@@ -45,6 +45,7 @@ from sibyl.db import (
     get_session,
 )
 from sibyl.db.models import ChunkType, OrganizationRole
+from sibyl.persistence.legacy.graph import get_legacy_graph_query_adapter
 
 log = structlog.get_logger()
 router = APIRouter(
@@ -735,14 +736,10 @@ async def get_document_related_entities(
     # Search the knowledge graph using document title as query
     entities: list[DocumentRelatedEntity] = []
     try:
-        from sibyl_core.graph.client import get_graph_client
-        from sibyl_core.graph.entities import EntityManager
-
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=auth.organization_id)
+        graph_queries = await get_legacy_graph_query_adapter(auth.organization_id)
 
         # Semantic search using document title
-        search_results = await entity_manager.search(
+        search_results = await graph_queries.search_entities(
             query=doc_title,
             limit=15,
         )

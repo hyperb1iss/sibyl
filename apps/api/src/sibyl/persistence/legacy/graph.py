@@ -584,6 +584,15 @@ class LegacyGraphQueryAdapter:
             limit=limit,
         )
 
+    async def search_entities(
+        self,
+        query: str,
+        *,
+        entity_types: list[EntityType] | None = None,
+        limit: int = 10,
+    ) -> list[tuple[Entity, float]]:
+        return await self._entities.search(query, entity_types=entity_types, limit=limit)
+
     async def execute_read_org(self, query: str, **params: object) -> list[dict[str, object]]:
         return await self._client.execute_read_org(
             query,

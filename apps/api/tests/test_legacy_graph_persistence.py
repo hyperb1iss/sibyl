@@ -191,6 +191,7 @@ async def test_legacy_graph_query_adapter_proxies_scoped_reads() -> None:
     manager = AsyncMock()
     manager.list_by_type.return_value = ["task-1"]
     manager.get.return_value = "entity-1"
+    manager.search.return_value = [("entity-2", 0.75)]
     relationships = AsyncMock()
     relationships.list_all.return_value = ["rel-1"]
 
@@ -208,12 +209,14 @@ async def test_legacy_graph_query_adapter_proxies_scoped_reads() -> None:
         )
         entity = await adapter.get_entity("task-1")
         rels = await adapter.list_relationships(limit=25, offset=5)
+        search_results = await adapter.search_entities("task query", limit=15)
         query_rows = await adapter.execute_query("RETURN n.uuid AS id")
         rows = await adapter.execute_read_org("RETURN 1 AS value", now_iso="2026-04-17T00:00:00+00:00")
 
     assert entities == ["task-1"]
     assert entity == "entity-1"
     assert rels == ["rel-1"]
+    assert search_results == [("entity-2", 0.75)]
     assert query_rows == [{"id": "node-1"}]
     manager.list_by_type.assert_awaited_once_with(
         EntityType.TASK,
@@ -230,6 +233,7 @@ async def test_legacy_graph_query_adapter_proxies_scoped_reads() -> None:
         include_archived=False,
     )
     manager.get.assert_awaited_once_with("task-1")
+    manager.search.assert_awaited_once_with("task query", entity_types=None, limit=15)
     relationships.list_all.assert_awaited_once_with(
         relationship_types=None,
         limit=25,

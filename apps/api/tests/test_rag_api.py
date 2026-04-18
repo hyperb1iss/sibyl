@@ -443,6 +443,65 @@ class TestPageRetrieval:
         assert "Invalid document ID format" in exc_info.value.detail
 
 
+class TestDocumentRelatedEntities:
+    """Tests for document-related entity lookup."""
+
+    @pytest.mark.asyncio
+    async def test_get_document_related_entities_uses_legacy_graph_adapter(
+        self,
+        mock_session,
+        mock_auth_context,
+        sample_document,
+        sample_source,
+    ):
+        """Test document entity lookup through the legacy graph seam."""
+        sample_source.organization_id = mock_auth_context.organization_id
+        mock_session.get = AsyncMock(side_effect=[sample_document, sample_source])
+
+        entity = MagicMock()
+        entity.id = "task-1"
+        entity.name = "Ship auth docs"
+        entity.entity_type.value = "task"
+        entity.description = "Tighten the docs pipeline"
+        entity.metadata = {"project_id": "proj-1"}
+        blocked = MagicMock()
+        blocked.id = "task-2"
+        blocked.name = "Blocked task"
+        blocked.entity_type.value = "task"
+        blocked.description = "Should be filtered"
+        blocked.metadata = {"project_id": "proj-2"}
+        adapter = MagicMock()
+        adapter.search_entities = AsyncMock(return_value=[(entity, 0.7), (blocked, 0.8)])
+
+        with (
+            patch("sibyl.api.routes.rag.get_session") as mock_get_session,
+            patch(
+                "sibyl.api.routes.rag.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj-1"}),
+            ),
+            patch(
+                "sibyl.api.routes.rag.get_legacy_graph_query_adapter",
+                AsyncMock(return_value=adapter),
+            ),
+        ):
+            mock_get_session.return_value = mock_session
+
+            from sibyl.api.routes.rag import get_document_related_entities
+
+            response = await get_document_related_entities(
+                document_id=str(sample_document.id),
+                auth=mock_auth_context,
+            )
+
+        assert response.document_id == str(sample_document.id)
+        assert response.total == 1
+        assert response.entities[0].id == "task-1"
+        adapter.search_entities.assert_awaited_once_with(
+            query=sample_document.title,
+            limit=15,
+        )
+
+
 # =============================================================================
 # Hybrid Search Tests
 # =============================================================================
