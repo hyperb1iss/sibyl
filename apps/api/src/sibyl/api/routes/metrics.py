@@ -21,9 +21,10 @@ from sibyl.api.schemas import (
 )
 from sibyl.auth.dependencies import get_current_organization, require_org_role
 from sibyl.db.models import Organization, OrganizationRole
-from sibyl.persistence.legacy.graph import get_legacy_knowledge_read_adapter
-from sibyl_core.graph.client import get_graph_client
-from sibyl_core.graph.entities import EntityManager
+from sibyl.persistence.legacy.graph import (
+    get_legacy_graph_query_adapter,
+    get_legacy_knowledge_read_adapter,
+)
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
 
@@ -158,7 +159,7 @@ def _count_recent_tasks(tasks: list[dict], days: int, field: str = "created_at")
 
 
 async def _list_entities_by_type_paginated(
-    entity_manager: EntityManager,
+    graph_queries: Any,
     entity_type: EntityType,
     *,
     batch_size: int = 1000,
@@ -169,7 +170,7 @@ async def _list_entities_by_type_paginated(
     offset = 0
 
     while True:
-        batch = await entity_manager.list_by_type(
+        batch = await graph_queries.list_entities_by_type(
             entity_type,
             limit=batch_size,
             offset=offset,
@@ -333,9 +334,9 @@ def _normalize_metric_task_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _fetch_org_metric_tasks(client, organization_id: str) -> list[dict[str, Any]]:
+async def _fetch_org_metric_tasks(graph_queries: Any, organization_id: str) -> list[dict[str, Any]]:
     """Fetch raw task rows and normalize legacy metadata fallbacks in Python."""
-    rows = await client.execute_read_org(
+    rows = await graph_queries.execute_read_org(
         f"""
         {_task_metrics_where_clause()}
         RETURN n.project_id AS project_id,
@@ -368,11 +369,11 @@ def _task_metrics_where_clause() -> str:
 
 
 async def _fetch_task_overview(
-    client, organization_id: str, now: datetime
+    graph_queries: Any, organization_id: str, now: datetime
 ) -> tuple[TaskStatusDistribution, TaskPriorityDistribution, int, int]:
     """Fetch org-wide task counts, distributions, and recent creation totals."""
     cutoff = (now - timedelta(days=7)).isoformat()
-    rows = await client.execute_read_org(
+    rows = await graph_queries.execute_read_org(
         f"""
         {_task_metrics_where_clause()}
         RETURN count(n) AS total_tasks,
@@ -423,10 +424,10 @@ async def _fetch_task_overview(
 
 
 async def _fetch_project_task_counts(
-    client, organization_id: str, now: datetime
+    graph_queries: Any, organization_id: str, now: datetime
 ) -> dict[str, dict]:
     """Fetch per-project task rollups for org-wide metrics."""
-    rows = await client.execute_read_org(
+    rows = await graph_queries.execute_read_org(
         f"""
         {_task_metrics_where_clause()}
           AND coalesce(n.project_id, '') <> ''
@@ -489,9 +490,9 @@ async def _fetch_project_task_counts(
     return counts_by_project
 
 
-async def _fetch_top_assignees(client, organization_id: str) -> list[AssigneeStats]:
+async def _fetch_top_assignees(graph_queries: Any, organization_id: str) -> list[AssigneeStats]:
     """Fetch the top assignees without materializing all task rows."""
-    rows = await client.execute_read_org(
+    rows = await graph_queries.execute_read_org(
         f"""
         {_task_metrics_where_clause()}
         WITH coalesce(n.assignees, []) AS assignees, coalesce(n.status, '') AS status
@@ -522,11 +523,11 @@ async def _fetch_top_assignees(client, organization_id: str) -> list[AssigneeSta
 
 
 async def _fetch_velocity_trend(
-    client, organization_id: str, now: datetime
+    graph_queries: Any, organization_id: str, now: datetime
 ) -> tuple[list[TimeSeriesPoint], int]:
     """Fetch the completion trend and last-7-day completion count."""
     trend_start = (now - timedelta(days=13)).isoformat()
-    rows = await client.execute_read_org(
+    rows = await graph_queries.execute_read_org(
         f"""
         {_task_metrics_where_clause()}
           AND toLower(coalesce(n.status, '')) = 'done'
@@ -562,17 +563,15 @@ async def get_project_metrics(
     try:
         group_id = str(org.id)
         service = await get_legacy_knowledge_read_adapter(group_id)
+        graph_queries = await get_legacy_graph_query_adapter(group_id)
 
         # Get project
         project = await service.get_entity(project_id)
         if not project:
             raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
 
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-
         project_tasks = await _list_entities_by_type_paginated(
-            entity_manager,
+            graph_queries,
             EntityType.TASK,
             project_id=project_id,
         )
@@ -630,13 +629,17 @@ async def get_project_summaries(
     try:
         group_id = str(org.id)
         service = await get_legacy_knowledge_read_adapter(group_id)
-        client = await get_graph_client()
+        graph_queries = await get_legacy_graph_query_adapter(group_id)
         projects = await _list_entities_by_type_paginated_via_service(
             service,
             EntityType.PROJECT,
             batch_size=500,
         )
-        counts_by_project = await _fetch_project_task_counts(client, group_id, datetime.now(UTC))
+        counts_by_project = await _fetch_project_task_counts(
+            graph_queries,
+            group_id,
+            datetime.now(UTC),
+        )
 
         return ProjectSummariesResponse(
             projects_summary=_build_project_summaries(projects, counts_by_project)
@@ -657,7 +660,7 @@ async def get_org_metrics(
     try:
         group_id = str(org.id)
         service = await get_legacy_knowledge_read_adapter(group_id)
-        client = await get_graph_client()
+        graph_queries = await get_legacy_graph_query_adapter(group_id)
 
         # Get all projects
         projects = await _list_entities_by_type_paginated_via_service(
@@ -665,7 +668,7 @@ async def get_org_metrics(
             EntityType.PROJECT,
             batch_size=500,
         )
-        tasks = await _fetch_org_metric_tasks(client, group_id)
+        tasks = await _fetch_org_metric_tasks(graph_queries, group_id)
 
         status_dist = _compute_status_distribution(tasks)
         priority_dist = _compute_priority_distribution(tasks)

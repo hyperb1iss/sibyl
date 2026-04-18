@@ -452,7 +452,7 @@ class TestGetProjectMetrics:
                 "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_graph_client", AsyncMock()),
+            patch("sibyl.api.routes.metrics.get_legacy_graph_query_adapter", AsyncMock()),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_project_metrics("nonexistent", org=mock_org)
@@ -502,8 +502,7 @@ class TestGetProjectMetrics:
             ),
         ]
 
-        mock_entity_manager = AsyncMock()
-        mock_entity_manager.list_by_type.return_value = mock_tasks
+        mock_client.list_entities_by_type = AsyncMock(return_value=mock_tasks)
         mock_service.get_entity.return_value = mock_project
 
         with (
@@ -511,10 +510,9 @@ class TestGetProjectMetrics:
                 "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl.api.routes.metrics.EntityManager",
-                return_value=mock_entity_manager,
+                "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
+                return_value=mock_client,
             ),
         ):
             result = await get_project_metrics("proj_123", org=mock_org)
@@ -528,7 +526,7 @@ class TestGetProjectMetrics:
             assert result.metrics.priority_distribution.medium == 1
             assert len(result.metrics.assignees) == 2
             assert result.metrics.completion_rate == 50.0
-            assert mock_entity_manager.list_by_type.await_args_list == [
+            assert mock_client.list_entities_by_type.await_args_list == [
                 call(
                     EntityType.TASK,
                     limit=1000,
@@ -550,8 +548,7 @@ class TestGetProjectMetrics:
             entity_type="project", name="Empty Project", entity_id="proj_empty"
         )
 
-        mock_entity_manager = AsyncMock()
-        mock_entity_manager.list_by_type.return_value = []
+        mock_client.list_entities_by_type = AsyncMock(return_value=[])
         mock_service.get_entity.return_value = mock_project
 
         with (
@@ -559,10 +556,9 @@ class TestGetProjectMetrics:
                 "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl.api.routes.metrics.EntityManager",
-                return_value=mock_entity_manager,
+                "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
+                return_value=mock_client,
             ),
         ):
             result = await get_project_metrics("proj_empty", org=mock_org)
@@ -608,8 +604,7 @@ class TestGetProjectMetrics:
             )
         ]
 
-        mock_entity_manager = AsyncMock()
-        mock_entity_manager.list_by_type = AsyncMock(side_effect=[first_page, second_page])
+        mock_client.list_entities_by_type = AsyncMock(side_effect=[first_page, second_page])
         mock_service.get_entity.return_value = mock_project
 
         with (
@@ -617,10 +612,9 @@ class TestGetProjectMetrics:
                 "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
             patch(
-                "sibyl.api.routes.metrics.EntityManager",
-                return_value=mock_entity_manager,
+                "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
+                return_value=mock_client,
             ),
         ):
             result = await get_project_metrics("proj_big", org=mock_org)
@@ -630,7 +624,7 @@ class TestGetProjectMetrics:
         assert result.metrics.status_distribution.todo == 1000
         assert result.metrics.priority_distribution.high == 1
         assert result.metrics.priority_distribution.low == 1000
-        assert mock_entity_manager.list_by_type.await_args_list == [
+        assert mock_client.list_entities_by_type.await_args_list == [
             call(
                 EntityType.TASK,
                 limit=1000,
@@ -705,7 +699,10 @@ class TestGetOrgMetrics:
                 "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
+            patch(
+                "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
+                return_value=mock_client,
+            ),
         ):
             result = await get_org_metrics(org=mock_org)
 
@@ -748,7 +745,10 @@ class TestGetOrgMetrics:
                 "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
+            patch(
+                "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
+                return_value=mock_client,
+            ),
         ):
             result = await get_org_metrics(org=mock_org)
 
@@ -802,7 +802,10 @@ class TestGetOrgMetrics:
                 "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
+            patch(
+                "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
+                return_value=mock_client,
+            ),
         ):
             result = await get_org_metrics(org=mock_org)
 
@@ -854,7 +857,10 @@ class TestGetOrgMetrics:
                 "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
+            patch(
+                "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
+                return_value=mock_client,
+            ),
         ):
             result = await get_org_metrics(org=mock_org)
 
@@ -938,7 +944,10 @@ class TestGetOrgMetrics:
                 "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
+            patch(
+                "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
+                return_value=mock_client,
+            ),
         ):
             result = await get_org_metrics(org=mock_org)
 
@@ -992,7 +1001,10 @@ class TestGetOrgMetrics:
                 "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
+            patch(
+                "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
+                return_value=mock_client,
+            ),
         ):
             result = await get_org_metrics(org=mock_org)
 
@@ -1067,7 +1079,10 @@ class TestGetProjectSummaries:
                 "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
+            patch(
+                "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
+                return_value=mock_client,
+            ),
         ):
             result = await get_project_summaries(org=mock_org)
 
@@ -1119,7 +1134,10 @@ class TestGetProjectSummaries:
                 "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_graph_client", return_value=mock_client),
+            patch(
+                "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
+                return_value=mock_client,
+            ),
         ):
             result = await get_project_summaries(org=mock_org)
 
@@ -1158,7 +1176,7 @@ class TestMetricsErrorHandling:
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics.get_graph_client",
+                "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
                 side_effect=Exception("Database error"),
             ),
         ):
@@ -1176,7 +1194,7 @@ class TestMetricsErrorHandling:
         mock_org = create_mock_org()
 
         with patch(
-            "sibyl.api.routes.metrics.get_graph_client",
+            "sibyl.api.routes.metrics.get_legacy_graph_query_adapter",
             side_effect=Exception("Database error"),
         ):
             with pytest.raises(HTTPException) as exc_info:

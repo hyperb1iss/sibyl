@@ -9,9 +9,11 @@ from sibyl.api.dependencies import get_legacy_graph_store, get_legacy_knowledge_
 from sibyl.api.routes.graph import get_graph_stats
 from sibyl.persistence.legacy.graph import (
     LegacyEntityStore,
+    LegacyGraphQueryAdapter,
     LegacyGraphStore,
     LegacyKnowledgeReadAdapter,
     LegacySearchIndex,
+    get_legacy_graph_query_adapter,
     get_legacy_graph_stats_payload,
     graph_stats_payload,
 )
@@ -177,3 +179,54 @@ async def test_get_legacy_graph_stats_payload_uses_read_adapter() -> None:
 
     assert payload["total_entities"] == 5
     assert payload["entity_counts"]["task"] == 5
+
+
+@pytest.mark.asyncio
+async def test_legacy_graph_query_adapter_proxies_scoped_reads() -> None:
+    client = AsyncMock()
+    manager = AsyncMock()
+    manager.list_by_type.return_value = ["task-1"]
+
+    with patch("sibyl.persistence.legacy.graph.EntityManager", return_value=manager):
+        adapter = LegacyGraphQueryAdapter(client, "org-1")
+        entities = await adapter.list_entities_by_type(
+            EntityType.TASK,
+            limit=50,
+            offset=10,
+            project_id="proj-1",
+        )
+        rows = await adapter.execute_read_org("RETURN 1 AS value", now_iso="2026-04-17T00:00:00+00:00")
+
+    assert entities == ["task-1"]
+    manager.list_by_type.assert_awaited_once_with(
+        EntityType.TASK,
+        limit=50,
+        offset=10,
+        project_id="proj-1",
+        epic_id=None,
+        no_epic=False,
+        status=None,
+        priority=None,
+        complexity=None,
+        feature=None,
+        tags=None,
+        include_archived=False,
+    )
+    client.execute_read_org.assert_awaited_once_with(
+        "RETURN 1 AS value",
+        "org-1",
+        group_id="org-1",
+        now_iso="2026-04-17T00:00:00+00:00",
+    )
+    assert rows == client.execute_read_org.return_value
+
+
+@pytest.mark.asyncio
+async def test_get_legacy_graph_query_adapter_uses_graph_client() -> None:
+    client = MagicMock()
+
+    with patch("sibyl.persistence.legacy.graph.get_graph_client", AsyncMock(return_value=client)):
+        adapter = await get_legacy_graph_query_adapter("org-1")
+
+    assert isinstance(adapter, LegacyGraphQueryAdapter)
+    assert adapter._client is client

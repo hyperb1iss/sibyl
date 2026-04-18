@@ -502,9 +502,62 @@ class LegacyKnowledgeWriteAdapter(KnowledgeWriteService):
         return await self._store.relationships.delete(relationship_id)
 
 
+class LegacyGraphQueryAdapter:
+    """Thin graph query surface for routes that still need legacy reads."""
+
+    def __init__(self, client: GraphClient, group_id: str) -> None:
+        self._client = client
+        self._group_id = group_id
+        self._entities = EntityManager(client, group_id=group_id)
+
+    async def list_entities_by_type(
+        self,
+        entity_type: EntityType,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        project_id: str | None = None,
+        epic_id: str | None = None,
+        no_epic: bool = False,
+        status: str | None = None,
+        priority: str | None = None,
+        complexity: str | None = None,
+        feature: str | None = None,
+        tags: list[str] | None = None,
+        include_archived: bool = False,
+    ) -> list[Entity]:
+        return await self._entities.list_by_type(
+            entity_type,
+            limit=limit,
+            offset=offset,
+            project_id=project_id,
+            epic_id=epic_id,
+            no_epic=no_epic,
+            status=status,
+            priority=priority,
+            complexity=complexity,
+            feature=feature,
+            tags=tags,
+            include_archived=include_archived,
+        )
+
+    async def execute_read_org(self, query: str, **params: object) -> list[dict[str, object]]:
+        return await self._client.execute_read_org(
+            query,
+            self._group_id,
+            group_id=self._group_id,
+            **params,
+        )
+
+
 async def get_legacy_knowledge_read_adapter(group_id: str) -> LegacyKnowledgeReadAdapter:
     client = await get_graph_client()
     return LegacyKnowledgeReadAdapter.from_client(client, group_id)
+
+
+async def get_legacy_graph_query_adapter(group_id: str) -> LegacyGraphQueryAdapter:
+    client = await get_graph_client()
+    return LegacyGraphQueryAdapter(client, group_id)
 
 
 def graph_stats_payload(stats: GraphStats) -> dict[str, object]:
