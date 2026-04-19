@@ -11,7 +11,6 @@ from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlmodel import col, select
 
 from sibyl.api.dependencies import get_legacy_knowledge_read_service
 from sibyl.api.event_types import WSEvent
@@ -35,10 +34,17 @@ from sibyl.auth.dependencies import (
     get_current_organization,
     require_org_role,
 )
-from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
-from sibyl.db.connection import get_session_dependency
+from sibyl.db import (
+    get_session,
+    get_session_dependency,
+)
 from sibyl.db.models import Organization, OrganizationRole, RawCapture
 from sibyl.db.project_sync import sync_project_create, sync_project_delete, sync_project_update
+from sibyl.persistence.legacy.entities import (
+    get_legacy_raw_capture,
+    list_legacy_raw_captures,
+    resolve_legacy_document_entity,
+)
 from sibyl.persistence.legacy.graph import get_legacy_entity_runtime
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
@@ -347,32 +353,15 @@ async def list_raw_captures(
 ) -> RawCaptureListResponse:
     """List archived raw quick captures for the current organization."""
     try:
-        stmt = (
-            select(RawCapture)
-            .where(col(RawCapture.organization_id) == org.id)
-            .order_by(col(RawCapture.created_at).desc())
-            .offset(offset)
-            .limit(limit + 1)
+        captures, has_more = await list_legacy_raw_captures(
+            session,
+            organization_id=org.id,
+            entity_type=entity_type,
+            capture_surface=capture_surface,
+            review_state=review_state,
+            limit=limit,
+            offset=offset,
         )
-        if entity_type:
-            stmt = stmt.where(col(RawCapture.entity_type) == entity_type)
-        if capture_surface:
-            stmt = stmt.where(col(RawCapture.capture_surface) == capture_surface)
-        if review_state:
-            if review_state == "pending":
-                stmt = stmt.where(
-                    col(RawCapture.metadata_).op("->>")("review_state").is_(None)
-                    | (col(RawCapture.metadata_).op("->>")("review_state") == "pending")
-                )
-            else:
-                stmt = stmt.where(
-                    col(RawCapture.metadata_).op("->>")("review_state") == review_state
-                )
-
-        result = await session.execute(stmt)
-        rows = result.scalars().all()
-        has_more = len(rows) > limit
-        captures = rows[:limit]
 
         return RawCaptureListResponse(
             captures=[_serialize_raw_capture_summary(capture) for capture in captures],
@@ -395,13 +384,11 @@ async def get_raw_capture(
 ) -> RawCaptureResponse:
     """Get a single archived raw quick capture."""
     try:
-        result = await session.execute(
-            select(RawCapture).where(
-                col(RawCapture.id) == capture_id,
-                col(RawCapture.organization_id) == org.id,
-            )
+        capture = await get_legacy_raw_capture(
+            session,
+            organization_id=org.id,
+            capture_id=capture_id,
         )
-        capture = result.scalar_one_or_none()
         if not capture:
             raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
 
@@ -428,13 +415,11 @@ async def update_raw_capture_review_state(
 ) -> RawCaptureResponse:
     """Update review-state metadata for a raw capture."""
     try:
-        result = await session.execute(
-            select(RawCapture).where(
-                col(RawCapture.id) == capture_id,
-                col(RawCapture.organization_id) == org.id,
-            )
+        capture = await get_legacy_raw_capture(
+            session,
+            organization_id=org.id,
+            capture_id=capture_id,
         )
-        capture = result.scalar_one_or_none()
         if not capture:
             raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
 
@@ -674,81 +659,27 @@ async def get_entity(
 
         log.debug("Entity not in graph, checking document chunks", entity_id=entity_id)
 
-        # Fallback: check if it's a document chunk
-        # Support both full UUIDs and prefix matching (e.g., "2cebcab8" matches "2cebcab8-...")
         async with get_session() as session:
-            # Try exact UUID match first
-            try:
-                chunk_uuid = UUID(entity_id)
-                result = await session.execute(
-                    select(DocumentChunk, CrawledDocument, CrawlSource)
-                    .join(CrawledDocument, DocumentChunk.document_id == CrawledDocument.id)
-                    .join(CrawlSource, CrawledDocument.source_id == CrawlSource.id)
-                    .where(col(DocumentChunk.id) == chunk_uuid)
-                    .where(col(CrawlSource.organization_id) == org.id)
-                )
-                row = result.first()
-            except ValueError:
-                row = None
+            record = await resolve_legacy_document_entity(
+                session,
+                organization_id=org.id,
+                entity_id=entity_id,
+            )
 
-            # If no exact match and ID looks like a prefix (4-32 hex chars), try prefix match
-            if (
-                not row
-                and len(entity_id) >= 4
-                and all(c in "0123456789abcdef-" for c in entity_id.lower())
-            ):
-                from sqlalchemy import String, cast
-
-                prefix = entity_id.lower().replace("-", "")
-                result = await session.execute(
-                    select(DocumentChunk, CrawledDocument, CrawlSource)
-                    .join(CrawledDocument, DocumentChunk.document_id == CrawledDocument.id)
-                    .join(CrawlSource, CrawledDocument.source_id == CrawlSource.id)
-                    .where(cast(DocumentChunk.id, String).like(f"{prefix[:8]}%"))
-                    .where(col(CrawlSource.organization_id) == org.id)
-                    .limit(1)
-                )
-                row = result.first()
-
-            if not row:
+            if not record:
                 raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
 
-            chunk, doc, source = row
-
-            # Build heading path as description
+            chunk = record.chunk
+            doc = record.document
+            source = record.source
             heading_desc = " > ".join(chunk.heading_path) if chunk.heading_path else ""
-
-            # For heading chunks, fetch the section content (chunks until next heading)
-            # This provides context instead of just showing the heading text
-            from sibyl.db.models import ChunkType
-
-            section_content = chunk.content or ""
-            if chunk.chunk_type == ChunkType.HEADING:
-                # Get subsequent chunks until next heading (max 10 for reasonable size)
-                following_result = await session.execute(
-                    select(DocumentChunk)
-                    .where(col(DocumentChunk.document_id) == chunk.document_id)
-                    .where(col(DocumentChunk.chunk_index) > chunk.chunk_index)
-                    .order_by(col(DocumentChunk.chunk_index))
-                    .limit(10)
-                )
-                following_chunks = following_result.scalars().all()
-
-                # Concatenate content until we hit another heading
-                section_parts = [section_content]
-                for fc in following_chunks:
-                    if fc.chunk_type == ChunkType.HEADING:
-                        break
-                    section_parts.append(fc.content or "")
-
-                section_content = "\n\n".join(section_parts)
 
             return EntityResponse(
                 id=str(chunk.id),
                 entity_type=EntityType.DOCUMENT,
                 name=doc.title or source.name,
                 description=heading_desc,
-                content=section_content[:50000],
+                content=record.content[:50000],
                 category=chunk.chunk_type.value if chunk.chunk_type else None,
                 languages=[chunk.language] if chunk.language else [],
                 tags=[],
