@@ -61,7 +61,7 @@ async def get_legacy_graph_client() -> Any:
     return await get_graph_client()
 
 
-async def get_graph_runtime(group_id: str) -> ActiveGraphRuntime:
+async def get_legacy_graph_runtime(group_id: str) -> ActiveGraphRuntime:
     if (
         get_graph_client is _default_get_graph_client
         and EntityManager is _compat_entity_manager
@@ -90,8 +90,8 @@ async def get_graph_runtime(group_id: str) -> ActiveGraphRuntime:
 LegacyGraphRuntime = ActiveGraphRuntime
 
 
-async def get_legacy_graph_runtime(group_id: str) -> ActiveGraphRuntime:
-    return await get_graph_runtime(group_id)
+async def get_graph_runtime(group_id: str) -> ActiveGraphRuntime:
+    return await get_legacy_graph_runtime(group_id)
 
 
 # =============================================================================
@@ -287,7 +287,7 @@ async def _handle_task_action(
             message="organization_id required for task actions",
         )
 
-    runtime = await get_legacy_graph_runtime(organization_id)
+    runtime = await get_graph_runtime(organization_id)
     client = runtime.client
     entity_manager = runtime.entity_manager
     relationship_manager = runtime.relationship_manager
@@ -633,7 +633,7 @@ async def _handle_epic_action(
             message="organization_id required for epic actions",
         )
 
-    runtime = await get_legacy_graph_runtime(organization_id)
+    runtime = await get_graph_runtime(organization_id)
     entity_manager = runtime.entity_manager
 
     # Get the epic
@@ -945,7 +945,7 @@ async def _link_graph(
         GraphIntegrationService = _GraphIntegrationService
 
     # Process chunks
-    client = await get_legacy_graph_client()
+    client = await get_graph_client()
     integration = GraphIntegrationService(
         client,
         organization_id,
@@ -1022,7 +1022,7 @@ async def _handle_analysis_action(
             message="organization_id required for analysis actions",
         )
 
-    runtime = await get_legacy_graph_runtime(organization_id)
+    runtime = await get_graph_runtime(organization_id)
     client = runtime.client
     entity_manager = runtime.entity_manager
     relationship_manager = runtime.relationship_manager
