@@ -1,10 +1,12 @@
 """Tests for task dependency detection and cycle checking."""
 
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sibyl_core.models.entities import RelationshipType
+from sibyl_core.models.entities import EntityType, RelationshipType
 from sibyl_core.models.tasks import TaskStatus
 from sibyl_core.tasks.dependencies import (
     CycleResult,
@@ -169,37 +171,112 @@ class TestDependencyLogic:
 TEST_ORG_ID = "org_test_123"
 
 
+def _make_task(
+    task_id: str,
+    *,
+    status: TaskStatus | str = TaskStatus.TODO,
+    task_order: int | None = 0,
+    metadata: dict[str, Any] | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=task_id,
+        status=status,
+        task_order=task_order,
+        metadata=metadata or {},
+    )
+
+
+def _make_relationship(
+    source_id: str | None,
+    target_id: str | None,
+    *,
+    relationship_type: RelationshipType = RelationshipType.DEPENDS_ON,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        source_id=source_id,
+        target_id=target_id,
+        relationship_type=relationship_type,
+    )
+
+
+def _make_dependency_managers(
+    *,
+    entity_lookup: dict[str, Any] | None = None,
+    relationships_by_entity: dict[tuple[str, str], list[Any]] | None = None,
+    tasks: list[Any] | None = None,
+    all_relationships: list[Any] | None = None,
+) -> tuple[SimpleNamespace, SimpleNamespace]:
+    entity_lookup = entity_lookup or {}
+    relationships_by_entity = relationships_by_entity or {}
+    tasks = tasks or []
+    all_relationships = all_relationships or []
+
+    async def get(entity_id: str) -> Any:
+        value = entity_lookup.get(entity_id)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    async def list_by_type(
+        _entity_type: Any,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        **_kwargs: Any,
+    ) -> list[Any]:
+        return tasks[offset : offset + limit]
+
+    async def get_for_entity(
+        entity_id: str,
+        *,
+        direction: str = "both",
+        **_kwargs: Any,
+    ) -> list[Any]:
+        return relationships_by_entity.get((entity_id, direction), [])
+
+    async def list_all(
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        **_kwargs: Any,
+    ) -> list[Any]:
+        return all_relationships[offset : offset + limit]
+
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(side_effect=get),
+        list_by_type=AsyncMock(side_effect=list_by_type),
+    )
+    relationship_manager = SimpleNamespace(
+        get_for_entity=AsyncMock(side_effect=get_for_entity),
+        list_all=AsyncMock(side_effect=list_all),
+    )
+    return entity_manager, relationship_manager
+
+
 class TestGetTaskDependencies:
     """Tests for get_task_dependencies function."""
 
     @pytest.mark.asyncio
     async def test_surreal_runtime_uses_graph_managers(self) -> None:
         """Should use entity/relationship managers in surreal mode."""
-        mock_client = MagicMock()
-
-        entity_manager = MagicMock()
-        entity_manager.get = AsyncMock(
-            side_effect=[
-                MagicMock(status=TaskStatus.TODO, metadata={"status": "todo"}),
-                MagicMock(status=TaskStatus.DONE, metadata={"status": "done"}),
-            ]
-        )
-        relationship_manager = MagicMock()
-        relationship_manager.get_for_entity = AsyncMock(
-            return_value=[
-                MagicMock(target_id="dep-1"),
-                MagicMock(target_id="dep-2"),
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            entity_lookup={
+                "dep-1": _make_task("dep-1", status=TaskStatus.TODO, metadata={"status": "todo"}),
+                "dep-2": _make_task("dep-2", status=TaskStatus.DONE, metadata={"status": "done"}),
+            },
+            relationships_by_entity={
+                ("task-123", "outgoing"): [
+                    _make_relationship("task-123", "dep-1"),
+                    _make_relationship("task-123", "dep-2"),
+                ]
+            },
         )
 
-        with (
-            patch("sibyl_core.tasks.dependencies._uses_surreal_runtime", return_value=True),
-            patch(
-                "sibyl_core.tasks.dependencies._get_graph_managers",
-                return_value=(entity_manager, relationship_manager),
-            ),
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
         ):
-            result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID)
+            result = await get_task_dependencies(MagicMock(), "task-123", TEST_ORG_ID)
 
         assert result.dependencies == ["dep-1", "dep-2"]
         assert result.blockers == ["dep-1"]
@@ -207,16 +284,25 @@ class TestGetTaskDependencies:
 
     @pytest.mark.asyncio
     async def test_returns_direct_dependencies(self) -> None:
-        """Should return direct dependencies from graph query."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                ("dep-1", TaskStatus.TODO.value),
-                ("dep-2", TaskStatus.DONE.value),
-            ]
+        """Should return direct dependencies from relationship seams."""
+        entity_manager, relationship_manager = _make_dependency_managers(
+            entity_lookup={
+                "dep-1": _make_task("dep-1", status=TaskStatus.TODO),
+                "dep-2": _make_task("dep-2", status=TaskStatus.DONE),
+            },
+            relationships_by_entity={
+                ("task-123", "outgoing"): [
+                    _make_relationship("task-123", "dep-1"),
+                    _make_relationship("task-123", "dep-2"),
+                ]
+            },
         )
 
-        result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID, depth=1)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_task_dependencies(MagicMock(), "task-123", TEST_ORG_ID, depth=1)
 
         assert result.task_id == "task-123"
         assert "dep-1" in result.dependencies
@@ -226,17 +312,28 @@ class TestGetTaskDependencies:
     @pytest.mark.asyncio
     async def test_identifies_blockers(self) -> None:
         """Should identify incomplete dependencies as blockers."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                ("dep-1", TaskStatus.TODO.value),  # Incomplete - blocker
-                ("dep-2", TaskStatus.DOING.value),  # Incomplete - blocker
-                ("dep-3", TaskStatus.DONE.value),  # Complete - not blocker
-                ("dep-4", TaskStatus.ARCHIVED.value),  # Archived - not blocker
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            entity_lookup={
+                "dep-1": _make_task("dep-1", status=TaskStatus.TODO),
+                "dep-2": _make_task("dep-2", status=TaskStatus.DOING),
+                "dep-3": _make_task("dep-3", status=TaskStatus.DONE),
+                "dep-4": _make_task("dep-4", status=TaskStatus.ARCHIVED),
+            },
+            relationships_by_entity={
+                ("task-123", "outgoing"): [
+                    _make_relationship("task-123", "dep-1"),
+                    _make_relationship("task-123", "dep-2"),
+                    _make_relationship("task-123", "dep-3"),
+                    _make_relationship("task-123", "dep-4"),
+                ]
+            },
         )
 
-        result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID, depth=1)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_task_dependencies(MagicMock(), "task-123", TEST_ORG_ID, depth=1)
 
         assert len(result.blockers) == 2
         assert "dep-1" in result.blockers
@@ -246,16 +343,25 @@ class TestGetTaskDependencies:
 
     @pytest.mark.asyncio
     async def test_handles_dict_records(self) -> None:
-        """Should handle dict-style records from graph query."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                {"dep_id": "dep-1", "dep_status": TaskStatus.TODO.value},
-                {"dep_id": "dep-2", "dep_status": TaskStatus.DONE.value},
-            ]
+        """Should handle task-like objects with string statuses."""
+        entity_manager, relationship_manager = _make_dependency_managers(
+            entity_lookup={
+                "dep-1": _make_task("dep-1", status=TaskStatus.TODO.value),
+                "dep-2": _make_task("dep-2", status=TaskStatus.DONE.value),
+            },
+            relationships_by_entity={
+                ("task-123", "outgoing"): [
+                    _make_relationship("task-123", "dep-1"),
+                    _make_relationship("task-123", "dep-2"),
+                ]
+            },
         )
 
-        result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID, depth=1)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_task_dependencies(MagicMock(), "task-123", TEST_ORG_ID, depth=1)
 
         assert len(result.dependencies) == 2
         assert "dep-1" in result.dependencies
@@ -263,36 +369,47 @@ class TestGetTaskDependencies:
     @pytest.mark.asyncio
     async def test_clamps_depth(self) -> None:
         """Should clamp depth to 1-5 range."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(return_value=[])
+        entity_manager, relationship_manager = _make_dependency_managers()
 
-        # Depth too low
-        result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID, depth=0)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_task_dependencies(MagicMock(), "task-123", TEST_ORG_ID, depth=0)
         assert result.depth == 1
 
-        # Depth too high
-        result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID, depth=10)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_task_dependencies(MagicMock(), "task-123", TEST_ORG_ID, depth=10)
         assert result.depth == 1  # Not include_transitive, so depth stays 1
 
     @pytest.mark.asyncio
     async def test_transitive_dependencies(self) -> None:
         """Should use deeper traversal when include_transitive is True."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(return_value=[])
+        entity_manager, relationship_manager = _make_dependency_managers()
 
-        result = await get_task_dependencies(
-            mock_client, "task-123", TEST_ORG_ID, depth=3, include_transitive=True
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_task_dependencies(
+                MagicMock(), "task-123", TEST_ORG_ID, depth=3, include_transitive=True
+            )
 
         assert result.depth == 3
 
     @pytest.mark.asyncio
     async def test_handles_empty_results(self) -> None:
         """Should handle tasks with no dependencies."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(return_value=[])
+        entity_manager, relationship_manager = _make_dependency_managers()
 
-        result = await get_task_dependencies(mock_client, "task-standalone", TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_task_dependencies(MagicMock(), "task-standalone", TEST_ORG_ID)
 
         assert result.dependencies == []
         assert result.blockers == []
@@ -300,10 +417,11 @@ class TestGetTaskDependencies:
     @pytest.mark.asyncio
     async def test_handles_query_exception(self) -> None:
         """Should return empty result on query failure."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(side_effect=RuntimeError("Connection failed"))
-
-        result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            side_effect=RuntimeError("Connection failed"),
+        ):
+            result = await get_task_dependencies(MagicMock(), "task-123", TEST_ORG_ID)
 
         assert result.dependencies == []
         assert result.blockers == []
@@ -311,15 +429,23 @@ class TestGetTaskDependencies:
     @pytest.mark.asyncio
     async def test_skips_none_dep_id(self) -> None:
         """Should skip records with None dep_id."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                (None, TaskStatus.TODO.value),
-                ("dep-1", TaskStatus.TODO.value),
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            entity_lookup={
+                "dep-1": _make_task("dep-1", status=TaskStatus.TODO),
+            },
+            relationships_by_entity={
+                ("task-123", "outgoing"): [
+                    _make_relationship("task-123", None),
+                    _make_relationship("task-123", "dep-1"),
+                ]
+            },
         )
 
-        result = await get_task_dependencies(mock_client, "task-123", TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_task_dependencies(MagicMock(), "task-123", TEST_ORG_ID)
 
         assert len(result.dependencies) == 1
         assert "dep-1" in result.dependencies
@@ -331,31 +457,28 @@ class TestGetBlockingTasks:
     @pytest.mark.asyncio
     async def test_surreal_runtime_uses_graph_managers(self) -> None:
         """Should use entity/relationship managers in surreal mode."""
-        mock_client = MagicMock()
-
-        entity_manager = MagicMock()
-        entity_manager.get = AsyncMock(
-            side_effect=[
-                MagicMock(status=TaskStatus.TODO, metadata={"status": "todo"}),
-                MagicMock(status=TaskStatus.DONE, metadata={"status": "done"}),
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            entity_lookup={
+                "blocked-1": _make_task(
+                    "blocked-1", status=TaskStatus.TODO, metadata={"status": "todo"}
+                ),
+                "blocked-2": _make_task(
+                    "blocked-2", status=TaskStatus.DONE, metadata={"status": "done"}
+                ),
+            },
+            relationships_by_entity={
+                ("task-123", "incoming"): [
+                    _make_relationship("blocked-1", "task-123"),
+                    _make_relationship("blocked-2", "task-123"),
+                ]
+            },
         )
-        relationship_manager = MagicMock()
-        relationship_manager.get_for_entity = AsyncMock(
-            return_value=[
-                MagicMock(source_id="blocked-1"),
-                MagicMock(source_id="blocked-2"),
-            ]
-        )
 
-        with (
-            patch("sibyl_core.tasks.dependencies._uses_surreal_runtime", return_value=True),
-            patch(
-                "sibyl_core.tasks.dependencies._get_graph_managers",
-                return_value=(entity_manager, relationship_manager),
-            ),
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
         ):
-            result = await get_blocking_tasks(mock_client, "task-123", TEST_ORG_ID)
+            result = await get_blocking_tasks(MagicMock(), "task-123", TEST_ORG_ID)
 
         assert result.dependencies == ["blocked-1", "blocked-2"]
         assert result.blockers == ["blocked-1"]
@@ -364,15 +487,24 @@ class TestGetBlockingTasks:
     @pytest.mark.asyncio
     async def test_returns_dependent_tasks(self) -> None:
         """Should return tasks that depend on the given task."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                ("dependent-1", TaskStatus.TODO.value),
-                ("dependent-2", TaskStatus.DOING.value),
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            entity_lookup={
+                "dependent-1": _make_task("dependent-1", status=TaskStatus.TODO),
+                "dependent-2": _make_task("dependent-2", status=TaskStatus.DOING),
+            },
+            relationships_by_entity={
+                ("task-123", "incoming"): [
+                    _make_relationship("dependent-1", "task-123"),
+                    _make_relationship("dependent-2", "task-123"),
+                ]
+            },
         )
 
-        result = await get_blocking_tasks(mock_client, "task-123", TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_blocking_tasks(MagicMock(), "task-123", TEST_ORG_ID)
 
         assert result.task_id == "task-123"
         assert len(result.dependencies) == 2
@@ -382,50 +514,71 @@ class TestGetBlockingTasks:
     @pytest.mark.asyncio
     async def test_identifies_incomplete_dependents(self) -> None:
         """Should identify incomplete dependents as blockers."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                ("dep-1", TaskStatus.TODO.value),  # Incomplete
-                ("dep-2", TaskStatus.DONE.value),  # Complete
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            entity_lookup={
+                "dep-1": _make_task("dep-1", status=TaskStatus.TODO),
+                "dep-2": _make_task("dep-2", status=TaskStatus.DONE),
+            },
+            relationships_by_entity={
+                ("task-123", "incoming"): [
+                    _make_relationship("dep-1", "task-123"),
+                    _make_relationship("dep-2", "task-123"),
+                ]
+            },
         )
 
-        result = await get_blocking_tasks(mock_client, "task-123", TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_blocking_tasks(MagicMock(), "task-123", TEST_ORG_ID)
 
         assert len(result.blockers) == 1
         assert "dep-1" in result.blockers
 
     @pytest.mark.asyncio
     async def test_handles_dict_records(self) -> None:
-        """Should handle dict-style records."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                {"dep_id": "dependent-1", "dep_status": TaskStatus.TODO.value},
-            ]
+        """Should handle task-like objects with string statuses."""
+        entity_manager, relationship_manager = _make_dependency_managers(
+            entity_lookup={
+                "dependent-1": _make_task("dependent-1", status=TaskStatus.TODO.value),
+            },
+            relationships_by_entity={
+                ("task-123", "incoming"): [
+                    _make_relationship("dependent-1", "task-123"),
+                ]
+            },
         )
 
-        result = await get_blocking_tasks(mock_client, "task-123", TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_blocking_tasks(MagicMock(), "task-123", TEST_ORG_ID)
 
         assert "dependent-1" in result.dependencies
 
     @pytest.mark.asyncio
     async def test_clamps_depth(self) -> None:
         """Should clamp depth to 1-5 range."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(return_value=[])
+        entity_manager, relationship_manager = _make_dependency_managers()
 
-        result = await get_blocking_tasks(mock_client, "task-123", TEST_ORG_ID, depth=10)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_blocking_tasks(MagicMock(), "task-123", TEST_ORG_ID, depth=10)
 
         assert result.depth == 5
 
     @pytest.mark.asyncio
     async def test_handles_query_exception(self) -> None:
         """Should return empty result on query failure."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(side_effect=RuntimeError("Connection failed"))
-
-        result = await get_blocking_tasks(mock_client, "task-123", TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            side_effect=RuntimeError("Connection failed"),
+        ):
+            result = await get_blocking_tasks(MagicMock(), "task-123", TEST_ORG_ID)
 
         assert result.dependencies == []
         assert result.blockers == []
@@ -437,45 +590,24 @@ class TestDetectDependencyCycles:
     @pytest.mark.asyncio
     async def test_surreal_runtime_uses_graph_managers(self) -> None:
         """Should build the cycle graph from manager-backed relationships."""
-        mock_client = MagicMock()
-
-        entity_manager = MagicMock()
-        entity_manager.list_by_type = AsyncMock(
-            return_value=[
-                MagicMock(id="task-a"),
-                MagicMock(id="task-b"),
-                MagicMock(id="task-c"),
-            ]
-        )
-        relationship_manager = MagicMock()
-        relationship_manager.list_all = AsyncMock(
-            return_value=[
-                MagicMock(
-                    source_id="task-a",
-                    target_id="task-b",
-                    relationship_type=RelationshipType.DEPENDS_ON,
-                ),
-                MagicMock(
-                    source_id="task-b",
-                    target_id="task-c",
-                    relationship_type=RelationshipType.DEPENDS_ON,
-                ),
-                MagicMock(
-                    source_id="task-c",
-                    target_id="task-a",
-                    relationship_type=RelationshipType.DEPENDS_ON,
-                ),
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task("task-a"),
+                _make_task("task-b"),
+                _make_task("task-c"),
+            ],
+            all_relationships=[
+                _make_relationship("task-a", "task-b"),
+                _make_relationship("task-b", "task-c"),
+                _make_relationship("task-c", "task-a"),
+            ],
         )
 
-        with (
-            patch("sibyl_core.tasks.dependencies._uses_surreal_runtime", return_value=True),
-            patch(
-                "sibyl_core.tasks.dependencies._get_graph_managers",
-                return_value=(entity_manager, relationship_manager),
-            ),
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
         ):
-            result = await detect_dependency_cycles(mock_client, TEST_ORG_ID)
+            result = await detect_dependency_cycles(MagicMock(), TEST_ORG_ID)
 
         assert result.has_cycles is True
         relationship_manager.list_all.assert_awaited_once()
@@ -483,16 +615,23 @@ class TestDetectDependencyCycles:
     @pytest.mark.asyncio
     async def test_no_cycles_detected(self) -> None:
         """Should detect no cycles in acyclic graph."""
-        mock_client = MagicMock()
-        # A -> B -> C (no cycle)
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                ("task-a", "task-b"),
-                ("task-b", "task-c"),
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task("task-a"),
+                _make_task("task-b"),
+                _make_task("task-c"),
+            ],
+            all_relationships=[
+                _make_relationship("task-a", "task-b"),
+                _make_relationship("task-b", "task-c"),
+            ],
         )
 
-        result = await detect_dependency_cycles(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await detect_dependency_cycles(MagicMock(), TEST_ORG_ID)
 
         assert result.has_cycles is False
         assert result.cycles == []
@@ -501,17 +640,24 @@ class TestDetectDependencyCycles:
     @pytest.mark.asyncio
     async def test_detects_simple_cycle(self) -> None:
         """Should detect a simple cycle."""
-        mock_client = MagicMock()
-        # A -> B -> C -> A (cycle)
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                ("task-a", "task-b"),
-                ("task-b", "task-c"),
-                ("task-c", "task-a"),
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task("task-a"),
+                _make_task("task-b"),
+                _make_task("task-c"),
+            ],
+            all_relationships=[
+                _make_relationship("task-a", "task-b"),
+                _make_relationship("task-b", "task-c"),
+                _make_relationship("task-c", "task-a"),
+            ],
         )
 
-        result = await detect_dependency_cycles(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await detect_dependency_cycles(MagicMock(), TEST_ORG_ID)
 
         assert result.has_cycles is True
         assert len(result.cycles) >= 1
@@ -520,50 +666,64 @@ class TestDetectDependencyCycles:
     @pytest.mark.asyncio
     async def test_detects_self_cycle(self) -> None:
         """Should detect a task depending on itself."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                ("task-a", "task-a"),  # Self-dependency
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[_make_task("task-a")],
+            all_relationships=[_make_relationship("task-a", "task-a")],
         )
 
-        result = await detect_dependency_cycles(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await detect_dependency_cycles(MagicMock(), TEST_ORG_ID)
 
         assert result.has_cycles is True
 
     @pytest.mark.asyncio
     async def test_project_scoped_query(self) -> None:
-        """Should use project-scoped query when project_id provided."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(return_value=[])
+        """Should pass project scope through the entity seam when project_id provided."""
+        entity_manager, relationship_manager = _make_dependency_managers()
 
-        await detect_dependency_cycles(mock_client, TEST_ORG_ID, project_id="proj-123")
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            await detect_dependency_cycles(MagicMock(), TEST_ORG_ID, project_id="proj-123")
 
-        # Verify query was called with project_id
-        call_args = mock_client.execute_read_org.call_args
-        assert call_args.kwargs.get("project_id") == "proj-123"
+        entity_manager.list_by_type.assert_awaited_once_with(
+            EntityType.TASK,
+            project_id="proj-123",
+            limit=500,
+            offset=0,
+            include_archived=True,
+        )
 
     @pytest.mark.asyncio
     async def test_handles_dict_records(self) -> None:
-        """Should handle dict-style records."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                {"from_id": "task-a", "to_id": "task-b"},
-            ]
+        """Should handle plain manager relationship objects."""
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[_make_task("task-a"), _make_task("task-b")],
+            all_relationships=[_make_relationship("task-a", "task-b")],
         )
 
-        result = await detect_dependency_cycles(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await detect_dependency_cycles(MagicMock(), TEST_ORG_ID)
 
         assert result.has_cycles is False
 
     @pytest.mark.asyncio
     async def test_handles_empty_graph(self) -> None:
         """Should handle empty dependency graph."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(return_value=[])
+        entity_manager, relationship_manager = _make_dependency_managers()
 
-        result = await detect_dependency_cycles(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await detect_dependency_cycles(MagicMock(), TEST_ORG_ID)
 
         assert result.has_cycles is False
         assert result.cycles == []
@@ -571,10 +731,11 @@ class TestDetectDependencyCycles:
     @pytest.mark.asyncio
     async def test_handles_query_exception(self) -> None:
         """Should return safe result on query failure."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(side_effect=RuntimeError("Connection failed"))
-
-        result = await detect_dependency_cycles(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            side_effect=RuntimeError("Connection failed"),
+        ):
+            result = await detect_dependency_cycles(MagicMock(), TEST_ORG_ID)
 
         assert result.has_cycles is False
         assert "failed" in result.message.lower()
@@ -582,16 +743,20 @@ class TestDetectDependencyCycles:
     @pytest.mark.asyncio
     async def test_skips_none_ids(self) -> None:
         """Should skip records with None IDs."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                (None, "task-b"),
-                ("task-a", None),
-                ("task-a", "task-b"),
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[_make_task("task-a"), _make_task("task-b")],
+            all_relationships=[
+                _make_relationship(None, "task-b"),
+                _make_relationship("task-a", None),
+                _make_relationship("task-a", "task-b"),
+            ],
         )
 
-        result = await detect_dependency_cycles(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await detect_dependency_cycles(MagicMock(), TEST_ORG_ID)
 
         # Should only process the valid edge
         assert result.has_cycles is False
@@ -603,38 +768,23 @@ class TestSuggestTaskOrder:
     @pytest.mark.asyncio
     async def test_surreal_runtime_uses_graph_managers(self) -> None:
         """Should derive order from manager-backed tasks and relationships."""
-        mock_client = MagicMock()
-
-        task_one = MagicMock(id="task-1", task_order=10, status=TaskStatus.TODO, metadata={})
-        task_two = MagicMock(id="task-2", task_order=20, status=TaskStatus.TODO, metadata={})
-        task_three = MagicMock(id="task-3", task_order=30, status=TaskStatus.TODO, metadata={})
-
-        entity_manager = MagicMock()
-        entity_manager.list_by_type = AsyncMock(return_value=[task_one, task_two, task_three])
-        relationship_manager = MagicMock()
-        relationship_manager.list_all = AsyncMock(
-            return_value=[
-                MagicMock(
-                    source_id="task-2",
-                    target_id="task-1",
-                    relationship_type=RelationshipType.DEPENDS_ON,
-                ),
-                MagicMock(
-                    source_id="task-3",
-                    target_id="task-2",
-                    relationship_type=RelationshipType.DEPENDS_ON,
-                ),
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task("task-1", task_order=10),
+                _make_task("task-2", task_order=20),
+                _make_task("task-3", task_order=30),
+            ],
+            all_relationships=[
+                _make_relationship("task-2", "task-1"),
+                _make_relationship("task-3", "task-2"),
+            ],
         )
 
-        with (
-            patch("sibyl_core.tasks.dependencies._uses_surreal_runtime", return_value=True),
-            patch(
-                "sibyl_core.tasks.dependencies._get_graph_managers",
-                return_value=(entity_manager, relationship_manager),
-            ),
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
         ):
-            result = await suggest_task_order(mock_client, TEST_ORG_ID)
+            result = await suggest_task_order(MagicMock(), TEST_ORG_ID)
 
         assert result.ordered_tasks == ["task-1", "task-2", "task-3"]
         relationship_manager.list_all.assert_awaited_once()
@@ -642,23 +792,23 @@ class TestSuggestTaskOrder:
     @pytest.mark.asyncio
     async def test_orders_simple_chain(self) -> None:
         """Should order tasks in dependency order."""
-        mock_client = MagicMock()
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task("task-1", task_order=10),
+                _make_task("task-2", task_order=20),
+                _make_task("task-3", task_order=30),
+            ],
+            all_relationships=[
+                _make_relationship("task-2", "task-1"),
+                _make_relationship("task-3", "task-2"),
+            ],
+        )
 
-        # Tasks query
-        task_results = [
-            ("task-1", TaskStatus.TODO.value, 10),
-            ("task-2", TaskStatus.TODO.value, 20),
-            ("task-3", TaskStatus.TODO.value, 30),
-        ]
-        # Dependency edges: task-2 depends on task-1, task-3 depends on task-2
-        dep_results = [
-            ("task-2", "task-1"),
-            ("task-3", "task-2"),
-        ]
-
-        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
-
-        result = await suggest_task_order(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await suggest_task_order(MagicMock(), TEST_ORG_ID)
 
         assert len(result.ordered_tasks) == 3
         # task-1 should come before task-2
@@ -669,18 +819,19 @@ class TestSuggestTaskOrder:
     @pytest.mark.asyncio
     async def test_handles_independent_tasks(self) -> None:
         """Should order independent tasks by priority."""
-        mock_client = MagicMock()
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task("task-low", task_order=10),
+                _make_task("task-high", task_order=100),
+                _make_task("task-med", task_order=50),
+            ],
+        )
 
-        task_results = [
-            ("task-low", TaskStatus.TODO.value, 10),
-            ("task-high", TaskStatus.TODO.value, 100),
-            ("task-med", TaskStatus.TODO.value, 50),
-        ]
-        dep_results = []  # No dependencies
-
-        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
-
-        result = await suggest_task_order(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await suggest_task_order(MagicMock(), TEST_ORG_ID)
 
         assert len(result.ordered_tasks) == 3
         # Highest priority should come first
@@ -689,22 +840,23 @@ class TestSuggestTaskOrder:
     @pytest.mark.asyncio
     async def test_identifies_cycle_tasks(self) -> None:
         """Should identify tasks in cycles as unordered."""
-        mock_client = MagicMock()
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task("task-ok", task_order=10),
+                _make_task("task-a", task_order=10),
+                _make_task("task-b", task_order=10),
+            ],
+            all_relationships=[
+                _make_relationship("task-a", "task-b"),
+                _make_relationship("task-b", "task-a"),
+            ],
+        )
 
-        task_results = [
-            ("task-ok", TaskStatus.TODO.value, 10),
-            ("task-a", TaskStatus.TODO.value, 10),
-            ("task-b", TaskStatus.TODO.value, 10),
-        ]
-        # task-a and task-b form a cycle
-        dep_results = [
-            ("task-a", "task-b"),
-            ("task-b", "task-a"),
-        ]
-
-        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
-
-        result = await suggest_task_order(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await suggest_task_order(MagicMock(), TEST_ORG_ID)
 
         # task-ok should be ordered, cycle tasks should be unordered
         assert "task-ok" in result.ordered_tasks
@@ -716,22 +868,23 @@ class TestSuggestTaskOrder:
     @pytest.mark.asyncio
     async def test_status_filter(self) -> None:
         """Should filter tasks by status."""
-        mock_client = MagicMock()
-
-        task_results = [
-            ("task-todo", TaskStatus.TODO.value, 10),
-            ("task-done", TaskStatus.DONE.value, 10),
-            ("task-doing", TaskStatus.DOING.value, 10),
-        ]
-        dep_results = []
-
-        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
-
-        result = await suggest_task_order(
-            mock_client,
-            TEST_ORG_ID,
-            status_filter=[TaskStatus.TODO, TaskStatus.DOING],
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task("task-todo", status=TaskStatus.TODO, task_order=10),
+                _make_task("task-done", status=TaskStatus.DONE, task_order=10),
+                _make_task("task-doing", status=TaskStatus.DOING, task_order=10),
+            ],
         )
+
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await suggest_task_order(
+                MagicMock(),
+                TEST_ORG_ID,
+                status_filter=[TaskStatus.TODO, TaskStatus.DOING],
+            )
 
         assert "task-todo" in result.ordered_tasks
         assert "task-doing" in result.ordered_tasks
@@ -739,44 +892,48 @@ class TestSuggestTaskOrder:
 
     @pytest.mark.asyncio
     async def test_project_scoped_query(self) -> None:
-        """Should use project-scoped queries when project_id provided."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=[[], []]  # Empty results
+        """Should pass project scope through the task seam when project_id provided."""
+        entity_manager, relationship_manager = _make_dependency_managers()
+
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            await suggest_task_order(MagicMock(), TEST_ORG_ID, project_id="proj-123")
+
+        entity_manager.list_by_type.assert_awaited_once_with(
+            EntityType.TASK,
+            project_id="proj-123",
+            limit=500,
+            offset=0,
+            include_archived=True,
         )
-
-        await suggest_task_order(mock_client, TEST_ORG_ID, project_id="proj-123")
-
-        # Both calls should have project_id
-        calls = mock_client.execute_read_org.call_args_list
-        assert calls[0].kwargs.get("project_id") == "proj-123"
-        assert calls[1].kwargs.get("project_id") == "proj-123"
 
     @pytest.mark.asyncio
     async def test_handles_dict_records(self) -> None:
-        """Should handle dict-style records."""
-        mock_client = MagicMock()
+        """Should handle task-like objects with string statuses and priorities."""
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[_make_task("task-1", status=TaskStatus.TODO.value, task_order=10)],
+        )
 
-        task_results = [
-            {"task_id": "task-1", "status": TaskStatus.TODO.value, "priority": 10},
-        ]
-        dep_results = []
-
-        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
-
-        result = await suggest_task_order(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await suggest_task_order(MagicMock(), TEST_ORG_ID)
 
         assert "task-1" in result.ordered_tasks
 
     @pytest.mark.asyncio
     async def test_handles_empty_project(self) -> None:
         """Should handle project with no tasks."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=[[], []]  # No tasks, no deps
-        )
+        entity_manager, relationship_manager = _make_dependency_managers()
 
-        result = await suggest_task_order(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await suggest_task_order(MagicMock(), TEST_ORG_ID)
 
         assert result.ordered_tasks == []
         assert result.unordered_tasks == []
@@ -784,10 +941,11 @@ class TestSuggestTaskOrder:
     @pytest.mark.asyncio
     async def test_handles_query_exception(self) -> None:
         """Should return safe result on query failure."""
-        mock_client = MagicMock()
-        mock_client.execute_read_org = AsyncMock(side_effect=RuntimeError("Connection failed"))
-
-        result = await suggest_task_order(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            side_effect=RuntimeError("Connection failed"),
+        ):
+            result = await suggest_task_order(MagicMock(), TEST_ORG_ID)
 
         assert result.ordered_tasks == []
         assert "failed" in result.warnings[0].lower()
@@ -795,20 +953,21 @@ class TestSuggestTaskOrder:
     @pytest.mark.asyncio
     async def test_ignores_external_dependencies(self) -> None:
         """Should ignore dependencies to tasks not in the task set."""
-        mock_client = MagicMock()
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task("task-1", task_order=10),
+                _make_task("task-2", task_order=20),
+            ],
+            all_relationships=[
+                _make_relationship("task-2", "task-external"),
+            ],
+        )
 
-        task_results = [
-            ("task-1", TaskStatus.TODO.value, 10),
-            ("task-2", TaskStatus.TODO.value, 20),
-        ]
-        # task-2 depends on task-external which is not in our task set
-        dep_results = [
-            ("task-2", "task-external"),
-        ]
-
-        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
-
-        result = await suggest_task_order(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await suggest_task_order(MagicMock(), TEST_ORG_ID)
 
         # Both tasks should be ordered (external dep ignored)
         assert len(result.ordered_tasks) == 2
@@ -816,16 +975,17 @@ class TestSuggestTaskOrder:
     @pytest.mark.asyncio
     async def test_handles_none_priority(self) -> None:
         """Should handle tasks with None priority."""
-        mock_client = MagicMock()
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task("task-1", task_order=None),
+                _make_task("task-2", task_order=50),
+            ],
+        )
 
-        task_results = [
-            ("task-1", TaskStatus.TODO.value, None),
-            ("task-2", TaskStatus.TODO.value, 50),
-        ]
-        dep_results = []
-
-        mock_client.execute_read_org = AsyncMock(side_effect=[task_results, dep_results])
-
-        result = await suggest_task_order(mock_client, TEST_ORG_ID)
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await suggest_task_order(MagicMock(), TEST_ORG_ID)
 
         assert len(result.ordered_tasks) == 2
