@@ -9,7 +9,9 @@ from sibyl.api.dependencies import get_knowledge_read_service
 from sibyl.api.schemas import GraphData, GraphEdge, GraphNode, SubgraphRequest
 from sibyl.auth.dependencies import get_current_organization, require_org_role
 from sibyl.db.models import Organization, OrganizationRole
-from sibyl.persistence.legacy.graph import get_legacy_entity_runtime
+from sibyl.persistence.legacy.graph import (
+    get_entity_graph_runtime as _service_get_entity_graph_runtime,
+)
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.graph.communities import (
     get_cluster_nodes,
@@ -31,6 +33,14 @@ _ADMIN_ROLES = (
     OrganizationRole.ADMIN,
 )
 
+
+async def get_legacy_entity_runtime(group_id: str):
+    return await _service_get_entity_graph_runtime(group_id)
+
+
+async def get_entity_graph_runtime(group_id: str):
+    return await get_legacy_entity_runtime(group_id)
+
 router = APIRouter(
     prefix="/graph",
     tags=["graph"],
@@ -42,7 +52,7 @@ router = APIRouter(
 async def debug_graph(org: Organization = Depends(get_current_organization)):
     """Debug endpoint to trace graph data issue."""
     group_id = str(org.id)
-    runtime = await get_legacy_entity_runtime(group_id)
+    runtime = await get_entity_graph_runtime(group_id)
 
     nodes = await _list_graph_entities(
         runtime.entity_manager,
@@ -235,7 +245,7 @@ async def get_all_nodes(
     """
     try:
         group_id = str(org.id)
-        runtime = await get_legacy_entity_runtime(group_id)
+        runtime = await get_entity_graph_runtime(group_id)
         entities = await _list_graph_entities(
             runtime.entity_manager,
             entity_types=types,
@@ -298,7 +308,7 @@ async def get_all_edges(
     """Get all edges for graph visualization."""
     try:
         group_id = str(org.id)
-        runtime = await get_legacy_entity_runtime(group_id)
+        runtime = await get_entity_graph_runtime(group_id)
 
         all_relationships = await runtime.relationship_manager.list_all(
             relationship_types=relationship_types,
@@ -336,7 +346,7 @@ async def get_full_graph(
     """Get complete graph data for visualization."""
     try:
         group_id = str(org.id)
-        runtime = await get_legacy_entity_runtime(group_id)
+        runtime = await get_entity_graph_runtime(group_id)
 
         entities = await _list_graph_entities(
             runtime.entity_manager,
@@ -418,7 +428,7 @@ async def get_subgraph(
     """Get a subgraph centered on a specific entity."""
     try:
         group_id = str(org.id)
-        runtime = await get_legacy_entity_runtime(group_id)
+        runtime = await get_entity_graph_runtime(group_id)
 
         # Get center entity
         center = await _get_graph_entity(runtime.entity_manager, payload.entity_id)
@@ -524,7 +534,7 @@ async def get_clusters(
     """
     try:
         group_id = str(org.id)
-        runtime = await get_legacy_entity_runtime(group_id)
+        runtime = await get_entity_graph_runtime(group_id)
 
         clusters = await get_clusters_for_visualization(
             runtime.client,
@@ -568,7 +578,7 @@ async def get_cluster_detail(
     """Get nodes and edges within a specific cluster for drill-down view."""
     try:
         group_id = str(org.id)
-        runtime = await get_legacy_entity_runtime(group_id)
+        runtime = await get_entity_graph_runtime(group_id)
 
         result = await get_cluster_nodes(runtime.client, group_id, cluster_id)
 
@@ -644,7 +654,7 @@ async def get_hierarchical_graph_data(
     """
     try:
         group_id = str(org.id)
-        runtime = await get_legacy_entity_runtime(group_id)
+        runtime = await get_entity_graph_runtime(group_id)
 
         data = await get_hierarchical_graph(
             runtime.client,

@@ -22,13 +22,29 @@ from sibyl.api.schemas import (
 from sibyl.auth.dependencies import get_current_organization, require_org_role
 from sibyl.db.models import Organization, OrganizationRole
 from sibyl.persistence.legacy.graph import (
-    get_legacy_entity_runtime,
-    get_legacy_knowledge_read_adapter,
+    get_entity_graph_runtime as _service_get_entity_graph_runtime,
+    get_knowledge_read_adapter as _service_get_knowledge_read_adapter,
 )
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
 
 log = structlog.get_logger()
+
+
+async def get_legacy_entity_runtime(group_id: str):
+    return await _service_get_entity_graph_runtime(group_id)
+
+
+async def get_entity_graph_runtime(group_id: str):
+    return await get_legacy_entity_runtime(group_id)
+
+
+async def get_legacy_knowledge_read_adapter(group_id: str):
+    return await _service_get_knowledge_read_adapter(group_id)
+
+
+async def get_knowledge_read_adapter(group_id: str):
+    return await get_legacy_knowledge_read_adapter(group_id)
 
 router = APIRouter(
     prefix="/metrics",
@@ -387,8 +403,8 @@ async def get_project_metrics(
     """Get metrics for a specific project."""
     try:
         group_id = str(org.id)
-        service = await get_legacy_knowledge_read_adapter(group_id)
-        entity_runtime = await get_legacy_entity_runtime(group_id)
+        service = await get_knowledge_read_adapter(group_id)
+        entity_runtime = await get_entity_graph_runtime(group_id)
 
         # Get project
         project = await service.get_entity(project_id)
@@ -453,7 +469,7 @@ async def get_project_summaries(
     """Get the lean project-summary payload for the projects page."""
     try:
         group_id = str(org.id)
-        service = await get_legacy_knowledge_read_adapter(group_id)
+        service = await get_knowledge_read_adapter(group_id)
         projects = await _list_entities_by_type_paginated_via_service(
             service,
             EntityType.PROJECT,
@@ -490,7 +506,7 @@ async def get_org_metrics(
     """Get organization-wide metrics aggregating all projects."""
     try:
         group_id = str(org.id)
-        service = await get_legacy_knowledge_read_adapter(group_id)
+        service = await get_knowledge_read_adapter(group_id)
 
         # Get all projects
         projects = await _list_entities_by_type_paginated_via_service(

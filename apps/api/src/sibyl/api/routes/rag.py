@@ -42,7 +42,9 @@ from sibyl.db import (
     get_session,
 )
 from sibyl.db.models import OrganizationRole
-from sibyl.persistence.legacy.graph import get_legacy_entity_runtime
+from sibyl.persistence.legacy.graph import (
+    get_entity_graph_runtime as _service_get_entity_graph_runtime,
+)
 from sibyl.persistence.legacy.rag import (
     get_document_by_url_for_org,
     hybrid_search_chunks,
@@ -52,6 +54,16 @@ from sibyl.persistence.legacy.rag import (
 )
 
 log = structlog.get_logger()
+
+
+async def get_legacy_entity_runtime(group_id: str):
+    return await _service_get_entity_graph_runtime(group_id)
+
+
+async def get_entity_graph_runtime(group_id: str):
+    return await get_legacy_entity_runtime(group_id)
+
+
 router = APIRouter(
     prefix="/rag",
     tags=["rag"],
@@ -662,7 +674,7 @@ async def get_document_related_entities(
     # Search the knowledge graph using document title as query
     entities: list[DocumentRelatedEntity] = []
     try:
-        entity_runtime = await get_legacy_entity_runtime(auth.organization_id)
+        entity_runtime = await get_entity_graph_runtime(auth.organization_id)
 
         # Semantic search using document title
         search_results = await entity_runtime.entity_manager.search(

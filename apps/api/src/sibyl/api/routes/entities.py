@@ -45,11 +45,21 @@ from sibyl.persistence.legacy.entities import (
     list_legacy_raw_captures,
     resolve_legacy_document_entity,
 )
-from sibyl.persistence.legacy.graph import get_legacy_entity_runtime
+from sibyl.persistence.legacy.graph import (
+    get_entity_graph_runtime as _service_get_entity_graph_runtime,
+)
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
 
 log = structlog.get_logger()
+
+
+async def get_legacy_entity_runtime(group_id: str):
+    return await _service_get_entity_graph_runtime(group_id)
+
+
+async def get_entity_graph_runtime(group_id: str):
+    return await get_legacy_entity_runtime(group_id)
 
 
 class SortField(str, Enum):
@@ -477,7 +487,7 @@ async def list_entities(
             project_ids=project_ids,
             page=page,
         )
-        runtime = await get_legacy_entity_runtime(group_id)
+        runtime = await get_entity_graph_runtime(group_id)
         entity_manager = runtime.entity_manager
 
         # Get entities - single query for all types, or filtered by type
@@ -627,7 +637,7 @@ async def get_entity(
             )
 
             if entity.entity_type in {EntityType.PROJECT, EntityType.EPIC}:
-                runtime = await get_legacy_entity_runtime(str(org.id))
+                runtime = await get_entity_graph_runtime(str(org.id))
 
                 # Enrich with project and epic summaries via the current manager until
                 # those read models move behind the seam.
@@ -818,7 +828,7 @@ async def create_entity(
             return response
 
         # Sync creation - fetch the created entity
-        runtime = await get_legacy_entity_runtime(group_id)
+        runtime = await get_entity_graph_runtime(group_id)
         created = await runtime.entity_manager.get(result.id)
 
         if not created:
@@ -909,7 +919,7 @@ async def update_entity(
                     detail="Entity is being updated by another process. Please retry.",
                 )
 
-            runtime = await get_legacy_entity_runtime(group_id)
+            runtime = await get_entity_graph_runtime(group_id)
 
             # Get existing entity
             existing = await runtime.entity_manager.get(entity_id)
@@ -1037,7 +1047,7 @@ async def delete_entity(
                     detail="Entity is being modified by another process. Please retry.",
                 )
 
-            runtime = await get_legacy_entity_runtime(group_id)
+            runtime = await get_entity_graph_runtime(group_id)
 
             # Check existence
             existing = await runtime.entity_manager.get(entity_id)
