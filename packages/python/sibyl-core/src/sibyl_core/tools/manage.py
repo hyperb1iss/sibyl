@@ -16,11 +16,75 @@ from typing import Any
 import structlog
 
 from sibyl_core.models.entities import EntityType
-from sibyl_core.services.legacy_graph import get_legacy_graph_client, get_legacy_graph_runtime
+from sibyl_core.services.crawl_sources import (
+    _crawl_source_exists,
+    _create_or_get_crawl_source,
+    _enqueue_source_crawl,
+    _enqueue_source_sync,
+    _list_crawl_source_ids,
+    list_unlinked_document_chunks,
+)
+from sibyl_core.services.legacy_graph import (
+    LegacyGraphRuntime,
+)
+from sibyl_core.services.legacy_graph import (
+    get_legacy_graph_client as _service_get_legacy_graph_client,
+)
+from sibyl_core.services.legacy_graph import (
+    get_legacy_graph_runtime as _service_get_legacy_graph_runtime,
+)
+from sibyl_core.services.link_graph_status import get_link_graph_status_data
 from sibyl_core.tasks.dependencies import detect_dependency_cycles
-from sibyl_core.tools.link_graph_status import get_link_graph_status_data
 
 log = structlog.get_logger()
+
+
+async def _default_get_graph_client() -> Any:
+    return await _service_get_legacy_graph_client()
+
+
+def _compat_entity_manager(*args: Any, **kwargs: Any) -> Any:
+    raise RuntimeError("EntityManager compatibility shim should be patched in tests")
+
+
+def _compat_relationship_manager(*args: Any, **kwargs: Any) -> Any:
+    raise RuntimeError("RelationshipManager compatibility shim should be patched in tests")
+
+
+get_graph_client = _default_get_graph_client
+EntityManager = _compat_entity_manager
+RelationshipManager = _compat_relationship_manager
+GraphIntegrationService: Any = None
+
+
+async def get_legacy_graph_client() -> Any:
+    return await get_graph_client()
+
+
+async def get_legacy_graph_runtime(group_id: str) -> LegacyGraphRuntime:
+    if (
+        get_graph_client is _default_get_graph_client
+        and EntityManager is _compat_entity_manager
+        and RelationshipManager is _compat_relationship_manager
+    ):
+        return await _service_get_legacy_graph_runtime(group_id)
+
+    runtime = await _service_get_legacy_graph_runtime(group_id)
+    client = await get_graph_client()
+    entity_manager = runtime.entity_manager
+    relationship_manager = runtime.relationship_manager
+
+    if EntityManager is not _compat_entity_manager:
+        entity_manager = EntityManager(client, group_id=str(group_id))
+
+    if RelationshipManager is not _compat_relationship_manager:
+        relationship_manager = RelationshipManager(client, group_id=str(group_id))
+
+    return LegacyGraphRuntime(
+        client=client,
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+    )
 
 
 # =============================================================================
@@ -751,155 +815,6 @@ async def _handle_source_action(
         return await _link_graph_status(organization_id)
 
     return ManageResponse(success=False, action=action, message="Unknown source action")
-
-
-def _normalize_pattern_list(value: Any) -> list[str]:
-    """Normalize a source pattern input into a string list."""
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [value] if value else []
-    if isinstance(value, list | tuple | set):
-        return [str(item) for item in value if item]
-    return [str(value)]
-
-
-async def _create_or_get_crawl_source(
-    url: str,
-    depth: int,
-    data: dict[str, Any],
-    *,
-    organization_id: str,
-) -> tuple[str, bool]:
-    """Create or reuse a relational crawl source for the given URL."""
-    from uuid import UUID
-
-    from sibyl.db import CrawlSource, SourceType, get_session
-    from sqlalchemy import select
-    from sqlmodel import col
-
-    normalized_url = url.rstrip("/")
-    source_name = str(data.get("name") or normalized_url.split("//")[-1].split("/")[0])
-    source_type = str(data.get("source_type") or "website").lower()
-
-    try:
-        source_type_enum = SourceType(source_type)
-    except ValueError:
-        source_type_enum = SourceType.WEBSITE
-
-    include_patterns = _normalize_pattern_list(data.get("include_patterns") or data.get("patterns"))
-    exclude_patterns = _normalize_pattern_list(data.get("exclude_patterns") or data.get("exclude"))
-
-    async with get_session() as session:
-        result = await session.execute(
-            select(CrawlSource).where(
-                col(CrawlSource.organization_id) == UUID(organization_id),
-                col(CrawlSource.url) == normalized_url,
-            )
-        )
-        source = result.scalar_one_or_none()
-        if source is not None:
-            return str(source.id), False
-
-        source = CrawlSource(
-            name=source_name,
-            url=normalized_url,
-            organization_id=UUID(organization_id),
-            source_type=source_type_enum,
-            description=data.get("description"),
-            crawl_depth=max(0, min(int(depth), 10)),
-            include_patterns=include_patterns,
-            exclude_patterns=exclude_patterns,
-        )
-        session.add(source)
-        await session.flush()
-        await session.refresh(source)
-        return str(source.id), True
-
-
-async def _crawl_source_exists(source_id: str, organization_id: str) -> bool:
-    """Return whether a crawl source exists within the organization."""
-    from uuid import UUID
-
-    from sibyl.db import CrawlSource, get_session
-    from sqlalchemy import select
-    from sqlmodel import col
-
-    async with get_session() as session:
-        result = await session.execute(
-            select(CrawlSource).where(
-                col(CrawlSource.id) == UUID(source_id),
-                col(CrawlSource.organization_id) == UUID(organization_id),
-            )
-        )
-        return result.scalar_one_or_none() is not None
-
-
-async def _list_crawl_source_ids(organization_id: str) -> list[str]:
-    """List crawl source IDs for an organization."""
-    from uuid import UUID
-
-    from sibyl.db import CrawlSource, get_session
-    from sqlalchemy import select
-    from sqlmodel import col
-
-    async with get_session() as session:
-        result = await session.execute(
-            select(CrawlSource).where(col(CrawlSource.organization_id) == UUID(organization_id))
-        )
-        return [str(source.id) for source in result.scalars().all()]
-
-
-async def _enqueue_source_crawl(
-    source_id: str,
-    *,
-    organization_id: str,
-    max_pages: int = 50,
-    max_depth: int = 3,
-    generate_embeddings: bool = True,
-    force: bool = False,
-) -> str:
-    """Enqueue a crawl job and sync its pending state to the relational source."""
-    from uuid import UUID
-
-    from sibyl.db import CrawlSource, CrawlStatus, get_session
-    from sibyl.jobs.queue import enqueue_crawl
-    from sqlalchemy import select
-    from sqlmodel import col
-
-    job_id = await enqueue_crawl(
-        source_id,
-        organization_id=organization_id,
-        max_pages=max_pages,
-        max_depth=max_depth,
-        generate_embeddings=generate_embeddings,
-        force=force,
-    )
-
-    async with get_session() as session:
-        result = await session.execute(
-            select(CrawlSource).where(
-                col(CrawlSource.id) == UUID(source_id),
-                col(CrawlSource.organization_id) == UUID(organization_id),
-            )
-        )
-        source = result.scalar_one_or_none()
-        if source is not None:
-            source.current_job_id = job_id
-            source.crawl_status = CrawlStatus.PENDING
-            source.last_error = None
-            session.add(source)
-
-    return job_id
-
-
-async def _enqueue_source_sync(source_id: str, *, organization_id: str) -> str:
-    """Enqueue a source-stat sync job."""
-    from sibyl.jobs.queue import enqueue_sync
-
-    return await enqueue_sync(source_id, organization_id=organization_id)
-
-
 async def _crawl_source(
     url: str,
     depth: int,
@@ -989,35 +904,13 @@ async def _link_graph(
     organization_id: str,
 ) -> ManageResponse:
     """Link document chunks to knowledge graph entities via LLM extraction."""
-    from uuid import UUID
-
-    from sibyl.crawler.graph_integration import GraphIntegrationService
-    from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
-    from sqlalchemy import select
-    from sqlmodel import col
-
     max_chunks = data.get("max_chunks", 1000)
     create_new_entities = bool(data.get("create_new_entities", False))
-    org_uuid = UUID(organization_id)
-
-    # Build query for unlinked chunks
-    query = (
-        select(DocumentChunk)
-        .join(CrawledDocument, col(CrawledDocument.id) == col(DocumentChunk.document_id))
-        .join(CrawlSource, col(CrawlSource.id) == col(CrawledDocument.source_id))
-        .where(col(CrawlSource.organization_id) == org_uuid)
-        .where(col(DocumentChunk.has_entities) == False)  # noqa: E712
+    chunks = await list_unlinked_document_chunks(
+        organization_id=organization_id,
+        source_id=source_id,
+        limit=max_chunks,
     )
-
-    if source_id:
-        # Filter to specific source via document join
-        query = query.where(CrawlSource.id == UUID(source_id))  # type: ignore[arg-type]
-
-    query = query.limit(max_chunks)
-
-    async with get_session() as session:
-        result = await session.execute(query)
-        chunks = result.scalars().all()
 
     if not chunks:
         return ManageResponse(
@@ -1034,6 +927,15 @@ async def _link_graph(
                 "create_new_entities": create_new_entities,
             },
         )
+
+    global GraphIntegrationService
+
+    if GraphIntegrationService is None:
+        from sibyl.crawler.graph_integration import (
+            GraphIntegrationService as _GraphIntegrationService,
+        )
+
+        GraphIntegrationService = _GraphIntegrationService
 
     # Process chunks
     client = await get_legacy_graph_client()

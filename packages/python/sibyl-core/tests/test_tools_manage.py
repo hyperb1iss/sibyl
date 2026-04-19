@@ -1072,7 +1072,7 @@ class TestSourceActions:
                 AsyncMock(return_value=graph_client),
             ),
             patch(
-                "sibyl.crawler.graph_integration.GraphIntegrationService",
+                "sibyl_core.tools.manage.GraphIntegrationService",
                 return_value=integration,
             ) as integration_cls,
         ):

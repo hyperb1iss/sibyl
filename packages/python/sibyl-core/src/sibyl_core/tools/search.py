@@ -1,7 +1,6 @@
 """Search tool for unified semantic search across Sibyl knowledge graph and documentation."""
 
 from collections.abc import Sequence
-from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
@@ -9,6 +8,7 @@ import structlog
 
 from sibyl_core.models.entities import EntityType
 from sibyl_core.retrieval import HybridConfig, hybrid_search, temporal_boost
+from sibyl_core.services import document_search as document_search_service
 from sibyl_core.services.legacy_graph import get_legacy_graph_runtime
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
@@ -21,15 +21,12 @@ from sibyl_core.utils.resilience import TIMEOUTS, with_timeout
 
 log = structlog.get_logger()
 
-__all__ = ["search"]
-
-DOCUMENT_VECTOR_WEIGHT = 0.7
-DOCUMENT_LEXICAL_WEIGHT = 0.3
-
-
-def _document_result_key(result: SearchResult) -> str:
-    document_id = result.metadata.get("document_id")
-    return str(document_id or result.id)
+__all__ = [
+    "_dedupe_document_rows",
+    "_document_language_predicates",
+    "_merge_document_results",
+    "search",
+]
 
 
 def _graph_result_key(result: tuple[Any, float]) -> str:
@@ -78,86 +75,18 @@ def _document_language_predicates(
     language_column: Any,
     code_chunk_type: Any,
 ) -> tuple[Any, ...]:
-    if not language:
-        return ()
-
-    return (
-        chunk_type_column == code_chunk_type,
-        language_column.ilike(language),
+    return document_search_service._document_language_predicates(
+        language=language,
+        chunk_type_column=chunk_type_column,
+        language_column=language_column,
+        code_chunk_type=code_chunk_type,
     )
 
 
 def _dedupe_document_rows(
     rows: Sequence[Any],
 ) -> list[tuple[Any, Any, str, Any, float]]:
-    best_rows: dict[str, tuple[Any, Any, str, Any, float]] = {}
-
-    for row in rows:
-        chunk, doc, source_name, source_id, score = row
-        typed_row = (chunk, doc, source_name, source_id, float(score or 0.0))
-        doc_id = str(doc.id)
-        score_value = typed_row[4]
-
-        if doc_id not in best_rows or score_value > float(best_rows[doc_id][4] or 0.0):
-            best_rows[doc_id] = typed_row
-
-    return sorted(best_rows.values(), key=lambda row: float(row[4] or 0.0), reverse=True)
-
-
-def _build_document_result(
-    chunk: Any,
-    doc: Any,
-    source_name: str,
-    source_id: Any,
-    score: float,
-    include_content: bool,
-) -> SearchResult:
-    if include_content:
-        content = chunk.content[:500] if chunk.content else ""
-    else:
-        content = chunk.content[:200] if chunk.content else ""
-
-    heading_context = " > ".join(chunk.heading_path) if chunk.heading_path else ""
-    if heading_context:
-        content = f"[{heading_context}] {content}"
-
-    display_url = None
-    if doc.url and not doc.url.startswith("file://"):
-        display_url = doc.url
-
-    return SearchResult(
-        id=str(chunk.id),
-        type="document",
-        name=doc.title or source_name,
-        content=content,
-        score=score,
-        source=source_name,
-        url=display_url,
-        result_origin="document",
-        metadata={
-            "document_id": str(doc.id),
-            "source_id": str(source_id),
-            "chunk_type": chunk.chunk_type.value
-            if hasattr(chunk.chunk_type, "value")
-            else str(chunk.chunk_type),
-            "chunk_index": chunk.chunk_index,
-            "heading_path": chunk.heading_path or [],
-            "language": chunk.language,
-            "has_code": doc.has_code,
-            "hint": "Use 'sibyl entity <id>' or fetch /api/entities/<id> for full content",
-        },
-    )
-
-
-def _normalize_document_scores(results: list[SearchResult]) -> dict[str, float]:
-    if not results:
-        return {}
-
-    max_score = max(result.score for result in results)
-    if max_score <= 0:
-        return {_document_result_key(result): 1.0 for result in results}
-
-    return {_document_result_key(result): result.score / max_score for result in results}
+    return document_search_service._dedupe_document_rows(rows)
 
 
 def _merge_document_results(
@@ -165,25 +94,11 @@ def _merge_document_results(
     lexical_results: list[SearchResult],
     limit: int,
 ) -> list[SearchResult]:
-    combined_scores: dict[str, float] = {}
-    representatives: dict[str, SearchResult] = {}
-
-    for results, weight in (
-        (vector_results, DOCUMENT_VECTOR_WEIGHT),
-        (lexical_results, DOCUMENT_LEXICAL_WEIGHT),
-    ):
-        normalized_scores = _normalize_document_scores(results)
-        for result in results:
-            key = _document_result_key(result)
-            representatives.setdefault(key, result)
-            combined_scores[key] = combined_scores.get(key, 0.0) + (
-                normalized_scores.get(key, 0.0) * weight
-            )
-
-    ranked_keys = sorted(combined_scores, key=lambda key: combined_scores[key], reverse=True)
-    return [
-        replace(representatives[key], score=combined_scores[key]) for key in ranked_keys[:limit]
-    ]
+    return document_search_service._merge_document_results(
+        vector_results=vector_results,
+        lexical_results=lexical_results,
+        limit=limit,
+    )
 
 
 async def _search_documents(
@@ -195,103 +110,16 @@ async def _search_documents(
     limit: int = 10,
     include_content: bool = True,
 ) -> list[SearchResult]:
-    """Search crawled documentation using vector and lexical matching.
-
-    Returns SearchResult objects for unified result merging.
-    """
     try:
-        from uuid import UUID
-
-        from sibyl.crawler.embedder import embed_text
-        from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
-        from sibyl.db.models import ChunkType
-        from sqlalchemy import func, select
-        from sqlmodel import col
-
-        query_embedding: list[float] | None = None
-        try:
-            query_embedding = await embed_text(query)
-        except Exception as e:
-            log.warning("document_vector_embedding_failed", error=str(e))
-
-        async with get_session() as session:
-            base_query = (
-                select(
-                    DocumentChunk,
-                    CrawledDocument,
-                    CrawlSource.name.label("source_name"),  # type: ignore[attr-defined]
-                    CrawlSource.id.label("source_id"),  # type: ignore[attr-defined]
-                )
-                .join(CrawledDocument, DocumentChunk.document_id == CrawledDocument.id)  # type: ignore[arg-type]
-                .join(CrawlSource, CrawledDocument.source_id == CrawlSource.id)  # type: ignore[arg-type]
-            )
-
-            base_query = base_query.where(col(CrawlSource.organization_id) == UUID(organization_id))
-
-            if source_id:
-                base_query = base_query.where(col(CrawlSource.id) == UUID(source_id))
-            if source_name:
-                base_query = base_query.where(col(CrawlSource.name).ilike(f"%{source_name}%"))
-
-            for predicate in _document_language_predicates(
-                language=language,
-                chunk_type_column=DocumentChunk.chunk_type,
-                language_column=DocumentChunk.language,
-                code_chunk_type=ChunkType.CODE,
-            ):
-                base_query = base_query.where(predicate)
-
-            vector_results: list[SearchResult] = []
-            if query_embedding is not None:
-                similarity_expr = 1 - DocumentChunk.embedding.cosine_distance(query_embedding)
-                vector_query = (
-                    base_query.add_columns(similarity_expr.label("score"))
-                    .where(col(DocumentChunk.embedding).is_not(None))
-                    .where(similarity_expr >= 0.5)
-                    .order_by(similarity_expr.desc())
-                    .limit(limit * 5)
-                )
-                vector_rows = _dedupe_document_rows((await session.execute(vector_query)).all())[
-                    :limit
-                ]
-                vector_results = [
-                    _build_document_result(
-                        chunk=chunk,
-                        doc=doc,
-                        source_name=src_name,
-                        source_id=src_id,
-                        score=float(score),
-                        include_content=include_content,
-                    )
-                    for chunk, doc, src_name, src_id, score in vector_rows
-                ]
-
-            ts_query = func.plainto_tsquery("english", query)
-            ts_vector = func.to_tsvector("english", DocumentChunk.content)
-            fts_rank = func.ts_rank(ts_vector, ts_query)
-            lexical_query = (
-                base_query.add_columns(fts_rank.label("score"))
-                .where(fts_rank > 0)
-                .order_by(fts_rank.desc())
-                .limit(limit * 5)
-            )
-            lexical_rows = _dedupe_document_rows((await session.execute(lexical_query)).all())[
-                :limit
-            ]
-            lexical_results = [
-                _build_document_result(
-                    chunk=chunk,
-                    doc=doc,
-                    source_name=src_name,
-                    source_id=src_id,
-                    score=float(score),
-                    include_content=include_content,
-                )
-                for chunk, doc, src_name, src_id, score in lexical_rows
-            ]
-
-            return _merge_document_results(vector_results, lexical_results, limit)
-
+        return await document_search_service.search_documents(
+            query=query,
+            organization_id=organization_id,
+            source_id=source_id,
+            source_name=source_name,
+            language=language,
+            limit=limit,
+            include_content=include_content,
+        )
     except Exception as e:
         log.warning("document_search_failed", error=str(e))
         return []

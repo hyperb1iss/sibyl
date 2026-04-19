@@ -53,7 +53,7 @@ from sibyl.db import (
     get_session,
 )
 from sibyl.db.models import Organization, OrganizationRole, utcnow_naive
-from sibyl_core.tools.link_graph_status import get_link_graph_status_data
+from sibyl_core.services.link_graph_status import get_link_graph_status_data
 
 log = structlog.get_logger()
 

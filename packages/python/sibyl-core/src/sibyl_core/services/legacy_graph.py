@@ -3,28 +3,29 @@
 from dataclasses import dataclass
 from typing import Any
 
-from sibyl_core.graph.client import GraphClient, get_graph_client
-from sibyl_core.graph.entities import EntityManager
-from sibyl_core.graph.relationships import RelationshipManager
-
 
 @dataclass(frozen=True)
 class LegacyGraphRuntime:
     """Bound legacy graph collaborators for a single organization."""
 
-    client: GraphClient
-    entity_manager: EntityManager
-    relationship_manager: RelationshipManager
+    client: Any
+    entity_manager: Any
+    relationship_manager: Any
 
 
-async def get_legacy_graph_client() -> GraphClient:
+async def get_legacy_graph_client() -> Any:
     """Return the shared legacy graph client."""
+
+    from sibyl_core.graph.client import get_graph_client
 
     return await get_graph_client()
 
 
 async def get_legacy_graph_runtime(group_id: str) -> LegacyGraphRuntime:
     """Bind the legacy graph managers for a single organization."""
+
+    from sibyl_core.graph.entities import EntityManager
+    from sibyl_core.graph.relationships import RelationshipManager
 
     client = await get_legacy_graph_client()
     return LegacyGraphRuntime(
