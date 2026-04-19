@@ -172,6 +172,101 @@ class EntityManager:
             attributes=self._build_entity_node_attributes(entity, marker_key=marker_key),
         )
 
+    async def _surreal_entity_nodes_for_group(
+        self,
+        *,
+        page_size: int = 1000,
+    ) -> list[EntityNode]:
+        ops = self._surreal_entity_node_ops()
+        if ops is None:
+            return []
+
+        nodes: list[EntityNode] = []
+        uuid_cursor: str | None = None
+        seen_cursors: set[str] = set()
+
+        while True:
+            batch = await ops.get_by_group_ids(
+                self._driver,
+                [self._group_id],
+                limit=page_size,
+                uuid_cursor=uuid_cursor,
+            )
+            if not batch:
+                break
+            nodes.extend(batch)
+            if len(batch) < page_size:
+                break
+            next_cursor = batch[-1].uuid
+            if next_cursor in seen_cursors:
+                break
+            seen_cursors.add(next_cursor)
+            uuid_cursor = next_cursor
+
+        return nodes
+
+    async def _surreal_entities_for_group(
+        self,
+        *,
+        include_archived: bool,
+    ) -> list[Entity]:
+        entities: list[Entity] = []
+        for node in await self._surreal_entity_nodes_for_group():
+            try:
+                entity = self.node_to_entity(node)
+            except Exception as exc:
+                log.debug("Failed to convert Surreal node to entity", error=str(exc))
+                continue
+            if not include_archived and self._entity_is_archived(entity):
+                continue
+            entities.append(entity)
+
+        entities.sort(key=self._entity_sort_key, reverse=True)
+        return entities
+
+    def _entity_sort_key(self, entity: Entity) -> tuple[datetime, str]:
+        timestamp = entity.updated_at or entity.created_at or datetime.min.replace(tzinfo=UTC)
+        return (timestamp, entity.id)
+
+    def _entity_is_archived(self, entity: Entity) -> bool:
+        return str((entity.metadata or {}).get("status") or "").lower() == "archived"
+
+    def _entity_matches_filters(
+        self,
+        entity: Entity,
+        *,
+        project_id: str | None = None,
+        epic_id: str | None = None,
+        no_epic: bool = False,
+        status_values: list[str] | None = None,
+        priority_values: list[str] | None = None,
+        complexity_values: list[str] | None = None,
+        feature: str | None = None,
+        tags: list[str] | None = None,
+        include_archived: bool = False,
+    ) -> bool:
+        metadata = entity.metadata or {}
+
+        if project_id and metadata.get("project_id") != project_id:
+            return False
+        if epic_id and metadata.get("epic_id") != epic_id:
+            return False
+        if no_epic and metadata.get("epic_id"):
+            return False
+        if status_values and str(metadata.get("status") or "").lower() not in status_values:
+            return False
+        if priority_values and str(metadata.get("priority") or "").lower() not in priority_values:
+            return False
+        if complexity_values and str(metadata.get("complexity") or "").lower() not in complexity_values:
+            return False
+        if feature and metadata.get("feature") != feature:
+            return False
+        if tags:
+            entity_tags = metadata.get("tags") or []
+            if not any(tag in entity_tags for tag in tags):
+                return False
+        return include_archived or not self._entity_is_archived(entity)
+
     async def _add_episode_with_retry(
         self,
         name: str,
@@ -518,71 +613,74 @@ class EntityManager:
 
         try:
             _t0 = _time.perf_counter()
-
-            # Use search_() with NODE_HYBRID_SEARCH for direct node search
-            # This searches node embeddings directly instead of going through edges
-            # CRITICAL: Pass self._driver (org-specific driver) - otherwise Graphiti
-            # uses the default driver which points to "default" graph, not our org graph
-            search_results = await self._client.client.search_(
-                query=safe_query,
-                config=NODE_HYBRID_SEARCH_RRF,
-                group_ids=[self._group_id],
-                driver=self._driver,
-            )
-
-            _t1 = _time.perf_counter()
-            log.debug(
-                "search_timing",
-                step="graphiti_search",
-                ms=round((_t1 - _t0) * 1000),
-                nodes=len(search_results.nodes),
-                episodes=len(search_results.episodes),
-            )
-
             results: list[tuple[Entity, float]] = []
+            try:
+                # Use search_() with NODE_HYBRID_SEARCH for direct node search
+                # This searches node embeddings directly instead of going through edges
+                # CRITICAL: Pass self._driver (org-specific driver) - otherwise Graphiti
+                # uses the default driver which points to "default" graph, not our org graph
+                search_results = await self._client.client.search_(
+                    query=safe_query,
+                    config=NODE_HYBRID_SEARCH_RRF,
+                    group_ids=[self._group_id],
+                    driver=self._driver,
+                )
 
-            # Process EntityNodes with their reranker scores
-            for i, node in enumerate(search_results.nodes):
-                try:
-                    # Filter by group_id (multi-tenancy)
-                    if node.group_id != self._group_id:
-                        continue
+                _t1 = _time.perf_counter()
+                log.debug(
+                    "search_timing",
+                    step="graphiti_search",
+                    ms=round((_t1 - _t0) * 1000),
+                    nodes=len(search_results.nodes),
+                    episodes=len(search_results.episodes),
+                )
 
-                    entity = self.node_to_entity(node)
+                # Process EntityNodes with their reranker scores
+                for i, node in enumerate(search_results.nodes):
+                    try:
+                        # Filter by group_id (multi-tenancy)
+                        if node.group_id != self._group_id:
+                            continue
 
-                    # Filter by entity types if specified
-                    if entity_types and entity.entity_type not in entity_types:
-                        continue
+                        entity = self.node_to_entity(node)
 
-                    # Use reranker score if available, otherwise position-based
-                    if i < len(search_results.node_reranker_scores):
-                        score = search_results.node_reranker_scores[i]
-                    else:
-                        score = 1.0 / (i + 1)
+                        # Filter by entity types if specified
+                        if entity_types and entity.entity_type not in entity_types:
+                            continue
 
-                    results.append((entity, score))
-                except Exception as e:
-                    log.debug("Failed to convert EntityNode", error=str(e), node=node.uuid)
+                        # Use reranker score if available, otherwise position-based
+                        if i < len(search_results.node_reranker_scores):
+                            score = search_results.node_reranker_scores[i]
+                        else:
+                            score = 1.0 / (i + 1)
 
-            # Also check episodes (for nodes created via add_episode)
-            for i, node in enumerate(search_results.episodes):
-                try:
-                    if node.group_id != self._group_id:
-                        continue
+                        results.append((entity, score))
+                    except Exception as e:
+                        log.debug("Failed to convert EntityNode", error=str(e), node=node.uuid)
 
-                    entity = self._episodic_to_entity(node)
+                # Also check episodes (for nodes created via add_episode)
+                for i, node in enumerate(search_results.episodes):
+                    try:
+                        if node.group_id != self._group_id:
+                            continue
 
-                    if entity_types and entity.entity_type not in entity_types:
-                        continue
+                        entity = self._episodic_to_entity(node)
 
-                    if i < len(search_results.episode_reranker_scores):
-                        score = search_results.episode_reranker_scores[i]
-                    else:
-                        score = 1.0 / (i + 1)
+                        if entity_types and entity.entity_type not in entity_types:
+                            continue
 
-                    results.append((entity, score))
-                except Exception as e:
-                    log.debug("Failed to convert EpisodicNode", error=str(e))
+                        if i < len(search_results.episode_reranker_scores):
+                            score = search_results.episode_reranker_scores[i]
+                        else:
+                            score = 1.0 / (i + 1)
+
+                        results.append((entity, score))
+                    except Exception as e:
+                        log.debug("Failed to convert EpisodicNode", error=str(e))
+            except Exception as e:
+                if self._surreal_entity_node_ops() is None:
+                    raise
+                log.warning("Surreal hybrid search unavailable, using scan fallback", error=str(e))
 
             # Sort by score and limit results
             results.sort(key=lambda x: x[1], reverse=True)
@@ -668,6 +766,15 @@ class EntityManager:
         if not normalized_query:
             return []
 
+        if self._surreal_entity_node_ops() is not None:
+            exact_results = [
+                (entity, 2.0)
+                for entity in await self._surreal_entities_for_group(include_archived=True)
+                if entity.name.strip().lower() == normalized_query
+                and (not entity_types or entity.entity_type in entity_types)
+            ]
+            return exact_results[:limit]
+
         params: dict[str, Any] = {
             "group_id": self._group_id,
             "query_lower": normalized_query,
@@ -731,6 +838,38 @@ class EntityManager:
         normalized_query = query.strip().lower()
         if not normalized_query:
             return []
+
+        if self._surreal_entity_node_ops() is not None:
+            fallback_results: list[tuple[Entity, float]] = []
+            for entity in await self._surreal_entities_for_group(include_archived=True):
+                if entity_types and entity.entity_type not in entity_types:
+                    continue
+
+                name = entity.name.strip().lower()
+                description = (entity.description or "").lower()
+                content = (entity.content or "").lower()
+
+                if (
+                    normalized_query not in name
+                    and normalized_query not in description
+                    and normalized_query not in content
+                ):
+                    continue
+
+                if name == normalized_query:
+                    score = 1.0
+                elif name.startswith(normalized_query):
+                    score = 0.95
+                elif normalized_query in name:
+                    score = 0.9
+                elif normalized_query in description:
+                    score = 0.75
+                else:
+                    score = 0.6
+                fallback_results.append((entity, score))
+
+            fallback_results.sort(key=lambda item: (item[1], *self._entity_sort_key(item[0])), reverse=True)
+            return fallback_results[:limit]
 
         params: dict[str, Any] = {
             "group_id": self._group_id,
@@ -1037,6 +1176,32 @@ class EntityManager:
         priority_list = [p.strip().lower() for p in priority.split(",")] if priority else []
         complexity_list = [c.strip().lower() for c in complexity.split(",")] if complexity else []
 
+        if self._surreal_entity_node_ops() is not None:
+            try:
+                entities = [
+                    entity
+                    for entity in await self._surreal_entities_for_group(
+                        include_archived=include_archived
+                    )
+                    if entity.entity_type == entity_type
+                    and self._entity_matches_filters(
+                        entity,
+                        project_id=project_id,
+                        epic_id=epic_id,
+                        no_epic=no_epic,
+                        status_values=status_list,
+                        priority_values=priority_list,
+                        complexity_values=complexity_list,
+                        feature=feature,
+                        tags=tags,
+                        include_archived=include_archived,
+                    )
+                ]
+                return entities[offset : offset + limit]
+            except Exception as e:
+                log.exception("Failed to list entities", entity_type=entity_type, error=str(e))
+                return []
+
         # Use BELONGS_TO relationship for epic filtering (most reliable)
         if epic_id:
             match_clause = "MATCH (n)-[:BELONGS_TO]->(e)"
@@ -1298,6 +1463,12 @@ class EntityManager:
         log.debug("Listing all entities", limit=limit, offset=offset)
 
         try:
+            if self._surreal_entity_node_ops() is not None:
+                entities = await self._surreal_entities_for_group(
+                    include_archived=include_archived
+                )
+                return entities[offset : offset + limit]
+
             query = """
                 MATCH (n)
                 WHERE n.group_id = $group_id
@@ -1384,6 +1555,15 @@ class EntityManager:
         log.debug("Fetching tasks for epic", epic_id=epic_id, status=status)
 
         try:
+            if self._surreal_entity_node_ops() is not None:
+                return await self.list_by_type(
+                    EntityType.TASK,
+                    epic_id=epic_id,
+                    status=status,
+                    limit=limit,
+                    include_archived=True,
+                )
+
             # Use BELONGS_TO relationship to find tasks in epic
             # Status is stored in metadata JSON, so we filter in Python if needed
             query = """
@@ -1445,6 +1625,38 @@ class EntityManager:
         log.debug("Getting epic progress", epic_id=epic_id)
 
         try:
+            if self._surreal_entity_node_ops() is not None:
+                tasks = await self.list_by_type(
+                    EntityType.TASK,
+                    epic_id=epic_id,
+                    limit=10_000,
+                    include_archived=True,
+                )
+                total = len(tasks)
+                done = 0
+                doing = 0
+                blocked = 0
+                review = 0
+                for task in tasks:
+                    status_value = str((task.metadata or {}).get("status") or "").lower()
+                    if status_value == "done":
+                        done += 1
+                    elif status_value == "doing":
+                        doing += 1
+                    elif status_value == "blocked":
+                        blocked += 1
+                    elif status_value == "review":
+                        review += 1
+
+                return {
+                    "total_tasks": total,
+                    "completed_tasks": done,
+                    "in_progress_tasks": doing,
+                    "blocked_tasks": blocked,
+                    "in_review_tasks": review,
+                    "completion_pct": round((done / total * 100) if total > 0 else 0, 1),
+                }
+
             # Use BELONGS_TO relationship to find tasks, then count by status in Python
             # since status is stored in metadata JSON
             result = await self._driver.execute_query(
@@ -1529,6 +1741,97 @@ class EntityManager:
         log.debug("Getting project summary", project_id=project_id)
 
         try:
+            if self._surreal_entity_node_ops() is not None:
+                tasks = await self.list_by_type(
+                    EntityType.TASK,
+                    project_id=project_id,
+                    limit=10_000,
+                    include_archived=True,
+                )
+                status_counts: dict[str, int] = {}
+                doing_tasks: list[dict[str, Any]] = []
+                blocked_tasks: list[dict[str, Any]] = []
+                review_tasks: list[dict[str, Any]] = []
+                critical_tasks: list[dict[str, Any]] = []
+                recent_tasks: list[dict[str, Any]] = []
+                epic_progress: dict[str, dict[str, int]] = {}
+
+                for task in tasks:
+                    metadata = task.metadata or {}
+                    status_value = str(metadata.get("status") or "todo")
+                    priority = str(metadata.get("priority") or "")
+                    epic_ref = metadata.get("epic_id")
+
+                    status_counts[status_value] = status_counts.get(status_value, 0) + 1
+
+                    if epic_ref:
+                        counters = epic_progress.setdefault(
+                            str(epic_ref),
+                            {"total_tasks": 0, "completed_tasks": 0},
+                        )
+                        counters["total_tasks"] += 1
+                        if status_value == "done":
+                            counters["completed_tasks"] += 1
+
+                    task_info = {
+                        "id": task.id,
+                        "name": task.name,
+                        "status": status_value,
+                        "priority": priority,
+                    }
+                    is_critical = (
+                        priority.lower() in ("critical", "high") or "CRITICAL" in task.name.upper()
+                    ) and status_value not in ("done", "archived")
+                    if is_critical and len(critical_tasks) < critical_limit:
+                        critical_tasks.append(task_info)
+                    if status_value == "doing" and len(doing_tasks) < actionable_limit:
+                        doing_tasks.append(task_info)
+                    elif status_value == "blocked" and len(blocked_tasks) < actionable_limit:
+                        blocked_tasks.append(task_info)
+                    elif status_value == "review" and len(review_tasks) < actionable_limit:
+                        review_tasks.append(task_info)
+                    elif len(recent_tasks) < actionable_limit:
+                        recent_tasks.append(task_info)
+
+                actionable: list[dict[str, Any]] = []
+                for pool in [doing_tasks, blocked_tasks, review_tasks, recent_tasks]:
+                    for task_info in pool:
+                        if len(actionable) >= actionable_limit:
+                            break
+                        if task_info["id"] not in [t["id"] for t in actionable]:
+                            actionable.append(task_info)
+                    if len(actionable) >= actionable_limit:
+                        break
+
+                total = sum(status_counts.values())
+                done = status_counts.get("done", 0)
+                epics: list[dict[str, Any]] = []
+                for epic in await self.list_epics_for_project(project_id, limit=epic_limit):
+                    progress = epic_progress.get(epic.id, {})
+                    total_tasks = progress.get("total_tasks", 0)
+                    completed_tasks = progress.get("completed_tasks", 0)
+                    epics.append(
+                        {
+                            "id": epic.id,
+                            "name": epic.name,
+                            "status": (epic.metadata or {}).get("status") or "planning",
+                            "progress_pct": round(
+                                (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0,
+                                1,
+                            ),
+                            "total_tasks": total_tasks,
+                        }
+                    )
+
+                return {
+                    "status_counts": status_counts,
+                    "total_tasks": total,
+                    "progress_pct": round((done / total * 100) if total > 0 else 0, 1),
+                    "actionable_tasks": actionable,
+                    "critical_tasks": critical_tasks,
+                    "epics": epics,
+                }
+
             legacy_project_params, legacy_project_match = _metadata_json_contains_params(
                 "legacy_project",
                 "project_id",
@@ -1726,6 +2029,14 @@ class EntityManager:
         log.debug("Fetching epics for project", project_id=project_id, status=status)
 
         try:
+            if self._surreal_entity_node_ops() is not None:
+                return await self.list_by_type(
+                    EntityType.EPIC,
+                    project_id=project_id,
+                    status=status,
+                    limit=limit,
+                )
+
             status_clause = "AND n.status = $status" if status else ""
             query = f"""
                 MATCH (n)
@@ -1793,6 +2104,15 @@ class EntityManager:
         log.debug("Fetching notes for task", task_id=task_id, limit=limit)
 
         try:
+            if self._surreal_entity_node_ops() is not None:
+                notes = [
+                    entity
+                    for entity in await self._surreal_entities_for_group(include_archived=True)
+                    if entity.entity_type == EntityType.NOTE
+                    and (entity.metadata or {}).get("task_id") == task_id
+                ]
+                return notes[:limit]
+
             # Use BELONGS_TO relationship to find notes
             query = """
                 MATCH (n)-[:BELONGS_TO]->(t)
@@ -2517,6 +2837,7 @@ class EntityManager:
         description = node.attributes.get("description", node.summary or "")
         content = node.attributes.get("content", "")
         source_file = node.attributes.get("source_file")
+        updated_at = self._parse_datetime(node.attributes.get("updated_at")) or node.created_at
 
         # Remove known fields from attributes to get clean metadata
         metadata = {
@@ -2552,7 +2873,7 @@ class EntityManager:
                 modified_by=metadata.get("modified_by"),
                 metadata=metadata,
                 created_at=node.created_at,
-                updated_at=node.created_at,  # Graphiti doesn't track updated_at
+                updated_at=updated_at,
                 source_file=source_file,
                 embedding=node.name_embedding if node.name_embedding else None,
             )

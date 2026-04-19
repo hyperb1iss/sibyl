@@ -881,6 +881,50 @@ class TestEntityListByType:
     """Test listing entities by type with filters."""
 
     @pytest.mark.asyncio
+    async def test_list_by_type_uses_surreal_node_scan(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        doing_node = EntityNode(
+            uuid="task-001",
+            name="Doing Task",
+            group_id="test-org-123",
+            labels=["Entity", "task"],
+            created_at=datetime.now(UTC),
+            summary="",
+            attributes={
+                "entity_type": "task",
+                "description": "Doing",
+                "metadata": json.dumps({"status": "doing", "project_id": "project-001"}),
+            },
+        )
+        todo_node = EntityNode(
+            uuid="task-002",
+            name="Todo Task",
+            group_id="test-org-123",
+            labels=["Entity", "task"],
+            created_at=datetime.now(UTC),
+            summary="",
+            attributes={
+                "entity_type": "task",
+                "description": "Todo",
+                "metadata": json.dumps({"status": "todo", "project_id": "project-001"}),
+            },
+        )
+
+        ops = surreal_entity_manager._driver.entity_node_ops
+        ops.get_by_group_ids = AsyncMock(return_value=[doing_node, todo_node])
+
+        results = await surreal_entity_manager.list_by_type(
+            EntityType.TASK,
+            project_id="project-001",
+            status="doing",
+        )
+
+        assert len(results) == 1
+        assert results[0].id == "task-001"
+
+    @pytest.mark.asyncio
     async def test_list_by_type_basic(
         self,
         entity_manager: EntityManager,
@@ -1505,6 +1549,51 @@ class TestEntitySearch:
     """Test semantic search operations."""
 
     @pytest.mark.asyncio
+    async def test_search_falls_back_to_surreal_scan_when_hybrid_search_fails(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        matching_node = EntityNode(
+            uuid="pattern-001",
+            name="Repository Pattern",
+            group_id="test-org-123",
+            labels=["Entity", "pattern"],
+            created_at=datetime.now(UTC),
+            summary="",
+            attributes={
+                "entity_type": "pattern",
+                "description": "Repository abstraction",
+                "content": "Use repositories for data access",
+                "metadata": json.dumps({"category": "architecture"}),
+            },
+        )
+        other_node = EntityNode(
+            uuid="pattern-002",
+            name="Async Pattern",
+            group_id="test-org-123",
+            labels=["Entity", "pattern"],
+            created_at=datetime.now(UTC),
+            summary="",
+            attributes={
+                "entity_type": "pattern",
+                "description": "Async IO work",
+                "content": "Event loop orchestration",
+                "metadata": json.dumps({}),
+            },
+        )
+
+        surreal_entity_manager._client.client.search_ = AsyncMock(
+            side_effect=RuntimeError("hybrid unavailable")
+        )
+        ops = surreal_entity_manager._driver.entity_node_ops
+        ops.get_by_group_ids = AsyncMock(return_value=[matching_node, other_node])
+
+        results = await surreal_entity_manager.search("repository", entity_types=[EntityType.PATTERN])
+
+        assert len(results) == 1
+        assert results[0][0].id == "pattern-001"
+
+    @pytest.mark.asyncio
     async def test_search_basic(
         self,
         entity_manager: EntityManager,
@@ -1744,6 +1833,47 @@ class TestGetEpicProgress:
     """Test epic progress calculation."""
 
     @pytest.mark.asyncio
+    async def test_get_epic_progress_uses_surreal_task_listing(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        with patch.object(
+            surreal_entity_manager,
+            "list_by_type",
+            new_callable=AsyncMock,
+            return_value=[
+                Task(
+                    id="task-001",
+                    name="Done Task",
+                    title="Done Task",
+                    description="",
+                    status=TaskStatus.DONE,
+                    priority=TaskPriority.HIGH,
+                    project_id="project-001",
+                    epic_id="epic-001",
+                    metadata={"status": "done"},
+                ),
+                Task(
+                    id="task-002",
+                    name="Doing Task",
+                    title="Doing Task",
+                    description="",
+                    status=TaskStatus.DOING,
+                    priority=TaskPriority.MEDIUM,
+                    project_id="project-001",
+                    epic_id="epic-001",
+                    metadata={"status": "doing"},
+                ),
+            ],
+        ):
+            progress = await surreal_entity_manager.get_epic_progress("epic-001")
+
+        assert progress["total_tasks"] == 2
+        assert progress["completed_tasks"] == 1
+        assert progress["in_progress_tasks"] == 1
+        assert progress["completion_pct"] == 50.0
+
+    @pytest.mark.asyncio
     async def test_get_epic_progress(
         self,
         entity_manager: EntityManager,
@@ -1788,6 +1918,31 @@ class TestGetEpicProgress:
 
 class TestListEpicsForProject:
     """Test listing epics for a project."""
+
+    @pytest.mark.asyncio
+    async def test_list_epics_for_project_uses_surreal_list_by_type(
+        self,
+        surreal_entity_manager: EntityManager,
+        sample_epic: Epic,
+    ) -> None:
+        with patch.object(
+            surreal_entity_manager,
+            "list_by_type",
+            new_callable=AsyncMock,
+            return_value=[sample_epic],
+        ) as list_by_type:
+            results = await surreal_entity_manager.list_epics_for_project(
+                "project-001",
+                status="in_progress",
+            )
+
+        assert len(results) == 1
+        list_by_type.assert_awaited_once_with(
+            EntityType.EPIC,
+            project_id="project-001",
+            status="in_progress",
+            limit=50,
+        )
 
     @pytest.mark.asyncio
     async def test_list_epics_for_project(
@@ -1861,6 +2016,46 @@ class TestListEpicsForProject:
 
 class TestGetNotesForTask:
     """Test retrieving notes for a task."""
+
+    @pytest.mark.asyncio
+    async def test_get_notes_for_task_uses_surreal_node_scan(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        matching_note = EntityNode(
+            uuid="note-001",
+            name="First note",
+            group_id="test-org-123",
+            labels=["Entity", "note"],
+            created_at=datetime.now(UTC),
+            summary="",
+            attributes={
+                "entity_type": "note",
+                "content": "Note content",
+                "metadata": json.dumps({"task_id": "task-001"}),
+            },
+        )
+        other_note = EntityNode(
+            uuid="note-002",
+            name="Other note",
+            group_id="test-org-123",
+            labels=["Entity", "note"],
+            created_at=datetime.now(UTC),
+            summary="",
+            attributes={
+                "entity_type": "note",
+                "content": "Other content",
+                "metadata": json.dumps({"task_id": "task-999"}),
+            },
+        )
+
+        ops = surreal_entity_manager._driver.entity_node_ops
+        ops.get_by_group_ids = AsyncMock(return_value=[matching_note, other_note])
+
+        results = await surreal_entity_manager.get_notes_for_task("task-001")
+
+        assert len(results) == 1
+        assert results[0].id == "note-001"
 
     @pytest.mark.asyncio
     async def test_get_notes_for_task(
@@ -2305,6 +2500,97 @@ class TestEdgeCases:
 
 class TestGetProjectSummary:
     """Test project summary generation."""
+
+    @pytest.mark.asyncio
+    async def test_get_project_summary_uses_surreal_listings(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        tasks = [
+            Task(
+                id="task-001",
+                name="CRITICAL Bug",
+                title="CRITICAL Bug",
+                description="",
+                status=TaskStatus.DOING,
+                priority=TaskPriority.CRITICAL,
+                project_id="project-001",
+                epic_id="epic-001",
+                metadata={
+                    "project_id": "project-001",
+                    "status": "doing",
+                    "priority": "critical",
+                    "epic_id": "epic-001",
+                },
+            ),
+            Task(
+                id="task-002",
+                name="Blocked task",
+                title="Blocked task",
+                description="",
+                status=TaskStatus.BLOCKED,
+                priority=TaskPriority.HIGH,
+                project_id="project-001",
+                epic_id="epic-001",
+                metadata={
+                    "project_id": "project-001",
+                    "status": "blocked",
+                    "priority": "high",
+                    "epic_id": "epic-001",
+                },
+            ),
+            Task(
+                id="task-003",
+                name="Done task",
+                title="Done task",
+                description="",
+                status=TaskStatus.DONE,
+                priority=TaskPriority.MEDIUM,
+                project_id="project-001",
+                epic_id="epic-001",
+                metadata={
+                    "project_id": "project-001",
+                    "status": "done",
+                    "priority": "medium",
+                    "epic_id": "epic-001",
+                },
+            ),
+        ]
+        epics = [
+            Epic(
+                id="epic-001",
+                name="Auth Epic",
+                title="Auth Epic",
+                description="",
+                status=EpicStatus.IN_PROGRESS,
+                priority=TaskPriority.HIGH,
+                project_id="project-001",
+                metadata={"status": "in_progress"},
+            )
+        ]
+
+        with (
+            patch.object(
+                surreal_entity_manager,
+                "list_by_type",
+                new_callable=AsyncMock,
+                return_value=tasks,
+            ),
+            patch.object(
+                surreal_entity_manager,
+                "list_epics_for_project",
+                new_callable=AsyncMock,
+                return_value=epics,
+            ),
+        ):
+            result = await surreal_entity_manager.get_project_summary("project-001")
+
+        assert result["total_tasks"] == 3
+        assert result["status_counts"]["doing"] == 1
+        assert result["status_counts"]["blocked"] == 1
+        assert result["status_counts"]["done"] == 1
+        assert result["progress_pct"] == round(1 / 3 * 100, 1)
+        assert result["epics"][0]["progress_pct"] == round(1 / 3 * 100, 1)
 
     @pytest.mark.asyncio
     async def test_get_project_summary(
