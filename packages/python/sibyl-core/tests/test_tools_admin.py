@@ -11,6 +11,7 @@ from sibyl_core.models.entities import EntityType, RelationshipType
 from sibyl_core.tools.admin import (
     backfill_episode_task_relationships,
     backfill_project_id_from_relationships,
+    backfill_shared_project,
     backfill_task_project_relationships,
     get_stats,
     health_check,
@@ -408,6 +409,121 @@ class TestBackfillProjectIdFromRelationships:
             "episode-1",
             {"project_id": "project-1"},
         )
+
+
+class TestBackfillSharedProjectRelationships:
+    """Shared project backfill should use runtime seams."""
+
+    @pytest.mark.asyncio
+    async def test_pages_orphans_and_counts_dry_run(self) -> None:
+        """Dry-run shared project backfill should classify orphans through entity seams."""
+        org_id = "00000000-0000-0000-0000-000000000111"
+        shared_project_id = "project_shared_00000000"
+        entity_manager = AsyncMock()
+        relationship_manager = AsyncMock()
+
+        page_size = 2
+        entity_manager.get = AsyncMock(return_value=SimpleNamespace(id=shared_project_id))
+        entity_manager.list_all = AsyncMock(
+            side_effect=[
+                [
+                    SimpleNamespace(id="task-1", entity_type=EntityType.TASK, project_id=None, metadata={}),
+                    SimpleNamespace(id="topic-1", entity_type=EntityType.TOPIC, project_id="project-1", metadata={}),
+                ],
+                [
+                    SimpleNamespace(id="episode-1", entity_type=EntityType.EPISODE, project_id=None, metadata={}),
+                ],
+                [],
+            ]
+        )
+        entity_manager.update = AsyncMock()
+        relationship_manager.create = AsyncMock()
+
+        with (
+            patch(
+                "sibyl_core.tools.admin.get_legacy_graph_runtime",
+                AsyncMock(
+                    return_value=SimpleNamespace(
+                        entity_manager=entity_manager,
+                        relationship_manager=relationship_manager,
+                    )
+                ),
+            ),
+            patch("sibyl_core.tools.admin.BACKFILL_PAGE_SIZE", page_size),
+        ):
+            result = await backfill_shared_project(
+                organization_id=org_id,
+                shared_project_graph_id=shared_project_id,
+                dry_run=True,
+            )
+
+        assert result.success is True
+        assert result.graph_entity_created is False
+        assert result.entities_updated == 2
+        assert result.entities_already_set == 1
+        entity_manager.list_all.assert_has_awaits(
+            [
+                call(limit=page_size, offset=0, include_archived=True),
+                call(limit=page_size, offset=page_size, include_archived=True),
+                call(limit=page_size, offset=page_size + 1, include_archived=True),
+            ]
+        )
+        entity_manager.update.assert_not_awaited()
+        relationship_manager.create.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_updates_entities_and_creates_belongs_to_links(self) -> None:
+        """Real shared-project backfill should persist project ids and link task-like entities."""
+        org_id = "00000000-0000-0000-0000-000000000111"
+        shared_project_id = "project_shared_00000000"
+        entity_manager = AsyncMock()
+        relationship_manager = AsyncMock()
+
+        entity_manager.get = AsyncMock(return_value=None)
+        entity_manager.create_direct = AsyncMock()
+        entity_manager.list_all = AsyncMock(
+            side_effect=[
+                [
+                    SimpleNamespace(id="task-1", entity_type=EntityType.TASK, project_id=None, metadata={}),
+                    SimpleNamespace(id="pattern-1", entity_type=EntityType.PATTERN, project_id=None, metadata={}),
+                ],
+                [],
+            ]
+        )
+        entity_manager.update = AsyncMock()
+        relationship_manager.create = AsyncMock()
+
+        with patch(
+            "sibyl_core.tools.admin.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    entity_manager=entity_manager,
+                    relationship_manager=relationship_manager,
+                )
+            ),
+        ):
+            result = await backfill_shared_project(
+                organization_id=org_id,
+                shared_project_graph_id=shared_project_id,
+                dry_run=False,
+            )
+        assert result.success is True
+        assert result.graph_entity_created is True
+        assert result.graph_entity_id == shared_project_id
+        assert result.entities_updated == 2
+        assert result.entities_already_set == 2
+        entity_manager.create_direct.assert_awaited_once()
+        entity_manager.update.assert_has_awaits(
+            [
+                call("task-1", {"project_id": shared_project_id}),
+                call("pattern-1", {"project_id": shared_project_id}),
+            ]
+        )
+        relationship_manager.create.assert_awaited_once()
+        relationship = relationship_manager.create.await_args.args[0]
+        assert relationship.relationship_type == RelationshipType.BELONGS_TO
+        assert relationship.source_id == "task-1"
+        assert relationship.target_id == shared_project_id
 
 
 class TestBackfillEpisodeTaskRelationships:

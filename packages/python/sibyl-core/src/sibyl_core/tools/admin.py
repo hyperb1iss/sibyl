@@ -1204,8 +1204,8 @@ async def backfill_shared_project(
 
     try:
         runtime = await get_legacy_graph_runtime(organization_id)
-        client = runtime.client
         entity_manager = runtime.entity_manager
+        relationship_manager = runtime.relationship_manager
 
         # Step 1: Create or get the shared project graph entity
         import contextlib
@@ -1248,26 +1248,44 @@ async def backfill_shared_project(
                     id=shared_project_graph_id,
                 )
 
-        # Step 2: Find all entities with NULL project_id
-        # We need to query both Episodic and Entity labels
-        orphan_query = """
-        MATCH (n)
-        WHERE (n:Episodic OR n:Entity)
-          AND n.group_id = $org_id
-          AND (n.project_id IS NULL OR n.project_id = '')
-          AND n.entity_type <> 'project'
-        RETURN n.uuid AS id, n.entity_type AS type
-        """
+        orphan_entities: list[tuple[str, str]] = []
+        offset = 0
+        while True:
+            entities = await entity_manager.list_all(
+                limit=BACKFILL_PAGE_SIZE,
+                offset=offset,
+                include_archived=True,
+            )
+            if not entities:
+                break
 
-        orphan_rows = await client.execute_read_org(
-            orphan_query, organization_id, org_id=organization_id
-        )
-        log.info("orphan_entities_found", count=len(orphan_rows))
+            offset += len(entities)
+            for entity in entities:
+                entity_type = getattr(entity, "entity_type", None)
+                if entity_type == EntityType.PROJECT:
+                    continue
+
+                metadata = getattr(entity, "metadata", None)
+                metadata = metadata if isinstance(metadata, dict) else {}
+                project_id = getattr(entity, "project_id", None) or metadata.get("project_id")
+
+                if project_id:
+                    entities_already_set += 1
+                    continue
+
+                entity_id = getattr(entity, "id", None)
+                if entity_id:
+                    type_value = (
+                        entity_type.value
+                        if hasattr(entity_type, "value")
+                        else str(entity_type or "")
+                    )
+                    orphan_entities.append((str(entity_id), type_value))
+
+        log.info("orphan_entities_found", count=len(orphan_entities))
 
         # Step 3: Update orphan entities to use shared project
-        for row in orphan_rows:
-            entity_id = row["id"]
-            entity_type = row["type"]
+        for entity_id, entity_type in orphan_entities:
 
             if dry_run:
                 log.debug(
@@ -1279,34 +1297,20 @@ async def backfill_shared_project(
                 entities_updated += 1
             else:
                 try:
-                    # Update the node's project_id property
-                    update_query = """
-                    MATCH (n)
-                    WHERE n.uuid = $entity_id AND n.group_id = $org_id
-                    SET n.project_id = $project_id
-                    """
-                    await client.execute_write_org(
-                        update_query,
-                        organization_id,
-                        entity_id=entity_id,
-                        org_id=organization_id,
-                        project_id=shared_project_graph_id,
+                    await entity_manager.update(
+                        entity_id,
+                        {"project_id": shared_project_graph_id},
                     )
 
                     # Also create BELONGS_TO relationship if entity type warrants it
                     if entity_type in {"task", "epic", "milestone"}:
-                        rel_query = """
-                        MATCH (n), (p)
-                        WHERE n.uuid = $entity_id AND p.uuid = $project_id
-                          AND n.group_id = $org_id AND p.group_id = $org_id
-                        MERGE (n)-[:BELONGS_TO]->(p)
-                        """
-                        await client.execute_write_org(
-                            rel_query,
-                            organization_id,
-                            entity_id=entity_id,
-                            project_id=shared_project_graph_id,
-                            org_id=organization_id,
+                        await relationship_manager.create(
+                            Relationship(
+                                id=f"rel_{uuid4().hex}",
+                                relationship_type=RelationshipType.BELONGS_TO,
+                                source_id=entity_id,
+                                target_id=shared_project_graph_id,
+                            )
                         )
 
                     entities_updated += 1
@@ -1324,20 +1328,8 @@ async def backfill_shared_project(
                         error=str(e),
                     )
 
-        # Count entities that already had a project_id
-        count_query = """
-        MATCH (n)
-        WHERE (n:Episodic OR n:Entity)
-          AND n.group_id = $org_id
-          AND n.project_id IS NOT NULL
-          AND n.project_id <> ''
-          AND n.entity_type <> 'project'
-        RETURN count(n) AS count
-        """
-        count_rows = await client.execute_read_org(
-            count_query, organization_id, org_id=organization_id
-        )
-        entities_already_set = count_rows[0]["count"] if count_rows else 0
+        if not dry_run:
+            entities_already_set += entities_updated
 
         duration = time.time() - start_time
         log.info(
