@@ -4,7 +4,7 @@ import pytest
 
 from sibyl_core.errors import InvalidTransitionError
 from sibyl_core.models.entities import EntityType
-from sibyl_core.models.tasks import Task, TaskComplexity, TaskStatus
+from sibyl_core.models.tasks import EpicStatus, Task, TaskComplexity, TaskStatus
 from sibyl_core.tasks.workflow import (
     ALL_STATUSES,
     get_allowed_transitions,
@@ -430,6 +430,125 @@ class _FakeGraphClient:
         """Execute a write query with organization context."""
         result = await self.client.driver.execute_query(query, **params)
         return self.normalize_result(result)
+
+
+@pytest.mark.asyncio
+async def test_surreal_update_project_progress_uses_entity_listing() -> None:
+    """Project progress should come from EntityManager in surreal mode."""
+    from sibyl_core.tasks.workflow import TaskWorkflowEngine
+
+    class TrackingEntityManager:
+        def __init__(self) -> None:
+            self.list_calls: list[tuple] = []
+            self.updates: list[tuple[str, dict]] = []
+
+        async def list_by_type(self, entity_type, **kwargs):
+            self.list_calls.append((entity_type, kwargs))
+            return [
+                Task(
+                    id="task-1",
+                    title="Doing task",
+                    description="",
+                    project_id="proj-001",
+                    status=TaskStatus.DOING,
+                    metadata={"status": "doing"},
+                ),
+                Task(
+                    id="task-2",
+                    title="Done task",
+                    description="",
+                    project_id="proj-001",
+                    status=TaskStatus.DONE,
+                    metadata={"status": "done"},
+                ),
+            ]
+
+        async def update(self, entity_id: str, updates: dict):
+            self.updates.append((entity_id, updates))
+
+    graph_client = _FakeGraphClient()
+    graph_client._store = "surreal"
+    entity_manager = TrackingEntityManager()
+    engine = TaskWorkflowEngine(
+        entity_manager,
+        _FakeRelationshipManager(),
+        graph_client,
+        organization_id="test-org",
+    )
+
+    await engine._update_project_progress("proj-001")
+
+    assert entity_manager.list_calls[0][1]["project_id"] == "proj-001"
+    assert entity_manager.updates[0][0] == "proj-001"
+    assert entity_manager.updates[0][1]["total_tasks"] == 2
+    assert entity_manager.updates[0][1]["completed_tasks"] == 1
+    assert entity_manager.updates[0][1]["in_progress_tasks"] == 1
+
+
+@pytest.mark.asyncio
+async def test_surreal_maybe_complete_epic_uses_entity_listing() -> None:
+    """Epic completion should derive counts from EntityManager in surreal mode."""
+    from sibyl_core.tasks.workflow import TaskWorkflowEngine
+
+    class TrackingEntityManager:
+        def __init__(self) -> None:
+            self.updates: list[tuple[str, dict]] = []
+
+        async def get(self, entity_id: str):
+            return type("EpicRecord", (), {"metadata": {"status": "in_progress"}})()
+
+        async def list_by_type(self, entity_type, **kwargs):
+            return [
+                Task(
+                    id="task-1",
+                    title="Done task",
+                    description="",
+                    project_id="proj-001",
+                    epic_id="epic-001",
+                    status=TaskStatus.DONE,
+                    metadata={"status": "done"},
+                ),
+                Task(
+                    id="task-2",
+                    title="Archived task",
+                    description="",
+                    project_id="proj-001",
+                    epic_id="epic-001",
+                    status=TaskStatus.ARCHIVED,
+                    metadata={"status": "archived"},
+                ),
+            ]
+
+        async def update(self, entity_id: str, updates: dict):
+            self.updates.append((entity_id, updates))
+
+    graph_client = _FakeGraphClient()
+    graph_client._store = "surreal"
+    entity_manager = TrackingEntityManager()
+    engine = TaskWorkflowEngine(
+        entity_manager,
+        _FakeRelationshipManager(),
+        graph_client,
+        organization_id="test-org",
+    )
+
+    completed = await engine._maybe_complete_epic(
+        Task(
+            id="task-1",
+            title="Done task",
+            description="",
+            project_id="proj-001",
+            epic_id="epic-001",
+            status=TaskStatus.DONE,
+            metadata={"status": "done"},
+        )
+    )
+
+    assert completed is True
+    assert entity_manager.updates[0][0] == "epic-001"
+    assert entity_manager.updates[0][1]["status"] == EpicStatus.COMPLETED
+    assert entity_manager.updates[0][1]["total_tasks"] == 2
+    assert entity_manager.updates[0][1]["completed_tasks"] == 2
 
 
 @pytest.mark.asyncio
