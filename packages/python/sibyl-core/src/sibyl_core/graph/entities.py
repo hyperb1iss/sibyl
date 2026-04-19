@@ -119,6 +119,26 @@ class EntityManager:
         # This enables multi-tenancy: each org has its own isolated graph
         self._driver = client.client.driver.clone(group_id)
 
+    def _surreal_entity_node_ops(self):
+        try:
+            from sibyl_core.backends.surreal import SurrealDriver
+        except ImportError:
+            return None
+
+        if isinstance(self._driver, SurrealDriver):
+            return self._driver.entity_node_ops
+        return None
+
+    def _surreal_episode_node_ops(self):
+        try:
+            from sibyl_core.backends.surreal import SurrealDriver
+        except ImportError:
+            return None
+
+        if isinstance(self._driver, SurrealDriver):
+            return self._driver.episode_node_ops
+        return None
+
     async def _add_episode_with_retry(
         self,
         name: str,
@@ -276,6 +296,7 @@ class EntityManager:
 
         try:
             _t0 = _time.perf_counter()
+            surreal_entity_ops = self._surreal_entity_node_ops()
 
             # Build attributes dict - all values must be primitives (FalkorDB limitation)
             # Serialize nested dicts to JSON strings
@@ -304,15 +325,19 @@ class EntityManager:
             _t1 = _time.perf_counter()
             log.debug("create_direct_timing", step="build_node", ms=round((_t1 - _t0) * 1000))
 
-            # Save using Graphiti
-            await node.save(self._driver)
+            if surreal_entity_ops is not None:
+                await surreal_entity_ops.save(self._driver, node)
+            else:
+                await node.save(self._driver)
 
             _t2 = _time.perf_counter()
             log.debug("create_direct_timing", step="node_save", ms=round((_t2 - _t1) * 1000))
 
-            # Persist structured properties (project_id, status, etc.) for graph filtering
-            # This ensures create_direct() nodes are queryable the same as create() nodes
-            await self._persist_entity_attributes(entity.id, entity)
+            if surreal_entity_ops is None:
+                # Persist structured properties (project_id, status, etc.) for graph filtering.
+                # SurrealDB keeps the normalized payload in node.attributes until the
+                # store-specific query layer is ported.
+                await self._persist_entity_attributes(entity.id, entity)
 
             _t3 = _time.perf_counter()
             log.debug("create_direct_timing", step="persist_attrs", ms=round((_t3 - _t2) * 1000))
@@ -328,12 +353,16 @@ class EntityManager:
                         "create_direct_timing", step="embedding_api", ms=round((_t4 - _t3) * 1000)
                     )
 
-                    # Store embedding on node using vecf32() for FalkorDB vector ops
-                    await self._driver.execute_query(
-                        "MATCH (n {uuid: $entity_id}) SET n.name_embedding = vecf32($embedding)",
-                        entity_id=entity.id,
-                        embedding=embedding,
-                    )
+                    if surreal_entity_ops is not None:
+                        node.name_embedding = embedding
+                        await surreal_entity_ops.save(self._driver, node)
+                    else:
+                        # Store embedding on node using vecf32() for FalkorDB vector ops
+                        await self._driver.execute_query(
+                            "MATCH (n {uuid: $entity_id}) SET n.name_embedding = vecf32($embedding)",
+                            entity_id=entity.id,
+                            embedding=embedding,
+                        )
 
                     _t5 = _time.perf_counter()
                     log.debug(
@@ -389,9 +418,14 @@ class EntityManager:
         _t0 = _time.perf_counter()
 
         try:
+            surreal_entity_ops = self._surreal_entity_node_ops()
+            surreal_episode_ops = self._surreal_episode_node_ops()
             # Try EntityNode first (nodes created via create_direct or extracted)
             try:
-                node = await EntityNode.get_by_uuid(self._driver, entity_id)
+                if surreal_entity_ops is not None:
+                    node = await surreal_entity_ops.get_by_uuid(self._driver, entity_id)
+                else:
+                    node = await EntityNode.get_by_uuid(self._driver, entity_id)
                 _t1 = _time.perf_counter()
                 log.debug("get_timing", step="entity_node_query", ms=round((_t1 - _t0) * 1000))
 
@@ -414,10 +448,17 @@ class EntityManager:
 
             # Try EpisodicNode (nodes created via add_episode)
             try:
-                episodic = await EpisodicNode.get_by_uuid(self._driver, entity_id)
+                if surreal_episode_ops is not None:
+                    episodic = await surreal_episode_ops.get_by_uuid(self._driver, entity_id)
+                else:
+                    episodic = await EpisodicNode.get_by_uuid(self._driver, entity_id)
                 if episodic and episodic.group_id == self._group_id:
                     # Query for entity_type property (not hydrated by Graphiti's dataclass)
-                    entity_type_override = await self._get_node_entity_type(entity_id)
+                    entity_type_override = (
+                        None
+                        if surreal_episode_ops is not None
+                        else await self._get_node_entity_type(entity_id)
+                    )
                     entity = self._episodic_to_entity(episodic, entity_type_override)
                     log.debug(
                         "Entity retrieved via EpisodicNode",
@@ -841,11 +882,19 @@ class EntityManager:
         log.info("Deleting entity", entity_id=entity_id)
 
         try:
+            surreal_entity_ops = self._surreal_entity_node_ops()
+            surreal_episode_ops = self._surreal_episode_node_ops()
             # Try to delete as EntityNode first
             try:
-                node = await EntityNode.get_by_uuid(self._driver, entity_id)
+                if surreal_entity_ops is not None:
+                    node = await surreal_entity_ops.get_by_uuid(self._driver, entity_id)
+                else:
+                    node = await EntityNode.get_by_uuid(self._driver, entity_id)
                 if node and node.group_id == self._group_id:
-                    await node.delete(self._driver)
+                    if surreal_entity_ops is not None:
+                        await surreal_entity_ops.delete(self._driver, node)
+                    else:
+                        await node.delete(self._driver)
                     log.info("Entity deleted via EntityNode", entity_id=entity_id)
                     return True
             except Exception as e:
@@ -857,9 +906,15 @@ class EntityManager:
 
             # Try to delete as EpisodicNode
             try:
-                episodic = await EpisodicNode.get_by_uuid(self._driver, entity_id)
+                if surreal_episode_ops is not None:
+                    episodic = await surreal_episode_ops.get_by_uuid(self._driver, entity_id)
+                else:
+                    episodic = await EpisodicNode.get_by_uuid(self._driver, entity_id)
                 if episodic and episodic.group_id == self._group_id:
-                    await episodic.delete(self._driver)
+                    if surreal_episode_ops is not None:
+                        await surreal_episode_ops.delete(self._driver, episodic)
+                    else:
+                        await episodic.delete(self._driver)
                     log.info("Entity deleted via EpisodicNode", entity_id=entity_id)
                     return True
             except Exception as e:

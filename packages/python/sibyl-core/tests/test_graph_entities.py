@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from graphiti_core.nodes import EntityNode, EpisodicNode
 
+from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.errors import EntityCreationError, EntityNotFoundError, SearchError
 from sibyl_core.graph.entities import EntityManager, sanitize_search_query
 from sibyl_core.models.entities import Entity, EntityType
@@ -58,6 +59,22 @@ def mock_graph_client(mock_graphiti_client: MagicMock) -> MagicMock:
 def entity_manager(mock_graph_client: MagicMock) -> EntityManager:
     """Create EntityManager with mocked dependencies."""
     return EntityManager(mock_graph_client, group_id="test-org-123")
+
+
+@pytest.fixture
+def surreal_entity_manager() -> EntityManager:
+    """Create EntityManager backed by a Surreal driver clone."""
+    driver = SurrealDriver("memory://")
+    client = MagicMock()
+    client.driver = driver
+    client.add_episode = AsyncMock()
+    client.embedder = MagicMock()
+    client.embedder.create = AsyncMock(return_value=[0.1] * 1536)
+
+    graph_client = MagicMock()
+    graph_client.client = client
+    graph_client.driver = driver
+    return EntityManager(graph_client, group_id="test-org-123")
 
 
 @pytest.fixture
@@ -263,6 +280,48 @@ class TestEntityCreateDirect:
     """Test direct entity creation bypassing LLM."""
 
     @pytest.mark.asyncio
+    async def test_create_direct_uses_surreal_entity_ops(
+        self,
+        surreal_entity_manager: EntityManager,
+        sample_entity: Entity,
+    ) -> None:
+        ops = surreal_entity_manager._driver.entity_node_ops
+        ops.save = AsyncMock()
+
+        with (
+            patch.object(
+                surreal_entity_manager,
+                "_persist_entity_attributes",
+                new_callable=AsyncMock,
+            ) as persist_attrs,
+            patch.object(EntityNode, "save", new_callable=AsyncMock) as legacy_save,
+        ):
+            result = await surreal_entity_manager.create_direct(
+                sample_entity,
+                generate_embedding=False,
+            )
+
+        assert result == sample_entity.id
+        ops.save.assert_awaited_once()
+        persist_attrs.assert_not_awaited()
+        legacy_save.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_direct_stores_embedding_via_surreal_entity_ops(
+        self,
+        surreal_entity_manager: EntityManager,
+        sample_entity: Entity,
+    ) -> None:
+        ops = surreal_entity_manager._driver.entity_node_ops
+        ops.save = AsyncMock()
+
+        await surreal_entity_manager.create_direct(sample_entity, generate_embedding=True)
+
+        assert ops.save.await_count == 2
+        second_call_node = ops.save.await_args_list[1].args[1]
+        assert second_call_node.name_embedding is not None
+
+    @pytest.mark.asyncio
     async def test_create_direct_success(
         self,
         entity_manager: EntityManager,
@@ -329,6 +388,47 @@ class TestEntityCreateDirect:
 
 class TestEntityGet:
     """Test entity retrieval by ID."""
+
+    @pytest.mark.asyncio
+    async def test_get_entity_node_uses_surreal_entity_ops(
+        self,
+        surreal_entity_manager: EntityManager,
+        sample_entity_node: EntityNode,
+    ) -> None:
+        ops = surreal_entity_manager._driver.entity_node_ops
+        ops.get_by_uuid = AsyncMock(return_value=sample_entity_node)
+
+        with patch.object(EntityNode, "get_by_uuid", new_callable=AsyncMock) as legacy_get:
+            result = await surreal_entity_manager.get("entity-001")
+
+        assert result.id == "entity-001"
+        ops.get_by_uuid.assert_awaited_once_with(surreal_entity_manager._driver, "entity-001")
+        legacy_get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_episodic_node_uses_surreal_episode_ops(
+        self,
+        surreal_entity_manager: EntityManager,
+        sample_episodic_node: EpisodicNode,
+    ) -> None:
+        entity_ops = surreal_entity_manager._driver.entity_node_ops
+        episode_ops = surreal_entity_manager._driver.episode_node_ops
+        entity_ops.get_by_uuid = AsyncMock(side_effect=Exception("Not found"))
+        episode_ops.get_by_uuid = AsyncMock(return_value=sample_episodic_node)
+
+        with patch.object(
+            surreal_entity_manager,
+            "_get_node_entity_type",
+            new_callable=AsyncMock,
+        ) as get_entity_type:
+            result = await surreal_entity_manager.get("episode-001")
+
+        assert result.id == "episode-001"
+        episode_ops.get_by_uuid.assert_awaited_once_with(
+            surreal_entity_manager._driver,
+            "episode-001",
+        )
+        get_entity_type.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_get_entity_node_success(
@@ -594,6 +694,53 @@ class TestEntityUpdate:
 
 class TestEntityDelete:
     """Test entity deletion operations."""
+
+    @pytest.mark.asyncio
+    async def test_delete_entity_node_uses_surreal_entity_ops(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        node = MagicMock(spec=EntityNode)
+        node.uuid = "entity-001"
+        node.group_id = "test-org-123"
+
+        ops = surreal_entity_manager._driver.entity_node_ops
+        ops.get_by_uuid = AsyncMock(return_value=node)
+        ops.delete = AsyncMock()
+
+        with patch.object(EntityNode, "get_by_uuid", new_callable=AsyncMock) as legacy_get:
+            result = await surreal_entity_manager.delete("entity-001")
+
+        assert result is True
+        ops.get_by_uuid.assert_awaited_once_with(surreal_entity_manager._driver, "entity-001")
+        ops.delete.assert_awaited_once_with(surreal_entity_manager._driver, node)
+        legacy_get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_episodic_node_uses_surreal_episode_ops(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        episodic = MagicMock(spec=EpisodicNode)
+        episodic.uuid = "episode-001"
+        episodic.group_id = "test-org-123"
+
+        entity_ops = surreal_entity_manager._driver.entity_node_ops
+        episode_ops = surreal_entity_manager._driver.episode_node_ops
+        entity_ops.get_by_uuid = AsyncMock(side_effect=Exception("Not found"))
+        episode_ops.get_by_uuid = AsyncMock(return_value=episodic)
+        episode_ops.delete = AsyncMock()
+
+        with patch.object(EpisodicNode, "get_by_uuid", new_callable=AsyncMock) as legacy_get:
+            result = await surreal_entity_manager.delete("episode-001")
+
+        assert result is True
+        episode_ops.get_by_uuid.assert_awaited_once_with(
+            surreal_entity_manager._driver,
+            "episode-001",
+        )
+        episode_ops.delete.assert_awaited_once_with(surreal_entity_manager._driver, episodic)
+        legacy_get.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_delete_entity_node(
