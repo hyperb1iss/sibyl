@@ -37,6 +37,8 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger()
 
+_ENTITY_LINK_PAGE_SIZE = 500
+
 _EXTRACTED_TYPE_MAP: dict[str, EntityType] = {
     "api": EntityType.TOPIC,
     "concept": EntityType.TOPIC,
@@ -369,6 +371,36 @@ class EntityLinker:
             self._entity_manager = EntityManager(self.graph_client, group_id=self.organization_id)
         return self._entity_manager
 
+    async def _list_graph_entities_via_manager(self, entity_type: str | None = None) -> list[Entity]:
+        entity_manager = self._get_entity_manager()
+        entities: list[Entity] = []
+        offset = 0
+
+        while True:
+            if entity_type:
+                batch = await entity_manager.list_by_type(
+                    EntityType(entity_type),
+                    limit=_ENTITY_LINK_PAGE_SIZE,
+                    offset=offset,
+                    include_archived=True,
+                )
+            else:
+                batch = await entity_manager.list_all(
+                    limit=_ENTITY_LINK_PAGE_SIZE,
+                    offset=offset,
+                    include_archived=True,
+                )
+
+            if not batch:
+                break
+
+            entities.extend(batch)
+            offset += len(batch)
+            if len(batch) < _ENTITY_LINK_PAGE_SIZE:
+                break
+
+        return entities
+
     async def _get_graph_entities(self, entity_type: str | None = None) -> list[dict]:
         """Get entities from graph, with caching.
 
@@ -382,18 +414,7 @@ class EntityLinker:
 
         if cache_key not in self._entity_cache:
             try:
-                entity_manager = self._get_entity_manager()
-                if entity_type:
-                    entities = await entity_manager.list_by_type(
-                        EntityType(entity_type),
-                        limit=1000,
-                        include_archived=True,
-                    )
-                else:
-                    entities = await entity_manager.list_all(
-                        limit=1000,
-                        include_archived=True,
-                    )
+                entities = await self._list_graph_entities_via_manager(entity_type)
 
                 self._entity_cache[cache_key] = [
                     {
@@ -406,37 +427,11 @@ class EntityLinker:
                 ]
             except Exception as e:
                 log.warning(
-                    "Entity manager lookup failed; falling back to raw graph query",
+                    "Entity manager lookup failed; returning empty graph entity cache",
                     entity_type=entity_type,
                     error=str(e),
                 )
-
-                query = """
-                MATCH (n)
-                WHERE (n:Episodic OR n:Entity)
-                AND n.entity_type IS NOT NULL
-                """
-                params: dict[str, str] = {}
-
-                if entity_type:
-                    query += " AND n.entity_type = $entity_type"
-                    params["entity_type"] = entity_type
-
-                query += (
-                    " RETURN n.uuid AS uuid, n.name AS name, n.entity_type AS entity_type LIMIT 1000"
-                )
-
-                records = await self.graph_client.execute_read_org(
-                    query,
-                    self.organization_id,
-                    **params,
-                )
-
-                self._entity_cache[cache_key] = [
-                    {"uuid": r["uuid"], "name": r["name"], "entity_type": r["entity_type"]}
-                    for r in records
-                    if r.get("uuid") and r.get("name")
-                ]
+                self._entity_cache[cache_key] = []
 
         return self._entity_cache[cache_key]
 
@@ -580,19 +575,6 @@ class GraphIntegrationService:
                 group_id=self.organization_id,
             )
         return self.relationship_manager
-
-    def _uses_surreal_runtime(self) -> bool:
-        try:
-            from sibyl_core.backends.surreal import SurrealDriver
-        except ImportError:
-            return False
-
-        try:
-            driver = self.graph_client.client.driver.clone(self.organization_id)
-        except Exception:
-            return False
-
-        return isinstance(driver, SurrealDriver)
 
     def _build_document_entity(
         self,
@@ -793,15 +775,7 @@ class GraphIntegrationService:
         if not entity_uuids:
             return 0
 
-        if self._uses_surreal_runtime():
-            return await self._create_doc_relationships_via_managers(
-                document_id,
-                entity_uuids,
-                document_title=document_title,
-                document_url=document_url,
-            )
-
-        return await self._create_doc_relationships_via_query(
+        return await self._create_doc_relationships_via_managers(
             document_id,
             entity_uuids,
             document_title=document_title,
@@ -845,62 +819,6 @@ class GraphIntegrationService:
                         target_id=str(document_id),
                         metadata={"created_by": "crawler_graph_integration"},
                     )
-                )
-                created += 1
-
-            except Exception as e:
-                log.warning(
-                    "Failed to create doc relationship",
-                    entity_uuid=entity_uuid,
-                    doc_uuid=str(document_id),
-                    error=str(e),
-                )
-
-        return created
-
-    async def _create_doc_relationships_via_query(
-        self,
-        document_id: UUID,
-        entity_uuids: list[str],
-        *,
-        document_title: str | None,
-        document_url: str | None,
-    ) -> int:
-        created = 0
-        for entity_uuid in entity_uuids:
-            try:
-                query = """
-                MATCH (e)
-                WHERE (e:Episodic OR e:Entity) AND e.uuid = $entity_uuid
-                MERGE (d {uuid: $doc_uuid})
-                ON CREATE SET
-                    d.group_id = $group_id,
-                    d.entity_type = 'document',
-                    d.name = COALESCE($doc_title, $doc_uuid),
-                    d.summary = COALESCE($doc_title, 'Documentation page'),
-                    d.url = $doc_url,
-                    d.created_at = timestamp()
-                ON MATCH SET
-                    d.group_id = COALESCE(d.group_id, $group_id),
-                    d.entity_type = COALESCE(d.entity_type, 'document'),
-                    d.name = COALESCE(d.name, $doc_title, $doc_uuid),
-                    d.url = COALESCE(d.url, $doc_url)
-                SET d:Entity:Document
-                MERGE (e)-[r:DOCUMENTED_IN]->(d)
-                SET r.created_at = COALESCE(r.created_at, timestamp()),
-                    r.group_id = COALESCE(r.group_id, $group_id),
-                    r.name = COALESCE(r.name, 'DOCUMENTED_IN')
-                RETURN count(r) as count
-                """
-
-                await self.graph_client.execute_write_org(
-                    query,
-                    self.organization_id,
-                    entity_uuid=entity_uuid,
-                    doc_uuid=str(document_id),
-                    doc_title=document_title,
-                    doc_url=document_url,
-                    group_id=self.organization_id,
                 )
                 created += 1
 

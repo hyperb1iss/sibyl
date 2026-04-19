@@ -351,6 +351,28 @@ class TestEntityLinker:
         await linker._get_graph_entities("tool")
         assert linker._entity_manager.list_by_type.call_count == 1
 
+    @pytest.mark.asyncio
+    async def test_get_graph_entities_paginates_manager_results(self, mock_graph_client):
+        """Entity cache loading should page through manager results."""
+        linker = EntityLinker(mock_graph_client, TEST_ORG_ID)
+        linker._entity_manager = MagicMock()
+        linker._entity_manager.list_by_type = AsyncMock(
+            side_effect=[
+                [
+                    self._graph_entity("entity-1", "FastAPI", EntityType.TOOL),
+                    self._graph_entity("entity-2", "Pydantic", EntityType.TOOL),
+                ],
+                [self._graph_entity("entity-3", "Starlette", EntityType.TOOL)],
+            ]
+        )
+
+        with patch("sibyl.crawler.graph_integration._ENTITY_LINK_PAGE_SIZE", 2):
+            entities = await linker._get_graph_entities("tool")
+
+        assert [entity["uuid"] for entity in entities] == ["entity-1", "entity-2", "entity-3"]
+        assert linker._entity_manager.list_by_type.await_args_list[0].kwargs["offset"] == 0
+        assert linker._entity_manager.list_by_type.await_args_list[1].kwargs["offset"] == 2
+
 
 # =============================================================================
 # GraphIntegrationService Tests
@@ -488,22 +510,7 @@ class TestGraphIntegrationService:
 
     @pytest.mark.asyncio
     async def test_create_doc_relationships(self, mock_graph_client):
-        """Test creating document relationships in graph."""
-        mock_graph_client.execute_write_org = AsyncMock(return_value=[])
-
-        service = GraphIntegrationService(mock_graph_client, TEST_ORG_ID)
-
-        doc_id = uuid4()
-        entity_uuids = ["entity-1", "entity-2", "entity-3"]
-
-        count = await service.create_doc_relationships(doc_id, entity_uuids)
-
-        assert count == 3
-        assert mock_graph_client.execute_write_org.call_count == 3
-
-    @pytest.mark.asyncio
-    async def test_create_doc_relationships_prefers_manager_seams(self, mock_graph_client):
-        """Surreal-backed graph linking should materialize document nodes via managers."""
+        """Test creating document relationships via manager seams."""
         service = GraphIntegrationService(mock_graph_client, TEST_ORG_ID)
         service.entity_manager = MagicMock()
         service.entity_manager.create_direct = AsyncMock(return_value="doc-entity")
@@ -515,13 +522,12 @@ class TestGraphIntegrationService:
         doc_id = uuid4()
         entity_uuids = ["entity-1", "entity-2", "entity-3"]
 
-        with patch.object(service, "_uses_surreal_runtime", return_value=True):
-            count = await service.create_doc_relationships(
-                doc_id,
-                entity_uuids,
-                document_title="FastAPI Docs",
-                document_url="https://docs.example.com/fastapi",
-            )
+        count = await service.create_doc_relationships(
+            doc_id,
+            entity_uuids,
+            document_title="FastAPI Docs",
+            document_url="https://docs.example.com/fastapi",
+        )
 
         assert count == 3
         service.entity_manager.create_direct.assert_awaited_once()
@@ -535,6 +541,7 @@ class TestGraphIntegrationService:
         assert created_relationship.relationship_type == RelationshipType.DOCUMENTED_IN
         assert created_relationship.source_id == "entity-1"
         assert created_relationship.target_id == str(doc_id)
+        assert mock_graph_client.execute_write_org.call_count == 0
 
     @pytest.mark.asyncio
     async def test_create_doc_relationships_empty(self, mock_graph_client):
