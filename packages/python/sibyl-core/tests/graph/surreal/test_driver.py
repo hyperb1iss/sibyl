@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from sibyl_core.graph.surreal import SurrealDriver, SurrealDriverSession
-from sibyl_core.graph.surreal.driver import _namespace_for_group
-from sibyl_core.graph.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
+from sibyl_core.backends.surreal import SurrealDriver, SurrealDriverSession
+from sibyl_core.backends.surreal.driver import _namespace_for_group
+from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
 
 
 class TestNamespaceNaming:
@@ -96,7 +96,7 @@ class TestSchemaBootstrap:
 
     async def test_bootstrap_without_group_id_raises(self) -> None:
         d = SurrealDriver("memory://")
-        from sibyl_core.graph.surreal.schema import bootstrap_schema
+        from sibyl_core.backends.surreal.schema import bootstrap_schema
 
         with pytest.raises(ValueError, match="group_id"):
             await bootstrap_schema(d)
@@ -156,3 +156,9 @@ class TestSchemaBootstrap:
         assert isinstance(rows, list) and len(rows) == 1
         assert rows[0]["fact"] == "Alice knows Bob"
         assert rows[0]["attributes"]["confidence"] == 0.9
+
+
+def test_legacy_graph_surreal_path_reexports_backend_driver() -> None:
+    from sibyl_core.graph.surreal import SurrealDriver as LegacySurrealDriver
+
+    assert LegacySurrealDriver is SurrealDriver

@@ -9,7 +9,7 @@ from graphiti_core.edges import EntityEdge
 from graphiti_core.errors import EdgeNotFoundError
 from graphiti_core.nodes import EntityNode
 
-from sibyl_core.graph.surreal import SurrealDriver
+from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.graph.surreal.ops.entity_edge_ops import SurrealEntityEdgeOperations
 from sibyl_core.graph.surreal.ops.entity_node_ops import SurrealEntityNodeOperations
 

@@ -8,7 +8,7 @@ import pytest
 from graphiti_core.edges import HasEpisodeEdge
 from graphiti_core.errors import EdgeNotFoundError
 
-from sibyl_core.graph.surreal import SurrealDriver
+from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.graph.surreal.ops.has_episode_edge_ops import SurrealHasEpisodeEdgeOperations
 
 

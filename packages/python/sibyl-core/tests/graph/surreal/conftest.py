@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator
 
 import pytest_asyncio
 
-from sibyl_core.graph.surreal import SurrealDriver
+from sibyl_core.backends.surreal import SurrealDriver
 
 
 @pytest_asyncio.fixture

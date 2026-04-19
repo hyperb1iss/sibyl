@@ -8,7 +8,7 @@ import pytest
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import EpisodeType, EpisodicNode
 
-from sibyl_core.graph.surreal import SurrealDriver
+from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.graph.surreal.ops.episode_node_ops import SurrealEpisodeNodeOperations
 
 

@@ -30,8 +30,9 @@ from graphiti_core.driver.record_parsers import (
 )
 from graphiti_core.nodes import CommunityNode, EntityNode, EpisodicNode
 
+from sibyl_core.backends.surreal.driver import SurrealDriver
+from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
 from sibyl_core.graph.surreal.ops._common import normalize_records
-from sibyl_core.graph.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,6 @@ class SurrealGraphMaintenanceOperations(GraphMaintenanceOperations):
     ) -> None:
         # Schema-module bootstrap is the canonical path; delegate to the
         # driver so callers with QueryExecutor-only access still work.
-        from sibyl_core.graph.surreal.driver import SurrealDriver
-
         if not isinstance(executor, SurrealDriver):
             msg = (
                 "SurrealGraphMaintenanceOperations.build_indices_and_constraints "
