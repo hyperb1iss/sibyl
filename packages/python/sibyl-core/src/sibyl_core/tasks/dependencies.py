@@ -60,6 +60,10 @@ def _uses_surreal_runtime(client: "GraphClient") -> bool:
     return isinstance(driver, SurrealDriver)
 
 
+def _prefer_graph_managers(client: "GraphClient") -> bool:
+    return isinstance(client, GraphClient) or _uses_surreal_runtime(client)
+
+
 def _get_graph_managers(
     client: "GraphClient",
     organization_id: str,
@@ -126,7 +130,7 @@ async def get_task_dependencies(
     log.info("get_task_dependencies", task_id=task_id, depth=actual_depth)
 
     try:
-        if _uses_surreal_runtime(client):
+        if _prefer_graph_managers(client):
             entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
             seen: set[str] = set()
             frontier = [task_id]
@@ -236,7 +240,7 @@ async def get_blocking_tasks(
     log.info("get_blocking_tasks", task_id=task_id, depth=depth)
 
     try:
-        if _uses_surreal_runtime(client):
+        if _prefer_graph_managers(client):
             entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
             relationships = await relationship_manager.get_for_entity(
                 task_id,
@@ -322,7 +326,7 @@ async def detect_dependency_cycles(
 
     try:
         # Query for all DEPENDS_ON edges, optionally scoped to project
-        if _uses_surreal_runtime(client):
+        if _prefer_graph_managers(client):
             entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
             tasks = await entity_manager.list_by_type(
                 EntityType.TASK,
@@ -444,7 +448,7 @@ async def suggest_task_order(
 
     try:
         # Get all tasks and their dependencies
-        if _uses_surreal_runtime(client):
+        if _prefer_graph_managers(client):
             entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
             tasks = await entity_manager.list_by_type(
                 EntityType.TASK,
@@ -505,7 +509,7 @@ async def suggest_task_order(
                 except (TypeError, ValueError):
                     tasks[task_id] = 0
 
-        if not _uses_surreal_runtime(client):
+        if not _prefer_graph_managers(client):
             # Get dependency edges
             if project_id:
                 dep_query = """
