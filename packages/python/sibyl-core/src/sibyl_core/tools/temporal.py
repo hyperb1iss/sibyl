@@ -25,6 +25,10 @@ log = structlog.get_logger()
 __all__ = ["find_conflicts", "get_entity_history", "temporal_query"]
 
 
+async def get_graph_client() -> Any:
+    return await get_legacy_graph_client()
+
+
 async def temporal_query(
     mode: Literal["history", "timeline", "conflicts"] = "history",
     entity_id: str | None = None,
@@ -92,7 +96,7 @@ async def temporal_query(
                 message=f"Invalid as_of date format: {e}. Use ISO format like 2025-03-15",
             )
 
-    client = await get_legacy_graph_client()
+    client = await get_graph_client()
 
     if mode == "history":
         return await get_entity_history(
@@ -160,10 +164,34 @@ async def get_entity_history(
         temporal_filter = f"""
             AND (r.created_at IS NULL OR r.created_at <= datetime('{as_of_str}'))
             AND (r.expired_at IS NULL OR r.expired_at > datetime('{as_of_str}'))
+            AND (r.valid_at IS NULL OR r.valid_at <= datetime('{as_of_str}'))
+            AND (r.invalid_at IS NULL OR r.invalid_at > datetime('{as_of_str}'))
         """
     elif not include_expired:
         # Default: only current edges (not expired)
-        temporal_filter = "AND r.expired_at IS NULL"
+        temporal_filter = "AND r.expired_at IS NULL AND r.invalid_at IS NULL"
+
+    context = _get_surreal_temporal_context(client, organization_id)
+    if context is not None:
+        try:
+            driver, edge_ops, node_ops = context
+            edges = await edge_ops.get_by_node_uuid(driver, entity_id)
+            filtered = _filter_history_edges(edges, as_of=as_of, include_expired=include_expired)
+            filtered.sort(key=_created_at_sort_key, reverse=True)
+            temporal_edges = await _graphiti_edges_to_temporal_edges(
+                driver,
+                node_ops,
+                filtered[:limit],
+            )
+            return TemporalResponse(
+                mode="history",
+                entity_id=entity_id,
+                edges=temporal_edges,
+                total=len(temporal_edges),
+                as_of=as_of,
+            )
+        except Exception as e:
+            log.debug("surreal_entity_history_fallback", error=str(e), entity_id=entity_id)
 
     query = f"""
         MATCH (source)-[r]-(target)
@@ -233,6 +261,30 @@ async def get_entity_timeline(
             total=0,
             message="entity_id is required for timeline mode",
         )
+
+    context = _get_surreal_temporal_context(client, organization_id)
+    if context is not None:
+        try:
+            driver, edge_ops, node_ops = context
+            edges = await edge_ops.get_by_node_uuid(driver, entity_id)
+            edges.sort(key=_created_at_sort_key)
+            temporal_edges = await _graphiti_edges_to_temporal_edges(
+                driver,
+                node_ops,
+                edges[:limit],
+            )
+            return TemporalResponse(
+                mode="timeline",
+                entity_id=entity_id,
+                edges=temporal_edges,
+                total=len(temporal_edges),
+                message=(
+                    f"Timeline shows {len(temporal_edges)} edges. "
+                    "Expired edges indicate superseded information."
+                ),
+            )
+        except Exception as e:
+            log.debug("surreal_entity_timeline_fallback", error=str(e), entity_id=entity_id)
 
     # Get ALL edges, including expired, ordered by creation time
     query = """
@@ -328,6 +380,38 @@ async def find_conflicts(
     if entity_id:
         params["entity_id"] = entity_id
 
+    context = _get_surreal_temporal_context(client, organization_id)
+    if context is not None:
+        try:
+            driver, edge_ops, node_ops = context
+            edges = await _load_surreal_conflict_edges(
+                driver,
+                edge_ops,
+                organization_id=organization_id,
+                entity_id=entity_id,
+                limit=limit,
+            )
+            temporal_edges = await _graphiti_edges_to_temporal_edges(
+                driver,
+                node_ops,
+                edges,
+            )
+
+            message = f"Found {len(temporal_edges)} invalidated edges"
+            if entity_id:
+                message += f" for entity {entity_id}"
+            message += ". These facts have been superseded by newer information."
+
+            return TemporalResponse(
+                mode="conflicts",
+                entity_id=entity_id,
+                edges=temporal_edges,
+                total=len(temporal_edges),
+                message=message,
+            )
+        except Exception as e:
+            log.debug("surreal_conflicts_fallback", error=str(e), entity_id=entity_id)
+
     try:
         result = await client.execute_read_org(
             query,
@@ -359,6 +443,150 @@ async def find_conflicts(
             total=0,
             message=f"Query failed: {e}",
         )
+
+
+def _get_surreal_temporal_context(client: Any, organization_id: str) -> tuple[Any, Any, Any] | None:
+    try:
+        from sibyl_core.backends.surreal import SurrealDriver
+    except ImportError:
+        return None
+
+    base_driver = getattr(getattr(client, "client", None), "driver", None)
+    if base_driver is None or not hasattr(base_driver, "clone"):
+        return None
+
+    driver = base_driver.clone(organization_id)
+    if not isinstance(driver, SurrealDriver):
+        return None
+
+    edge_ops = getattr(driver, "entity_edge_ops", None)
+    node_ops = getattr(driver, "entity_node_ops", None)
+    if edge_ops is None or node_ops is None:
+        return None
+
+    return driver, edge_ops, node_ops
+
+
+def _created_at_sort_key(edge: Any) -> datetime:
+    created_at = getattr(edge, "created_at", None)
+    if isinstance(created_at, datetime):
+        return created_at
+    return datetime.min.replace(tzinfo=UTC)
+
+
+def _filter_history_edges(
+    edges: list[Any],
+    *,
+    as_of: datetime | None,
+    include_expired: bool,
+) -> list[Any]:
+    filtered: list[Any] = []
+    for edge in edges:
+        created_at = getattr(edge, "created_at", None)
+        expired_at = getattr(edge, "expired_at", None)
+        valid_at = getattr(edge, "valid_at", None)
+        invalid_at = getattr(edge, "invalid_at", None)
+
+        if as_of is not None:
+            if isinstance(created_at, datetime) and created_at > as_of:
+                continue
+            if isinstance(expired_at, datetime) and expired_at <= as_of:
+                continue
+            if isinstance(valid_at, datetime) and valid_at > as_of:
+                continue
+            if isinstance(invalid_at, datetime) and invalid_at <= as_of:
+                continue
+        elif not include_expired and (
+            isinstance(expired_at, datetime) or isinstance(invalid_at, datetime)
+        ):
+            continue
+
+        filtered.append(edge)
+    return filtered
+
+
+async def _load_surreal_conflict_edges(
+    driver: Any,
+    edge_ops: Any,
+    *,
+    organization_id: str,
+    entity_id: str | None,
+    limit: int,
+) -> list[Any]:
+    if entity_id:
+        edges = await edge_ops.get_by_node_uuid(driver, entity_id)
+    else:
+        edges = []
+        cursor: str | None = None
+        batch_size = max(limit, 100)
+        while True:
+            batch = await edge_ops.get_by_group_ids(
+                driver,
+                [organization_id],
+                limit=batch_size,
+                uuid_cursor=cursor,
+            )
+            if not batch:
+                break
+            edges.extend(batch)
+            if len(batch) < batch_size:
+                break
+            cursor = batch[-1].uuid
+
+    invalidated = [
+        edge
+        for edge in edges
+        if getattr(edge, "expired_at", None) is not None
+        or getattr(edge, "invalid_at", None) is not None
+    ]
+    invalidated.sort(
+        key=lambda edge: (
+            getattr(edge, "expired_at", None)
+            or getattr(edge, "invalid_at", None)
+            or _created_at_sort_key(edge)
+        ),
+        reverse=True,
+    )
+    return invalidated[:limit]
+
+
+async def _graphiti_edges_to_temporal_edges(
+    driver: Any,
+    node_ops: Any,
+    edges: list[Any],
+) -> list[TemporalEdge]:
+    node_ids = {
+        node_id
+        for edge in edges
+        for node_id in (
+            getattr(edge, "source_node_uuid", None),
+            getattr(edge, "target_node_uuid", None),
+        )
+        if node_id
+    }
+    nodes = await node_ops.get_by_uuids(driver, sorted(node_ids)) if node_ids else []
+    names = {getattr(node, "uuid", ""): getattr(node, "name", "") for node in nodes}
+
+    return [
+        TemporalEdge(
+            id=str(getattr(edge, "uuid", "") or ""),
+            name=str(getattr(edge, "name", "") or ""),
+            source_id=str(getattr(edge, "source_node_uuid", "") or ""),
+            source_name=str(names.get(getattr(edge, "source_node_uuid", ""), "")),
+            target_id=str(getattr(edge, "target_node_uuid", "") or ""),
+            target_name=str(names.get(getattr(edge, "target_node_uuid", ""), "")),
+            created_at=getattr(edge, "created_at", None),
+            expired_at=getattr(edge, "expired_at", None),
+            valid_at=getattr(edge, "valid_at", None),
+            invalid_at=getattr(edge, "invalid_at", None),
+            fact=getattr(edge, "fact", None),
+            is_current=(
+                getattr(edge, "expired_at", None) is None
+                and getattr(edge, "invalid_at", None) is None
+            ),
+        )
+        for edge in edges
+    ]
 
 
 def _parse_edge_results(

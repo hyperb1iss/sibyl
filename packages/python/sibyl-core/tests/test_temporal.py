@@ -10,6 +10,7 @@ Covers bi-temporal query functionality including:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -495,6 +496,54 @@ class TestGetEntityHistory:
         assert response.total == 0
         assert "Query failed" in (response.message or "")
 
+    @pytest.mark.asyncio
+    async def test_history_prefers_surreal_edge_ops(self) -> None:
+        """get_entity_history should use Surreal edge ops when available."""
+        now = datetime.now(UTC)
+        mock_client = AsyncMock()
+        mock_client.execute_read_org = AsyncMock(return_value=[])
+        driver = object()
+        edge_ops = SimpleNamespace(
+            get_by_node_uuid=AsyncMock(
+                return_value=[
+                    SimpleNamespace(
+                        uuid="edge_1",
+                        name="RELATED_TO",
+                        fact="Entity is related",
+                        source_node_uuid="entity_123",
+                        target_node_uuid="other_entity",
+                        created_at=now - timedelta(days=1),
+                        expired_at=None,
+                        valid_at=now - timedelta(days=1),
+                        invalid_at=None,
+                    )
+                ]
+            )
+        )
+        node_ops = SimpleNamespace(
+            get_by_uuids=AsyncMock(
+                return_value=[
+                    SimpleNamespace(uuid="entity_123", name="Test Entity"),
+                    SimpleNamespace(uuid="other_entity", name="Other Entity"),
+                ]
+            )
+        )
+
+        with patch(
+            "sibyl_core.tools.temporal._get_surreal_temporal_context",
+            return_value=(driver, edge_ops, node_ops),
+        ):
+            response = await get_entity_history(
+                client=mock_client,
+                organization_id="org_123",
+                entity_id="entity_123",
+            )
+
+        assert response.total == 1
+        assert response.edges[0].source_name == "Test Entity"
+        assert response.edges[0].target_name == "Other Entity"
+        mock_client.execute_read_org.assert_not_called()
+
 
 class TestGetEntityTimeline:
     """Test get_entity_timeline function."""
@@ -572,6 +621,66 @@ class TestGetEntityTimeline:
             entity_id="entity_123",
         )
         assert "Timeline shows" in (response.message or "")
+
+    @pytest.mark.asyncio
+    async def test_timeline_prefers_surreal_edge_ops(self) -> None:
+        """get_entity_timeline should build results from Surreal edge ops."""
+        now = datetime.now(UTC)
+        mock_client = AsyncMock()
+        mock_client.execute_read_org = AsyncMock(return_value=[])
+        driver = object()
+        edge_ops = SimpleNamespace(
+            get_by_node_uuid=AsyncMock(
+                return_value=[
+                    SimpleNamespace(
+                        uuid="edge_old",
+                        name="HAS_STATUS",
+                        fact="Status was todo",
+                        source_node_uuid="task_1",
+                        target_node_uuid="status_todo",
+                        created_at=now - timedelta(days=10),
+                        expired_at=now - timedelta(days=5),
+                        valid_at=None,
+                        invalid_at=None,
+                    ),
+                    SimpleNamespace(
+                        uuid="edge_new",
+                        name="HAS_STATUS",
+                        fact="Status is doing",
+                        source_node_uuid="task_1",
+                        target_node_uuid="status_doing",
+                        created_at=now - timedelta(days=5),
+                        expired_at=None,
+                        valid_at=None,
+                        invalid_at=None,
+                    ),
+                ]
+            )
+        )
+        node_ops = SimpleNamespace(
+            get_by_uuids=AsyncMock(
+                return_value=[
+                    SimpleNamespace(uuid="task_1", name="Task"),
+                    SimpleNamespace(uuid="status_todo", name="Todo"),
+                    SimpleNamespace(uuid="status_doing", name="Doing"),
+                ]
+            )
+        )
+
+        with patch(
+            "sibyl_core.tools.temporal._get_surreal_temporal_context",
+            return_value=(driver, edge_ops, node_ops),
+        ):
+            response = await get_entity_timeline(
+                client=mock_client,
+                organization_id="org_123",
+                entity_id="task_1",
+            )
+
+        assert response.total == 2
+        assert response.edges[0].id == "edge_old"
+        assert response.edges[1].id == "edge_new"
+        mock_client.execute_read_org.assert_not_called()
 
 
 class TestFindConflicts:
@@ -652,6 +761,53 @@ class TestFindConflicts:
         assert response.entity_id is None
         # Query should not include entity filter
         mock_client.execute_read_org.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_conflicts_prefers_surreal_edge_ops(self) -> None:
+        """find_conflicts should use Surreal edge ops when available."""
+        now = datetime.now(UTC)
+        mock_client = AsyncMock()
+        mock_client.execute_read_org = AsyncMock(return_value=[])
+        driver = object()
+        edge_ops = SimpleNamespace(
+            get_by_group_ids=AsyncMock(
+                return_value=[
+                    SimpleNamespace(
+                        uuid="edge_1",
+                        name="OLD_FACT",
+                        fact="This was believed true",
+                        source_node_uuid="s1",
+                        target_node_uuid="t1",
+                        created_at=now - timedelta(days=30),
+                        expired_at=now - timedelta(days=10),
+                        valid_at=None,
+                        invalid_at=None,
+                    )
+                ]
+            )
+        )
+        node_ops = SimpleNamespace(
+            get_by_uuids=AsyncMock(
+                return_value=[
+                    SimpleNamespace(uuid="s1", name="Source"),
+                    SimpleNamespace(uuid="t1", name="Target"),
+                ]
+            )
+        )
+
+        with patch(
+            "sibyl_core.tools.temporal._get_surreal_temporal_context",
+            return_value=(driver, edge_ops, node_ops),
+        ):
+            response = await find_conflicts(
+                client=mock_client,
+                organization_id="org_123",
+            )
+
+        assert response.total == 1
+        assert response.edges[0].source_name == "Source"
+        assert response.edges[0].target_name == "Target"
+        mock_client.execute_read_org.assert_not_called()
 
 
 # =============================================================================
