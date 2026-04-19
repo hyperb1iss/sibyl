@@ -20,9 +20,17 @@ from sibyl.auth.organizations import OrganizationManager, slugify
 from sibyl.auth.sessions import SessionManager
 from sibyl.db.connection import get_session
 from sibyl.db.models import Organization, OrganizationMember, OrganizationRole
-from sibyl.persistence.legacy.graph import ensure_legacy_graph_indexes
+from sibyl.persistence.legacy.graph import ensure_graph_indexes as _service_ensure_graph_indexes
 
 log = structlog.get_logger()
+
+
+async def ensure_legacy_graph_indexes(group_id: str) -> None:
+    await _service_ensure_graph_indexes(group_id)
+
+
+async def ensure_graph_indexes(group_id: str) -> None:
+    await ensure_legacy_graph_indexes(group_id)
 
 
 @dataclass
@@ -161,7 +169,7 @@ async def create_legacy_org(
         )
 
         try:
-            await ensure_legacy_graph_indexes(str(org.id))
+            await ensure_graph_indexes(str(org.id))
         except Exception as exc:
             log.debug("Graph index setup deferred", org_id=str(org.id), error=str(exc))
 

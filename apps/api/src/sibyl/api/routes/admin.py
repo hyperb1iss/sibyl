@@ -23,7 +23,7 @@ from sibyl.db.models import Organization, OrganizationRole
 from sibyl.persistence.legacy.admin import recover_legacy_stuck_sources
 from sibyl.persistence.legacy.graph import (
     execute_legacy_debug_query,
-    get_legacy_graph_stats_payload,
+    get_graph_stats_payload as _service_get_graph_stats_payload,
 )
 
 log = structlog.get_logger()
@@ -37,6 +37,14 @@ router = APIRouter(
 # Role sets for different permission levels
 _READ_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.MEMBER)
 _ADMIN_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN)
+
+
+async def get_legacy_graph_stats_payload(group_id: str) -> dict[str, object]:
+    return await _service_get_graph_stats_payload(group_id)
+
+
+async def get_graph_stats_payload(group_id: str) -> dict[str, object]:
+    return await get_legacy_graph_stats_payload(group_id)
 
 
 @router.get(
@@ -84,7 +92,7 @@ async def stats(
 ) -> StatsResponse:
     """Get knowledge graph statistics."""
     try:
-        stats_data = await get_legacy_graph_stats_payload(str(org.id))
+        stats_data = await get_graph_stats_payload(str(org.id))
 
         return StatsResponse(
             entity_counts=stats_data.get("entity_counts", {}),
@@ -318,7 +326,6 @@ async def dev_status(
 
     Requires organization OWNER role.
     """
-    from sibyl.persistence.legacy.graph import get_legacy_graph_stats_payload
     from sibyl_core.logging import LogBuffer
     from sibyl_core.tools.core import get_health
 
@@ -335,7 +342,7 @@ async def dev_status(
 
     # Get entity count
     try:
-        stats = await get_legacy_graph_stats_payload(str(org.id))
+        stats = await get_graph_stats_payload(str(org.id))
         entity_count = stats.get("total_entities", 0)
     except Exception:
         entity_count = 0

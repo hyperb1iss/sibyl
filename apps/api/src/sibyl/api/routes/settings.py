@@ -13,7 +13,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from sibyl.persistence.legacy.graph import reset_legacy_graph_runtime
+from sibyl.persistence.legacy.graph import reset_graph_runtime as _service_reset_graph_runtime
 from sibyl.persistence.legacy.settings import (
     is_legacy_setup_mode,
     require_legacy_settings_admin,
@@ -24,6 +24,14 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 log = structlog.get_logger()
 
 
+async def reset_legacy_graph_runtime() -> None:
+    await _service_reset_graph_runtime()
+
+
+async def reset_graph_runtime() -> None:
+    await reset_legacy_graph_runtime()
+
+
 async def _try_reset_graph_client(context: str) -> None:
     """Reset the global GraphClient, logging on failure.
 
@@ -31,7 +39,7 @@ async def _try_reset_graph_client(context: str) -> None:
         context: Description for log message (e.g., "API key update", "API key deletion")
     """
     try:
-        await reset_legacy_graph_runtime()
+        await reset_graph_runtime()
         log.info(f"Reset GraphClient after {context}")
     except Exception as e:
         log.warning("Failed to reset GraphClient", error=str(e))
