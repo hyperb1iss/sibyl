@@ -1480,6 +1480,7 @@ class EntityManager:
                        n.content AS content,
                        n.description AS description,
                        n.summary AS summary,
+                       n.name_embedding AS name_embedding,
                        n.metadata AS metadata,
                        n.created_at AS created_at,
                        n.updated_at AS updated_at,
@@ -1510,20 +1511,7 @@ class EntityManager:
                     if not include_archived and metadata.get("archived"):
                         continue
 
-                    entity = Entity(
-                        id=record.get("uuid", ""),
-                        entity_type=record.get("entity_type", ""),
-                        name=record.get("name", ""),
-                        description=record.get("description") or record.get("summary") or "",
-                        content=record.get("content") or "",
-                        metadata=metadata,
-                        **(
-                            {"created_at": record["created_at"]} if record.get("created_at") else {}
-                        ),
-                        **(
-                            {"updated_at": record["updated_at"]} if record.get("updated_at") else {}
-                        ),
-                    )
+                    entity = self._record_to_entity({**record, "metadata": metadata})
                     entities.append(entity)
 
                 except Exception as e:
@@ -2194,6 +2182,9 @@ class EntityManager:
             "modified_by": metadata.get("modified_by"),
             "metadata": metadata,
         }
+        embedding = node_data.get("name_embedding")
+        if isinstance(embedding, list):
+            entity_kwargs["embedding"] = embedding
         if created_at := self._parse_datetime(node_data.get("created_at")):
             entity_kwargs["created_at"] = created_at
         if updated_at := self._parse_datetime(node_data.get("updated_at")):

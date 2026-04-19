@@ -131,6 +131,17 @@ class MockEntityManagerForDedup:
             return True
         return False
 
+    async def list_all(
+        self,
+        limit: int = 1000,
+        offset: int = 0,
+        *,
+        include_archived: bool = False,
+    ) -> list[Entity]:
+        """List entities with pagination for seam-driven dedup."""
+        del include_archived
+        return list(self.entities.values())[offset : offset + limit]
+
 
 @dataclass
 class MockEntityManagerForHybrid:
@@ -507,6 +518,40 @@ class TestEntityDeduplicatorFindDuplicates:
         assert len(client.query_history) >= 1
         assert client.read_calls == []
         assert client.read_org_calls[0][0] == manager._group_id
+
+    @pytest.mark.asyncio
+    async def test_find_duplicates_prefers_entity_manager_list_all(self) -> None:
+        """Dedup should read candidates through the entity manager seam when available."""
+        client = MockGraphClientForDedup()
+        manager = MockEntityManagerForDedup(
+            entities={
+                "id1": Entity(
+                    id="id1",
+                    name="Python async",
+                    entity_type=EntityType.TOPIC,
+                    embedding=[1.0, 0.0, 0.0],
+                ),
+                "id2": Entity(
+                    id="id2",
+                    name="Python async programming",
+                    entity_type=EntityType.TOPIC,
+                    embedding=[0.99, 0.01, 0.0],
+                ),
+            }
+        )
+        config = DedupConfig(
+            similarity_threshold=0.9,
+            same_type_only=True,
+            min_name_overlap=0.0,
+        )
+        dedup = EntityDeduplicator(client=client, entity_manager=manager, config=config)  # type: ignore[arg-type]
+
+        pairs = await dedup.find_duplicates(entity_types=["topic"], threshold=0.9)
+
+        assert len(pairs) == 1
+        assert pairs[0].entity1_id == "id1"
+        assert client.query_history == []
+        assert client.read_org_calls == []
 
 
 class TestEntityDeduplicatorMerge:

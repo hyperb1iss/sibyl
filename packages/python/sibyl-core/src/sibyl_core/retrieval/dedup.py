@@ -360,6 +360,50 @@ class EntityDeduplicator:
         Returns:
             List of (id, name, type, embedding) tuples.
         """
+        list_all = getattr(self.entity_manager, "list_all", None)
+        if callable(list_all):
+            try:
+                entities = await self._fetch_entities_with_embeddings_via_manager(entity_types)
+                if entities:
+                    return entities
+            except Exception as e:
+                log.debug("fetch_entities_with_embeddings_manager_failed", error=str(e))
+
+        return await self._fetch_entities_with_embeddings_via_query(entity_types)
+
+    async def _fetch_entities_with_embeddings_via_manager(
+        self,
+        entity_types: list[str] | None = None,
+    ) -> list[tuple[str, str, str, list[float]]]:
+        allowed_types = {entity_type.lower() for entity_type in entity_types or []}
+        entities: list[tuple[str, str, str, list[float]]] = []
+        offset = 0
+        page_size = max(self.config.batch_size, 100)
+
+        while True:
+            batch = await self.entity_manager.list_all(
+                limit=page_size,
+                offset=offset,
+                include_archived=True,
+            )
+            if not batch:
+                break
+
+            offset += len(batch)
+            for entity in batch:
+                entity_type = entity.entity_type.value
+                if allowed_types and entity_type.lower() not in allowed_types:
+                    continue
+                if not entity.id or not isinstance(entity.embedding, list) or not entity.embedding:
+                    continue
+                entities.append((entity.id, entity.name, entity_type, entity.embedding))
+
+        return entities
+
+    async def _fetch_entities_with_embeddings_via_query(
+        self,
+        entity_types: list[str] | None = None,
+    ) -> list[tuple[str, str, str, list[float]]]:
         # Build Cypher query to fetch entities with embeddings
         type_filter = ""
         params: dict[str, Any] = {}
