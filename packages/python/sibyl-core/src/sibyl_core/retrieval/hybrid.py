@@ -154,10 +154,113 @@ async def graph_traversal(
     resolved_group_id = _require_group_id(group_id, "graph traversal")
 
     try:
+        manager_results = await _graph_traversal_via_relationship_manager(
+            seed_ids,
+            client,
+            depth=depth,
+            limit=limit,
+            group_id=resolved_group_id,
+        )
+        if manager_results is not None:
+            return manager_results
+    except Exception as e:
+        log.debug("graph_traversal_manager_path_failed", seeds=seed_ids, error=str(e))
+
+    try:
+        return await _graph_traversal_via_query(
+            seed_ids,
+            client,
+            depth=depth,
+            limit=limit,
+            group_id=resolved_group_id,
+        )
+    except Exception as e:
+        log.warning("graph_traversal_failed", seeds=seed_ids, error=str(e))
+        return []
+
+
+async def _graph_traversal_via_relationship_manager(
+    seed_ids: list[str],
+    client: GraphClient,
+    *,
+    depth: int,
+    limit: int,
+    group_id: str,
+) -> list[tuple[Entity, float]] | None:
+    try:
+        from sibyl_core.graph.relationships import RelationshipManager
+    except ImportError:
+        return None
+
+    try:
+        relationship_manager = RelationshipManager(client, group_id=group_id)
+    except Exception:
+        return None
+
+    seed_id_set = {seed_id for seed_id in seed_ids if seed_id}
+    frontier = [seed_id for seed_id in seed_ids if seed_id]
+    visited = set(seed_id_set)
+    results_by_id: dict[str, tuple[Entity, float, int]] = {}
+
+    for current_depth in range(1, max(depth, 0) + 1):
+        if not frontier or len(results_by_id) >= limit:
+            break
+
+        next_frontier: list[str] = []
+        for entity_id in frontier:
+            related = await relationship_manager.get_related_entities(
+                entity_id=entity_id,
+                max_depth=1,
+                limit=max(limit * 2, 50),
+            )
+            for entity, _relationship in related:
+                if not entity.id or entity.id in seed_id_set or entity.id in visited:
+                    continue
+
+                visited.add(entity.id)
+                score = 1.0 / (current_depth + 1)
+                results_by_id[entity.id] = (entity, score, current_depth)
+                next_frontier.append(entity.id)
+
+                if len(results_by_id) >= limit:
+                    break
+
+            if len(results_by_id) >= limit:
+                break
+
+        frontier = next_frontier
+
+    if not results_by_id:
+        return []
+
+    ordered = sorted(
+        results_by_id.values(),
+        key=lambda item: (item[2], item[0].name.lower(), item[0].id),
+    )
+    results = [(entity, score) for entity, score, _distance in ordered[:limit]]
+    log.debug(
+        "graph_traversal_complete",
+        seeds=len(seed_ids),
+        depth=depth,
+        results=len(results),
+        strategy="relationship_manager",
+    )
+    return results
+
+
+async def _graph_traversal_via_query(
+    seed_ids: list[str],
+    client: GraphClient,
+    *,
+    depth: int,
+    limit: int,
+    group_id: str,
+) -> list[tuple[Entity, float]]:
+    try:
         params: dict[str, Any] = {
             "seed_ids": seed_ids,
             "limit": limit,
-            "group_id": resolved_group_id,
+            "group_id": group_id,
         }
 
         # Query for related entities up to depth
@@ -176,7 +279,7 @@ async def graph_traversal(
         LIMIT $limit
         """
 
-        rows = await client.execute_read_org(query, resolved_group_id, **params)
+        rows = await client.execute_read_org(query, group_id, **params)
 
         # Convert to Entity objects with distance-based scores
         results: list[tuple[Entity, float]] = []
@@ -217,12 +320,11 @@ async def graph_traversal(
             seeds=len(seed_ids),
             depth=depth,
             results=len(results),
+            strategy="query",
         )
         return results
-
-    except Exception as e:
-        log.warning("graph_traversal_failed", seeds=seed_ids, error=str(e))
-        return []
+    except Exception:
+        raise
 
 
 async def hybrid_search(

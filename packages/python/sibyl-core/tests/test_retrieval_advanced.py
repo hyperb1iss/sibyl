@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import numpy as np
 import pytest
@@ -728,6 +728,48 @@ class TestGraphTraversal:
 
         results = await graph_traversal([], client, depth=2)  # type: ignore[arg-type]
         assert results == []
+
+    @pytest.mark.asyncio
+    async def test_graph_traversal_prefers_relationship_manager_path(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Graph traversal should stay on relationship-manager seams when available."""
+        import sibyl_core.graph.relationships as relationships_module
+
+        client = MockGraphClientForHybrid()
+        relationship_manager = MagicMock()
+        near = make_entity_for_test("near", name="Near Entity")
+        far = make_entity_for_test("far", name="Far Entity")
+        relationship_manager.get_related_entities = AsyncMock(
+            side_effect=[
+                [(near, MagicMock())],
+                [(far, MagicMock())],
+            ]
+        )
+
+        monkeypatch.setattr(
+            relationships_module,
+            "RelationshipManager",
+            MagicMock(return_value=relationship_manager),
+        )
+
+        results = await graph_traversal(
+            ["seed"],
+            client,
+            depth=2,
+            limit=10,
+            group_id="org-123",
+        )  # type: ignore[arg-type]
+
+        assert [entity.id for entity, _score in results] == ["near", "far"]
+        assert results[0][1] > results[1][1]
+        assert client.query_history == []
+        assert client.read_org_calls == []
+        assert relationship_manager.get_related_entities.await_args_list == [
+            call(entity_id="seed", max_depth=1, limit=50),
+            call(entity_id="near", max_depth=1, limit=50),
+        ]
 
     @pytest.mark.asyncio
     async def test_graph_traversal_builds_correct_query(self) -> None:
