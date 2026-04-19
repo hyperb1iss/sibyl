@@ -35,6 +35,75 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+DEFAULT_REHEARSAL_BASE_URL = "http://localhost:3334"
+DEFAULT_REHEARSAL_BASELINES_DIR = Path("baselines")
+DEFAULT_REHEARSAL_MANIFEST = Path(".moon/cache/baseline-runtime-manifest.json")
+DEFAULT_REHEARSAL_EMAIL = "baseline-corpus@sibyl.dev"
+DEFAULT_REHEARSAL_PASSWORD = "baseline-corpus-password-secure-123!"  # noqa: S105
+
+
+def _load_valid_archive(source: Path):
+    try:
+        archive = load_archive(source)
+    except Exception as exc:
+        error(f"Archive load failed: {exc}")
+        raise typer.Exit(code=1) from exc
+
+    errors = validate_archive(archive)
+    if errors:
+        for issue in errors:
+            warn(issue)
+        error("Archive validation failed")
+        raise typer.Exit(code=1)
+
+    return archive
+
+
+def _resolve_org_id(requested_org_id: str, archive_org_id: str) -> str:
+    effective_org_id = requested_org_id or archive_org_id
+    if not effective_org_id:
+        error("Operation requires --org-id or an archive manifest organization_id")
+        raise typer.Exit(code=1)
+    return effective_org_id
+
+
+def _print_verify_summary(result: object) -> None:
+    expected_entities = getattr(result, "expected_entities", 0)
+    actual_entities = getattr(result, "actual_entities", 0)
+    expected_relationships = getattr(result, "expected_relationships", 0)
+    actual_relationships = getattr(result, "actual_relationships", 0)
+    validated_entity_ids = list(getattr(result, "validated_entity_ids", []))
+    errors = list(getattr(result, "errors", []))
+
+    info(f"Entities: expected {expected_entities}, actual {actual_entities}")
+    info(f"Relationships: expected {expected_relationships}, actual {actual_relationships}")
+    if validated_entity_ids:
+        info(f"Sampled entities: {len(validated_entity_ids)}")
+    if errors:
+        warn(f"Verification failed with {len(errors)} issue(s)")
+        for issue in errors:
+            console.print(f"  [dim]{issue}[/dim]")
+        raise typer.Exit(code=1)
+
+
+async def _replay_baseline(
+    *,
+    base_url: str,
+    baselines_dir: Path,
+    email: str,
+    password: str,
+    manifest_path: Path,
+) -> None:
+    from tools.baselines.replay import replay_all
+
+    await replay_all(
+        base_url=base_url,
+        baselines_dir=baselines_dir,
+        email=email,
+        password=password,
+        manifest_path=manifest_path,
+    )
+
 
 def _load_graph_export(org_id: str) -> tuple[dict[str, object], bytes]:
     from dataclasses import asdict
@@ -79,11 +148,7 @@ def check_archive(
     source: Annotated[Path, typer.Argument(help="Archive .tar.gz or directory to inspect")],
 ) -> None:
     """Validate an archive and print its manifest summary."""
-    try:
-        archive = load_archive(source)
-    except Exception as exc:
-        error(f"Archive load failed: {exc}")
-        raise typer.Exit(code=1) from exc
+    archive = _load_valid_archive(source)
 
     manifest = archive.manifest
     info(f"Archive: {source}")
@@ -97,7 +162,6 @@ def check_archive(
             f"  {name} ({file_manifest.kind}, {file_manifest.size_bytes} bytes, {file_manifest.sha256[:12]})"
         )
 
-    errors = validate_archive(archive)
     graph_payload = graph_payload_from_archive(archive)
     if graph_payload is not None:
         info(
@@ -105,13 +169,6 @@ def check_archive(
             f"{graph_payload.get('entity_count', len(graph_payload.get('entities', [])))} entities, "
             f"{graph_payload.get('relationship_count', len(graph_payload.get('relationships', [])))} relationships"
         )
-
-    if errors:
-        warn(f"Archive validation failed with {len(errors)} issue(s)")
-        for issue in errors:
-            console.print(f"  [dim]{issue}[/dim]")
-        raise typer.Exit(code=1)
-
     success("Archive validation passed")
 
 
@@ -200,23 +257,8 @@ def import_archive(
     ] = True,
 ) -> None:
     """Import a manifest archive into the active store."""
-    try:
-        archive = load_archive(source)
-    except Exception as exc:
-        error(f"Archive load failed: {exc}")
-        raise typer.Exit(code=1) from exc
-
-    errors = validate_archive(archive)
-    if errors:
-        for issue in errors:
-            warn(issue)
-        error("Archive validation failed; refusing import")
-        raise typer.Exit(code=1)
-
-    effective_org_id = org_id or archive.manifest.organization_id
-    if restore_graph and not effective_org_id:
-        error("Graph import requires --org-id or an archive manifest organization_id")
-        raise typer.Exit(code=1)
+    archive = _load_valid_archive(source)
+    effective_org_id = _resolve_org_id(org_id, archive.manifest.organization_id) if restore_graph else ""
 
     if restore_postgres and POSTGRES_FILENAME not in archive.files:
         error("Archive does not contain postgres.sql")
@@ -259,16 +301,8 @@ def verify_archive(
     ] = 10,
 ) -> None:
     """Verify an archive against the active runtime."""
-    try:
-        archive = load_archive(source)
-    except Exception as exc:
-        error(f"Archive load failed: {exc}")
-        raise typer.Exit(code=1) from exc
-
-    effective_org_id = org_id or archive.manifest.organization_id
-    if not effective_org_id:
-        error("Verification requires --org-id or an archive manifest organization_id")
-        raise typer.Exit(code=1)
+    archive = _load_valid_archive(source)
+    effective_org_id = _resolve_org_id(org_id, archive.manifest.organization_id)
 
     @run_async
     async def _verify() -> None:
@@ -277,20 +311,108 @@ def verify_archive(
             organization_id=effective_org_id,
             sample_size=sample_size,
         )
-        info(
-            f"Entities: expected {result.expected_entities}, actual {result.actual_entities}"
-        )
-        info(
-            "Relationships: "
-            f"expected {result.expected_relationships}, actual {result.actual_relationships}"
-        )
-        if result.validated_entity_ids:
-            info(f"Sampled entities: {len(result.validated_entity_ids)}")
-        if result.errors:
-            warn(f"Verification failed with {len(result.errors)} issue(s)")
-            for issue in result.errors:
-                console.print(f"  [dim]{issue}[/dim]")
-            raise typer.Exit(code=1)
+        _print_verify_summary(result)
         success("Archive verification passed")
 
     _verify()
+
+
+@app.command("rehearse")
+def rehearse_archive(
+    source: Annotated[Path, typer.Argument(help="Archive .tar.gz or directory to rehearse")],
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID override"),
+    ] = "",
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    clean: Annotated[
+        bool,
+        typer.Option("--clean", help="Clear the target graph before import"),
+    ] = True,
+    restore_postgres: Annotated[
+        bool,
+        typer.Option("--restore-postgres", help="Restore postgres.sql before graph import"),
+    ] = False,
+    run_baseline: Annotated[
+        bool,
+        typer.Option("--run-baseline/--skip-baseline", help="Replay the deterministic runtime baseline"),
+    ] = True,
+    base_url: Annotated[
+        str,
+        typer.Option("--base-url", help="Base URL for baseline replay"),
+    ] = DEFAULT_REHEARSAL_BASE_URL,
+    baselines_dir: Annotated[
+        Path,
+        typer.Option("--baselines-dir", help="Directory containing baseline case files"),
+    ] = DEFAULT_REHEARSAL_BASELINES_DIR,
+    manifest_path: Annotated[
+        Path,
+        typer.Option("--manifest-path", help="Runtime baseline manifest from `moon run baseline-seed`"),
+    ] = DEFAULT_REHEARSAL_MANIFEST,
+    email: Annotated[
+        str,
+        typer.Option("--email", help="Baseline user email"),
+    ] = DEFAULT_REHEARSAL_EMAIL,
+    password: Annotated[
+        str,
+        typer.Option("--password", help="Baseline user password"),
+    ] = DEFAULT_REHEARSAL_PASSWORD,
+    sample_size: Annotated[
+        int,
+        typer.Option("--sample-size", help="How many entity IDs to spot-check during verify"),
+    ] = 10,
+) -> None:
+    """Run an import + verify + baseline smoke rehearsal against the active store."""
+    archive = _load_valid_archive(source)
+    effective_org_id = _resolve_org_id(org_id, archive.manifest.organization_id)
+
+    if restore_postgres and POSTGRES_FILENAME not in archive.files:
+        error("Archive does not contain postgres.sql")
+        raise typer.Exit(code=1)
+    if GRAPH_FILENAME not in archive.files:
+        error("Archive does not contain graph.json")
+        raise typer.Exit(code=1)
+    if run_baseline and not manifest_path.exists():
+        error(f"Baseline manifest not found: {manifest_path}")
+        raise typer.Exit(code=1)
+
+    if not yes:
+        warn("This will import archive data and run rehearsal checks against the active runtime.")
+        if not typer.confirm("Continue?"):
+            info("Cancelled")
+            return
+
+    if restore_postgres:
+        info("Restoring PostgreSQL payload...")
+        _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
+
+    info(f"Restoring graph payload into {settings.store} store...")
+    payload = json.loads(archive.files[GRAPH_FILENAME].decode("utf-8"))
+    if not _restore_graph_payload(payload, effective_org_id, clean=clean):
+        error("Graph import failed")
+        raise typer.Exit(code=1)
+
+    @run_async
+    async def _rehearse() -> None:
+        result = await verify_graph_archive(
+            archive,
+            organization_id=effective_org_id,
+            sample_size=sample_size,
+        )
+        _print_verify_summary(result)
+        success("Archive verification passed")
+
+        if run_baseline:
+            info(f"Replaying deterministic baseline against {base_url}...")
+            await _replay_baseline(
+                base_url=base_url,
+                baselines_dir=baselines_dir,
+                email=email,
+                password=password,
+                manifest_path=manifest_path,
+            )
+            success("Baseline replay passed")
+
+        success("Migration rehearsal passed")
+
+    _rehearse()

@@ -114,3 +114,42 @@ def test_migrate_verify_uses_runtime_verifier(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "Archive verification passed" in result.output
+
+
+def test_migrate_rehearse_runs_verify_and_baseline(tmp_path: Path) -> None:
+    archive_path = tmp_path / "migration.tar.gz"
+    manifest_path = tmp_path / "runtime-manifest.json"
+    _write_graph_archive(archive_path)
+    manifest_path.write_text('{"graph_fixture": {}}\n', encoding="utf-8")
+
+    verify_graph_archive = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            expected_entities=1,
+            actual_entities=1,
+            expected_relationships=0,
+            actual_relationships=0,
+            validated_entity_ids=["entity-1"],
+            errors=[],
+        )
+    )
+    replay_all = AsyncMock(return_value=None)
+
+    with (
+        patch("sibyl.cli.migrate._restore_graph_payload", return_value=True),
+        patch("sibyl.cli.migrate.verify_graph_archive", verify_graph_archive),
+        patch("sibyl.cli.migrate._replay_baseline", replay_all),
+    ):
+        result = runner.invoke(
+            migrate_cli.app,
+            [
+                "rehearse",
+                str(archive_path),
+                "--yes",
+                "--manifest-path",
+                str(manifest_path),
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert "Migration rehearsal passed" in result.output

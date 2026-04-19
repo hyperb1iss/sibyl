@@ -345,6 +345,18 @@ tasks:
       - tools/**/*.py
       - pyproject.toml
 
+  migrate-rehearse:
+    command: uv run sibyld migrate rehearse
+    inputs:
+      - apps/api/src/**/*.py
+      - packages/python/sibyl-core/src/**/*.py
+      - tools/**/*.py
+      - baselines/**/*.jsonl
+      - .moon/cache/baseline-runtime-manifest.json
+      - pyproject.toml
+      - apps/api/pyproject.toml
+      - packages/python/sibyl-core/pyproject.toml
+
   # ==========================================================================
   # Coverage
   # ==========================================================================

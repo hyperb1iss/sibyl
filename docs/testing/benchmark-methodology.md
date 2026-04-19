@@ -79,9 +79,11 @@ Use this for offline comparison work, and label it clearly as such.
 
 When you need to compare legacy and Surreal on the same graph data:
 
-1. Export the source org graph with `sibyld export graph --org-id <org> --output /tmp/graph.json`
-2. Boot the target store and import it with `sibyld db restore /tmp/graph.json --org-id <org> --yes`
+1. Export a manifest archive from the source store with `sibyld migrate export --org-id <org> --output /tmp/migration.tar.gz`
+2. Rehearse the import path on the target store with `moon run migrate-rehearse -- /tmp/migration.tar.gz --yes`
 3. Run `moon run bench-live -- --label <store> --metadata store=<store>`
 4. Compare the saved artifacts with `uv run python benchmarks/compare_eval_reports.py <legacy.json> <surreal.json>`
 
-That split keeps the public story honest and makes it much easier to compare runs over time.
+The rehearsal command handles archive validation, graph import, runtime verification, and the
+deterministic baseline replay in one pass. That keeps the public story honest and makes it much
+easier to compare runs over time.
