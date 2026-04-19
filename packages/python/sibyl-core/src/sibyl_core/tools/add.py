@@ -199,7 +199,6 @@ async def add(
             )
         org_id = str(org_id)
         runtime = await get_legacy_graph_runtime(org_id)
-        client = runtime.client
         entity_manager = runtime.entity_manager
 
         # Generate deterministic ID
@@ -277,7 +276,7 @@ async def add(
                     log.warning("invalid_priority", priority=priority)
 
             # Get existing project tags for consistency (when project-scoped)
-            project_tags = await get_project_tags(client, project) if project else []
+            project_tags = await get_project_tags(runtime, project) if project else []
 
             # Auto-generate tags based on task content + project context
             task_technologies = technologies or languages or []

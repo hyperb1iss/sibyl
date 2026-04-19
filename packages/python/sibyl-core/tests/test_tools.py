@@ -26,6 +26,7 @@ from sibyl_core.tools.helpers import (
     _get_field,
     _serialize_enum,
     auto_tag_task,
+    get_project_tags,
 )
 from sibyl_core.tools.responses import (
     AddResponse,
@@ -236,6 +237,56 @@ class TestBuildEntityMetadata:
         assert metadata["category"] == "testing"
         assert metadata["languages"] == ["python", "typescript"]
         assert metadata["extra"] == "value"
+
+
+class TestGetProjectTags:
+    """Test project tag lookup helpers."""
+
+    @pytest.mark.asyncio
+    async def test_prefers_entity_manager_runtime(self) -> None:
+        """Project tag lookup should use the entity manager seam when available."""
+        entity_manager = MagicMock()
+        entity_manager.list_by_type = AsyncMock(
+            return_value=[
+                MockEntity(
+                    id="task_1",
+                    entity_type=EntityType.TASK,
+                    name="Task 1",
+                    tags=["Backend", "API"],
+                ),
+                MockEntity(
+                    id="task_2",
+                    entity_type=EntityType.TASK,
+                    name="Task 2",
+                    tags=["api", "Urgent"],
+                ),
+            ]
+        )
+        runtime = make_legacy_graph_runtime(entity_manager=entity_manager)
+
+        tags = await get_project_tags(runtime, "project-123")
+
+        assert tags == ["api", "backend", "urgent"]
+        entity_manager.list_by_type.assert_awaited_once_with(
+            EntityType.TASK,
+            project_id="project-123",
+            limit=1000,
+            include_archived=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_client_queries(self) -> None:
+        """Project tag lookup keeps the legacy client fallback when no runtime is present."""
+        client = MagicMock()
+        client.driver.execute_query = AsyncMock(
+            return_value=([[["backend"]], ['["api", "ops"]']], None, None)
+        )
+        client.normalize_result.return_value = [[["backend"]], ['["api", "ops"]']]
+
+        tags = await get_project_tags(client, "project-123")
+
+        assert tags == ["api", "backend", "ops"]
+        client.driver.execute_query.assert_awaited_once()
 
     def test_build_metadata_with_status_enum(self) -> None:
         """Serializes status enum to string."""
