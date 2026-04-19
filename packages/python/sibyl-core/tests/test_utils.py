@@ -7,6 +7,7 @@ Covers:
 """
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -627,6 +628,68 @@ class TestCycleResult:
         assert len(result.cycles) == 1
 
 
+def _make_task(*, task_id: str, status: str = "todo", task_order: int = 0) -> SimpleNamespace:
+    return SimpleNamespace(id=task_id, status=status, task_order=task_order, metadata={})
+
+
+def _make_relationship(source_id: str, target_id: str) -> SimpleNamespace:
+    return SimpleNamespace(source_id=source_id, target_id=target_id)
+
+
+def _make_dependency_managers(
+    *,
+    entity_lookup: dict[str, Any] | None = None,
+    relationships_by_entity: dict[tuple[str, str], list[Any]] | None = None,
+    tasks: list[Any] | None = None,
+    all_relationships: list[Any] | None = None,
+) -> tuple[SimpleNamespace, SimpleNamespace]:
+    entity_lookup = entity_lookup or {}
+    relationships_by_entity = relationships_by_entity or {}
+    tasks = tasks or []
+    all_relationships = all_relationships or []
+
+    async def get(entity_id: str) -> Any:
+        value = entity_lookup.get(entity_id)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    async def list_by_type(
+        _entity_type: Any,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        **_kwargs: Any,
+    ) -> list[Any]:
+        return tasks[offset : offset + limit]
+
+    async def get_for_entity(
+        entity_id: str,
+        *,
+        direction: str = "both",
+        **_kwargs: Any,
+    ) -> list[Any]:
+        return relationships_by_entity.get((entity_id, direction), [])
+
+    async def list_all(
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        **_kwargs: Any,
+    ) -> list[Any]:
+        return all_relationships[offset : offset + limit]
+
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(side_effect=get),
+        list_by_type=AsyncMock(side_effect=list_by_type),
+    )
+    relationship_manager = SimpleNamespace(
+        get_for_entity=AsyncMock(side_effect=get_for_entity),
+        list_all=AsyncMock(side_effect=list_all),
+    )
+    return entity_manager, relationship_manager
+
+
 class TestTaskOrderResult:
     """Test TaskOrderResult dataclass."""
 
@@ -652,20 +715,29 @@ class TestGetTaskDependencies:
         """Gets direct dependencies for a task."""
         from sibyl_core.tasks.dependencies import get_task_dependencies
 
-        mock_client = AsyncMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                ["dep_1", "todo"],
-                ["dep_2", "done"],
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            entity_lookup={
+                "dep_1": _make_task(task_id="dep_1", status="todo"),
+                "dep_2": _make_task(task_id="dep_2", status="done"),
+            },
+            relationships_by_entity={
+                ("task_1", "outgoing"): [
+                    _make_relationship("task_1", "dep_1"),
+                    _make_relationship("task_1", "dep_2"),
+                ]
+            },
         )
 
-        result = await get_task_dependencies(
-            client=mock_client,
-            task_id="task_1",
-            organization_id="org_1",
-            depth=1,
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_task_dependencies(
+                client=AsyncMock(),
+                task_id="task_1",
+                organization_id="org_1",
+                depth=1,
+            )
 
         assert result.task_id == "task_1"
         assert "dep_1" in result.dependencies
@@ -678,14 +750,15 @@ class TestGetTaskDependencies:
         """Returns empty result on error."""
         from sibyl_core.tasks.dependencies import get_task_dependencies
 
-        mock_client = AsyncMock()
-        mock_client.execute_read_org = AsyncMock(side_effect=Exception("DB error"))
-
-        result = await get_task_dependencies(
-            client=mock_client,
-            task_id="task_1",
-            organization_id="org_1",
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            side_effect=Exception("DB error"),
+        ):
+            result = await get_task_dependencies(
+                client=AsyncMock(),
+                task_id="task_1",
+                organization_id="org_1",
+            )
 
         assert result.dependencies == []
         assert result.blockers == []
@@ -699,19 +772,28 @@ class TestGetBlockingTasks:
         """Gets tasks that are blocked by the given task."""
         from sibyl_core.tasks.dependencies import get_blocking_tasks
 
-        mock_client = AsyncMock()
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                ["blocked_1", "todo"],
-                ["blocked_2", "doing"],
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            entity_lookup={
+                "blocked_1": _make_task(task_id="blocked_1", status="todo"),
+                "blocked_2": _make_task(task_id="blocked_2", status="doing"),
+            },
+            relationships_by_entity={
+                ("blocker_task", "incoming"): [
+                    _make_relationship("blocked_1", "blocker_task"),
+                    _make_relationship("blocked_2", "blocker_task"),
+                ]
+            },
         )
 
-        result = await get_blocking_tasks(
-            client=mock_client,
-            task_id="blocker_task",
-            organization_id="org_1",
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_blocking_tasks(
+                client=AsyncMock(),
+                task_id="blocker_task",
+                organization_id="org_1",
+            )
 
         assert result.task_id == "blocker_task"
         assert "blocked_1" in result.dependencies
@@ -722,14 +804,15 @@ class TestGetBlockingTasks:
         """Returns empty result on error."""
         from sibyl_core.tasks.dependencies import get_blocking_tasks
 
-        mock_client = AsyncMock()
-        mock_client.execute_read_org = AsyncMock(side_effect=Exception("Network error"))
-
-        result = await get_blocking_tasks(
-            client=mock_client,
-            task_id="task_1",
-            organization_id="org_1",
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            side_effect=Exception("Network error"),
+        ):
+            result = await get_blocking_tasks(
+                client=AsyncMock(),
+                task_id="task_1",
+                organization_id="org_1",
+            )
 
         assert result.dependencies == []
 
@@ -742,19 +825,26 @@ class TestDetectDependencyCycles:
         """Detects no cycles in acyclic graph."""
         from sibyl_core.tasks.dependencies import detect_dependency_cycles
 
-        mock_client = AsyncMock()
-        # A -> B -> C (no cycle)
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                ["A", "B"],
-                ["B", "C"],
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task(task_id="A"),
+                _make_task(task_id="B"),
+                _make_task(task_id="C"),
+            ],
+            all_relationships=[
+                _make_relationship("A", "B"),
+                _make_relationship("B", "C"),
+            ],
         )
 
-        result = await detect_dependency_cycles(
-            client=mock_client,
-            organization_id="org_1",
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await detect_dependency_cycles(
+                client=AsyncMock(),
+                organization_id="org_1",
+            )
 
         assert result.has_cycles is False
         assert result.cycles == []
@@ -764,20 +854,27 @@ class TestDetectDependencyCycles:
         """Detects cycles in graph."""
         from sibyl_core.tasks.dependencies import detect_dependency_cycles
 
-        mock_client = AsyncMock()
-        # A -> B -> C -> A (cycle)
-        mock_client.execute_read_org = AsyncMock(
-            return_value=[
-                ["A", "B"],
-                ["B", "C"],
-                ["C", "A"],
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task(task_id="A"),
+                _make_task(task_id="B"),
+                _make_task(task_id="C"),
+            ],
+            all_relationships=[
+                _make_relationship("A", "B"),
+                _make_relationship("B", "C"),
+                _make_relationship("C", "A"),
+            ],
         )
 
-        result = await detect_dependency_cycles(
-            client=mock_client,
-            organization_id="org_1",
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await detect_dependency_cycles(
+                client=AsyncMock(),
+                organization_id="org_1",
+            )
 
         assert result.has_cycles is True
         assert len(result.cycles) > 0
@@ -787,13 +884,14 @@ class TestDetectDependencyCycles:
         """Returns safe result on error."""
         from sibyl_core.tasks.dependencies import detect_dependency_cycles
 
-        mock_client = AsyncMock()
-        mock_client.execute_read_org = AsyncMock(side_effect=Exception("Query failed"))
-
-        result = await detect_dependency_cycles(
-            client=mock_client,
-            organization_id="org_1",
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            side_effect=Exception("Query failed"),
+        ):
+            result = await detect_dependency_cycles(
+                client=AsyncMock(),
+                organization_id="org_1",
+            )
 
         assert result.has_cycles is False
         assert "failed" in result.message.lower()
@@ -807,21 +905,26 @@ class TestSuggestTaskOrder:
         """Sorts tasks in dependency order."""
         from sibyl_core.tasks.dependencies import suggest_task_order
 
-        mock_client = AsyncMock()
-        # Tasks
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=[
-                # First call: get tasks
-                [["task_a", "todo", 1], ["task_b", "todo", 2], ["task_c", "todo", 3]],
-                # Second call: get dependencies (B depends on A, C depends on B)
-                [["task_b", "task_a"], ["task_c", "task_b"]],
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task(task_id="task_a", task_order=1),
+                _make_task(task_id="task_b", task_order=2),
+                _make_task(task_id="task_c", task_order=3),
+            ],
+            all_relationships=[
+                _make_relationship("task_b", "task_a"),
+                _make_relationship("task_c", "task_b"),
+            ],
         )
 
-        result = await suggest_task_order(
-            client=mock_client,
-            organization_id="org_1",
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await suggest_task_order(
+                client=AsyncMock(),
+                organization_id="org_1",
+            )
 
         # A should come before B, B before C
         assert result.ordered_tasks.index("task_a") < result.ordered_tasks.index("task_b")
@@ -833,20 +936,27 @@ class TestSuggestTaskOrder:
         """Tasks in cycles are reported as unordered."""
         from sibyl_core.tasks.dependencies import suggest_task_order
 
-        mock_client = AsyncMock()
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=[
-                # Tasks
-                [["A", "todo", 0], ["B", "todo", 0], ["C", "todo", 0]],
-                # Dependencies: A->B->C->A (cycle)
-                [["A", "B"], ["B", "C"], ["C", "A"]],
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task(task_id="A"),
+                _make_task(task_id="B"),
+                _make_task(task_id="C"),
+            ],
+            all_relationships=[
+                _make_relationship("A", "B"),
+                _make_relationship("B", "C"),
+                _make_relationship("C", "A"),
+            ],
         )
 
-        result = await suggest_task_order(
-            client=mock_client,
-            organization_id="org_1",
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await suggest_task_order(
+                client=AsyncMock(),
+                organization_id="org_1",
+            )
 
         # All tasks should be unordered due to cycle
         assert len(result.unordered_tasks) > 0
@@ -857,13 +967,14 @@ class TestSuggestTaskOrder:
         """Returns empty result on error."""
         from sibyl_core.tasks.dependencies import suggest_task_order
 
-        mock_client = AsyncMock()
-        mock_client.execute_read_org = AsyncMock(side_effect=Exception("DB error"))
-
-        result = await suggest_task_order(
-            client=mock_client,
-            organization_id="org_1",
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            side_effect=Exception("DB error"),
+        ):
+            result = await suggest_task_order(
+                client=AsyncMock(),
+                organization_id="org_1",
+            )
 
         assert result.ordered_tasks == []
         assert "failed" in result.warnings[0].lower()
@@ -873,24 +984,53 @@ class TestSuggestTaskOrder:
         """Independent tasks can be in any order."""
         from sibyl_core.tasks.dependencies import suggest_task_order
 
-        mock_client = AsyncMock()
-        mock_client.execute_read_org = AsyncMock(
-            side_effect=[
-                # Tasks with no dependencies
-                [["task_1", "todo", 0], ["task_2", "todo", 0], ["task_3", "todo", 0]],
-                # No dependency edges
-                [],
-            ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=[
+                _make_task(task_id="task_1"),
+                _make_task(task_id="task_2"),
+                _make_task(task_id="task_3"),
+            ],
         )
 
-        result = await suggest_task_order(
-            client=mock_client,
-            organization_id="org_1",
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await suggest_task_order(
+                client=AsyncMock(),
+                organization_id="org_1",
+            )
 
         # All tasks should be ordered (no cycles)
         assert len(result.ordered_tasks) == 3
         assert result.unordered_tasks == []
+
+    @pytest.mark.asyncio
+    async def test_topological_sort_paginates_manager_results(self) -> None:
+        """Orders tasks beyond a single manager page."""
+        from sibyl_core.tasks.dependencies import suggest_task_order
+
+        tasks = [_make_task(task_id=f"task_{idx:03d}") for idx in range(502)]
+        relationships = [
+            _make_relationship(f"task_{idx + 1:03d}", f"task_{idx:03d}") for idx in range(501)
+        ]
+        entity_manager, relationship_manager = _make_dependency_managers(
+            tasks=tasks,
+            all_relationships=relationships,
+        )
+
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await suggest_task_order(
+                client=AsyncMock(),
+                organization_id="org_1",
+            )
+
+        assert len(result.ordered_tasks) == 502
+        assert result.ordered_tasks[0] == "task_000"
+        assert result.ordered_tasks[-1] == "task_501"
 
 
 class TestDepthClamping:
@@ -901,15 +1041,18 @@ class TestDepthClamping:
         """Depth is clamped to minimum of 1."""
         from sibyl_core.tasks.dependencies import get_task_dependencies
 
-        mock_client = AsyncMock()
-        mock_client.execute_read_org = AsyncMock(return_value=[])
+        entity_manager, relationship_manager = _make_dependency_managers()
 
-        result = await get_task_dependencies(
-            client=mock_client,
-            task_id="task_1",
-            organization_id="org_1",
-            depth=-5,
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_task_dependencies(
+                client=AsyncMock(),
+                task_id="task_1",
+                organization_id="org_1",
+                depth=-5,
+            )
 
         assert result.depth == 1
 
@@ -918,16 +1061,19 @@ class TestDepthClamping:
         """Depth is clamped to maximum of 5 when include_transitive=True."""
         from sibyl_core.tasks.dependencies import get_task_dependencies
 
-        mock_client = AsyncMock()
-        mock_client.execute_read_org = AsyncMock(return_value=[])
+        entity_manager, relationship_manager = _make_dependency_managers()
 
-        result = await get_task_dependencies(
-            client=mock_client,
-            task_id="task_1",
-            organization_id="org_1",
-            depth=100,
-            include_transitive=True,  # Must be True to use depth > 1
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_task_dependencies(
+                client=AsyncMock(),
+                task_id="task_1",
+                organization_id="org_1",
+                depth=100,
+                include_transitive=True,  # Must be True to use depth > 1
+            )
 
         assert result.depth == 5
 
@@ -936,15 +1082,18 @@ class TestDepthClamping:
         """Depth is 1 when include_transitive=False, regardless of depth param."""
         from sibyl_core.tasks.dependencies import get_task_dependencies
 
-        mock_client = AsyncMock()
-        mock_client.execute_read_org = AsyncMock(return_value=[])
+        entity_manager, relationship_manager = _make_dependency_managers()
 
-        result = await get_task_dependencies(
-            client=mock_client,
-            task_id="task_1",
-            organization_id="org_1",
-            depth=5,
-            include_transitive=False,
-        )
+        with patch(
+            "sibyl_core.tasks.dependencies._get_graph_managers",
+            return_value=(entity_manager, relationship_manager),
+        ):
+            result = await get_task_dependencies(
+                client=AsyncMock(),
+                task_id="task_1",
+                organization_id="org_1",
+                depth=5,
+                include_transitive=False,
+            )
 
         assert result.depth == 1  # include_transitive=False forces depth to 1

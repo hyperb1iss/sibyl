@@ -5,15 +5,17 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from sibyl_core.graph.client import GraphClient
 from sibyl_core.models.entities import EntityType, RelationshipType
 from sibyl_core.models.tasks import TaskStatus
 
 if TYPE_CHECKING:
+    from sibyl_core.graph.client import GraphClient
     from sibyl_core.graph.entities import EntityManager
     from sibyl_core.graph.relationships import RelationshipManager
 
 log = structlog.get_logger()
+
+_PAGINATION_BATCH_SIZE = 500
 
 
 @dataclass
@@ -42,26 +44,6 @@ class TaskOrderResult:
     ordered_tasks: list[str]  # Task IDs in execution order
     unordered_tasks: list[str] = field(default_factory=list)  # Tasks in cycles
     warnings: list[str] = field(default_factory=list)
-
-
-def _uses_surreal_runtime(client: "GraphClient") -> bool:
-    if getattr(client, "_store", None) == "surreal":
-        return True
-
-    try:
-        from sibyl_core.backends.surreal import SurrealDriver
-    except ImportError:
-        return False
-
-    driver = getattr(client, "driver", None)
-    if driver is None:
-        graphiti_client = getattr(client, "client", None)
-        driver = getattr(graphiti_client, "driver", None)
-    return isinstance(driver, SurrealDriver)
-
-
-def _prefer_graph_managers(client: "GraphClient") -> bool:
-    return isinstance(client, GraphClient) or _uses_surreal_runtime(client)
 
 
 def _get_graph_managers(
@@ -104,6 +86,66 @@ def _task_order_value(task: Any) -> int:
     return 0
 
 
+async def _list_task_entities(
+    entity_manager: "EntityManager",
+    *,
+    project_id: str | None = None,
+) -> list[Any]:
+    tasks: list[Any] = []
+    offset = 0
+
+    while True:
+        batch = await entity_manager.list_by_type(
+            EntityType.TASK,
+            project_id=project_id,
+            limit=_PAGINATION_BATCH_SIZE,
+            offset=offset,
+            include_archived=True,
+        )
+        if not batch:
+            break
+
+        tasks.extend(batch)
+        offset += len(batch)
+        if len(batch) < _PAGINATION_BATCH_SIZE:
+            break
+
+    return tasks
+
+
+async def _list_dependency_relationships(
+    relationship_manager: "RelationshipManager",
+    *,
+    task_ids: set[str] | None = None,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    offset = 0
+
+    while True:
+        batch = await relationship_manager.list_all(
+            relationship_types=[RelationshipType.DEPENDS_ON],
+            limit=_PAGINATION_BATCH_SIZE,
+            offset=offset,
+        )
+        if not batch:
+            break
+
+        for relationship in batch:
+            source_id = relationship.source_id
+            target_id = relationship.target_id
+            if not source_id or not target_id:
+                continue
+            if task_ids is not None and (source_id not in task_ids or target_id not in task_ids):
+                continue
+            rows.append({"from_id": source_id, "to_id": target_id})
+
+        offset += len(batch)
+        if len(batch) < _PAGINATION_BATCH_SIZE:
+            break
+
+    return rows
+
+
 async def get_task_dependencies(
     client: "GraphClient",
     task_id: str,
@@ -130,52 +172,33 @@ async def get_task_dependencies(
     log.info("get_task_dependencies", task_id=task_id, depth=actual_depth)
 
     try:
-        if _prefer_graph_managers(client):
-            entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
-            seen: set[str] = set()
-            frontier = [task_id]
-            rows: list[dict[str, str | None]] = []
+        entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
+        seen: set[str] = set()
+        frontier = [task_id]
+        rows: list[dict[str, str | None]] = []
 
-            for _ in range(actual_depth):
-                if not frontier:
-                    break
-                next_frontier: list[str] = []
-                for current_task_id in frontier:
-                    relationships = await relationship_manager.get_for_entity(
-                        current_task_id,
-                        relationship_types=[RelationshipType.DEPENDS_ON],
-                        direction="outgoing",
-                    )
-                    for relationship in relationships:
-                        dep_id = relationship.target_id
-                        if dep_id in seen:
-                            continue
-                        seen.add(dep_id)
-                        next_frontier.append(dep_id)
-                        dep_status = None
-                        try:
-                            dependency = await entity_manager.get(dep_id)
-                        except Exception:
-                            dependency = None
-                        dep_status = _task_status_value(dependency)
-                        rows.append({"dep_id": dep_id, "dep_status": dep_status})
-                frontier = next_frontier
-        else:
-            # Query for DEPENDS_ON relationships
-            query = f"""
-            MATCH (task {{uuid: $task_id}})-[:RELATIONSHIP*1..{actual_depth}]->(dep)
-            WHERE ALL(r IN relationships(path) WHERE r.relationship_type = 'DEPENDS_ON')
-            RETURN DISTINCT dep.uuid as dep_id, dep.status as dep_status
-            """
-
-            # Simpler query for direct dependencies only
-            if actual_depth == 1:
-                query = """
-                MATCH (task {uuid: $task_id})-[r:RELATIONSHIP {relationship_type: 'DEPENDS_ON'}]->(dep)
-                RETURN dep.uuid as dep_id, dep.status as dep_status
-                """
-
-            rows = await client.execute_read_org(query, organization_id, task_id=task_id)
+        for _ in range(actual_depth):
+            if not frontier:
+                break
+            next_frontier: list[str] = []
+            for current_task_id in frontier:
+                relationships = await relationship_manager.get_for_entity(
+                    current_task_id,
+                    relationship_types=[RelationshipType.DEPENDS_ON],
+                    direction="outgoing",
+                )
+                for relationship in relationships:
+                    dep_id = relationship.target_id
+                    if not dep_id or dep_id in seen:
+                        continue
+                    seen.add(dep_id)
+                    next_frontier.append(dep_id)
+                    try:
+                        dependency = await entity_manager.get(dep_id)
+                    except Exception:
+                        dependency = None
+                    rows.append({"dep_id": dep_id, "dep_status": _task_status_value(dependency)})
+            frontier = next_frontier
 
         dependencies: list[str] = []
         blockers: list[str] = []
@@ -240,31 +263,22 @@ async def get_blocking_tasks(
     log.info("get_blocking_tasks", task_id=task_id, depth=depth)
 
     try:
-        if _prefer_graph_managers(client):
-            entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
-            relationships = await relationship_manager.get_for_entity(
-                task_id,
-                relationship_types=[RelationshipType.DEPENDS_ON],
-                direction="incoming",
-            )
-            rows = []
-            for relationship in relationships:
-                dep_id = relationship.source_id
-                dep_status = None
-                try:
-                    dependency = await entity_manager.get(dep_id)
-                except Exception:
-                    dependency = None
-                dep_status = _task_status_value(dependency)
-                rows.append({"dep_id": dep_id, "dep_status": dep_status})
-        else:
-            # Query for tasks that DEPEND_ON this task (inverse relationship)
-            query = """
-            MATCH (dependent)-[r:RELATIONSHIP {relationship_type: 'DEPENDS_ON'}]->(task {uuid: $task_id})
-            RETURN dependent.uuid as dep_id, dependent.status as dep_status
-            """
-
-            rows = await client.execute_read_org(query, organization_id, task_id=task_id)
+        entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
+        relationships = await relationship_manager.get_for_entity(
+            task_id,
+            relationship_types=[RelationshipType.DEPENDS_ON],
+            direction="incoming",
+        )
+        rows = []
+        for relationship in relationships:
+            dep_id = relationship.source_id
+            if not dep_id:
+                continue
+            try:
+                dependency = await entity_manager.get(dep_id)
+            except Exception:
+                dependency = None
+            rows.append({"dep_id": dep_id, "dep_status": _task_status_value(dependency)})
 
         blocked_tasks: list[str] = []
         incomplete: list[str] = []
@@ -325,37 +339,13 @@ async def detect_dependency_cycles(
     log.info("detect_dependency_cycles", project_id=project_id, max_depth=max_depth)
 
     try:
-        # Query for all DEPENDS_ON edges, optionally scoped to project
-        if _prefer_graph_managers(client):
-            entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
-            tasks = await entity_manager.list_by_type(
-                EntityType.TASK,
-                project_id=project_id,
-                limit=10_000,
-                include_archived=True,
-            )
-            task_ids = {task.id for task in tasks}
-            rows = [
-                {"from_id": relationship.source_id, "to_id": relationship.target_id}
-                for relationship in await relationship_manager.list_all()
-                if relationship.relationship_type == RelationshipType.DEPENDS_ON
-                and relationship.source_id in task_ids
-                and relationship.target_id in task_ids
-            ]
-        elif project_id:
-            query = """
-            MATCH (task)-[belongs:RELATIONSHIP {relationship_type: 'BELONGS_TO'}]->(project {uuid: $project_id})
-            WITH task
-            MATCH (task)-[r:RELATIONSHIP {relationship_type: 'DEPENDS_ON'}]->(dep)
-            RETURN task.uuid as from_id, dep.uuid as to_id
-            """
-            rows = await client.execute_read_org(query, organization_id, project_id=project_id)
-        else:
-            query = """
-            MATCH (task)-[r:RELATIONSHIP {relationship_type: 'DEPENDS_ON'}]->(dep)
-            RETURN task.uuid as from_id, dep.uuid as to_id
-            """
-            rows = await client.execute_read_org(query, organization_id)
+        entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
+        tasks = await _list_task_entities(entity_manager, project_id=project_id)
+        task_ids = {task.id for task in tasks if getattr(task, "id", None)}
+        rows = await _list_dependency_relationships(
+            relationship_manager,
+            task_ids=task_ids,
+        )
 
         # Build adjacency list
         graph: dict[str, list[str]] = {}
@@ -447,43 +437,17 @@ async def suggest_task_order(
     log.info("suggest_task_order", project_id=project_id, status_filter=status_filter)
 
     try:
-        # Get all tasks and their dependencies
-        if _prefer_graph_managers(client):
-            entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
-            tasks = await entity_manager.list_by_type(
-                EntityType.TASK,
-                project_id=project_id,
-                limit=10_000,
-                include_archived=True,
-            )
-            task_rows = [
-                {
-                    "task_id": task.id,
-                    "status": _task_status_value(task),
-                    "priority": _task_order_value(task),
-                }
-                for task in tasks
-            ]
-            dep_rows = [
-                {"from_id": relationship.source_id, "to_id": relationship.target_id}
-                for relationship in await relationship_manager.list_all()
-                if relationship.relationship_type == RelationshipType.DEPENDS_ON
-            ]
-        elif project_id:
-            task_query = """
-            MATCH (task)-[r:RELATIONSHIP {relationship_type: 'BELONGS_TO'}]->(project {uuid: $project_id})
-            RETURN task.uuid as task_id, task.status as status, task.task_order as priority
-            """
-            task_rows = await client.execute_read_org(
-                task_query, organization_id, project_id=project_id
-            )
-        else:
-            task_query = """
-            MATCH (task)
-            WHERE task.entity_type = 'task'
-            RETURN task.uuid as task_id, task.status as status, task.task_order as priority
-            """
-            task_rows = await client.execute_read_org(task_query, organization_id)
+        entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
+        task_entities = await _list_task_entities(entity_manager, project_id=project_id)
+        task_rows = [
+            {
+                "task_id": task.id,
+                "status": _task_status_value(task),
+                "priority": _task_order_value(task),
+            }
+            for task in task_entities
+            if getattr(task, "id", None)
+        ]
 
         # Build task set with priorities
         tasks: dict[str, int] = {}  # task_id -> priority
@@ -509,25 +473,10 @@ async def suggest_task_order(
                 except (TypeError, ValueError):
                     tasks[task_id] = 0
 
-        if not _prefer_graph_managers(client):
-            # Get dependency edges
-            if project_id:
-                dep_query = """
-                MATCH (task)-[:RELATIONSHIP {relationship_type: 'BELONGS_TO'}]->(project {uuid: $project_id})
-                WITH task
-                MATCH (task)-[r:RELATIONSHIP {relationship_type: 'DEPENDS_ON'}]->(dep)
-                RETURN task.uuid as from_id, dep.uuid as to_id
-                """
-                dep_rows = await client.execute_read_org(
-                    dep_query, organization_id, project_id=project_id
-                )
-            else:
-                dep_query = """
-                MATCH (task)-[r:RELATIONSHIP {relationship_type: 'DEPENDS_ON'}]->(dep)
-                WHERE task.entity_type = 'task'
-                RETURN task.uuid as from_id, dep.uuid as to_id
-                """
-                dep_rows = await client.execute_read_org(dep_query, organization_id)
+        dep_rows = await _list_dependency_relationships(
+            relationship_manager,
+            task_ids=set(tasks),
+        )
 
         # Build adjacency list and in-degree count
         graph: dict[str, list[str]] = {task_id: [] for task_id in tasks}
