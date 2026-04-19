@@ -851,32 +851,76 @@ async def backfill_project_id_from_relationships(
     nodes_without_project_rel = 0
 
     try:
-        client = await get_legacy_graph_client()
+        runtime = await get_legacy_graph_runtime(organization_id)
+        entity_manager = runtime.entity_manager
+        relationship_manager = runtime.relationship_manager
 
-        # Query: Find nodes with BELONGS_TO -> project but missing project_id property
-        # This uses a single Cypher query for efficiency
-        query = """
-        MATCH (n)-[r:BELONGS_TO]->(p)
-        WHERE (n:Episodic OR n:Entity)
-          AND n.group_id = $group_id
-          AND p.entity_type = 'project'
-          AND (n.project_id IS NULL OR n.project_id = '')
-        RETURN n.uuid AS node_id, p.uuid AS project_id, n.name AS node_name
-        """
-
-        result = await client.execute_read_org(query, organization_id, group_id=organization_id)
+        project_ids: set[str] = set()
+        project_offset = 0
+        while True:
+            projects = await entity_manager.list_by_type(
+                EntityType.PROJECT,
+                limit=BACKFILL_PAGE_SIZE,
+                offset=project_offset,
+                include_archived=True,
+            )
+            if not projects:
+                break
+            project_offset += len(projects)
+            project_ids.update(
+                str(project.id)
+                for project in projects
+                if getattr(project, "id", None)
+            )
 
         updates_needed: list[tuple[str, str, str]] = []
-        for record in result:
-            if isinstance(record, (list, tuple)):
-                node_id, project_id, node_name = record[0], record[1], record[2]
-            else:
-                node_id = record.get("node_id")
-                project_id = record.get("project_id")
-                node_name = record.get("node_name")
+        entity_offset = 0
+        while True:
+            entities = await entity_manager.list_all(
+                limit=BACKFILL_PAGE_SIZE,
+                offset=entity_offset,
+                include_archived=True,
+            )
+            if not entities:
+                break
 
-            if node_id and project_id:
-                updates_needed.append((node_id, project_id, node_name or ""))
+            entity_offset += len(entities)
+            for entity in entities:
+                node_id = getattr(entity, "id", None)
+                if not node_id:
+                    continue
+
+                metadata = getattr(entity, "metadata", None)
+                metadata = metadata if isinstance(metadata, dict) else {}
+                project_id = getattr(entity, "project_id", None) or metadata.get("project_id")
+                if project_id:
+                    nodes_already_set += 1
+                    continue
+
+                relationships = await relationship_manager.get_for_entity(
+                    str(node_id),
+                    relationship_types=[RelationshipType.BELONGS_TO],
+                    direction="outgoing",
+                )
+                relationship_project_id = next(
+                    (
+                        relationship.target_id
+                        for relationship in relationships
+                        if relationship.target_id in project_ids
+                    ),
+                    None,
+                )
+
+                if relationship_project_id:
+                    updates_needed.append(
+                        (
+                            str(node_id),
+                            str(relationship_project_id),
+                            str(getattr(entity, "name", "") or ""),
+                        )
+                    )
+                else:
+                    nodes_without_project_rel += 1
 
         log.info("backfill_nodes_found", count=len(updates_needed))
 
@@ -890,22 +934,9 @@ async def backfill_project_id_from_relationships(
                 )
             nodes_updated = len(updates_needed)
         else:
-            # Batch update for efficiency
             for node_id, project_id, node_name in updates_needed:
                 try:
-                    update_query = """
-                    MATCH (n)
-                    WHERE n.uuid = $node_id AND n.group_id = $group_id
-                    SET n.project_id = $project_id
-                    RETURN n.uuid
-                    """
-                    await client.execute_write_org(
-                        update_query,
-                        organization_id,
-                        node_id=node_id,
-                        group_id=organization_id,
-                        project_id=project_id,
-                    )
+                    await entity_manager.update(node_id, {"project_id": project_id})
                     nodes_updated += 1
                     log.debug(
                         "backfill_node_updated",
@@ -916,45 +947,8 @@ async def backfill_project_id_from_relationships(
                 except Exception as e:
                     errors.append(f"Node {node_id}: {e}")
 
-        # Also count nodes that already have project_id set
-        count_query = """
-        MATCH (n)
-        WHERE (n:Episodic OR n:Entity)
-          AND n.group_id = $group_id
-          AND n.project_id IS NOT NULL
-          AND n.project_id <> ''
-        RETURN count(n) AS cnt
-        """
-        count_result = await client.execute_read_org(
-            count_query, organization_id, group_id=organization_id
-        )
-        if count_result:
-            record = count_result[0]
-            nodes_already_set = (
-                record[0] if isinstance(record, (list, tuple)) else record.get("cnt", 0)
-            )
-
-        # Count nodes without any project relationship (true orphans)
-        # FalkorDB doesn't support EXISTS {} syntax, use OPTIONAL MATCH instead
-        orphan_query = """
-        MATCH (n)
-        WHERE (n:Episodic OR n:Entity)
-          AND n.group_id = $group_id
-          AND (n.project_id IS NULL OR n.project_id = '')
-        OPTIONAL MATCH (n)-[:BELONGS_TO]->(p:Entity)
-        WHERE p.entity_type = 'project'
-        WITH n, p
-        WHERE p IS NULL
-        RETURN count(n) AS cnt
-        """
-        orphan_result = await client.execute_read_org(
-            orphan_query, organization_id, group_id=organization_id
-        )
-        if orphan_result:
-            record = orphan_result[0]
-            nodes_without_project_rel = (
-                record[0] if isinstance(record, (list, tuple)) else record.get("cnt", 0)
-            )
+        if not dry_run:
+            nodes_already_set += nodes_updated
 
         duration = time.time() - start_time
         log.info(
