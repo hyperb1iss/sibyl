@@ -15,7 +15,12 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from sibyl_core.services.legacy_graph import get_legacy_graph_runtime
+from sibyl_core.services import (
+    get_graph_client as _service_get_graph_client,
+)
+from sibyl_core.services import (
+    get_graph_runtime,
+)
 from sibyl_core.tools.responses import ConflictWarning
 
 if TYPE_CHECKING:
@@ -24,6 +29,9 @@ if TYPE_CHECKING:
 log = structlog.get_logger()
 
 __all__ = ["detect_conflicts", "find_similar_entities"]
+get_graph_client = _service_get_graph_client
+get_legacy_graph_runtime = get_graph_runtime
+EntityManager = None
 
 # Thresholds for conflict classification
 DUPLICATE_THRESHOLD = 0.95  # Near-identical content

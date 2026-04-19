@@ -22,7 +22,7 @@ from sibyl_core.models.tasks import (
     TaskPriority,
     TaskStatus,
 )
-from sibyl_core.services.legacy_graph import get_legacy_graph_runtime
+from sibyl_core.services import get_graph_runtime
 from sibyl_core.tools.conflicts import detect_conflicts
 from sibyl_core.tools.helpers import (
     MAX_CONTENT_LENGTH,
@@ -37,6 +37,7 @@ from sibyl_core.tools.responses import AddResponse, ConflictWarning
 log = structlog.get_logger()
 
 __all__ = ["add"]
+get_legacy_graph_runtime = get_graph_runtime
 
 
 def _build_relationship(rel_data: dict[str, Any]) -> Relationship:

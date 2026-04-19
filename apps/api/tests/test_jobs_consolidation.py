@@ -180,7 +180,7 @@ async def test_consolidate_org_counts_merge_exceptions_as_failures(
 async def test_priority_decay_archives_only_old_unarchived_episodes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import sibyl_core.services.legacy_graph as legacy_graph_module
+    import sibyl_core.services as graph_services
 
     now = datetime.now(UTC)
 
@@ -220,8 +220,8 @@ async def test_priority_decay_archives_only_old_unarchived_episodes(
     entity_manager.update = AsyncMock(return_value=object())
 
     monkeypatch.setattr(
-        legacy_graph_module,
-        "get_legacy_graph_runtime",
+        graph_services,
+        "get_graph_runtime",
         AsyncMock(
             return_value=SimpleNamespace(
                 client=MagicMock(),
@@ -253,7 +253,7 @@ async def test_priority_decay_archives_only_old_unarchived_episodes(
 async def test_priority_decay_respects_archive_cap_across_pages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import sibyl_core.services.legacy_graph as legacy_graph_module
+    import sibyl_core.services as graph_services
 
     now = datetime.now(UTC)
 
@@ -275,8 +275,8 @@ async def test_priority_decay_respects_archive_cap_across_pages(
     entity_manager.update = AsyncMock(return_value=object())
 
     monkeypatch.setattr(
-        legacy_graph_module,
-        "get_legacy_graph_runtime",
+        graph_services,
+        "get_graph_runtime",
         AsyncMock(
             return_value=SimpleNamespace(
                 client=MagicMock(),

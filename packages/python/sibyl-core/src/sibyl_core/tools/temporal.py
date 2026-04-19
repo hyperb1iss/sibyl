@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 import structlog
 
-from sibyl_core.services.legacy_graph import get_legacy_graph_client
+from sibyl_core.services import get_graph_client as _service_get_graph_client
 from sibyl_core.tools.responses import TemporalEdge, TemporalResponse
 
 log = structlog.get_logger()
@@ -26,7 +26,10 @@ __all__ = ["find_conflicts", "get_entity_history", "temporal_query"]
 
 
 async def get_graph_client() -> Any:
-    return await get_legacy_graph_client()
+    return await _service_get_graph_client()
+
+
+get_legacy_graph_client = get_graph_client
 
 
 async def temporal_query(

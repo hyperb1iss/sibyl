@@ -8,6 +8,7 @@ Covers contradiction detection during knowledge ingest including:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -217,16 +218,14 @@ class TestFindSimilarEntities:
         mock_entity_manager = AsyncMock()
         mock_entity_manager.search = AsyncMock(return_value=[])
 
-        mock_client = AsyncMock()
-
-        with (
-            patch(
-                "sibyl_core.tools.conflicts.get_graph_client",
-                return_value=mock_client,
-            ),
-            patch(
-                "sibyl_core.tools.conflicts.EntityManager",
-                return_value=mock_entity_manager,
+        with patch(
+            "sibyl_core.tools.conflicts.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    entity_manager=mock_entity_manager,
+                    relationship_manager=AsyncMock(),
+                    client=AsyncMock(),
+                )
             ),
         ):
             results = await find_similar_entities(
@@ -254,16 +253,14 @@ class TestFindSimilarEntities:
             ]
         )
 
-        mock_client = AsyncMock()
-
-        with (
-            patch(
-                "sibyl_core.tools.conflicts.get_graph_client",
-                return_value=mock_client,
-            ),
-            patch(
-                "sibyl_core.tools.conflicts.EntityManager",
-                return_value=mock_entity_manager,
+        with patch(
+            "sibyl_core.tools.conflicts.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    entity_manager=mock_entity_manager,
+                    relationship_manager=AsyncMock(),
+                    client=AsyncMock(),
+                )
             ),
         ):
             results = await find_similar_entities(
@@ -292,16 +289,14 @@ class TestFindSimilarEntities:
             ]
         )
 
-        mock_client = AsyncMock()
-
-        with (
-            patch(
-                "sibyl_core.tools.conflicts.get_graph_client",
-                return_value=mock_client,
-            ),
-            patch(
-                "sibyl_core.tools.conflicts.EntityManager",
-                return_value=mock_entity_manager,
+        with patch(
+            "sibyl_core.tools.conflicts.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    entity_manager=mock_entity_manager,
+                    relationship_manager=AsyncMock(),
+                    client=AsyncMock(),
+                )
             ),
         ):
             results = await find_similar_entities(

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import structlog
 
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
-from sibyl_core.services.legacy_graph import get_legacy_graph_runtime
+from sibyl_core.services import get_graph_runtime
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
     _build_entity_metadata,
@@ -26,6 +26,7 @@ log = structlog.get_logger()
 
 # Re-export for backwards compatibility
 __all__ = ["DependencyNode", "explore"]
+get_legacy_graph_runtime = get_graph_runtime
 
 
 def _normalize_project_ids(

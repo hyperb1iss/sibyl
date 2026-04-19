@@ -13,13 +13,15 @@ import structlog
 
 from sibyl_core.config import settings
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
-from sibyl_core.services.legacy_graph import (
+from sibyl_core.services import (
     count_entities_by_type,
-    get_legacy_graph_client,
-    get_legacy_graph_runtime,
+    get_graph_client,
+    get_graph_runtime,
 )
 
 log = structlog.get_logger()
+get_legacy_graph_client = get_graph_client
+get_legacy_graph_runtime = get_graph_runtime
 
 BACKFILL_PAGE_SIZE = 1000
 

@@ -4,18 +4,21 @@ import time
 from typing import Any
 
 from sibyl_core.models.entities import EntityType
-from sibyl_core.services.legacy_graph import (
+from sibyl_core.services import (
     count_entities_by_type,
-    get_legacy_graph_client,
-    get_legacy_graph_runtime,
+    get_graph_client,
+    get_graph_runtime,
 )
-from sibyl_core.services.legacy_graph import (
-    execute_legacy_graph_query as _execute_legacy_graph_query,
+from sibyl_core.services import (
+    execute_graph_query as _execute_graph_query,
 )
 
 # Module-level state for uptime tracking
 _server_start_time: float | None = None
-execute_legacy_graph_query = _execute_legacy_graph_query
+get_legacy_graph_client = get_graph_client
+get_legacy_graph_runtime = get_graph_runtime
+execute_graph_query = _execute_graph_query
+execute_legacy_graph_query = _execute_graph_query
 
 
 async def _count_entities(entity_manager: Any, entity_type: EntityType) -> int:

@@ -762,11 +762,11 @@ def backup_all(
         typer.Option("--prefix", help="Filename prefix for backup files"),
     ] = "",
 ) -> None:
-    """Backup BOTH PostgreSQL database AND FalkorDB graph.
+    """Backup BOTH PostgreSQL database AND graph runtime data.
 
     Creates two files:
     - {prefix}sibyl_pg_backup.sql - PostgreSQL dump
-    - {prefix}sibyl_graph_backup.json - FalkorDB graph (if org_id provided)
+    - {prefix}sibyl_graph_backup.json - graph data export (if org_id provided)
 
     This is the recommended backup command for full disaster recovery.
     """
@@ -815,7 +815,7 @@ def backup_all(
 
     # Backup Graph (if org_id provided)
     if org_id:
-        info("Step 2/2: Backing up FalkorDB graph...")
+        info("Step 2/2: Backing up graph runtime data...")
 
         @run_async
         async def _backup_graph() -> bool:
@@ -837,7 +837,7 @@ def backup_all(
 
                 graph_size = graph_file.stat().st_size / 1024
                 success(
-                    f"  FalkorDB: {graph_file} ({graph_size:.1f} KB) - "
+                    f"  Graph: {graph_file} ({graph_size:.1f} KB) - "
                     f"{result.entity_count} entities, {result.relationship_count} relationships"
                 )
                 return True
@@ -1001,7 +1001,7 @@ def restore_all(
         typer.Option("--graph-file", help="Override graph backup filename"),
     ] = "",
 ) -> None:
-    """Restore PostgreSQL + FalkorDB graph from a backup archive or directory.
+    """Restore PostgreSQL + graph runtime data from a backup archive or directory.
 
     Accepts a .tar.gz archive (from backup jobs) or a directory (from backup-all).
     Reads org_id from metadata.json automatically when restoring from an archive.
@@ -1045,7 +1045,7 @@ def restore_all(
 
     # Restore Graph
     if graph_path and org_id:
-        info("Step 2/2: Restoring FalkorDB graph...")
+        info("Step 2/2: Restoring graph runtime data...")
         _restore_graph_from_file(graph_path, org_id, clean)
     elif graph_path:
         warn("Step 2/2: Skipping graph restore (no --org-id — pass it or add metadata.json)")
@@ -1419,7 +1419,7 @@ def backup_create(
     """Create a backup via the API (async job).
 
     Triggers a backup job on the server that creates a compressed archive
-    containing PostgreSQL dump and FalkorDB graph export.
+    containing PostgreSQL dump and graph data export.
 
     Use --wait to block until the backup completes.
 

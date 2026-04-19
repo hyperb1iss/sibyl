@@ -9,7 +9,7 @@ import structlog
 from sibyl_core.models.entities import EntityType
 from sibyl_core.retrieval import HybridConfig, hybrid_search, temporal_boost
 from sibyl_core.services import document_search as document_search_service
-from sibyl_core.services.legacy_graph import get_legacy_graph_runtime
+from sibyl_core.services import get_graph_runtime
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
     _build_entity_metadata,
@@ -20,6 +20,7 @@ from sibyl_core.tools.responses import SearchResponse, SearchResult
 from sibyl_core.utils.resilience import TIMEOUTS, with_timeout
 
 log = structlog.get_logger()
+get_legacy_graph_runtime = get_graph_runtime
 
 __all__ = [
     "_dedupe_document_rows",

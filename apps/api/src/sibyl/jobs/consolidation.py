@@ -133,7 +133,7 @@ async def priority_decay(
         Dict with archival statistics
     """
     from sibyl_core.models.entities import EntityType
-    from sibyl_core.services.legacy_graph import get_legacy_graph_runtime
+    from sibyl_core.services import get_graph_runtime
 
     log.info(
         "priority_decay_started",
@@ -142,7 +142,7 @@ async def priority_decay(
     )
 
     try:
-        runtime = await get_legacy_graph_runtime(group_id)
+        runtime = await get_graph_runtime(group_id)
         entity_manager = runtime.entity_manager
 
         cutoff = datetime.now(UTC) - timedelta(days=min_age_days)
