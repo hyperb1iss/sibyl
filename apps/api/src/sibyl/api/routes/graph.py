@@ -11,13 +11,9 @@ from sibyl.auth.dependencies import get_current_organization, require_org_role
 from sibyl.db.models import Organization, OrganizationRole
 from sibyl.persistence.graph_runtime import (
     get_entity_graph_runtime as _service_get_entity_graph_runtime,
+    get_graph_query_adapter as _service_get_graph_query_adapter,
 )
 from sibyl_core.errors import EntityNotFoundError
-from sibyl_core.graph.communities import (
-    get_cluster_nodes,
-    get_clusters_for_visualization,
-    get_hierarchical_graph,
-)
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services import KnowledgeReadService
 
@@ -40,6 +36,51 @@ async def get_legacy_entity_runtime(group_id: str):
 
 async def get_entity_graph_runtime(group_id: str):
     return await get_legacy_entity_runtime(group_id)
+
+
+async def get_legacy_graph_query_adapter(group_id: str):
+    return await _service_get_graph_query_adapter(group_id)
+
+
+async def get_graph_query_adapter(group_id: str):
+    return await get_legacy_graph_query_adapter(group_id)
+
+
+async def get_clusters_for_visualization(
+    _client: object,
+    group_id: str,
+    *,
+    force_refresh: bool = False,
+):
+    adapter = await get_graph_query_adapter(group_id)
+    return await adapter.get_clusters_for_visualization(force_refresh=force_refresh)
+
+
+async def get_cluster_nodes(
+    _client: object,
+    group_id: str,
+    cluster_id: str,
+):
+    adapter = await get_graph_query_adapter(group_id)
+    return await adapter.get_cluster_nodes(cluster_id)
+
+
+async def get_hierarchical_graph(
+    _client: object,
+    group_id: str,
+    *,
+    project_ids: list[str] | None = None,
+    entity_types: list[str] | None = None,
+    max_nodes: int = 1000,
+    max_edges: int = 5000,
+):
+    adapter = await get_graph_query_adapter(group_id)
+    return await adapter.get_hierarchical_graph(
+        project_ids=project_ids,
+        entity_types=entity_types,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+    )
 
 router = APIRouter(
     prefix="/graph",
