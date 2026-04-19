@@ -851,10 +851,23 @@ class TestGraphTraversal:
         ]
 
     @pytest.mark.asyncio
-    async def test_graph_traversal_builds_correct_query(self) -> None:
-        """Graph traversal builds correct Cypher query."""
+    async def test_graph_traversal_initializes_relationship_manager_with_group_id(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Graph traversal initializes the relationship manager with explicit org scope."""
+        import sibyl_core.graph.relationships as relationships_module
+
         client = MockGraphClientForHybrid()
-        client.traversal_results = []
+        relationship_manager = MagicMock()
+        relationship_manager.get_related_entities = AsyncMock(return_value=[])
+        relationship_manager_cls = MagicMock(return_value=relationship_manager)
+
+        monkeypatch.setattr(
+            relationships_module,
+            "RelationshipManager",
+            relationship_manager_cls,
+        )
 
         await graph_traversal(
             ["id1", "id2"],
@@ -864,33 +877,43 @@ class TestGraphTraversal:
             group_id="org-123",
         )  # type: ignore[arg-type]
 
-        assert len(client.query_history) == 1
-        query = client.query_history[0]
-        assert "RELATIONSHIP*1..3" in query  # Depth 3
-        assert "seed.uuid IN $seed_ids" in query
+        relationship_manager_cls.assert_called_once_with(client, group_id="org-123")
+        assert relationship_manager.get_related_entities.await_args_list == [
+            call(entity_id="id1", max_depth=1, limit=50),
+            call(entity_id="id2", max_depth=1, limit=50),
+        ]
 
     @pytest.mark.asyncio
-    async def test_graph_traversal_scores_by_distance(self) -> None:
+    async def test_graph_traversal_scores_by_distance(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Graph traversal scores entities by distance."""
+        import sibyl_core.graph.relationships as relationships_module
+
         client = MockGraphClientForHybrid()
-        # Return entities at different distances
-        client.traversal_results = [
-            {
-                "id": "near",
-                "name": "Near Entity",
-                "type": "topic",
-                "description": "",
-                "distance": 1,
-            },
-            {"id": "far", "name": "Far Entity", "type": "topic", "description": "", "distance": 3},
-        ]
+        relationship_manager = MagicMock()
+        near = make_entity_for_test("near", name="Near Entity")
+        far = make_entity_for_test("far", name="Far Entity")
+        relationship_manager.get_related_entities = AsyncMock(
+            side_effect=[
+                [(near, MagicMock())],
+                [(far, MagicMock())],
+            ]
+        )
+
+        monkeypatch.setattr(
+            relationships_module,
+            "RelationshipManager",
+            MagicMock(return_value=relationship_manager),
+        )
 
         results = await graph_traversal(
             ["seed"],
-            client,
-            depth=5,
+            client,  # type: ignore[arg-type]
+            depth=2,
             group_id="org-123",
-        )  # type: ignore[arg-type]
+        )
 
         assert len(results) == 2
         # Closer entity should have higher score
@@ -899,17 +922,30 @@ class TestGraphTraversal:
         assert near_score > far_score  # 1/(1+1) > 1/(3+1)
 
     @pytest.mark.asyncio
-    async def test_graph_traversal_with_group_id(self) -> None:
-        """Graph traversal includes group_id filter."""
+    async def test_graph_traversal_with_group_id(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Graph traversal keeps all reads on relationship-manager seams."""
+        import sibyl_core.graph.relationships as relationships_module
+
         client = MockGraphClientForHybrid()
-        client.traversal_results = []
+        relationship_manager = MagicMock()
+        relationship_manager.get_related_entities = AsyncMock(return_value=[])
+
+        monkeypatch.setattr(
+            relationships_module,
+            "RelationshipManager",
+            MagicMock(return_value=relationship_manager),
+        )
 
         await graph_traversal(["id1"], client, depth=2, group_id="org-123")  # type: ignore[arg-type]
 
-        query = client.query_history[0]
-        assert "group_id" in query
+        assert relationship_manager.get_related_entities.await_args_list == [
+            call(entity_id="id1", max_depth=1, limit=50)
+        ]
         assert client.read_calls == []
-        assert client.read_org_calls[0][0] == "org-123"
+        assert client.read_org_calls == []
 
     @pytest.mark.asyncio
     async def test_graph_traversal_requires_group_id(self) -> None:
@@ -1038,26 +1074,37 @@ class TestHybridSearch:
         assert result.total == 5
 
     @pytest.mark.asyncio
-    async def test_hybrid_search_uses_entity_manager_group_id_for_graph_traversal(self) -> None:
+    async def test_hybrid_search_uses_entity_manager_group_id_for_graph_traversal(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Hybrid search derives org scope from the entity manager."""
+        import sibyl_core.graph.relationships as relationships_module
+
         client = MockGraphClientForHybrid()
         manager = MockEntityManagerForHybrid()
+        relationship_manager = MagicMock()
+        relationship_manager.get_related_entities = AsyncMock(return_value=[])
+        relationship_manager_cls = MagicMock(return_value=relationship_manager)
+
+        monkeypatch.setattr(
+            relationships_module,
+            "RelationshipManager",
+            relationship_manager_cls,
+        )
 
         manager.search_results = [(make_entity_for_test("id1", name="Python"), 0.9)]
-        client.traversal_results = [
-            {
-                "id": "id2",
-                "name": "Related",
-                "type": "topic",
-                "description": "",
-                "distance": 1,
-            }
-        ]
 
         await hybrid_search("Python", client, manager)  # type: ignore[arg-type]
 
         assert client.read_calls == []
-        assert client.read_org_calls[0][0] == manager._group_id
+        assert client.read_org_calls == []
+        relationship_manager_cls.assert_called_once_with(client, group_id=manager._group_id)
+        relationship_manager.get_related_entities.assert_awaited_once_with(
+            entity_id="id1",
+            max_depth=1,
+            limit=50,
+        )
 
 
 class TestSimpleHybridSearch:
@@ -1277,10 +1324,22 @@ class TestEdgeCases:
         assert config.similarity_threshold == 1.0
 
     @pytest.mark.asyncio
-    async def test_graph_traversal_handles_query_exception(self) -> None:
-        """Graph traversal returns empty on exception."""
+    async def test_graph_traversal_handles_manager_exception(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Graph traversal returns empty when the relationship seam fails."""
+        import sibyl_core.graph.relationships as relationships_module
+
         client = MockGraphClientForHybrid()
-        client.execute_read_org = AsyncMock(side_effect=Exception("DB error"))
+        relationship_manager = MagicMock()
+        relationship_manager.get_related_entities = AsyncMock(side_effect=Exception("DB error"))
+
+        monkeypatch.setattr(
+            relationships_module,
+            "RelationshipManager",
+            MagicMock(return_value=relationship_manager),
+        )
 
         results = await graph_traversal(
             ["id1"],
