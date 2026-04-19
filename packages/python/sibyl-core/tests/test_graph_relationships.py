@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from graphiti_core.edges import EntityEdge
 
+from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.errors import ConventionsMCPError
 from sibyl_core.graph.relationships import (
     VALID_RELATIONSHIP_TYPES,
@@ -57,6 +58,17 @@ def mock_graph_client(mock_graphiti_client: MagicMock) -> MagicMock:
 def relationship_manager(mock_graph_client: MagicMock) -> RelationshipManager:
     """Create RelationshipManager with mocked dependencies."""
     return RelationshipManager(mock_graph_client, group_id="test-org-123")
+
+
+@pytest.fixture
+def surreal_relationship_manager() -> RelationshipManager:
+    """Create RelationshipManager backed by a Surreal driver clone."""
+    driver = SurrealDriver("memory://")
+    graph_client = MagicMock()
+    graph_client.client = MagicMock(driver=driver)
+    graph_client.driver = driver
+    graph_client.normalize_result = MagicMock(side_effect=lambda x: x[0] if x else [])
+    return RelationshipManager(graph_client, group_id="test-org-123")
 
 
 @pytest.fixture
@@ -124,6 +136,26 @@ class TestRelationshipManagerInit:
 
 class TestRelationshipCreate:
     """Test relationship creation operations."""
+
+    @pytest.mark.asyncio
+    async def test_create_relationship_uses_surreal_edge_ops(
+        self,
+        surreal_relationship_manager: RelationshipManager,
+        sample_relationship: Relationship,
+    ) -> None:
+        ops = surreal_relationship_manager._driver.entity_edge_ops
+        ops.get_between_nodes = AsyncMock(return_value=[])
+        ops.save = AsyncMock()
+
+        result = await surreal_relationship_manager.create(sample_relationship)
+
+        assert result == sample_relationship.id
+        ops.get_between_nodes.assert_awaited_once_with(
+            surreal_relationship_manager._driver,
+            sample_relationship.source_id,
+            sample_relationship.target_id,
+        )
+        ops.save.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_create_relationship_success(
@@ -352,6 +384,24 @@ class TestRelationshipBulkCreate:
 
 class TestGetForEntity:
     """Test retrieving relationships for an entity."""
+
+    @pytest.mark.asyncio
+    async def test_get_for_entity_uses_surreal_edge_ops(
+        self,
+        surreal_relationship_manager: RelationshipManager,
+        sample_entity_edge: EntityEdge,
+    ) -> None:
+        ops = surreal_relationship_manager._driver.entity_edge_ops
+        ops.get_by_node_uuid = AsyncMock(return_value=[sample_entity_edge])
+
+        results = await surreal_relationship_manager.get_for_entity("entity-001", direction="outgoing")
+
+        assert len(results) == 1
+        assert results[0].source_id == "entity-001"
+        ops.get_by_node_uuid.assert_awaited_once_with(
+            surreal_relationship_manager._driver,
+            "entity-001",
+        )
 
     @pytest.mark.asyncio
     async def test_get_for_entity_outgoing(
@@ -668,6 +718,28 @@ class TestRelationshipDelete:
     """Test relationship deletion operations."""
 
     @pytest.mark.asyncio
+    async def test_delete_uses_surreal_edge_ops(
+        self,
+        surreal_relationship_manager: RelationshipManager,
+        sample_entity_edge: EntityEdge,
+    ) -> None:
+        ops = surreal_relationship_manager._driver.entity_edge_ops
+        ops.get_by_uuid = AsyncMock(return_value=sample_entity_edge)
+        ops.delete = AsyncMock()
+
+        result = await surreal_relationship_manager.delete(sample_entity_edge.uuid)
+
+        assert result is True
+        ops.get_by_uuid.assert_awaited_once_with(
+            surreal_relationship_manager._driver,
+            sample_entity_edge.uuid,
+        )
+        ops.delete.assert_awaited_once_with(
+            surreal_relationship_manager._driver,
+            sample_entity_edge,
+        )
+
+    @pytest.mark.asyncio
     async def test_delete_success(
         self,
         relationship_manager: RelationshipManager,
@@ -766,6 +838,23 @@ class TestDeleteForEntity:
 
 class TestListAll:
     """Test listing all relationships."""
+
+    @pytest.mark.asyncio
+    async def test_list_all_uses_surreal_edge_ops(
+        self,
+        surreal_relationship_manager: RelationshipManager,
+        sample_entity_edge: EntityEdge,
+    ) -> None:
+        ops = surreal_relationship_manager._driver.entity_edge_ops
+        ops.get_by_group_ids = AsyncMock(return_value=[sample_entity_edge])
+
+        results = await surreal_relationship_manager.list_all()
+
+        assert len(results) == 1
+        ops.get_by_group_ids.assert_awaited_once_with(
+            surreal_relationship_manager._driver,
+            [surreal_relationship_manager._group_id],
+        )
 
     @pytest.mark.asyncio
     async def test_list_all_basic(

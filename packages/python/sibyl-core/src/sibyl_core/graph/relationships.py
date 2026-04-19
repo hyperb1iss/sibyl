@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import structlog
 from graphiti_core.edges import EntityEdge
+from graphiti_core.errors import EdgeNotFoundError
 
 from sibyl_core.errors import ConventionsMCPError
 from sibyl_core.graph.client import GraphClient
@@ -83,6 +84,26 @@ class RelationshipManager:
         self._group_id = group_id
         # Clone the driver to use the org-specific graph
         self._driver = client.client.driver.clone(group_id)
+
+    def _surreal_entity_edge_ops(self):
+        try:
+            from sibyl_core.backends.surreal import SurrealDriver
+        except ImportError:
+            return None
+
+        if isinstance(self._driver, SurrealDriver):
+            return self._driver.entity_edge_ops
+        return None
+
+    def _surreal_entity_node_ops(self):
+        try:
+            from sibyl_core.backends.surreal import SurrealDriver
+        except ImportError:
+            return None
+
+        if isinstance(self._driver, SurrealDriver):
+            return self._driver.entity_node_ops
+        return None
 
     def _to_graphiti_edge(self, relationship: Relationship) -> EntityEdge:
         """Convert our Relationship model to Graphiti's EntityEdge.
@@ -174,6 +195,26 @@ class RelationshipManager:
         )
 
         try:
+            surreal_edge_ops = self._surreal_entity_edge_ops()
+            if surreal_edge_ops is not None:
+                existing = await surreal_edge_ops.get_between_nodes(
+                    self._driver,
+                    relationship.source_id,
+                    relationship.target_id,
+                )
+                for edge in existing:
+                    if edge.name == relationship.relationship_type.value:
+                        log.info(
+                            "Relationship already exists; skipping duplicate",
+                            relationship_id=edge.uuid,
+                        )
+                        return edge.uuid
+
+                edge = self._to_graphiti_edge(relationship)
+                await surreal_edge_ops.save(self._driver, edge)
+                log.info("Created relationship", relationship_id=edge.uuid)
+                return edge.uuid
+
             # Check for existing relationship
             existing = await EntityEdge.get_between_nodes(
                 self._client.driver,
@@ -322,6 +363,30 @@ class RelationshipManager:
         )
 
         try:
+            surreal_edge_ops = self._surreal_entity_edge_ops()
+            if surreal_edge_ops is not None:
+                edges = await surreal_edge_ops.get_by_node_uuid(self._driver, entity_id)
+                relationships = []
+                type_values = {t.value for t in relationship_types} if relationship_types else None
+
+                for edge in edges:
+                    if edge.group_id != self._group_id:
+                        continue
+                    if direction == "outgoing" and edge.source_node_uuid != entity_id:
+                        continue
+                    if direction == "incoming" and edge.target_node_uuid != entity_id:
+                        continue
+                    if type_values and edge.name not in type_values:
+                        continue
+                    relationships.append(self._from_graphiti_edge(edge))
+
+                log.debug(
+                    "Retrieved relationships via Surreal edge ops",
+                    entity_id=entity_id,
+                    count=len(relationships),
+                )
+                return relationships
+
             # Build direction-aware query
             if direction == "outgoing":
                 match_clause = "MATCH (n {uuid: $entity_id})-[r]->(m)"
@@ -458,50 +523,56 @@ class RelationshipManager:
             from graphiti_core.nodes import EntityNode
 
             entity_manager = EntityManager(self._client, group_id=self._group_id)
-            query = """
-                MATCH (n)
-                WHERE n.uuid IN $ids
-                RETURN n
-            """
-            rows = await self._client.execute_read_org(
-                query, organization_id=self._group_id, ids=other_ids
-            )
-
-            # Build entity lookup map - convert FalkorDB nodes to EntityNode then to Entity
             entities_by_id: dict[str, Entity] = {}
-            for row in rows:
-                fdb_node = row.get("n")
-                if fdb_node and hasattr(fdb_node, "properties"):
-                    try:
-                        props = fdb_node.properties
-                        # Convert FalkorDB node to Graphiti EntityNode
-                        node = EntityNode(
-                            uuid=props.get("uuid", ""),
-                            name=props.get("name", ""),
-                            group_id=props.get("group_id", self._group_id),
-                            labels=list(fdb_node.labels) if hasattr(fdb_node, "labels") else [],
-                            created_at=props.get("created_at"),
-                            name_embedding=props.get("name_embedding"),
-                            summary=props.get("summary", ""),
-                            attributes={
-                                k: v
-                                for k, v in props.items()
-                                if k
-                                not in (
-                                    "uuid",
-                                    "name",
-                                    "group_id",
-                                    "labels",
-                                    "created_at",
-                                    "name_embedding",
-                                    "summary",
-                                )
-                            },
-                        )
-                        entity = entity_manager.node_to_entity(node)
-                        entities_by_id[entity.id] = entity
-                    except Exception:
-                        continue
+            surreal_entity_ops = self._surreal_entity_node_ops()
+            if surreal_entity_ops is not None:
+                nodes = await surreal_entity_ops.get_by_uuids(self._driver, other_ids)
+                for node in nodes:
+                    entity = entity_manager.node_to_entity(node)
+                    entities_by_id[entity.id] = entity
+            else:
+                query = """
+                    MATCH (n)
+                    WHERE n.uuid IN $ids
+                    RETURN n
+                """
+                rows = await self._client.execute_read_org(
+                    query, organization_id=self._group_id, ids=other_ids
+                )
+
+                # Build entity lookup map - convert FalkorDB nodes to EntityNode then to Entity
+                for row in rows:
+                    fdb_node = row.get("n")
+                    if fdb_node and hasattr(fdb_node, "properties"):
+                        try:
+                            props = fdb_node.properties
+                            node = EntityNode(
+                                uuid=props.get("uuid", ""),
+                                name=props.get("name", ""),
+                                group_id=props.get("group_id", self._group_id),
+                                labels=list(fdb_node.labels) if hasattr(fdb_node, "labels") else [],
+                                created_at=props.get("created_at"),
+                                name_embedding=props.get("name_embedding"),
+                                summary=props.get("summary", ""),
+                                attributes={
+                                    k: v
+                                    for k, v in props.items()
+                                    if k
+                                    not in (
+                                        "uuid",
+                                        "name",
+                                        "group_id",
+                                        "labels",
+                                        "created_at",
+                                        "name_embedding",
+                                        "summary",
+                                    )
+                                },
+                            )
+                            entity = entity_manager.node_to_entity(node)
+                            entities_by_id[entity.id] = entity
+                        except Exception:
+                            continue
 
             # Match entities back to relationships
             results: list[tuple[Entity, Relationship]] = []
@@ -535,6 +606,18 @@ class RelationshipManager:
         log.info("Deleting relationship", relationship_id=relationship_id)
 
         try:
+            surreal_edge_ops = self._surreal_entity_edge_ops()
+            if surreal_edge_ops is not None:
+                try:
+                    edge = await surreal_edge_ops.get_by_uuid(self._driver, relationship_id)
+                except EdgeNotFoundError:
+                    log.warning("Relationship not found", relationship_id=relationship_id)
+                    return False
+
+                await surreal_edge_ops.delete(self._driver, edge)
+                log.info("Deleted relationship", relationship_id=relationship_id)
+                return True
+
             # Use direct Cypher to delete by UUID (consistent with create/get)
             query = """
                 MATCH ()-[r {uuid: $relationship_id}]-()
@@ -595,6 +678,21 @@ class RelationshipManager:
         try:
             rel_type = _validate_relationship_type(relationship_type.value)
 
+            surreal_edge_ops = self._surreal_entity_edge_ops()
+            if surreal_edge_ops is not None:
+                edges = await surreal_edge_ops.get_between_nodes(self._driver, source_id, target_id)
+                to_delete = [edge for edge in edges if edge.name == rel_type]
+                for edge in to_delete:
+                    await surreal_edge_ops.delete(self._driver, edge)
+
+                log.info(
+                    "Deleted relationships between entities",
+                    source_id=source_id,
+                    target_id=target_id,
+                    count=len(to_delete),
+                )
+                return len(to_delete)
+
             query = f"""
                 MATCH (s {{uuid: $source_id}})-[r:{rel_type}]->(t {{uuid: $target_id}})
                 WHERE r.group_id = $group_id
@@ -645,6 +743,20 @@ class RelationshipManager:
         log.info("Deleting all relationships for entity", entity_id=entity_id)
 
         try:
+            surreal_edge_ops = self._surreal_entity_edge_ops()
+            if surreal_edge_ops is not None:
+                edges = await surreal_edge_ops.get_by_node_uuid(self._driver, entity_id)
+                scoped_edges = [edge for edge in edges if edge.group_id == self._group_id]
+                for edge in scoped_edges:
+                    await surreal_edge_ops.delete(self._driver, edge)
+
+                log.info(
+                    "Deleted relationships for entity",
+                    entity_id=entity_id,
+                    count=len(scoped_edges),
+                )
+                return len(scoped_edges)
+
             # Use direct Cypher to delete all relationships for entity
             query = """
                 MATCH (n {uuid: $entity_id})-[r]-()
@@ -692,6 +804,18 @@ class RelationshipManager:
         log.debug("Listing all relationships", limit=limit, offset=offset, types=relationship_types)
 
         try:
+            surreal_edge_ops = self._surreal_entity_edge_ops()
+            if surreal_edge_ops is not None:
+                edges = await surreal_edge_ops.get_by_group_ids(self._driver, [self._group_id])
+                if relationship_types:
+                    allowed = {relationship_type.value for relationship_type in relationship_types}
+                    edges = [edge for edge in edges if edge.name in allowed]
+
+                selected = edges[offset : offset + limit]
+                relationships = [self._from_graphiti_edge(edge) for edge in selected]
+                log.debug("Listed relationships via Surreal edge ops", count=len(relationships))
+                return relationships
+
             # Sanitize pagination to prevent injection
             # Note: max_value for limit increased to support backup exports
             safe_offset = _sanitize_pagination(offset, max_value=100000)
