@@ -1,9 +1,12 @@
 import importlib.util
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
+from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.retrieval.dedup import DuplicatePair
 
 
@@ -171,3 +174,128 @@ async def test_consolidate_org_counts_merge_exceptions_as_failures(
         remove_id="remove-1",
         merge_metadata=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_priority_decay_archives_only_old_unarchived_episodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sibyl_core.services.legacy_graph as legacy_graph_module
+
+    now = datetime.now(UTC)
+
+    async def list_by_type(
+        entity_type: EntityType,
+        limit: int = 50,
+        offset: int = 0,
+        include_archived: bool = False,
+    ) -> list[Entity]:
+        del entity_type, limit, include_archived
+        if offset != 0:
+            return []
+        return [
+            Entity(
+                id="episode-old",
+                entity_type=EntityType.EPISODE,
+                name="Old episode",
+                created_at=now - timedelta(days=200),
+            ),
+            Entity(
+                id="episode-archived",
+                entity_type=EntityType.EPISODE,
+                name="Archived episode",
+                created_at=now - timedelta(days=220),
+                metadata={"status": "archived"},
+            ),
+            Entity(
+                id="episode-fresh",
+                entity_type=EntityType.EPISODE,
+                name="Fresh episode",
+                created_at=now - timedelta(days=20),
+            ),
+        ]
+
+    entity_manager = AsyncMock()
+    entity_manager.list_by_type = AsyncMock(side_effect=list_by_type)
+    entity_manager.update = AsyncMock(return_value=object())
+
+    monkeypatch.setattr(
+        legacy_graph_module,
+        "get_legacy_graph_runtime",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                client=MagicMock(),
+                entity_manager=entity_manager,
+                relationship_manager=AsyncMock(),
+            )
+        ),
+    )
+
+    result = await consolidation_module.priority_decay({}, group_id="org-123", max_archives_per_run=10)
+
+    assert result == {
+        "group_id": "org-123",
+        "candidates_found": 1,
+        "archived": 1,
+        "min_age_days": 180,
+    }
+    assert entity_manager.list_by_type.await_args_list == [
+        call(EntityType.EPISODE, limit=200, offset=0, include_archived=True),
+        call(EntityType.EPISODE, limit=200, offset=3, include_archived=True),
+    ]
+    entity_manager.update.assert_awaited_once()
+    assert entity_manager.update.await_args.args[0] == "episode-old"
+    assert entity_manager.update.await_args.args[1]["status"] == "archived"
+    assert "archived_at" in entity_manager.update.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_priority_decay_respects_archive_cap_across_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sibyl_core.services.legacy_graph as legacy_graph_module
+
+    now = datetime.now(UTC)
+
+    def episode(entity_id: str, age_days: int) -> Entity:
+        return Entity(
+            id=entity_id,
+            entity_type=EntityType.EPISODE,
+            name=entity_id,
+            created_at=now - timedelta(days=age_days),
+        )
+
+    entity_manager = AsyncMock()
+    entity_manager.list_by_type = AsyncMock(
+        side_effect=[
+            [episode("episode-1", 240), episode("episode-2", 220)],
+            [episode("episode-3", 200)],
+        ]
+    )
+    entity_manager.update = AsyncMock(return_value=object())
+
+    monkeypatch.setattr(
+        legacy_graph_module,
+        "get_legacy_graph_runtime",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                client=MagicMock(),
+                entity_manager=entity_manager,
+                relationship_manager=AsyncMock(),
+            )
+        ),
+    )
+
+    result = await consolidation_module.priority_decay({}, group_id="org-123", max_archives_per_run=3)
+
+    assert result["candidates_found"] == 3
+    assert result["archived"] == 3
+    assert entity_manager.list_by_type.await_args_list == [
+        call(EntityType.EPISODE, limit=200, offset=0, include_archived=True),
+        call(EntityType.EPISODE, limit=200, offset=2, include_archived=True),
+    ]
+    assert [await_call.args[0] for await_call in entity_manager.update.await_args_list] == [
+        "episode-1",
+        "episode-2",
+        "episode-3",
+    ]

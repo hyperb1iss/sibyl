@@ -132,7 +132,8 @@ async def priority_decay(
     Returns:
         Dict with archival statistics
     """
-    from sibyl_core.graph.client import get_graph_client
+    from sibyl_core.models.entities import EntityType
+    from sibyl_core.services.legacy_graph import get_legacy_graph_runtime
 
     log.info(
         "priority_decay_started",
@@ -141,57 +142,43 @@ async def priority_decay(
     )
 
     try:
-        client = await get_graph_client()
+        runtime = await get_legacy_graph_runtime(group_id)
+        entity_manager = runtime.entity_manager
 
         cutoff = datetime.now(UTC) - timedelta(days=min_age_days)
-        cutoff_iso = cutoff.isoformat()
+        page_size = max(200, min(max_archives_per_run * 2, 1000))
+        offset = 0
+        candidates: list[str] = []
 
-        # Find old episodic nodes (both :Entity and :Episodic labels)
-        query = """
-        MATCH (n)
-        WHERE (n:Entity OR n:Episodic)
-          AND n.entity_type = 'episode'
-          AND n.group_id = $group_id
-          AND n.created_at < $cutoff
-          AND (n.status IS NULL OR n.status <> 'archived')
-        RETURN n.uuid AS id, n.name AS name, n.created_at AS created_at
-        ORDER BY n.created_at ASC
-        LIMIT $limit
-        """
+        while len(candidates) < max_archives_per_run:
+            batch = await entity_manager.list_by_type(
+                EntityType.EPISODE,
+                limit=page_size,
+                offset=offset,
+                include_archived=True,
+            )
+            if not batch:
+                break
 
-        rows = await client.execute_read_org(
-            query,
-            group_id,
-            group_id=group_id,
-            cutoff=cutoff_iso,
-            limit=max_archives_per_run,
-        )
+            offset += len(batch)
+            for entity in batch:
+                status = str((entity.metadata or {}).get("status") or "").lower()
+                if status == "archived" or entity.created_at >= cutoff:
+                    continue
+                candidates.append(entity.id)
+                if len(candidates) >= max_archives_per_run:
+                    break
 
         archived_count = 0
-        for record in rows:
-            entity_id = record[0] if isinstance(record, (list, tuple)) else record.get("id")
-            if not entity_id:
-                continue
-
+        now_iso = datetime.now(UTC).isoformat()
+        for entity_id in candidates:
             try:
-                archive_query = """
-                MATCH (n {uuid: $entity_id, group_id: $group_id})
-                WHERE n:Entity OR n:Episodic
-                SET n.status = 'archived',
-                    n.archived_at = $now,
-                    n.metadata = CASE
-                        WHEN n.metadata IS NOT NULL
-                        THEN n.metadata
-                        ELSE '{}'
-                    END
-                RETURN n.uuid
-                """
-                await client.execute_write_org(
-                    archive_query,
-                    group_id,
-                    entity_id=str(entity_id),
-                    group_id=group_id,
-                    now=datetime.now(UTC).isoformat(),
+                await entity_manager.update(
+                    entity_id,
+                    {
+                        "status": "archived",
+                        "archived_at": now_iso,
+                    },
                 )
                 archived_count += 1
             except Exception as e:
@@ -199,7 +186,7 @@ async def priority_decay(
 
         result = {
             "group_id": group_id,
-            "candidates_found": len(rows),
+            "candidates_found": len(candidates),
             "archived": archived_count,
             "min_age_days": min_age_days,
         }
