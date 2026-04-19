@@ -1,5 +1,7 @@
 """Graph visualization data endpoints."""
 
+from collections.abc import Sequence
+
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -7,8 +9,14 @@ from sibyl.api.dependencies import get_legacy_knowledge_read_service
 from sibyl.api.schemas import GraphData, GraphEdge, GraphNode, SubgraphRequest
 from sibyl.auth.dependencies import get_current_organization, require_org_role
 from sibyl.db.models import Organization, OrganizationRole
-from sibyl.persistence.legacy.graph import get_legacy_graph_query_adapter
-from sibyl_core.models.entities import EntityType, RelationshipType
+from sibyl.persistence.legacy.graph import get_legacy_entity_runtime
+from sibyl_core.errors import EntityNotFoundError
+from sibyl_core.graph.communities import (
+    get_cluster_nodes,
+    get_clusters_for_visualization,
+    get_hierarchical_graph,
+)
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services import KnowledgeReadService
 
 log = structlog.get_logger()
@@ -34,11 +42,15 @@ router = APIRouter(
 async def debug_graph(org: Organization = Depends(get_current_organization)):
     """Debug endpoint to trace graph data issue."""
     group_id = str(org.id)
-    graph_queries = await get_legacy_graph_query_adapter(group_id)
+    runtime = await get_legacy_entity_runtime(group_id)
 
-    nodes = await graph_queries.list_entities(limit=500, include_archived=True)
+    nodes = await _list_graph_entities(
+        runtime.entity_manager,
+        limit=500,
+        include_archived=True,
+    )
     node_ids = {entity.id for entity in nodes if entity.id}
-    relationships = await graph_queries.list_relationships(limit=1000)
+    relationships = await runtime.relationship_manager.list_all(limit=1000)
 
     matching = sum(
         1
@@ -86,6 +98,130 @@ def get_entity_color(entity_type: EntityType) -> str:
     return ENTITY_COLORS.get(entity_type, DEFAULT_COLOR)
 
 
+async def _list_graph_entities(
+    entity_manager: object,
+    *,
+    entity_types: list[EntityType] | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    include_archived: bool = False,
+) -> list[Entity]:
+    allowed_types = set(entity_types or [])
+    remaining_offset = max(offset, 0)
+    page_offset = 0
+    page_size = max(200, min(max(limit, 1) * 2, 1000))
+    entities: list[Entity] = []
+
+    while len(entities) < limit:
+        batch = await entity_manager.list_all(
+            limit=page_size,
+            offset=page_offset,
+            include_archived=include_archived,
+        )
+        if not batch:
+            break
+
+        page_offset += len(batch)
+        for entity in batch:
+            if allowed_types and entity.entity_type not in allowed_types:
+                continue
+            if remaining_offset:
+                remaining_offset -= 1
+                continue
+            entities.append(entity)
+            if len(entities) >= limit:
+                break
+        if len(batch) < page_size:
+            break
+
+    return entities
+
+
+async def _get_graph_entity(entity_manager: object, entity_id: str) -> Entity | None:
+    try:
+        return await entity_manager.get(entity_id)
+    except EntityNotFoundError:
+        return None
+
+
+async def _list_graph_relationships_for_entities(
+    relationship_manager: object,
+    entity_ids: Sequence[str],
+    *,
+    relationship_types: list[RelationshipType] | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[Relationship]:
+    scoped_entity_ids = {entity_id for entity_id in entity_ids if entity_id}
+    if not scoped_entity_ids:
+        return []
+
+    relationships: list[Relationship] = []
+    remaining_offset = max(offset, 0)
+    page_offset = 0
+    page_size = max(200, min(max(limit, 1) * 2, 1000))
+
+    while len(relationships) < limit:
+        batch = await relationship_manager.list_all(
+            relationship_types=relationship_types,
+            limit=page_size,
+            offset=page_offset,
+        )
+        if not batch:
+            break
+
+        page_offset += len(batch)
+        for relationship in batch:
+            if (
+                relationship.source_id not in scoped_entity_ids
+                or relationship.target_id not in scoped_entity_ids
+            ):
+                continue
+            if remaining_offset:
+                remaining_offset -= 1
+                continue
+            relationships.append(relationship)
+            if len(relationships) >= limit:
+                break
+        if len(batch) < page_size:
+            break
+
+    return relationships
+
+
+async def _get_connection_counts(
+    relationship_manager: object,
+    entity_ids: Sequence[str],
+    *,
+    relationship_types: list[RelationshipType] | None = None,
+) -> dict[str, int]:
+    scoped_entity_ids = {entity_id for entity_id in entity_ids if entity_id}
+    if not scoped_entity_ids:
+        return {}
+
+    counts = dict.fromkeys(scoped_entity_ids, 0)
+    page_offset = 0
+    page_size = 1000
+
+    while True:
+        batch = await relationship_manager.list_all(
+            relationship_types=relationship_types,
+            limit=page_size,
+            offset=page_offset,
+        )
+        if not batch:
+            break
+
+        page_offset += len(batch)
+        for relationship in batch:
+            if relationship.source_id in counts:
+                counts[relationship.source_id] += 1
+            if relationship.target_id in counts and relationship.target_id != relationship.source_id:
+                counts[relationship.target_id] += 1
+
+    return counts
+
+
 @router.get("/nodes", response_model=list[GraphNode])
 async def get_all_nodes(
     org: Organization = Depends(get_current_organization),
@@ -99,15 +235,17 @@ async def get_all_nodes(
     """
     try:
         group_id = str(org.id)
-        graph_queries = await get_legacy_graph_query_adapter(group_id)
-        entities = await graph_queries.list_entities(
+        runtime = await get_legacy_entity_runtime(group_id)
+        entities = await _list_graph_entities(
+            runtime.entity_manager,
             entity_types=types,
             limit=limit,
             offset=offset,
             include_archived=True,
         )
 
-        connection_counts = await graph_queries.get_connection_counts(
+        connection_counts = await _get_connection_counts(
+            runtime.relationship_manager,
             [entity.id for entity in entities]
         )
 
@@ -160,9 +298,9 @@ async def get_all_edges(
     """Get all edges for graph visualization."""
     try:
         group_id = str(org.id)
-        graph_queries = await get_legacy_graph_query_adapter(group_id)
+        runtime = await get_legacy_entity_runtime(group_id)
 
-        all_relationships = await graph_queries.list_relationships(
+        all_relationships = await runtime.relationship_manager.list_all(
             relationship_types=relationship_types,
             limit=limit,
             offset=offset,
@@ -198,9 +336,10 @@ async def get_full_graph(
     """Get complete graph data for visualization."""
     try:
         group_id = str(org.id)
-        graph_queries = await get_legacy_graph_query_adapter(group_id)
+        runtime = await get_legacy_entity_runtime(group_id)
 
-        entities = await graph_queries.list_entities(
+        entities = await _list_graph_entities(
+            runtime.entity_manager,
             entity_types=types,
             limit=max_nodes,
             include_archived=True,
@@ -226,7 +365,8 @@ async def get_full_graph(
                 )
             )
 
-        relationships = await graph_queries.list_relationships_for_entities(
+        relationships = await _list_graph_relationships_for_entities(
+            runtime.relationship_manager,
             node_ids,
             limit=max_edges,
         )
@@ -278,10 +418,10 @@ async def get_subgraph(
     """Get a subgraph centered on a specific entity."""
     try:
         group_id = str(org.id)
-        graph_queries = await get_legacy_graph_query_adapter(group_id)
+        runtime = await get_legacy_entity_runtime(group_id)
 
         # Get center entity
-        center = await graph_queries.get_entity(payload.entity_id)
+        center = await _get_graph_entity(runtime.entity_manager, payload.entity_id)
         if not center:
             raise HTTPException(status_code=404, detail=f"Entity not found: {payload.entity_id}")
 
@@ -297,7 +437,7 @@ async def get_subgraph(
             if entity_id in visited_nodes:
                 return
 
-            entity = await graph_queries.get_entity(entity_id)
+            entity = await _get_graph_entity(runtime.entity_manager, entity_id)
             if not entity:
                 return
 
@@ -315,7 +455,7 @@ async def get_subgraph(
             )
 
             # Get related entities
-            related = await graph_queries.get_related_entities(
+            related = await runtime.relationship_manager.get_related_entities(
                 entity_id=entity_id,
                 relationship_types=payload.relationship_types,
                 max_depth=1,
@@ -384,9 +524,13 @@ async def get_clusters(
     """
     try:
         group_id = str(org.id)
-        graph_queries = await get_legacy_graph_query_adapter(group_id)
+        runtime = await get_legacy_entity_runtime(group_id)
 
-        clusters = await graph_queries.get_clusters_for_visualization(force_refresh=refresh)
+        clusters = await get_clusters_for_visualization(
+            runtime.client,
+            group_id,
+            force_refresh=refresh,
+        )
 
         # Transform to API response format
         cluster_data = [
@@ -424,9 +568,9 @@ async def get_cluster_detail(
     """Get nodes and edges within a specific cluster for drill-down view."""
     try:
         group_id = str(org.id)
-        graph_queries = await get_legacy_graph_query_adapter(group_id)
+        runtime = await get_legacy_entity_runtime(group_id)
 
-        result = await graph_queries.get_cluster_nodes(cluster_id)
+        result = await get_cluster_nodes(runtime.client, group_id, cluster_id)
 
         if result.get("error"):
             raise HTTPException(status_code=404, detail=result["error"])
@@ -500,9 +644,11 @@ async def get_hierarchical_graph_data(
     """
     try:
         group_id = str(org.id)
-        graph_queries = await get_legacy_graph_query_adapter(group_id)
+        runtime = await get_legacy_entity_runtime(group_id)
 
-        data = await graph_queries.get_hierarchical_graph(
+        data = await get_hierarchical_graph(
+            runtime.client,
+            group_id,
             project_ids=projects,
             entity_types=[t.value for t in types] if types else None,
             max_nodes=max_nodes,
