@@ -42,15 +42,15 @@ from sibyl.db import (
     get_session,
 )
 from sibyl.db.models import OrganizationRole
-from sibyl.persistence.graph_runtime import (
-    get_entity_graph_runtime as _service_get_entity_graph_runtime,
-)
-from sibyl.persistence.legacy.rag import (
+from sibyl.persistence.content_runtime import (
     get_document_by_url_for_org,
     hybrid_search_chunks,
-    list_source_documents_page,
+    list_rag_source_documents_page as list_source_documents_page,
     search_code_example_chunks,
     search_rag_chunks,
+)
+from sibyl.persistence.graph_runtime import (
+    get_entity_graph_runtime as _service_get_entity_graph_runtime,
 )
 
 log = structlog.get_logger()

@@ -40,13 +40,13 @@ from sibyl.db import (
 )
 from sibyl.db.models import Organization, OrganizationRole, RawCapture
 from sibyl.db.project_sync import sync_project_create, sync_project_delete, sync_project_update
-from sibyl.persistence.graph_runtime import (
-    get_entity_graph_runtime as _service_get_entity_graph_runtime,
-)
-from sibyl.persistence.legacy.entities import (
+from sibyl.persistence.content_runtime import (
     get_legacy_raw_capture,
     list_legacy_raw_captures,
     resolve_legacy_document_entity,
+)
+from sibyl.persistence.graph_runtime import (
+    get_entity_graph_runtime as _service_get_entity_graph_runtime,
 )
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService

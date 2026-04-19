@@ -50,7 +50,7 @@ from sibyl.db import (
     get_session,
 )
 from sibyl.db.models import Organization, OrganizationRole, utcnow_naive
-from sibyl.persistence.legacy.crawler import (
+from sibyl.persistence.content_runtime import (
     count_remaining_unlinked_chunks,
     get_crawl_stats_payload,
     get_crawled_document_for_org,
