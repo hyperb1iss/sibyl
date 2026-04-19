@@ -159,6 +159,7 @@ def restore_db(
             info(
                 f"Restoring {backup_data.entity_count} entities and {backup_data.relationship_count} relationships..."
             )
+            _prepare_graph_runtime(org_id, clean=False)
 
             result = await restore_backup(
                 backup_data,
@@ -870,6 +871,11 @@ def _find_backup_file(backup_dir: Path, explicit: str, patterns: list[str]) -> P
 def _restore_pg(pg_path: Path, clean: bool) -> None:
     """Restore PostgreSQL from backup file."""
     sql_content = pg_path.read_text(encoding="utf-8")
+    _restore_pg_sql(sql_content, clean)
+
+
+def _restore_pg_sql(sql_content: str, clean: bool) -> None:
+    """Restore PostgreSQL from raw SQL content."""
 
     if clean:
         drop_sql = """
@@ -902,15 +908,38 @@ DROP TABLE IF EXISTS alembic_version CASCADE;
     success("  PostgreSQL restored!")
 
 
-def _restore_graph_from_file(graph_path: Path, org_id: str, clean: bool) -> None:
-    """Restore graph data from a backup or export file."""
+def _prepare_graph_runtime(org_id: str, *, clean: bool) -> None:
+    """Ensure the target graph runtime is ready for restore."""
+
+    @run_async
+    async def _prepare() -> None:
+        from sibyl.config import settings
+        from sibyl_core.graph.client import get_graph_client
+
+        client = await get_graph_client()
+        if settings.store == "surreal":
+            driver = client.get_org_driver(org_id)
+            await driver.build_indices_and_constraints(delete_existing=clean)
+            return
+
+        if clean:
+            await client.execute_write_org(
+                "MATCH (n) DETACH DELETE n RETURN count(n) AS deleted",
+                org_id,
+            )
+
+    _prepare()
+
+
+def _restore_graph_payload(backup_dict: dict[str, object], org_id: str, clean: bool) -> bool:
+    """Restore graph data from a decoded backup payload."""
+    _prepare_graph_runtime(org_id, clean=clean)
 
     @run_async
     async def _restore() -> bool:
         from sibyl_core.tools.admin import restore_backup
 
         try:
-            backup_dict = json.loads(graph_path.read_text(encoding="utf-8"))
             backup_data = _coerce_graph_backup_data(backup_dict, org_id)
 
             result = await restore_backup(
@@ -930,7 +959,13 @@ def _restore_graph_from_file(graph_path: Path, org_id: str, clean: bool) -> None
             error(f"  Graph restore failed: {e}")
             return False
 
-    _restore()
+    return _restore()
+
+
+def _restore_graph_from_file(graph_path: Path, org_id: str, clean: bool) -> bool:
+    """Restore graph data from a backup or export file."""
+    backup_dict = json.loads(graph_path.read_text(encoding="utf-8"))
+    return _restore_graph_payload(backup_dict, org_id, clean)
 
 
 def _resolve_backup_source(
@@ -1046,7 +1081,8 @@ def restore_all(
     # Restore Graph
     if graph_path and org_id:
         info("Step 2/2: Restoring graph runtime data...")
-        _restore_graph_from_file(graph_path, org_id, clean)
+        if not _restore_graph_from_file(graph_path, org_id, clean):
+            raise typer.Exit(code=1)
     elif graph_path:
         warn("Step 2/2: Skipping graph restore (no --org-id — pass it or add metadata.json)")
     else:

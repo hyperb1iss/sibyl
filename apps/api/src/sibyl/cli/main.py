@@ -26,6 +26,7 @@ from sibyl.cli.common import (
 from sibyl.cli.db import app as db_app
 from sibyl.cli.export import app as export_app
 from sibyl.cli.generate import app as generate_app
+from sibyl.cli.migrate import app as migrate_app
 from sibyl.cli.up_cmd import down, status as up_status, up
 
 # Main app
@@ -40,6 +41,7 @@ app = typer.Typer(
 app.add_typer(db_app, name="db")
 app.add_typer(export_app, name="export")
 app.add_typer(generate_app, name="generate")
+app.add_typer(migrate_app, name="migrate")
 
 # Register top-level commands from up_cmd
 app.command("up")(up)

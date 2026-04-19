@@ -43,7 +43,10 @@ def test_restore_accepts_graph_export_payload(tmp_path: Path) -> None:
         )
     )
 
-    with patch("sibyl_core.tools.admin.restore_backup", restore_backup):
+    with (
+        patch("sibyl.cli.db._prepare_graph_runtime"),
+        patch("sibyl_core.tools.admin.restore_backup", restore_backup),
+    ):
         result = runner.invoke(
             db_cli.app,
             ["restore", str(graph_file), "--org-id", "org-123", "--yes"],
@@ -98,7 +101,10 @@ def test_restore_prefers_top_level_backup_metadata(tmp_path: Path) -> None:
         )
     )
 
-    with patch("sibyl_core.tools.admin.restore_backup", restore_backup):
+    with (
+        patch("sibyl.cli.db._prepare_graph_runtime"),
+        patch("sibyl_core.tools.admin.restore_backup", restore_backup),
+    ):
         result = runner.invoke(
             db_cli.app,
             ["restore", str(graph_file), "--org-id", "org-override", "--yes"],
@@ -111,3 +117,40 @@ def test_restore_prefers_top_level_backup_metadata(tmp_path: Path) -> None:
     assert backup_data.organization_id == "org-backup"
     assert backup_data.entity_count == 7
     assert backup_data.relationship_count == 5
+
+
+def test_restore_prepares_graph_runtime_before_restore(tmp_path: Path) -> None:
+    graph_file = tmp_path / "graph-export.json"
+    graph_file.write_text(
+        json.dumps(
+            {
+                "entities": [{"id": "entity-1"}],
+                "relationships": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    restore_backup = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            entities_restored=1,
+            relationships_restored=0,
+            entities_skipped=0,
+            relationships_skipped=0,
+            duration_seconds=0.1,
+            errors=[],
+        )
+    )
+
+    with (
+        patch("sibyl.cli.db._prepare_graph_runtime") as prepare,
+        patch("sibyl_core.tools.admin.restore_backup", restore_backup),
+    ):
+        result = runner.invoke(
+            db_cli.app,
+            ["restore", str(graph_file), "--org-id", "org-123", "--yes"],
+        )
+
+    assert result.exit_code == 0
+    prepare.assert_called_once_with("org-123", clean=False)
