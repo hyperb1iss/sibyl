@@ -59,6 +59,27 @@ This is the offline baseline.
 
 Use this for offline comparison work, and label it clearly as such.
 
+## Threshold Gates
+
+Saved runtime artifacts should go through `moon run bench-gate -- <report.json>` before they count
+as acceptance evidence.
+
+The default `acceptance` profile enforces:
+
+- `success@5 >= 0.40`
+- `ndcg@10 >= 0.30`
+- `mrr >= 0.25`
+- `latency_ms <= 3000`
+
+The lighter `smoke` profile keeps just the fast guardrails:
+
+- `success@5 >= 0.20`
+- `latency_ms <= 3000`
+
+Use `--require-metadata store=surreal` or other metadata filters when you need to prove which stack
+produced the artifact. Use `--min-metric` and `--max-metric` to tighten a gate for a specific run
+without forking the script.
+
 ## Reporting Rules
 
 - Lead with `bench-live` when describing Sibyl’s current runtime behavior.

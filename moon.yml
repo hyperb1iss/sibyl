@@ -204,6 +204,7 @@ tasks:
       - ~:inventory-lint
       - ~:inventory-typecheck
       - ~:inventory-test
+      - ~:bench-gate-test
       - ~:storage-access-check
       - ~:storage-access-test
       - ~:baseline-test
@@ -219,6 +220,7 @@ tasks:
   test:
     deps:
       - ~:inventory-test
+      - ~:bench-gate-test
       - ~:storage-access-test
       - ~:baseline-test
       - core:test
@@ -274,6 +276,19 @@ tasks:
       - apps/api/pyproject.toml
       - apps/cli/pyproject.toml
       - packages/python/sibyl-core/pyproject.toml
+
+  bench-gate:
+    command: uv run python -m tools.bench.eval_gate
+    inputs:
+      - tools/**/*.py
+      - benchmarks/**/*.py
+      - pyproject.toml
+
+  bench-gate-test:
+    command: uv run pytest tools/tests/test_bench_gate.py -v
+    inputs:
+      - tools/**/*.py
+      - pyproject.toml
 
   storage-access-check:
     command: uv run python -m tools.lint.no_direct_storage_access
