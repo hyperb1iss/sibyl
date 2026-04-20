@@ -11,6 +11,7 @@ from sibyl_core.graph.communities import (
     export_to_networkx,
     get_community_members,
     get_entity_communities,
+    get_hierarchical_graph,
     link_hierarchy,
     partition_to_communities,
     store_communities,
@@ -407,6 +408,58 @@ class TestDetectCommunities:
 
             assert len(communities) == 2
             mock_louvain.assert_called_once()
+
+
+class TestHierarchicalGraph:
+    """Tests for hierarchical graph snapshot selection."""
+
+    @pytest.fixture
+    def mock_client(self) -> MagicMock:
+        client = MagicMock()
+        client.execute_read_org = AsyncMock(return_value=[])
+        client.execute_write_org = AsyncMock(return_value=[])
+        return client
+
+    @pytest.mark.asyncio
+    async def test_prefers_connected_nodes_and_reuses_snapshot(
+        self,
+        mock_client: MagicMock,
+    ) -> None:
+        entities = [
+            _make_entity("isolated-1", "Isolated 1", EntityType.NOTE),
+            _make_entity("isolated-2", "Isolated 2", EntityType.NOTE),
+            _make_entity("isolated-3", "Isolated 3", EntityType.NOTE),
+            _make_entity("core-1", "Core 1", EntityType.TASK),
+            _make_entity("core-2", "Core 2", EntityType.TASK),
+            _make_entity("core-3", "Core 3", EntityType.TASK),
+        ]
+        relationships = [
+            _make_relationship("r1", "core-1", "core-2"),
+            _make_relationship("r2", "core-2", "core-3"),
+        ]
+        partition = {entity.id: 0 for entity in entities}
+
+        with (
+            patch.dict("sibyl_core.graph.communities.HIERARCHICAL_CACHE", {}, clear=True),
+            patch(
+                "sibyl_core.graph.communities._list_all_entities",
+                AsyncMock(return_value=entities),
+            ) as list_entities,
+            patch(
+                "sibyl_core.graph.communities._list_all_relationships",
+                AsyncMock(return_value=relationships),
+            ) as list_relationships,
+            patch(
+                "sibyl_core.graph.communities.detect_communities_louvain",
+                return_value=(partition, 0.5),
+            ),
+        ):
+            data = await get_hierarchical_graph(mock_client, TEST_ORG_ID, max_nodes=3, max_edges=10)
+
+        assert {node["id"] for node in data.nodes} == {"core-1", "core-2", "core-3"}
+        assert data.displayed_edges == 2
+        list_entities.assert_awaited_once_with(mock_client, TEST_ORG_ID)
+        list_relationships.assert_awaited_once_with(mock_client, TEST_ORG_ID)
 
 
 class TestStoreCommunities:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -163,6 +164,54 @@ def _entity_index(entities: list[Entity]) -> dict[str, Entity]:
     return {entity.id: entity for entity in entities if entity.id}
 
 
+def _entity_timestamp(entity: Entity | None) -> datetime:
+    if entity is None:
+        return datetime.min.replace(tzinfo=UTC)
+    return entity.updated_at or entity.created_at or datetime.min.replace(tzinfo=UTC)
+
+
+def _snapshot_to_networkx(
+    entities: list[Entity],
+    relationships: list[Relationship],
+    *,
+    type_affinity_weight: float = 2.0,
+) -> Any:
+    try:
+        import networkx as nx
+    except ImportError as e:
+        raise ImportError(
+            "networkx is required for community detection. Install with: pip install networkx"
+        ) from e
+
+    G = nx.Graph()
+
+    for entity in entities:
+        if entity.id:
+            G.add_node(entity.id, name=entity.name, type=entity.entity_type.value)
+
+    for relationship in relationships:
+        if relationship.source_id not in G or relationship.target_id not in G:
+            continue
+
+        source_type = G.nodes[relationship.source_id].get("type", "")
+        target_type = G.nodes[relationship.target_id].get("type", "")
+        weight = 1.0
+        if source_type and target_type and source_type == target_type:
+            weight += type_affinity_weight
+
+        if G.has_edge(relationship.source_id, relationship.target_id):
+            G[relationship.source_id][relationship.target_id]["weight"] += weight
+        else:
+            G.add_edge(
+                relationship.source_id,
+                relationship.target_id,
+                rel_type=relationship.relationship_type.value,
+                weight=weight,
+            )
+
+    return G
+
+
 def _matches_project_focus(entity: Entity, project_ids: list[str] | None) -> bool:
     if not project_ids:
         return True
@@ -271,14 +320,33 @@ def _build_graph_nodes_from_snapshot(
         project_ids=project_ids,
         entity_types=entity_types,
     )
-    nodes: list[dict[str, Any]] = []
-    node_ids: set[str] = set()
+    entity_by_id = _entity_index(entities)
+    degrees: Counter[str] = Counter()
+    for relationship in relationships:
+        if relationship.source_id not in focused_ids or relationship.target_id not in focused_ids:
+            continue
+        degrees[relationship.source_id] += 1
+        if relationship.target_id != relationship.source_id:
+            degrees[relationship.target_id] += 1
 
-    for entity in entities:
-        if not entity.id or entity.id not in focused_ids:
+    selected_ids = sorted(
+        focused_ids,
+        key=lambda entity_id: (
+            degrees.get(entity_id, 0),
+            _entity_timestamp(entity_by_id.get(entity_id)),
+            entity_id,
+        ),
+        reverse=True,
+    )[:max_nodes]
+
+    nodes: list[dict[str, Any]] = []
+    node_ids = set(selected_ids)
+
+    for entity_id in selected_ids:
+        entity = entity_by_id.get(entity_id)
+        if entity is None:
             continue
 
-        node_ids.add(entity.id)
         nodes.append(
             {
                 "id": entity.id,
@@ -288,8 +356,6 @@ def _build_graph_nodes_from_snapshot(
                 "cluster_id": node_to_cluster.get(entity.id, "unclustered"),
             }
         )
-        if len(nodes) >= max_nodes:
-            break
 
     return nodes, node_ids
 
@@ -733,6 +799,59 @@ def _build_cluster_metadata(
     return enriched_clusters, cluster_edges
 
 
+def _detect_communities_from_graph(
+    G: Any,
+    *,
+    config: CommunityConfig,
+    algorithm: str,
+) -> list[DetectedCommunity]:
+    if G.number_of_nodes() < config.min_community_size:
+        log.info("detect_communities_too_few_nodes", nodes=G.number_of_nodes())
+        return []
+
+    detect_fn = detect_communities_leiden if algorithm == "leiden" else detect_communities_louvain
+    all_level_communities: list[list[DetectedCommunity]] = []
+
+    for level, resolution in enumerate(config.resolutions[: config.max_levels]):
+        try:
+            partition, modularity = detect_fn(G, resolution=resolution)
+
+            communities = partition_to_communities(
+                partition=partition,
+                level=level,
+                resolution=resolution,
+                modularity=modularity,
+                min_size=config.min_community_size,
+            )
+
+            all_level_communities.append(communities)
+
+            log.debug(
+                "detect_communities_level_complete",
+                level=level,
+                resolution=resolution,
+                communities=len(communities),
+                modularity=modularity,
+            )
+
+        except ImportError as e:
+            log.exception("detect_communities_missing_dependency", error=str(e))
+            raise
+        except Exception as e:
+            log.warning("detect_communities_level_failed", level=level, error=str(e))
+            continue
+
+    all_communities = link_hierarchy(all_level_communities)
+
+    log.info(
+        "detect_communities_complete",
+        total_communities=len(all_communities),
+        levels=len(all_level_communities),
+    )
+
+    return all_communities
+
+
 async def get_hierarchical_graph(
     client: GraphClient,
     organization_id: str,
@@ -765,9 +884,12 @@ async def get_hierarchical_graph(
         types=entity_types,
     )
 
-    # Get real totals for stats display (filtered by project if specified)
-    total_node_count, total_edge_count = await _get_graph_totals(
-        client, organization_id, project_ids=project_ids
+    entities = await _list_all_entities(client, organization_id)
+    relationships = await _list_all_relationships(client, organization_id)
+    total_node_count, total_edge_count = _graph_totals_from_snapshot(
+        entities,
+        relationships,
+        project_ids=project_ids,
     )
     log.info(
         "graph_totals_queried",
@@ -794,9 +916,8 @@ async def get_hierarchical_graph(
     # Run community detection if not cached
     if not node_to_cluster:
         try:
-            detected = await detect_communities(
-                client,
-                organization_id,
+            detected = _detect_communities_from_graph(
+                _snapshot_to_networkx(entities, relationships),
                 config=CommunityConfig(
                     resolutions=[1.0], min_community_size=2, max_levels=1, store_in_graph=False
                 ),
@@ -823,16 +944,19 @@ async def get_hierarchical_graph(
         except Exception as e:
             log.warning("community_detection_failed", error=str(e))
 
-    # Fetch nodes and edges with optional project/type filtering
-    nodes, node_ids = await _fetch_graph_nodes(
-        client,
-        organization_id,
+    nodes, node_ids = _build_graph_nodes_from_snapshot(
+        entities,
+        relationships,
         node_to_cluster,
-        max_nodes,
+        max_nodes=max_nodes,
         project_ids=project_ids,
         entity_types=entity_types,
     )
-    edges = await _fetch_graph_edges(client, organization_id, node_ids, max_edges)
+    edges = _build_graph_edges_from_snapshot(
+        relationships,
+        node_ids,
+        max_edges=max_edges,
+    )
 
     # Fallback: if focused totals query fails or undercounts, use displayed values.
     # This prevents confusing "0 nodes / 0 edges" overlays when focused data exists.
@@ -932,52 +1056,25 @@ async def export_to_networkx(
     Raises:
         ImportError: If networkx is not installed.
     """
-    try:
-        import networkx as nx
-    except ImportError as e:
-        raise ImportError(
-            "networkx is required for community detection. Install with: pip install networkx"
-        ) from e
-
     log.info("export_to_networkx_start", org_id=organization_id, type_affinity=type_affinity_weight)
-
-    # Create undirected graph for community detection
-    G = nx.Graph()
 
     try:
         entities = await _list_all_entities(client, organization_id)
-        for entity in entities:
-            if entity.id:
-                G.add_node(entity.id, name=entity.name, type=entity.entity_type.value)
     except Exception as e:
         log.warning("export_nodes_failed", error=str(e))
+        entities = []
 
     try:
         relationships = await _list_all_relationships(client, organization_id)
-        for relationship in relationships:
-            if relationship.source_id in G and relationship.target_id in G:
-                # Calculate edge weight with type affinity boost
-                source_type = G.nodes[relationship.source_id].get("type", "")
-                target_type = G.nodes[relationship.target_id].get("type", "")
-
-                # Base weight + bonus if same type
-                weight = 1.0
-                if source_type and target_type and source_type == target_type:
-                    weight += type_affinity_weight
-
-                # Update or add edge (accumulate weight for multi-edges)
-                if G.has_edge(relationship.source_id, relationship.target_id):
-                    G[relationship.source_id][relationship.target_id]["weight"] += weight
-                else:
-                    G.add_edge(
-                        relationship.source_id,
-                        relationship.target_id,
-                        rel_type=relationship.relationship_type.value,
-                        weight=weight,
-                    )
-
     except Exception as e:
         log.warning("export_edges_failed", error=str(e))
+        relationships = []
+
+    G = _snapshot_to_networkx(
+        entities,
+        relationships,
+        type_affinity_weight=type_affinity_weight,
+    )
 
     log.info(
         "export_to_networkx_complete",
@@ -1182,56 +1279,7 @@ async def detect_communities(
 
     # Export graph to NetworkX
     G = await export_to_networkx(client, organization_id)
-
-    if G.number_of_nodes() < config.min_community_size:
-        log.info("detect_communities_too_few_nodes", nodes=G.number_of_nodes())
-        return []
-
-    # Select algorithm
-    detect_fn = detect_communities_leiden if algorithm == "leiden" else detect_communities_louvain
-
-    # Detect communities at each resolution level
-    all_level_communities: list[list[DetectedCommunity]] = []
-
-    for level, resolution in enumerate(config.resolutions[: config.max_levels]):
-        try:
-            partition, modularity = detect_fn(G, resolution=resolution)
-
-            communities = partition_to_communities(
-                partition=partition,
-                level=level,
-                resolution=resolution,
-                modularity=modularity,
-                min_size=config.min_community_size,
-            )
-
-            all_level_communities.append(communities)
-
-            log.debug(
-                "detect_communities_level_complete",
-                level=level,
-                resolution=resolution,
-                communities=len(communities),
-                modularity=modularity,
-            )
-
-        except ImportError as e:
-            log.exception("detect_communities_missing_dependency", error=str(e))
-            raise
-        except Exception as e:
-            log.warning("detect_communities_level_failed", level=level, error=str(e))
-            continue
-
-    # Link hierarchy
-    all_communities = link_hierarchy(all_level_communities)
-
-    log.info(
-        "detect_communities_complete",
-        total_communities=len(all_communities),
-        levels=len(all_level_communities),
-    )
-
-    return all_communities
+    return _detect_communities_from_graph(G, config=config, algorithm=algorithm)
 
 
 async def store_communities(
