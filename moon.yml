@@ -21,20 +21,7 @@ tasks:
       persistent: true
 
   dev-surreal:
-    script: |
-      surreal_data_dir="${SIBYL_SURREAL_DATA_DIR:-}"
-      if [ -z "$surreal_data_dir" ] && [ -d .moon/cache ]; then
-        surreal_data_dir="$(find .moon/cache -maxdepth 1 -type d \( -name 'surreal-rehearsal' -o -name 'surreal-rehearsal-cli-*' \) | sort | tail -n 1)"
-      fi
-      if [ -z "$surreal_data_dir" ]; then
-        surreal_data_dir=".moon/cache/surreal-dev"
-      fi
-      export SIBYL_SURREAL_DATA_DIR="$surreal_data_dir"
-      echo "🔮 Surreal data dir: $SIBYL_SURREAL_DATA_DIR"
-      docker compose up -d && sleep 1 && npx concurrently --raw --kill-others-on-fail \
-        "uv run --directory apps/api sibyld serve --reload" \
-        "uv run --directory apps/api arq sibyl.jobs.worker.WorkerSettings --watch src" \
-        "moon run web:dev"
+    command: bash tools/dev/run-surreal-dev.sh
     env:
       FORCE_COLOR: "1"
       SIBYL_STORE: "surreal"
