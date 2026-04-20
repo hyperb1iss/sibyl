@@ -779,6 +779,106 @@ async def _list_backup_relationships(
     return relationships
 
 
+def _legacy_record_to_backup_entity(record: dict[str, Any], *, organization_id: str) -> Entity:
+    import json
+
+    metadata = record.get("metadata") or {}
+    if isinstance(metadata, str):
+        with contextlib.suppress(json.JSONDecodeError, TypeError):
+            metadata = json.loads(metadata)
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    raw_entity_type = str(record.get("entity_type") or "").strip().lower()
+    entity_type = EntityType.TOPIC
+    if raw_entity_type:
+        with contextlib.suppress(ValueError):
+            entity_type = EntityType(raw_entity_type)
+
+    entity_kwargs: dict[str, Any] = {
+        "id": str(record.get("uuid") or ""),
+        "entity_type": entity_type,
+        "name": str(record.get("name") or ""),
+        "description": str(record.get("description") or record.get("summary") or ""),
+        "content": str(record.get("content") or ""),
+        "organization_id": str(record.get("group_id") or organization_id),
+        "created_by": metadata.get("created_by"),
+        "modified_by": metadata.get("modified_by"),
+        "metadata": metadata,
+        "source_file": record.get("source_file"),
+    }
+    if isinstance(record.get("name_embedding"), list):
+        entity_kwargs["embedding"] = record["name_embedding"]
+    if record.get("created_at") is not None:
+        entity_kwargs["created_at"] = _parse_backup_datetime(record.get("created_at"))
+    if record.get("updated_at") is not None:
+        entity_kwargs["updated_at"] = _parse_backup_datetime(record.get("updated_at"))
+
+    return Entity(**entity_kwargs)
+
+
+async def _list_backup_entities(
+    *,
+    organization_id: str,
+    client: Any,
+    entity_manager: Any,
+) -> list[Entity]:
+    if settings.store == "surreal":
+        entities: list[Entity] = []
+        offset = 0
+        while True:
+            batch = await entity_manager.list_all(
+                limit=BACKFILL_PAGE_SIZE,
+                offset=offset,
+                include_archived=True,
+            )
+            if not batch:
+                break
+            entities.extend(batch)
+            if len(batch) < BACKFILL_PAGE_SIZE:
+                break
+            offset += len(batch)
+        return entities
+
+    driver = client.get_org_driver(organization_id)
+    entities: list[Entity] = []
+    offset = 0
+    while True:
+        result = await driver.execute_query(
+            f"""
+            MATCH (entity)
+            WHERE entity.group_id = $group_id
+              AND NOT entity:Episodic
+            RETURN entity.uuid AS uuid,
+                   entity.name AS name,
+                   entity.entity_type AS entity_type,
+                   entity.group_id AS group_id,
+                   entity.content AS content,
+                   entity.description AS description,
+                   entity.summary AS summary,
+                   entity.metadata AS metadata,
+                   entity.created_at AS created_at,
+                   entity.updated_at AS updated_at,
+                   entity.source_file AS source_file,
+                   entity.name_embedding AS name_embedding
+            ORDER BY uuid DESC
+            SKIP {offset}
+            LIMIT {BACKFILL_PAGE_SIZE}
+            """,
+            group_id=organization_id,
+        )
+        rows = client.normalize_result(result)
+        if not rows:
+            break
+        entities.extend(
+            _legacy_record_to_backup_entity(row, organization_id=organization_id) for row in rows
+        )
+        if len(rows) < BACKFILL_PAGE_SIZE:
+            break
+        offset += len(rows)
+    return entities
+
+
 async def create_backup(*, organization_id: str) -> BackupResult:
     """Create a backup of all graph data for an organization.
 
@@ -797,25 +897,11 @@ async def create_backup(*, organization_id: str) -> BackupResult:
         relationship_manager = runtime.relationship_manager
         client = runtime.client
 
-        # Collect all entities
-        all_entities: list[Entity] = []
-        for entity_type in BACKUP_ENTITY_TYPES:
-            try:
-                offset = 0
-                while True:
-                    entities = await entity_manager.list_by_type(
-                        entity_type,
-                        limit=BACKFILL_PAGE_SIZE,
-                        offset=offset,
-                    )
-                    if not entities:
-                        break
-                    all_entities.extend(entities)
-                    if len(entities) < BACKFILL_PAGE_SIZE:
-                        break
-                    offset += len(entities)
-            except Exception as e:
-                log.warning("Failed to backup entity type", type=entity_type.value, error=str(e))
+        all_entities = await _list_backup_entities(
+            organization_id=organization_id,
+            client=client,
+            entity_manager=entity_manager,
+        )
 
         relationships = await _list_backup_relationships(
             organization_id=organization_id,

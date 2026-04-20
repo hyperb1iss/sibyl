@@ -69,31 +69,54 @@ class TestBackupInventory:
         entity_manager = AsyncMock()
         relationship_manager = AsyncMock()
 
-        async def list_by_type(
-            entity_type: EntityType,
-            *,
-            offset: int = 0,
-            **_: object,
-        ) -> list[Entity]:
-            if entity_type == EntityType.PATTERN and offset == 0:
-                return [Entity(id="entity-1", entity_type=EntityType.PATTERN, name="Pattern")]
-            return []
-
-        entity_manager.list_by_type = AsyncMock(side_effect=list_by_type)
-
         def normalize_result(result: object) -> list[dict[str, object]]:
             if isinstance(result, tuple):
                 return result[0]
             return result if isinstance(result, list) else []
 
         async def execute_query(query: str, **_: object) -> tuple[list[dict[str, object]], None, None]:
+            if "MATCH (entity)" in query:
+                return (
+                    [
+                        {
+                            "uuid": "entity-1",
+                            "name": "Pattern",
+                            "entity_type": "pattern",
+                            "group_id": org_id,
+                            "content": "",
+                            "description": "",
+                            "summary": "",
+                            "metadata": {},
+                            "created_at": "2026-04-19T00:00:00Z",
+                            "updated_at": "2026-04-19T00:00:00Z",
+                            "source_file": None,
+                            "name_embedding": None,
+                        },
+                        {
+                            "uuid": "entity-2",
+                            "name": "Untyped",
+                            "entity_type": None,
+                            "group_id": org_id,
+                            "content": "",
+                            "description": "",
+                            "summary": "",
+                            "metadata": {},
+                            "created_at": "2026-04-19T00:00:00Z",
+                            "updated_at": "2026-04-19T00:00:00Z",
+                            "source_file": None,
+                            "name_embedding": None,
+                        },
+                    ],
+                    None,
+                    None,
+                )
             if "MATCH (source)-[rel]->(target)" in query:
                 return (
                     [
                         {
                             "id": "rel-1",
                             "source_id": "document-1",
-                            "target_id": "entity-1",
+                            "target_id": "entity-2",
                             "rel_type": "MENTIONS",
                             "created_at": "2026-04-19T00:00:00Z",
                         }
@@ -153,11 +176,15 @@ class TestBackupInventory:
             result = await create_backup(organization_id=org_id)
 
         assert result.success is True
-        assert result.entity_count == 1
+        assert result.entity_count == 2
         assert result.relationship_count == 1
         assert result.episode_count == 1
         assert result.mention_count == 1
         assert result.backup_data is not None
+        assert {entity["id"] for entity in result.backup_data.entities} == {"entity-1", "entity-2"}
+        assert {
+            entity["entity_type"] for entity in result.backup_data.entities if entity["id"] == "entity-2"
+        } == {"topic"}
         assert result.backup_data.relationships[0]["relationship_type"] == "MENTIONS"
         assert result.backup_data.episodes[0]["uuid"] == "episode-1"
         assert result.backup_data.mentions[0]["uuid"] == "mention-1"
