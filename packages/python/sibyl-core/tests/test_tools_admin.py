@@ -7,8 +7,9 @@ from unittest.mock import ANY, AsyncMock, call, patch
 
 import pytest
 
-from sibyl_core.models.entities import EntityType, RelationshipType
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.tools.admin import (
+    BackupData,
     backfill_episode_task_relationships,
     backfill_project_id_from_relationships,
     backfill_shared_project,
@@ -16,6 +17,7 @@ from sibyl_core.tools.admin import (
     get_stats,
     health_check,
     rebuild_indices,
+    restore_backup,
 )
 
 
@@ -143,6 +145,119 @@ class TestHealthAndStats:
                 call(limit=1000, offset=5, include_archived=False),
             ]
         )
+
+
+class TestRestoreBackup:
+    """Graph restores should use the fast direct entity seams."""
+
+    @pytest.mark.asyncio
+    async def test_clean_restore_uses_bulk_direct_entity_insert(self) -> None:
+        org_id = "00000000-0000-0000-0000-000000000111"
+        entity_manager = AsyncMock()
+        relationship_manager = AsyncMock()
+        entity_manager.bulk_create_direct = AsyncMock(return_value=(2, 0))
+        entity_manager.create_direct = AsyncMock()
+        relationship_manager.create = AsyncMock()
+        backup_data = BackupData(
+            version="2.0",
+            created_at="2026-04-19T00:00:00Z",
+            organization_id=org_id,
+            entity_count=2,
+            relationship_count=1,
+            entities=[
+                Entity(id="entity-1", entity_type=EntityType.PATTERN, name="One").model_dump(
+                    mode="json"
+                ),
+                Entity(id="entity-2", entity_type=EntityType.TASK, name="Two").model_dump(
+                    mode="json"
+                ),
+            ],
+            relationships=[
+                Relationship(
+                    id="rel-1",
+                    source_id="entity-1",
+                    target_id="entity-2",
+                    relationship_type=RelationshipType.RELATED_TO,
+                ).model_dump(mode="json")
+            ],
+        )
+
+        with patch(
+            "sibyl_core.tools.admin.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    entity_manager=entity_manager,
+                    relationship_manager=relationship_manager,
+                )
+            ),
+        ):
+            result = await restore_backup(
+                backup_data,
+                organization_id=org_id,
+                skip_existing=False,
+            )
+
+        assert result.success is True
+        assert result.entities_restored == 2
+        assert result.entities_skipped == 0
+        entity_manager.bulk_create_direct.assert_awaited_once()
+        entity_manager.create_direct.assert_not_awaited()
+        relationship_manager.create.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_skip_existing_restore_uses_direct_create_without_embeddings(self) -> None:
+        org_id = "00000000-0000-0000-0000-000000000111"
+        entity_manager = AsyncMock()
+        relationship_manager = AsyncMock()
+        entity_manager.get = AsyncMock(
+            side_effect=[SimpleNamespace(id="entity-1"), Exception("missing")]
+        )
+        entity_manager.create_direct = AsyncMock()
+        entity_manager.bulk_create_direct = AsyncMock()
+        relationship_manager.create = AsyncMock()
+        backup_data = BackupData(
+            version="2.0",
+            created_at="2026-04-19T00:00:00Z",
+            organization_id=org_id,
+            entity_count=2,
+            relationship_count=0,
+            entities=[
+                Entity(id="entity-1", entity_type=EntityType.PATTERN, name="Existing").model_dump(
+                    mode="json"
+                ),
+                Entity(
+                    id="entity-2",
+                    entity_type=EntityType.TASK,
+                    name="Missing",
+                    embedding=[0.1, 0.2, 0.3],
+                ).model_dump(mode="json"),
+            ],
+            relationships=[],
+        )
+
+        with patch(
+            "sibyl_core.tools.admin.get_legacy_graph_runtime",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    entity_manager=entity_manager,
+                    relationship_manager=relationship_manager,
+                )
+            ),
+        ):
+            result = await restore_backup(
+                backup_data,
+                organization_id=org_id,
+                skip_existing=True,
+            )
+
+        assert result.success is True
+        assert result.entities_restored == 1
+        assert result.entities_skipped == 1
+        entity_manager.bulk_create_direct.assert_not_awaited()
+        entity_manager.create_direct.assert_awaited_once()
+        create_args = entity_manager.create_direct.await_args
+        assert create_args.args[0].id == "entity-2"
+        assert create_args.kwargs == {"generate_embedding": False}
 
 
 class TestBackfillTaskProjectRelationships:

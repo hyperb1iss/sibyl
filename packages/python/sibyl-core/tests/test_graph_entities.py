@@ -340,6 +340,24 @@ class TestEntityCreateDirect:
         assert second_call_node.name_embedding is not None
 
     @pytest.mark.asyncio
+    async def test_create_direct_preserves_provided_embedding(
+        self,
+        surreal_entity_manager: EntityManager,
+        sample_entity: Entity,
+        mock_graph_client: MagicMock,
+    ) -> None:
+        ops = surreal_entity_manager._driver.entity_node_ops
+        ops.save = AsyncMock()
+        sample_entity.embedding = [0.1, 0.2, 0.3]
+
+        await surreal_entity_manager.create_direct(sample_entity, generate_embedding=False)
+
+        assert ops.save.await_count == 1
+        saved_node = ops.save.await_args.args[1]
+        assert saved_node.name_embedding == [0.1, 0.2, 0.3]
+        mock_graph_client.client.embedder.create.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_create_direct_success(
         self,
         entity_manager: EntityManager,

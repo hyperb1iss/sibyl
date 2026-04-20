@@ -597,7 +597,7 @@ async def restore_backup(
         entity_manager = runtime.entity_manager
         relationship_manager = runtime.relationship_manager
 
-        # Restore entities
+        entities_to_restore: list[Entity] = []
         for entity_data in backup_data.entities:
             try:
                 entity = Entity.model_validate(entity_data)
@@ -611,13 +611,36 @@ async def restore_backup(
                     except Exception:
                         pass  # Entity doesn't exist — proceed to create
 
-                await entity_manager.create(entity)
-                entities_restored += 1
+                entities_to_restore.append(entity)
             except Exception as e:
                 error_msg = f"Entity {entity_data.get('id', 'unknown')}: {e}"
                 errors.append(error_msg)
                 if len(errors) <= 10:
                     log.warning("Entity restore failed", error=error_msg)
+
+        bulk_create_direct = getattr(entity_manager, "bulk_create_direct", None)
+        create_direct = getattr(entity_manager, "create_direct", None)
+
+        if entities_to_restore and not skip_existing and callable(bulk_create_direct):
+            created_count, failed_count = await bulk_create_direct(entities_to_restore)
+            entities_restored += created_count
+            if failed_count:
+                error_msg = f"Bulk entity restore failed for {failed_count} entities"
+                errors.append(error_msg)
+                log.warning("Bulk entity restore reported failures", failed=failed_count)
+        else:
+            for entity in entities_to_restore:
+                try:
+                    if callable(create_direct):
+                        await create_direct(entity, generate_embedding=False)
+                    else:
+                        await entity_manager.create(entity)
+                    entities_restored += 1
+                except Exception as e:
+                    error_msg = f"Entity {entity.id}: {e}"
+                    errors.append(error_msg)
+                    if len(errors) <= 10:
+                        log.warning("Entity restore failed", error=error_msg)
 
         # Restore relationships
         for rel_data in backup_data.relationships:

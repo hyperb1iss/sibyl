@@ -162,7 +162,7 @@ class EntityManager:
         *,
         marker_key: str,
     ) -> EntityNode:
-        return EntityNode(
+        node = EntityNode(
             uuid=entity.id,
             name=entity.name,
             group_id=self._group_id,
@@ -171,6 +171,9 @@ class EntityManager:
             summary=entity.description[:500] if entity.description else entity.name,
             attributes=self._build_entity_node_attributes(entity, marker_key=marker_key),
         )
+        if isinstance(entity.embedding, list) and entity.embedding:
+            node.name_embedding = entity.embedding
+        return node
 
     async def _surreal_entity_nodes_for_group(
         self,
@@ -2528,7 +2531,9 @@ class EntityManager:
         props["created_at"] = (entity.created_at or datetime.now(UTC)).isoformat()
         props["updated_at"] = datetime.now(UTC).isoformat()
         props["metadata"] = json.dumps(self._entity_to_metadata(entity) or {})
-        props["name_embedding"] = None
+        props["name_embedding"] = (
+            entity.embedding if isinstance(entity.embedding, list) and entity.embedding else None
+        )
         props["_generated"] = True
         return props
 
