@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -327,7 +326,18 @@ class GraphEntityStore(EntityStore):
 
     async def count(self) -> int:
         if _surreal_entity_node_ops_for(self._driver) is not None:
-            return len(await _list_surreal_entity_nodes(self._driver, self._group_id))
+            rows = GraphClient.normalize_result(
+                await self._driver.execute_query(
+                    """
+                    SELECT count() AS cnt
+                    FROM entity
+                    WHERE group_id = $group_id
+                    GROUP ALL;
+                    """,
+                    group_id=self._group_id,
+                )
+            )
+            return int(rows[0].get("cnt", 0)) if rows else 0
 
         rows = GraphClient.normalize_result(
             await self._driver.execute_query(
@@ -498,7 +508,18 @@ class GraphRelationshipStore(RelationshipStore):
 
     async def count(self) -> int:
         if _surreal_entity_edge_ops_for(self._driver) is not None:
-            return len(await _list_surreal_entity_edges(self._driver, self._group_id))
+            rows = GraphClient.normalize_result(
+                await self._driver.execute_query(
+                    """
+                    SELECT count() AS cnt
+                    FROM relates_to
+                    WHERE group_id = $group_id
+                    GROUP ALL;
+                    """,
+                    group_id=self._group_id,
+                )
+            )
+            return int(rows[0].get("cnt", 0)) if rows else 0
 
         rows = GraphClient.normalize_result(
             await self._driver.execute_query(
@@ -552,18 +573,39 @@ class GraphSearchIndex(SearchIndex):
     async def stats(self) -> GraphStats:
         driver = self._client.get_org_driver(self._group_id)
         if _surreal_driver_for(driver) is not None:
-            entity_counts: Counter[str] = Counter()
-            relationship_counts: Counter[str] = Counter()
+            entity_rows = GraphClient.normalize_result(
+                await driver.execute_query(
+                    """
+                    SELECT entity_type, count() AS cnt
+                    FROM entity
+                    WHERE group_id = $group_id
+                    GROUP BY entity_type;
+                    """,
+                    group_id=self._group_id,
+                )
+            )
+            relationship_rows = GraphClient.normalize_result(
+                await driver.execute_query(
+                    """
+                    SELECT name AS relationship_type, count() AS cnt
+                    FROM relates_to
+                    WHERE group_id = $group_id
+                    GROUP BY name;
+                    """,
+                    group_id=self._group_id,
+                )
+            )
 
-            for node in await _list_surreal_entity_nodes(driver, self._group_id):
-                entity = self._entities.entity_from_node(node)
-                entity_counts[entity.entity_type.value] += 1
-
-            for edge in await _list_surreal_entity_edges(driver, self._group_id):
-                relationship_counts[str(getattr(edge, "name", None) or "RELATED_TO")] += 1
-
-            entities_by_type = dict(entity_counts)
-            relationships_by_type = dict(relationship_counts)
+            entities_by_type = {
+                str(row.get("entity_type")): int(row.get("cnt", 0))
+                for row in entity_rows
+                if row.get("entity_type")
+            }
+            relationships_by_type = {
+                str(row.get("relationship_type") or "RELATED_TO"): int(row.get("cnt", 0))
+                for row in relationship_rows
+                if int(row.get("cnt", 0))
+            }
             return GraphStats(
                 total_entities=sum(entities_by_type.values()),
                 total_relationships=sum(relationships_by_type.values()),

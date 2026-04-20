@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 from uuid import uuid4
 
 import pytest
@@ -90,47 +89,57 @@ async def test_legacy_search_index_aggregates_graph_stats() -> None:
 
 
 @pytest.mark.asyncio
-async def test_legacy_search_index_aggregates_graph_stats_via_surreal_ops() -> None:
+async def test_legacy_search_index_aggregates_graph_stats_via_surreal_queries() -> None:
     driver = MagicMock()
-    driver.execute_query = AsyncMock()
+    driver.execute_query = AsyncMock(
+        side_effect=[
+            [
+                {"entity_type": "pattern", "cnt": 1},
+                {"entity_type": "task", "cnt": 2},
+            ],
+            [
+                {"relationship_type": "RELATED_TO", "cnt": 2},
+                {"relationship_type": "DEPENDS_ON", "cnt": 1},
+            ],
+        ]
+    )
     client = MagicMock()
     client.get_org_driver.return_value = driver
-    manager = MagicMock()
-    manager.node_to_entity.side_effect = [
-        Entity(id="entity-1", entity_type=EntityType.PATTERN, name="Pattern"),
-        Entity(id="entity-2", entity_type=EntityType.TASK, name="Task"),
-        Entity(id="entity-3", entity_type=EntityType.TASK, name="Task 2"),
-    ]
     search = LegacySearchIndex(
         client,
         "org-1",
-        LegacyEntityStore(manager, driver=driver, group_id="org-1"),
+        LegacyEntityStore(MagicMock(), driver=driver, group_id="org-1"),
     )
 
-    with (
-        patch("sibyl.persistence.graph_runtime._surreal_driver_for", return_value=object()),
-        patch(
-            "sibyl.persistence.graph_runtime._list_surreal_entity_nodes",
-            AsyncMock(return_value=[SimpleNamespace(), SimpleNamespace(), SimpleNamespace()]),
-        ),
-        patch(
-            "sibyl.persistence.graph_runtime._list_surreal_entity_edges",
-            AsyncMock(
-                return_value=[
-                    SimpleNamespace(name="RELATED_TO"),
-                    SimpleNamespace(name="DEPENDS_ON"),
-                    SimpleNamespace(name="RELATED_TO"),
-                ]
-            ),
-        ),
-    ):
+    with patch("sibyl.persistence.graph_runtime._surreal_driver_for", return_value=object()):
         stats = await search.stats()
 
     assert stats.total_entities == 3
     assert stats.total_relationships == 3
     assert stats.entities_by_type == {"pattern": 1, "task": 2}
     assert stats.relationships_by_type == {"RELATED_TO": 2, "DEPENDS_ON": 1}
-    driver.execute_query.assert_not_called()
+    driver.execute_query.assert_has_awaits(
+        [
+            call(
+                """
+                    SELECT entity_type, count() AS cnt
+                    FROM entity
+                    WHERE group_id = $group_id
+                    GROUP BY entity_type;
+                    """,
+                group_id="org-1",
+            ),
+            call(
+                """
+                    SELECT name AS relationship_type, count() AS cnt
+                    FROM relates_to
+                    WHERE group_id = $group_id
+                    GROUP BY name;
+                    """,
+                group_id="org-1",
+            ),
+        ]
+    )
 
 
 @pytest.mark.asyncio
