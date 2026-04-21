@@ -276,7 +276,7 @@ Auto-linking searches for:
 ```
 
 - Returns immediately with entity ID
-- Processing happens in background via arq worker
+- Processing happens in the active coordination runtime (local in-process or Redis worker)
 - Entity may not be immediately queryable
 
 ### Sync Mode

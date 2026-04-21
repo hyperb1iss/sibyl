@@ -320,8 +320,8 @@ Active crawls show:
 # Check crawl status
 sibyl crawl status source_abc123
 
-# If stuck, you may need to restart the worker
-moon run stop && moon run dev
+# If stuck, restart the local dev stack
+moon run stop && moon run dev-surreal
 ```
 
 ### No Documents After Crawl

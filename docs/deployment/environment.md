@@ -179,24 +179,25 @@ stored encrypted in the database (using `SIBYL_SETTINGS_KEY`).
 
 ## Worker Configuration
 
-| Variable           | Default | Description                     |
-| ------------------ | ------- | ------------------------------- |
-| `SIBYL_RUN_WORKER` | `false` | Embed arq worker in API process |
+| Variable           | Default | Description                                                     |
+| ------------------ | ------- | --------------------------------------------------------------- |
+| `SIBYL_RUN_WORKER` | `false` | Embed the legacy Redis worker in the API process when supported |
 
 ## Example .env Files
 
 ### Local Development
 
 ```bash
-# apps/api/.env
+# .env
 SIBYL_ENVIRONMENT=development
 SIBYL_JWT_SECRET=dev-secret-change-in-production
 
-# Databases (Docker Compose ports)
-SIBYL_POSTGRES_HOST=localhost
-SIBYL_POSTGRES_PORT=5433
-SIBYL_FALKORDB_HOST=localhost
-SIBYL_FALKORDB_PORT=6380
+# Recommended local runtime
+SIBYL_STORE=surreal
+SIBYL_COORDINATION_BACKEND=local
+SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc
+SIBYL_SURREAL_USERNAME=root
+SIBYL_SURREAL_PASSWORD=root
 
 # LLM
 SIBYL_OPENAI_API_KEY=sk-...
