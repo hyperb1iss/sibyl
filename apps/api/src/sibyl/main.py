@@ -157,6 +157,20 @@ def create_combined_app(  # noqa: PLR0915
                 error=str(e),
             )
 
+        scheduler_initialized = False
+        try:
+            from sibyl.coordination.scheduler import get_scheduler
+
+            await get_scheduler().startup()
+            scheduler_initialized = True
+            log.info("Coordination scheduler ready", backend=coordination_backend)
+        except Exception as e:
+            log.warning(
+                "Coordination scheduler unavailable",
+                backend=coordination_backend,
+                error=str(e),
+            )
+
         # Initialize coordination event bus for WebSocket broadcasts
         pubsub_initialized = False
         try:
@@ -235,6 +249,14 @@ def create_combined_app(  # noqa: PLR0915
                 await get_broker().shutdown()
             except Exception as e:
                 log.warning("Error shutting down broker", error=str(e))
+
+        if scheduler_initialized:
+            try:
+                from sibyl.coordination.scheduler import get_scheduler
+
+                await get_scheduler().shutdown()
+            except Exception as e:
+                log.warning("Error shutting down scheduler", error=str(e))
 
         # Shutdown embedded worker if running
         if worker_task:

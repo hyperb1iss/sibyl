@@ -36,6 +36,7 @@ async def test_surreal_mode_skips_legacy_startup(monkeypatch: pytest.MonkeyPatch
     enable_pubsub = MagicMock()
     disable_pubsub = MagicMock()
     broker = SimpleNamespace(startup=AsyncMock(), shutdown=AsyncMock())
+    scheduler = SimpleNamespace(startup=AsyncMock(), shutdown=AsyncMock())
 
     monkeypatch.setattr(main_module.settings, "store", "surreal")
     monkeypatch.setattr("sibyl.api.app.create_api_app", lambda: Starlette())
@@ -50,6 +51,7 @@ async def test_surreal_mode_skips_legacy_startup(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr("sibyl.api.websocket.enable_pubsub", enable_pubsub)
     monkeypatch.setattr("sibyl.api.websocket.disable_pubsub", disable_pubsub)
     monkeypatch.setattr("sibyl.coordination.broker.get_broker", lambda: broker)
+    monkeypatch.setattr("sibyl.coordination.scheduler.get_scheduler", lambda: scheduler)
     monkeypatch.setattr(
         "sibyl_core.graph.client.get_graph_client",
         AsyncMock(return_value=SimpleNamespace(is_connected=True)),
@@ -69,5 +71,7 @@ async def test_surreal_mode_skips_legacy_startup(monkeypatch: pytest.MonkeyPatch
     shutdown_locks.assert_awaited_once()
     broker.startup.assert_awaited_once()
     broker.shutdown.assert_awaited_once()
+    scheduler.startup.assert_awaited_once()
+    scheduler.shutdown.assert_awaited_once()
     enable_pubsub.assert_called_once_with()
     disable_pubsub.assert_called_once_with()

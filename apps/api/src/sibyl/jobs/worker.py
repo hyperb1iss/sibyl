@@ -8,6 +8,7 @@ This is the worker entrypoint. Job implementations are in:
 - backup.py: run_backup, cleanup_old_backups
 """
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -30,6 +31,20 @@ from sibyl.jobs.entities import (
 )
 
 log = structlog.get_logger()
+
+
+@dataclass(frozen=True)
+class ScheduleSpec:
+    """Shared schedule intent for Redis cron and local scheduling."""
+
+    name: str
+    function: Any
+    schedule_label: str
+    minute: int | set[int] | None = None
+    hour: int | set[int] | None = None
+    day: int | set[int] | None = None
+    month: int | set[int] | None = None
+    weekday: int | set[int] | None = None
 
 
 def get_redis_settings() -> RedisSettings:
@@ -98,6 +113,63 @@ def _parse_cron_schedule(schedule: str) -> dict[str, int | set[int] | None]:
     }
 
 
+def get_schedule_specs() -> list[ScheduleSpec]:
+    """Build the schedule definitions shared by Redis and local runtimes."""
+    schedule_specs: list[ScheduleSpec] = []
+
+    if settings.backup_enabled:
+        try:
+            schedule_kwargs = _parse_cron_schedule(settings.backup_schedule)
+            schedule_specs.append(
+                ScheduleSpec(
+                    name="run_scheduled_backups",
+                    function=run_scheduled_backups,
+                    schedule_label=settings.backup_schedule,
+                    **schedule_kwargs,
+                )
+            )
+            log.info(
+                "cron_job_registered",
+                job="run_scheduled_backups",
+                schedule=settings.backup_schedule,
+            )
+
+            cleanup_hour = schedule_kwargs.get("hour")
+            if cleanup_hour is not None and isinstance(cleanup_hour, int):
+                cleanup_schedule = {**schedule_kwargs, "hour": (cleanup_hour + 1) % 24}
+            else:
+                cleanup_schedule = schedule_kwargs
+
+            schedule_specs.append(
+                ScheduleSpec(
+                    name="cleanup_old_backups",
+                    function=cleanup_old_backups,
+                    schedule_label="1 hour after backup schedule",
+                    **cleanup_schedule,
+                )
+            )
+            log.info(
+                "cron_job_registered",
+                job="cleanup_old_backups",
+                schedule="1 hour after backup schedule",
+            )
+        except Exception as e:
+            log.warning("cron_schedule_parse_failed", schedule=settings.backup_schedule, error=str(e))
+
+    schedule_specs.append(
+        ScheduleSpec(
+            name="consolidate_all_orgs",
+            function=consolidate_all_orgs,
+            schedule_label="0 3 * * *",
+            hour=3,
+            minute=0,
+        )
+    )
+    log.info("cron_job_registered", job="consolidate_all_orgs", schedule="0 3 * * *")
+
+    return schedule_specs
+
+
 class WorkerSettings:
     """arq worker settings."""
 
@@ -129,62 +201,18 @@ class WorkerSettings:
     @staticmethod
     def get_cron_jobs() -> list:
         """Build cron job list based on settings."""
-        cron_jobs = []
-
-        if settings.backup_enabled:
-            try:
-                schedule_kwargs = _parse_cron_schedule(settings.backup_schedule)
-
-                # Scheduled backups - queries all orgs with enabled backup settings
-                cron_jobs.append(
-                    cron(
-                        run_scheduled_backups,
-                        **schedule_kwargs,
-                        unique=True,
-                    )
-                )
-                log.info(
-                    "cron_job_registered",
-                    job="run_scheduled_backups",
-                    schedule=settings.backup_schedule,
-                )
-
-                # Cleanup old backups - runs 1 hour after backups (offset by 1 hour)
-                cleanup_hour = schedule_kwargs.get("hour")
-                if cleanup_hour is not None and isinstance(cleanup_hour, int):
-                    cleanup_schedule = {**schedule_kwargs, "hour": (cleanup_hour + 1) % 24}
-                else:
-                    cleanup_schedule = schedule_kwargs
-
-                cron_jobs.append(
-                    cron(
-                        cleanup_old_backups,
-                        **cleanup_schedule,
-                        unique=True,
-                    )
-                )
-                log.info(
-                    "cron_job_registered",
-                    job="cleanup_old_backups",
-                    schedule="1 hour after backup schedule",
-                )
-            except Exception as e:
-                log.warning(
-                    "cron_schedule_parse_failed", schedule=settings.backup_schedule, error=str(e)
-                )
-
-        # Nightly consolidation: merge duplicates + archive stale entities (3 AM)
-        cron_jobs.append(
+        return [
             cron(
-                consolidate_all_orgs,
-                hour=3,
-                minute=0,
+                spec.function,
+                minute=spec.minute,
+                hour=spec.hour,
+                day=spec.day,
+                month=spec.month,
+                weekday=spec.weekday,
                 unique=True,
             )
-        )
-        log.info("cron_job_registered", job="consolidate_all_orgs", schedule="0 3 * * *")
-
-        return cron_jobs
+            for spec in get_schedule_specs()
+        ]
 
     cron_jobs = get_cron_jobs.__func__()  # type: ignore[attr-defined]
 

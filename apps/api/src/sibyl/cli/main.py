@@ -168,6 +168,15 @@ def worker(
     For dev mode with hot reload, use arq directly:
         arq sibyl.jobs.worker.WorkerSettings --watch src
     """
+    from sibyl.config import settings
+
+    if settings.resolved_coordination_backend == "local":
+        console.print(
+            f"[{NEON_CYAN}]Local coordination runs background jobs in-process under "
+            f"[{ELECTRIC_PURPLE}]sibyld serve[/{ELECTRIC_PURPLE}].[/{NEON_CYAN}]"
+        )
+        return
+
     from arq import run_worker
 
     from sibyl.jobs.worker import WorkerSettings
