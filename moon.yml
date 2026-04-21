@@ -43,6 +43,18 @@ tasks:
     options:
       persistent: true
 
+  migrate-local-surreal:
+    command: bash tools/dev/migrate-local-surreal.sh
+    env:
+      FORCE_COLOR: "1"
+    inputs:
+      - tools/dev/*.sh
+      - apps/api/src/**/*.py
+      - packages/python/sibyl-core/src/**/*.py
+      - pyproject.toml
+      - apps/api/pyproject.toml
+      - packages/python/sibyl-core/pyproject.toml
+
   dev-api:
     script: |
       docker compose up -d surrealdb redis
@@ -394,7 +406,8 @@ tasks:
 
   baseline-replay-runtime:
     command:
-      uv run python -m tools.baselines.replay --manifest-path .moon/cache/baseline-runtime-manifest.json
+      uv run python -m tools.baselines.replay --manifest-path
+      .moon/cache/baseline-runtime-manifest.json
     inputs:
       - tools/**/*.py
       - baselines/**/*.jsonl

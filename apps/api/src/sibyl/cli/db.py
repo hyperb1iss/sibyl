@@ -173,7 +173,7 @@ def restore_db(
                 f"{backup_data.episode_count} episodes, "
                 f"and {backup_data.mention_count} mentions..."
             )
-            _prepare_graph_runtime(org_id, clean=False)
+            await _prepare_graph_runtime_async(org_id, clean=False)
 
             result = await restore_backup(
                 backup_data,
@@ -935,55 +935,59 @@ DROP TABLE IF EXISTS alembic_version CASCADE;
     success("  PostgreSQL restored!")
 
 
+async def _prepare_graph_runtime_async(org_id: str, *, clean: bool) -> None:
+    """Ensure the target graph runtime is ready for restore."""
+    from sibyl.config import settings
+    from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
+    from sibyl_core.graph.client import get_graph_client
+
+    client = await get_graph_client()
+    if settings.store == "surreal":
+        driver = client.get_org_driver(org_id)
+
+        async def _clear_surreal_group_data() -> None:
+            # Table names come from the static schema constants above.
+            for table in (*GRAPH_EDGES, *GRAPH_TABLES):
+                query = f"DELETE FROM {table} WHERE group_id = $group_id;"  # noqa: S608
+                await driver.execute_query(query, group_id=org_id)
+
+        if clean:
+            graph_ops = getattr(driver, "graph_ops", None)
+            if graph_ops is not None:
+                try:
+                    await graph_ops.clear_data(driver, group_ids=[org_id])
+                except Exception:
+                    await _clear_surreal_group_data()
+            else:
+                await _clear_surreal_group_data()
+        return
+
+    if clean:
+        await client.execute_write_org(
+            "MATCH (n) DETACH DELETE n RETURN count(n) AS deleted",
+            org_id,
+        )
+
+
 def _prepare_graph_runtime(org_id: str, *, clean: bool) -> None:
     """Ensure the target graph runtime is ready for restore."""
 
     @run_async
     async def _prepare() -> None:
-        from sibyl.config import settings
-        from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
-        from sibyl_core.graph.client import get_graph_client
-
-        client = await get_graph_client()
-        if settings.store == "surreal":
-            driver = client.get_org_driver(org_id)
-
-            async def _clear_surreal_group_data() -> None:
-                # Table names come from the static schema constants above.
-                for table in (*GRAPH_EDGES, *GRAPH_TABLES):
-                    query = f"DELETE FROM {table} WHERE group_id = $group_id;"  # noqa: S608
-                    await driver.execute_query(query, group_id=org_id)
-
-            if clean:
-                graph_ops = getattr(driver, "graph_ops", None)
-                if graph_ops is not None:
-                    try:
-                        await graph_ops.clear_data(driver, group_ids=[org_id])
-                    except Exception:
-                        await _clear_surreal_group_data()
-                else:
-                    await _clear_surreal_group_data()
-            return
-
-        if clean:
-            await client.execute_write_org(
-                "MATCH (n) DETACH DELETE n RETURN count(n) AS deleted",
-                org_id,
-            )
+        await _prepare_graph_runtime_async(org_id, clean=clean)
 
     _prepare()
 
 
 def _restore_graph_payload(backup_dict: dict[str, object], org_id: str, clean: bool) -> bool:
     """Restore graph data from a decoded backup payload."""
-    _prepare_graph_runtime(org_id, clean=clean)
-
     @run_async
     async def _restore() -> bool:
         from sibyl_core.tools.admin import restore_backup
 
         try:
             backup_data = _coerce_graph_backup_data(backup_dict, org_id)
+            await _prepare_graph_runtime_async(org_id, clean=clean)
 
             result = await restore_backup(
                 backup_data, organization_id=org_id, skip_existing=not clean

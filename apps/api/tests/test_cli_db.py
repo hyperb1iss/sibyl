@@ -44,7 +44,7 @@ def test_restore_accepts_graph_export_payload(tmp_path: Path) -> None:
     )
 
     with (
-        patch("sibyl.cli.db._prepare_graph_runtime"),
+        patch("sibyl.cli.db._prepare_graph_runtime_async", AsyncMock()),
         patch("sibyl_core.tools.admin.restore_backup", restore_backup),
     ):
         result = runner.invoke(
@@ -102,7 +102,7 @@ def test_restore_prefers_top_level_backup_metadata(tmp_path: Path) -> None:
     )
 
     with (
-        patch("sibyl.cli.db._prepare_graph_runtime"),
+        patch("sibyl.cli.db._prepare_graph_runtime_async", AsyncMock()),
         patch("sibyl_core.tools.admin.restore_backup", restore_backup),
     ):
         result = runner.invoke(
@@ -143,8 +143,11 @@ def test_restore_prepares_graph_runtime_before_restore(tmp_path: Path) -> None:
         )
     )
 
+    prepare = AsyncMock()
+
     with (
-        patch("sibyl.cli.db._prepare_graph_runtime") as prepare,
+        patch("sibyl.cli.db._prepare_graph_runtime", side_effect=AssertionError("sync helper should not be used")),
+        patch("sibyl.cli.db._prepare_graph_runtime_async", prepare),
         patch("sibyl_core.tools.admin.restore_backup", restore_backup),
     ):
         result = runner.invoke(
@@ -153,7 +156,38 @@ def test_restore_prepares_graph_runtime_before_restore(tmp_path: Path) -> None:
         )
 
     assert result.exit_code == 0
-    prepare.assert_called_once_with("org-123", clean=False)
+    prepare.assert_awaited_once_with("org-123", clean=False)
+
+
+def test_restore_graph_payload_prepares_runtime_in_same_async_flow() -> None:
+    prepare = AsyncMock()
+    restore_backup = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            entities_restored=1,
+            relationships_restored=0,
+            entities_skipped=0,
+            relationships_skipped=0,
+            duration_seconds=0.1,
+            errors=[],
+        )
+    )
+
+    with (
+        patch("sibyl.cli.db._prepare_graph_runtime_async", prepare),
+        patch("sibyl_core.tools.admin.restore_backup", restore_backup),
+    ):
+        result = db_cli._restore_graph_payload(
+            {
+                "entities": [{"id": "entity-1"}],
+                "relationships": [],
+            },
+            "org-123",
+            clean=True,
+        )
+
+    assert result is True
+    prepare.assert_awaited_once_with("org-123", clean=True)
 
 
 def test_prepare_graph_runtime_surreal_clears_rows_without_bootstrapping_schema(monkeypatch) -> None:

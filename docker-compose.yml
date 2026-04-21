@@ -24,7 +24,7 @@ services:
     ports:
       - "${SIBYL_SURREAL_PORT:-8000}:8000"
     volumes:
-      - "${SIBYL_SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}:/data"
+      - "${SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}:/data"
     restart: unless-stopped
 
   redis:

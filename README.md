@@ -55,15 +55,15 @@ docs ingestion, and graph exploration keep hard-won context close at hand for bo
 
 ## ✦ What You Get
 
-| Capability                     | What It Means                                                                                               |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| 🔮 **Collective Intelligence** | Every session compounds. The graph gets smarter as your team and tools capture real work                    |
+| Capability                     | What It Means                                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| 🔮 **Collective Intelligence** | Every session compounds. The graph gets smarter as your team and tools capture real work                     |
 | 🎯 **Semantic Search**         | Find knowledge by meaning. "Authentication patterns" finds OAuth solutions even if "OAuth" isn't in the text |
-| 🔮 **Persistent Memory**       | What you learn today helps tomorrow. Patterns, decisions, and gotchas stay searchable across sessions       |
-| 🦋 **Task Workflow**           | Plan with epics and tasks. Track execution across sessions and teammates in one place                       |
-| 🌊 **Doc Ingestion**           | Crawl and index external documentation into your graph                                                      |
-| 💎 **Multi-Tenancy**           | Isolated graphs per organization. Enterprise-ready from day one                                             |
-| ⚡ **Graph Visualization**     | Interactive D3 visualization of your knowledge connections                                                  |
+| 🔮 **Persistent Memory**       | What you learn today helps tomorrow. Patterns, decisions, and gotchas stay searchable across sessions        |
+| 🦋 **Task Workflow**           | Plan with epics and tasks. Track execution across sessions and teammates in one place                        |
+| 🌊 **Doc Ingestion**           | Crawl and index external documentation into your graph                                                       |
+| 💎 **Multi-Tenancy**           | Isolated graphs per organization. Enterprise-ready from day one                                              |
+| ⚡ **Graph Visualization**     | Interactive D3 visualization of your knowledge connections                                                   |
 
 <table>
   <tr>
@@ -341,10 +341,10 @@ moon run hooks:install     # Install context hooks
 
 **Hooks:** Automatic context injection:
 
-| Hook                 | Trigger        | Action                                           |
-| -------------------- | -------------- | ------------------------------------------------ |
+| Hook                 | Trigger        | Action                                                                |
+| -------------------- | -------------- | --------------------------------------------------------------------- |
 | **SessionStart**     | Session begins | Prints a compact session bundle with active tasks and relevant memory |
-| **UserPromptSubmit** | Every prompt   | Searches graph, injects relevant patterns        |
+| **UserPromptSubmit** | Every prompt   | Searches graph, injects relevant patterns                             |
 
 The `UserPromptSubmit` hook extracts keywords from your prompt, searches Sibyl, and injects matching
 patterns as context, so Claude always knows what you've learned before.
@@ -434,8 +434,10 @@ moon run install
 moon run dev
 
 # Start the Surreal-backed stack explicitly.
-# Auto-resumes the newest rehearsal store in .moon/cache if one exists.
 moon run dev-surreal
+
+# Move one local org from Falkor/Postgres into local Surreal and verify it.
+moon run migrate-local-surreal -- --org-id <org-uuid>
 
 # Falkor/Postgres alias
 moon run dev-legacy
@@ -457,11 +459,15 @@ moon run docker-down      # Stop databases
 
 `moon run dev` stays on the FalkorDB/PostgreSQL stack for now while the Surreal path stabilizes.
 `moon run dev-surreal` is the explicit Surreal server-mode flow. When `SIBYL_SURREAL_URL` is unset
-it starts local SurrealDB plus Redis/Valkey, points the API and worker at
-`ws://127.0.0.1:8000/rpc`, and auto-resumes the newest rehearsal store in `.moon/cache` if one
-exists. Set `SIBYL_SURREAL_URL` to a hosted SurrealDB endpoint, including Surreal Cloud, to skip
-the local database and connect remotely instead. `moon run dev-legacy` remains as an alias for the
-Falkor/PostgreSQL path.
+it starts local SurrealDB plus Redis/Valkey, points the API and worker at `ws://127.0.0.1:8000/rpc`,
+and stores local database files in `.moon/cache/surreal-dev`. Set `SURREAL_DATA_DIR=/your/path` if
+you want the local Docker volume somewhere else. Set `SIBYL_SURREAL_URL` to a hosted SurrealDB
+endpoint, including Surreal Cloud, to skip the local database and connect remotely instead.
+`moon run dev-legacy` remains as an alias for the Falkor/PostgreSQL path.
+
+`moon run migrate-local-surreal -- --org-id <uuid>` is the simple local data move: it exports the
+org from legacy storage, imports it into the local Surreal server, and verifies the result. Use
+`--restore-postgres` only if you also want to replay the PostgreSQL dump.
 
 ## Entity Types
 
