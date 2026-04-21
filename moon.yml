@@ -10,12 +10,13 @@ tasks:
   # ==========================================================================
   dev:
     script: |
-      docker compose up -d && sleep 1 && npx concurrently --raw --kill-others-on-fail \
+      docker compose up -d falkordb postgres && sleep 1 && npx concurrently --raw --kill-others-on-fail \
         "uv run --directory apps/api sibyld serve --reload" \
         "uv run --directory apps/api arq sibyl.jobs.worker.WorkerSettings --watch src" \
         "moon run web:dev"
     env:
       FORCE_COLOR: "1"
+      SIBYL_STORE: "legacy"
     preset: server
     options:
       persistent: true
@@ -29,11 +30,32 @@ tasks:
     options:
       persistent: true
 
+  dev-legacy:
+    script: |
+      docker compose up -d falkordb postgres && sleep 1 && npx concurrently --raw --kill-others-on-fail \
+        "uv run --directory apps/api sibyld serve --reload" \
+        "uv run --directory apps/api arq sibyl.jobs.worker.WorkerSettings --watch src" \
+        "moon run web:dev"
+    env:
+      FORCE_COLOR: "1"
+      SIBYL_STORE: "legacy"
+    preset: server
+    options:
+      persistent: true
+
   dev-api:
     script: |
-      docker compose up -d
+      docker compose up -d surrealdb redis
       sleep 1
       uv run --directory apps/api sibyld serve --reload
+    env:
+      SIBYL_STORE: "surreal"
+      SIBYL_SURREAL_URL: "ws://127.0.0.1:8000/rpc"
+      SIBYL_SURREAL_USERNAME: "root"
+      SIBYL_SURREAL_PASSWORD: "root"
+      SIBYL_REDIS_HOST: "127.0.0.1"
+      SIBYL_REDIS_PORT: "6381"
+      SIBYL_REDIS_PASSWORD: ""
     preset: server
     options:
       persistent: true

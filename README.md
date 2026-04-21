@@ -433,12 +433,15 @@ moon run install
 # Start everything
 moon run dev
 
-# Start the Surreal-backed stack.
+# Start the Surreal-backed stack explicitly.
 # Auto-resumes the newest rehearsal store in .moon/cache if one exists.
 moon run dev-surreal
 
+# Falkor/Postgres alias
+moon run dev-legacy
+
 # Individual services
-moon run dev-api          # API + worker
+moon run dev-api          # API only
 moon run dev-web          # Frontend only
 
 # Quality checks
@@ -448,14 +451,17 @@ moon run web:typecheck    # TypeScript check
 moon run core:check       # Full check on core library
 
 # Database
-moon run docker-up        # Start FalkorDB + PostgreSQL
+moon run docker-up        # Start SurrealDB + Redis/Valkey
 moon run docker-down      # Stop databases
 ```
 
-`moon run dev` still boots the legacy graph path. `moon run dev-surreal` keeps the same
-Docker infra for PostgreSQL and FalkorDB, but points the API and worker at SurrealKV via
-`SIBYL_STORE=surreal`. Set `SIBYL_SURREAL_DATA_DIR=/path/to/store` if you want to pin a
-specific migrated snapshot instead of letting the task pick the newest rehearsal directory.
+`moon run dev` stays on the FalkorDB/PostgreSQL stack for now while the Surreal path stabilizes.
+`moon run dev-surreal` is the explicit Surreal server-mode flow. When `SIBYL_SURREAL_URL` is unset
+it starts local SurrealDB plus Redis/Valkey, points the API and worker at
+`ws://127.0.0.1:8000/rpc`, and auto-resumes the newest rehearsal store in `.moon/cache` if one
+exists. Set `SIBYL_SURREAL_URL` to a hosted SurrealDB endpoint, including Surreal Cloud, to skip
+the local database and connect remotely instead. `moon run dev-legacy` remains as an alias for the
+Falkor/PostgreSQL path.
 
 ## Entity Types
 

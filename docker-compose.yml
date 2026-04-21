@@ -1,15 +1,44 @@
-# Sibyl Development Database Services
+# Sibyl Development Data Services
 #
 # To run multiple instances, use different project names and ports:
-#   COMPOSE_PROJECT_NAME=sibyl-test SIBYL_FALKORDB_PORT=6390 SIBYL_POSTGRES_PORT=5443 docker compose up -d
+#   COMPOSE_PROJECT_NAME=sibyl-test SIBYL_SURREAL_PORT=8010 SIBYL_REDIS_PORT=6391 docker compose up -d
 #
 # Or use a separate env file:
 #   docker compose --env-file .env.test up -d
 
 services:
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-surrealdb
+    command:
+      [
+        "start",
+        "--log",
+        "${SIBYL_SURREAL_LOG_LEVEL:-info}",
+        "--user",
+        "${SIBYL_SURREAL_USERNAME:-root}",
+        "--pass",
+        "${SIBYL_SURREAL_PASSWORD:-root}",
+        "rocksdb:///data/sibyl.db",
+      ]
+    ports:
+      - "${SIBYL_SURREAL_PORT:-8000}:8000"
+    volumes:
+      - "${SIBYL_SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}:/data"
+    restart: unless-stopped
+
+  redis:
+    image: valkey/valkey:8-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-redis
+    ports:
+      - "${SIBYL_REDIS_PORT:-6381}:6379"
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+
   falkordb:
     image: falkordb/falkordb:latest
     container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-falkordb
+    profiles: ["legacy"]
     ports:
       - "${SIBYL_FALKORDB_PORT:-6380}:6379"
       - "${SIBYL_FALKORDB_BROWSER_PORT:-3335}:3000"
@@ -27,6 +56,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg18
     container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-postgres
+    profiles: ["legacy"]
     ports:
       - "${SIBYL_POSTGRES_PORT:-5433}:5432"
     volumes:
@@ -44,5 +74,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  falkordb_data:
   postgres_data:
+  falkordb_data:

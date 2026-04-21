@@ -8,8 +8,11 @@ For client commands (task, search, add, etc.), use the `sibyl` CLI.
 
 import asyncio
 import contextlib
+import shutil
+import socket
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
+from urllib.parse import urlparse
 
 import typer
 
@@ -181,70 +184,118 @@ def worker(
         loop.close()
 
 
-@app.command()
-def setup() -> None:
-    """Check environment and guide first-time setup."""
-    import shutil
-    import socket
+def _tcp_service_running(host: str, port: int) -> bool:
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
 
+
+def _check_env_file() -> bool:
     from sibyl.cli.common import error, success
-    from sibyl.config import settings
 
-    console.print(create_panel(f"[{ELECTRIC_PURPLE}]Sibyl Setup[/{ELECTRIC_PURPLE}]"))
-
-    all_good = True
-
-    # Check 1: .env file exists
     env_file = Path(".env")
     env_example = Path(".env.example")
     if env_file.exists():
         success(".env file exists")
-    elif env_example.exists():
+        return True
+    if env_example.exists():
         info("Creating .env from .env.example...")
         shutil.copy(env_example, env_file)
         success(".env file created - please update with your values")
-        all_good = False
-    else:
-        error(".env.example not found - are you in the project directory?")
-        all_good = False
+        return False
 
-    # Check 2: OpenAI API key
+    error(".env.example not found - are you in the project directory?")
+    return False
+
+
+def _check_openai_api_key_configured(settings: Any) -> bool:
+    from sibyl.cli.common import error, success
+
     api_key = settings.openai_api_key.get_secret_value()
     if api_key and not api_key.startswith("sk-your"):
         success("OpenAI API key configured")
-    else:
-        error("OpenAI API key not set")
-        console.print(f"  [{NEON_CYAN}]Set SIBYL_OPENAI_API_KEY in .env[/{NEON_CYAN}]")
-        all_good = False
+        return True
 
-    # Check 3: Docker available
-    docker_available = shutil.which("docker") is not None
-    if docker_available:
+    error("OpenAI API key not set")
+    console.print(f"  [{NEON_CYAN}]Set SIBYL_OPENAI_API_KEY in .env[/{NEON_CYAN}]")
+    return False
+
+
+def _check_docker_available() -> bool:
+    from sibyl.cli.common import error, success
+
+    if shutil.which("docker") is not None:
         success("Docker available")
-    else:
-        error("Docker not found")
-        console.print(
-            f"  [{NEON_CYAN}]Install Docker: https://docs.docker.com/get-docker/[/{NEON_CYAN}]"
-        )
-        all_good = False
+        return True
 
-    # Check 4: FalkorDB connection
-    falkor_running = False
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(1)
-        result = sock.connect_ex((settings.falkordb_host, settings.falkordb_port))
-        sock.close()
-        falkor_running = result == 0
-    except Exception:
-        pass  # Socket connection check - failure means not running
+    error("Docker not found")
+    console.print(f"  [{NEON_CYAN}]Install Docker: https://docs.docker.com/get-docker/[/{NEON_CYAN}]")
+    return False
 
-    if falkor_running:
-        success(f"FalkorDB running on {settings.falkordb_host}:{settings.falkordb_port}")
+
+def _check_surreal_services(settings: Any) -> bool:
+    from sibyl.cli.common import error, success
+
+    all_good = True
+    surreal_url = settings.resolved_surreal_url
+    parsed_surreal = urlparse(surreal_url)
+
+    if parsed_surreal.scheme in {"ws", "wss", "http", "https"} and parsed_surreal.hostname:
+        surreal_host = parsed_surreal.hostname
+        surreal_port = parsed_surreal.port or 8000
+        if _tcp_service_running(surreal_host, surreal_port):
+            success(f"SurrealDB running on {surreal_host}:{surreal_port}")
+        else:
+            error(f"SurrealDB not running on {surreal_host}:{surreal_port}")
+            console.print(f"  [{NEON_CYAN}]Start with: docker compose up -d[/{NEON_CYAN}]")
+            all_good = False
     else:
-        error(f"FalkorDB not running on {settings.falkordb_host}:{settings.falkordb_port}")
+        info(f"SurrealDB configured via {surreal_url}")
+
+    redis_host = settings.redis_host or "127.0.0.1"
+    redis_port = settings.redis_port or 6381
+    if _tcp_service_running(redis_host, redis_port):
+        success(f"Redis/Valkey running on {redis_host}:{redis_port}")
+    else:
+        error(f"Redis/Valkey not running on {redis_host}:{redis_port}")
         console.print(f"  [{NEON_CYAN}]Start with: docker compose up -d[/{NEON_CYAN}]")
         all_good = False
+
+    return all_good
+
+
+def _check_legacy_services(settings: Any) -> bool:
+    from sibyl.cli.common import error, success
+
+    if _tcp_service_running(settings.falkordb_host, settings.falkordb_port):
+        success(f"FalkorDB running on {settings.falkordb_host}:{settings.falkordb_port}")
+        return True
+
+    error(f"FalkorDB not running on {settings.falkordb_host}:{settings.falkordb_port}")
+    console.print(f"  [{NEON_CYAN}]Start with: docker compose up -d[/{NEON_CYAN}]")
+    return False
+
+
+@app.command()
+def setup() -> None:
+    """Check environment and guide first-time setup."""
+    from sibyl.config import settings
+
+    console.print(create_panel(f"[{ELECTRIC_PURPLE}]Sibyl Setup[/{ELECTRIC_PURPLE}]"))
+
+    all_good = _check_env_file()
+    all_good = _check_openai_api_key_configured(settings) and all_good
+    all_good = _check_docker_available() and all_good
+    all_good = (
+        _check_surreal_services(settings)
+        if settings.store == "surreal"
+        else _check_legacy_services(settings)
+    ) and all_good
 
     # Summary
     console.print()

@@ -98,6 +98,13 @@ router = APIRouter(
 
 LIST_ALL_PAGE_SIZE = 2000
 LIST_BY_TYPE_PAGE_SIZE = 1000
+GRAPH_ENTITY_ID_PREFIXES = frozenset(
+    {
+        entity_type.value
+        for entity_type in EntityType
+        if entity_type is not EntityType.DOCUMENT
+    }
+)
 
 
 # =============================================================================
@@ -108,6 +115,10 @@ LIST_BY_TYPE_PAGE_SIZE = 1000
 def _entity_is_archived(entity: Any) -> bool:
     metadata = getattr(entity, "metadata", None) or {}
     return bool(metadata.get("archived")) or str(metadata.get("status", "")).lower() == "archived"
+
+
+def _should_fallback_to_document_entity(entity_id: str) -> bool:
+    return not any(entity_id.startswith(f"{prefix}_") for prefix in GRAPH_ENTITY_ID_PREFIXES)
 
 
 async def _archive_raw_capture(
@@ -739,6 +750,9 @@ async def get_entity(
                 updated_at=getattr(entity, "updated_at", None),
                 related=related,
             )
+
+        if not _should_fallback_to_document_entity(entity_id):
+            raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
 
         log.debug("Entity not in graph, checking document chunks", entity_id=entity_id)
 

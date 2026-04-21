@@ -247,6 +247,25 @@ def test_load_archive_supports_legacy_backup_metadata(tmp_path: Path) -> None:
     assert loaded.manifest.source_store == "legacy"
 
 
+def test_load_archive_supports_backup_all_directory_layout(tmp_path: Path) -> None:
+    backup_dir = tmp_path / "backup-all"
+    backup_dir.mkdir()
+    (backup_dir / "20260420_120000_sibyl_pg.sql").write_text("select 1;\n", encoding="utf-8")
+    (backup_dir / "20260420_120000_sibyl_graph.json").write_bytes(_graph_bytes())
+
+    loaded = load_archive(backup_dir)
+
+    assert validate_archive(loaded) == []
+    assert sorted(loaded.files) == [GRAPH_FILENAME, POSTGRES_FILENAME]
+    assert loaded.manifest.organization_id == "org-123"
+    assert loaded.manifest.source_store == "legacy"
+    assert loaded.manifest.metadata["legacy_layout"] == "backup_payloads"
+    assert (
+        loaded.manifest.files[GRAPH_FILENAME].metadata["original_path"]
+        == "20260420_120000_sibyl_graph.json"
+    )
+
+
 @pytest.mark.asyncio
 async def test_verify_graph_archive_checks_counts_and_samples(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

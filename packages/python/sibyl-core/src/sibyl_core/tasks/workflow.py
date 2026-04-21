@@ -567,47 +567,48 @@ class TaskWorkflowEngine:
             project_id: Project UUID
         """
         log.debug("Updating project progress", project_id=project_id)
+        try:
+            total = 0
+            done = 0
+            doing = 0
 
-        total = 0
-        done = 0
-        doing = 0
+            tasks = await self._entity_manager.list_by_type(
+                EntityType.TASK,
+                project_id=project_id,
+                limit=10_000,
+                include_archived=True,
+            )
+            metadata_rows = [task.metadata or {} for task in tasks]
 
-        tasks = await self._entity_manager.list_by_type(
-            EntityType.TASK,
-            project_id=project_id,
-            limit=10_000,
-            include_archived=True,
-        )
-        metadata_rows = [task.metadata or {} for task in tasks]
+            for metadata in metadata_rows:
+                status = (metadata.get("status") if isinstance(metadata, dict) else None) or "todo"
+                total += 1
+                if status == "done":
+                    done += 1
+                elif status == "doing":
+                    doing += 1
 
-        for metadata in metadata_rows:
-            status = (metadata.get("status") if isinstance(metadata, dict) else None) or "todo"
-            total += 1
-            if status == "done":
-                done += 1
-            elif status == "doing":
-                doing += 1
+            now = datetime.now(UTC)
+            await self._entity_manager.update(
+                project_id,
+                {
+                    "total_tasks": total,
+                    "completed_tasks": done,
+                    "in_progress_tasks": doing,
+                    "last_activity_at": now.isoformat(),
+                },
+            )
 
-        # Update project entity with progress and activity timestamp
-        now = datetime.now(UTC)
-        await self._entity_manager.update(
-            project_id,
-            {
-                "total_tasks": total,
-                "completed_tasks": done,
-                "in_progress_tasks": doing,
-                "last_activity_at": now.isoformat(),
-            },
-        )
-
-        log.debug(
-            "Project progress updated",
-            project_id=project_id,
-            total=total,
-            done=done,
-            doing=doing,
-            last_activity_at=now.isoformat(),
-        )
+            log.debug(
+                "Project progress updated",
+                project_id=project_id,
+                total=total,
+                done=done,
+                doing=doing,
+                last_activity_at=now.isoformat(),
+            )
+        except Exception:
+            log.warning("Project progress update failed", project_id=project_id, exc_info=True)
 
     async def _maybe_start_epic(self, task: Task) -> bool:
         """Auto-start epic if a task moves to a forward-progress state.

@@ -769,6 +769,9 @@ def archive_task(
             success(f"Archived {archived} task(s)")
             if failed:
                 error(f"Failed: {failed} task(s)")
+                for result in [result for result in results if not result.get("success")][:10]:
+                    detail = result.get("message") or result.get("error") or "Unknown error"
+                    console.print(f"  [{CORAL}]{result['id']}[/{CORAL}] {detail}")
 
     _archive()
 

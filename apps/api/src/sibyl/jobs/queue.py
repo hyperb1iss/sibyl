@@ -29,12 +29,14 @@ RECENT_JOB_INDEX_LIMIT = 1000
 def get_redis_settings() -> RedisSettings:
     """Get Redis connection settings for arq.
 
-    Uses FalkorDB's Redis instance with a separate database for jobs.
+    Uses the configured Redis/Valkey runtime with a dedicated database for jobs.
     """
+    redis_host = settings.redis_host or "127.0.0.1"
+    redis_port = settings.redis_port or 6381
     return RedisSettings(
-        host=settings.falkordb_host,
-        port=settings.falkordb_port,
-        password=settings.falkordb_password,
+        host=redis_host,
+        port=redis_port,
+        password=settings.redis_password_value or None,
         database=settings.redis_jobs_db,
     )
 

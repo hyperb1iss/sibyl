@@ -98,6 +98,16 @@ def _print_verify_summary(result: object) -> None:
         raise typer.Exit(code=1)
 
 
+def _warn_if_postgres_payload_skipped(*, archive: object, restore_postgres: bool) -> None:
+    if restore_postgres:
+        return
+    archive_files = getattr(archive, "files", {})
+    if POSTGRES_FILENAME not in archive_files:
+        return
+    warn("Archive includes postgres.sql, but PostgreSQL restore is disabled")
+    info("Pass --restore-postgres when you want a full Falkor/Postgres migration rehearsal")
+
+
 async def _replay_baseline(
     *,
     base_url: str,
@@ -410,6 +420,7 @@ def import_archive(
     if restore_graph and GRAPH_FILENAME not in archive.files:
         error("Archive does not contain graph.json")
         raise typer.Exit(code=1)
+    _warn_if_postgres_payload_skipped(archive=archive, restore_postgres=restore_postgres)
 
     if not yes:
         warn("This will import archive data into the active runtime.")
@@ -515,6 +526,7 @@ def rehearse_archive(
     if GRAPH_FILENAME not in archive.files:
         error("Archive does not contain graph.json")
         raise typer.Exit(code=1)
+    _warn_if_postgres_payload_skipped(archive=archive, restore_postgres=restore_postgres)
     if run_baseline and not manifest_path.exists():
         error(f"Baseline manifest not found: {manifest_path}")
         raise typer.Exit(code=1)
@@ -654,6 +666,7 @@ def cutover_archive(
     if GRAPH_FILENAME not in archive.files:
         error("Archive does not contain graph.json")
         raise typer.Exit(code=1)
+    _warn_if_postgres_payload_skipped(archive=archive, restore_postgres=restore_postgres)
 
     warn("Rollback is supported only until writes reopen on SurrealDB.")
     warn("This command does not unfreeze or freeze writes for you; it enforces the operator gate.")

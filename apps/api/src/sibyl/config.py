@@ -201,7 +201,16 @@ class Settings(BaseSettings):
     falkordb_password: str = Field(default="conventions", description="FalkorDB password")
     redis_jobs_db: int = Field(
         default=1,
-        description="Redis database number for job queue (0 is graph data)",
+        description="Redis database number for job queue",
+    )
+    redis_host: str | None = Field(
+        default=None,
+        description="Redis/Valkey host for jobs, locks, and pub/sub",
+    )
+    redis_port: int | None = Field(default=None, description="Redis/Valkey port")
+    redis_password: SecretStr | None = Field(
+        default=None,
+        description="Redis/Valkey password",
     )
 
     # SurrealDB configuration
@@ -308,6 +317,13 @@ class Settings(BaseSettings):
         if self.surreal_url and self.surreal_data_dir:
             raise ValueError("Configure only one of surreal_url or surreal_data_dir")
 
+        if self.redis_host is None:
+            object.__setattr__(self, "redis_host", self.falkordb_host)
+        if self.redis_port is None:
+            object.__setattr__(self, "redis_port", self.falkordb_port)
+        if self.redis_password is None:
+            object.__setattr__(self, "redis_password", SecretStr(self.falkordb_password))
+
         return self
 
     embedding_model: str = Field(
@@ -380,6 +396,19 @@ class Settings(BaseSettings):
     def falkordb_url(self) -> str:
         """Construct FalkorDB connection URL."""
         return f"redis://:{self.falkordb_password}@{self.falkordb_host}:{self.falkordb_port}"
+
+    @property
+    def redis_password_value(self) -> str:
+        """Resolve the active Redis password with FalkorDB fallback."""
+        if self.redis_password is None:
+            return self.falkordb_password
+        return self.redis_password.get_secret_value()
+
+    @property
+    def redis_url(self) -> str:
+        """Construct Redis/Valkey connection URL."""
+        auth = f":{self.redis_password_value}@" if self.redis_password_value else ""
+        return f"redis://{auth}{self.redis_host}:{self.redis_port}"
 
     @property
     def resolved_surreal_url(self) -> str:

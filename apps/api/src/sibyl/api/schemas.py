@@ -867,9 +867,12 @@ class BackfillResponse(BaseModel):
 
 
 class DebugQueryRequest(BaseModel):
-    """Request for executing a debug Cypher query."""
+    """Request for executing a read-only debug query."""
 
-    cypher: str = Field(..., description="Cypher query to execute (read-only)")
+    cypher: str = Field(
+        ...,
+        description="Read-only graph query to execute (SurrealQL for Surreal runtime)",
+    )
     params: dict[str, Any] = Field(default_factory=dict, description="Query parameters")
 
 

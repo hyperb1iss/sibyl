@@ -8,6 +8,7 @@ import tarfile
 import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -200,14 +201,99 @@ def _legacy_manifest_from_files(files: dict[str, bytes]) -> ArchiveManifest:
     )
 
 
+def _select_legacy_payload(
+    files: dict[str, bytes],
+    *,
+    canonical_name: str,
+    patterns: tuple[str, ...],
+    kind: str,
+) -> tuple[str, bytes] | None:
+    matches = [
+        (name, payload)
+        for name, payload in sorted(files.items())
+        if name == canonical_name or any(fnmatch(name, pattern) for pattern in patterns)
+    ]
+    if not matches:
+        return None
+    if len(matches) > 1:
+        msg = (
+            f"Archive contains multiple {kind} payload candidates: "
+            + ", ".join(name for name, _ in matches)
+        )
+        raise ValueError(msg)
+    return matches[0]
+
+
+def _organization_id_from_graph_bytes(payload: bytes) -> str:
+    try:
+        graph_payload = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return ""
+    organization_id = graph_payload.get("organization_id")
+    return str(organization_id) if organization_id else ""
+
+
+def _legacy_manifest_from_backup_payloads(
+    files: dict[str, bytes],
+) -> tuple[ArchiveManifest, dict[str, bytes]]:
+    graph_match = _select_legacy_payload(
+        files,
+        canonical_name=GRAPH_FILENAME,
+        patterns=("*_graph.json", "*graph_backup.json"),
+        kind="graph",
+    )
+    postgres_match = _select_legacy_payload(
+        files,
+        canonical_name=POSTGRES_FILENAME,
+        patterns=("*_pg.sql", "*pg_backup.sql"),
+        kind="postgres",
+    )
+
+    if graph_match is None and postgres_match is None:
+        msg = "Archive is missing manifest.json"
+        raise ValueError(msg)
+
+    normalized_files: dict[str, bytes] = {}
+    file_metadata: dict[str, dict[str, Any]] = {}
+
+    if graph_match is not None:
+        original_path, payload = graph_match
+        normalized_files[GRAPH_FILENAME] = payload
+        file_metadata[GRAPH_FILENAME] = {
+            "kind": "graph",
+            "original_path": original_path,
+        }
+
+    if postgres_match is not None:
+        original_path, payload = postgres_match
+        normalized_files[POSTGRES_FILENAME] = payload
+        file_metadata[POSTGRES_FILENAME] = {
+            "kind": "postgres",
+            "original_path": original_path,
+        }
+
+    manifest = build_manifest(
+        organization_id=_organization_id_from_graph_bytes(normalized_files.get(GRAPH_FILENAME, b"")),
+        source_store="legacy",
+        files=normalized_files,
+        file_metadata=file_metadata,
+        metadata={"legacy_layout": "backup_payloads"},
+    )
+    return manifest, normalized_files
+
+
 def load_archive(source: Path) -> LoadedArchive:
     files = _load_archive_bytes(source)
     manifest_bytes = files.pop(MANIFEST_FILENAME, None)
     if manifest_bytes is not None:
         manifest = ArchiveManifest.from_dict(json.loads(manifest_bytes.decode("utf-8")))
     else:
-        manifest = _legacy_manifest_from_files(files)
-        files.pop(LEGACY_METADATA_FILENAME, None)
+        metadata_bytes = files.get(LEGACY_METADATA_FILENAME)
+        if metadata_bytes is not None:
+            manifest = _legacy_manifest_from_files(files)
+            files.pop(LEGACY_METADATA_FILENAME, None)
+        else:
+            manifest, files = _legacy_manifest_from_backup_payloads(files)
     return LoadedArchive(source=source, manifest=manifest, files=files)
 
 

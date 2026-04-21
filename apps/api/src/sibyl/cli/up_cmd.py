@@ -1,6 +1,6 @@
 """Commands for running Sibyl locally.
 
-`sibyl up` starts all services (FalkorDB, PostgreSQL, API server).
+`sibyl up` starts local data services and the API server.
 `sibyl down` stops everything.
 """
 
@@ -73,6 +73,37 @@ def _wait_for_services(project_root: Path, timeout: int = 60) -> bool:
     return False
 
 
+def _default_local_surreal_url(env: dict[str, str]) -> str:
+    port = env.get("SIBYL_SURREAL_PORT", "8000")
+    return f"ws://127.0.0.1:{port}/rpc"
+
+
+def _apply_surreal_dev_defaults(env: dict[str, str]) -> None:
+    env.setdefault("SIBYL_STORE", "surreal")
+
+    if env["SIBYL_STORE"] != "surreal":
+        return
+
+    env.setdefault("SIBYL_SURREAL_URL", _default_local_surreal_url(env))
+    env.pop("SIBYL_SURREAL_DATA_DIR", None)
+
+    surreal_url = env["SIBYL_SURREAL_URL"]
+    if surreal_url.startswith(
+        (
+            "ws://127.0.0.1",
+            "ws://localhost",
+            "http://127.0.0.1",
+            "http://localhost",
+        )
+    ):
+        env.setdefault("SIBYL_SURREAL_USERNAME", "root")
+        env.setdefault("SIBYL_SURREAL_PASSWORD", "root")
+
+    env.setdefault("SIBYL_REDIS_HOST", "127.0.0.1")
+    env.setdefault("SIBYL_REDIS_PORT", "6381")
+    env.setdefault("SIBYL_REDIS_PASSWORD", "")
+
+
 def up(
     detach: Annotated[
         bool,
@@ -89,7 +120,7 @@ def up(
 ) -> None:
     """Start Sibyl services locally.
 
-    Starts FalkorDB, PostgreSQL, and the API server.
+    Starts the configured local data services and the API server.
     """
     project_root = _find_project_root()
     if not project_root:
@@ -116,7 +147,7 @@ def up(
                 console.print(f"[dim]{result.stderr}[/dim]")
                 raise typer.Exit(1)
 
-        success("Docker services started (FalkorDB, PostgreSQL)")
+        success("Docker services started")
 
         # Wait for services to be healthy
         with console.status(f"[{NEON_CYAN}]Waiting for services...[/{NEON_CYAN}]"):
@@ -151,6 +182,8 @@ def _start_server_foreground(project_root: Path, with_worker: bool) -> None:
             if line and not line.startswith("#") and "=" in line:
                 key, _, value = line.partition("=")
                 env[key.strip()] = value.strip().strip('"').strip("'")
+
+    _apply_surreal_dev_defaults(env)
 
     cmd = [
         sys.executable,
@@ -209,7 +242,7 @@ def down(
 ) -> None:
     """Stop Sibyl services.
 
-    Stops FalkorDB, PostgreSQL, and any running API server.
+    Stops local data services and any running API server.
     """
     project_root = _find_project_root()
     if not project_root:

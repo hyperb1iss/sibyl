@@ -32,24 +32,24 @@ app = typer.Typer(
 
 @app.command("query")
 def query(
-    cypher: Annotated[
+    query_text: Annotated[
         str,
-        typer.Argument(help="Cypher query to execute"),
+        typer.Argument(help="Read-only graph query to execute"),
     ],
     json_output: Annotated[
         bool,
         typer.Option("--json", "-j", help="Output as JSON"),
     ] = False,
 ) -> None:
-    """Execute a read-only Cypher query against the graph.
+    """Execute a read-only graph query against the active runtime.
 
-    Useful for inspecting graph data during development.
-    Only read-only queries are permitted (no CREATE, SET, DELETE, etc.).
+    Use SurrealQL when running the Surreal runtime. Only read-only queries are
+    permitted.
 
     Examples:
-        sibyl debug query "MATCH (n:Entity) RETURN n.name LIMIT 5"
-        sibyl debug query "MATCH (n) RETURN labels(n), count(*)" -j
-        sibyl debug query "MATCH (t:Entity {entity_type: 'task'}) RETURN t.name, t.status LIMIT 10"
+        sibyl debug query "SELECT name, entity_type FROM entity LIMIT 5;"
+        sibyl debug query "SELECT entity_type, count() AS count FROM entity GROUP BY entity_type;" -j
+        sibyl debug query "SELECT name, metadata.status AS status FROM entity WHERE entity_type = 'task' LIMIT 10;"
     """
 
     @run_async
@@ -58,7 +58,7 @@ def query(
             async with get_client() as client:
                 result = await client.post(
                     "/admin/debug/query",
-                    json={"cypher": cypher},
+                    json={"cypher": query_text},
                 )
 
                 if result.get("error"):
@@ -156,9 +156,10 @@ def schema(
                     "/admin/debug/query",
                     json={
                         "cypher": """
-                        MATCH (n:Entity)
-                        RETURN n.entity_type AS type, count(*) AS count
-                        ORDER BY count DESC
+                        SELECT entity_type AS type, count() AS count
+                        FROM entity
+                        GROUP BY entity_type
+                        ORDER BY count DESC;
                         """
                     },
                 )
@@ -208,7 +209,7 @@ def status(
     Aggregates health from all system components:
     - API server
     - Worker process
-    - FalkorDB graph database
+    - Active graph database runtime
     - Job queue
     - Recent errors
 

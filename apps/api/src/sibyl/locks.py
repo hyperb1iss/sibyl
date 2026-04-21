@@ -58,10 +58,13 @@ class EntityLockManager:
         if self._redis is not None:
             return
 
+        redis_host = settings.redis_host or "127.0.0.1"
+        redis_port = settings.redis_port or 6381
+
         self._redis = Redis(
-            host=settings.falkordb_host,
-            port=settings.falkordb_port,
-            password=settings.falkordb_password,
+            host=redis_host,
+            port=redis_port,
+            password=settings.redis_password_value or None,
             db=LOCKS_DB,
             decode_responses=True,
         )
@@ -70,8 +73,8 @@ class EntityLockManager:
         await self._redis.ping()
         log.info(
             "entity_lock_manager_connected",
-            host=settings.falkordb_host,
-            port=settings.falkordb_port,
+            host=redis_host,
+            port=redis_port,
             db=LOCKS_DB,
         )
 

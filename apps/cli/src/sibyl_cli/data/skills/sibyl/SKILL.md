@@ -3,7 +3,7 @@ name: sibyl
 description:
   Graph-RAG knowledge system with CLI interface. Use for semantic search, task management, knowledge
   capture, project audits, and sprint planning. Invoke when you need persistent memory across
-  sessions, pattern/learning lookup, or task tracking. Requires FalkorDB running.
+  sessions, pattern/learning lookup, or task tracking. Requires the Sibyl data services running.
 allowed-tools: Bash, Grep, Glob, Read
 ---
 
@@ -411,17 +411,17 @@ sibyl logs tail
 sibyl logs tail -l error              # Filter by level
 sibyl logs tail -s api -n 100         # Filter by service, more entries
 
-# Search logs
-sibyl logs search "timeout" --from 2025-04-01
+# Search recent logs with your normal shell tools
+sibyl logs tail -n 200 | rg "timeout"
 
 # Inspect graph schema
 sibyl debug schema
 
-# Run read-only Cypher query
-sibyl debug query "MATCH (n:Entity) RETURN labels(n), count(*)"
+# Run read-only graph query
+sibyl debug query "SELECT entity_type, count() AS count FROM entity GROUP BY entity_type;"
 
-# Database metrics
-sibyl debug metrics
+# System status
+sibyl debug status
 ```
 
 ---
@@ -579,8 +579,8 @@ values with a 422 validation error.
 sibyl health
 ```
 
-If unhealthy, the server or FalkorDB is down. Do not retry commands blindly. Report it and continue
-without Sibyl for this session.
+If unhealthy, the server or local data services are down. Do not retry commands blindly. Report it
+and continue without Sibyl for this session.
 
 ### Task list shows wrong project's tasks
 

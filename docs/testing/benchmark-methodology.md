@@ -101,13 +101,14 @@ without forking the script.
 When you need to compare legacy and Surreal on the same graph data:
 
 1. Export a manifest archive from the source store with `sibyld migrate export --org-id <org> --output /tmp/migration.tar.gz`
-2. Rehearse the import path on the target store with `moon run migrate-rehearse -- /tmp/migration.tar.gz --yes`
+2. Rehearse the import path on the target store with `moon run migrate-rehearse -- /tmp/migration.tar.gz --yes --restore-postgres`
 3. Run `moon run bench-live -- --label <store> --metadata store=<store>`
 4. Compare the saved artifacts with `uv run python benchmarks/compare_eval_reports.py <legacy.json> <surreal.json>`
 
-The rehearsal command handles archive validation, graph import, runtime verification, and the
-deterministic baseline replay in one pass. That keeps the public story honest and makes it much
-easier to compare runs over time.
+The rehearsal command handles archive validation, optional PostgreSQL restore, graph import,
+runtime verification, and the deterministic baseline replay in one pass. Use `--restore-postgres`
+when you want a full FalkorDB/PostgreSQL migration rehearsal instead of a graph-only replay. That
+keeps the public story honest and makes it much easier to compare runs over time.
 
 When you are ready for a real maintenance-window swap, use
 `sibyld migrate cutover /tmp/migration.tar.gz --yes --write-freeze-confirmed` on the Surreal
