@@ -323,6 +323,8 @@ export interface GraphStatsResponse {
 }
 
 // Hierarchical graph with cluster assignments for rich visualization
+export type GraphResolution = 'overview' | 'detail';
+
 export interface HierarchicalNode {
   id: string;
   name: string;
@@ -331,6 +333,8 @@ export interface HierarchicalNode {
   color: string;
   summary: string;
   cluster_id: string;
+  aggregate?: boolean;
+  member_count?: number;
 }
 
 export interface HierarchicalEdge {
@@ -365,6 +369,7 @@ export interface HierarchicalGraphResponse {
   total_edges: number;
   displayed_nodes?: number;
   displayed_edges?: number;
+  resolution?: GraphResolution;
 }
 
 export interface HealthResponse {
@@ -1533,6 +1538,8 @@ export const api = {
       projects?: string[];
       types?: string[];
       refresh?: boolean;
+      resolution?: GraphResolution;
+      cluster_id?: string;
     }) => {
       const searchParams = new URLSearchParams();
       if (params?.max_nodes) searchParams.set('max_nodes', params.max_nodes.toString());
@@ -1544,6 +1551,8 @@ export const api = {
         for (const t of params.types) searchParams.append('types', t);
       }
       if (params?.refresh) searchParams.set('refresh', 'true');
+      if (params?.resolution) searchParams.set('resolution', params.resolution);
+      if (params?.cluster_id) searchParams.set('cluster_id', params.cluster_id);
       const query = searchParams.toString();
       return fetchApi<HierarchicalGraphResponse>(`/graph/hierarchical${query ? `?${query}` : ''}`);
     },

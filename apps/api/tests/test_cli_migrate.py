@@ -11,6 +11,8 @@ from typer.testing import CliRunner
 
 from sibyl.cli import migrate as migrate_cli
 from sibyl_core.migrate.archive import (
+    AUTH_FILENAME,
+    CONTENT_FILENAME,
     GRAPH_FILENAME,
     POSTGRES_FILENAME,
     build_manifest,
@@ -19,6 +21,63 @@ from sibyl_core.migrate.archive import (
 )
 
 runner = CliRunner()
+
+
+def _auth_payload(*, user_rows: int = 1) -> dict[str, object]:
+    return {
+        "version": "1.0",
+        "created_at": "2026-04-21T02:00:00+00:00",
+        "tables": {
+            "users": [{"id": f"user-{index}", "email": f"user{index}@example.com"} for index in range(user_rows)],
+            "organizations": [],
+        },
+        "row_counts": {"users": user_rows, "organizations": 0},
+        "total_rows": user_rows,
+    }
+
+
+def _content_payload(*, chunk_rows: int = 1) -> dict[str, object]:
+    return {
+        "version": "1.0",
+        "created_at": "2026-04-21T03:00:00+00:00",
+        "tables": {
+            "crawl_sources": [
+                {"id": "source-1", "organization_id": "org-123", "name": "Docs", "url": "https://docs.example.com"}
+            ],
+            "crawled_documents": [
+                {
+                    "id": "document-1",
+                    "source_id": "source-1",
+                    "url": "https://docs.example.com/page",
+                    "title": "Docs Page",
+                }
+            ],
+            "document_chunks": [
+                {
+                    "id": f"chunk-{index}",
+                    "document_id": "document-1",
+                    "chunk_index": index,
+                    "content": f"chunk {index}",
+                    "embedding": [0.1, 0.2, 0.3],
+                }
+                for index in range(chunk_rows)
+            ],
+            "raw_captures": [],
+            "system_settings": [],
+            "backup_settings": [],
+            "backups": [],
+        },
+        "row_counts": {
+            "crawl_sources": 1,
+            "crawled_documents": 1,
+            "document_chunks": chunk_rows,
+            "raw_captures": 0,
+            "system_settings": 0,
+            "backup_settings": 0,
+            "backups": 0,
+        },
+        "total_rows": chunk_rows + 2,
+    }
 
 
 def _write_graph_archive(path: Path, *, org_id: str = "org-123") -> None:
@@ -44,7 +103,13 @@ def _write_graph_archive(path: Path, *, org_id: str = "org-123") -> None:
     write_archive(path, manifest=manifest, files=files)
 
 
-def _write_full_archive(path: Path, *, org_id: str = "org-123") -> None:
+def _write_full_archive(
+    path: Path,
+    *,
+    org_id: str = "org-123",
+    include_auth: bool = False,
+    include_content: bool = False,
+) -> None:
     files = {
         GRAPH_FILENAME: json.dumps(
             {
@@ -59,14 +124,23 @@ def _write_full_archive(path: Path, *, org_id: str = "org-123") -> None:
         ).encode("utf-8"),
         POSTGRES_FILENAME: b"select 1;\n",
     }
+    file_metadata: dict[str, dict[str, object]] = {
+        GRAPH_FILENAME: {"kind": "graph", "entity_count": 1, "relationship_count": 0},
+        POSTGRES_FILENAME: {"kind": "postgres"},
+    }
+    if include_auth:
+        auth_payload = _auth_payload()
+        files[AUTH_FILENAME] = json.dumps(auth_payload).encode("utf-8")
+        file_metadata[AUTH_FILENAME] = {"kind": "auth", "table_count": 2, "total_rows": 1}
+    if include_content:
+        content_payload = _content_payload()
+        files[CONTENT_FILENAME] = json.dumps(content_payload).encode("utf-8")
+        file_metadata[CONTENT_FILENAME] = {"kind": "content", "table_count": 7, "total_rows": 3}
     manifest = build_manifest(
         organization_id=org_id,
         source_store="legacy",
         files=files,
-        file_metadata={
-            GRAPH_FILENAME: {"kind": "graph", "entity_count": 1, "relationship_count": 0},
-            POSTGRES_FILENAME: {"kind": "postgres"},
-        },
+        file_metadata=file_metadata,
     )
     write_archive(path, manifest=manifest, files=files)
 
@@ -118,6 +192,7 @@ def test_migrate_export_graph_only_writes_archive(tmp_path: Path) -> None:
                 "--output",
                 str(archive_path),
                 "--no-include-postgres",
+                "--skip-auth",
             ],
         )
 
@@ -142,6 +217,10 @@ def test_migrate_export_writes_graph_and_postgres_archive(tmp_path: Path) -> Non
             "sibyl.cli.migrate._load_graph_export",
             return_value=(graph_payload, json.dumps(graph_payload).encode("utf-8")),
         ),
+        patch(
+            "sibyl.cli.migrate._load_auth_export",
+            return_value=(_auth_payload(), json.dumps(_auth_payload()).encode("utf-8")),
+        ),
         patch("sibyl.cli.migrate._run_pg_dump", return_value=b"select 1;\n"),
     ):
         result = runner.invoke(
@@ -157,8 +236,96 @@ def test_migrate_export_writes_graph_and_postgres_archive(tmp_path: Path) -> Non
 
     assert result.exit_code == 0
     loaded = load_archive(archive_path)
+    assert AUTH_FILENAME in loaded.files
     assert POSTGRES_FILENAME in loaded.files
     assert GRAPH_FILENAME in loaded.files
+
+
+def test_migrate_export_writes_content_archive_when_requested(tmp_path: Path) -> None:
+    archive_path = tmp_path / "migration.tar.gz"
+    graph_payload = {
+        "version": "2.0",
+        "created_at": "2026-04-19T20:00:00+00:00",
+        "organization_id": "org-123",
+        "entity_count": 1,
+        "relationship_count": 0,
+        "entities": [{"id": "entity-1"}],
+        "relationships": [],
+    }
+
+    with (
+        patch(
+            "sibyl.cli.migrate._load_graph_export",
+            return_value=(graph_payload, json.dumps(graph_payload).encode("utf-8")),
+        ),
+        patch(
+            "sibyl.cli.migrate._load_content_export",
+            return_value=(
+                _content_payload(),
+                json.dumps(_content_payload()).encode("utf-8"),
+            ),
+        ),
+        patch("sibyl.cli.migrate._run_pg_dump", return_value=b"select 1;\n"),
+    ):
+        result = runner.invoke(
+            migrate_cli.app,
+            [
+                "export",
+                "--org-id",
+                "org-123",
+                "--output",
+                str(archive_path),
+                "--skip-auth",
+                "--include-content",
+            ],
+        )
+
+    assert result.exit_code == 0
+    loaded = load_archive(archive_path)
+    assert CONTENT_FILENAME in loaded.files
+
+
+def test_migrate_export_loads_auth_and_content_in_one_runtime_pass(tmp_path: Path) -> None:
+    archive_path = tmp_path / "migration.tar.gz"
+    graph_payload = {
+        "version": "2.0",
+        "created_at": "2026-04-19T20:00:00+00:00",
+        "organization_id": "org-123",
+        "entity_count": 1,
+        "relationship_count": 0,
+        "entities": [{"id": "entity-1"}],
+        "relationships": [],
+    }
+    runtime_exports = (
+        (_auth_payload(), json.dumps(_auth_payload()).encode("utf-8")),
+        (_content_payload(), json.dumps(_content_payload()).encode("utf-8")),
+    )
+
+    with (
+        patch(
+            "sibyl.cli.migrate._load_graph_export",
+            return_value=(graph_payload, json.dumps(graph_payload).encode("utf-8")),
+        ),
+        patch("sibyl.cli.migrate._load_runtime_exports", return_value=runtime_exports) as load_runtime_exports,
+        patch("sibyl.cli.migrate._run_pg_dump", return_value=b"select 1;\n"),
+    ):
+        result = runner.invoke(
+            migrate_cli.app,
+            [
+                "export",
+                "--org-id",
+                "org-123",
+                "--output",
+                str(archive_path),
+                "--include-content",
+            ],
+        )
+
+    assert result.exit_code == 0
+    load_runtime_exports.assert_called_once_with(include_auth=True, include_content=True)
+    loaded = load_archive(archive_path)
+    assert AUTH_FILENAME in loaded.files
+    assert CONTENT_FILENAME in loaded.files
 
 
 def test_migrate_import_uses_archive_org_id(tmp_path: Path) -> None:
@@ -205,6 +372,64 @@ def test_migrate_import_warns_when_postgres_payload_is_skipped(tmp_path: Path) -
 
     assert result.exit_code == 0
     assert "Archive includes postgres.sql" in result.output
+
+
+def test_migrate_import_warns_when_auth_payload_is_skipped_in_postgres_mode(tmp_path: Path) -> None:
+    archive_path = tmp_path / "migration.tar.gz"
+    _write_full_archive(archive_path, include_auth=True)
+
+    with patch("sibyl.cli.migrate._restore_graph_payload", return_value=True):
+        result = runner.invoke(migrate_cli.app, ["import", str(archive_path), "--yes"])
+
+    assert result.exit_code == 0
+    assert "Archive includes auth.json, but SIBYL_AUTH_STORE is not surreal" in result.output
+
+
+def test_migrate_import_restores_auth_when_surreal_auth_store_is_enabled(tmp_path: Path) -> None:
+    archive_path = tmp_path / "migration.tar.gz"
+    _write_full_archive(archive_path, include_auth=True)
+
+    with (
+        patch.object(migrate_cli.settings, "auth_store", "surreal"),
+        patch("sibyl.cli.migrate._restore_graph_payload", return_value=True),
+        patch("sibyl.cli.migrate._restore_auth_payload", return_value=True) as restore_auth,
+    ):
+        result = runner.invoke(migrate_cli.app, ["import", str(archive_path), "--yes"])
+
+    assert result.exit_code == 0
+    payload = restore_auth.call_args.args[0]
+    assert payload["row_counts"]["users"] == 1
+    assert restore_auth.call_args.kwargs == {"clean": False}
+
+
+def test_migrate_import_warns_when_content_payload_is_skipped_in_legacy_store(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "migration.tar.gz"
+    _write_full_archive(archive_path, include_content=True)
+
+    with patch("sibyl.cli.migrate._restore_graph_payload", return_value=True):
+        result = runner.invoke(migrate_cli.app, ["import", str(archive_path), "--yes"])
+
+    assert result.exit_code == 0
+    assert "Archive includes content.json, but SIBYL_STORE is not surreal" in result.output
+
+
+def test_migrate_import_restores_content_when_surreal_store_is_enabled(tmp_path: Path) -> None:
+    archive_path = tmp_path / "migration.tar.gz"
+    _write_full_archive(archive_path, include_content=True)
+
+    with (
+        patch.object(migrate_cli.settings, "store", "surreal"),
+        patch("sibyl.cli.migrate._restore_graph_payload", return_value=True),
+        patch("sibyl.cli.migrate._restore_content_payload", return_value=True) as restore_content,
+    ):
+        result = runner.invoke(migrate_cli.app, ["import", str(archive_path), "--yes"])
+
+    assert result.exit_code == 0
+    payload = restore_content.call_args.args[0]
+    assert payload["row_counts"]["document_chunks"] == 1
+    assert restore_content.call_args.kwargs == {"clean": False}
 
 
 def test_migrate_check_accepts_backup_all_directory_layout(tmp_path: Path) -> None:

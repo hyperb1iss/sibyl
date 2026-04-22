@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
+import sibyl_core.tools.manage as manage_tool
 from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
 from sibyl_core.models.entities import EntityType
 from sibyl_core.models.tasks import TaskStatus
@@ -1183,6 +1184,38 @@ class TestSourceActions:
                 "pending": 3,
             },
         ]
+
+    @pytest.mark.asyncio
+    async def test_link_graph_status_skips_sql_session_in_surreal_mode(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """link_graph_status should call the shared helper directly in surreal mode."""
+        org_id = "00000000-0000-0000-0000-000000000111"
+        status = LinkGraphStatusData(
+            total_chunks=2,
+            chunks_with_entities=1,
+            sources=[
+                LinkGraphSourceStatusData(
+                    source_id="00000000-0000-0000-0000-000000000aaa",
+                    name="Docs",
+                    pending=1,
+                )
+            ],
+        )
+
+        helper = AsyncMock(return_value=status)
+        monkeypatch.setattr(manage_tool.settings, "store", "surreal")
+
+        with patch("sibyl_core.tools.manage.get_link_graph_status_data", helper):
+            response = await manage(
+                action="link_graph_status",
+                organization_id=org_id,
+            )
+
+        helper.assert_awaited_once_with(None, org_id)
+        assert response.success is True
+        assert response.data["chunks_pending"] == 1
 
 
 # =============================================================================

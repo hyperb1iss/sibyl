@@ -30,7 +30,7 @@ async def test_get_backup_settings_uses_legacy_helper(monkeypatch: pytest.Monkey
     )
     monkeypatch.setattr(
         backup_routes,
-        "get_legacy_backup_settings",
+        "load_backup_settings",
         AsyncMock(return_value=settings),
     )
 
@@ -50,12 +50,12 @@ async def test_create_backup_uses_legacy_record_helpers(monkeypatch: pytest.Monk
     monkeypatch.setattr(backup_routes, "generate_backup_id", lambda _: "backup_fixed")
     monkeypatch.setattr(
         backup_routes,
-        "create_legacy_backup_record",
+        "create_backup_record",
         AsyncMock(return_value=backup),
     )
     monkeypatch.setattr(
         backup_routes,
-        "attach_legacy_backup_job",
+        "attach_backup_job_record",
         AsyncMock(return_value=queued),
     )
     monkeypatch.setattr(
@@ -92,7 +92,7 @@ async def test_list_backups_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) 
     )
     monkeypatch.setattr(
         backup_routes,
-        "list_legacy_backups",
+        "list_backup_records",
         AsyncMock(return_value=LegacyBackupList(backups=[backup], total=1)),
     )
 
@@ -106,7 +106,7 @@ async def test_list_backups_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) 
 async def test_run_cleanup_uses_retention_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         backup_routes,
-        "get_legacy_backup_retention",
+        "resolve_backup_retention",
         AsyncMock(return_value=14),
     )
     monkeypatch.setattr(
@@ -126,12 +126,12 @@ async def test_run_cleanup_uses_retention_helper(monkeypatch: pytest.MonkeyPatch
 async def test_delete_backup_uses_legacy_delete_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         backup_routes,
-        "get_legacy_backup",
+        "get_backup_record",
         AsyncMock(return_value=SimpleNamespace(backup_id="backup_a")),
     )
     monkeypatch.setattr(
         backup_routes,
-        "delete_legacy_backup_record",
+        "delete_backup_record",
         AsyncMock(return_value=SimpleNamespace(backup_id="backup_a")),
     )
     monkeypatch.setattr("sibyl.jobs.backup.delete_backup", lambda _: None)

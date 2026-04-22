@@ -7,18 +7,122 @@ Provides REST API for:
 """
 
 from typing import Any
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
 from sibyl.auth.dependencies import get_current_organization, require_org_admin
 from sibyl.db.models import Organization
-from sibyl.persistence.operations_runtime import (
-    _job_visible_to_org,
-    _resolve_visible_legacy_source_ids,
+from sibyl.persistence.content_runtime import (
+    get_content_read_session,
+    get_crawl_source_by_id,
 )
 
 log = structlog.get_logger()
+
+
+async def _source_visible_to_org(
+    *,
+    org_id: UUID,
+    source_uuid: UUID,
+    session: Any | None,
+) -> bool:
+    source = await get_crawl_source_by_id(session, source_id=source_uuid)
+    return source is not None and source.organization_id == org_id
+
+
+async def _job_visible_to_org(
+    job: Any,
+    *,
+    org: Organization,
+    session: Any | None = None,
+    legacy_source_ids: set[UUID] | None = None,
+) -> bool:
+    fn = getattr(job, "function", "") or ""
+    args: list[Any] = list(getattr(job, "args", None) or ())
+    kwargs = dict(getattr(job, "kwargs", None) or {})
+
+    if fn == "create_entity" and len(args) >= 3:
+        return str(args[2]) == str(org.id)
+    if fn == "update_entity" and len(args) >= 4:
+        return str(args[3]) == str(org.id)
+    if fn in {"consolidate_org", "priority_decay"} and args:
+        return str(args[0]) == str(org.id)
+
+    if fn in {"crawl_source", "sync_source"} and args:
+        metadata_org_id = kwargs.get("organization_id")
+        if metadata_org_id is not None:
+            return str(metadata_org_id) == str(org.id)
+
+        try:
+            source_uuid = UUID(str(args[0]))
+        except (TypeError, ValueError):
+            return False
+
+        if legacy_source_ids is not None:
+            return source_uuid in legacy_source_ids
+        if session is not None:
+            return await _source_visible_to_org(
+                org_id=org.id,
+                source_uuid=source_uuid,
+                session=session,
+            )
+
+        async with get_content_read_session() as read_session:
+            return await _source_visible_to_org(
+                org_id=org.id,
+                source_uuid=source_uuid,
+                session=read_session,
+            )
+
+    return False
+
+
+async def _resolve_visible_legacy_source_ids(
+    jobs: list[Any],
+    *,
+    org: Organization,
+    session: Any | None = None,
+) -> set[UUID]:
+    source_ids: set[UUID] = set()
+
+    for job in jobs:
+        fn = getattr(job, "function", "") or ""
+        if fn not in {"crawl_source", "sync_source"}:
+            continue
+
+        args: list[Any] = list(getattr(job, "args", None) or ())
+        kwargs = dict(getattr(job, "kwargs", None) or {})
+        if kwargs.get("organization_id") is not None or not args:
+            continue
+
+        try:
+            source_ids.add(UUID(str(args[0])))
+        except (TypeError, ValueError):
+            continue
+
+    if not source_ids:
+        return set()
+
+    async def _resolve(read_session: Any | None) -> set[UUID]:
+        visible: set[UUID] = set()
+        for source_id in source_ids:
+            if await _source_visible_to_org(
+                org_id=org.id,
+                source_uuid=source_id,
+                session=read_session,
+            ):
+                visible.add(source_id)
+        return visible
+
+    if session is not None:
+        return await _resolve(session)
+
+    async with get_content_read_session() as read_session:
+        return await _resolve(read_session)
+
+
 router = APIRouter(
     prefix="/jobs",
     tags=["jobs"],

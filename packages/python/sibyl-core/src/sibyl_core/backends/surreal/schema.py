@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 
 EMBEDDING_DIM = 1536
+_EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://")
 
 ANALYZER_DEFINITIONS = """
 DEFINE ANALYZER IF NOT EXISTS name_analyzer
@@ -28,7 +29,7 @@ DEFINE FIELD IF NOT EXISTS name ON entity TYPE string;
 DEFINE FIELD IF NOT EXISTS entity_type ON entity TYPE string;
 DEFINE FIELD IF NOT EXISTS summary ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS labels ON entity TYPE array<string> DEFAULT [];
-DEFINE FIELD IF NOT EXISTS attributes ON entity FLEXIBLE TYPE object DEFAULT {{}};
+DEFINE FIELD IF NOT EXISTS attributes ON entity TYPE object FLEXIBLE DEFAULT {{}};
 DEFINE FIELD IF NOT EXISTS group_id ON entity TYPE string;
 DEFINE FIELD IF NOT EXISTS created_at ON entity TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS name_embedding ON entity TYPE option<array<float, {EMBEDDING_DIM}>>;
@@ -37,8 +38,7 @@ DEFINE INDEX IF NOT EXISTS idx_entity_uuid ON entity FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_entity_group ON entity FIELDS group_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_type ON entity FIELDS entity_type;
 DEFINE INDEX IF NOT EXISTS idx_entity_labels ON entity FIELDS labels;
-DEFINE INDEX IF NOT EXISTS idx_entity_name_ft ON entity FIELDS name
-    SEARCH ANALYZER name_analyzer BM25;
+DEFINE INDEX IF NOT EXISTS idx_entity_name_ft ON entity FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_entity_embedding ON entity FIELDS name_embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
 
@@ -57,8 +57,7 @@ DEFINE FIELD IF NOT EXISTS entity_edges ON episode TYPE array<string> DEFAULT []
 DEFINE INDEX IF NOT EXISTS idx_episode_uuid ON episode FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_episode_group ON episode FIELDS group_id;
 DEFINE INDEX IF NOT EXISTS idx_episode_created ON episode FIELDS created_at;
-DEFINE INDEX IF NOT EXISTS idx_episode_content_ft ON episode FIELDS content
-    SEARCH ANALYZER content_analyzer BM25;
+DEFINE INDEX IF NOT EXISTS idx_episode_content_ft ON episode FIELDS content FULLTEXT ANALYZER content_analyzer BM25;
 
 DEFINE TABLE IF NOT EXISTS community SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON community TYPE string;
@@ -94,7 +93,7 @@ DEFINE FIELD IF NOT EXISTS fact ON relates_to TYPE string;
 DEFINE FIELD IF NOT EXISTS fact_embedding ON relates_to TYPE option<array<float, {EMBEDDING_DIM}>>;
 DEFINE FIELD IF NOT EXISTS group_id ON relates_to TYPE string;
 DEFINE FIELD IF NOT EXISTS episodes ON relates_to TYPE array<string> DEFAULT [];
-DEFINE FIELD IF NOT EXISTS attributes ON relates_to FLEXIBLE TYPE object DEFAULT {{}};
+DEFINE FIELD IF NOT EXISTS attributes ON relates_to TYPE object FLEXIBLE DEFAULT {{}};
 DEFINE FIELD IF NOT EXISTS created_at ON relates_to TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS expired_at ON relates_to TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS valid_at ON relates_to TYPE option<datetime>;
@@ -102,8 +101,7 @@ DEFINE FIELD IF NOT EXISTS invalid_at ON relates_to TYPE option<datetime>;
 
 DEFINE INDEX IF NOT EXISTS idx_relates_uuid ON relates_to FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_relates_group ON relates_to FIELDS group_id;
-DEFINE INDEX IF NOT EXISTS idx_relates_fact_ft ON relates_to FIELDS fact
-    SEARCH ANALYZER content_analyzer BM25;
+DEFINE INDEX IF NOT EXISTS idx_relates_fact_ft ON relates_to FIELDS fact FULLTEXT ANALYZER content_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_relates_fact_embedding ON relates_to FIELDS fact_embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
 
@@ -161,6 +159,11 @@ def _split_statements(sql: str) -> list[str]:
     return statements
 
 
+def render_fulltext_compatible_sql(sql: str, *, url: str) -> str:
+    fulltext_keyword = "SEARCH" if url.startswith(_EMBEDDED_SURREAL_SCHEMES) else "FULLTEXT"
+    return sql.replace("FULLTEXT ANALYZER", f"{fulltext_keyword} ANALYZER")
+
+
 async def bootstrap_schema(driver: SurrealDriver, *, reset: bool = False) -> None:
     if not driver.group_id:
         msg = "bootstrap_schema requires driver.clone(group_id) first"
@@ -170,7 +173,12 @@ async def bootstrap_schema(driver: SurrealDriver, *, reset: bool = False) -> Non
         for table in (*GRAPH_EDGES, *GRAPH_TABLES):
             await driver.execute_query(f"REMOVE TABLE IF EXISTS {table};")
 
-    for block in (ANALYZER_DEFINITIONS, NODE_DEFINITIONS, EDGE_DEFINITIONS):
+    compatible_blocks = (
+        ANALYZER_DEFINITIONS,
+        render_fulltext_compatible_sql(NODE_DEFINITIONS, url=driver._url),
+        render_fulltext_compatible_sql(EDGE_DEFINITIONS, url=driver._url),
+    )
+    for block in compatible_blocks:
         for statement in _split_statements(block):
             await driver.execute_query(statement)
 
@@ -200,5 +208,5 @@ __all__ = [
     "NODE_DEFINITIONS",
     "bootstrap_schema",
     "drop_all_indexes",
+    "render_fulltext_compatible_sql",
 ]
-

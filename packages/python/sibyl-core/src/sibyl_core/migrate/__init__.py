@@ -2,13 +2,17 @@
 
 from sibyl_core.migrate.archive import (
     ARCHIVE_VERSION,
+    AUTH_FILENAME,
+    CONTENT_FILENAME,
     GRAPH_FILENAME,
     MANIFEST_FILENAME,
     POSTGRES_FILENAME,
     ArchiveFileManifest,
     ArchiveManifest,
     LoadedArchive,
+    auth_payload_from_archive,
     build_manifest,
+    content_payload_from_archive,
     effective_graph_counts,
     graph_payload_from_archive,
     load_archive,
@@ -21,6 +25,8 @@ from sibyl_core.migrate.verify import GraphVerificationResult, verify_graph_arch
 
 __all__ = [
     "ARCHIVE_VERSION",
+    "AUTH_FILENAME",
+    "CONTENT_FILENAME",
     "GRAPH_FILENAME",
     "MANIFEST_FILENAME",
     "POSTGRES_FILENAME",
@@ -28,7 +34,9 @@ __all__ = [
     "ArchiveManifest",
     "GraphVerificationResult",
     "LoadedArchive",
+    "auth_payload_from_archive",
     "build_manifest",
+    "content_payload_from_archive",
     "effective_graph_counts",
     "graph_payload_from_archive",
     "load_archive",

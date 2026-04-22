@@ -25,10 +25,10 @@ class _FakeMCPServer:
 
 
 @pytest.mark.asyncio
-async def test_surreal_mode_skips_legacy_startup(monkeypatch: pytest.MonkeyPatch) -> None:
-    run_migrations = AsyncMock()
-    recover_stuck_sources = AsyncMock()
-    load_api_keys_from_db = AsyncMock()
+async def test_surreal_mode_bootstraps_legacy_postgres_support(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap_legacy_postgres_support = AsyncMock(return_value=True)
     init_pubsub = AsyncMock()
     shutdown_pubsub = AsyncMock()
     init_locks = AsyncMock()
@@ -41,9 +41,11 @@ async def test_surreal_mode_skips_legacy_startup(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(main_module.settings, "store", "surreal")
     monkeypatch.setattr("sibyl.api.app.create_api_app", lambda: Starlette())
     monkeypatch.setattr("sibyl.server.create_mcp_server", lambda **_: _FakeMCPServer())
-    monkeypatch.setattr("sibyl.db.migrations.run_migrations", run_migrations)
-    monkeypatch.setattr("sibyl.api.routes.admin.recover_stuck_sources", recover_stuck_sources)
-    monkeypatch.setattr("sibyl.services.settings.load_api_keys_from_db", load_api_keys_from_db)
+    monkeypatch.setattr(
+        main_module,
+        "bootstrap_legacy_postgres_support",
+        bootstrap_legacy_postgres_support,
+    )
     monkeypatch.setattr("sibyl.api.pubsub.init_pubsub", init_pubsub)
     monkeypatch.setattr("sibyl.api.pubsub.shutdown_pubsub", shutdown_pubsub)
     monkeypatch.setattr("sibyl.locks.init_locks", init_locks)
@@ -62,9 +64,7 @@ async def test_surreal_mode_skips_legacy_startup(monkeypatch: pytest.MonkeyPatch
     async with app.router.lifespan_context(app):
         pass
 
-    run_migrations.assert_not_awaited()
-    recover_stuck_sources.assert_not_awaited()
-    load_api_keys_from_db.assert_not_awaited()
+    bootstrap_legacy_postgres_support.assert_awaited_once()
     init_pubsub.assert_awaited_once()
     init_locks.assert_awaited_once()
     shutdown_pubsub.assert_awaited_once()

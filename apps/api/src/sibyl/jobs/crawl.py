@@ -7,12 +7,16 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from sqlalchemy import func, select
-from sqlmodel import col
 
 from sibyl.api.event_types import WSEvent
-from sibyl.db import CrawledDocument, CrawlSource, CrawlStatus, DocumentChunk, get_session
+from sibyl.db import CrawlStatus
 from sibyl.db.models import utcnow_naive
+from sibyl.persistence.content_runtime import (
+    get_content_read_session,
+    get_crawl_source_by_id,
+    get_source_sync_counts,
+    save_crawl_source_record,
+)
 
 log = structlog.get_logger()
 
@@ -63,21 +67,16 @@ async def crawl_source(
         max_depth=max_depth,
     )
 
-    # Get source and update status
-    async with get_session() as session:
-        source = await session.get(CrawlSource, UUID(source_id))
+    async with get_content_read_session() as session:
+        source = await get_crawl_source_by_id(session, source_id=UUID(source_id))
         if not source:
             raise ValueError(f"Source not found: {source_id}")
 
-        # Update status to IN_PROGRESS
         source.crawl_status = CrawlStatus.IN_PROGRESS
         source.last_error = None
-        await session.flush()  # Persist status change before expunge
-
-        # Detach for background processing
+        source = await save_crawl_source_record(session, source=source)
         source_name = source.name
         organization_id = str(source.organization_id)
-        session.expunge(source)
 
     # Broadcast start event
     await _safe_broadcast(
@@ -93,11 +92,12 @@ async def crawl_source(
     # Progress callback: update DB + broadcast after each document
     async def on_progress(stats: Any, chunks_added: int) -> None:
         """Update source stats and broadcast progress after each document."""
-        async with get_session() as session:
-            db_source = await session.get(CrawlSource, UUID(source_id))
+        async with get_content_read_session() as session:
+            db_source = await get_crawl_source_by_id(session, source_id=UUID(source_id))
             if db_source:
                 db_source.document_count = stats.documents_stored
                 db_source.chunk_count = stats.chunks_created
+                await save_crawl_source_record(session, source=db_source)
 
         await _safe_broadcast(
             WSEvent.CRAWL_PROGRESS,
@@ -126,8 +126,8 @@ async def crawl_source(
             )
 
         # Update source with results
-        async with get_session() as session:
-            db_source = await session.get(CrawlSource, UUID(source_id))
+        async with get_content_read_session() as session:
+            db_source = await get_crawl_source_by_id(session, source_id=UUID(source_id))
             if db_source:
                 db_source.crawl_status = (
                     CrawlStatus.COMPLETED if stats.errors == 0 else CrawlStatus.PARTIAL
@@ -136,6 +136,7 @@ async def crawl_source(
                 db_source.last_crawled_at = utcnow_naive()
                 db_source.document_count = stats.documents_stored
                 db_source.chunk_count = stats.chunks_created
+                await save_crawl_source_record(session, source=db_source)
 
         result = {
             "source_id": source_id,
@@ -156,12 +157,13 @@ async def crawl_source(
 
     except Exception as e:
         # Update source with error
-        async with get_session() as session:
-            db_source = await session.get(CrawlSource, UUID(source_id))
+        async with get_content_read_session() as session:
+            db_source = await get_crawl_source_by_id(session, source_id=UUID(source_id))
             if db_source:
                 db_source.crawl_status = CrawlStatus.FAILED
                 db_source.current_job_id = None  # Clear job on failure
                 db_source.last_error = str(e)[:1000]
+                await save_crawl_source_record(session, source=db_source)
 
         await _safe_broadcast(
             WSEvent.CRAWL_COMPLETE,
@@ -192,27 +194,14 @@ async def sync_source(
     """
     log.info("Starting sync job", source_id=source_id)
 
-    async with get_session() as session:
-        source = await session.get(CrawlSource, UUID(source_id))
+    source_uuid = UUID(source_id)
+    async with get_content_read_session() as session:
+        source = await get_crawl_source_by_id(session, source_id=source_uuid)
         if not source:
             raise ValueError(f"Source not found: {source_id}")
         organization_id = str(source.organization_id)
 
-        # Count actual documents
-        source_uuid = UUID(source_id)
-        source_filter = col(CrawledDocument.source_id) == source_uuid
-        doc_result = await session.execute(
-            select(func.count(CrawledDocument.id)).where(source_filter)  # pyright: ignore[reportArgumentType]
-        )
-        doc_count = doc_result.scalar() or 0
-
-        # Count actual chunks
-        chunk_result = await session.execute(
-            select(func.count(DocumentChunk.id))  # pyright: ignore[reportArgumentType]
-            .join(CrawledDocument)
-            .where(source_filter)
-        )
-        chunk_count = chunk_result.scalar() or 0
+        doc_count, chunk_count = await get_source_sync_counts(session, source_id=source_uuid)
 
         # Update source
         old_status = source.crawl_status
@@ -230,6 +219,8 @@ async def sync_source(
         elif doc_count == 0 and source.crawl_status == CrawlStatus.IN_PROGRESS:
             source.crawl_status = CrawlStatus.PENDING
             source.current_job_id = None  # Clear job on sync reset
+
+        await save_crawl_source_record(session, source=source)
 
         result = {
             "source_id": source_id,

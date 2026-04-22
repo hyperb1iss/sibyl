@@ -16,6 +16,7 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 from sibyl.config import settings
+from sibyl.legacy_postgres_startup import bootstrap_legacy_postgres_support
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -89,43 +90,12 @@ def create_combined_app(  # noqa: PLR0915
                 hint="Set SIBYL_JWT_SECRET for authenticated access",
             )
 
-        db_connected = False
-        if legacy_runtime:
-            try:
-                from sqlalchemy import text
+        if settings.store == "surreal":
+            log.info(
+                "Surreal store mode enabled; bootstrapping remaining PostgreSQL-backed services"
+            )
 
-                from sibyl.db.connection import get_session
-
-                async with get_session() as session:
-                    await session.execute(text("SELECT 1"))
-                log.info("PostgreSQL connected", host=settings.postgres_host)
-                db_connected = True
-            except Exception as e:
-                log.warning("PostgreSQL unavailable at startup", error=str(e))
-
-            if db_connected:
-                try:
-                    from sibyl.db.migrations import run_migrations
-
-                    await run_migrations()
-                except Exception:
-                    log.exception("Database migration failed")
-                    raise
-
-            if db_connected:
-                try:
-                    from sibyl.api.routes.admin import recover_stuck_sources
-
-                    await recover_stuck_sources()
-                except Exception as e:
-                    log.warning("Source recovery failed", error=str(e))
-
-            if db_connected:
-                from sibyl.services.settings import load_api_keys_from_db
-
-                await load_api_keys_from_db()
-        else:
-            log.info("Surreal store mode enabled; skipping legacy PostgreSQL startup")
+        await bootstrap_legacy_postgres_support()
 
         try:
             from sibyl_core.graph.client import get_graph_client

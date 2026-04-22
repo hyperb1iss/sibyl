@@ -9,10 +9,9 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from sibyl.auth.context import AuthContext
-from sibyl.db.models import CrawlSource, Organization, OrganizationRole, User
+from sibyl.db.models import Organization, OrganizationRole, User
 
 
 def make_mock_user(user_id=None) -> MagicMock:
@@ -97,30 +96,22 @@ class TestSourcePagesOrgVerification:
         from sibyl.api.routes.rag import list_source_pages
 
         user_org_id = uuid4()
-        other_org_id = uuid4()
         source_id = str(uuid4())  # String ID
 
-        # Create a source owned by a different org
-        mock_source = MagicMock(spec=CrawlSource)
-        mock_source.organization_id = other_org_id  # Different org!
-
-        # Mock session
-        mock_session = AsyncMock(spec=AsyncSession)
-        mock_session.get.return_value = mock_source
-
-        # User belongs to user_org_id, but source is in other_org_id
         auth = make_auth_context(with_org=True, org_id=user_org_id)
 
-        # Patch get_session to return our mock
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value.__aenter__.return_value = mock_session
+        with (
+            patch(
+                "sibyl.api.routes.rag.get_org_crawl_source",
+                AsyncMock(return_value=None),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await list_source_pages(source_id=source_id, auth=auth)
 
-            with pytest.raises(HTTPException) as exc_info:
-                await list_source_pages(source_id=source_id, auth=auth)
-
-            # Should return 404 (not 403) to prevent org enumeration
-            assert exc_info.value.status_code == 404
-            assert "Source not found" in str(exc_info.value.detail)
+        # Should return 404 (not 403) to prevent org enumeration
+        assert exc_info.value.status_code == 404
+        assert "Source not found" in str(exc_info.value.detail)
 
 
 class TestDocumentOrgVerification:
@@ -132,36 +123,20 @@ class TestDocumentOrgVerification:
         from sibyl.api.routes.rag import get_full_page
 
         user_org_id = uuid4()
-        other_org_id = uuid4()
         document_id = str(uuid4())  # String ID
-        source_id = uuid4()
-
-        # Create a document with source owned by different org
-        mock_doc = MagicMock()
-        mock_doc.source_id = source_id
-
-        mock_source = MagicMock(spec=CrawlSource)
-        mock_source.organization_id = other_org_id  # Different org!
-
-        mock_session = AsyncMock(spec=AsyncSession)
-        mock_session.get.side_effect = lambda _model, entity_id: (
-            mock_doc
-            if str(entity_id) == document_id
-            else mock_source
-            if entity_id == source_id
-            else None
-        )
-
         auth = make_auth_context(with_org=True, org_id=user_org_id)
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value.__aenter__.return_value = mock_session
+        with (
+            patch(
+                "sibyl.api.routes.rag.get_crawled_document_for_org",
+                AsyncMock(return_value=None),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await get_full_page(document_id=document_id, auth=auth)
 
-            with pytest.raises(HTTPException) as exc_info:
-                await get_full_page(document_id=document_id, auth=auth)
-
-            assert exc_info.value.status_code == 404
-            assert "not found" in str(exc_info.value.detail).lower()
+        assert exc_info.value.status_code == 404
+        assert "not found" in str(exc_info.value.detail).lower()
 
     @pytest.mark.asyncio
     async def test_update_document_verifies_org_ownership(self) -> None:
@@ -170,38 +145,23 @@ class TestDocumentOrgVerification:
         from sibyl.api.schemas import DocumentUpdateRequest
 
         user_org_id = uuid4()
-        other_org_id = uuid4()
         document_id = str(uuid4())  # String ID
-        source_id = uuid4()
-
-        mock_doc = MagicMock()
-        mock_doc.source_id = source_id
-
-        mock_source = MagicMock(spec=CrawlSource)
-        mock_source.organization_id = other_org_id
-
-        mock_session = AsyncMock(spec=AsyncSession)
-        mock_session.get.side_effect = lambda _model, entity_id: (
-            mock_doc
-            if str(entity_id) == document_id
-            else mock_source
-            if entity_id == source_id
-            else None
-        )
-
         auth = make_auth_context(with_org=True, org_id=user_org_id)
 
         # Use title (required field for update)
         request = DocumentUpdateRequest(title="Updated title")
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value.__aenter__.return_value = mock_session
+        with (
+            patch(
+                "sibyl.api.routes.rag.get_crawled_document_for_org",
+                AsyncMock(return_value=None),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await update_document(document_id=document_id, request=request, auth=auth)
 
-            with pytest.raises(HTTPException) as exc_info:
-                await update_document(document_id=document_id, request=request, auth=auth)
-
-            assert exc_info.value.status_code == 404
-            assert "Document not found" in str(exc_info.value.detail)
+        assert exc_info.value.status_code == 404
+        assert "Document not found" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
     async def test_get_related_entities_verifies_org_ownership(self) -> None:
@@ -209,35 +169,20 @@ class TestDocumentOrgVerification:
         from sibyl.api.routes.rag import get_document_related_entities
 
         user_org_id = uuid4()
-        other_org_id = uuid4()
         document_id = str(uuid4())  # String ID
-        source_id = uuid4()
-
-        mock_doc = MagicMock()
-        mock_doc.source_id = source_id
-
-        mock_source = MagicMock(spec=CrawlSource)
-        mock_source.organization_id = other_org_id
-
-        mock_session = AsyncMock(spec=AsyncSession)
-        mock_session.get.side_effect = lambda _model, entity_id: (
-            mock_doc
-            if str(entity_id) == document_id
-            else mock_source
-            if entity_id == source_id
-            else None
-        )
-
         auth = make_auth_context(with_org=True, org_id=user_org_id)
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value.__aenter__.return_value = mock_session
+        with (
+            patch(
+                "sibyl.api.routes.rag.get_crawled_document_for_org",
+                AsyncMock(return_value=None),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await get_document_related_entities(document_id=document_id, auth=auth)
 
-            with pytest.raises(HTTPException) as exc_info:
-                await get_document_related_entities(document_id=document_id, auth=auth)
-
-            assert exc_info.value.status_code == 404
-            assert "Document not found" in str(exc_info.value.detail)
+        assert exc_info.value.status_code == 404
+        assert "Document not found" in str(exc_info.value.detail)
 
 
 class TestCrawlSourceModel:

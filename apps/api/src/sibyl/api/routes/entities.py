@@ -34,16 +34,16 @@ from sibyl.auth.dependencies import (
     get_current_organization,
     require_org_role,
 )
-from sibyl.db import (
-    get_session,
-    get_session_dependency,
-)
+from sibyl.db import get_session_dependency
 from sibyl.db.models import Organization, OrganizationRole, RawCapture
 from sibyl.db.project_sync import sync_project_create, sync_project_delete, sync_project_update
 from sibyl.persistence.content_runtime import (
+    get_content_read_session,
+    get_content_read_session_dependency,
     get_legacy_raw_capture,
     list_legacy_raw_captures,
     resolve_legacy_document_entity,
+    save_raw_capture_record,
 )
 from sibyl.persistence.graph_runtime import (
     get_entity_graph_runtime as _service_get_entity_graph_runtime,
@@ -134,8 +134,9 @@ async def _archive_raw_capture(
     metadata: dict[str, Any],
 ) -> None:
     """Persist the write-once capture sidecar."""
-    session.add(
-        RawCapture(
+    await save_raw_capture_record(
+        session,
+        capture=RawCapture(
             organization_id=organization_id,
             entity_id=entity_id,
             title=entity_name,
@@ -147,9 +148,8 @@ async def _archive_raw_capture(
             if metadata.get("capture_surface")
             else None,
             created_by_user_id=user_id,
-        )
+        ),
     )
-    await session.commit()
 
 
 def _raw_capture_review_state(capture: RawCapture) -> str:
@@ -391,7 +391,7 @@ async def _fetch_related_entity_summaries(
 @router.get("/captures", response_model=RawCaptureListResponse)
 async def list_raw_captures(
     org: Organization = Depends(get_current_organization),
-    session: Any = Depends(get_session_dependency),
+    session: Any = Depends(get_content_read_session_dependency),
     entity_type: str | None = Query(default=None, description="Filter by entity type"),
     capture_surface: str | None = Query(default=None, description="Filter by capture surface"),
     review_state: str | None = Query(default=None, description="Filter by review queue state"),
@@ -427,7 +427,7 @@ async def list_raw_captures(
 async def get_raw_capture(
     capture_id: UUID,
     org: Organization = Depends(get_current_organization),
-    session: Any = Depends(get_session_dependency),
+    session: Any = Depends(get_content_read_session_dependency),
 ) -> RawCaptureResponse:
     """Get a single archived raw quick capture."""
     try:
@@ -458,7 +458,7 @@ async def update_raw_capture_review_state(
     capture_id: UUID,
     update: RawCaptureReviewUpdate,
     org: Organization = Depends(get_current_organization),
-    session: Any = Depends(get_session_dependency),
+    session: Any = Depends(get_content_read_session_dependency),
 ) -> RawCaptureResponse:
     """Update review-state metadata for a raw capture."""
     try:
@@ -484,9 +484,7 @@ async def update_raw_capture_review_state(
             metadata.pop("deferred_at", None)
 
         capture.metadata_ = metadata
-        session.add(capture)
-        await session.commit()
-        await session.refresh(capture)
+        capture = await save_raw_capture_record(session, capture=capture)
         return _serialize_raw_capture(capture)
     except HTTPException:
         raise
@@ -756,7 +754,7 @@ async def get_entity(
 
         log.debug("Entity not in graph, checking document chunks", entity_id=entity_id)
 
-        async with get_session() as session:
+        async with get_content_read_session() as session:
             record = await resolve_legacy_document_entity(
                 session,
                 organization_id=org.id,

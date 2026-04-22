@@ -15,6 +15,7 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.config import settings
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import (
     ActiveGraphRuntime,
@@ -977,10 +978,13 @@ async def _link_graph(
 
 async def _link_graph_status(organization_id: str) -> ManageResponse:
     """Get status of graph linking (pending chunks per source)."""
-    from sibyl.db import get_session
+    if settings.store == "surreal":
+        status = await get_link_graph_status_data(None, organization_id)
+    else:
+        from sibyl.db import get_session
 
-    async with get_session() as session:
-        status = await get_link_graph_status_data(session, organization_id)
+        async with get_session() as session:
+            status = await get_link_graph_status_data(session, organization_id)
 
     return ManageResponse(
         success=True,

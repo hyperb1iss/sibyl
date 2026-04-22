@@ -63,6 +63,10 @@ class Settings(BaseSettings):
         default="legacy",
         description="Active persistence runtime for this process",
     )
+    auth_store: Literal["postgres", "surreal"] = Field(
+        default="postgres",
+        description="Active auth persistence runtime for this process",
+    )
     coordination_backend: Literal["auto", "local", "redis"] = Field(
         default="auto",
         description="Coordination backend for jobs, locks, pub/sub, and pending state",
@@ -83,18 +87,17 @@ class Settings(BaseSettings):
                     "CRITICAL: disable_auth=True is forbidden in production environment. "
                     "Set SIBYL_ENVIRONMENT=development to use disable_auth for testing."
                 )
-            if self.store == "legacy":
-                if self.falkordb_password == "conventions":  # noqa: S105
-                    raise ValueError(
-                        "CRITICAL: Default FalkorDB password 'conventions' is forbidden in production. "
-                        "Set SIBYL_FALKORDB_PASSWORD to a secure value."
-                    )
-                if self.postgres_password.get_secret_value() == "sibyl_dev":
-                    raise ValueError(
-                        "CRITICAL: Default PostgreSQL password 'sibyl_dev' is forbidden in production. "
-                        "Set SIBYL_POSTGRES_PASSWORD to a secure value."
-                    )
-            elif self.resolved_surreal_url.startswith("memory://"):
+            if self.falkordb_password == "conventions":  # noqa: S105
+                raise ValueError(
+                    "CRITICAL: Default FalkorDB password 'conventions' is forbidden in production. "
+                    "Set SIBYL_FALKORDB_PASSWORD to a secure value."
+                )
+            if self.postgres_password.get_secret_value() == "sibyl_dev":
+                raise ValueError(
+                    "CRITICAL: Default PostgreSQL password 'sibyl_dev' is forbidden in production. "
+                    "Set SIBYL_POSTGRES_PASSWORD to a secure value."
+                )
+            if self.store == "surreal" and self.resolved_surreal_url.startswith("memory://"):
                 raise ValueError(
                     "CRITICAL: In-memory SurrealDB is forbidden in production. "
                     "Set SIBYL_SURREAL_URL or SIBYL_SURREAL_DATA_DIR."

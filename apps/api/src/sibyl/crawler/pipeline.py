@@ -19,9 +19,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import col
 
 from sibyl.crawler.chunker import ChunkStrategy, DocumentChunker
 from sibyl.crawler.embedder import EmbeddingService
@@ -33,7 +31,15 @@ from sibyl.db import (
     CrawlSource,
     DocumentChunk,
     SourceType,
-    get_session,
+)
+from sibyl.persistence.content_runtime import (
+    get_content_read_session,
+    get_crawl_source_by_id,
+    get_document_by_url_for_org,
+    list_source_documents,
+    save_crawl_source_record,
+    save_crawled_document_record,
+    save_document_chunks,
 )
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.models.entities import Entity, EntityType
@@ -325,12 +331,8 @@ class IngestionPipeline:
         from sibyl.crawler.tagger import aggregate_source_tags
 
         try:
-            async with get_session() as session:
-                # Fetch documents for this source
-                result = await session.execute(
-                    select(CrawledDocument).where(col(CrawledDocument.source_id) == source.id)
-                )
-                documents = result.scalars().all()
+            async with get_content_read_session() as session:
+                documents = await list_source_documents(session, source_id=source.id)
 
                 if not documents:
                     return
@@ -347,12 +349,13 @@ class IngestionPipeline:
                         log.debug("Failed to fetch favicon", source=source.name, error=str(e))
 
                 # Update source in database
-                db_source = await session.get(CrawlSource, source.id)
+                db_source = await get_crawl_source_by_id(session, source_id=source.id)
                 if db_source:
                     db_source.tags = tags
                     db_source.categories = categories
                     if favicon_url:
                         db_source.favicon_url = favicon_url
+                    await save_crawl_source_record(session, source=db_source)
                     log.info(
                         "Auto-detected source metadata",
                         source=source.name,
@@ -378,30 +381,44 @@ class IngestionPipeline:
             source_type: Type of source (LOCAL for convention entities)
         """
         db_chunks: list[DocumentChunk] = []
+        stored_document = document
 
-        async with get_session() as session:
-            # Check for existing document (deduplication)
-            existing = await session.execute(
-                select(CrawledDocument).where(col(CrawledDocument.url) == document.url)
+        async with get_content_read_session() as session:
+            source = await get_crawl_source_by_id(session, source_id=document.source_id)
+            if source is None:
+                msg = f"Source not found for document {document.source_id}"
+                raise ValueError(msg)
+
+            existing = await get_document_by_url_for_org(
+                session,
+                url=document.url,
+                organization_id=source.organization_id,
             )
-            if existing.scalar_one_or_none():
+            if existing is not None:
                 log.debug("Document already exists, skipping", url=document.url)
                 return
 
-            # Store document - handle race condition with concurrent crawls
             try:
-                session.add(document)
-                await session.flush()
-                await session.refresh(document)
-            except IntegrityError:
-                # Another concurrent crawl already inserted this URL
-                log.debug("Document inserted by concurrent crawl, skipping", url=document.url)
-                await session.rollback()
+                stored_document = await save_crawled_document_record(session, document=document)
+            except (IntegrityError, RuntimeError) as exc:
+                if session is not None and hasattr(session, "rollback"):
+                    await session.rollback()
+                existing = await get_document_by_url_for_org(
+                    session,
+                    url=document.url,
+                    organization_id=source.organization_id,
+                )
+                if existing is None:
+                    raise
+                log.debug(
+                    "Document inserted by concurrent crawl, skipping",
+                    url=document.url,
+                    error=str(exc),
+                )
                 return
 
-            # Chunk document
             chunks = self._chunker.chunk_document(
-                document,
+                stored_document,
                 strategy=self.chunk_strategy,
             )
             stats.chunks_created += len(chunks)
@@ -426,7 +443,7 @@ class IngestionPipeline:
             # Store chunks
             for i, chunk in enumerate(chunks):
                 db_chunk = DocumentChunk(
-                    document_id=document.id,
+                    document_id=stored_document.id,
                     chunk_index=chunk.chunk_index,
                     chunk_type=chunk.chunk_type,
                     content=chunk.content,
@@ -441,18 +458,16 @@ class IngestionPipeline:
                     has_entities=False,
                     entity_ids=[],
                 )
-                session.add(db_chunk)
                 db_chunks.append(db_chunk)
 
-            # Flush to get chunk IDs for graph integration
-            await session.flush()
+            db_chunks = await save_document_chunks(session, chunks=db_chunks)
 
         # Graph integration: extract entities and link to knowledge graph
         if self._graph_integration and db_chunks:
             try:
                 integration_stats = await self._graph_integration.process_chunks(
                     db_chunks,
-                    source_name=document.url,
+                    source_name=stored_document.url,
                 )
                 stats.entities_extracted += integration_stats.entities_extracted
                 stats.entities_linked += integration_stats.entities_linked
@@ -465,26 +480,26 @@ class IngestionPipeline:
 
                 if entity_uuids:
                     await self._graph_integration.create_doc_relationships(
-                        document.id,
+                        stored_document.id,
                         list(set(entity_uuids)),  # Dedupe
-                        document_title=document.title,
-                        document_url=document.url,
+                        document_title=stored_document.title,
+                        document_url=stored_document.url,
                     )
 
             except Exception as e:
                 log.warning(
                     "Graph integration failed for document",
-                    url=document.url,
+                    url=stored_document.url,
                     error=str(e),
                 )
 
         # Create convention entity for local sources
         if source_type == SourceType.LOCAL:
-            await self._create_convention_entity(document)
+            await self._create_convention_entity(stored_document)
 
         log.debug(
             "Processed document",
-            url=document.url,
+            url=stored_document.url,
             chunks=len(chunks),
             embeddings=len(embeddings) if embeddings else 0,
             entities=stats.entities_extracted,
@@ -579,8 +594,8 @@ async def reingest_source(source_id: UUID, organization_id: str) -> IngestionSta
     Returns:
         IngestionStats with results
     """
-    async with get_session() as session:
-        source = await session.get(CrawlSource, source_id)
+    async with get_content_read_session() as session:
+        source = await get_crawl_source_by_id(session, source_id=source_id)
         if source is None:
             raise ValueError(f"Source not found: {source_id}")
 

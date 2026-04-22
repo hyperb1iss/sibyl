@@ -77,6 +77,19 @@ async def get_legacy_raw_capture(
     return result.scalar_one_or_none()
 
 
+async def save_raw_capture_record(
+    session: Any,
+    *,
+    capture: RawCapture,
+) -> RawCapture:
+    """Persist a raw-capture mutation."""
+
+    session.add(capture)
+    await session.flush()
+    await session.refresh(capture)
+    return capture
+
+
 async def resolve_legacy_document_entity(
     session: Any,
     *,

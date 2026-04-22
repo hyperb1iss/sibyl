@@ -31,21 +31,20 @@ from sibyl.api.schemas import (
     RAGSearchResponse,
     SourcePagesResponse,
 )
-from sibyl.auth.authorization import list_accessible_project_graph_ids
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, require_org_role
 from sibyl.auth.errors import NoOrgContextError
 from sibyl.crawler.embedder import embed_text
-from sibyl.db import (
-    CrawledDocument,
-    CrawlSource,
-    get_session,
-)
 from sibyl.db.models import OrganizationRole
+from sibyl.persistence.auth_runtime import list_legacy_accessible_project_graph_ids
 from sibyl.persistence.content_runtime import (
+    get_content_read_session,
+    get_crawled_document_for_org,
     get_document_by_url_for_org,
+    get_org_crawl_source,
     hybrid_search_chunks,
     list_rag_source_documents_page as list_source_documents_page,
+    save_crawled_document_record,
     search_code_example_chunks,
     search_rag_chunks,
 )
@@ -116,7 +115,7 @@ async def rag_search(
         log.exception("Failed to generate query embedding", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to generate query embedding") from e
 
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         source_filter_name = None
         if request.source_id:
             source_uuid = _parse_uuid_or_400(request.source_id, "source ID")
@@ -224,7 +223,7 @@ async def search_code_examples(
         log.exception("Failed to generate query embedding", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to generate query embedding") from e
 
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         if request.source_id:
             source_uuid = _parse_uuid_or_400(request.source_id, "source ID")
         else:
@@ -299,12 +298,15 @@ async def list_source_pages(
             status_code=400, detail=f"Invalid source ID format: {source_id}"
         ) from None
 
-    async with get_session() as session:
-        # Get source info and verify org ownership
-        source = await session.get(CrawlSource, source_uuid)
-        if not source:
-            raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
-        if str(source.organization_id) != auth.organization_id:
+    organization_uuid = UUID(auth.organization_id)
+
+    async with get_content_read_session() as session:
+        source = await get_org_crawl_source(
+            session,
+            source_id=source_uuid,
+            organization_id=organization_uuid,
+        )
+        if source is None:
             raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
 
         documents, total = await list_source_documents_page(
@@ -361,14 +363,23 @@ async def get_full_page(
             status_code=400, detail=f"Invalid document ID format: {document_id}"
         ) from None
 
-    async with get_session() as session:
-        doc = await session.get(CrawledDocument, doc_uuid)
-        if not doc:
+    organization_uuid = UUID(auth.organization_id)
+
+    async with get_content_read_session() as session:
+        doc = await get_crawled_document_for_org(
+            session,
+            document_id=doc_uuid,
+            organization_id=organization_uuid,
+        )
+        if doc is None:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
-        # Get source and verify org ownership
-        source = await session.get(CrawlSource, doc.source_id)
-        if not source or str(source.organization_id) != auth.organization_id:
+        source = await get_org_crawl_source(
+            session,
+            source_id=doc.source_id,
+            organization_id=organization_uuid,
+        )
+        if source is None:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
         source_name = source.name
 
@@ -402,18 +413,23 @@ async def get_page_by_url(
     if not auth.organization_id:
         raise NoOrgContextError("access this resource")
 
-    async with get_session() as session:
+    organization_uuid = UUID(auth.organization_id)
+
+    async with get_content_read_session() as session:
         doc = await get_document_by_url_for_org(
             session,
             url=url,
-            organization_id=auth.organization_id,
+            organization_id=organization_uuid,
         )
 
         if not doc:
             raise HTTPException(status_code=404, detail=f"Document not found for URL: {url}")
 
-        # Get source name
-        source = await session.get(CrawlSource, doc.source_id)
+        source = await get_org_crawl_source(
+            session,
+            source_id=doc.source_id,
+            organization_id=organization_uuid,
+        )
         source_name = source.name if source else "Unknown"
 
     return FullPageResponse(
@@ -462,7 +478,7 @@ async def hybrid_search(
         log.exception("Failed to generate query embedding", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to generate query embedding") from e
 
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         source_filter_name = None
         if request.source_id:
             source_uuid = _parse_uuid_or_400(request.source_id, "source ID")
@@ -574,14 +590,23 @@ async def update_document(
             status_code=400, detail=f"Invalid document ID format: {document_id}"
         ) from None
 
-    async with get_session() as session:
-        doc = await session.get(CrawledDocument, doc_uuid)
+    organization_uuid = UUID(auth.organization_id)
+
+    async with get_content_read_session() as session:
+        doc = await get_crawled_document_for_org(
+            session,
+            document_id=doc_uuid,
+            organization_id=organization_uuid,
+        )
         if not doc:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
-        # Verify organization ownership
-        source = await session.get(CrawlSource, doc.source_id)
-        if not source or str(source.organization_id) != auth.organization_id:
+        source = await get_org_crawl_source(
+            session,
+            source_id=doc.source_id,
+            organization_id=organization_uuid,
+        )
+        if source is None:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
         # Update title if provided
@@ -597,9 +622,7 @@ async def update_document(
             doc.has_code = _detect_code_presence(request.content)
             doc.headings = _extract_headings(request.content)
 
-        session.add(doc)
-        await session.commit()
-        await session.refresh(doc)
+        doc = await save_crawled_document_record(session, document=doc)
 
         # Reuse source from ownership check
         source_name = source.name
@@ -657,19 +680,20 @@ async def get_document_related_entities(
 
     accessible_projects: set[str] | None = None
 
-    async with get_session() as session:
-        # Get the document and verify org ownership
-        doc = await session.get(CrawledDocument, doc_uuid)
-        if not doc:
+    organization_uuid = UUID(auth.organization_id)
+
+    async with get_content_read_session() as session:
+        doc = await get_crawled_document_for_org(
+            session,
+            document_id=doc_uuid,
+            organization_id=organization_uuid,
+        )
+        if doc is None:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
 
-        source = await session.get(CrawlSource, doc.source_id)
-        if not source or str(source.organization_id) != auth.organization_id:
-            raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
-
-        # Enforce project-level graph visibility for related entities.
-        accessible_projects = await list_accessible_project_graph_ids(session, auth)
         doc_title = doc.title
+
+    accessible_projects = await list_legacy_accessible_project_graph_ids(auth)
 
     # Search the knowledge graph using document title as query
     entities: list[DocumentRelatedEntity] = []

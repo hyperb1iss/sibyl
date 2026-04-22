@@ -22,16 +22,22 @@ import structlog
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
 from crawl4ai.deep_crawling.filters import FilterChain, URLPatternFilter
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 from sibyl.api.event_types import WSEvent
 from sibyl.api.websocket import broadcast_event
 from sibyl.crawler.discovery import DiscoveryResult, DiscoveryService
 from sibyl.crawler.llms_parser import LLMsSection, parse_llms_full
-from sibyl.db import CrawledDocument, CrawlSource, CrawlStatus, SourceType, get_session
+from sibyl.db import CrawledDocument, CrawlSource, CrawlStatus, SourceType
 from sibyl.db.models import utcnow_naive
+from sibyl.persistence.content_runtime import (
+    create_crawl_source_record,
+    get_content_read_session,
+    get_crawl_source_by_id,
+    get_crawl_source_by_url,
+    list_crawl_sources,
+    list_crawl_sources_for_org,
+    save_crawl_source_record,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -81,6 +87,16 @@ def _clean_nav_cruft(content: str) -> str:
     # Clean up multiple blank lines left behind
     content = re.sub(r"\n{3,}", "\n\n", content)
     return content.strip()
+
+
+async def _save_source_update(source_id: UUID, **updates: object) -> CrawlSource | None:
+    async with get_content_read_session() as session:
+        source = await get_crawl_source_by_id(session, source_id=source_id)
+        if source is None:
+            return None
+        for field, value in updates.items():
+            setattr(source, field, value)
+        return await save_crawl_source_record(session, source=source)
 
 
 class CrawlerService:
@@ -272,10 +288,7 @@ class CrawlerService:
 
         # Update source status - fetch fresh to avoid detached instance issues
         source_id = source.id
-        async with get_session() as session:
-            db_source = await session.get(CrawlSource, source_id)
-            if db_source:
-                db_source.crawl_status = CrawlStatus.IN_PROGRESS
+        await _save_source_update(source_id, crawl_status=CrawlStatus.IN_PROGRESS)
 
         # Perform deep crawl
         crawled_count = 0
@@ -326,14 +339,14 @@ class CrawlerService:
                     error=str(e),
                 )
                 error_count += 1
-                async with get_session() as session:
-                    db_source = await session.get(CrawlSource, source_id)
-                    if db_source:
-                        db_source.crawl_status = CrawlStatus.PARTIAL
-                        db_source.current_job_id = None
-                        db_source.last_crawled_at = utcnow_naive()
-                        db_source.document_count = crawled_count
-                        db_source.last_error = f"Browser crashed after {crawled_count} pages"
+                await _save_source_update(
+                    source_id,
+                    crawl_status=CrawlStatus.PARTIAL,
+                    current_job_id=None,
+                    last_crawled_at=utcnow_naive(),
+                    document_count=crawled_count,
+                    last_error=f"Browser crashed after {crawled_count} pages",
+                )
 
                 # Restart browser for next source
                 await self.restart()
@@ -349,24 +362,22 @@ class CrawlerService:
 
             # Other errors - fail as before
             log.error("Deep crawl failed", source=source.name, error=str(e))  # noqa: TRY400
-            async with get_session() as session:
-                db_source = await session.get(CrawlSource, source_id)
-                if db_source:
-                    db_source.crawl_status = CrawlStatus.FAILED
-                    db_source.current_job_id = None  # Clear job on failure
-                    db_source.last_error = str(e)
+            await _save_source_update(
+                source_id,
+                crawl_status=CrawlStatus.FAILED,
+                current_job_id=None,
+                last_error=str(e),
+            )
             raise
 
         # Update source with results
-        async with get_session() as session:
-            db_source = await session.get(CrawlSource, source_id)
-            if db_source:
-                db_source.crawl_status = (
-                    CrawlStatus.COMPLETED if error_count == 0 else CrawlStatus.PARTIAL
-                )
-                db_source.current_job_id = None  # Clear job on completion
-                db_source.last_crawled_at = utcnow_naive()
-                db_source.document_count = crawled_count
+        await _save_source_update(
+            source_id,
+            crawl_status=CrawlStatus.COMPLETED if error_count == 0 else CrawlStatus.PARTIAL,
+            current_job_id=None,
+            last_crawled_at=utcnow_naive(),
+            document_count=crawled_count,
+        )
 
         log.info(
             "Deep crawl completed",
@@ -818,12 +829,12 @@ async def create_source(
     Returns:
         Created CrawlSource
     """
-    async with get_session() as session:
-        return await _persist_source(
+    async with get_content_read_session() as session:
+        return await create_crawl_source_record(
             session,
             name=name,
             url=url,
-            organization_id=organization_id,
+            organization_id=UUID(organization_id),
             source_type=source_type,
             description=description,
             crawl_depth=crawl_depth,
@@ -844,22 +855,11 @@ async def create_org_source(
     exclude_patterns: list[str] | None = None,
 ) -> CrawlSource:
     """Create a crawl source for an organization, rejecting same-org duplicates."""
-    normalized_url = _normalize_source_url(url)
-
-    async with get_session() as session:
-        existing = await session.execute(
-            select(CrawlSource).where(
-                col(CrawlSource.url) == normalized_url,
-                col(CrawlSource.organization_id) == organization_id,
-            )
-        )
-        if existing.scalar_one_or_none():
-            raise SourceAlreadyExistsError(normalized_url)
-
-        return await _persist_source(
+    async with get_content_read_session() as session:
+        return await create_crawl_source_record(
             session,
             name=name,
-            url=normalized_url,
+            url=url,
             organization_id=organization_id,
             source_type=source_type,
             description=description,
@@ -871,11 +871,8 @@ async def create_org_source(
 
 async def get_source_by_url(url: str) -> CrawlSource | None:
     """Get a crawl source by URL."""
-    async with get_session() as session:
-        result = await session.execute(
-            select(CrawlSource).where(col(CrawlSource.url) == _normalize_source_url(url))
-        )
-        return result.scalar_one_or_none()
+    async with get_content_read_session() as session:
+        return await get_crawl_source_by_url(session, url=_normalize_source_url(url))
 
 
 async def list_sources(
@@ -884,13 +881,8 @@ async def list_sources(
     limit: int = 50,
 ) -> list[CrawlSource]:
     """List crawl sources with optional filtering."""
-    async with get_session() as session:
-        query = select(CrawlSource)
-        if status:
-            query = query.where(col(CrawlSource.crawl_status) == status)
-        query = query.limit(limit)
-        result = await session.execute(query)
-        return list(result.scalars().all())
+    async with get_content_read_session() as session:
+        return await list_crawl_sources(session, status=status, limit=limit)
 
 
 async def list_org_sources(
@@ -900,58 +892,15 @@ async def list_org_sources(
     limit: int = 50,
 ) -> CrawlSourcePage:
     """List crawl sources for a single organization."""
-    async with get_session() as session:
-        query = (
-            select(CrawlSource)
-            .where(col(CrawlSource.organization_id) == organization_id)
-            .order_by(col(CrawlSource.created_at).desc())
-            .limit(limit)
+    async with get_content_read_session() as session:
+        sources, total = await list_crawl_sources_for_org(
+            session,
+            organization_id=organization_id,
+            status=status,
+            limit=limit,
         )
-        if status:
-            query = query.where(col(CrawlSource.crawl_status) == status)
-
-        result = await session.execute(query)
-        count_result = await session.execute(
-            select(func.count(CrawlSource.id)).where(
-                col(CrawlSource.organization_id) == organization_id
-            )
-        )
-
-        return CrawlSourcePage(
-            sources=list(result.scalars().all()),
-            total=count_result.scalar() or 0,
-        )
+    return CrawlSourcePage(sources=sources, total=total)
 
 
 def _normalize_source_url(url: str) -> str:
     return url.rstrip("/")
-
-
-async def _persist_source(
-    session: AsyncSession,
-    *,
-    name: str,
-    url: str,
-    organization_id: UUID | str,
-    source_type: SourceType,
-    description: str | None,
-    crawl_depth: int,
-    include_patterns: list[str] | None,
-    exclude_patterns: list[str] | None,
-) -> CrawlSource:
-    normalized_url = _normalize_source_url(url)
-    source = CrawlSource(
-        name=name,
-        url=normalized_url,
-        organization_id=organization_id,
-        source_type=source_type,
-        description=description,
-        crawl_depth=crawl_depth,
-        include_patterns=include_patterns or [],
-        exclude_patterns=exclude_patterns or [],
-    )
-    session.add(source)
-    await session.flush()
-    await session.refresh(source)
-    log.info("Created crawl source", name=name, url=normalized_url, id=str(source.id))
-    return source

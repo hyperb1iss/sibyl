@@ -1000,6 +1000,8 @@ class GraphQueryAdapter:
         entity_types: list[str] | None = None,
         max_nodes: int = 1000,
         max_edges: int = 5000,
+        resolution: str = "detail",
+        cluster_id: str | None = None,
     ) -> HierarchicalGraphData:
         from sibyl_core.graph.communities import get_hierarchical_graph
 
@@ -1010,6 +1012,8 @@ class GraphQueryAdapter:
             entity_types=entity_types,
             max_nodes=max_nodes,
             max_edges=max_edges,
+            resolution=resolution,
+            cluster_id=cluster_id,
         )
 
 

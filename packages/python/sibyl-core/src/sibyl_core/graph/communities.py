@@ -34,10 +34,16 @@ CLUSTER_CACHE_TTL = timedelta(minutes=5)
 # Cache for hierarchical graph community detection (expensive operation)
 HIERARCHICAL_CACHE: dict[str, tuple[datetime, dict[str, str], list[dict]]] = {}
 HIERARCHICAL_CACHE_TTL = timedelta(minutes=5)
+GRAPH_SNAPSHOT_CACHE: dict[str, tuple[datetime, GraphSnapshot]] = {}
+GRAPH_SNAPSHOT_CACHE_TTL = timedelta(minutes=5)
+GRAPH_LOD_CACHE: dict[tuple[Any, ...], tuple[datetime, HierarchicalGraphData]] = {}
+GRAPH_LOD_CACHE_TTL = timedelta(minutes=2)
 _COMMUNITY_PAGE_SIZE = 500
 _GRAPH_DIVERSITY_THRESHOLD = 100
 _GRAPH_PRIMARY_SAMPLE_SHARE = 0.8
 _GRAPH_MISSING_TYPE_MIN_RESERVE = 5
+GRAPH_RESOLUTION_OVERVIEW = "overview"
+GRAPH_RESOLUTION_DETAIL = "detail"
 
 
 def _entity_summary(entity: Entity) -> str:
@@ -163,8 +169,131 @@ async def _list_all_relationships(
     return relationships
 
 
+def _relationship_dedupe_key(
+    relationship: Relationship,
+) -> tuple[str, str, str]:
+    return (
+        relationship.source_id,
+        relationship.relationship_type.value,
+        relationship.target_id,
+    )
+
+
+def _merge_relationships(
+    primary: list[Relationship],
+    secondary: list[Relationship],
+) -> list[Relationship]:
+    merged: dict[tuple[str, str, str], Relationship] = {
+        _relationship_dedupe_key(relationship): relationship for relationship in primary
+    }
+    for relationship in secondary:
+        merged.setdefault(_relationship_dedupe_key(relationship), relationship)
+    return list(merged.values())
+
+
+async def _list_surreal_episodic_relationships(
+    client: GraphClient,
+    organization_id: str,
+    entity_by_id: dict[str, Entity],
+) -> list[Relationship]:
+    if getattr(client, "_store", None) != "surreal":
+        return []
+
+    try:
+        driver = client.get_org_driver(organization_id)
+        edge_ops = getattr(driver, "episodic_edge_ops", None)
+        if edge_ops is None:
+            return []
+
+        edges = await edge_ops.get_by_group_ids(driver, [organization_id])
+        relationships: list[Relationship] = []
+        for edge in edges:
+            if edge.source_node_uuid not in entity_by_id or edge.target_node_uuid not in entity_by_id:
+                continue
+            relationships.append(
+                Relationship(
+                    id=edge.uuid,
+                    source_id=edge.source_node_uuid,
+                    target_id=edge.target_node_uuid,
+                    relationship_type=RelationshipType.MENTIONS,
+                    created_at=edge.created_at,
+                )
+            )
+        return relationships
+    except Exception as exc:
+        log.warning(
+            "list_surreal_episodic_relationships_failed",
+            org_id=organization_id,
+            error=str(exc),
+        )
+        return []
+
+
+async def _get_graph_snapshot(
+    client: GraphClient,
+    organization_id: str,
+) -> GraphSnapshot:
+    cached = GRAPH_SNAPSHOT_CACHE.get(organization_id)
+    if cached is not None:
+        cached_at, snapshot = cached
+        if datetime.now(UTC) - cached_at < GRAPH_SNAPSHOT_CACHE_TTL:
+            log.debug("graph_snapshot_cache_hit", org_id=organization_id)
+            return snapshot
+
+    entities = await _list_all_entities(client, organization_id)
+    entity_by_id = _entity_index(entities)
+    relationships = await _list_all_relationships(client, organization_id)
+    episodic_relationships = await _list_surreal_episodic_relationships(
+        client,
+        organization_id,
+        entity_by_id,
+    )
+    relationships = _merge_relationships(relationships, episodic_relationships)
+    snapshot = GraphSnapshot(
+        entities=entities,
+        relationships=relationships,
+        entity_by_id=entity_by_id,
+    )
+    GRAPH_SNAPSHOT_CACHE[organization_id] = (datetime.now(UTC), snapshot)
+    log.info(
+        "graph_snapshot_cache_updated",
+        org_id=organization_id,
+        entity_count=len(entities),
+        relationship_count=len(relationships),
+        episodic_relationship_count=len(episodic_relationships),
+    )
+    return snapshot
+
+
 def _entity_index(entities: list[Entity]) -> dict[str, Entity]:
     return {entity.id: entity for entity in entities if entity.id}
+
+
+def _normalized_cache_list(values: list[str] | None) -> tuple[str, ...]:
+    if not values:
+        return ()
+    return tuple(dict.fromkeys(values))
+
+
+def _lod_cache_key(
+    *,
+    organization_id: str,
+    project_ids: list[str] | None,
+    entity_types: list[str] | None,
+    resolution: str,
+    cluster_id: str | None,
+    max_nodes: int,
+    max_edges: int,
+) -> tuple[Any, ...]:
+    return (
+        organization_id,
+        _normalized_cache_list(project_ids),
+        _normalized_cache_list(entity_types),
+        resolution,
+        cluster_id,
+        max_nodes,
+        max_edges,
+    )
 
 
 def _entity_timestamp(entity: Entity | None) -> datetime:
@@ -521,6 +650,212 @@ def _build_graph_edges_from_snapshot(
     return edges
 
 
+def _build_overview_graph_from_snapshot(
+    entities: list[Entity],
+    relationships: list[Relationship],
+    node_to_cluster: dict[str, str],
+    clusters_meta: list[dict[str, Any]],
+    *,
+    project_ids: list[str] | None = None,
+    entity_types: list[str] | None = None,
+    max_nodes: int = 1000,
+    max_edges: int = 5000,
+) -> HierarchicalGraphData:
+    data = _build_cluster_detail_graph_from_snapshot(
+        entities,
+        relationships,
+        node_to_cluster,
+        clusters_meta,
+        cluster_id=None,
+        project_ids=project_ids,
+        entity_types=entity_types,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+    )
+    data.resolution = GRAPH_RESOLUTION_OVERVIEW
+    return data
+
+
+def _build_cluster_detail_graph_from_snapshot(
+    entities: list[Entity],
+    relationships: list[Relationship],
+    node_to_cluster: dict[str, str],
+    clusters_meta: list[dict[str, Any]],
+    *,
+    cluster_id: str | None = None,
+    project_ids: list[str] | None = None,
+    entity_types: list[str] | None = None,
+    max_nodes: int = 1000,
+    max_edges: int = 5000,
+) -> HierarchicalGraphData:
+    entity_by_id = _entity_index(entities)
+    focused_ids = _focused_entity_ids(
+        entities,
+        relationships,
+        project_ids=project_ids,
+        entity_types=entity_types,
+    )
+    total_node_count, total_edge_count = _graph_totals_from_snapshot(
+        entities,
+        relationships,
+        project_ids=project_ids,
+        entity_types=entity_types,
+    )
+    if not focused_ids:
+        return HierarchicalGraphData(
+            nodes=[],
+            edges=[],
+            clusters=[],
+            cluster_edges=[],
+            total_nodes=total_node_count,
+            total_edges=total_edge_count,
+            displayed_nodes=0,
+            displayed_edges=0,
+        )
+
+    if not cluster_id:
+        nodes, node_ids = _build_graph_nodes_from_snapshot(
+            entities,
+            relationships,
+            node_to_cluster,
+            max_nodes=max_nodes,
+            project_ids=project_ids,
+            entity_types=entity_types,
+        )
+        edges = _build_graph_edges_from_snapshot(
+            relationships,
+            node_ids,
+            max_edges=max_edges,
+        )
+        enriched_clusters, cluster_edges = _build_cluster_metadata(
+            nodes,
+            clusters_meta,
+            node_to_cluster,
+            edges,
+            entity_by_id,
+            focused_ids,
+        )
+        return HierarchicalGraphData(
+            nodes=nodes,
+            edges=edges,
+            clusters=enriched_clusters,
+            cluster_edges=cluster_edges,
+            total_nodes=total_node_count,
+            total_edges=total_edge_count,
+            displayed_nodes=len(nodes),
+            displayed_edges=len(edges),
+        )
+
+    cluster_member_ids = {
+        entity_id
+        for entity_id in focused_ids
+        if node_to_cluster.get(entity_id, "unclustered") == cluster_id
+    }
+    if not cluster_member_ids:
+        return HierarchicalGraphData(
+            nodes=[],
+            edges=[],
+            clusters=[],
+            cluster_edges=[],
+            total_nodes=total_node_count,
+            total_edges=total_edge_count,
+            displayed_nodes=0,
+            displayed_edges=0,
+        )
+
+    degrees: Counter[str] = Counter()
+    for relationship in relationships:
+        if relationship.source_id not in focused_ids or relationship.target_id not in focused_ids:
+            continue
+        degrees[relationship.source_id] += 1
+        if relationship.target_id != relationship.source_id:
+            degrees[relationship.target_id] += 1
+
+    selected_cluster_ids = set(
+        _pick_representative_node_ids(
+            cluster_member_ids,
+            entity_by_id,
+            degrees,
+            max_nodes=min(len(cluster_member_ids), max_nodes),
+        )
+    )
+
+    neighbor_ids: set[str] = set()
+    for relationship in relationships:
+        if relationship.source_id not in focused_ids or relationship.target_id not in focused_ids:
+            continue
+        src_in_cluster = relationship.source_id in cluster_member_ids
+        tgt_in_cluster = relationship.target_id in cluster_member_ids
+        if src_in_cluster and not tgt_in_cluster:
+            neighbor_ids.add(relationship.target_id)
+        elif tgt_in_cluster and not src_in_cluster:
+            neighbor_ids.add(relationship.source_id)
+
+    remaining_budget = max(max_nodes - len(selected_cluster_ids), 0)
+    selected_neighbor_ids = set(
+        _pick_representative_node_ids(
+            neighbor_ids,
+            entity_by_id,
+            degrees,
+            max_nodes=remaining_budget,
+        )
+    )
+    visible_ids = selected_cluster_ids | selected_neighbor_ids
+
+    nodes = [
+        {
+            "id": entity.id,
+            "name": entity.name or entity.id[:20],
+            "type": entity.entity_type.value,
+            "summary": _entity_summary(entity),
+            "cluster_id": node_to_cluster.get(entity.id, "unclustered"),
+            "aggregate": False,
+            "member_count": 1,
+        }
+        for entity_id in visible_ids
+        if (entity := entity_by_id.get(entity_id)) is not None
+    ]
+
+    edges: list[dict[str, Any]] = []
+    for relationship in relationships:
+        if relationship.source_id not in visible_ids or relationship.target_id not in visible_ids:
+            continue
+        if (
+            relationship.source_id not in selected_cluster_ids
+            and relationship.target_id not in selected_cluster_ids
+        ):
+            continue
+        edges.append(
+            {
+                "source": relationship.source_id,
+                "target": relationship.target_id,
+                "type": relationship.relationship_type.value,
+            }
+        )
+        if len(edges) >= max_edges:
+            break
+
+    enriched_clusters, cluster_edges = _build_cluster_metadata(
+        nodes,
+        clusters_meta,
+        node_to_cluster,
+        edges,
+        entity_by_id,
+        focused_ids,
+    )
+
+    return HierarchicalGraphData(
+        nodes=nodes,
+        edges=edges,
+        clusters=enriched_clusters,
+        cluster_edges=cluster_edges,
+        total_nodes=total_node_count,
+        total_edges=total_edge_count,
+        displayed_nodes=len(nodes),
+        displayed_edges=len(edges),
+    )
+
+
 @dataclass
 class ClusterSummary:
     """Lightweight cluster summary for visualization.
@@ -738,9 +1073,11 @@ def invalidate_cluster_cache(organization_id: str | None = None) -> None:
     """
     if organization_id:
         CLUSTER_CACHE.pop(organization_id, None)
+        GRAPH_LOD_CACHE.clear()
         log.debug("cluster_cache_invalidated", org_id=organization_id)
     else:
         CLUSTER_CACHE.clear()
+        GRAPH_LOD_CACHE.clear()
         log.debug("cluster_cache_cleared")
 
 
@@ -752,9 +1089,13 @@ def invalidate_hierarchical_cache(organization_id: str | None = None) -> None:
     """
     if organization_id:
         HIERARCHICAL_CACHE.pop(organization_id, None)
+        GRAPH_SNAPSHOT_CACHE.pop(organization_id, None)
+        GRAPH_LOD_CACHE.clear()
         log.debug("hierarchical_cache_invalidated", org_id=organization_id)
     else:
         HIERARCHICAL_CACHE.clear()
+        GRAPH_SNAPSHOT_CACHE.clear()
+        GRAPH_LOD_CACHE.clear()
         log.debug("hierarchical_cache_cleared")
 
 
@@ -782,6 +1123,16 @@ class HierarchicalGraphData:
     total_edges: int  # REAL total in graph (not limited)
     displayed_nodes: int  # How many we're sending to UI
     displayed_edges: int  # How many we're sending to UI
+    resolution: str = GRAPH_RESOLUTION_DETAIL
+
+
+@dataclass
+class GraphSnapshot:
+    """Cached graph snapshot for fast LOD rendering."""
+
+    entities: list[Entity]
+    relationships: list[Relationship]
+    entity_by_id: dict[str, Entity]
 
 
 async def _get_graph_totals(
@@ -876,14 +1227,15 @@ def _build_cluster_metadata(
     """Build enriched cluster metadata and inter-cluster edges."""
     focused_cluster_type_counts = _cluster_type_counts(focused_ids, entity_by_id, node_to_cluster)
     displayed_cluster_type_counts: dict[str, dict[str, int]] = {}
+    node_cluster_lookup = {node["id"]: node["cluster_id"] for node in nodes}
     for node in nodes:
         cluster_id = node["cluster_id"]
         entity_type = node["type"]
         if cluster_id not in displayed_cluster_type_counts:
             displayed_cluster_type_counts[cluster_id] = {}
-        displayed_cluster_type_counts[cluster_id][entity_type] = (
-            displayed_cluster_type_counts[cluster_id].get(entity_type, 0) + 1
-        )
+        displayed_cluster_type_counts[cluster_id][entity_type] = displayed_cluster_type_counts[
+            cluster_id
+        ].get(entity_type, 0) + int(node.get("member_count", 1))
 
     enriched_clusters = []
     for cluster in clusters_meta:
@@ -923,12 +1275,18 @@ def _build_cluster_metadata(
     # Calculate inter-cluster edges
     cluster_edge_counts: dict[tuple[str, str], int] = {}
     for edge in edges:
-        src_cluster = node_to_cluster.get(edge["source"], "unclustered")
-        tgt_cluster = node_to_cluster.get(edge["target"], "unclustered")
+        src_cluster = node_cluster_lookup.get(
+            edge["source"], node_to_cluster.get(edge["source"], "unclustered")
+        )
+        tgt_cluster = node_cluster_lookup.get(
+            edge["target"], node_to_cluster.get(edge["target"], "unclustered")
+        )
         if src_cluster != tgt_cluster:
             sorted_pair = sorted([src_cluster, tgt_cluster])
             pair: tuple[str, str] = (sorted_pair[0], sorted_pair[1])
-            cluster_edge_counts[pair] = cluster_edge_counts.get(pair, 0) + 1
+            cluster_edge_counts[pair] = cluster_edge_counts.get(pair, 0) + int(
+                edge.get("weight", 1)
+            )
 
     cluster_edges = [
         {"source": p[0], "target": p[1], "weight": c}
@@ -999,6 +1357,8 @@ async def get_hierarchical_graph(
     entity_types: list[str] | None = None,
     max_nodes: int = 1000,
     max_edges: int = 5000,
+    resolution: str = GRAPH_RESOLUTION_DETAIL,
+    cluster_id: str | None = None,
 ) -> HierarchicalGraphData:
     """Get graph data with cluster assignments for rich visualization.
 
@@ -1022,10 +1382,34 @@ async def get_hierarchical_graph(
         max_nodes=max_nodes,
         projects=project_ids,
         types=entity_types,
+        resolution=resolution,
+        cluster_id=cluster_id,
     )
 
-    entities = await _list_all_entities(client, organization_id)
-    relationships = await _list_all_relationships(client, organization_id)
+    cache_key = _lod_cache_key(
+        organization_id=organization_id,
+        project_ids=project_ids,
+        entity_types=entity_types,
+        resolution=resolution,
+        cluster_id=cluster_id,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+    )
+    cached_lod = GRAPH_LOD_CACHE.get(cache_key)
+    if cached_lod is not None:
+        cached_at, data = cached_lod
+        if datetime.now(UTC) - cached_at < GRAPH_LOD_CACHE_TTL:
+            log.info(
+                "graph_lod_cache_hit",
+                org_id=organization_id,
+                resolution=resolution,
+                cluster_id=cluster_id,
+            )
+            return data
+
+    snapshot = await _get_graph_snapshot(client, organization_id)
+    entities = snapshot.entities
+    relationships = snapshot.relationships
     total_node_count, total_edge_count = _graph_totals_from_snapshot(
         entities,
         relationships,
@@ -1041,12 +1425,12 @@ async def get_hierarchical_graph(
 
     # Check cache for community detection (expensive operation)
     # Cache key includes org only - community structure is org-wide
-    cache_key = organization_id
+    community_cache_key = organization_id
     node_to_cluster: dict[str, str] = {}
     clusters_meta: list[dict[str, Any]] = []
 
-    if cache_key in HIERARCHICAL_CACHE:
-        cached_at, cached_clusters, cached_meta = HIERARCHICAL_CACHE[cache_key]
+    if community_cache_key in HIERARCHICAL_CACHE:
+        cached_at, cached_clusters, cached_meta = HIERARCHICAL_CACHE[community_cache_key]
         if datetime.now(UTC) - cached_at < HIERARCHICAL_CACHE_TTL:
             log.info("hierarchical_cache_hit", org_id=organization_id)
             node_to_cluster = cached_clusters
@@ -1077,7 +1461,11 @@ async def get_hierarchical_graph(
                     assigned_nodes=len(node_to_cluster),
                 )
                 # Cache the result
-                HIERARCHICAL_CACHE[cache_key] = (datetime.now(UTC), node_to_cluster, clusters_meta)
+                HIERARCHICAL_CACHE[community_cache_key] = (
+                    datetime.now(UTC),
+                    node_to_cluster,
+                    clusters_meta,
+                )
             else:
                 log.warning("community_detection_empty", msg="no communities detected")
         except ImportError:
@@ -1085,60 +1473,51 @@ async def get_hierarchical_graph(
         except Exception as e:
             log.warning("community_detection_failed", error=str(e))
 
-    nodes, node_ids = _build_graph_nodes_from_snapshot(
-        entities,
-        relationships,
-        node_to_cluster,
-        max_nodes=max_nodes,
-        project_ids=project_ids,
-        entity_types=entity_types,
-    )
-    edges = _build_graph_edges_from_snapshot(
-        relationships,
-        node_ids,
-        max_edges=max_edges,
-    )
+    if resolution == GRAPH_RESOLUTION_OVERVIEW:
+        data = _build_overview_graph_from_snapshot(
+            entities,
+            relationships,
+            node_to_cluster,
+            clusters_meta,
+            project_ids=project_ids,
+            entity_types=entity_types,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+    else:
+        data = _build_cluster_detail_graph_from_snapshot(
+            entities,
+            relationships,
+            node_to_cluster,
+            clusters_meta,
+            cluster_id=cluster_id,
+            project_ids=project_ids,
+            entity_types=entity_types,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
 
-    if (project_ids or entity_types) and total_node_count == 0 and nodes:
-        total_node_count = len(nodes)
-    if (project_ids or entity_types) and total_edge_count == 0 and edges:
-        total_edge_count = len(edges)
+    if (project_ids or entity_types) and total_node_count == 0 and data.displayed_nodes > 0:
+        total_node_count = data.displayed_nodes
+    if (project_ids or entity_types) and total_edge_count == 0 and data.displayed_edges > 0:
+        total_edge_count = data.displayed_edges
 
-    entity_by_id = _entity_index(entities)
-    focused_ids = _focused_entity_ids(
-        entities,
-        relationships,
-        project_ids=project_ids,
-        entity_types=entity_types,
-    )
-    enriched_clusters, cluster_edges = _build_cluster_metadata(
-        nodes,
-        clusters_meta,
-        node_to_cluster,
-        edges,
-        entity_by_id,
-        focused_ids,
-    )
+    data.total_nodes = total_node_count
+    data.total_edges = total_edge_count
 
     log.info(
         "get_hierarchical_graph_complete",
-        total_nodes=total_node_count,
-        total_edges=total_edge_count,
-        displayed_nodes=len(nodes),
-        displayed_edges=len(edges),
-        clusters=len(enriched_clusters),
+        total_nodes=data.total_nodes,
+        total_edges=data.total_edges,
+        displayed_nodes=data.displayed_nodes,
+        displayed_edges=data.displayed_edges,
+        clusters=len(data.clusters),
+        resolution=data.resolution,
+        cluster_id=cluster_id,
     )
 
-    return HierarchicalGraphData(
-        nodes=nodes,
-        edges=edges,
-        clusters=enriched_clusters,
-        cluster_edges=cluster_edges,
-        total_nodes=total_node_count,
-        total_edges=total_edge_count,
-        displayed_nodes=len(nodes),
-        displayed_edges=len(edges),
-    )
+    GRAPH_LOD_CACHE[cache_key] = (datetime.now(UTC), data)
+    return data
 
 
 @dataclass

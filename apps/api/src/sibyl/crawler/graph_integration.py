@@ -24,7 +24,8 @@ from uuid import uuid4
 
 import structlog
 
-from sibyl.db import DocumentChunk, get_session
+from sibyl.db import DocumentChunk
+from sibyl.persistence.content_runtime import get_content_read_session, save_document_chunks
 from sibyl.services.settings import get_settings_service
 from sibyl_core.graph.client import GraphClient
 from sibyl_core.graph.entities import EntityManager
@@ -730,17 +731,19 @@ class GraphIntegrationService:
             if link.chunk_id:
                 links_by_chunk[link.chunk_id].append(link)
 
-        # Update chunk entity_ids in database
-        async with get_session() as session:
-            for chunk in chunks:
-                chunk_links = links_by_chunk.get(str(chunk.id), [])
-                if not chunk_links:
-                    continue
+        dirty_chunks: list[DocumentChunk] = []
+        for chunk in chunks:
+            chunk_links = links_by_chunk.get(str(chunk.id), [])
+            if not chunk_links:
+                continue
 
-                chunk.entity_ids = list(dict.fromkeys(link.entity_uuid for link in chunk_links))
-                chunk.has_entities = True
-                session.add(chunk)
-            await session.commit()
+            chunk.entity_ids = list(dict.fromkeys(link.entity_uuid for link in chunk_links))
+            chunk.has_entities = True
+            dirty_chunks.append(chunk)
+
+        if dirty_chunks:
+            async with get_content_read_session() as session:
+                await save_document_chunks(session, chunks=dirty_chunks)
 
         log.info(
             "Graph integration complete",

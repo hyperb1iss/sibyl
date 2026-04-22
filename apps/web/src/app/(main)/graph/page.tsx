@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
 import type {
+  GraphResolution,
   HierarchicalCluster,
   HierarchicalEdge,
   HierarchicalNode,
@@ -728,6 +729,7 @@ function GraphPageContent() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
+  const [graphResolution, setGraphResolution] = useState<GraphResolution>('detail');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
@@ -788,15 +790,15 @@ function GraphPageContent() {
   const projectKey = projectFilter?.join(',') || 'all';
   const selectedTypesKey = selectedTypes.join(',');
   const filtersKey = `${projectKey}:${selectedTypesKey}`;
-  const graphRenderKey = `${theme}-${projectKey}-${selectedTypesKey}-${selectedCluster || 'all'}`;
+  const graphRenderKey = `${theme}-${graphResolution}-${projectKey}-${selectedTypesKey}-${selectedCluster || 'all'}`;
 
   useEffect(() => {
-    const nextKey = `${projectKey}:${selectedTypesKey}:${selectedCluster ?? 'all'}`;
+    const nextKey = `${graphResolution}:${projectKey}:${selectedTypesKey}:${selectedCluster ?? 'all'}`;
     if (fitKeyRef.current !== nextKey) {
       fitKeyRef.current = nextKey;
       setHasInitialFit(false);
     }
-  }, [projectKey, selectedTypesKey, selectedCluster]);
+  }, [graphResolution, projectKey, selectedTypesKey, selectedCluster]);
 
   // Fetch hierarchical graph data with up to 1000 nodes
   // Filter by selected projects and entity types
@@ -809,6 +811,8 @@ function GraphPageContent() {
     max_edges: GRAPH_DEFAULTS.MAX_EDGES,
     projects: projectFilter,
     types: selectedTypes.length > 0 ? selectedTypes : undefined,
+    resolution: graphResolution,
+    cluster_id: selectedCluster ?? undefined,
   });
 
   // Reset stale selection state when filters change
@@ -817,6 +821,7 @@ function GraphPageContent() {
     setSelectedCluster(null);
     setSelectedNodeId(null);
     setHoveredNode(null);
+    setGraphResolution('detail');
   }, [filtersKey]);
 
   // Build cluster color map
@@ -1003,6 +1008,12 @@ function GraphPageContent() {
     return { nodes: graphNodes, links: filteredEdges, maxDegree, matchCount };
   }, [data, selectedCluster, clusterColorMap, matchesSearch]);
 
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    if (graphData.nodes.some(node => node.id === selectedNodeId)) return;
+    setSelectedNodeId(null);
+  }, [graphData.nodes, selectedNodeId]);
+
   // Keep fullscreen state in sync (Escape key, browser UI, etc.)
   useEffect(() => {
     function handleFullscreenChange() {
@@ -1065,8 +1076,10 @@ function GraphPageContent() {
       const isProject = node.isProject;
       const isNeighbor = node.isNeighbor;
       const isSearchMatch = node.isSearchMatch;
+      const isAggregate = Boolean(node.aggregate);
       const degree = node.degree || 0;
       const maxDegree = graphData.maxDegree || 1;
+      const memberCount = node.member_count || 1;
 
       // Size based on degree (connections) - more connections = bigger
       const degreeScale = Math.sqrt(degree / maxDegree);
@@ -1079,6 +1092,8 @@ function GraphPageContent() {
       let size: number;
       if (isProject) {
         size = 14 + combinedScale * 10;
+      } else if (isAggregate) {
+        size = Math.max(10, 8 + Math.log2(memberCount + 1) * 3 + combinedScale * 6);
       } else if (isSelected) {
         size = Math.max(12, 6 + combinedScale * 10);
       } else if (isHovered) {
@@ -1143,7 +1158,7 @@ function GraphPageContent() {
       // =================================================================
       // globalScale: 0.3 = zoomed out, 1.0 = default, 4.0+ = zoomed in
 
-      const isHubNode = degree > Math.max(3, maxDegree * 0.05);
+      const isHubNode = degree > Math.max(3, maxDegree * 0.05) || (isAggregate && memberCount >= 3);
 
       // Determine if label should show based on zoom + importance
       // Neighbors only show labels when hovered/selected to keep focus on cluster
@@ -1155,6 +1170,8 @@ function GraphPageContent() {
       } else if (isNeighbor) {
         // Neighbors only show label when zoomed in very close
         showLabel = globalScale >= 4.0;
+      } else if (isAggregate && globalScale >= 0.45) {
+        showLabel = true;
       } else if (isProject && globalScale >= 0.4) {
         showLabel = true;
       } else if (isHubNode && globalScale >= 0.7) {
@@ -1255,6 +1272,16 @@ function GraphPageContent() {
   // Smooth zoom to node on click
   const handleNodeClick = useCallback(
     (node: GraphNode) => {
+      if (node.aggregate) {
+        setSelectedNodeId(null);
+        setSelectedCluster(node.cluster_id || null);
+        if (graphRef.current && node.x !== undefined && node.y !== undefined) {
+          graphRef.current.centerAt(node.x, node.y, 800);
+          graphRef.current.zoom(2.1, 800);
+        }
+        return;
+      }
+
       const isDeselecting = selectedNodeId === node.id;
       setSelectedNodeId(isDeselecting ? null : node.id);
 
@@ -1336,6 +1363,7 @@ function GraphPageContent() {
     graphRef.current?.centerAt(0, 0, 300);
     setSelectedNodeId(null);
     setSelectedCluster(null);
+    setGraphResolution('detail');
   }, []);
 
   const toggleFullscreen = useCallback(() => {

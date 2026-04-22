@@ -17,6 +17,8 @@ MANIFEST_FILENAME = "manifest.json"
 LEGACY_METADATA_FILENAME = "metadata.json"
 GRAPH_FILENAME = "graph.json"
 POSTGRES_FILENAME = "postgres.sql"
+AUTH_FILENAME = "auth.json"
+CONTENT_FILENAME = "content.json"
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -297,6 +299,60 @@ def load_archive(source: Path) -> LoadedArchive:
     return LoadedArchive(source=source, manifest=manifest, files=files)
 
 
+def _validate_tabular_archive_payload(
+    *,
+    filename: str,
+    payload: dict[str, Any],
+    errors: list[str],
+) -> None:
+    tables = payload.get("tables")
+    row_counts = payload.get("row_counts", {})
+    if not isinstance(row_counts, dict):
+        errors.append(f"{filename} row_counts must be a JSON object")
+        row_counts = {}
+    if not isinstance(tables, dict):
+        errors.append(f"{filename} tables must be a JSON object")
+        return
+
+    actual_total_rows = 0
+    for table_name, rows in tables.items():
+        if not isinstance(rows, list):
+            errors.append(f"{filename} table {table_name} must be a JSON array")
+            continue
+        actual_total_rows += len(rows)
+        declared_row_count = row_counts.get(table_name)
+        if declared_row_count is None:
+            continue
+        try:
+            normalized_row_count = int(declared_row_count)
+        except (TypeError, ValueError):
+            errors.append(
+                f"{filename} {table_name} row_count must be an integer, got {declared_row_count!r}"
+            )
+            continue
+        if normalized_row_count != len(rows):
+            errors.append(
+                f"{filename} {table_name} row_count mismatch: "
+                f"declared {normalized_row_count}, found {len(rows)} rows"
+            )
+
+    declared_total_rows = payload.get("total_rows")
+    if declared_total_rows is None:
+        return
+    try:
+        normalized_total_rows = int(declared_total_rows)
+    except (TypeError, ValueError):
+        errors.append(
+            f"{filename} total_rows must be an integer, got {declared_total_rows!r}"
+        )
+        return
+    if normalized_total_rows != actual_total_rows:
+        errors.append(
+            f"{filename} total_rows mismatch: "
+            f"declared {normalized_total_rows}, found {actual_total_rows} rows"
+        )
+
+
 def validate_archive(archive: LoadedArchive) -> list[str]:
     errors: list[str] = []
 
@@ -370,11 +426,51 @@ def validate_archive(archive: LoadedArchive) -> list[str]:
                     f"manifest {manifest_org_id}, payload {payload_org_id}"
                 )
 
+    auth_bytes = archive.files.get(AUTH_FILENAME)
+    if auth_bytes is not None:
+        try:
+            auth_payload = json.loads(auth_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            errors.append(f"auth.json is not valid UTF-8 JSON: {exc}")
+        else:
+            _validate_tabular_archive_payload(
+                filename=AUTH_FILENAME,
+                payload=auth_payload,
+                errors=errors,
+            )
+
+    content_bytes = archive.files.get(CONTENT_FILENAME)
+    if content_bytes is not None:
+        try:
+            content_payload = json.loads(content_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            errors.append(f"content.json is not valid UTF-8 JSON: {exc}")
+        else:
+            _validate_tabular_archive_payload(
+                filename=CONTENT_FILENAME,
+                payload=content_payload,
+                errors=errors,
+            )
+
     return errors
 
 
 def graph_payload_from_archive(archive: LoadedArchive) -> dict[str, Any] | None:
     payload = archive.files.get(GRAPH_FILENAME)
+    if payload is None:
+        return None
+    return json.loads(payload.decode("utf-8"))
+
+
+def auth_payload_from_archive(archive: LoadedArchive) -> dict[str, Any] | None:
+    payload = archive.files.get(AUTH_FILENAME)
+    if payload is None:
+        return None
+    return json.loads(payload.decode("utf-8"))
+
+
+def content_payload_from_archive(archive: LoadedArchive) -> dict[str, Any] | None:
+    payload = archive.files.get(CONTENT_FILENAME)
     if payload is None:
         return None
     return json.loads(payload.decode("utf-8"))
@@ -462,6 +558,8 @@ def effective_graph_counts(graph_payload: dict[str, Any]) -> dict[str, int]:
 
 __all__ = [
     "ARCHIVE_VERSION",
+    "AUTH_FILENAME",
+    "CONTENT_FILENAME",
     "GRAPH_FILENAME",
     "LEGACY_METADATA_FILENAME",
     "MANIFEST_FILENAME",
@@ -469,7 +567,9 @@ __all__ = [
     "ArchiveFileManifest",
     "ArchiveManifest",
     "LoadedArchive",
+    "auth_payload_from_archive",
     "build_manifest",
+    "content_payload_from_archive",
     "effective_graph_counts",
     "graph_payload_from_archive",
     "load_archive",

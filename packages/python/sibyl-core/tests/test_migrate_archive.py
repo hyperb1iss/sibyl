@@ -7,11 +7,15 @@ from pathlib import Path
 import pytest
 
 from sibyl_core.migrate.archive import (
+    AUTH_FILENAME,
+    CONTENT_FILENAME,
     GRAPH_FILENAME,
     LEGACY_METADATA_FILENAME,
     MANIFEST_FILENAME,
     POSTGRES_FILENAME,
+    auth_payload_from_archive,
     build_manifest,
+    content_payload_from_archive,
     effective_graph_counts,
     graph_payload_from_archive,
     load_archive,
@@ -46,8 +50,59 @@ def _graph_bytes(
     ).encode("utf-8")
 
 
+def _auth_bytes(*, user_rows: int = 1) -> bytes:
+    return json.dumps(
+        {
+            "version": "1.0",
+            "created_at": "2026-04-21T02:00:00+00:00",
+            "tables": {
+                "users": [
+                    {"id": f"user-{index}", "email": f"user{index}@example.com"}
+                    for index in range(user_rows)
+                ],
+                "organizations": [],
+            },
+            "row_counts": {
+                "users": user_rows,
+                "organizations": 0,
+            },
+            "total_rows": user_rows,
+        }
+    ).encode("utf-8")
+
+
+def _content_bytes(*, chunk_rows: int = 1) -> bytes:
+    return json.dumps(
+        {
+            "version": "1.0",
+            "created_at": "2026-04-21T03:00:00+00:00",
+            "tables": {
+                "crawl_sources": [{"id": "source-1", "organization_id": "org-123", "name": "Docs"}],
+                "crawled_documents": [{"id": "document-1", "source_id": "source-1", "title": "Page"}],
+                "document_chunks": [{"id": f"chunk-{index}", "document_id": "document-1"} for index in range(chunk_rows)],
+                "raw_captures": [],
+                "system_settings": [],
+                "backup_settings": [],
+                "backups": [],
+            },
+            "row_counts": {
+                "crawl_sources": 1,
+                "crawled_documents": 1,
+                "document_chunks": chunk_rows,
+                "raw_captures": 0,
+                "system_settings": 0,
+                "backup_settings": 0,
+                "backups": 0,
+            },
+            "total_rows": chunk_rows + 2,
+        }
+    ).encode("utf-8")
+
+
 def test_archive_round_trip_preserves_manifest_and_payloads(tmp_path: Path) -> None:
     files = {
+        AUTH_FILENAME: _auth_bytes(),
+        CONTENT_FILENAME: _content_bytes(),
         GRAPH_FILENAME: _graph_bytes(),
         POSTGRES_FILENAME: b"select 1;\n",
     }
@@ -56,6 +111,8 @@ def test_archive_round_trip_preserves_manifest_and_payloads(tmp_path: Path) -> N
         source_store="legacy",
         files=files,
         file_metadata={
+            AUTH_FILENAME: {"kind": "auth", "table_count": 2, "total_rows": 1},
+            CONTENT_FILENAME: {"kind": "content", "table_count": 7, "total_rows": 3},
             GRAPH_FILENAME: {"kind": "graph", "entity_count": 2, "relationship_count": 1},
             POSTGRES_FILENAME: {"kind": "postgres"},
         },
@@ -69,6 +126,8 @@ def test_archive_round_trip_preserves_manifest_and_payloads(tmp_path: Path) -> N
     assert loaded.manifest.organization_id == "org-123"
     assert loaded.manifest.source_store == "legacy"
     assert graph_payload_from_archive(loaded)["entity_count"] == 2
+    assert auth_payload_from_archive(loaded)["row_counts"]["users"] == 1
+    assert content_payload_from_archive(loaded)["row_counts"]["document_chunks"] == 1
 
 
 def test_validate_archive_detects_checksum_mismatch(tmp_path: Path) -> None:
@@ -189,6 +248,102 @@ def test_validate_archive_detects_graph_org_mismatch(tmp_path: Path) -> None:
     errors = validate_archive(loaded)
 
     assert errors == ["graph.json organization_id mismatch: manifest org-123, payload other-org"]
+
+
+def test_validate_archive_detects_auth_row_count_drift(tmp_path: Path) -> None:
+    files = {AUTH_FILENAME: _auth_bytes(user_rows=1)}
+    manifest = build_manifest(
+        organization_id="org-123",
+        source_store="legacy",
+        files=files,
+        file_metadata={AUTH_FILENAME: {"kind": "auth"}},
+    )
+    archive_path = tmp_path / "migration.tar.gz"
+    write_archive(archive_path, manifest=manifest, files=files)
+    loaded = load_archive(archive_path)
+
+    auth_payload = auth_payload_from_archive(loaded)
+    assert auth_payload is not None
+    auth_payload["row_counts"]["users"] = 9
+    mutated = json.dumps(auth_payload).encode("utf-8")
+    loaded = loaded.__class__(
+        source=loaded.source,
+        manifest=build_manifest(
+            organization_id="org-123",
+            source_store="legacy",
+            files={AUTH_FILENAME: mutated},
+            file_metadata={AUTH_FILENAME: {"kind": "auth"}},
+        ),
+        files={AUTH_FILENAME: mutated},
+    )
+
+    errors = validate_archive(loaded)
+
+    assert errors == ["auth.json users row_count mismatch: declared 9, found 1 rows"]
+
+
+def test_validate_archive_detects_auth_total_row_drift(tmp_path: Path) -> None:
+    files = {AUTH_FILENAME: _auth_bytes(user_rows=1)}
+    manifest = build_manifest(
+        organization_id="org-123",
+        source_store="legacy",
+        files=files,
+        file_metadata={AUTH_FILENAME: {"kind": "auth"}},
+    )
+    archive_path = tmp_path / "migration.tar.gz"
+    write_archive(archive_path, manifest=manifest, files=files)
+    loaded = load_archive(archive_path)
+
+    auth_payload = auth_payload_from_archive(loaded)
+    assert auth_payload is not None
+    auth_payload["total_rows"] = 9
+    mutated = json.dumps(auth_payload).encode("utf-8")
+    loaded = loaded.__class__(
+        source=loaded.source,
+        manifest=build_manifest(
+            organization_id="org-123",
+            source_store="legacy",
+            files={AUTH_FILENAME: mutated},
+            file_metadata={AUTH_FILENAME: {"kind": "auth"}},
+        ),
+        files={AUTH_FILENAME: mutated},
+    )
+
+    errors = validate_archive(loaded)
+
+    assert errors == ["auth.json total_rows mismatch: declared 9, found 1 rows"]
+
+
+def test_validate_archive_detects_content_row_count_drift(tmp_path: Path) -> None:
+    files = {CONTENT_FILENAME: _content_bytes(chunk_rows=1)}
+    manifest = build_manifest(
+        organization_id="org-123",
+        source_store="legacy",
+        files=files,
+        file_metadata={CONTENT_FILENAME: {"kind": "content"}},
+    )
+    archive_path = tmp_path / "migration.tar.gz"
+    write_archive(archive_path, manifest=manifest, files=files)
+    loaded = load_archive(archive_path)
+
+    content_payload = content_payload_from_archive(loaded)
+    assert content_payload is not None
+    content_payload["row_counts"]["document_chunks"] = 9
+    mutated = json.dumps(content_payload).encode("utf-8")
+    loaded = loaded.__class__(
+        source=loaded.source,
+        manifest=build_manifest(
+            organization_id="org-123",
+            source_store="legacy",
+            files={CONTENT_FILENAME: mutated},
+            file_metadata={CONTENT_FILENAME: {"kind": "content"}},
+        ),
+        files={CONTENT_FILENAME: mutated},
+    )
+
+    errors = validate_archive(loaded)
+
+    assert errors == ["content.json document_chunks row_count mismatch: declared 9, found 1 rows"]
 
 
 def test_effective_graph_counts_normalize_duplicate_edges() -> None:

@@ -314,6 +314,7 @@ class TestGraphRoutes:
             total_edges=0,
             displayed_nodes=1,
             displayed_edges=1,
+            resolution="overview",
         )
 
         with (
@@ -332,12 +333,15 @@ class TestGraphRoutes:
                 types=[EntityType.TASK],
                 max_nodes=200,
                 max_edges=300,
+                resolution="overview",
+                cluster_id="cluster-1",
             )
 
         assert result["total_nodes"] == 1
         assert result["total_edges"] == 1
         assert result["nodes"][0]["label"] == "Task One"
         assert result["nodes"][0]["color"] == graph_routes.get_entity_color(EntityType.TASK)
+        assert result["resolution"] == "overview"
         get_hierarchical_graph.assert_awaited_once_with(
             runtime.client,
             str(_org().id),
@@ -345,6 +349,8 @@ class TestGraphRoutes:
             entity_types=["task"],
             max_nodes=200,
             max_edges=300,
+            resolution="overview",
+            cluster_id="cluster-1",
         )
 
     @pytest.mark.asyncio
@@ -359,6 +365,7 @@ class TestGraphRoutes:
             total_edges=0,
             displayed_nodes=1,
             displayed_edges=1,
+            resolution="detail",
         )
 
         with (
@@ -380,3 +387,4 @@ class TestGraphRoutes:
 
         assert result["total_nodes"] == 1
         assert result["total_edges"] == 1
+        assert result["resolution"] == "detail"

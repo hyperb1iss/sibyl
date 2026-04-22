@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -139,24 +139,23 @@ async def test_update_raw_capture_review_state_updates_metadata() -> None:
     org = _org()
     capture = _capture(org_id=org.id, title="Quick memory", surface="dashboard")
     session = MagicMock()
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = capture
-    session.execute = AsyncMock(return_value=result)
-    session.add = MagicMock()
-    session.commit = AsyncMock()
-    session.refresh = AsyncMock()
 
-    response = await update_raw_capture_review_state(
-        capture.id,
-        RawCaptureReviewUpdate(review_state="deferred"),
-        org=org,
-        session=session,
-    )
+    with patch(
+        "sibyl.api.routes.entities.get_legacy_raw_capture",
+        AsyncMock(return_value=capture),
+    ), patch(
+        "sibyl.api.routes.entities.save_raw_capture_record",
+        AsyncMock(return_value=capture),
+    ) as save_capture:
+        response = await update_raw_capture_review_state(
+            capture.id,
+            RawCaptureReviewUpdate(review_state="deferred"),
+            org=org,
+            session=session,
+        )
 
     assert response.review_state == "deferred"
     assert capture.metadata_["review_state"] == "deferred"
     assert "reviewed_at" in capture.metadata_
     assert "deferred_at" in capture.metadata_
-    session.add.assert_called_once_with(capture)
-    session.commit.assert_awaited_once()
-    session.refresh.assert_awaited_once_with(capture)
+    save_capture.assert_awaited_once_with(session, capture=capture)

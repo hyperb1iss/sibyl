@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -13,7 +14,7 @@ from fastapi import HTTPException
 from sibyl.api.event_types import WSEvent
 from sibyl.api.routes.crawler import create_source, list_sources
 from sibyl.api.schemas import CrawlSourceCreate
-from sibyl.crawler.service import CrawlSourcePage, SourceAlreadyExistsError
+from sibyl.crawler.service import SourceAlreadyExistsError
 from sibyl.db import CrawlStatus, SourceType
 
 
@@ -52,7 +53,15 @@ class TestCrawlSourceRoutes:
         source = _make_source()
         broadcast = AsyncMock()
 
+        @asynccontextmanager
+        async def mock_content_session():
+            yield None
+
         with (
+            patch(
+                "sibyl.api.routes.crawler.get_content_read_session",
+                mock_content_session,
+            ),
             patch(
                 "sibyl.api.routes.crawler.create_crawl_source_record",
                 AsyncMock(return_value=source),
@@ -62,6 +71,7 @@ class TestCrawlSourceRoutes:
             response = await create_source(request=request, org=org)
 
         create_record.assert_awaited_once_with(
+            None,
             name="Docs",
             url="https://docs.example.com/",
             organization_id=org.id,
@@ -98,7 +108,15 @@ class TestCrawlSourceRoutes:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000999"))
         request = CrawlSourceCreate(name="Docs", url="https://docs.example.com/")
 
+        @asynccontextmanager
+        async def mock_content_session():
+            yield None
+
         with (
+            patch(
+                "sibyl.api.routes.crawler.get_content_read_session",
+                mock_content_session,
+            ),
             patch(
                 "sibyl.api.routes.crawler.create_crawl_source_record",
                 AsyncMock(side_effect=SourceAlreadyExistsError("https://docs.example.com")),
@@ -113,15 +131,22 @@ class TestCrawlSourceRoutes:
     @pytest.mark.asyncio
     async def test_list_sources_delegates_org_filter_and_maps_response(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000999"))
-        page = CrawlSourcePage(sources=[_make_source()], total=7)
+
+        @asynccontextmanager
+        async def mock_content_session():
+            yield None
 
         with patch(
-            "sibyl.api.routes.crawler.list_org_crawl_sources",
-            AsyncMock(return_value=page),
-        ) as list_org:
+            "sibyl.api.routes.crawler.get_content_read_session",
+            mock_content_session,
+        ), patch(
+            "sibyl.api.routes.crawler.list_crawl_sources_for_org",
+            AsyncMock(return_value=([_make_source()], 7)),
+        ) as list_sources_for_org:
             response = await list_sources(status="pending", limit=25, org=org)
 
-        list_org.assert_awaited_once_with(
+        list_sources_for_org.assert_awaited_once_with(
+            None,
             organization_id=org.id,
             status=CrawlStatus.PENDING,
             limit=25,

@@ -11,14 +11,19 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 
 from sibyl.crypto import decrypt_value, encrypt_value, mask_secret
 from sibyl.db.models import SystemSetting
+from sibyl.persistence.settings_runtime import (
+    delete_system_setting,
+    get_settings_session,
+    get_system_setting,
+    list_system_settings,
+    save_system_setting,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -66,12 +71,12 @@ class SettingsService:
     """
 
     def __init__(
-        self, session_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]]
+        self, session_factory: Callable[[], AbstractAsyncContextManager[Any]]
     ) -> None:
         """Initialize the settings service.
 
         Args:
-            session_factory: Callable that returns an async database session.
+            session_factory: Callable that returns an async settings session.
         """
         self._session_factory = session_factory
         self._cache: dict[str, _CacheEntry] = {}
@@ -114,10 +119,7 @@ class SettingsService:
                 return self._cache[key].value
 
             async with self._session_factory() as session:
-                result = await session.execute(
-                    select(SystemSetting).where(SystemSetting.key == key)
-                )
-                setting = result.scalar_one_or_none()
+                setting = await get_system_setting(session, key=key)
 
                 if setting:
                     value = setting.value
@@ -149,8 +151,7 @@ class SettingsService:
         """
         # Check database first
         async with self._session_factory() as session:
-            result = await session.execute(select(SystemSetting).where(SystemSetting.key == key))
-            setting = result.scalar_one_or_none()
+            setting = await get_system_setting(session, key=key)
 
             if setting:
                 value = setting.value
@@ -196,13 +197,9 @@ class SettingsService:
 
         async with self._lock:
             async with self._session_factory() as session:
-                # Upsert the setting
-                result = await session.execute(
-                    select(SystemSetting).where(SystemSetting.key == key)
-                )
-                setting = result.scalar_one_or_none()
-
-                if setting:
+                existing = await get_system_setting(session, key=key)
+                if existing is not None:
+                    setting = existing
                     setting.value = stored_value
                     setting.is_secret = is_secret
                     if description is not None:
@@ -214,9 +211,8 @@ class SettingsService:
                         is_secret=is_secret,
                         description=description,
                     )
-                    session.add(setting)
 
-                await session.commit()
+                await save_system_setting(session, setting=setting)
 
             # Invalidate cache
             self._cache.pop(key, None)
@@ -233,12 +229,8 @@ class SettingsService:
             True if setting was deleted, False if it didn't exist.
         """
         async with self._lock, self._session_factory() as session:
-            result = await session.execute(select(SystemSetting).where(SystemSetting.key == key))
-            setting = result.scalar_one_or_none()
-
-            if setting:
-                await session.delete(setting)
-                await session.commit()
+            deleted = await delete_system_setting(session, key=key)
+            if deleted:
                 self._cache.pop(key, None)
                 log.info("Setting deleted", key=key)
                 return True
@@ -258,8 +250,7 @@ class SettingsService:
 
         # Get all DB settings
         async with self._session_factory() as session:
-            db_result = await session.execute(select(SystemSetting))
-            for setting in db_result.scalars():
+            for setting in await list_system_settings(session):
                 value = None
                 if setting.is_secret:
                     if include_secrets:
@@ -340,9 +331,7 @@ def get_settings_service() -> SettingsService:
     """
     global _settings_service  # noqa: PLW0603
     if _settings_service is None:
-        from sibyl.db.connection import get_session
-
-        _settings_service = SettingsService(get_session)
+        _settings_service = SettingsService(get_settings_session)
     return _settings_service
 
 

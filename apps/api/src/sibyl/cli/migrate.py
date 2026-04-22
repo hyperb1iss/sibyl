@@ -19,10 +19,19 @@ from sibyl.cli.db import (
     _restore_pg_sql,
 )
 from sibyl.config import settings
+from sibyl.persistence.auth_archive import export_auth_archive_payload, restore_auth_archive_payload
+from sibyl.persistence.content_archive import (
+    export_content_archive_payload,
+    restore_content_archive_payload,
+)
 from sibyl_core.migrate import (
+    AUTH_FILENAME,
+    CONTENT_FILENAME,
     GRAPH_FILENAME,
     POSTGRES_FILENAME,
+    auth_payload_from_archive,
     build_manifest,
+    content_payload_from_archive,
     effective_graph_counts,
     graph_payload_from_archive,
     load_archive,
@@ -106,6 +115,32 @@ def _warn_if_postgres_payload_skipped(*, archive: object, restore_postgres: bool
         return
     warn("Archive includes postgres.sql, but PostgreSQL restore is disabled")
     info("Pass --restore-postgres when you want a full Falkor/Postgres migration rehearsal")
+
+
+def _warn_if_auth_payload_skipped(*, archive: object, restore_auth: bool) -> None:
+    archive_files = getattr(archive, "files", {})
+    if AUTH_FILENAME not in archive_files:
+        return
+    if not restore_auth:
+        warn("Archive includes auth.json, but auth restore is disabled")
+        info("Pass --restore-auth when you want the Surreal auth snapshot imported")
+        return
+    if settings.auth_store != "surreal":
+        warn("Archive includes auth.json, but SIBYL_AUTH_STORE is not surreal")
+        info("PostgreSQL remains the active auth source; auth.json will be skipped")
+
+
+def _warn_if_content_payload_skipped(*, archive: object, restore_content: bool) -> None:
+    archive_files = getattr(archive, "files", {})
+    if CONTENT_FILENAME not in archive_files:
+        return
+    if not restore_content:
+        warn("Archive includes content.json, but content restore is disabled")
+        info("Pass --restore-content when you want the Surreal content snapshot imported")
+        return
+    if settings.store != "surreal":
+        warn("Archive includes content.json, but SIBYL_STORE is not surreal")
+        info("The active runtime is not using Surreal; content.json will be skipped")
 
 
 async def _replay_baseline(
@@ -249,6 +284,104 @@ def _load_graph_export(org_id: str) -> tuple[dict[str, object], bytes]:
     return _export()
 
 
+def _load_auth_export() -> tuple[dict[str, object], bytes]:
+    @run_async
+    async def _export() -> tuple[dict[str, object], bytes]:
+        payload = await export_auth_archive_payload()
+        encoded = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+        return payload, encoded
+
+    return _export()
+
+
+def _load_content_export() -> tuple[dict[str, object], bytes]:
+    @run_async
+    async def _export() -> tuple[dict[str, object], bytes]:
+        payload = await export_content_archive_payload()
+        encoded = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+        return payload, encoded
+
+    return _export()
+
+
+def _load_runtime_exports(
+    *,
+    include_auth: bool,
+    include_content: bool,
+) -> tuple[
+    tuple[dict[str, object], bytes] | None,
+    tuple[dict[str, object], bytes] | None,
+]:
+    @run_async
+    async def _export() -> tuple[
+        tuple[dict[str, object], bytes] | None,
+        tuple[dict[str, object], bytes] | None,
+    ]:
+        auth_export: tuple[dict[str, object], bytes] | None = None
+        content_export: tuple[dict[str, object], bytes] | None = None
+
+        if include_auth:
+            payload = await export_auth_archive_payload()
+            auth_export = (
+                payload,
+                json.dumps(payload, indent=2, sort_keys=True).encode("utf-8"),
+            )
+
+        if include_content:
+            payload = await export_content_archive_payload()
+            content_export = (
+                payload,
+                json.dumps(payload, indent=2, sort_keys=True).encode("utf-8"),
+            )
+
+        return auth_export, content_export
+
+    return _export()
+
+
+def _restore_auth_payload(payload: dict[str, object], *, clean: bool) -> bool:
+    @run_async
+    async def _restore() -> bool:
+        try:
+            result = await restore_auth_archive_payload(payload, clean=clean)
+            if result.success:
+                success(
+                    f"  Auth restored: {result.rows_restored} rows across {result.tables_restored} tables"
+                )
+            else:
+                warn(f"  Auth restore completed with errors: {len(result.errors)}")
+                for issue in result.errors[:10]:
+                    console.print(f"  [dim]{issue}[/dim]")
+            return result.success
+        except Exception as exc:
+            error(f"  Auth restore failed: {exc}")
+            return False
+
+    return _restore()
+
+
+def _restore_content_payload(payload: dict[str, object], *, clean: bool) -> bool:
+    @run_async
+    async def _restore() -> bool:
+        try:
+            result = await restore_content_archive_payload(payload, clean=clean)
+            if result.success:
+                success(
+                    "  Content restored: "
+                    f"{result.rows_restored} rows across {result.tables_restored} tables"
+                )
+            else:
+                warn(f"  Content restore completed with errors: {len(result.errors)}")
+                for issue in result.errors[:10]:
+                    console.print(f"  [dim]{issue}[/dim]")
+            return result.success
+        except Exception as exc:
+            error(f"  Content restore failed: {exc}")
+            return False
+
+    return _restore()
+
+
 def _run_pg_dump() -> bytes:
     cmd = [
         _find_pg_tool("pg_dump"),
@@ -311,6 +444,20 @@ def check_archive(
                 f"{effective_counts['episode_count']} episodes, "
                 f"{effective_counts['mention_count']} mentions"
             )
+
+    auth_payload = auth_payload_from_archive(archive)
+    if auth_payload is not None:
+        row_counts = auth_payload.get("row_counts", {})
+        total_rows = int(auth_payload.get("total_rows") or sum(int(v) for v in row_counts.values()))
+        info(f"Auth tables: {len(row_counts)} tables, {total_rows} rows")
+
+    content_payload = content_payload_from_archive(archive)
+    if content_payload is not None:
+        row_counts = content_payload.get("row_counts", {})
+        total_rows = int(
+            content_payload.get("total_rows") or sum(int(v) for v in row_counts.values())
+        )
+        info(f"Content tables: {len(row_counts)} tables, {total_rows} rows")
     success("Archive validation passed")
 
 
@@ -332,10 +479,21 @@ def export_archive(
         bool,
         typer.Option("--include-graph/--skip-graph", help="Include graph runtime export"),
     ] = True,
+    include_auth: Annotated[
+        bool,
+        typer.Option("--include-auth/--skip-auth", help="Include auth/RBAC snapshot"),
+    ] = True,
+    include_content: Annotated[
+        bool,
+        typer.Option("--include-content/--skip-content", help="Include content/operations snapshot"),
+    ] = False,
 ) -> None:
     """Export a manifest-driven migration archive from the active store."""
-    if not include_postgres and not include_graph:
-        error("Select at least one payload: --include-postgres or --include-graph")
+    if not include_postgres and not include_graph and not include_auth and not include_content:
+        error(
+            "Select at least one payload: "
+            "--include-postgres, --include-graph, --include-auth, or --include-content"
+        )
         raise typer.Exit(code=1)
 
     if include_graph and not org_id:
@@ -376,6 +534,44 @@ def export_archive(
         ]
         archive_metadata["graph_effective_mention_count"] = effective_counts["mention_count"]
 
+    auth_export: tuple[dict[str, object], bytes] | None = None
+    content_export: tuple[dict[str, object], bytes] | None = None
+    if include_auth and include_content:
+        auth_export, content_export = _load_runtime_exports(
+            include_auth=True,
+            include_content=True,
+        )
+
+    if include_auth:
+        info("Exporting auth/RBAC snapshot from PostgreSQL...")
+        if auth_export is None:
+            auth_export = _load_auth_export()
+        auth_payload, auth_bytes = auth_export
+        row_counts = dict(auth_payload.get("row_counts", {}))
+        files[AUTH_FILENAME] = auth_bytes
+        file_metadata[AUTH_FILENAME] = {
+            "kind": "auth",
+            "table_count": len(row_counts),
+            "total_rows": int(auth_payload.get("total_rows", 0)),
+        }
+        archive_metadata["auth_table_count"] = len(row_counts)
+        archive_metadata["auth_total_rows"] = int(auth_payload.get("total_rows", 0))
+
+    if include_content:
+        info("Exporting content/operations snapshot from PostgreSQL...")
+        if content_export is None:
+            content_export = _load_content_export()
+        content_payload, content_bytes = content_export
+        row_counts = dict(content_payload.get("row_counts", {}))
+        files[CONTENT_FILENAME] = content_bytes
+        file_metadata[CONTENT_FILENAME] = {
+            "kind": "content",
+            "table_count": len(row_counts),
+            "total_rows": int(content_payload.get("total_rows", 0)),
+        }
+        archive_metadata["content_table_count"] = len(row_counts)
+        archive_metadata["content_total_rows"] = int(content_payload.get("total_rows", 0))
+
     manifest = build_manifest(
         organization_id=org_id,
         source_store=settings.store,
@@ -408,6 +604,17 @@ def import_archive(
         bool,
         typer.Option("--restore-graph/--skip-graph", help="Restore graph payload"),
     ] = True,
+    restore_auth: Annotated[
+        bool,
+        typer.Option("--restore-auth/--skip-auth", help="Restore auth payload into Surreal auth storage"),
+    ] = True,
+    restore_content: Annotated[
+        bool,
+        typer.Option(
+            "--restore-content/--skip-content",
+            help="Restore content payload into Surreal content storage",
+        ),
+    ] = True,
 ) -> None:
     """Import a manifest archive into the active store."""
     archive = _load_valid_archive(source)
@@ -421,6 +628,8 @@ def import_archive(
         error("Archive does not contain graph.json")
         raise typer.Exit(code=1)
     _warn_if_postgres_payload_skipped(archive=archive, restore_postgres=restore_postgres)
+    _warn_if_auth_payload_skipped(archive=archive, restore_auth=restore_auth)
+    _warn_if_content_payload_skipped(archive=archive, restore_content=restore_content)
 
     if not yes:
         warn("This will import archive data into the active runtime.")
@@ -431,6 +640,20 @@ def import_archive(
     if restore_postgres:
         info("Restoring PostgreSQL payload...")
         _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
+
+    if restore_auth and AUTH_FILENAME in archive.files and settings.auth_store == "surreal":
+        info("Restoring auth payload into Surreal auth storage...")
+        payload = auth_payload_from_archive(archive)
+        if payload is None or not _restore_auth_payload(payload, clean=clean):
+            error("Auth import failed")
+            raise typer.Exit(code=1)
+
+    if restore_content and CONTENT_FILENAME in archive.files and settings.store == "surreal":
+        info("Restoring content payload into Surreal content storage...")
+        payload = content_payload_from_archive(archive)
+        if payload is None or not _restore_content_payload(payload, clean=clean):
+            error("Content import failed")
+            raise typer.Exit(code=1)
 
     if restore_graph:
         info(f"Restoring graph payload into {settings.store} store...")
@@ -487,6 +710,17 @@ def rehearse_archive(
         bool,
         typer.Option("--restore-postgres", help="Restore postgres.sql before graph import"),
     ] = False,
+    restore_auth: Annotated[
+        bool,
+        typer.Option("--restore-auth/--skip-auth", help="Restore auth payload into Surreal auth storage"),
+    ] = True,
+    restore_content: Annotated[
+        bool,
+        typer.Option(
+            "--restore-content/--skip-content",
+            help="Restore content payload into Surreal content storage",
+        ),
+    ] = True,
     run_baseline: Annotated[
         bool,
         typer.Option("--run-baseline/--skip-baseline", help="Replay the deterministic runtime baseline"),
@@ -527,6 +761,8 @@ def rehearse_archive(
         error("Archive does not contain graph.json")
         raise typer.Exit(code=1)
     _warn_if_postgres_payload_skipped(archive=archive, restore_postgres=restore_postgres)
+    _warn_if_auth_payload_skipped(archive=archive, restore_auth=restore_auth)
+    _warn_if_content_payload_skipped(archive=archive, restore_content=restore_content)
     if run_baseline and not manifest_path.exists():
         error(f"Baseline manifest not found: {manifest_path}")
         raise typer.Exit(code=1)
@@ -540,6 +776,20 @@ def rehearse_archive(
     if restore_postgres:
         info("Restoring PostgreSQL payload...")
         _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
+
+    if restore_auth and AUTH_FILENAME in archive.files and settings.auth_store == "surreal":
+        info("Restoring auth payload into Surreal auth storage...")
+        payload = auth_payload_from_archive(archive)
+        if payload is None or not _restore_auth_payload(payload, clean=clean):
+            error("Auth import failed")
+            raise typer.Exit(code=1)
+
+    if restore_content and CONTENT_FILENAME in archive.files and settings.store == "surreal":
+        info("Restoring content payload into Surreal content storage...")
+        payload = content_payload_from_archive(archive)
+        if payload is None or not _restore_content_payload(payload, clean=clean):
+            error("Content import failed")
+            raise typer.Exit(code=1)
 
     info(f"Restoring graph payload into {settings.store} store...")
     payload = json.loads(archive.files[GRAPH_FILENAME].decode("utf-8"))
@@ -600,6 +850,17 @@ def cutover_archive(
         bool,
         typer.Option("--restore-postgres", help="Restore postgres.sql before graph import"),
     ] = False,
+    restore_auth: Annotated[
+        bool,
+        typer.Option("--restore-auth/--skip-auth", help="Restore auth payload into Surreal auth storage"),
+    ] = True,
+    restore_content: Annotated[
+        bool,
+        typer.Option(
+            "--restore-content/--skip-content",
+            help="Restore content payload into Surreal content storage",
+        ),
+    ] = True,
     run_baseline: Annotated[
         bool,
         typer.Option("--run-baseline/--skip-baseline", help="Replay the deterministic runtime baseline"),
@@ -667,6 +928,8 @@ def cutover_archive(
         error("Archive does not contain graph.json")
         raise typer.Exit(code=1)
     _warn_if_postgres_payload_skipped(archive=archive, restore_postgres=restore_postgres)
+    _warn_if_auth_payload_skipped(archive=archive, restore_auth=restore_auth)
+    _warn_if_content_payload_skipped(archive=archive, restore_content=restore_content)
 
     warn("Rollback is supported only until writes reopen on SurrealDB.")
     warn("This command does not unfreeze or freeze writes for you; it enforces the operator gate.")
@@ -698,6 +961,20 @@ def cutover_archive(
     if restore_postgres:
         info("Restoring PostgreSQL payload...")
         _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
+
+    if restore_auth and AUTH_FILENAME in archive.files and settings.auth_store == "surreal":
+        info("Importing auth payload into the Surreal auth runtime...")
+        payload = auth_payload_from_archive(archive)
+        if payload is None or not _restore_auth_payload(payload, clean=clean):
+            error("Auth import failed")
+            raise typer.Exit(code=1)
+
+    if restore_content and CONTENT_FILENAME in archive.files and settings.store == "surreal":
+        info("Importing content payload into the Surreal content runtime...")
+        payload = content_payload_from_archive(archive)
+        if payload is None or not _restore_content_payload(payload, clean=clean):
+            error("Content import failed")
+            raise typer.Exit(code=1)
 
     info("Importing graph payload into the Surreal runtime...")
     payload = json.loads(archive.files[GRAPH_FILENAME].decode("utf-8"))

@@ -4,10 +4,13 @@ Tests the recover_stuck_sources function that runs on startup to clean up
 sources stuck in IN_PROGRESS state after server restarts.
 """
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+
+from sibyl.db.models import CrawlStatus
 
 # =============================================================================
 # Fixtures
@@ -16,11 +19,16 @@ import pytest
 
 @pytest.fixture
 def mock_session():
-    """Mock database session with context manager support."""
-    session = AsyncMock()
-    session.__aenter__ = AsyncMock(return_value=session)
-    session.__aexit__ = AsyncMock(return_value=None)
-    return session
+    return AsyncMock()
+
+
+@pytest.fixture
+def mock_content_session(mock_session: AsyncMock):
+    @asynccontextmanager
+    async def _session():
+        yield mock_session
+
+    return _session
 
 
 @pytest.fixture
@@ -58,16 +66,18 @@ class TestRecoverStuckSources:
     """Tests for the recover_stuck_sources function."""
 
     @pytest.mark.asyncio
-    async def test_no_stuck_sources(self, mock_session: AsyncMock) -> None:
+    async def test_no_stuck_sources(
+        self,
+        mock_session: AsyncMock,
+        mock_content_session,
+    ) -> None:
         """Test when there are no stuck sources."""
-        # Mock empty result for IN_PROGRESS query
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        with patch("sibyl.db.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
-
+        with (
+            patch("sibyl.api.routes.admin.get_content_read_session", mock_content_session),
+            patch("sibyl.api.routes.admin.list_crawl_sources", AsyncMock(return_value=[])) as list_sources,
+            patch("sibyl.api.routes.admin.get_source_sync_counts", AsyncMock()) as get_counts,
+            patch("sibyl.api.routes.admin.save_crawl_source_record", AsyncMock()) as save_source,
+        ):
             from sibyl.api.routes.admin import recover_stuck_sources
 
             result = await recover_stuck_sources()
@@ -75,141 +85,126 @@ class TestRecoverStuckSources:
         assert result["recovered"] == 0
         assert result["completed"] == 0
         assert result["reset_to_pending"] == 0
+        list_sources.assert_awaited_once_with(
+            mock_session,
+            status=CrawlStatus.IN_PROGRESS,
+            limit=None,
+        )
+        get_counts.assert_not_awaited()
+        save_source.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_recover_source_with_documents(
-        self, mock_session: AsyncMock, create_mock_source
+        self,
+        mock_session: AsyncMock,
+        mock_content_session,
+        create_mock_source,
     ) -> None:
         """Test recovering a stuck source that has documents (should mark COMPLETED)."""
-        from sibyl.db.models import CrawlStatus
-
-        # Create stuck source with documents
         stuck_source = create_mock_source(
             name="Source With Docs",
             crawl_status="in_progress",
-            document_count=0,  # Will be updated
-            chunk_count=0,  # Will be updated
+            document_count=0,
+            chunk_count=0,
         )
 
-        # Mock the queries
-        sources_result = MagicMock()
-        sources_result.scalars.return_value.all.return_value = [stuck_source]
-
-        doc_count_result = MagicMock()
-        doc_count_result.scalar.return_value = 10  # Has 10 documents
-
-        chunk_count_result = MagicMock()
-        chunk_count_result.scalar.return_value = 50  # Has 50 chunks
-
-        # Return different results for different execute calls
-        mock_session.execute = AsyncMock(
-            side_effect=[sources_result, doc_count_result, chunk_count_result]
-        )
-
-        with patch("sibyl.db.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
-
+        with (
+            patch("sibyl.api.routes.admin.get_content_read_session", mock_content_session),
+            patch(
+                "sibyl.api.routes.admin.list_crawl_sources",
+                AsyncMock(return_value=[stuck_source]),
+            ),
+            patch(
+                "sibyl.api.routes.admin.get_source_sync_counts",
+                AsyncMock(return_value=(10, 50)),
+            ) as get_counts,
+            patch(
+                "sibyl.api.routes.admin.save_crawl_source_record",
+                AsyncMock(return_value=stuck_source),
+            ) as save_source,
+        ):
             from sibyl.api.routes.admin import recover_stuck_sources
 
             result = await recover_stuck_sources()
 
-        # Should mark as COMPLETED since it has documents
         assert result["recovered"] == 1
         assert result["completed"] == 1
         assert result["reset_to_pending"] == 0
 
-        # Verify source was updated
         assert stuck_source.crawl_status == CrawlStatus.COMPLETED
         assert stuck_source.document_count == 10
         assert stuck_source.chunk_count == 50
         assert stuck_source.current_job_id is None
+        get_counts.assert_awaited_once_with(mock_session, source_id=stuck_source.id)
+        save_source.assert_awaited_once_with(mock_session, source=stuck_source)
 
     @pytest.mark.asyncio
     async def test_recover_source_without_documents(
-        self, mock_session: AsyncMock, create_mock_source
+        self,
+        mock_session: AsyncMock,
+        mock_content_session,
+        create_mock_source,
     ) -> None:
         """Test recovering a stuck source with no documents (should reset to PENDING)."""
-        from sibyl.db.models import CrawlStatus
-
-        # Create stuck source without documents
         stuck_source = create_mock_source(
             name="Empty Source",
             crawl_status="in_progress",
         )
 
-        # Mock the queries
-        sources_result = MagicMock()
-        sources_result.scalars.return_value.all.return_value = [stuck_source]
-
-        doc_count_result = MagicMock()
-        doc_count_result.scalar.return_value = 0  # No documents
-
-        chunk_count_result = MagicMock()
-        chunk_count_result.scalar.return_value = 0  # No chunks
-
-        mock_session.execute = AsyncMock(
-            side_effect=[sources_result, doc_count_result, chunk_count_result]
-        )
-
-        with patch("sibyl.db.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
-
+        with (
+            patch("sibyl.api.routes.admin.get_content_read_session", mock_content_session),
+            patch(
+                "sibyl.api.routes.admin.list_crawl_sources",
+                AsyncMock(return_value=[stuck_source]),
+            ),
+            patch(
+                "sibyl.api.routes.admin.get_source_sync_counts",
+                AsyncMock(return_value=(0, 0)),
+            ) as get_counts,
+            patch(
+                "sibyl.api.routes.admin.save_crawl_source_record",
+                AsyncMock(return_value=stuck_source),
+            ) as save_source,
+        ):
             from sibyl.api.routes.admin import recover_stuck_sources
 
             result = await recover_stuck_sources()
 
-        # Should reset to PENDING since no documents
         assert result["recovered"] == 1
         assert result["completed"] == 0
         assert result["reset_to_pending"] == 1
 
-        # Verify source was reset
         assert stuck_source.crawl_status == CrawlStatus.PENDING
         assert stuck_source.current_job_id is None
+        get_counts.assert_awaited_once_with(mock_session, source_id=stuck_source.id)
+        save_source.assert_awaited_once_with(mock_session, source=stuck_source)
 
     @pytest.mark.asyncio
     async def test_recover_multiple_sources(
-        self, mock_session: AsyncMock, create_mock_source
+        self,
+        mock_session: AsyncMock,
+        mock_content_session,
+        create_mock_source,
     ) -> None:
         """Test recovering multiple stuck sources with different states."""
-        from sibyl.db.models import CrawlStatus
-
-        # Create multiple stuck sources
         source_with_docs = create_mock_source(name="Has Docs", crawl_status="in_progress")
         source_empty = create_mock_source(name="Empty", crawl_status="in_progress")
 
-        # Mock the queries - sources query, then doc/chunk counts for each
-        sources_result = MagicMock()
-        sources_result.scalars.return_value.all.return_value = [
-            source_with_docs,
-            source_empty,
-        ]
-
-        # First source: has documents
-        doc_count_1 = MagicMock()
-        doc_count_1.scalar.return_value = 5
-        chunk_count_1 = MagicMock()
-        chunk_count_1.scalar.return_value = 25
-
-        # Second source: empty
-        doc_count_2 = MagicMock()
-        doc_count_2.scalar.return_value = 0
-        chunk_count_2 = MagicMock()
-        chunk_count_2.scalar.return_value = 0
-
-        mock_session.execute = AsyncMock(
-            side_effect=[
-                sources_result,
-                doc_count_1,
-                chunk_count_1,
-                doc_count_2,
-                chunk_count_2,
-            ]
-        )
-
-        with patch("sibyl.db.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
-
+        with (
+            patch("sibyl.api.routes.admin.get_content_read_session", mock_content_session),
+            patch(
+                "sibyl.api.routes.admin.list_crawl_sources",
+                AsyncMock(return_value=[source_with_docs, source_empty]),
+            ),
+            patch(
+                "sibyl.api.routes.admin.get_source_sync_counts",
+                AsyncMock(side_effect=[(5, 25), (0, 0)]),
+            ) as get_counts,
+            patch(
+                "sibyl.api.routes.admin.save_crawl_source_record",
+                AsyncMock(side_effect=[source_with_docs, source_empty]),
+            ) as save_source,
+        ):
             from sibyl.api.routes.admin import recover_stuck_sources
 
             result = await recover_stuck_sources()
@@ -218,21 +213,27 @@ class TestRecoverStuckSources:
         assert result["completed"] == 1
         assert result["reset_to_pending"] == 1
 
-        # Verify each source was handled correctly
         assert source_with_docs.crawl_status == CrawlStatus.COMPLETED
         assert source_empty.crawl_status == CrawlStatus.PENDING
+        assert get_counts.await_count == 2
+        assert save_source.await_count == 2
 
     @pytest.mark.asyncio
-    async def test_recover_handles_database_error(self, mock_session: AsyncMock) -> None:
+    async def test_recover_handles_database_error(
+        self,
+        mock_session: AsyncMock,
+        mock_content_session,
+    ) -> None:
         """Test that recovery handles database errors gracefully."""
-        mock_session.execute = AsyncMock(side_effect=Exception("Database connection failed"))
-
-        with patch("sibyl.db.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
-
+        with (
+            patch("sibyl.api.routes.admin.get_content_read_session", mock_content_session),
+            patch(
+                "sibyl.api.routes.admin.list_crawl_sources",
+                AsyncMock(side_effect=Exception("Database connection failed")),
+            ),
+        ):
             from sibyl.api.routes.admin import recover_stuck_sources
 
-            # Should not raise, just log and return zeros
             result = await recover_stuck_sources()
 
         assert result["recovered"] == 0

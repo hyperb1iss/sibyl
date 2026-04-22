@@ -36,35 +36,34 @@ from sibyl.api.schemas import (
 )
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.dependencies import get_current_organization, require_org_role
-from sibyl.crawler.service import (
-    SourceAlreadyExistsError,
-    create_org_source as create_crawl_source_record,
-    list_org_sources as list_org_crawl_sources,
-)
+from sibyl.crawler.service import SourceAlreadyExistsError
 from sibyl.db import (
     CrawledDocument,
     CrawlSource,
     CrawlStatus,
     SourceType,
     check_postgres_health,
-    get_session,
 )
 from sibyl.db.models import Organization, OrganizationRole, utcnow_naive
 from sibyl.persistence.content_runtime import (
     count_remaining_unlinked_chunks,
+    create_crawl_source_record,
+    delete_crawl_source_record,
+    delete_crawled_document_record,
+    get_content_read_session,
     get_crawl_stats_payload,
     get_crawled_document_for_org,
+    get_link_graph_status_payload,
     get_org_crawl_source,
     get_source_sync_counts,
+    list_crawl_sources_for_org,
     list_crawled_documents_for_org,
     list_document_chunks,
-    list_source_chunks,
-    list_source_documents as list_source_documents_for_delete,
     list_source_documents_page,
     list_sources_for_graph_linking,
     list_unlinked_source_chunks,
+    save_crawl_source_record,
 )
-from sibyl_core.services.link_graph_status import get_link_graph_status_data
 
 log = structlog.get_logger()
 
@@ -159,7 +158,7 @@ async def get_stats(
     org: Organization = Depends(get_current_organization),
 ) -> CrawlStatsResponse:
     """Get crawler statistics for the current organization."""
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         stats = await get_crawl_stats_payload(session, organization_id=org.id)
 
     return CrawlStatsResponse(
@@ -206,7 +205,7 @@ async def list_documents(
     org: Organization = Depends(get_current_organization),
 ) -> CrawlDocumentListResponse:
     """List crawled documents for the current organization."""
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         documents, total = await list_crawled_documents_for_org(
             session,
             organization_id=org.id,
@@ -228,7 +227,7 @@ async def get_document(
     """Get a crawled document by ID with full content (org-scoped)."""
     # Strip 'doc:' prefix if present
     uuid_str = document_id.removeprefix("doc:")
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         doc = await get_crawled_document_for_org(
             session,
             document_id=UUID(uuid_str),
@@ -255,31 +254,15 @@ async def delete_document(
     org: Organization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """Delete a crawled document and its chunks (org-scoped)."""
-    async with get_session() as session:
-        doc = await get_crawled_document_for_org(
+    async with get_content_read_session() as session:
+        deleted = await delete_crawled_document_record(
             session,
             document_id=UUID(document_id),
             organization_id=org.id,
         )
-        if not doc:
+        if deleted is None:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
-
-        source_id = str(doc.source_id)
-
-        # Delete chunks first
-        chunks_deleted = 0
-        for chunk in await list_document_chunks(session, document_id=UUID(document_id)):
-            await session.delete(chunk)
-            chunks_deleted += 1
-
-        # Delete document
-        await session.delete(doc)
-
-        # Update source stats
-        source = await session.get(CrawlSource, UUID(source_id))
-        if source:
-            source.document_count = max(0, source.document_count - 1)
-            source.chunk_count = max(0, source.chunk_count - chunks_deleted)
+        _doc, chunks_deleted = deleted
 
         log.info(
             "Deleted document",
@@ -372,16 +355,18 @@ async def create_source(
 ) -> CrawlSourceResponse:
     """Create a new crawl source."""
     try:
-        source = await create_crawl_source_record(
-            name=request.name,
-            url=request.url,
-            organization_id=org.id,
-            source_type=SourceType(request.source_type),
-            description=request.description,
-            crawl_depth=request.crawl_depth,
-            include_patterns=request.include_patterns,
-            exclude_patterns=request.exclude_patterns,
-        )
+        async with get_content_read_session() as session:
+            source = await create_crawl_source_record(
+                session,
+                name=request.name,
+                url=request.url,
+                organization_id=org.id,
+                source_type=SourceType(request.source_type),
+                description=request.description,
+                crawl_depth=request.crawl_depth,
+                include_patterns=request.include_patterns,
+                exclude_patterns=request.exclude_patterns,
+            )
     except SourceAlreadyExistsError as exc:
         raise HTTPException(
             status_code=409, detail=f"Source with URL {request.url} already exists"
@@ -404,15 +389,17 @@ async def list_sources(
     org: Organization = Depends(get_current_organization),
 ) -> CrawlSourceListResponse:
     """List crawl sources for the current organization."""
-    page = await list_org_crawl_sources(
-        organization_id=org.id,
-        status=CrawlStatus(status) if status else None,
-        limit=limit,
-    )
+    async with get_content_read_session() as session:
+        sources, total = await list_crawl_sources_for_org(
+            session,
+            organization_id=org.id,
+            status=CrawlStatus(status) if status else None,
+            limit=limit,
+        )
 
     return CrawlSourceListResponse(
-        sources=[_source_to_response(source) for source in page.sources],
-        total=page.total,
+        sources=[_source_to_response(source) for source in sources],
+        total=total,
     )
 
 
@@ -424,8 +411,8 @@ async def get_link_graph_status(
 
     Shows how many chunks still need entity extraction per source.
     """
-    async with get_session() as session:
-        status = await get_link_graph_status_data(session, org.id)
+    async with get_content_read_session() as session:
+        status = await get_link_graph_status_payload(session, organization_id=org.id)
 
     return LinkGraphStatusResponse(
         total_chunks=status.total_chunks,
@@ -456,7 +443,7 @@ async def get_source(
     org: Organization = Depends(get_current_organization),
 ) -> CrawlSourceResponse:
     """Get a crawl source by ID (org-scoped)."""
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         source = await _get_org_source(session, source_id, org)
         return _source_to_response(source)
 
@@ -468,7 +455,7 @@ async def update_source(
     org: Organization = Depends(get_current_organization),
 ) -> CrawlSourceResponse:
     """Update a crawl source (org-scoped)."""
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         source = await _get_org_source(session, source_id, org)
 
         # Update fields if provided
@@ -476,8 +463,7 @@ async def update_source(
         for field, value in update_data.items():
             setattr(source, field, value)
 
-        await session.flush()
-        await session.refresh(source)
+        source = await save_crawl_source_record(session, source=source)
 
         log.info("Updated crawl source", id=str(source.id), fields=list(update_data.keys()))
 
@@ -497,22 +483,14 @@ async def delete_source(
     org: Organization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """Delete a crawl source and all its documents (org-scoped)."""
-    async with get_session() as session:
-        source = await _get_org_source(session, source_id, org)
-
-        # Delete chunks first (foreign key constraint)
-        for chunk in await list_source_chunks(session, source_id=UUID(source_id)):
-            await session.delete(chunk)
-
-        # Delete documents
-        for doc in await list_source_documents_for_delete(
+    async with get_content_read_session() as session:
+        source = await delete_crawl_source_record(
             session,
             source_id=UUID(source_id),
-        ):
-            await session.delete(doc)
-
-        # Delete source
-        await session.delete(source)
+            organization_id=org.id,
+        )
+        if source is None:
+            raise HTTPException(status_code=404, detail=f"Source not found: {source_id}")
 
         log.info("Deleted crawl source", id=source_id, name=source.name)
 
@@ -543,7 +521,7 @@ async def ingest_source(
     from sibyl.jobs import enqueue_crawl
 
     # Verify source exists and belongs to org
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         source = await _get_org_source(session, source_id, org)
 
         # Check if already crawling
@@ -568,11 +546,15 @@ async def ingest_source(
         )
 
         # Save job_id to source for cancellation support
-        async with get_session() as session:
-            source = await session.get(CrawlSource, UUID(source_id))
-            if source:
+        async with get_content_read_session() as session:
+            source = await get_org_crawl_source(
+                session,
+                source_id=UUID(source_id),
+                organization_id=org.id,
+            )
+            if source is not None:
                 source.current_job_id = job_id
-                session.add(source)
+                await save_crawl_source_record(session, source=source)
 
         log.info(
             "Enqueued crawl job",
@@ -606,7 +588,7 @@ async def get_ingestion_status(
     Returns both the source's crawl_status and any active job status.
     """
     # Get source status from DB (org-scoped)
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         source = await _get_org_source(session, source_id, org)
 
         return {
@@ -633,7 +615,7 @@ async def cancel_crawl(
     """
     from sibyl.jobs.queue import cancel_job
 
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         source = await _get_org_source(session, source_id, org)
 
         # Check if there's a job to cancel
@@ -655,7 +637,7 @@ async def cancel_crawl(
         # Reset source status regardless of cancel result
         source.crawl_status = CrawlStatus.PENDING
         source.current_job_id = None
-        session.add(source)
+        await save_crawl_source_record(session, source=source)
 
         log.info(
             "Cancelled crawl",
@@ -688,7 +670,7 @@ async def sync_source(
     Useful for fixing stuck sources or after manual data changes.
     Recalculates document_count, chunk_count, and fixes status if stuck.
     """
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         source = await _get_org_source(session, source_id, org)
 
         actual_doc_count, actual_chunk_count = await get_source_sync_counts(
@@ -713,6 +695,7 @@ async def sync_source(
         old_chunk_count = source.chunk_count
         source.document_count = actual_doc_count
         source.chunk_count = actual_chunk_count
+        source = await save_crawl_source_record(session, source=source)
 
         # Capture values before session closes
         new_status = source.crawl_status
@@ -802,7 +785,7 @@ async def _process_graph_linking(
     org_uuid = UUID(organization_id)
 
     # Get sources to process (org-scoped)
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         sources = await list_sources_for_graph_linking(
             session,
             organization_id=org_uuid,
@@ -851,7 +834,7 @@ async def _process_graph_linking(
                 total_created += stats.new_entities_created
 
     # Count remaining unprocessed chunks
-    async with get_session() as session:
+    async with get_content_read_session() as session:
         chunks_remaining = await count_remaining_unlinked_chunks(
             session,
             organization_id=org_uuid,
@@ -908,9 +891,11 @@ async def list_source_documents(
     source_id: str,
     limit: int = 50,
     offset: int = 0,
+    org: Organization = Depends(get_current_organization),
 ) -> CrawlDocumentListResponse:
     """List documents for a source."""
-    async with get_session() as session:
+    async with get_content_read_session() as session:
+        await _get_org_source(session, source_id, org)
         documents, total = await list_source_documents_page(
             session,
             source_id=UUID(source_id),

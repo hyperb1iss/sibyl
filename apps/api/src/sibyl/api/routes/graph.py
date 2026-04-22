@@ -73,6 +73,8 @@ async def get_hierarchical_graph(
     entity_types: list[str] | None = None,
     max_nodes: int = 1000,
     max_edges: int = 5000,
+    resolution: str = "detail",
+    cluster_id: str | None = None,
 ):
     adapter = await get_graph_query_adapter(group_id)
     return await adapter.get_hierarchical_graph(
@@ -80,6 +82,8 @@ async def get_hierarchical_graph(
         entity_types=entity_types,
         max_nodes=max_nodes,
         max_edges=max_edges,
+        resolution=resolution,
+        cluster_id=cluster_id,
     )
 
 router = APIRouter(
@@ -681,6 +685,12 @@ async def get_hierarchical_graph_data(
     types: list[EntityType] | None = Query(default=None, description="Filter by entity types"),
     max_nodes: int = Query(default=1000, ge=100, le=2000, description="Maximum nodes"),
     max_edges: int = Query(default=5000, ge=500, le=10000, description="Maximum edges"),
+    resolution: str = Query(
+        default="detail",
+        pattern="^(overview|detail)$",
+        description="Graph detail level",
+    ),
+    cluster_id: str | None = Query(default=None, description="Focus a specific cluster"),
 ) -> dict:
     """Get hierarchical graph data with cluster assignments.
 
@@ -704,6 +714,8 @@ async def get_hierarchical_graph_data(
             entity_types=[t.value for t in types] if types else None,
             max_nodes=max_nodes,
             max_edges=max_edges,
+            resolution=resolution,
+            cluster_id=cluster_id,
         )
 
         # Guard against focused-mode totals undercounting. If filtered data exists,
@@ -740,6 +752,7 @@ async def get_hierarchical_graph_data(
             "total_edges": data.total_edges,
             "displayed_nodes": data.displayed_nodes,
             "displayed_edges": data.displayed_edges,
+            "resolution": data.resolution,
         }
 
     except Exception as e:

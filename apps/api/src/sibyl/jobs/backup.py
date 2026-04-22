@@ -24,6 +24,13 @@ import structlog
 from sibyl.api.event_types import WSEvent
 from sibyl.backup_ids import generate_backup_id
 from sibyl.config import settings
+from sibyl.persistence.backups_runtime import (
+    attach_backup_job,
+    create_backup_record,
+    delete_backup_record,
+    list_enabled_backup_settings,
+    update_backup_record,
+)
 
 log = structlog.get_logger()
 
@@ -145,62 +152,23 @@ async def _update_backup_db(
 ) -> None:
     """Update backup record in database."""
     try:
-        from sqlalchemy import select
-
-        from sibyl.db.connection import get_session
-        from sibyl.db.models import Backup, BackupSettings
-
-        async with get_session() as session:
-            # Get the backup record
-            result = await session.execute(select(Backup).where(Backup.backup_id == backup_id))
-            backup = result.scalar_one_or_none()
-
-            if backup is None:
-                log.warning("backup_db_record_not_found", backup_id=backup_id)
-                return
-
-            # Update fields (status is stored as string in DB)
-            if status is not None:
-                backup.status = status
-            if filename is not None:
-                backup.filename = filename
-            if file_path is not None:
-                backup.file_path = file_path
-            if size_bytes is not None:
-                backup.size_bytes = size_bytes
-            if entity_count is not None:
-                backup.entity_count = entity_count
-            if relationship_count is not None:
-                backup.relationship_count = relationship_count
-            if started_at is not None:
-                backup.started_at = started_at.replace(tzinfo=None)
-            if completed_at is not None:
-                backup.completed_at = completed_at.replace(tzinfo=None)
-            if duration_seconds is not None:
-                backup.duration_seconds = duration_seconds
-            if error is not None:
-                backup.error = error
-
-            backup.updated_at = datetime.now(UTC).replace(tzinfo=None)
-
-            # If completed, update org's backup settings
-            if status == "completed":
-                settings_result = await session.execute(
-                    select(BackupSettings).where(
-                        BackupSettings.organization_id == backup.organization_id
-                    )
-                )
-                org_settings = settings_result.scalar_one_or_none()
-                if org_settings:
-                    org_settings.last_backup_at = (
-                        completed_at.replace(tzinfo=None)
-                        if completed_at
-                        else datetime.now(UTC).replace(tzinfo=None)
-                    )
-                    org_settings.last_backup_id = backup_id
-
-            await session.commit()
-            log.debug("backup_db_updated", backup_id=backup_id, status=status)
+        backup = await update_backup_record(
+            backup_id,
+            status=status,
+            filename=filename,
+            file_path=file_path,
+            size_bytes=size_bytes,
+            entity_count=entity_count,
+            relationship_count=relationship_count,
+            started_at=started_at,
+            completed_at=completed_at,
+            duration_seconds=duration_seconds,
+            error=error,
+        )
+        if backup is None:
+            log.warning("backup_db_record_not_found", backup_id=backup_id)
+            return
+        log.debug("backup_db_updated", backup_id=backup_id, status=backup.status)
 
     except Exception as e:
         log.warning("backup_db_update_failed", backup_id=backup_id, error=str(e))
@@ -634,11 +602,6 @@ async def run_scheduled_backups(
     Returns:
         Dict with scheduling results
     """
-    from sqlalchemy import select
-
-    from sibyl.db.connection import get_session
-    from sibyl.db.models import Backup, BackupSettings, BackupStatus
-
     log.info("scheduled_backups_started")
 
     orgs_queued = 0
@@ -646,63 +609,62 @@ async def run_scheduled_backups(
     errors = []
 
     try:
-        async with get_session() as session:
-            # Get all orgs with backups enabled
-            result = await session.execute(
-                select(BackupSettings).where(BackupSettings.enabled == True)  # noqa: E712
-            )
-            enabled_settings = result.scalars().all()
+        enabled_settings = await list_enabled_backup_settings()
+        log.info("scheduled_backups_found_orgs", count=len(enabled_settings))
 
-            log.info("scheduled_backups_found_orgs", count=len(enabled_settings))
+        for org_settings in enabled_settings:
+            org_id = str(org_settings.organization_id)
+            backup_id = generate_backup_id(org_id)
+            backup = None
 
-            for org_settings in enabled_settings:
-                org_id = str(org_settings.organization_id)
+            try:
+                backup = await create_backup_record(
+                    org_id=org_settings.organization_id,
+                    backup_id=backup_id,
+                    include_postgres=org_settings.include_postgres,
+                    include_graph=org_settings.include_graph,
+                    created_by_user_id=None,
+                    triggered_by="scheduled",
+                )
 
-                try:
-                    backup_id = generate_backup_id(org_id)
+                from sibyl.jobs.queue import enqueue_backup
 
-                    # Create backup record
-                    backup = Backup(
-                        organization_id=org_settings.organization_id,
-                        backup_id=backup_id,
-                        status=BackupStatus.PENDING.value,
-                        include_postgres=org_settings.include_postgres,
-                        include_graph=org_settings.include_graph,
-                        triggered_by="scheduled",
-                    )
-                    session.add(backup)
-                    await session.flush()
+                job_id = await enqueue_backup(
+                    org_id,
+                    include_postgres=org_settings.include_postgres,
+                    include_graph=org_settings.include_graph,
+                    backup_id=backup_id,
+                )
 
-                    # Enqueue the backup job
-                    from sibyl.jobs.queue import enqueue_backup
+                await attach_backup_job(backup.id, job_id)
 
-                    job_id = await enqueue_backup(
-                        org_id,
-                        include_postgres=org_settings.include_postgres,
-                        include_graph=org_settings.include_graph,
-                        backup_id=backup_id,
-                    )
+                log.info(
+                    "scheduled_backup_queued",
+                    organization_id=org_id,
+                    backup_id=backup_id,
+                    job_id=job_id,
+                )
+                orgs_queued += 1
 
-                    # Update backup with job ID
-                    backup.job_id = job_id
-                    await session.commit()
+            except Exception as e:
+                if backup is not None:
+                    try:
+                        await delete_backup_record(org_settings.organization_id, backup_id)
+                    except Exception as cleanup_error:
+                        log.warning(
+                            "scheduled_backup_cleanup_failed",
+                            organization_id=org_id,
+                            backup_id=backup_id,
+                            error=str(cleanup_error),
+                        )
 
-                    log.info(
-                        "scheduled_backup_queued",
-                        organization_id=org_id,
-                        backup_id=backup_id,
-                        job_id=job_id,
-                    )
-                    orgs_queued += 1
-
-                except Exception as e:
-                    log.warning(
-                        "scheduled_backup_failed_to_queue",
-                        organization_id=org_id,
-                        error=str(e),
-                    )
-                    errors.append({"organization_id": org_id, "error": str(e)})
-                    orgs_skipped += 1
+                log.warning(
+                    "scheduled_backup_failed_to_queue",
+                    organization_id=org_id,
+                    error=str(e),
+                )
+                errors.append({"organization_id": org_id, "error": str(e)})
+                orgs_skipped += 1
 
     except Exception as e:
         log.exception("scheduled_backups_failed", error=str(e))

@@ -791,10 +791,15 @@ export function useHierarchicalGraph(params?: {
   projects?: string[];
   types?: string[];
   refresh?: boolean;
+  resolution?: 'overview' | 'detail';
+  cluster_id?: string;
 }) {
   return useQuery({
     queryKey: queryKeys.graph.hierarchical(params),
     queryFn: () => api.graph.hierarchical(params),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    placeholderData: previousData => previousData,
   });
 }
 

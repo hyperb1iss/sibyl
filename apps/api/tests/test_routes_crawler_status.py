@@ -49,12 +49,12 @@ class TestLinkGraphStatusRoute:
 
         helper = AsyncMock(return_value=status)
         with (
-            patch("sibyl.api.routes.crawler.get_session", mock_session),
-            patch("sibyl.api.routes.crawler.get_link_graph_status_data", helper),
+            patch("sibyl.api.routes.crawler.get_content_read_session", mock_session),
+            patch("sibyl.api.routes.crawler.get_link_graph_status_payload", helper),
         ):
             response = await get_link_graph_status(org=org)
 
-        helper.assert_awaited_once_with(session, org.id)
+        helper.assert_awaited_once_with(session, organization_id=org.id)
         assert response.total_chunks == 12
         assert response.chunks_with_entities == 5
         assert response.chunks_pending == 7

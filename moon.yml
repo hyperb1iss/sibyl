@@ -58,7 +58,7 @@ tasks:
 
   dev-api:
     script: |
-      docker compose up -d surrealdb
+      docker compose up -d surrealdb postgres
       sleep 1
       uv run --directory apps/api sibyld serve --reload
     env:

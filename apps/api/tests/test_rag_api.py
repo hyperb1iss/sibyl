@@ -4,6 +4,7 @@ Tests the RAG search, code example search, and page retrieval endpoints.
 Uses mocked database and embedding service.
 """
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -68,6 +69,17 @@ def mock_session():
 
 
 @pytest.fixture
+def mock_content_session(mock_session):
+    """Mock content runtime session seam."""
+
+    @asynccontextmanager
+    async def _mock_content_session():
+        yield mock_session
+
+    return _mock_content_session
+
+
+@pytest.fixture
 def sample_chunk():
     """Create a sample DocumentChunk for testing."""
     chunk = MagicMock()
@@ -129,6 +141,7 @@ class TestRAGSearchEndpoint:
         self,
         mock_embed_text,
         mock_session,
+        mock_content_session,
         mock_auth_context,
         sample_chunk,
         sample_document,
@@ -142,8 +155,7 @@ class TestRAGSearchEndpoint:
         ]
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
+        with patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session):
 
             from sibyl.api.routes.rag import rag_search
             from sibyl.api.schemas import RAGSearchRequest
@@ -164,6 +176,7 @@ class TestRAGSearchEndpoint:
         self,
         mock_embed_text,
         mock_session,
+        mock_content_session,
         mock_auth_context,
         sample_chunk,
         sample_document,
@@ -174,8 +187,7 @@ class TestRAGSearchEndpoint:
         mock_result.all.return_value = []
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
+        with patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session):
 
             from sibyl.api.routes.rag import rag_search
             from sibyl.api.schemas import RAGSearchRequest
@@ -195,6 +207,7 @@ class TestRAGSearchEndpoint:
         self,
         mock_embed_text,
         mock_session,
+        mock_content_session,
         mock_auth_context,
         sample_chunk,
         sample_document,
@@ -207,8 +220,7 @@ class TestRAGSearchEndpoint:
         ]
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
+        with patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session):
 
             from sibyl.api.routes.rag import rag_search
             from sibyl.api.schemas import RAGSearchRequest
@@ -225,15 +237,14 @@ class TestRAGSearchEndpoint:
 
     @pytest.mark.asyncio
     async def test_search_similarity_threshold(
-        self, mock_embed_text, mock_session, mock_auth_context
+        self, mock_embed_text, mock_session, mock_content_session, mock_auth_context
     ):
         """Test that similarity threshold filters low-score results."""
         mock_result = MagicMock()
         mock_result.all.return_value = []  # No results above threshold
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
+        with patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session):
 
             from sibyl.api.routes.rag import rag_search
             from sibyl.api.schemas import RAGSearchRequest
@@ -279,6 +290,7 @@ class TestCodeExampleSearch:
         self,
         mock_embed_text,
         mock_session,
+        mock_content_session,
         mock_auth_context,
         sample_code_chunk,
         sample_document,
@@ -291,8 +303,7 @@ class TestCodeExampleSearch:
         ]
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
+        with patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session):
 
             from sibyl.api.routes.rag import search_code_examples
             from sibyl.api.schemas import CodeExampleRequest
@@ -313,6 +324,7 @@ class TestCodeExampleSearch:
         self,
         mock_embed_text,
         mock_session,
+        mock_content_session,
         mock_auth_context,
         sample_code_chunk,
         sample_document,
@@ -325,8 +337,7 @@ class TestCodeExampleSearch:
         ]
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
+        with patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session):
 
             from sibyl.api.routes.rag import search_code_examples
             from sibyl.api.schemas import CodeExampleRequest
@@ -352,27 +363,27 @@ class TestPageRetrieval:
 
     @pytest.mark.asyncio
     async def test_list_source_pages(
-        self, mock_session, mock_auth_context, sample_document, sample_source
+        self, mock_auth_context, sample_document, sample_source
     ):
         """Test listing pages for a source."""
         # Set source org ID to match auth context
         sample_source.organization_id = mock_auth_context.organization_id
 
-        # Mock source lookup
-        mock_session.get = AsyncMock(return_value=sample_source)
+        @asynccontextmanager
+        async def mock_content_session():
+            yield None
 
-        # Mock document query
-        mock_docs_result = MagicMock()
-        mock_docs_result.scalars.return_value.all.return_value = [sample_document]
-
-        # Mock count query
-        mock_count_result = MagicMock()
-        mock_count_result.scalar.return_value = 1
-
-        mock_session.execute = AsyncMock(side_effect=[mock_count_result, mock_docs_result])
-
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
+        with (
+            patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session),
+            patch(
+                "sibyl.api.routes.rag.get_org_crawl_source",
+                AsyncMock(return_value=sample_source),
+            ) as get_source,
+            patch(
+                "sibyl.api.routes.rag.list_source_documents_page",
+                AsyncMock(return_value=([sample_document], 1)),
+            ) as list_documents_page,
+        ):
 
             from sibyl.api.routes.rag import list_source_pages
 
@@ -384,19 +395,32 @@ class TestPageRetrieval:
 
             assert response.source_id == str(sample_source.id)
             assert response.source_name == sample_source.name
+            get_source.assert_awaited_once()
+            list_documents_page.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_get_full_page(
-        self, mock_session, mock_auth_context, sample_document, sample_source
+        self, mock_auth_context, sample_document, sample_source
     ):
         """Test getting full page content."""
         # Set source org ID to match auth context
         sample_source.organization_id = mock_auth_context.organization_id
 
-        mock_session.get = AsyncMock(side_effect=[sample_document, sample_source])
+        @asynccontextmanager
+        async def mock_content_session():
+            yield None
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
+        with (
+            patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session),
+            patch(
+                "sibyl.api.routes.rag.get_crawled_document_for_org",
+                AsyncMock(return_value=sample_document),
+            ) as get_document,
+            patch(
+                "sibyl.api.routes.rag.get_org_crawl_source",
+                AsyncMock(return_value=sample_source),
+            ) as get_source,
+        ):
 
             from sibyl.api.routes.rag import get_full_page
 
@@ -408,14 +432,23 @@ class TestPageRetrieval:
             assert response.title == sample_document.title
             assert response.content == sample_document.content
             assert response.has_code == sample_document.has_code
+            get_document.assert_awaited_once()
+            get_source.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_get_page_not_found(self, mock_session, mock_auth_context):
+    async def test_get_page_not_found(self, mock_auth_context):
         """Test 404 when page not found."""
-        mock_session.get = AsyncMock(return_value=None)
+        @asynccontextmanager
+        async def mock_content_session():
+            yield None
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
+        with (
+            patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session),
+            patch(
+                "sibyl.api.routes.rag.get_crawled_document_for_org",
+                AsyncMock(return_value=None),
+            ),
+        ):
 
             from fastapi import HTTPException
 
@@ -450,6 +483,7 @@ class TestDocumentRelatedEntities:
     async def test_get_document_related_entities_uses_entity_runtime_search(
         self,
         mock_session,
+        mock_content_session,
         mock_auth_context,
         sample_document,
         sample_source,
@@ -474,9 +508,13 @@ class TestDocumentRelatedEntities:
         runtime.entity_manager.search = AsyncMock(return_value=[(entity, 0.7), (blocked, 0.8)])
 
         with (
-            patch("sibyl.api.routes.rag.get_session") as mock_get_session,
+            patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session),
             patch(
-                "sibyl.api.routes.rag.list_accessible_project_graph_ids",
+                "sibyl.api.routes.rag.get_crawled_document_for_org",
+                AsyncMock(return_value=sample_document),
+            ),
+            patch(
+                "sibyl.api.routes.rag.list_legacy_accessible_project_graph_ids",
                 AsyncMock(return_value={"proj-1"}),
             ),
             patch(
@@ -484,8 +522,6 @@ class TestDocumentRelatedEntities:
                 AsyncMock(return_value=runtime),
             ),
         ):
-            mock_get_session.return_value = mock_session
-
             from sibyl.api.routes.rag import get_document_related_entities
 
             response = await get_document_related_entities(
@@ -515,6 +551,7 @@ class TestHybridSearch:
         self,
         mock_embed_text,
         mock_session,
+        mock_content_session,
         mock_auth_context,
         sample_chunk,
         sample_document,
@@ -527,8 +564,7 @@ class TestHybridSearch:
         ]
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
+        with patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session):
 
             from sibyl.api.routes.rag import hybrid_search
             from sibyl.api.schemas import RAGSearchRequest
@@ -577,10 +613,17 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_source_not_found(self, mock_session, mock_auth_context):
         """Test 404 when source not found."""
-        mock_session.get = AsyncMock(return_value=None)
+        @asynccontextmanager
+        async def mock_content_session():
+            yield None
 
-        with patch("sibyl.api.routes.rag.get_session") as mock_get_session:
-            mock_get_session.return_value = mock_session
+        with (
+            patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session),
+            patch(
+                "sibyl.api.routes.rag.get_org_crawl_source",
+                AsyncMock(return_value=None),
+            ),
+        ):
 
             from fastapi import HTTPException
 

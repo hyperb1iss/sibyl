@@ -9,7 +9,9 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlmodel import col
 
-from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk
+from sibyl.db import CrawledDocument, CrawlSource, CrawlStatus, DocumentChunk
+from sibyl.db.models import SourceType
+from sibyl_core.services.link_graph_status import get_link_graph_status_data
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,126 @@ async def get_org_crawl_source(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def get_crawl_source_by_id(
+    session: Any,
+    *,
+    source_id: UUID,
+) -> CrawlSource | None:
+    """Fetch a crawl source by primary key."""
+
+    return await session.get(CrawlSource, source_id)
+
+
+async def get_crawl_source_by_url(
+    session: Any,
+    *,
+    url: str,
+) -> CrawlSource | None:
+    """Fetch a crawl source by normalized URL."""
+
+    result = await session.execute(
+        select(CrawlSource).where(col(CrawlSource.url) == url.rstrip("/"))
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_crawl_sources_for_org(
+    session: Any,
+    *,
+    organization_id: UUID,
+    status: Any | None,
+    limit: int,
+) -> tuple[list[Any], int]:
+    """List crawl sources for an organization."""
+
+    query = (
+        select(CrawlSource)
+        .where(col(CrawlSource.organization_id) == organization_id)
+        .order_by(col(CrawlSource.created_at).desc())
+        .limit(limit)
+    )
+    if status is not None:
+        query = query.where(col(CrawlSource.crawl_status) == status)
+
+    result = await session.execute(query)
+    count_result = await session.execute(
+        select(func.count(CrawlSource.id)).where(col(CrawlSource.organization_id) == organization_id)
+    )
+    return list(result.scalars().all()), count_result.scalar() or 0
+
+
+async def list_crawl_sources(
+    session: Any,
+    *,
+    status: CrawlStatus | None = None,
+    limit: int | None = 50,
+) -> list[CrawlSource]:
+    """List crawl sources across all organizations."""
+
+    query = select(CrawlSource).order_by(col(CrawlSource.created_at).desc())
+    if status is not None:
+        query = query.where(col(CrawlSource.crawl_status) == status)
+    if limit is not None:
+        query = query.limit(limit)
+    result = await session.execute(query)
+    return list(result.scalars().all())
+
+
+async def create_crawl_source_record(
+    session: Any,
+    *,
+    name: str,
+    url: str,
+    organization_id: UUID,
+    source_type: SourceType,
+    description: str | None,
+    crawl_depth: int,
+    include_patterns: list[str] | None,
+    exclude_patterns: list[str] | None,
+) -> CrawlSource:
+    """Create an org-scoped crawl source with duplicate protection."""
+
+    from sibyl.crawler.service import SourceAlreadyExistsError
+
+    normalized_url = url.rstrip("/")
+    existing = await session.execute(
+        select(CrawlSource).where(
+            col(CrawlSource.url) == normalized_url,
+            col(CrawlSource.organization_id) == organization_id,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise SourceAlreadyExistsError(normalized_url)
+
+    source = CrawlSource(
+        organization_id=organization_id,
+        name=name,
+        url=normalized_url,
+        source_type=source_type,
+        description=description,
+        crawl_depth=crawl_depth,
+        include_patterns=include_patterns or [],
+        exclude_patterns=exclude_patterns or [],
+    )
+    session.add(source)
+    await session.flush()
+    await session.refresh(source)
+    return source
+
+
+async def save_crawl_source_record(
+    session: Any,
+    *,
+    source: CrawlSource,
+) -> CrawlSource:
+    """Persist a crawl source mutation."""
+
+    session.add(source)
+    await session.flush()
+    await session.refresh(source)
+    return source
 
 
 async def get_crawl_stats_payload(
@@ -98,6 +220,16 @@ async def get_crawl_stats_payload(
     )
 
 
+async def get_link_graph_status_payload(
+    session: Any,
+    *,
+    organization_id: UUID,
+) -> Any:
+    """Load link-graph status for the active organization."""
+
+    return await get_link_graph_status_data(session, organization_id)
+
+
 async def list_crawled_documents_for_org(
     session: Any,
     *,
@@ -144,6 +276,65 @@ async def get_crawled_document_for_org(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def save_crawled_document_record(
+    session: Any,
+    *,
+    document: CrawledDocument,
+) -> CrawledDocument:
+    """Persist a crawled document mutation."""
+
+    session.add(document)
+    await session.flush()
+    await session.refresh(document)
+    return document
+
+
+async def save_document_chunks(
+    session: Any,
+    *,
+    chunks: list[DocumentChunk],
+) -> list[DocumentChunk]:
+    """Persist document chunk mutations."""
+
+    for chunk in chunks:
+        session.add(chunk)
+    await session.flush()
+    for chunk in chunks:
+        await session.refresh(chunk)
+    return chunks
+
+
+async def delete_crawled_document_record(
+    session: Any,
+    *,
+    document_id: UUID,
+    organization_id: UUID,
+) -> tuple[CrawledDocument, int] | None:
+    """Delete a document, its chunks, and update source counters."""
+
+    document = await get_crawled_document_for_org(
+        session,
+        document_id=document_id,
+        organization_id=organization_id,
+    )
+    if document is None:
+        return None
+
+    source = await session.get(CrawlSource, document.source_id)
+    chunks = await list_document_chunks(session, document_id=document_id)
+    chunks_deleted = len(chunks)
+
+    for chunk in chunks:
+        await session.delete(chunk)
+    await session.delete(document)
+
+    if source is not None:
+        source.document_count = max(0, source.document_count - 1)
+        source.chunk_count = max(0, source.chunk_count - chunks_deleted)
+
+    return document, chunks_deleted
 
 
 async def list_document_chunks(
@@ -213,6 +404,34 @@ async def list_source_documents(
         select(CrawledDocument).where(col(CrawledDocument.source_id) == source_id)
     )
     return list(result.scalars().all())
+
+
+async def delete_crawl_source_record(
+    session: Any,
+    *,
+    source_id: UUID,
+    organization_id: UUID,
+) -> CrawlSource | None:
+    """Delete a source and all of its documents and chunks."""
+
+    source = await get_org_crawl_source(
+        session,
+        source_id=source_id,
+        organization_id=organization_id,
+    )
+    if source is None:
+        return None
+
+    chunks = await list_source_chunks(session, source_id=source_id)
+    for chunk in chunks:
+        await session.delete(chunk)
+
+    documents = await list_source_documents(session, source_id=source_id)
+    for document in documents:
+        await session.delete(document)
+
+    await session.delete(source)
+    return source
 
 
 async def count_source_documents(

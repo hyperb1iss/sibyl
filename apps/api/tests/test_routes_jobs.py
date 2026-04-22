@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
@@ -49,18 +49,23 @@ class TestJobVisibility:
     @pytest.mark.asyncio
     async def test_legacy_source_jobs_fall_back_to_db_lookup(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        result = MagicMock()
-        result.scalar_one_or_none.return_value = object()
         session = AsyncMock()
-        session.execute.return_value = result
         job = SimpleNamespace(
             function="crawl_source",
             args=("00000000-0000-0000-0000-000000000222",),
             kwargs=None,
         )
 
-        assert await _job_visible_to_org(job, org=org, session=session) is True
-        session.execute.assert_awaited_once()
+        with patch(
+            "sibyl.api.routes.jobs.get_crawl_source_by_id",
+            AsyncMock(return_value=SimpleNamespace(organization_id=org.id)),
+        ) as get_source:
+            assert await _job_visible_to_org(job, org=org, session=session) is True
+
+        get_source.assert_awaited_once_with(
+            session,
+            source_id=UUID("00000000-0000-0000-0000-000000000222"),
+        )
 
     @pytest.mark.asyncio
     async def test_maintenance_jobs_use_group_id_argument(self) -> None:
@@ -79,7 +84,7 @@ class TestJobVisibility:
 
         assert await _job_visible_to_org(visible, org=org, session=session) is True
         assert await _job_visible_to_org(hidden, org=org, session=session) is False
-        session.execute.assert_not_called()
+        session.get.assert_not_called()
 
 
 class TestListJobsRoute:

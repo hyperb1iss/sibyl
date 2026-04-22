@@ -17,15 +17,15 @@ from pydantic import BaseModel, Field
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_admin
 from sibyl.backup_ids import generate_backup_id
 from sibyl.db.models import BackupStatus, Organization, User
-from sibyl.persistence.operations_runtime import (
-    attach_legacy_backup_job,
-    create_legacy_backup_record,
-    delete_legacy_backup_record,
-    get_legacy_backup,
-    get_legacy_backup_retention,
-    get_legacy_backup_settings,
-    list_legacy_backups,
-    update_legacy_backup_settings,
+from sibyl.persistence.backups_runtime import (
+    attach_backup_job as attach_backup_job_record,
+    create_backup_record,
+    delete_backup_record,
+    get_backup as get_backup_record,
+    get_backup_retention as resolve_backup_retention,
+    get_backup_settings as load_backup_settings,
+    list_backups as list_backup_records,
+    update_backup_settings as save_backup_settings,
 )
 
 log = structlog.get_logger()
@@ -131,7 +131,7 @@ async def get_backup_settings(
     org: Organization = Depends(get_current_organization),
 ) -> BackupSettingsResponse:
     """Get backup configuration settings for the organization."""
-    settings = await get_legacy_backup_settings(org.id)
+    settings = await load_backup_settings(org.id)
 
     return BackupSettingsResponse(
         enabled=settings.enabled,
@@ -150,7 +150,7 @@ async def update_backup_settings(
     org: Organization = Depends(get_current_organization),
 ) -> BackupSettingsResponse:
     """Update backup configuration settings."""
-    settings = await update_legacy_backup_settings(
+    settings = await save_backup_settings(
         org.id,
         enabled=request.enabled,
         schedule=request.schedule,
@@ -199,7 +199,7 @@ async def create_backup(
     Returns a job ID that can be used to track progress.
     """
     backup_id = generate_backup_id(str(org.id))
-    backup = await create_legacy_backup_record(
+    backup = await create_backup_record(
         org_id=org.id,
         backup_id=backup_id,
         include_postgres=request.include_postgres,
@@ -223,7 +223,7 @@ async def create_backup(
         include_graph=request.include_graph,
         backup_id=backup_id,
     )
-    backup = await attach_legacy_backup_job(backup.id, job_id)
+    backup = await attach_backup_job_record(backup.id, job_id)
 
     return CreateBackupResponse(
         id=str(backup.id),
@@ -244,7 +244,7 @@ async def list_backups(
 
     Returns backups sorted by creation time (newest first).
     """
-    results = await list_legacy_backups(org.id, limit=limit, offset=offset)
+    results = await list_backup_records(org.id, limit=limit, offset=offset)
 
     return BackupListResponse(
         backups=[
@@ -278,7 +278,7 @@ async def run_cleanup(
 
     Removes backup archives older than the retention period.
     """
-    retention = await get_legacy_backup_retention(org.id, request.retention_days)
+    retention = await resolve_backup_retention(org.id, request.retention_days)
 
     log.info(
         "backup_cleanup_requested",
@@ -302,7 +302,7 @@ async def get_backup_details(
     org: Organization = Depends(get_current_organization),
 ) -> BackupInfo:
     """Get detailed information about a specific backup."""
-    backup = await get_legacy_backup(org.id, backup_id)
+    backup = await get_backup_record(org.id, backup_id)
 
     return BackupInfo(
         id=str(backup.id),
@@ -330,7 +330,7 @@ async def download_backup(
 
     Returns the .tar.gz file directly.
     """
-    backup = await get_legacy_backup(org.id, backup_id)
+    backup = await get_backup_record(org.id, backup_id)
 
     if backup.status != BackupStatus.COMPLETED.value:
         raise HTTPException(
@@ -369,14 +369,14 @@ async def delete_backup(
 
     This action cannot be undone.
     """
-    backup = await get_legacy_backup(org.id, backup_id)
+    backup = await get_backup_record(org.id, backup_id)
 
     log.info("backup_delete_requested", backup_id=backup_id, organization_id=str(org.id))
 
     from sibyl.jobs.backup import delete_backup as delete_backup_file
 
     delete_backup_file(backup_id)
-    await delete_legacy_backup_record(org.id, backup.backup_id)
+    await delete_backup_record(org.id, backup.backup_id)
 
     return {"deleted": True, "backup_id": backup_id}
 

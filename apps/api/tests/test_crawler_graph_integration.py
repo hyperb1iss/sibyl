@@ -416,8 +416,7 @@ class TestGraphIntegrationService:
         service.extractor = mock_extractor
         service.linker = mock_linker
 
-        with patch("sibyl.crawler.graph_integration.get_session"):
-            stats = await service.process_chunks(mock_document_chunks, "Test Source")
+        stats = await service.process_chunks(mock_document_chunks, "Test Source")
 
         assert stats.chunks_processed == 3
         assert stats.entities_extracted == 1
@@ -456,7 +455,6 @@ class TestGraphIntegrationService:
         linker.invalidate_cache = MagicMock()
 
         session = AsyncMock()
-        session.add = MagicMock()
 
         @asynccontextmanager
         async def mock_session():
@@ -476,7 +474,13 @@ class TestGraphIntegrationService:
             side_effect=["tool:fastapi", "error_pattern:retry-timeout"]
         )
 
-        with patch("sibyl.crawler.graph_integration.get_session", mock_session):
+        with (
+            patch("sibyl.crawler.graph_integration.get_content_read_session", mock_session),
+            patch(
+                "sibyl.crawler.graph_integration.save_document_chunks",
+                AsyncMock(return_value=mock_document_chunks),
+            ) as save_chunks,
+        ):
             stats = await service.process_chunks(mock_document_chunks, "Test Source")
 
         created_types = [
@@ -494,7 +498,10 @@ class TestGraphIntegrationService:
         assert mock_document_chunks[1].entity_ids == ["error_pattern:retry-timeout"]
         linker.invalidate_cache.assert_called_once()
         assert set(linker.invalidate_cache.call_args.args) == {"tool", "error_pattern"}
-        session.commit.assert_awaited_once()
+        save_chunks.assert_awaited_once_with(
+            session,
+            chunks=[mock_document_chunks[0], mock_document_chunks[1]],
+        )
 
     @pytest.mark.asyncio
     async def test_process_chunks_disabled_extraction(

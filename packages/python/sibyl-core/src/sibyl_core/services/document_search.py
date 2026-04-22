@@ -7,6 +7,9 @@ from uuid import UUID
 
 import structlog
 
+from sibyl_core.config import settings
+from sibyl_core.retrieval.dedup import cosine_similarity
+from sibyl_core.services.surreal_content import lexical_score, load_search_scope
 from sibyl_core.tools.responses import SearchResult
 
 log = structlog.get_logger()
@@ -147,16 +150,96 @@ async def search_documents(
     """Search crawled documentation using vector and lexical matching."""
 
     from sibyl.crawler.embedder import embed_text
-    from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
-    from sibyl.db.models import ChunkType
-    from sqlalchemy import func, select
-    from sqlmodel import col
 
     query_embedding: list[float] | None = None
     try:
         query_embedding = await embed_text(query)
     except Exception as exc:
         log.warning("document_vector_embedding_failed", error=str(exc))
+
+    if settings.store == "surreal":
+        _, sources_by_id, documents_by_id, chunks = await load_search_scope(
+            organization_id=organization_id,
+            source_id=source_id,
+            source_name=source_name,
+        )
+
+        if language:
+            language_filter = language.lower()
+            chunks = [
+                chunk
+                for chunk in chunks
+                if chunk.chunk_type.lower() == "code"
+                and (chunk.language or "").lower() == language_filter
+            ]
+
+        vector_rows_raw: list[tuple[Any, Any, str, Any, float]] = []
+        if query_embedding is not None:
+            for chunk in chunks:
+                if not chunk.embedding:
+                    continue
+                similarity = cosine_similarity(chunk.embedding, query_embedding)
+                if similarity < 0.5:
+                    continue
+                document = documents_by_id.get(chunk.document_id)
+                if document is None:
+                    continue
+                source = sources_by_id.get(document.source_id)
+                if source is None:
+                    continue
+                vector_rows_raw.append((chunk, document, source.name, source.id, similarity))
+
+        vector_results = [
+            _build_document_result(
+                chunk=chunk,
+                doc=doc,
+                source_name=src_name,
+                source_id=src_id,
+                score=float(score),
+                include_content=include_content,
+            )
+            for chunk, doc, src_name, src_id, score in _dedupe_document_rows(vector_rows_raw)[:limit]
+        ]
+
+        lexical_rows_raw: list[tuple[Any, Any, str, Any, float]] = []
+        for chunk in chunks:
+            document = documents_by_id.get(chunk.document_id)
+            if document is None:
+                continue
+            source = sources_by_id.get(document.source_id)
+            if source is None:
+                continue
+            score = lexical_score(
+                query,
+                chunk.content,
+                chunk.context,
+                document.title,
+                document.content,
+            )
+            if score <= 0:
+                continue
+            lexical_rows_raw.append((chunk, document, source.name, source.id, score))
+
+        lexical_results = [
+            _build_document_result(
+                chunk=chunk,
+                doc=doc,
+                source_name=src_name,
+                source_id=src_id,
+                score=float(score),
+                include_content=include_content,
+            )
+            for chunk, doc, src_name, src_id, score in _dedupe_document_rows(lexical_rows_raw)[
+                :limit
+            ]
+        ]
+
+        return _merge_document_results(vector_results, lexical_results, limit)
+
+    from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
+    from sibyl.db.models import ChunkType
+    from sqlalchemy import func, select
+    from sqlmodel import col
 
     async with get_session() as session:
         base_query = (

@@ -140,7 +140,7 @@ def _compose_services_for_env(env: dict[str, str]) -> list[str]:
     if env["SIBYL_STORE"] == "legacy":
         return ["falkordb", "postgres", "redis"]
 
-    services = ["surrealdb"]
+    services = ["surrealdb", "postgres"]
     if _resolve_coordination_backend(env) == "redis":
         services.append("redis")
     return services

@@ -68,6 +68,8 @@ main() {
     unset SURREAL_DATA_DIR
   fi
 
+  services+=(postgres)
+
   if [[ "$coordination_backend" == "redis" ]]; then
     local redis_host="${SIBYL_REDIS_HOST:-}"
 
@@ -100,6 +102,8 @@ main() {
       printf 'SIBYL_REDIS_HOST=%s\n' "$SIBYL_REDIS_HOST"
       printf 'SIBYL_REDIS_PORT=%s\n' "$SIBYL_REDIS_PORT"
     fi
+    printf 'SIBYL_POSTGRES_HOST=%s\n' "${SIBYL_POSTGRES_HOST:-localhost}"
+    printf 'SIBYL_POSTGRES_PORT=%s\n' "${SIBYL_POSTGRES_PORT:-5433}"
     return 0
   fi
 

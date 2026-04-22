@@ -20,12 +20,17 @@ from sibyl.api.schemas import (
 )
 from sibyl.auth.dependencies import get_current_organization, require_org_role
 from sibyl.coordination import get_coordination_health
-from sibyl.db.models import Organization, OrganizationRole
+from sibyl.db.models import CrawlStatus, Organization, OrganizationRole
+from sibyl.persistence.content_runtime import (
+    get_content_read_session,
+    get_source_sync_counts,
+    list_crawl_sources,
+    save_crawl_source_record,
+)
 from sibyl.persistence.graph_runtime import (
     execute_legacy_debug_query,
     get_graph_stats_payload as _service_get_graph_stats_payload,
 )
-from sibyl.persistence.operations_runtime import recover_legacy_stuck_sources
 
 log = structlog.get_logger()
 
@@ -385,4 +390,64 @@ async def recover_stuck_sources() -> dict[str, Any]:
     Returns:
         Dict with counts of recovered sources
     """
-    return await recover_legacy_stuck_sources()
+    recovered = 0
+    completed = 0
+    reset_to_pending = 0
+
+    try:
+        async with get_content_read_session() as session:
+            stuck_sources = await list_crawl_sources(
+                session,
+                status=CrawlStatus.IN_PROGRESS,
+                limit=None,
+            )
+
+            if not stuck_sources:
+                log.info("No stuck sources found during startup recovery")
+                return {"recovered": 0, "completed": 0, "reset_to_pending": 0}
+
+            log.warning(
+                "Found stuck IN_PROGRESS sources",
+                count=len(stuck_sources),
+                sources=[source.name for source in stuck_sources],
+            )
+
+            for source in stuck_sources:
+                doc_count, chunk_count = await get_source_sync_counts(session, source_id=source.id)
+                old_status = source.crawl_status
+
+                if doc_count > 0:
+                    source.crawl_status = CrawlStatus.COMPLETED
+                    source.document_count = doc_count
+                    source.chunk_count = chunk_count
+                    completed += 1
+                else:
+                    source.crawl_status = CrawlStatus.PENDING
+                    reset_to_pending += 1
+
+                source.current_job_id = None
+                await save_crawl_source_record(session, source=source)
+
+                log.info(
+                    "Recovered stuck source",
+                    source_name=source.name,
+                    old_status=old_status.value,
+                    new_status=source.crawl_status.value,
+                    doc_count=doc_count,
+                )
+                recovered += 1
+
+        log.info(
+            "Startup recovery complete",
+            recovered=recovered,
+            completed=completed,
+            reset_to_pending=reset_to_pending,
+        )
+    except Exception as exc:
+        log.exception("Startup recovery failed", error=str(exc))
+
+    return {
+        "recovered": recovered,
+        "completed": completed,
+        "reset_to_pending": reset_to_pending,
+    }

@@ -3,6 +3,9 @@
 from typing import Any
 from uuid import UUID
 
+from sibyl_core.config import settings
+from sibyl_core.services import surreal_content
+
 
 def _normalize_pattern_list(value: Any) -> list[str]:
     if value is None:
@@ -22,6 +25,15 @@ async def _create_or_get_crawl_source(
     organization_id: str,
 ) -> tuple[str, bool]:
     """Create or reuse a relational crawl source for the given URL."""
+
+    if settings.store == "surreal":
+        source, created = await surreal_content.get_or_create_source(
+            url,
+            depth,
+            data,
+            organization_id=organization_id,
+        )
+        return source.id, created
 
     from sibyl.db import CrawlSource, SourceType, get_session
     from sqlalchemy import select
@@ -69,6 +81,9 @@ async def _create_or_get_crawl_source(
 async def _crawl_source_exists(source_id: str, organization_id: str) -> bool:
     """Return whether a crawl source exists within the organization."""
 
+    if settings.store == "surreal":
+        return await surreal_content.source_exists(source_id, organization_id)
+
     from sibyl.db import CrawlSource, get_session
     from sqlalchemy import select
     from sqlmodel import col
@@ -85,6 +100,9 @@ async def _crawl_source_exists(source_id: str, organization_id: str) -> bool:
 
 async def _list_crawl_source_ids(organization_id: str) -> list[str]:
     """List crawl source IDs for an organization."""
+
+    if settings.store == "surreal":
+        return await surreal_content.list_source_ids_for_org(organization_id)
 
     from sibyl.db import CrawlSource, get_session
     from sqlalchemy import select
@@ -108,10 +126,7 @@ async def _enqueue_source_crawl(
 ) -> str:
     """Enqueue a crawl job and sync its pending state to the relational source."""
 
-    from sibyl.db import CrawlSource, CrawlStatus, get_session
     from sibyl.jobs.queue import enqueue_crawl
-    from sqlalchemy import select
-    from sqlmodel import col
 
     job_id = await enqueue_crawl(
         source_id,
@@ -121,6 +136,20 @@ async def _enqueue_source_crawl(
         generate_embeddings=generate_embeddings,
         force=force,
     )
+
+    if settings.store == "surreal":
+        await surreal_content.set_source_job_state(
+            source_id,
+            organization_id=organization_id,
+            job_id=job_id,
+            crawl_status="pending",
+            last_error=None,
+        )
+        return job_id
+
+    from sibyl.db import CrawlSource, CrawlStatus, get_session
+    from sqlalchemy import select
+    from sqlmodel import col
 
     async with get_session() as session:
         result = await session.execute(
@@ -154,6 +183,13 @@ async def list_unlinked_document_chunks(
     limit: int = 1000,
 ) -> list[Any]:
     """List unlinked document chunks for an organization or source."""
+
+    if settings.store == "surreal":
+        return await surreal_content.list_unlinked_document_chunks(
+            organization_id=organization_id,
+            source_id=source_id,
+            limit=limit,
+        )
 
     from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
     from sqlalchemy import select
