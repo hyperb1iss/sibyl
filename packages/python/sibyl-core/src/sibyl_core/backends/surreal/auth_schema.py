@@ -81,6 +81,29 @@ ARCHIVE_ONLY_TABLE_DEFINITIONS = "\n".join(
     f"DEFINE TABLE IF NOT EXISTS {table} SCHEMALESS;" for table in ARCHIVE_ONLY_AUTH_TABLES
 )
 
+ARCHIVE_RUNTIME_INDEX_DEFINITIONS = """
+DEFINE INDEX IF NOT EXISTS idx_organization_invitations_uuid
+    ON organization_invitations FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_organization_invitations_token
+    ON organization_invitations FIELDS token UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_organization_invitations_org
+    ON organization_invitations FIELDS organization_id;
+
+DEFINE INDEX IF NOT EXISTS idx_project_members_uuid
+    ON project_members FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_project_members_project_user
+    ON project_members FIELDS project_id, user_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_project_members_org
+    ON project_members FIELDS organization_id;
+
+DEFINE INDEX IF NOT EXISTS idx_team_projects_uuid
+    ON team_projects FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_team_projects_team_project
+    ON team_projects FIELDS team_id, project_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_team_projects_org
+    ON team_projects FIELDS organization_id;
+"""
+
 
 def _split_statements(sql: str) -> list[str]:
     statements: list[str] = []
@@ -112,10 +135,14 @@ async def bootstrap_auth_schema(client: SurrealAuthClient, *, reset: bool = Fals
     for statement in _split_statements(ARCHIVE_ONLY_TABLE_DEFINITIONS):
         await client.execute_query(statement)
 
+    for statement in _split_statements(ARCHIVE_RUNTIME_INDEX_DEFINITIONS):
+        await client.execute_query(statement)
+
 
 __all__ = [
     "ARCHIVE_ONLY_AUTH_TABLES",
     "ARCHIVE_ONLY_TABLE_DEFINITIONS",
+    "ARCHIVE_RUNTIME_INDEX_DEFINITIONS",
     "AUTH_SCHEMA_DEFINITIONS",
     "AUTH_TABLES",
     "RUNTIME_AUTH_TABLES",
