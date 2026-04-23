@@ -57,7 +57,5 @@ export function renderWithProviders(
 
 // Re-export everything from testing-library
 export * from '@testing-library/react';
-export { userEvent };
-
 // Default render override
-export { renderWithProviders as render };
+export { renderWithProviders as render, userEvent };

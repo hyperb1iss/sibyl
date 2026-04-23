@@ -205,5 +205,6 @@ export default defineConfig({
     // Allow localhost links in docs (they reference local dev services)
     ignoreDeadLinks: [
         /^http:\/\/localhost/,
+        /^\/(Users|home)\//,
     ],
 })

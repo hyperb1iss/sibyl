@@ -37,7 +37,7 @@ type LogData = Record<string, unknown>;
 /**
  * Check if colors should be enabled (TTY or FORCE_COLOR)
  */
-function useColors(): boolean {
+function shouldUseColors(): boolean {
   if (typeof process === 'undefined') return false;
   const forceColor = process.env.FORCE_COLOR;
   if (forceColor && forceColor !== '0' && forceColor !== 'false') return true;
@@ -54,13 +54,13 @@ function getTimestamp(): string {
 /**
  * Format key-value pairs for log output
  */
-function formatKV(data: LogData | undefined, useColors: boolean): string {
+function formatKV(data: LogData | undefined, colorsEnabled: boolean): string {
   if (!data || Object.keys(data).length === 0) return '';
 
   const pairs = Object.entries(data)
     .filter(([key]) => !key.startsWith('_'))
     .map(([key, value]) => {
-      if (useColors) {
+      if (colorsEnabled) {
         if (typeof value === 'number') {
           return `${key}=${COLORS.coral}${value}${COLORS.reset}`;
         }
@@ -79,7 +79,7 @@ function formatKV(data: LogData | undefined, useColors: boolean): string {
  * Format a log message in Sibyl style
  */
 function formatLog(level: LogLevel, message: string, data?: LogData): string {
-  const colors = useColors();
+  const colors = shouldUseColors();
   const timestamp = getTimestamp();
   const kv = formatKV(data, colors);
 

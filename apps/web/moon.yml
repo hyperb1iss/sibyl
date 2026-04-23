@@ -46,7 +46,7 @@ tasks:
 
   # Type Checking
   typecheck:
-    command: pnpm tsc --noEmit
+    script: pnpm next typegen && pnpm tsc --noEmit
     inputs:
       - "@group(sources)"
       - "@group(configs)"

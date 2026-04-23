@@ -2,6 +2,9 @@
     "name": "sibyl-docs",
     "version": "1.0.0",
     "private": true,
+    "engines": {
+        "node": "~24"
+    },
     "description": "Sibyl Documentation - Knowledge graph and task workflow",
     "scripts": {
         "dev": "vitepress dev",
@@ -9,7 +12,7 @@
         "preview": "vitepress preview"
     },
     "devDependencies": {
-        "vitepress": "^2.0.0-alpha.15",
-        "vitepress-plugin-llms": "^1.9.3"
+        "vitepress": "2.0.0-alpha.17",
+        "vitepress-plugin-llms": "^1.12.1"
     }
 }

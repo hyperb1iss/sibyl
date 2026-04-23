@@ -253,7 +253,7 @@ export function VelocityLineChart({ data, className }: VelocityChartProps) {
           />
           <Tooltip
             content={<CustomTooltip />}
-            labelFormatter={(label: string) => `Date: ${label}`}
+            labelFormatter={label => `Date: ${String(label ?? '')}`}
           />
           <Line
             type="monotone"

@@ -71,7 +71,7 @@ export function Tooltip({ content, children, side = 'top', delay = 200 }: Toolti
 }
 
 // Export primitives for advanced usage
-export { TooltipProvider, TooltipRoot, TooltipTrigger, TooltipContent };
+export { TooltipContent, TooltipProvider, TooltipRoot, TooltipTrigger };
 
 // Empty state component for when there's no data - with personality
 interface EmptyStateProps {

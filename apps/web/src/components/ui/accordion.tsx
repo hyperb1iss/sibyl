@@ -194,11 +194,11 @@ AccordionCardContent.displayName = 'AccordionCardContent';
 
 export {
   Accordion,
-  AccordionItem,
-  AccordionTrigger,
-  AccordionContent,
   AccordionCard,
+  AccordionCardContent,
   AccordionCardItem,
   AccordionCardTrigger,
-  AccordionCardContent,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
 };

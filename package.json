@@ -6,7 +6,7 @@
     "fmt": "prettier --write \"**/*.{yaml,yml,md}\""
   },
   "devDependencies": {
-    "prettier": "^3.4.2"
+    "prettier": "^3.8.3"
   },
   "engines": {
     "node": "~24"

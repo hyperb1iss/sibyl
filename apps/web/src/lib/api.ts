@@ -1207,7 +1207,7 @@ async function tryRefreshToken(): Promise<boolean> {
   }
 
   // If already refreshing, wait for that to complete
-  if (isRefreshing && refreshPromise) {
+  if (isRefreshing && refreshPromise !== null) {
     return refreshPromise;
   }
 
@@ -1255,7 +1255,7 @@ async function tryRefreshToken(): Promise<boolean> {
 }
 
 async function bestEffortLogout(): Promise<void> {
-  if (logoutPromise) return logoutPromise;
+  if (logoutPromise !== null) return logoutPromise;
 
   logoutPromise = (async () => {
     try {

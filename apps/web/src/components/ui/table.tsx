@@ -199,14 +199,14 @@ function TableEmpty({ icon, title, description, action }: TableEmptyProps) {
 }
 
 export {
+  type SortDirection,
   Table,
-  TableHeader,
   TableBody,
+  TableCaption,
+  TableCell,
+  TableEmpty,
   TableFooter,
   TableHead,
+  TableHeader,
   TableRow,
-  TableCell,
-  TableCaption,
-  TableEmpty,
-  type SortDirection,
 };
