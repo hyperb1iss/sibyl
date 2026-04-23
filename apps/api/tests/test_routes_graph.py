@@ -17,7 +17,7 @@ def _org() -> SimpleNamespace:
 
 class TestGraphRoutes:
     @pytest.mark.asyncio
-    async def test_debug_graph_uses_legacy_entity_runtime(self) -> None:
+    async def test_debug_graph_uses_entity_graph_runtime(self) -> None:
         runtime = SimpleNamespace(
             entity_manager=SimpleNamespace(
                 list_all=AsyncMock(
@@ -38,7 +38,7 @@ class TestGraphRoutes:
         )
 
         with patch(
-            "sibyl.api.routes.graph.get_legacy_entity_runtime",
+            "sibyl.api.routes.graph.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ):
             result = await graph_routes.debug_graph(org=_org())
@@ -54,7 +54,7 @@ class TestGraphRoutes:
         runtime.relationship_manager.list_all.assert_awaited_once_with(limit=1000)
 
     @pytest.mark.asyncio
-    async def test_get_all_nodes_uses_legacy_entity_runtime(self) -> None:
+    async def test_get_all_nodes_uses_entity_graph_runtime(self) -> None:
         runtime = SimpleNamespace(
             entity_manager=SimpleNamespace(
                 list_all=AsyncMock(
@@ -88,7 +88,7 @@ class TestGraphRoutes:
         )
 
         with patch(
-            "sibyl.api.routes.graph.get_legacy_entity_runtime",
+            "sibyl.api.routes.graph.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ):
             nodes = await graph_routes.get_all_nodes(
@@ -120,7 +120,7 @@ class TestGraphRoutes:
         ]
 
     @pytest.mark.asyncio
-    async def test_get_all_edges_uses_legacy_entity_runtime(self) -> None:
+    async def test_get_all_edges_uses_entity_graph_runtime(self) -> None:
         runtime = SimpleNamespace(
             relationship_manager=SimpleNamespace(
                 list_all=AsyncMock(
@@ -137,7 +137,7 @@ class TestGraphRoutes:
         )
 
         with patch(
-            "sibyl.api.routes.graph.get_legacy_entity_runtime",
+            "sibyl.api.routes.graph.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ):
             edges = await graph_routes.get_all_edges(
@@ -157,7 +157,7 @@ class TestGraphRoutes:
         )
 
     @pytest.mark.asyncio
-    async def test_get_subgraph_uses_legacy_entity_runtime(self) -> None:
+    async def test_get_subgraph_uses_entity_graph_runtime(self) -> None:
         center = SimpleNamespace(
             id="task-1",
             entity_type=EntityType.TASK,
@@ -187,7 +187,7 @@ class TestGraphRoutes:
         )
 
         with patch(
-            "sibyl.api.routes.graph.get_legacy_entity_runtime",
+            "sibyl.api.routes.graph.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ):
             result = await graph_routes.get_subgraph(
@@ -217,7 +217,7 @@ class TestGraphRoutes:
         runtime = SimpleNamespace(client=object())
         with (
             patch(
-                "sibyl.api.routes.graph.get_legacy_entity_runtime",
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
@@ -246,7 +246,7 @@ class TestGraphRoutes:
         )
 
     @pytest.mark.asyncio
-    async def test_get_full_graph_uses_legacy_entity_runtime(self) -> None:
+    async def test_get_full_graph_uses_entity_graph_runtime(self) -> None:
         runtime = SimpleNamespace(
             entity_manager=SimpleNamespace(
                 list_all=AsyncMock(
@@ -279,7 +279,7 @@ class TestGraphRoutes:
         )
 
         with patch(
-            "sibyl.api.routes.graph.get_legacy_entity_runtime",
+            "sibyl.api.routes.graph.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ):
             result = await graph_routes.get_full_graph(
@@ -319,7 +319,7 @@ class TestGraphRoutes:
 
         with (
             patch(
-                "sibyl.api.routes.graph.get_legacy_entity_runtime",
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
@@ -370,7 +370,7 @@ class TestGraphRoutes:
 
         with (
             patch(
-                "sibyl.api.routes.graph.get_legacy_entity_runtime",
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(

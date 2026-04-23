@@ -30,20 +30,12 @@ _ADMIN_ROLES = (
 )
 
 
-async def get_legacy_entity_runtime(group_id: str):
+async def get_entity_graph_runtime(group_id: str):
     return await _service_get_entity_graph_runtime(group_id)
 
 
-async def get_entity_graph_runtime(group_id: str):
-    return await get_legacy_entity_runtime(group_id)
-
-
-async def get_legacy_graph_query_adapter(group_id: str):
-    return await _service_get_graph_query_adapter(group_id)
-
-
 async def get_graph_query_adapter(group_id: str):
-    return await get_legacy_graph_query_adapter(group_id)
+    return await _service_get_graph_query_adapter(group_id)
 
 
 async def get_clusters_for_visualization(
