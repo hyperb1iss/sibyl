@@ -47,6 +47,21 @@ def test_auth_runtime_maps_auth_exports_for_surreal(
     )
 
 
+def test_auth_runtime_surreal_backend_covers_public_exports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
+
+    overrides = auth_runtime._BACKEND_NAME_OVERRIDES.get("surreal", {})
+    skipped = {"InvalidAuthClaimsError", "UserNotFoundError"}
+
+    for name in auth_runtime.__all__:
+        if name in skipped:
+            continue
+        export_name = overrides.get(name, name)
+        assert hasattr(surreal_auth_runtime, export_name), name
+
+
 @pytest.mark.asyncio
 async def test_auth_runtime_dispatches_profile_patch_to_surreal(
     monkeypatch: pytest.MonkeyPatch,

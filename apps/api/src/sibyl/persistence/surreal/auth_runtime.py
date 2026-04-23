@@ -24,7 +24,12 @@ from sibyl.auth.api_key_common import (
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import JwtError, create_access_token, create_refresh_token, verify_access_token
 from sibyl.auth.passwords import hash_password, verify_password
-from sibyl.auth.primitives import DeviceTokenError
+from sibyl.auth.primitives import (
+    DeviceTokenError,
+    generate_device_code,
+    generate_user_code,
+    hash_device_code,
+)
 from sibyl.db.models import ProjectRole, ProjectVisibility
 from sibyl.email import PasswordResetEmail, get_email_client
 from sibyl.persistence.surreal.auth import (
@@ -1100,9 +1105,9 @@ async def start_legacy_device_authorization(
         now = _utcnow()
         expires_at = now + expires_in
         for _ in range(20):
-            device_code = generate_api_key(live=False)
-            user_code = f"{uuid4().hex[:4].upper()}-{uuid4().hex[:4].upper()}"
-            device_code_hash = hashlib.sha256(device_code.encode("utf-8")).hexdigest()
+            device_code = generate_device_code()
+            user_code = generate_user_code()
+            device_code_hash = hash_device_code(device_code)
             existing = await repo.select_one(
                 "SELECT * FROM device_authorization_requests "
                 "WHERE device_code_hash = $device_code_hash OR user_code = $user_code LIMIT 1;",
@@ -1147,7 +1152,7 @@ async def exchange_legacy_device_code(*, device_code: str) -> dict[str, object]:
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         sessions = SurrealSessionRepository.from_client(client)
-        device_code_hash = hashlib.sha256(device_code.encode("utf-8")).hexdigest()
+        device_code_hash = hash_device_code(device_code)
         record = await repo.select_one(
             "SELECT * FROM device_authorization_requests "
             "WHERE device_code_hash = $device_code_hash LIMIT 1;",

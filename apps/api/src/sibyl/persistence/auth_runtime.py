@@ -137,8 +137,8 @@ def _resolve_backend_export(name: str) -> Any:
 def _unsupported_export(*, name: str, backend: str) -> Any:
     message = (
         f"{name} is not implemented for SIBYL_AUTH_STORE={backend!r}. "
-        "Keep SIBYL_AUTH_STORE=postgres for request-time auth flows until the "
-        "remaining Surreal adapters land."
+        "Add the backend adapter or route the export through the runtime helper "
+        "before using it on this path."
     )
     if name.endswith("Resolver"):
 

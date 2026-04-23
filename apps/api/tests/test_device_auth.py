@@ -1,6 +1,7 @@
 """Tests for device authorization security (code enumeration prevention)."""
 
 from sibyl.auth.device_authorization import (
+    generate_device_code,
     generate_user_code,
     normalize_user_code,
 )
@@ -62,6 +63,16 @@ class TestGenerateUserCode:
             assert "O" not in code
             assert "1" not in code
             assert "I" not in code
+
+
+class TestGenerateDeviceCode:
+    """Tests for raw device code generation."""
+
+    def test_device_code_is_not_api_key_like(self) -> None:
+        """Generated device codes should not look like API keys."""
+        code = generate_device_code()
+        assert code
+        assert not code.startswith("sk_")
 
 
 class TestDeviceAuthEnumerationPrevention:

@@ -10,8 +10,6 @@ Storage is PostgreSQL-backed via DeviceAuthorizationRequest.
 
 from __future__ import annotations
 
-import hashlib
-import secrets
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Self
 
@@ -20,7 +18,13 @@ from sqlmodel import select
 
 from sibyl import config as config_module
 from sibyl.auth.jwt import create_access_token, create_refresh_token
-from sibyl.auth.primitives import DeviceTokenError, generate_user_code, normalize_user_code
+from sibyl.auth.primitives import (
+    DeviceTokenError,
+    generate_device_code,
+    generate_user_code,
+    hash_device_code,
+    normalize_user_code,
+)
 from sibyl.auth.sessions import SessionManager
 from sibyl.db.models import DeviceAuthorizationRequest
 
@@ -30,6 +34,7 @@ if TYPE_CHECKING:
 __all__ = [
     "DeviceAuthorizationManager",
     "DeviceTokenError",
+    "generate_device_code",
     "generate_user_code",
     "normalize_user_code",
 ]
@@ -40,7 +45,7 @@ def _utcnow_naive() -> datetime:
 
 
 def _hash_device_code(device_code: str) -> str:
-    return hashlib.sha256(device_code.encode("utf-8")).hexdigest()
+    return hash_device_code(device_code)
 
 
 class DeviceAuthorizationManager:
@@ -67,7 +72,7 @@ class DeviceAuthorizationManager:
         expires_at = now + expires_in
 
         for _ in range(20):
-            device_code = secrets.token_urlsafe(32)
+            device_code = generate_device_code()
             user_code = generate_user_code()
             device_hash = _hash_device_code(device_code)
 

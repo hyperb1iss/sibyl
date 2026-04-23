@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import secrets
 from dataclasses import dataclass
@@ -18,6 +19,14 @@ def slugify(name: str) -> str:
 
 def generate_invite_token() -> str:
     return secrets.token_urlsafe(48)
+
+
+def generate_device_code() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def hash_device_code(device_code: str) -> str:
+    return hashlib.sha256(device_code.encode("utf-8")).hexdigest()
 
 
 def generate_user_code() -> str:
