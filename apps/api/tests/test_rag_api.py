@@ -518,7 +518,7 @@ class TestDocumentRelatedEntities:
                 AsyncMock(return_value={"proj-1"}),
             ),
             patch(
-                "sibyl.api.routes.rag.get_legacy_entity_runtime",
+                "sibyl.api.routes.rag.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
         ):
