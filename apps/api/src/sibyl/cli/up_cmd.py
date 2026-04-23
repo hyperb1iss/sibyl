@@ -27,6 +27,12 @@ from sibyl.cli.common import (
     success,
     warn,
 )
+from sibyl.runtime_shape import (
+    default_auth_store,
+    requires_relational_support,
+    requires_surreal_support,
+    resolve_coordination_backend,
+)
 
 
 # Find project root (where docker-compose.yml lives)
@@ -80,22 +86,21 @@ def _default_local_surreal_url(env: dict[str, str]) -> str:
 
 
 def _resolve_coordination_backend(env: dict[str, str]) -> str:
-    configured = env.get("SIBYL_COORDINATION_BACKEND", "auto")
-    if configured == "auto":
-        return "redis" if env.get("SIBYL_STORE", "legacy") == "legacy" else "local"
-    return configured
+    return resolve_coordination_backend(
+        store=env.get("SIBYL_STORE", "legacy"),
+        coordination_backend=env.get("SIBYL_COORDINATION_BACKEND", "auto"),
+    )
 
 
 def _apply_surreal_dev_defaults(env: dict[str, str]) -> None:
     env.setdefault("SIBYL_STORE", "surreal")
-    env.setdefault(
-        "SIBYL_AUTH_STORE",
-        "surreal" if env["SIBYL_STORE"] == "surreal" else "postgres",
-    )
+    env.setdefault("SIBYL_AUTH_STORE", default_auth_store(store=env["SIBYL_STORE"]))
     env.setdefault("SIBYL_COORDINATION_BACKEND", "auto")
 
-    uses_surreal = env["SIBYL_STORE"] == "surreal" or env["SIBYL_AUTH_STORE"] == "surreal"
-    if uses_surreal:
+    if requires_surreal_support(
+        store=env["SIBYL_STORE"],
+        auth_store=env["SIBYL_AUTH_STORE"],
+    ):
         env.setdefault("SIBYL_SURREAL_URL", _default_local_surreal_url(env))
         env.pop("SIBYL_SURREAL_DATA_DIR", None)
 
@@ -152,14 +157,14 @@ def _load_runtime_env(project_root: Path) -> dict[str, str]:
 
 def _compose_services_for_env(env: dict[str, str]) -> list[str]:
     store = env.get("SIBYL_STORE", "surreal")
-    auth_store = env.get("SIBYL_AUTH_STORE", "surreal" if store == "surreal" else "postgres")
+    auth_store = env.get("SIBYL_AUTH_STORE", default_auth_store(store=store))
     services: list[str] = []
 
     if store == "legacy":
         services.append("falkordb")
-    if store == "surreal" or auth_store == "surreal":
+    if requires_surreal_support(store=store, auth_store=auth_store):
         services.append("surrealdb")
-    if store == "legacy" or auth_store == "postgres":
+    if requires_relational_support(store=store, auth_store=auth_store):
         services.append("postgres")
     if _resolve_coordination_backend(env) == "redis":
         services.append("redis")

@@ -9,6 +9,14 @@ import structlog
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from sibyl.runtime_shape import (
+    default_auth_store,
+    fully_surreal_runtime,
+    requires_relational_support,
+    resolve_coordination_backend,
+    uses_relational_auth,
+)
+
 _log = structlog.get_logger()
 
 # Persisted auto-generated JWT key (same pattern as settings.key in crypto.py)
@@ -82,7 +90,7 @@ class Settings(BaseSettings):
     def validate_security_settings(self) -> "Settings":
         """Prevent insecure settings in production."""
         if self.store == "surreal" and "auth_store" not in self.model_fields_set:
-            object.__setattr__(self, "auth_store", "surreal")
+            object.__setattr__(self, "auth_store", default_auth_store(store=self.store))
         if self.environment == "production":
             if self.disable_auth:
                 raise ValueError(
@@ -445,24 +453,25 @@ class Settings(BaseSettings):
     @property
     def fully_surreal(self) -> bool:
         """Whether both the main store and auth runtime are fully Surreal-backed."""
-        return self.store == "surreal" and self.auth_store == "surreal"
+        return fully_surreal_runtime(store=self.store, auth_store=self.auth_store)
 
     @property
     def uses_relational_auth(self) -> bool:
         """Whether auth/session persistence still depends on PostgreSQL."""
-        return self.auth_store == "postgres"
+        return uses_relational_auth(auth_store=self.auth_store)
 
     @property
     def requires_relational_support(self) -> bool:
         """Whether startup/runtime helpers still need relational services online."""
-        return self.store == "legacy" or self.uses_relational_auth
+        return requires_relational_support(store=self.store, auth_store=self.auth_store)
 
     @property
     def resolved_coordination_backend(self) -> Literal["local", "redis"]:
         """Resolve the active coordination backend for this runtime."""
-        if self.coordination_backend == "auto":
-            return "redis" if self.store == "legacy" else "local"
-        return self.coordination_backend
+        return resolve_coordination_backend(
+            store=self.store,
+            coordination_backend=self.coordination_backend,
+        )
 
 
 # Global settings instance
