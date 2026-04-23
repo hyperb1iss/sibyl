@@ -120,7 +120,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:  # noqa: PLR0915
     coordination_backend = settings.resolved_coordination_backend
 
     if settings.store == "surreal" and settings.uses_relational_auth:
-        log.info("Surreal store mode enabled; bootstrapping remaining PostgreSQL-backed services")
+        log.info("Surreal store mode enabled; bootstrapping remaining relational sidecar services")
 
     if settings.requires_relational_support:
         await _bootstrap_legacy_postgres_support()

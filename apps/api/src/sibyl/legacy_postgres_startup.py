@@ -1,4 +1,4 @@
-"""Bootstrap the remaining PostgreSQL-backed services during startup."""
+"""Bootstrap the remaining relational sidecar services during startup."""
 
 from __future__ import annotations
 
@@ -37,16 +37,16 @@ async def load_legacy_postgres_api_keys() -> None:
 
 async def bootstrap_legacy_postgres_support() -> bool:
     if not settings.requires_relational_support:
-        log.info("PostgreSQL bootstrap disabled in fully surreal mode", store=settings.store)
+        log.info("Relational sidecar bootstrap disabled in fully surreal mode", store=settings.store)
         return False
 
     try:
         await check_legacy_postgres_connection()
     except Exception as exc:
-        log.warning("PostgreSQL unavailable at startup", error=str(exc), store=settings.store)
+        log.warning("Relational sidecar unavailable at startup", error=str(exc), store=settings.store)
         return False
 
-    log.info("PostgreSQL connected", host=settings.postgres_host, store=settings.store)
+    log.info("Relational sidecar connected", host=settings.postgres_host, store=settings.store)
 
     try:
         await run_legacy_postgres_migrations()

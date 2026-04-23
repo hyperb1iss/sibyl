@@ -117,7 +117,7 @@ def create_combined_app(  # noqa: PLR0915
 
         if settings.store == "surreal" and settings.uses_relational_auth:
             log.info(
-                "Surreal store mode enabled; bootstrapping remaining PostgreSQL-backed services"
+                "Surreal store mode enabled; bootstrapping remaining relational sidecar services"
             )
 
         if settings.requires_relational_support:

@@ -128,7 +128,7 @@ def _warn_if_auth_payload_skipped(*, archive: object, restore_auth: bool) -> Non
         return
     if settings.uses_relational_auth:
         warn("Archive includes auth.json, but SIBYL_AUTH_STORE is not surreal")
-        info("PostgreSQL remains the active auth source; auth.json will be skipped")
+        info("The active auth store is still relational; auth.json will be skipped")
 
 
 def _warn_if_content_payload_skipped(*, archive: object, restore_content: bool) -> None:
