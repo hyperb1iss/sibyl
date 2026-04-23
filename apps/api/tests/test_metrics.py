@@ -448,10 +448,10 @@ class TestGetProjectMetrics:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
-            patch("sibyl.api.routes.metrics.get_legacy_entity_runtime", AsyncMock()),
+            patch("sibyl.api.routes.metrics.get_entity_graph_runtime", AsyncMock()),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_project_metrics("nonexistent", org=mock_org)
@@ -506,11 +506,11 @@ class TestGetProjectMetrics:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics.get_legacy_entity_runtime",
+                "sibyl.api.routes.metrics.get_entity_graph_runtime",
                 AsyncMock(return_value=mock_runtime),
             ),
         ):
@@ -552,11 +552,11 @@ class TestGetProjectMetrics:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics.get_legacy_entity_runtime",
+                "sibyl.api.routes.metrics.get_entity_graph_runtime",
                 AsyncMock(return_value=mock_runtime),
             ),
         ):
@@ -608,11 +608,11 @@ class TestGetProjectMetrics:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics.get_legacy_entity_runtime",
+                "sibyl.api.routes.metrics.get_entity_graph_runtime",
                 AsyncMock(return_value=mock_runtime),
             ),
         ):
@@ -707,7 +707,7 @@ class TestGetOrgMetrics:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
         ):
@@ -756,7 +756,7 @@ class TestGetOrgMetrics:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
         ):
@@ -822,7 +822,7 @@ class TestGetOrgMetrics:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
         ):
@@ -910,7 +910,7 @@ class TestGetOrgMetrics:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
         ):
@@ -1004,7 +1004,7 @@ class TestGetOrgMetrics:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
         ):
@@ -1056,7 +1056,7 @@ class TestGetOrgMetrics:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
         ):
@@ -1139,7 +1139,7 @@ class TestGetProjectSummaries:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
         ):
@@ -1193,7 +1193,7 @@ class TestGetProjectSummaries:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
         ):
@@ -1235,11 +1235,11 @@ class TestMetricsErrorHandling:
 
         with (
             patch(
-                "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
                 AsyncMock(return_value=mock_service),
             ),
             patch(
-                "sibyl.api.routes.metrics.get_legacy_entity_runtime",
+                "sibyl.api.routes.metrics.get_entity_graph_runtime",
                 side_effect=Exception("Database error"),
             ),
         ):
@@ -1257,7 +1257,7 @@ class TestMetricsErrorHandling:
         mock_org = create_mock_org()
 
         with patch(
-            "sibyl.api.routes.metrics.get_legacy_knowledge_read_adapter",
+            "sibyl.api.routes.metrics.get_knowledge_read_adapter",
             side_effect=Exception("Database error"),
         ):
             with pytest.raises(HTTPException) as exc_info:
