@@ -181,7 +181,11 @@ def _coerce_optional_uuid(value: object | None) -> UUID | None:
 
 
 def _coerce_datetime(value: object | None) -> datetime | None:
-    if value is None or isinstance(value, datetime):
+    if value is None:
+        return value
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(UTC).replace(tzinfo=None)
         return value
     if isinstance(value, str):
         normalized = value.replace("Z", "+00:00")
