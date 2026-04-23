@@ -3,6 +3,7 @@
 Hosts both MCP protocol at /mcp and REST API at /api/*.
 """
 
+import contextlib
 import os
 
 # Disable Graphiti telemetry before any imports
@@ -20,6 +21,25 @@ from sibyl.legacy_postgres_startup import bootstrap_legacy_postgres_support
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+
+
+def _enable_dev_signal_diagnostics() -> None:
+    enabled = os.getenv("SIBYL_DEV_DIAGNOSTICS", "").lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return
+
+    import faulthandler
+    import signal
+
+    sigusr1 = getattr(signal, "SIGUSR1", None)
+    if sigusr1 is None:
+        return
+
+    with contextlib.suppress(RuntimeError):
+        faulthandler.enable()
+
+    with contextlib.suppress(OSError, RuntimeError, ValueError):
+        faulthandler.register(sigusr1, all_threads=True)
 
 
 def create_combined_app(  # noqa: PLR0915
@@ -323,6 +343,7 @@ def create_dev_app() -> Starlette:
     """
     import os
 
+    _enable_dev_signal_diagnostics()
     embed_worker = os.getenv("SIBYL_RUN_WORKER", "").lower() in ("true", "1", "yes")
     return create_combined_app(embed_worker=embed_worker)
 

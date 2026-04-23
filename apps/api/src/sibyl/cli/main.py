@@ -111,7 +111,12 @@ def _serve_with_reload(host: str, port: int) -> None:
     console.print(f"[{NEON_CYAN}]Hot reload enabled - watching for changes[/{NEON_CYAN}]")
     console.print(f"[dim]API: http://{host}:{port}/api[/dim]")
     console.print(f"[dim]MCP: http://{host}:{port}/mcp[/dim]")
-    console.print(f"[dim]Docs: http://{host}:{port}/api/docs[/dim]\n")
+    console.print(f"[dim]Docs: http://{host}:{port}/api/docs[/dim]")
+    console.print("[dim]Debug stacks: kill -USR1 <api-child-pid>[/dim]\n")
+
+    env = os.environ.copy()
+    env.setdefault("PYTHONFAULTHANDLER", "1")
+    env.setdefault("SIBYL_DEV_DIAGNOSTICS", "1")
 
     process = subprocess.Popen(  # noqa: S603
         [
@@ -130,6 +135,7 @@ def _serve_with_reload(host: str, port: int) -> None:
             "--log-level",
             "warning",
         ],
+        env=env,
         start_new_session=True,
     )
 
