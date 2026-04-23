@@ -160,7 +160,7 @@ class TestListJobsRoute:
         with (
             patch("sibyl.jobs.queue.list_jobs", AsyncMock(return_value=jobs)),
             patch(
-                "sibyl.api.routes.jobs._resolve_visible_legacy_source_ids",
+                "sibyl.api.routes.jobs._resolve_visible_source_ids",
                 resolve_visible_source_ids,
             ),
         ):

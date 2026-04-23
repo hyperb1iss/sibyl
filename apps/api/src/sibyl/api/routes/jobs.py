@@ -37,7 +37,7 @@ async def _job_visible_to_org(
     *,
     org: Organization,
     session: Any | None = None,
-    legacy_source_ids: set[UUID] | None = None,
+    visible_source_ids: set[UUID] | None = None,
 ) -> bool:
     fn = getattr(job, "function", "") or ""
     args: list[Any] = list(getattr(job, "args", None) or ())
@@ -60,8 +60,8 @@ async def _job_visible_to_org(
         except (TypeError, ValueError):
             return False
 
-        if legacy_source_ids is not None:
-            return source_uuid in legacy_source_ids
+        if visible_source_ids is not None:
+            return source_uuid in visible_source_ids
         if session is not None:
             return await _source_visible_to_org(
                 org_id=org.id,
@@ -79,7 +79,7 @@ async def _job_visible_to_org(
     return False
 
 
-async def _resolve_visible_legacy_source_ids(
+async def _resolve_visible_source_ids(
     jobs: list[Any],
     *,
     org: Organization,
@@ -160,14 +160,14 @@ async def list_jobs(
 
     try:
         jobs = await _list_jobs(function=function, limit=limit)
-        legacy_source_ids = await _resolve_visible_legacy_source_ids(jobs, org=org)
+        visible_source_ids = await _resolve_visible_source_ids(jobs, org=org)
         visible = [
             j
             for j in jobs
             if await _job_visible_to_org(
                 j,
                 org=org,
-                legacy_source_ids=legacy_source_ids,
+                visible_source_ids=visible_source_ids,
             )
         ]
         return {
