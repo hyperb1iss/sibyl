@@ -39,20 +39,12 @@ _WRITE_ROLES = (
 )
 
 
-async def get_legacy_knowledge_read_adapter(group_id: str):
+async def get_knowledge_read_adapter(group_id: str):
     return await _service_get_knowledge_read_adapter(group_id)
 
 
-async def get_knowledge_read_adapter(group_id: str):
-    return await get_legacy_knowledge_read_adapter(group_id)
-
-
-async def get_legacy_task_runtime(group_id: str):
-    return await _service_get_task_graph_runtime(group_id)
-
-
 async def get_task_graph_runtime(group_id: str):
-    return await get_legacy_task_runtime(group_id)
+    return await _service_get_task_graph_runtime(group_id)
 
 
 async def _verify_task_access(

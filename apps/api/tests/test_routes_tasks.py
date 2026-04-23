@@ -42,7 +42,7 @@ class TestCompleteTaskRoute:
         with (
             patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
             patch("sibyl.api.routes.tasks.entity_lock", locked_entity),
-            patch("sibyl.api.routes.tasks.get_legacy_task_runtime", AsyncMock(return_value=runtime)),
+            patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
             patch("sibyl.api.routes.tasks.TaskWorkflowEngine", return_value=workflow),
             patch("sibyl.jobs.queue.enqueue_create_learning_episode", episode_enqueue),
             patch("sibyl.jobs.queue.enqueue_create_learning_procedure", procedure_enqueue),
@@ -85,7 +85,7 @@ class TestListNotesRoute:
                 "sibyl.api.routes.tasks._verify_task_access",
                 AsyncMock(return_value=SimpleNamespace(id="task-123")),
             ),
-            patch("sibyl.api.routes.tasks.get_legacy_task_runtime", AsyncMock(return_value=runtime)),
+            patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
         ):
             response = await list_notes("task-123", org=org, auth=auth)
 

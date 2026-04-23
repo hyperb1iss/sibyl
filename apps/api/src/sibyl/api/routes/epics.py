@@ -32,20 +32,12 @@ _WRITE_ROLES = (
 )
 
 
-async def get_legacy_knowledge_read_adapter(group_id: str):
+async def get_knowledge_read_adapter(group_id: str):
     return await _service_get_knowledge_read_adapter(group_id)
 
 
-async def get_knowledge_read_adapter(group_id: str):
-    return await get_legacy_knowledge_read_adapter(group_id)
-
-
-async def update_legacy_entity(group_id: str, entity_id: str, patch: dict[str, object]):
-    return await _service_update_graph_entity(group_id, entity_id, patch)
-
-
 async def update_graph_entity(group_id: str, entity_id: str, patch: dict[str, object]):
-    return await update_legacy_entity(group_id, entity_id, patch)
+    return await _service_update_graph_entity(group_id, entity_id, patch)
 
 router = APIRouter(
     prefix="/epics",

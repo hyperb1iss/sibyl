@@ -23,7 +23,7 @@ async def test_verify_task_access_uses_knowledge_read_adapter() -> None:
     authorize = AsyncMock()
 
     with (
-        patch("sibyl.api.routes.tasks.get_legacy_knowledge_read_adapter", AsyncMock(return_value=service)),
+        patch("sibyl.api.routes.tasks.get_knowledge_read_adapter", AsyncMock(return_value=service)),
         patch("sibyl.api.routes.tasks.verify_entity_project_access", authorize),
     ):
         await _verify_task_access("task-1", org, ctx, session)
@@ -47,7 +47,7 @@ async def test_verify_epic_access_uses_knowledge_read_adapter() -> None:
     authorize = AsyncMock()
 
     with (
-        patch("sibyl.api.routes.epics.get_legacy_knowledge_read_adapter", AsyncMock(return_value=service)),
+        patch("sibyl.api.routes.epics.get_knowledge_read_adapter", AsyncMock(return_value=service)),
         patch("sibyl.api.routes.epics.verify_entity_project_access", authorize),
     ):
         result = await _verify_epic_access("epic-1", org, ctx)

@@ -34,14 +34,14 @@ def _epic() -> SimpleNamespace:
 
 class TestEpicRoutes:
     @pytest.mark.asyncio
-    async def test_start_epic_routes_updates_through_legacy_seams(self) -> None:
+    async def test_start_epic_routes_updates_through_graph_runtime(self) -> None:
         epic = _epic()
         update_entity = AsyncMock()
         broadcast = AsyncMock()
 
         with (
             patch("sibyl.api.routes.epics._verify_epic_access", AsyncMock(return_value=epic)),
-            patch("sibyl.api.routes.epics.update_legacy_entity", update_entity),
+            patch("sibyl.api.routes.epics.update_graph_entity", update_entity),
             patch("sibyl.api.routes.epics.broadcast_event", broadcast),
         ):
             response = await start_epic("epic-1", org=_org(), ctx=_ctx())
@@ -59,13 +59,13 @@ class TestEpicRoutes:
         broadcast.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_complete_epic_captures_learnings_via_legacy_update(self) -> None:
+    async def test_complete_epic_captures_learnings_via_graph_update(self) -> None:
         epic = _epic()
         update_entity = AsyncMock()
 
         with (
             patch("sibyl.api.routes.epics._verify_epic_access", AsyncMock(return_value=epic)),
-            patch("sibyl.api.routes.epics.update_legacy_entity", update_entity),
+            patch("sibyl.api.routes.epics.update_graph_entity", update_entity),
             patch("sibyl.api.routes.epics.broadcast_event", AsyncMock()),
         ):
             response = await complete_epic(
@@ -90,7 +90,7 @@ class TestEpicRoutes:
 
         with (
             patch("sibyl.api.routes.epics._verify_epic_access", AsyncMock(return_value=epic)),
-            patch("sibyl.api.routes.epics.update_legacy_entity", update_entity),
+            patch("sibyl.api.routes.epics.update_graph_entity", update_entity),
             pytest.raises(HTTPException, match="No fields to update") as exc_info,
         ):
             await update_epic(
