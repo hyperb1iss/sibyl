@@ -181,9 +181,7 @@ async def get_stats(
 @router.get("/health", response_model=CrawlHealthResponse)
 async def get_health() -> CrawlHealthResponse:
     """Check crawler system health."""
-    relational_backend_enabled = not (
-        settings.store == "surreal" and settings.auth_store == "surreal"
-    )
+    relational_backend_enabled = settings.requires_relational_support
 
     if not relational_backend_enabled:
         pg_health = {"status": "disabled", "postgres_version": None, "pgvector_version": None}

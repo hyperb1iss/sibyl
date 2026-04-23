@@ -118,12 +118,11 @@ async def _bootstrap_legacy_postgres_support() -> bool:
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:  # noqa: PLR0915
     """Run migrations, pre-warm graph client, and start coordination backends."""
     coordination_backend = settings.resolved_coordination_backend
-    fully_surreal = settings.store == "surreal" and settings.auth_store == "surreal"
 
-    if settings.store == "surreal" and settings.auth_store != "surreal":
+    if settings.store == "surreal" and settings.uses_relational_auth:
         log.info("Surreal store mode enabled; bootstrapping remaining PostgreSQL-backed services")
 
-    if not fully_surreal:
+    if settings.requires_relational_support:
         await _bootstrap_legacy_postgres_support()
 
     log.info("Pre-warming graph client connection...")

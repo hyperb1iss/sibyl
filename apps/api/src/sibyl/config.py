@@ -443,6 +443,21 @@ class Settings(BaseSettings):
         return f"postgresql://{self.postgres_user}:{password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
 
     @property
+    def fully_surreal(self) -> bool:
+        """Whether both the main store and auth runtime are fully Surreal-backed."""
+        return self.store == "surreal" and self.auth_store == "surreal"
+
+    @property
+    def uses_relational_auth(self) -> bool:
+        """Whether auth/session persistence still depends on PostgreSQL."""
+        return self.auth_store == "postgres"
+
+    @property
+    def requires_relational_support(self) -> bool:
+        """Whether startup/runtime helpers still need relational services online."""
+        return self.store == "legacy" or self.uses_relational_auth
+
+    @property
     def resolved_coordination_backend(self) -> Literal["local", "redis"]:
         """Resolve the active coordination backend for this runtime."""
         if self.coordination_backend == "auto":
