@@ -206,3 +206,18 @@ def test_prepare_graph_runtime_surreal_clears_rows_without_bootstrapping_schema(
     client.get_org_driver.assert_called_once_with("org-123")
     driver.graph_ops.clear_data.assert_awaited_once_with(driver, group_ids=["org-123"])
     driver.build_indices_and_constraints.assert_not_called()
+
+
+def test_backup_create_uses_database_dump_request_field() -> None:
+    with patch("sibyl.cli.db._api_request", return_value={"job_id": "job-123"}) as api_request:
+        result = runner.invoke(
+            db_cli.app,
+            ["backup-create", "--no-database-dump"],
+        )
+
+    assert result.exit_code == 0
+    assert api_request.call_args.args == ("POST", "/backups")
+    assert api_request.call_args.kwargs["json_data"] == {
+        "include_database_dump": False,
+        "include_graph": True,
+    }

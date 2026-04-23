@@ -1486,9 +1486,13 @@ def _api_request(
 
 @app.command("backup-create")
 def backup_create(
-    include_postgres: Annotated[
+    include_database_dump: Annotated[
         bool,
-        typer.Option("--postgres/--no-postgres", help="Include PostgreSQL dump"),
+        typer.Option(
+            "--database-dump/--no-database-dump",
+            "--postgres/--no-postgres",
+            help="Include database dump sidecar",
+        ),
     ] = True,
     include_graph: Annotated[
         bool,
@@ -1502,14 +1506,14 @@ def backup_create(
     """Create a backup via the API (async job).
 
     Triggers a backup job on the server that creates a compressed archive
-    containing PostgreSQL dump and graph data export.
+    containing a database dump sidecar and graph data export.
 
     Use --wait to block until the backup completes.
 
     Example:
         sibyld db backup-create              # Queue backup job
         sibyld db backup-create --wait       # Wait for completion
-        sibyld db backup-create --no-graph   # PostgreSQL only
+        sibyld db backup-create --no-graph   # Database dump only
     """
     import time
 
@@ -1519,7 +1523,7 @@ def backup_create(
         "POST",
         "/backups",
         json_data={
-            "include_postgres": include_postgres,
+            "include_database_dump": include_database_dump,
             "include_graph": include_graph,
         },
     )

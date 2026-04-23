@@ -108,14 +108,14 @@ def _print_verify_summary(result: object) -> None:
         raise typer.Exit(code=1)
 
 
-def _warn_if_postgres_payload_skipped(*, archive: object, restore_postgres: bool) -> None:
-    if restore_postgres:
+def _warn_if_database_dump_payload_skipped(*, archive: object, restore_database_dump: bool) -> None:
+    if restore_database_dump:
         return
     archive_files = getattr(archive, "files", {})
     if POSTGRES_FILENAME not in archive_files:
         return
-    warn("Archive includes postgres.sql, but PostgreSQL restore is disabled")
-    info("Pass --restore-postgres when you want a full Falkor/Postgres migration rehearsal")
+    warn("Archive includes postgres.sql, but database dump restore is disabled")
+    info("Pass --restore-database-dump when you want the database dump restored before graph import")
 
 
 def _warn_if_auth_payload_skipped(*, archive: object, restore_auth: bool) -> None:
@@ -472,9 +472,13 @@ def export_archive(
         str,
         typer.Option("--org-id", help="Organization UUID for graph export"),
     ] = "",
-    include_postgres: Annotated[
+    include_database_dump: Annotated[
         bool,
-        typer.Option("--include-postgres/--no-include-postgres", help="Include PostgreSQL dump"),
+        typer.Option(
+            "--include-database-dump/--no-include-database-dump",
+            "--include-postgres/--no-include-postgres",
+            help="Include database dump sidecar",
+        ),
     ] = True,
     include_graph: Annotated[
         bool,
@@ -493,16 +497,16 @@ def export_archive(
     runtime_options = resolve_backup_runtime_options(
         store=settings.store,
         auth_store=settings.auth_store,
-        include_postgres=include_postgres,
+        include_database_dump=include_database_dump,
         include_graph=include_graph,
     )
-    include_postgres = runtime_options.include_postgres
+    include_database_dump = runtime_options.include_database_dump
     include_graph = runtime_options.include_graph
 
-    if not include_postgres and not include_graph and not include_auth and not include_content:
+    if not include_database_dump and not include_graph and not include_auth and not include_content:
         error(
             "Select at least one supported payload: "
-            "--include-postgres, --include-graph, --include-auth, or --include-content"
+            "--include-database-dump, --include-graph, --include-auth, or --include-content"
         )
         raise typer.Exit(code=1)
 
@@ -514,8 +518,8 @@ def export_archive(
     file_metadata: dict[str, dict[str, object]] = {}
     archive_metadata: dict[str, object] = {}
 
-    if include_postgres:
-        info("Exporting PostgreSQL...")
+    if include_database_dump:
+        info("Exporting database dump sidecar...")
         files[POSTGRES_FILENAME] = _run_pg_dump()
         file_metadata[POSTGRES_FILENAME] = {"kind": "postgres"}
 
@@ -606,9 +610,13 @@ def import_archive(
         bool,
         typer.Option("--clean", help="Clear the target graph before import"),
     ] = False,
-    restore_postgres: Annotated[
+    restore_database_dump: Annotated[
         bool,
-        typer.Option("--restore-postgres", help="Restore postgres.sql before graph import"),
+        typer.Option(
+            "--restore-database-dump",
+            "--restore-postgres",
+            help="Restore postgres.sql before graph import",
+        ),
     ] = False,
     restore_graph: Annotated[
         bool,
@@ -630,14 +638,17 @@ def import_archive(
     archive = _load_valid_archive(source)
     effective_org_id = _resolve_org_id(org_id, archive.manifest.organization_id) if restore_graph else ""
 
-    if restore_postgres and POSTGRES_FILENAME not in archive.files:
+    if restore_database_dump and POSTGRES_FILENAME not in archive.files:
         error("Archive does not contain postgres.sql")
         raise typer.Exit(code=1)
 
     if restore_graph and GRAPH_FILENAME not in archive.files:
         error("Archive does not contain graph.json")
         raise typer.Exit(code=1)
-    _warn_if_postgres_payload_skipped(archive=archive, restore_postgres=restore_postgres)
+    _warn_if_database_dump_payload_skipped(
+        archive=archive,
+        restore_database_dump=restore_database_dump,
+    )
     _warn_if_auth_payload_skipped(archive=archive, restore_auth=restore_auth)
     _warn_if_content_payload_skipped(archive=archive, restore_content=restore_content)
 
@@ -647,8 +658,8 @@ def import_archive(
             info("Cancelled")
             return
 
-    if restore_postgres:
-        info("Restoring PostgreSQL payload...")
+    if restore_database_dump:
+        info("Restoring database dump sidecar...")
         _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
 
     if restore_auth and AUTH_FILENAME in archive.files and settings.auth_store == "surreal":
@@ -716,9 +727,13 @@ def rehearse_archive(
         bool,
         typer.Option("--clean", help="Clear the target graph before import"),
     ] = True,
-    restore_postgres: Annotated[
+    restore_database_dump: Annotated[
         bool,
-        typer.Option("--restore-postgres", help="Restore postgres.sql before graph import"),
+        typer.Option(
+            "--restore-database-dump",
+            "--restore-postgres",
+            help="Restore postgres.sql before graph import",
+        ),
     ] = False,
     restore_auth: Annotated[
         bool,
@@ -764,13 +779,16 @@ def rehearse_archive(
     archive = _load_valid_archive(source)
     effective_org_id = _resolve_org_id(org_id, archive.manifest.organization_id)
 
-    if restore_postgres and POSTGRES_FILENAME not in archive.files:
+    if restore_database_dump and POSTGRES_FILENAME not in archive.files:
         error("Archive does not contain postgres.sql")
         raise typer.Exit(code=1)
     if GRAPH_FILENAME not in archive.files:
         error("Archive does not contain graph.json")
         raise typer.Exit(code=1)
-    _warn_if_postgres_payload_skipped(archive=archive, restore_postgres=restore_postgres)
+    _warn_if_database_dump_payload_skipped(
+        archive=archive,
+        restore_database_dump=restore_database_dump,
+    )
     _warn_if_auth_payload_skipped(archive=archive, restore_auth=restore_auth)
     _warn_if_content_payload_skipped(archive=archive, restore_content=restore_content)
     if run_baseline and not manifest_path.exists():
@@ -783,8 +801,8 @@ def rehearse_archive(
             info("Cancelled")
             return
 
-    if restore_postgres:
-        info("Restoring PostgreSQL payload...")
+    if restore_database_dump:
+        info("Restoring database dump sidecar...")
         _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
 
     if restore_auth and AUTH_FILENAME in archive.files and settings.auth_store == "surreal":
@@ -856,9 +874,13 @@ def cutover_archive(
         bool,
         typer.Option("--clean", help="Clear the target graph before import"),
     ] = True,
-    restore_postgres: Annotated[
+    restore_database_dump: Annotated[
         bool,
-        typer.Option("--restore-postgres", help="Restore postgres.sql before graph import"),
+        typer.Option(
+            "--restore-database-dump",
+            "--restore-postgres",
+            help="Restore postgres.sql before graph import",
+        ),
     ] = False,
     restore_auth: Annotated[
         bool,
@@ -931,13 +953,16 @@ def cutover_archive(
     archive = _load_valid_archive(source)
     effective_org_id = _resolve_org_id(org_id, archive.manifest.organization_id)
 
-    if restore_postgres and POSTGRES_FILENAME not in archive.files:
+    if restore_database_dump and POSTGRES_FILENAME not in archive.files:
         error("Archive does not contain postgres.sql")
         raise typer.Exit(code=1)
     if GRAPH_FILENAME not in archive.files:
         error("Archive does not contain graph.json")
         raise typer.Exit(code=1)
-    _warn_if_postgres_payload_skipped(archive=archive, restore_postgres=restore_postgres)
+    _warn_if_database_dump_payload_skipped(
+        archive=archive,
+        restore_database_dump=restore_database_dump,
+    )
     _warn_if_auth_payload_skipped(archive=archive, restore_auth=restore_auth)
     _warn_if_content_payload_skipped(archive=archive, restore_content=restore_content)
 
@@ -968,8 +993,8 @@ def cutover_archive(
             info("Cancelled")
             return
 
-    if restore_postgres:
-        info("Restoring PostgreSQL payload...")
+    if restore_database_dump:
+        info("Restoring database dump sidecar...")
         _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
 
     if restore_auth and AUTH_FILENAME in archive.files and settings.auth_store == "surreal":

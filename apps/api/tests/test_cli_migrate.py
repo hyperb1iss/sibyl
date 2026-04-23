@@ -191,7 +191,7 @@ def test_migrate_export_graph_only_writes_archive(tmp_path: Path) -> None:
                 "org-123",
                 "--output",
                 str(archive_path),
-                "--no-include-postgres",
+                "--no-include-database-dump",
                 "--skip-auth",
             ],
         )
@@ -424,7 +424,7 @@ def test_migrate_import_restores_postgres_and_graph(tmp_path: Path) -> None:
     ):
         result = runner.invoke(
             migrate_cli.app,
-            ["import", str(archive_path), "--yes", "--restore-postgres"],
+            ["import", str(archive_path), "--yes", "--restore-database-dump"],
         )
 
     assert result.exit_code == 0
@@ -443,7 +443,7 @@ def test_migrate_import_warns_when_postgres_payload_is_skipped(tmp_path: Path) -
         result = runner.invoke(migrate_cli.app, ["import", str(archive_path), "--yes"])
 
     assert result.exit_code == 0
-    assert "Archive includes postgres.sql" in result.output
+    assert "database dump restore is disabled" in result.output
 
 
 def test_migrate_import_warns_when_auth_payload_is_skipped_in_postgres_mode(tmp_path: Path) -> None:
