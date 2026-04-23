@@ -12,7 +12,7 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_admin
 from sibyl.backup_ids import generate_backup_id
@@ -35,29 +35,29 @@ log = structlog.get_logger()
 
 def _backup_runtime_options(
     *,
-    include_postgres: bool | None,
+    include_database_dump: bool | None,
     include_graph: bool,
 ) -> BackupRuntimeOptions:
     return resolve_backup_runtime_options(
         store=settings.store,
         auth_store=settings.auth_store,
-        include_postgres=include_postgres,
+        include_postgres=include_database_dump,
         include_graph=include_graph,
     )
 
 
 def _backup_settings_response(settings) -> "BackupSettingsResponse":
     options = _backup_runtime_options(
-        include_postgres=settings.include_postgres,
+        include_database_dump=settings.include_postgres,
         include_graph=settings.include_graph,
     )
     return BackupSettingsResponse(
         enabled=settings.enabled,
         schedule=settings.schedule,
         retention_days=settings.retention_days,
-        include_postgres=options.include_postgres,
+        include_database_dump=options.include_database_dump,
         include_graph=options.include_graph,
-        postgres_dump_supported=options.postgres_dump_supported,
+        database_dump_supported=options.database_dump_supported,
         archive_contents=list(options.archive_contents),
         last_backup_at=settings.last_backup_at.isoformat() if settings.last_backup_at else None,
         last_backup_id=settings.last_backup_id,
@@ -81,7 +81,10 @@ class BackupSettingsUpdate(BaseModel):
     enabled: bool | None = None
     schedule: str | None = Field(None, max_length=64)
     retention_days: int | None = Field(None, ge=1, le=365)
-    include_postgres: bool | None = None
+    include_database_dump: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("include_database_dump", "include_postgres"),
+    )
     include_graph: bool | None = None
 
 
@@ -91,9 +94,9 @@ class BackupSettingsResponse(BaseModel):
     enabled: bool
     schedule: str
     retention_days: int
-    include_postgres: bool
+    include_database_dump: bool
     include_graph: bool
-    postgres_dump_supported: bool
+    database_dump_supported: bool
     archive_contents: list[str]
     last_backup_at: str | None
     last_backup_id: str | None
@@ -102,9 +105,10 @@ class BackupSettingsResponse(BaseModel):
 class CreateBackupRequest(BaseModel):
     """Request to create a new backup."""
 
-    include_postgres: bool | None = Field(
+    include_database_dump: bool | None = Field(
         default=None,
-        description="Include a legacy PostgreSQL dump when supported by the active runtime",
+        validation_alias=AliasChoices("include_database_dump", "include_postgres"),
+        description="Include a database dump sidecar when supported by the active runtime",
     )
     include_graph: bool = Field(default=True, description="Include graph export")
 
@@ -186,7 +190,7 @@ async def update_backup_settings(
         enabled=request.enabled,
         schedule=request.schedule,
         retention_days=request.retention_days,
-        include_postgres=request.include_postgres,
+        include_postgres=request.include_database_dump,
         include_graph=request.include_graph,
     )
 
@@ -215,7 +219,7 @@ async def create_backup(
     """Trigger a new backup job.
 
     Creates a compressed archive containing:
-    - postgres.sql when the legacy PostgreSQL runtime is still active
+    - postgres.sql when database dump support is active for the current runtime
     - auth.json when auth runs on SurrealDB
     - content.json when content runs on SurrealDB
     - graph.json when graph export is requested
@@ -224,7 +228,7 @@ async def create_backup(
     Returns a job ID that can be used to track progress.
     """
     options = _backup_runtime_options(
-        include_postgres=request.include_postgres,
+        include_database_dump=request.include_database_dump,
         include_graph=request.include_graph,
     )
     backup_id = generate_backup_id(str(org.id))

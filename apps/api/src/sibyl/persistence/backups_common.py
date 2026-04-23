@@ -22,6 +22,14 @@ class BackupRuntimeOptions:
     postgres_dump_supported: bool
     archive_contents: tuple[str, ...]
 
+    @property
+    def include_database_dump(self) -> bool:
+        return self.include_postgres
+
+    @property
+    def database_dump_supported(self) -> bool:
+        return self.postgres_dump_supported
+
 
 def resolve_backup_runtime_options(
     *,

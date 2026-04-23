@@ -17,8 +17,20 @@ def _user() -> SimpleNamespace:
     return SimpleNamespace(id=uuid4())
 
 
+def test_backup_settings_update_accepts_legacy_database_dump_alias() -> None:
+    request = backup_routes.BackupSettingsUpdate(include_postgres=True)
+
+    assert request.include_database_dump is True
+
+
+def test_create_backup_request_accepts_legacy_database_dump_alias() -> None:
+    request = backup_routes.CreateBackupRequest(include_postgres=True)
+
+    assert request.include_database_dump is True
+
+
 @pytest.mark.asyncio
-async def test_get_backup_settings_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_get_backup_settings_uses_runtime_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = SimpleNamespace(
         enabled=True,
         schedule="0 2 * * *",
@@ -40,12 +52,13 @@ async def test_get_backup_settings_uses_legacy_helper(monkeypatch: pytest.Monkey
 
     assert response.enabled is True
     assert response.retention_days == 30
-    assert response.postgres_dump_supported is True
+    assert response.database_dump_supported is True
+    assert response.include_database_dump is True
     assert response.archive_contents == ["postgres.sql", "metadata.json"]
 
 
 @pytest.mark.asyncio
-async def test_create_backup_uses_legacy_record_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_create_backup_uses_runtime_record_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     org = _org()
     user = _user()
     backup = SimpleNamespace(id=uuid4(), status="pending")
@@ -70,7 +83,10 @@ async def test_create_backup_uses_legacy_record_helpers(monkeypatch: pytest.Monk
     )
 
     response = await backup_routes.create_backup(
-        request=backup_routes.CreateBackupRequest(include_postgres=True, include_graph=False),
+        request=backup_routes.CreateBackupRequest(
+            include_database_dump=True,
+            include_graph=False,
+        ),
         org=org,
         user=user,
     )
@@ -132,7 +148,7 @@ async def test_create_backup_disables_postgres_in_fully_surreal_mode(
 
 
 @pytest.mark.asyncio
-async def test_list_backups_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_list_backups_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     backup = SimpleNamespace(
         id=uuid4(),
         backup_id="backup_a",
@@ -181,7 +197,7 @@ async def test_run_cleanup_uses_retention_helper(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.asyncio
-async def test_delete_backup_uses_legacy_delete_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_delete_backup_uses_runtime_delete_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         backup_routes,
         "get_backup_record",
