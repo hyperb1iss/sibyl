@@ -256,7 +256,7 @@ def _normalize_content_archive_restore_row(
         return normalized
 
     normalized["include_database_dump"] = include_database_dump
-    normalized["include_postgres"] = include_database_dump
+    normalized.pop("include_postgres", None)
     return normalized
 
 

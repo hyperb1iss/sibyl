@@ -272,9 +272,9 @@ async def test_content_archive_restore_preserves_embeddings_and_metadata(
     assert capture_rows[0]["metadata"] == {"source": "manual"}
     assert setting_rows[0]["is_secret"] is True
     assert backup_setting_rows[0]["include_database_dump"] is True
-    assert backup_setting_rows[0]["include_postgres"] is True
+    assert "include_postgres" not in backup_setting_rows[0]
     assert backup_rows[0]["include_database_dump"] is True
-    assert backup_rows[0]["include_postgres"] is True
+    assert "include_postgres" not in backup_rows[0]
 
 
 @pytest.mark.asyncio
@@ -653,7 +653,7 @@ async def test_surreal_backup_helpers_round_trip(
     assert fetched.backup_id == "backup_fixed"
     assert retention == 14
     assert setting_rows[0]["include_database_dump"] is False
-    assert setting_rows[0]["include_postgres"] is False
+    assert "include_postgres" not in setting_rows[0]
     assert backup_rows[0]["include_database_dump"] is False
-    assert backup_rows[0]["include_postgres"] is False
+    assert "include_postgres" not in backup_rows[0]
     assert deleted.backup_id == "backup_fixed"
