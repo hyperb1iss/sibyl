@@ -772,7 +772,7 @@ DROP TABLE IF EXISTS alembic_version CASCADE;
 
 
 # =============================================================================
-# Unified Backup/Restore (PostgreSQL + Graph)
+# Unified Backup/Restore (Database Dump + Graph)
 # =============================================================================
 
 
@@ -790,16 +790,16 @@ def backup_all(
         typer.Option("--prefix", help="Filename prefix for backup files"),
     ] = "",
 ) -> None:
-    """Backup BOTH PostgreSQL database AND graph runtime data.
+    """Backup BOTH the relational database dump and graph runtime data.
 
     Creates two files:
-    - {prefix}sibyl_pg_backup.sql - PostgreSQL dump
+    - {prefix}sibyl_pg_backup.sql - relational database dump
     - {prefix}sibyl_graph_backup.json - graph data export (if org_id provided)
 
     This is the recommended backup command for full disaster recovery.
     """
     if not org_id:
-        warn("--org-id not provided. Only PostgreSQL will be backed up.")
+        warn("--org-id not provided. Only the database dump will be backed up.")
         warn("Graph backup requires an organization ID.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -810,8 +810,8 @@ def backup_all(
     pg_file = output_dir / f"{file_prefix}sibyl_pg.sql"
     graph_file = output_dir / f"{file_prefix}sibyl_graph.json"
 
-    # Backup PostgreSQL
-    info("Step 1/2: Backing up PostgreSQL...")
+    # Backup relational database dump
+    info("Step 1/2: Backing up database dump...")
     try:
         cmd = [
             _find_pg_tool("pg_dump"),
@@ -830,12 +830,12 @@ def backup_all(
         )
 
         if result.returncode != 0:
-            error(f"PostgreSQL backup failed: {result.stderr}")
+            error(f"Database dump backup failed: {result.stderr}")
             raise typer.Exit(code=1)
 
         pg_file.write_text(result.stdout, encoding="utf-8")
         pg_size = pg_file.stat().st_size / 1024
-        success(f"  PostgreSQL: {pg_file} ({pg_size:.1f} KB)")
+        success(f"  Database dump: {pg_file} ({pg_size:.1f} KB)")
 
     except FileNotFoundError:
         error("pg_dump not found. Install PostgreSQL client tools.")
@@ -875,7 +875,7 @@ def backup_all(
                 return False
 
         if not _backup_graph():
-            warn("Graph backup failed, but PostgreSQL backup succeeded.")
+            warn("Graph backup failed, but the database dump backup succeeded.")
     else:
         info("Step 2/2: Skipping graph backup (no --org-id)")
 
@@ -1021,7 +1021,7 @@ def _resolve_backup_source(
     pg_file: str,
     graph_file: str,
 ) -> tuple[Path, Path | None, str]:
-    """Resolve backup source to (pg_path, graph_path, org_id).
+    """Resolve backup source to (database_dump_path, graph_path, org_id).
 
     Handles both .tar.gz archives and directories. For archives, extracts to a
     temp dir and reads metadata.json for org_id if not provided.
@@ -1048,7 +1048,7 @@ def _resolve_backup_source(
             if org_id:
                 info(f"Organization: {org_id} (from metadata)")
 
-    # Find PG file — check both archive format (postgres.sql) and backup-all format (*_pg.sql)
+    # Find database dump file — check both archive format (postgres.sql) and backup-all format (*_pg.sql)
     pg_path = _find_backup_file(backup_dir, pg_file, ["postgres.sql", "*_pg.sql", "*pg_backup.sql"])
     # Find graph file — check both archive format (graph.json) and backup-all format (*_graph.json)
     graph_path = _find_backup_file(
@@ -1056,7 +1056,7 @@ def _resolve_backup_source(
     )
 
     if not pg_path or not pg_path.exists():
-        error("No PostgreSQL backup file found")
+        error("No database dump file found")
         raise typer.Exit(code=1)
 
     return pg_path, graph_path if graph_path and graph_path.exists() else None, org_id
@@ -1076,14 +1076,14 @@ def restore_all(
     ] = False,
     pg_file: Annotated[
         str,
-        typer.Option("--pg-file", help="Override PostgreSQL backup filename"),
+        typer.Option("--pg-file", help="Override database dump filename"),
     ] = "",
     graph_file: Annotated[
         str,
         typer.Option("--graph-file", help="Override graph backup filename"),
     ] = "",
 ) -> None:
-    """Restore PostgreSQL + graph runtime data from a backup archive or directory.
+    """Restore a database dump + graph runtime data from a backup archive or directory.
 
     Accepts a .tar.gz archive (from backup jobs) or a directory (from backup-all).
     Reads org_id from metadata.json automatically when restoring from an archive.
@@ -1096,11 +1096,11 @@ def restore_all(
 
     pg_path, graph_path, org_id = _resolve_backup_source(source, org_id, pg_file, graph_file)
 
-    info(f"PostgreSQL: {pg_path.name}")
+    info(f"Database dump: {pg_path.name}")
     if graph_path:
         info(f"Graph: {graph_path.name}")
     else:
-        warn("No graph backup found — only PostgreSQL will be restored.")
+        warn("No graph backup found — only the database dump will be restored.")
 
     # Confirmation
     if not yes:
@@ -1117,8 +1117,8 @@ def restore_all(
                 info("Cancelled")
                 return
 
-    # Restore PostgreSQL
-    info("Step 1/2: Restoring PostgreSQL...")
+    # Restore database dump
+    info("Step 1/2: Restoring database dump...")
     try:
         _restore_pg(pg_path, clean)
     except FileNotFoundError:
