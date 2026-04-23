@@ -27,9 +27,7 @@ tasks:
       FORCE_COLOR: "1"
       SIBYL_STORE: "surreal"
       SIBYL_COORDINATION_BACKEND: "local"
-    preset: server
-    options:
-      persistent: true
+    preset: utility
 
   dev-legacy:
     script: |
