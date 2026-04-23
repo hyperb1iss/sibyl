@@ -24,25 +24,25 @@ from sibyl.auth.oauth_state import OAuthStateError, issue_state, verify_state
 from sibyl.auth.primitives import DeviceTokenError, normalize_user_code
 from sibyl.db.models import User
 from sibyl.persistence.auth_runtime import (
-    approve_legacy_device_authorization,
-    create_legacy_api_key_for_user,
-    deny_legacy_device_authorization,
-    exchange_legacy_device_code,
-    get_legacy_device_request_by_user_code,
-    get_legacy_user_by_id,
-    list_legacy_api_keys_for_user,
-    log_legacy_audit_event,
-    login_legacy_device_browser_user,
-    login_legacy_github_identity,
-    login_legacy_local_user,
-    resolve_legacy_request_claims,
-    resolve_legacy_request_user,
-    revoke_legacy_access_session,
-    revoke_legacy_api_key_for_user,
-    rotate_legacy_refresh_exchange,
-    signup_legacy_local_user,
-    start_legacy_device_authorization,
-    update_legacy_auth_user,
+    approve_device_authorization,
+    create_api_key_for_user,
+    deny_device_authorization,
+    exchange_device_code,
+    get_device_request_by_user_code,
+    get_user_by_id,
+    list_api_keys_for_user,
+    log_audit_event,
+    login_device_browser_user,
+    login_github_identity,
+    login_local_user,
+    resolve_request_claims,
+    resolve_request_user,
+    revoke_access_session,
+    revoke_api_key_for_user,
+    rotate_refresh_exchange,
+    signup_local_user,
+    start_device_authorization,
+    update_auth_user,
 )
 from sibyl_core.auth import GitHubUserIdentity
 
@@ -334,7 +334,7 @@ async def github_callback(request: Request) -> Response:
     redirect_uri = f"{config_module.settings.server_url}/api/auth/github/callback"
     github_token = await _github_exchange_code(code=code, redirect_uri=redirect_uri)
     identity = await _github_fetch_identity(github_token)
-    issued = await login_legacy_github_identity(identity=identity, request=request)
+    issued = await login_github_identity(identity=identity, request=request)
 
     redirect = _safe_frontend_redirect(request.query_params.get("redirect"))
     response = RedirectResponse(url=redirect, status_code=status.HTTP_302_FOUND)
@@ -357,7 +357,7 @@ async def local_signup(request: Request):
     body = LocalSignupRequest.model_validate(data)
 
     try:
-        issued = await signup_legacy_local_user(
+        issued = await signup_local_user(
             email=body.email,
             password=body.password,
             name=body.name,
@@ -410,7 +410,7 @@ async def local_login(request: Request):
     data = await _read_auth_payload(request)
     body = LocalLoginRequest.model_validate(data)
 
-    issued = await login_legacy_local_user(
+    issued = await login_local_user(
         email=body.email,
         password=body.password,
         request=request,
@@ -463,7 +463,7 @@ async def device_start(request: Request) -> dict[str, object]:
     data = await _read_auth_payload(request)
     body = DeviceStartRequest.model_validate(data)
 
-    req, device_code = await start_legacy_device_authorization(
+    req, device_code = await start_device_authorization(
         client_name=body.client_name,
         scope=body.scope,
         expires_in=timedelta(seconds=body.expires_in),
@@ -495,7 +495,7 @@ async def device_token(request: Request) -> Response:
         )
 
     try:
-        tok = await exchange_legacy_device_code(device_code=body.device_code)
+        tok = await exchange_device_code(device_code=body.device_code)
     except DeviceTokenError as e:
         content: dict[str, object] = {"error": e.error}
         if e.error_description:
@@ -836,11 +836,11 @@ async def device_verify_get(request: Request) -> Response:
     user_code = normalize_user_code(raw_code)
     error_code = (request.query_params.get("error") or "").strip() or None
 
-    user = await resolve_legacy_request_user(request)
+    user = await resolve_request_user(request)
 
     pending: dict[str, object] | None = None
     if user_code:
-        req = await get_legacy_device_request_by_user_code(user_code)
+        req = await get_device_request_by_user_code(user_code)
         now = datetime.now(UTC).replace(tzinfo=None)
         # Security: Use same error for invalid and expired to prevent code enumeration
         if req is None or req.expires_at <= now or req.status != "pending":
@@ -882,7 +882,7 @@ async def device_verify_post(request: Request) -> Response:
     if action == "login":
         email = str(form.get("email") or "").strip()
         password = str(form.get("password") or "").strip()
-        login = await login_legacy_device_browser_user(
+        login = await login_device_browser_user(
             email=email,
             password=password,
             request=request,
@@ -907,7 +907,7 @@ async def device_verify_post(request: Request) -> Response:
         )
         return response
 
-    claims = await resolve_legacy_request_claims(request)
+    claims = await resolve_request_claims(request)
     if not claims:
         return RedirectResponse(url=verify_url + "&error=not_authenticated", status_code=302)
 
@@ -916,12 +916,12 @@ async def device_verify_post(request: Request) -> Response:
     except ValueError:
         return RedirectResponse(url=verify_url + "&error=invalid_token", status_code=302)
 
-    user = await get_legacy_user_by_id(user_id)
+    user = await get_user_by_id(user_id)
     if user is None:
         return RedirectResponse(url=verify_url + "&error=user_not_found", status_code=302)
 
     if action == "deny":
-        denied = await deny_legacy_device_authorization(
+        denied = await deny_device_authorization(
             user_id=user.id,
             user_code=user_code,
             request=request,
@@ -937,7 +937,7 @@ async def device_verify_post(request: Request) -> Response:
     if action != "approve":
         return RedirectResponse(url=verify_url + "&error=invalid_action", status_code=302)
 
-    approved = await approve_legacy_device_authorization(
+    approved = await approve_device_authorization(
         user_id=user.id,
         user_code=user_code,
         request=request,
@@ -999,7 +999,7 @@ async def refresh_tokens(request: Request):
     org_raw = claims.get("org")
     org_id = UUID(str(org_raw)) if org_raw else None
 
-    rotation = await rotate_legacy_refresh_exchange(
+    rotation = await rotate_refresh_exchange(
         refresh_token=refresh_token,
         user_id=user_id,
         organization_id=org_id,
@@ -1028,7 +1028,7 @@ async def refresh_tokens(request: Request):
 
 @router.post("/logout")
 async def logout(request: Request) -> Response:
-    claims = await resolve_legacy_request_claims(request)
+    claims = await resolve_request_claims(request)
     token = select_access_token(
         authorization=request.headers.get("authorization"),
         cookie_token=request.cookies.get(ACCESS_TOKEN_COOKIE),
@@ -1047,7 +1047,7 @@ async def logout(request: Request) -> Response:
             org_id = None
 
     if user_id:
-        await log_legacy_audit_event(
+        await log_audit_event(
             action="auth.logout",
             user_id=user_id,
             organization_id=org_id,
@@ -1057,7 +1057,7 @@ async def logout(request: Request) -> Response:
 
     # Best-effort server-side revocation for JWT sessions.
     if token and not token.startswith("sk_"):
-        await revoke_legacy_access_session(token)
+        await revoke_access_session(token)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(
         ACCESS_TOKEN_COOKIE, domain=config_module.settings.cookie_domain, path="/"
@@ -1075,7 +1075,7 @@ async def list_api_keys(
     if ctx.organization is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No organization context")
 
-    keys = await list_legacy_api_keys_for_user(
+    keys = await list_api_keys_for_user(
         organization_id=ctx.organization.id,
         user_id=ctx.user.id,
     )
@@ -1111,7 +1111,7 @@ async def create_api_key(
         if body.expires_days is not None
         else None
     )
-    record, raw = await create_legacy_api_key_for_user(
+    record, raw = await create_api_key_for_user(
         organization_id=ctx.organization.id,
         user_id=ctx.user.id,
         name=body.name,
@@ -1139,7 +1139,7 @@ async def revoke_api_key(
     if ctx.organization is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No organization context")
 
-    await revoke_legacy_api_key_for_user(
+    await revoke_api_key_for_user(
         api_key_id=api_key_id,
         organization_id=ctx.organization.id,
         actor_user_id=ctx.user.id,
@@ -1181,7 +1181,7 @@ async def update_me(
     body: MeUpdateRequest,
     ctx: AuthContext = Depends(get_auth_context),
 ):
-    user = await update_legacy_auth_user(
+    user = await update_auth_user(
         user_id=ctx.user.id,
         email=body.email,
         name=body.name,

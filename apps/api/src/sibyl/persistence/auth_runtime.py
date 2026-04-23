@@ -417,6 +417,74 @@ async def authenticate_local_user(*, email: str, password: str):
     )
 
 
+async def login_github_identity(**kwargs: object):
+    return await _call_backend_export("login_legacy_github_identity", **kwargs)
+
+
+async def signup_local_user(**kwargs: object):
+    return await _call_backend_export("signup_legacy_local_user", **kwargs)
+
+
+async def login_local_user(**kwargs: object):
+    return await _call_backend_export("login_legacy_local_user", **kwargs)
+
+
+async def start_device_authorization(**kwargs: object):
+    return await _call_backend_export("start_legacy_device_authorization", **kwargs)
+
+
+async def exchange_device_code(**kwargs: object):
+    return await _call_backend_export("exchange_legacy_device_code", **kwargs)
+
+
+async def get_device_request_by_user_code(user_code: str):
+    return await _call_backend_export("get_legacy_device_request_by_user_code", user_code)
+
+
+async def resolve_request_claims(request: Any) -> dict[str, Any] | None:
+    return await _call_backend_export("resolve_legacy_request_claims", request)
+
+
+async def resolve_request_user(request: Any):
+    return await _call_backend_export("resolve_legacy_request_user", request)
+
+
+async def login_device_browser_user(**kwargs: object):
+    return await _call_backend_export("login_legacy_device_browser_user", **kwargs)
+
+
+async def deny_device_authorization(**kwargs: object):
+    return await _call_backend_export("deny_legacy_device_authorization", **kwargs)
+
+
+async def approve_device_authorization(**kwargs: object):
+    return await _call_backend_export("approve_legacy_device_authorization", **kwargs)
+
+
+async def rotate_refresh_exchange(**kwargs: object):
+    return await _call_backend_export("rotate_legacy_refresh_exchange", **kwargs)
+
+
+async def revoke_access_session(token: str) -> None:
+    await _call_backend_export("revoke_legacy_access_session", token)
+
+
+async def log_audit_event(**kwargs: object) -> None:
+    await _call_backend_export("log_legacy_audit_event", **kwargs)
+
+
+async def list_api_keys_for_user(**kwargs: object):
+    return await _call_backend_export("list_legacy_api_keys_for_user", **kwargs)
+
+
+async def create_api_key_for_user(**kwargs: object):
+    return await _call_backend_export("create_legacy_api_key_for_user", **kwargs)
+
+
+async def revoke_api_key_for_user(**kwargs: object):
+    return await _call_backend_export("revoke_legacy_api_key_for_user", **kwargs)
+
+
 async def create_session_record(**kwargs: object):
     return await _call_backend_export("create_legacy_session_record", **kwargs)
 

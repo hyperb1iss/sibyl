@@ -108,6 +108,31 @@ async def test_auth_runtime_neutral_api_key_alias_dispatches_to_surreal(
 
 
 @pytest.mark.asyncio
+async def test_auth_runtime_neutral_login_alias_dispatches_to_surreal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = object()
+    request = object()
+    dispatched = AsyncMock(return_value=expected)
+
+    monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
+    monkeypatch.setattr(surreal_auth_runtime, "login_legacy_local_user", dispatched)
+
+    result = await auth_runtime.login_local_user(
+        email="nova@example.com",
+        password="secret",
+        request=request,
+    )
+
+    assert result is expected
+    dispatched.assert_awaited_once_with(
+        email="nova@example.com",
+        password="secret",
+        request=request,
+    )
+
+
+@pytest.mark.asyncio
 async def test_auth_runtime_dispatches_auth_context_resolution_to_postgres_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

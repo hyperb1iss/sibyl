@@ -24,7 +24,7 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sibyl.config import settings
-from sibyl.persistence.auth_runtime import resolve_legacy_request_claims
+from sibyl.persistence.auth_runtime import resolve_request_claims
 
 if TYPE_CHECKING:
     from sibyl.auth.context import AuthContext
@@ -105,7 +105,7 @@ async def get_rls_session(request: Request) -> AsyncGenerator[AsyncSession]:
             yield session
             return
 
-        claims = await resolve_legacy_request_claims(request)
+        claims = await resolve_request_claims(request)
 
         if claims:
             user_id = claims.get("sub")
@@ -143,7 +143,7 @@ async def require_rls_session(request: Request) -> AsyncGenerator[AsyncSession]:
             yield session
             return
 
-        claims = await resolve_legacy_request_claims(request)
+        claims = await resolve_request_claims(request)
         if not claims:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

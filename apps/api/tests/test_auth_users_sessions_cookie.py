@@ -34,7 +34,7 @@ async def test_list_sessions_marks_current_from_sibyl_access_token_cookie() -> N
 
     with patch.object(
         users_routes,
-        "list_legacy_user_sessions",
+        "list_user_sessions",
         AsyncMock(return_value=[session_row]),
     ):
         rows = await users_routes.list_sessions(request=request, auth=auth)

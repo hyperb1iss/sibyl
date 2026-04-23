@@ -105,7 +105,7 @@ async def test_github_callback_uses_legacy_helper(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(auth_routes, "verify_state", lambda **_: None)
     monkeypatch.setattr(auth_routes, "_github_exchange_code", AsyncMock(return_value="gh-token"))
     monkeypatch.setattr(auth_routes, "_github_fetch_identity", AsyncMock(return_value=identity))
-    monkeypatch.setattr(auth_routes, "login_legacy_github_identity", login)
+    monkeypatch.setattr(auth_routes, "login_github_identity", login)
 
     response = await auth_routes.github_callback(request=request)
 
@@ -127,7 +127,7 @@ async def test_local_signup_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) 
     signup = AsyncMock(return_value=issued)
 
     monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "secret")
-    monkeypatch.setattr(auth_routes, "signup_legacy_local_user", signup)
+    monkeypatch.setattr(auth_routes, "signup_local_user", signup)
 
     response = await auth_routes.local_signup(request=request)
 
@@ -153,7 +153,7 @@ async def test_local_login_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -
     login = AsyncMock(return_value=issued)
 
     monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "secret")
-    monkeypatch.setattr(auth_routes, "login_legacy_local_user", login)
+    monkeypatch.setattr(auth_routes, "login_local_user", login)
 
     response = await _call_route(auth_routes.local_login, request=request)
 
@@ -176,7 +176,7 @@ async def test_local_login_rejects_invalid_credentials(monkeypatch: pytest.Monke
     login = AsyncMock(return_value=None)
 
     monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "secret")
-    monkeypatch.setattr(auth_routes, "login_legacy_local_user", login)
+    monkeypatch.setattr(auth_routes, "login_local_user", login)
 
     with pytest.raises(HTTPException, match="Invalid credentials") as exc_info:
         await _call_route(auth_routes.local_login, request=request)
@@ -198,7 +198,7 @@ async def test_device_start_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) 
     start = AsyncMock(return_value=(SimpleNamespace(user_code="ABCD-EFGH"), "device-code"))
 
     monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "secret")
-    monkeypatch.setattr(auth_routes, "start_legacy_device_authorization", start)
+    monkeypatch.setattr(auth_routes, "start_device_authorization", start)
 
     response = await _call_route(auth_routes.device_start, request=request)
 
@@ -218,7 +218,7 @@ async def test_device_token_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) 
     exchange = AsyncMock(return_value={"access_token": "access-token"})
 
     monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "secret")
-    monkeypatch.setattr(auth_routes, "exchange_legacy_device_code", exchange)
+    monkeypatch.setattr(auth_routes, "exchange_device_code", exchange)
 
     response = await _call_route(auth_routes.device_token, request=request)
 
@@ -241,8 +241,8 @@ async def test_device_verify_get_uses_legacy_helpers(monkeypatch: pytest.MonkeyP
     )
 
     monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "secret")
-    monkeypatch.setattr(auth_routes, "resolve_legacy_request_user", resolve_user)
-    monkeypatch.setattr(auth_routes, "get_legacy_device_request_by_user_code", get_request)
+    monkeypatch.setattr(auth_routes, "resolve_request_user", resolve_user)
+    monkeypatch.setattr(auth_routes, "get_device_request_by_user_code", get_request)
 
     response = await _call_route(auth_routes.device_verify_get, request=request)
     body = response.body.decode()
@@ -267,7 +267,7 @@ async def test_device_verify_post_login_uses_legacy_helper(
     login = AsyncMock(return_value=SimpleNamespace(access_token="access-token"))
 
     monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "secret")
-    monkeypatch.setattr(auth_routes, "login_legacy_device_browser_user", login)
+    monkeypatch.setattr(auth_routes, "login_device_browser_user", login)
 
     response = await _call_route(auth_routes.device_verify_post, request=request)
 
@@ -296,9 +296,9 @@ async def test_device_verify_post_approve_uses_legacy_helpers(
     approve = AsyncMock(return_value=(SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())))
 
     monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "secret")
-    monkeypatch.setattr(auth_routes, "resolve_legacy_request_claims", claims)
-    monkeypatch.setattr(auth_routes, "get_legacy_user_by_id", get_user)
-    monkeypatch.setattr(auth_routes, "approve_legacy_device_authorization", approve)
+    monkeypatch.setattr(auth_routes, "resolve_request_claims", claims)
+    monkeypatch.setattr(auth_routes, "get_user_by_id", get_user)
+    monkeypatch.setattr(auth_routes, "approve_device_authorization", approve)
 
     response = await _call_route(auth_routes.device_verify_post, request=request)
 
@@ -331,7 +331,7 @@ async def test_refresh_tokens_uses_legacy_rotation(monkeypatch: pytest.MonkeyPat
         "verify_refresh_token",
         lambda _: {"sub": str(user_id), "org": str(org_id)},
     )
-    monkeypatch.setattr(auth_routes, "rotate_legacy_refresh_exchange", rotate)
+    monkeypatch.setattr(auth_routes, "rotate_refresh_exchange", rotate)
 
     response = await _call_route(auth_routes.refresh_tokens, request=request)
 
@@ -354,9 +354,9 @@ async def test_logout_uses_legacy_helpers(monkeypatch: pytest.MonkeyPatch) -> No
     log_audit = AsyncMock()
     revoke = AsyncMock()
 
-    monkeypatch.setattr(auth_routes, "resolve_legacy_request_claims", resolve_claims)
-    monkeypatch.setattr(auth_routes, "log_legacy_audit_event", log_audit)
-    monkeypatch.setattr(auth_routes, "revoke_legacy_access_session", revoke)
+    monkeypatch.setattr(auth_routes, "resolve_request_claims", resolve_claims)
+    monkeypatch.setattr(auth_routes, "log_audit_event", log_audit)
+    monkeypatch.setattr(auth_routes, "revoke_access_session", revoke)
 
     response = await auth_routes.logout(request=request)
 
@@ -386,7 +386,7 @@ async def test_list_api_keys_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch)
         created_at=None,
     )
     list_keys = AsyncMock(return_value=[key])
-    monkeypatch.setattr(auth_routes, "list_legacy_api_keys_for_user", list_keys)
+    monkeypatch.setattr(auth_routes, "list_api_keys_for_user", list_keys)
 
     response = await auth_routes.list_api_keys(ctx=ctx)
 
@@ -409,7 +409,7 @@ async def test_create_api_key_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch
         expires_at=None,
     )
     create_key = AsyncMock(return_value=(record, "raw-secret"))
-    monkeypatch.setattr(auth_routes, "create_legacy_api_key_for_user", create_key)
+    monkeypatch.setattr(auth_routes, "create_api_key_for_user", create_key)
 
     response = await auth_routes.create_api_key(
         request=request,
@@ -459,7 +459,7 @@ async def test_update_me_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> 
         avatar_url="https://example.com/new.png",
     )
     update_user = AsyncMock(return_value=updated_user)
-    monkeypatch.setattr(auth_routes, "update_legacy_auth_user", update_user)
+    monkeypatch.setattr(auth_routes, "update_auth_user", update_user)
 
     response = await auth_routes.update_me(
         request=request,
