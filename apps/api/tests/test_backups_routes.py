@@ -58,6 +58,32 @@ async def test_get_backup_settings_uses_runtime_metadata(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
+async def test_get_backup_settings_accepts_legacy_settings_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = SimpleNamespace(
+        enabled=True,
+        schedule="0 2 * * *",
+        retention_days=30,
+        include_postgres=True,
+        include_graph=False,
+        last_backup_at=None,
+        last_backup_id=None,
+    )
+    monkeypatch.setattr(
+        backup_routes,
+        "load_backup_settings",
+        AsyncMock(return_value=settings),
+    )
+    monkeypatch.setattr(backup_routes.settings, "store", "legacy")
+    monkeypatch.setattr(backup_routes.settings, "auth_store", "postgres")
+
+    response = await backup_routes.get_backup_settings(org=_org())
+
+    assert response.include_database_dump is True
+
+
+@pytest.mark.asyncio
 async def test_create_backup_uses_runtime_record_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     org = _org()
     user = _user()

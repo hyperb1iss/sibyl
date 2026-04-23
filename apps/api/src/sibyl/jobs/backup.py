@@ -28,6 +28,7 @@ from sibyl.config import settings
 from sibyl.persistence.auth_archive import export_auth_archive_payload
 from sibyl.persistence.backups_common import (
     resolve_backup_runtime_options,
+    resolve_object_database_dump,
     resolve_requested_database_dump,
 )
 from sibyl.persistence.backups_runtime import (
@@ -706,9 +707,7 @@ async def run_scheduled_backups(
             backup_id = generate_backup_id(org_id)
             backup = None
             include_database_dump = _effective_include_database_dump(
-                getattr(org_settings, "include_database_dump", None)
-                if hasattr(org_settings, "include_database_dump")
-                else getattr(org_settings, "include_postgres", None)
+                resolve_object_database_dump(org_settings)
             )
 
             try:

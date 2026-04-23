@@ -21,7 +21,7 @@ from sibyl.db.models import BackupStatus, Organization, User
 from sibyl.persistence.backups_common import (
     BackupRuntimeOptions,
     resolve_backup_runtime_options,
-    resolve_requested_database_dump,
+    resolve_object_database_dump,
 )
 from sibyl.persistence.backups_runtime import (
     attach_backup_job as attach_backup_job_record,
@@ -52,10 +52,7 @@ def _backup_runtime_options(
 
 def _backup_settings_response(settings) -> "BackupSettingsResponse":
     options = _backup_runtime_options(
-        include_database_dump=resolve_requested_database_dump(
-            include_database_dump=getattr(settings, "include_database_dump", None),
-            include_postgres=getattr(settings, "include_postgres", None),
-        ),
+        include_database_dump=resolve_object_database_dump(settings),
         include_graph=settings.include_graph,
     )
     return BackupSettingsResponse(

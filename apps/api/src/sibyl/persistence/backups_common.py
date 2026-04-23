@@ -22,14 +22,6 @@ class BackupRuntimeOptions:
     database_dump_supported: bool
     archive_contents: tuple[str, ...]
 
-    @property
-    def include_postgres(self) -> bool:
-        return self.include_database_dump
-
-    @property
-    def postgres_dump_supported(self) -> bool:
-        return self.database_dump_supported
-
 
 def resolve_requested_database_dump(
     *,
@@ -39,6 +31,13 @@ def resolve_requested_database_dump(
     if include_database_dump is not None:
         return include_database_dump
     return include_postgres
+
+
+def resolve_object_database_dump(value: object) -> bool | None:
+    return resolve_requested_database_dump(
+        include_database_dump=getattr(value, "include_database_dump", None),
+        include_postgres=getattr(value, "include_postgres", None),
+    )
 
 
 def resolve_backup_runtime_options(
