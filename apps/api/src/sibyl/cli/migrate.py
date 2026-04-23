@@ -126,7 +126,7 @@ def _warn_if_auth_payload_skipped(*, archive: object, restore_auth: bool) -> Non
         warn("Archive includes auth.json, but auth restore is disabled")
         info("Pass --restore-auth when you want the Surreal auth snapshot imported")
         return
-    if settings.auth_store != "surreal":
+    if settings.uses_relational_auth:
         warn("Archive includes auth.json, but SIBYL_AUTH_STORE is not surreal")
         info("PostgreSQL remains the active auth source; auth.json will be skipped")
 
@@ -662,7 +662,7 @@ def import_archive(
         info("Restoring database dump sidecar...")
         _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
 
-    if restore_auth and AUTH_FILENAME in archive.files and settings.auth_store == "surreal":
+    if restore_auth and AUTH_FILENAME in archive.files and not settings.uses_relational_auth:
         info("Restoring auth payload into Surreal auth storage...")
         payload = auth_payload_from_archive(archive)
         if payload is None or not _restore_auth_payload(payload, clean=clean):
@@ -805,7 +805,7 @@ def rehearse_archive(
         info("Restoring database dump sidecar...")
         _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
 
-    if restore_auth and AUTH_FILENAME in archive.files and settings.auth_store == "surreal":
+    if restore_auth and AUTH_FILENAME in archive.files and not settings.uses_relational_auth:
         info("Restoring auth payload into Surreal auth storage...")
         payload = auth_payload_from_archive(archive)
         if payload is None or not _restore_auth_payload(payload, clean=clean):
@@ -997,7 +997,7 @@ def cutover_archive(
         info("Restoring database dump sidecar...")
         _restore_pg_sql(archive.files[POSTGRES_FILENAME].decode("utf-8"), clean)
 
-    if restore_auth and AUTH_FILENAME in archive.files and settings.auth_store == "surreal":
+    if restore_auth and AUTH_FILENAME in archive.files and not settings.uses_relational_auth:
         info("Importing auth payload into the Surreal auth runtime...")
         payload = auth_payload_from_archive(archive)
         if payload is None or not _restore_auth_payload(payload, clean=clean):

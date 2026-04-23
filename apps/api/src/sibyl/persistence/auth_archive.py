@@ -265,7 +265,7 @@ async def _export_surreal_auth_archive_payload() -> dict[str, object]:
 async def export_auth_archive_payload() -> dict[str, object]:
     """Export auth/RBAC tables from the active auth backend into a JSON-safe payload."""
 
-    if config_module.settings.auth_store == "surreal":
+    if not config_module.settings.uses_relational_auth:
         return await _export_surreal_auth_archive_payload()
     return await _export_postgres_auth_archive_payload()
 
