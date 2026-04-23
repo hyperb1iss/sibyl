@@ -198,6 +198,11 @@ async def _call_runtime_helper(export_name: str, **kwargs: object) -> Any:
     return await export(**kwargs)
 
 
+async def _call_backend_export(export_name: str, *args: object, **kwargs: object) -> Any:
+    export = _resolve_backend_export(export_name)
+    return await export(*args, **kwargs)
+
+
 async def patch_legacy_auth_user(
     *,
     user_id: UUID,
@@ -398,3 +403,160 @@ async def remove_legacy_oauth_connection(
         user_id=user_id,
         connection_id=connection_id,
     )
+
+
+async def authenticate_api_key(raw_key: str):
+    return await _call_backend_export("authenticate_legacy_api_key", raw_key)
+
+
+async def authenticate_local_user(*, email: str, password: str):
+    return await _call_backend_export(
+        "authenticate_legacy_local_user",
+        email=email,
+        password=password,
+    )
+
+
+async def create_session_record(**kwargs: object):
+    return await _call_backend_export("create_legacy_session_record", **kwargs)
+
+
+async def load_refresh_session_record(refresh_token: str):
+    return await _call_backend_export("load_legacy_refresh_session_record", refresh_token)
+
+
+async def rotate_refresh_session_record(refresh_token: str, **kwargs: object):
+    return await _call_backend_export(
+        "rotate_legacy_refresh_session_record",
+        refresh_token,
+        **kwargs,
+    )
+
+
+async def revoke_refresh_session_record(refresh_token: str) -> None:
+    await _call_backend_export("revoke_legacy_refresh_session_record", refresh_token)
+
+
+async def ensure_personal_organization(*, user_id: UUID):
+    return await _call_backend_export("ensure_legacy_personal_organization", user_id=user_id)
+
+
+async def get_user_by_id(user_id: UUID):
+    return await _call_backend_export("get_legacy_user_by_id", user_id)
+
+
+async def resolve_auth_context(
+    *,
+    claims: dict[str, Any],
+    session: Any | None = None,
+) -> Any:
+    return await resolve_legacy_auth_context(claims=claims, session=session)
+
+
+async def list_user_organizations(*, user_id: UUID):
+    return await _call_backend_export("list_legacy_user_organizations", user_id=user_id)
+
+
+async def patch_auth_user(
+    *,
+    user_id: UUID,
+    updates: dict[str, Any],
+    organization_id: UUID | None,
+    request: Any,
+):
+    return await patch_legacy_auth_user(
+        user_id=user_id,
+        updates=updates,
+        organization_id=organization_id,
+        request=request,
+    )
+
+
+async def update_auth_user(**kwargs: object):
+    return await _call_backend_export("update_legacy_auth_user", **kwargs)
+
+
+async def get_project_record_by_graph_id(
+    *,
+    organization_id: UUID,
+    graph_project_id: str,
+) -> Any:
+    return await get_legacy_project_record_by_graph_id(
+        organization_id=organization_id,
+        graph_project_id=graph_project_id,
+    )
+
+
+async def get_project_record_by_id(
+    *,
+    organization_id: UUID,
+    project_id: UUID,
+) -> Any:
+    return await get_legacy_project_record_by_id(
+        organization_id=organization_id,
+        project_id=project_id,
+    )
+
+
+async def list_accessible_project_graph_ids(ctx: Any) -> set[str] | None:
+    return await list_legacy_accessible_project_graph_ids(ctx)
+
+
+async def verify_entity_project_access(
+    *,
+    ctx: Any,
+    entity_project_id: str | None,
+    required_role: Any,
+) -> Any:
+    return await verify_legacy_entity_project_access(
+        ctx=ctx,
+        entity_project_id=entity_project_id,
+        required_role=required_role,
+    )
+
+
+async def list_user_sessions(
+    *,
+    user_id: UUID,
+    include_expired: bool = False,
+):
+    return await list_legacy_user_sessions(user_id=user_id, include_expired=include_expired)
+
+
+async def revoke_all_user_sessions(
+    *,
+    user_id: UUID,
+    exclude_token_hash: str | None = None,
+) -> int:
+    return await revoke_all_legacy_user_sessions(
+        user_id=user_id,
+        exclude_token_hash=exclude_token_hash,
+    )
+
+
+async def revoke_user_session(
+    *,
+    user_id: UUID,
+    session_id: UUID,
+) -> bool:
+    return await revoke_legacy_user_session(user_id=user_id, session_id=session_id)
+
+
+async def request_password_reset(email: str) -> None:
+    await request_legacy_password_reset(email)
+
+
+async def confirm_password_reset(token: str, new_password: str) -> None:
+    await confirm_legacy_password_reset(token, new_password)
+
+
+async def list_oauth_connections(*, user_id: UUID):
+    return await list_legacy_oauth_connections(user_id=user_id)
+
+
+async def remove_oauth_connection(
+    *,
+    user_id: UUID,
+    connection_id: UUID,
+):
+    return await remove_legacy_oauth_connection(user_id=user_id, connection_id=connection_id)

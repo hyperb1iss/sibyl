@@ -22,10 +22,10 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context
 from sibyl.db.models import Project, ProjectRole
 from sibyl.persistence.auth_runtime import (
-    get_legacy_project_record_by_graph_id,
-    get_legacy_project_record_by_id,
-    list_legacy_accessible_project_graph_ids,
-    verify_legacy_entity_project_access,
+    get_project_record_by_graph_id,
+    get_project_record_by_id,
+    list_accessible_project_graph_ids as list_runtime_accessible_project_graph_ids,
+    verify_entity_project_access as verify_runtime_entity_project_access,
 )
 
 log = structlog.get_logger()
@@ -67,7 +67,7 @@ async def list_accessible_project_graph_ids(
         Set of accessible graph_project_id strings.
     """
     del session
-    return await list_legacy_accessible_project_graph_ids(ctx) or set()
+    return await list_runtime_accessible_project_graph_ids(ctx) or set()
 
 
 # =============================================================================
@@ -148,7 +148,7 @@ def require_project_role(
         required_role = min(allowed_roles, key=lambda r: PROJECT_ROLE_LEVELS[r])
 
         if use_graph_id:
-            project = await get_legacy_project_record_by_graph_id(
+            project = await get_project_record_by_graph_id(
                 organization_id=ctx.organization.id,
                 graph_project_id=project_id_value,
             )
@@ -160,7 +160,7 @@ def require_project_role(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid project ID format: {project_id_value}",
                 ) from e
-            project = await get_legacy_project_record_by_id(
+            project = await get_project_record_by_id(
                 organization_id=ctx.organization.id,
                 project_id=project_uuid,
             )
@@ -172,7 +172,7 @@ def require_project_role(
                 detail="Project record is missing graph_project_id",
             )
 
-        effective_role = await verify_legacy_entity_project_access(
+        effective_role = await verify_runtime_entity_project_access(
             ctx=ctx,
             entity_project_id=graph_project_id,
             required_role=required_role,
@@ -252,7 +252,7 @@ async def verify_entity_project_access(
         ProjectAuthorizationError: If user lacks required access
     """
     del session
-    return await verify_legacy_entity_project_access(
+    return await verify_runtime_entity_project_access(
         ctx=ctx,
         entity_project_id=entity_project_id,
         required_role=required_role,

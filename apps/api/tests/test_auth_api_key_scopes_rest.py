@@ -33,7 +33,7 @@ async def test_api_key_rest_denies_without_api_scopes() -> None:
     session = object()
 
     with patch(
-        "sibyl.auth.dependencies.authenticate_legacy_api_key",
+        "sibyl.auth.dependencies.authenticate_api_key",
         AsyncMock(
             return_value=ApiKeyAuth(
                 api_key_id="00000000-0000-0000-0000-000000000000",
@@ -54,7 +54,7 @@ async def test_api_key_rest_allows_api_read_for_get() -> None:
     session = object()
 
     with patch(
-        "sibyl.auth.dependencies.authenticate_legacy_api_key",
+        "sibyl.auth.dependencies.authenticate_api_key",
         AsyncMock(
             return_value=ApiKeyAuth(
                 api_key_id="00000000-0000-0000-0000-000000000000",
@@ -76,7 +76,7 @@ async def test_api_key_rest_denies_write_without_api_write() -> None:
     session = object()
 
     with patch(
-        "sibyl.auth.dependencies.authenticate_legacy_api_key",
+        "sibyl.auth.dependencies.authenticate_api_key",
         AsyncMock(
             return_value=ApiKeyAuth(
                 api_key_id="00000000-0000-0000-0000-000000000000",
@@ -97,7 +97,7 @@ async def test_api_key_rest_allows_write_with_api_write() -> None:
     session = object()
 
     with patch(
-        "sibyl.auth.dependencies.authenticate_legacy_api_key",
+        "sibyl.auth.dependencies.authenticate_api_key",
         AsyncMock(
             return_value=ApiKeyAuth(
                 api_key_id="00000000-0000-0000-0000-000000000000",

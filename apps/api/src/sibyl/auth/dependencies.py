@@ -16,9 +16,9 @@ from sibyl.db.models import OrganizationRole
 from sibyl.persistence.auth_runtime import (
     InvalidAuthClaimsError,
     UserNotFoundError,
-    authenticate_legacy_api_key,
-    get_legacy_user_by_id,
-    resolve_legacy_auth_context,
+    authenticate_api_key,
+    get_user_by_id,
+    resolve_auth_context,
 )
 
 if TYPE_CHECKING:
@@ -75,7 +75,7 @@ async def resolve_claims(request: Request, _session: AsyncSession | None = None)
         pass
 
     if token.startswith("sk_"):
-        auth = await authenticate_legacy_api_key(token)
+        auth = await authenticate_api_key(token)
         if auth:
             scopes = list(auth.scopes or [])
             if _is_rest_request(request) and not _api_key_allows_rest(
@@ -107,7 +107,7 @@ async def get_current_user(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from e
 
-    user = await get_legacy_user_by_id(user_id)
+    user = await get_user_by_id(user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
@@ -157,7 +157,7 @@ async def build_auth_context(
     if not claims:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
-        return await resolve_legacy_auth_context(claims=claims, session=session)
+        return await resolve_auth_context(claims=claims, session=session)
     except InvalidAuthClaimsError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from e
     except UserNotFoundError as e:

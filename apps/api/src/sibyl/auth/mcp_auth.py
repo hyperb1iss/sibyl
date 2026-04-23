@@ -17,7 +17,7 @@ from uuid import UUID
 from mcp.server.auth.provider import AccessToken
 
 from sibyl.auth.jwt import JwtError, verify_access_token
-from sibyl.persistence.auth_runtime import authenticate_legacy_api_key
+from sibyl.persistence.auth_runtime import authenticate_api_key
 
 
 def _parse_scopes(claims: dict[str, Any]) -> list[str]:
@@ -35,7 +35,7 @@ class SibylMcpTokenVerifier:
 
     async def verify_token(self, token: str) -> AccessToken | None:
         if token.startswith("sk_"):
-            auth = await authenticate_legacy_api_key(token)
+            auth = await authenticate_api_key(token)
             if auth is None:
                 return None
             scopes = list(auth.scopes or []) or ["mcp"]

@@ -46,7 +46,7 @@ async def test_mcp_token_verifier_accepts_api_key(monkeypatch) -> None:
     )
 
     with patch(
-        "sibyl.auth.mcp_auth.authenticate_legacy_api_key",
+        "sibyl.auth.mcp_auth.authenticate_api_key",
         AsyncMock(return_value=auth),
     ) as authenticate:
         access = await SibylMcpTokenVerifier().verify_token("sk_live_test")
@@ -58,7 +58,7 @@ async def test_mcp_token_verifier_accepts_api_key(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_mcp_token_verifier_rejects_unknown_api_key(monkeypatch) -> None:
     with patch(
-        "sibyl.auth.mcp_auth.authenticate_legacy_api_key",
+        "sibyl.auth.mcp_auth.authenticate_api_key",
         AsyncMock(return_value=None),
     ) as authenticate:
         access = await SibylMcpTokenVerifier().verify_token("sk_live_test")
@@ -76,7 +76,7 @@ async def test_mcp_token_verifier_rejects_api_key_without_mcp_scope() -> None:
     )
 
     with patch(
-        "sibyl.auth.mcp_auth.authenticate_legacy_api_key",
+        "sibyl.auth.mcp_auth.authenticate_api_key",
         AsyncMock(return_value=auth),
     ) as authenticate:
         access = await SibylMcpTokenVerifier().verify_token("sk_live_test")

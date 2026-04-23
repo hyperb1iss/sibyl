@@ -92,6 +92,22 @@ async def test_auth_runtime_dispatches_profile_patch_to_surreal(
 
 
 @pytest.mark.asyncio
+async def test_auth_runtime_neutral_api_key_alias_dispatches_to_surreal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = object()
+    dispatched = AsyncMock(return_value=expected)
+
+    monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
+    monkeypatch.setattr(surreal_auth_runtime, "authenticate_legacy_api_key", dispatched)
+
+    result = await auth_runtime.authenticate_api_key("sk_live_test")
+
+    assert result is expected
+    dispatched.assert_awaited_once_with("sk_live_test")
+
+
+@pytest.mark.asyncio
 async def test_auth_runtime_dispatches_auth_context_resolution_to_postgres_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

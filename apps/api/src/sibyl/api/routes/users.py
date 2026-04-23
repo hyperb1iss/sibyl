@@ -13,16 +13,16 @@ from pydantic import BaseModel, EmailStr, Field
 from sibyl.auth.http import select_access_token
 from sibyl.auth.rls import AuthSession, get_auth_session
 from sibyl.persistence.auth_runtime import (
-    confirm_legacy_password_reset,
-    get_legacy_user_by_id,
-    list_legacy_oauth_connections,
-    list_legacy_user_sessions,
-    patch_legacy_auth_user,
-    remove_legacy_oauth_connection,
-    request_legacy_password_reset,
-    revoke_all_legacy_user_sessions,
-    revoke_legacy_user_session,
-    update_legacy_auth_user,
+    confirm_password_reset as confirm_password_reset_token,
+    get_user_by_id,
+    list_oauth_connections,
+    list_user_sessions,
+    patch_auth_user,
+    remove_oauth_connection,
+    request_password_reset as request_password_reset_token,
+    revoke_all_user_sessions,
+    revoke_user_session,
+    update_auth_user,
 )
 
 log = structlog.get_logger()
@@ -123,7 +123,7 @@ async def get_profile(
     auth: AuthSession = Depends(get_auth_session),
 ) -> UserProfileResponse:
     """Get current user's profile."""
-    user = await get_legacy_user_by_id(auth.ctx.user.id)
+    user = await get_user_by_id(auth.ctx.user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -146,7 +146,7 @@ async def update_profile(
 ) -> UserProfileResponse:
     """Update current user's profile."""
     update_data = data.model_dump(exclude_unset=True)
-    user = await patch_legacy_auth_user(
+    user = await patch_auth_user(
         user_id=auth.ctx.user.id,
         updates=update_data,
         organization_id=auth.ctx.organization.id if auth.ctx.organization else None,
@@ -177,7 +177,7 @@ async def get_preferences(
     auth: AuthSession = Depends(get_auth_session),
 ) -> PreferencesResponse:
     """Get current user's preferences."""
-    user = await get_legacy_user_by_id(auth.ctx.user.id)
+    user = await get_user_by_id(auth.ctx.user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -190,13 +190,13 @@ async def update_preferences(
     auth: AuthSession = Depends(get_auth_session),
 ) -> PreferencesResponse:
     """Update current user's preferences (merge)."""
-    user = await get_legacy_user_by_id(auth.ctx.user.id)
+    user = await get_user_by_id(auth.ctx.user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     current = user.preferences or {}
     current.update(data.preferences)
-    user = await patch_legacy_auth_user(
+    user = await patch_auth_user(
         user_id=auth.ctx.user.id,
         updates={"preferences": current},
         organization_id=auth.ctx.organization.id if auth.ctx.organization else None,
@@ -219,7 +219,7 @@ async def change_password(
     auth: AuthSession = Depends(get_auth_session),
 ) -> None:
     """Change current user's password."""
-    user = await update_legacy_auth_user(
+    user = await update_auth_user(
         user_id=auth.ctx.user.id,
         email=None,
         name=None,
@@ -237,7 +237,7 @@ async def request_password_reset(
     data: PasswordResetRequest,
 ) -> dict[str, str]:
     """Request a password reset email."""
-    await request_legacy_password_reset(data.email)
+    await request_password_reset_token(data.email)
 
     return {"message": "If an account exists, a reset email has been sent."}
 
@@ -247,7 +247,7 @@ async def confirm_password_reset(
     data: PasswordResetConfirmRequest,
 ) -> None:
     """Confirm password reset with token."""
-    await confirm_legacy_password_reset(data.token, data.new_password)
+    await confirm_password_reset_token(data.token, data.new_password)
 
 
 # ============================================================================
@@ -261,7 +261,7 @@ async def list_sessions(
     auth: AuthSession = Depends(get_auth_session),
 ) -> list[SessionResponse]:
     """List current user's active sessions."""
-    sessions = await list_legacy_user_sessions(user_id=auth.ctx.user.id)
+    sessions = await list_user_sessions(user_id=auth.ctx.user.id)
 
     current_token_hash = None
     token = select_access_token(
@@ -303,7 +303,7 @@ async def revoke_all_sessions(
 
         current_token_hash = hashlib.sha256(token.encode()).hexdigest()
 
-    count = await revoke_all_legacy_user_sessions(
+    count = await revoke_all_user_sessions(
         user_id=auth.ctx.user.id,
         exclude_token_hash=current_token_hash,
     )
@@ -316,7 +316,7 @@ async def revoke_session(
     auth: AuthSession = Depends(get_auth_session),
 ) -> None:
     """Revoke a specific session."""
-    revoked = await revoke_legacy_user_session(
+    revoked = await revoke_user_session(
         session_id=session_id,
         user_id=auth.ctx.user.id,
     )
@@ -334,7 +334,7 @@ async def list_connections(
     auth: AuthSession = Depends(get_auth_session),
 ) -> list[OAuthConnectionResponse]:
     """List OAuth connections for current user."""
-    connections = await list_legacy_oauth_connections(user_id=auth.ctx.user.id)
+    connections = await list_oauth_connections(user_id=auth.ctx.user.id)
 
     return [
         OAuthConnectionResponse(
@@ -354,7 +354,7 @@ async def remove_connection(
     auth: AuthSession = Depends(get_auth_session),
 ) -> None:
     """Remove an OAuth connection."""
-    connection = await remove_legacy_oauth_connection(
+    connection = await remove_oauth_connection(
         user_id=auth.ctx.user.id,
         connection_id=connection_id,
     )

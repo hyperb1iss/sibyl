@@ -16,11 +16,11 @@ def _auth() -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_request_password_reset_uses_legacy_helper(
+async def test_request_password_reset_uses_runtime_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request_reset = AsyncMock()
-    monkeypatch.setattr(user_routes, "request_legacy_password_reset", request_reset)
+    monkeypatch.setattr(user_routes, "request_password_reset_token", request_reset)
 
     response = await user_routes.request_password_reset(
         user_routes.PasswordResetRequest(email="person@example.com")
@@ -31,11 +31,11 @@ async def test_request_password_reset_uses_legacy_helper(
 
 
 @pytest.mark.asyncio
-async def test_confirm_password_reset_uses_legacy_helper(
+async def test_confirm_password_reset_uses_runtime_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     confirm_reset = AsyncMock()
-    monkeypatch.setattr(user_routes, "confirm_legacy_password_reset", confirm_reset)
+    monkeypatch.setattr(user_routes, "confirm_password_reset_token", confirm_reset)
 
     await user_routes.confirm_password_reset(
         user_routes.PasswordResetConfirmRequest(
@@ -48,12 +48,12 @@ async def test_confirm_password_reset_uses_legacy_helper(
 
 
 @pytest.mark.asyncio
-async def test_list_connections_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_list_connections_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     auth = _auth()
     connected_at = datetime.now(UTC).replace(tzinfo=None)
     monkeypatch.setattr(
         user_routes,
-        "list_legacy_oauth_connections",
+        "list_oauth_connections",
         AsyncMock(
             return_value=[
                 SimpleNamespace(
@@ -75,11 +75,11 @@ async def test_list_connections_uses_legacy_helper(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-async def test_remove_connection_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_remove_connection_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     auth = _auth()
     connection_id = uuid4()
     remove_connection = AsyncMock(return_value=SimpleNamespace(provider="github"))
-    monkeypatch.setattr(user_routes, "remove_legacy_oauth_connection", remove_connection)
+    monkeypatch.setattr(user_routes, "remove_oauth_connection", remove_connection)
 
     await user_routes.remove_connection(connection_id=connection_id, auth=auth)
 
@@ -106,7 +106,7 @@ async def test_get_profile_uses_runtime_user_lookup(monkeypatch: pytest.MonkeyPa
             created_at=created_at,
         )
     )
-    monkeypatch.setattr(user_routes, "get_legacy_user_by_id", get_user)
+    monkeypatch.setattr(user_routes, "get_user_by_id", get_user)
 
     response = await user_routes.get_profile(auth=auth)
 
@@ -134,8 +134,8 @@ async def test_update_preferences_merges_and_uses_runtime_patch(
             preferences={"theme": "light", "compact": True},
         )
     )
-    monkeypatch.setattr(user_routes, "get_legacy_user_by_id", get_user)
-    monkeypatch.setattr(user_routes, "patch_legacy_auth_user", patch_user)
+    monkeypatch.setattr(user_routes, "get_user_by_id", get_user)
+    monkeypatch.setattr(user_routes, "patch_auth_user", patch_user)
 
     response = await user_routes.update_preferences(
         data=user_routes.PreferencesUpdateRequest(preferences={"compact": True}),
@@ -156,7 +156,7 @@ async def test_change_password_uses_auth_runtime_helper(monkeypatch: pytest.Monk
     auth = _auth()
     auth.ctx.organization = SimpleNamespace(id=uuid4())
     update_user = AsyncMock(return_value=SimpleNamespace(id=auth.ctx.user.id))
-    monkeypatch.setattr(user_routes, "update_legacy_auth_user", update_user)
+    monkeypatch.setattr(user_routes, "update_auth_user", update_user)
 
     await user_routes.change_password(
         data=user_routes.PasswordChangeRequest(
@@ -191,7 +191,7 @@ async def test_list_sessions_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch
         token_hash="token-hash",
     )
     list_sessions = AsyncMock(return_value=[session_row])
-    monkeypatch.setattr(user_routes, "list_legacy_user_sessions", list_sessions)
+    monkeypatch.setattr(user_routes, "list_user_sessions", list_sessions)
     request = SimpleNamespace(headers={"authorization": "Bearer no-match"}, cookies={})
 
     response = await user_routes.list_sessions(request=request, auth=auth)

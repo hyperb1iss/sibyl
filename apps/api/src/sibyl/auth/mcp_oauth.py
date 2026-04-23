@@ -40,15 +40,15 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 from sibyl import config as config_module
 from sibyl.auth.jwt import JwtError, create_access_token, verify_access_token
 from sibyl.persistence.auth_runtime import (
-    authenticate_legacy_api_key,
-    authenticate_legacy_local_user,
-    create_legacy_session_record,
-    ensure_legacy_personal_organization,
-    get_legacy_user_by_id,
-    list_legacy_user_organizations,
-    load_legacy_refresh_session_record,
-    revoke_legacy_refresh_session_record,
-    rotate_legacy_refresh_session_record,
+    authenticate_api_key,
+    authenticate_local_user,
+    create_session_record,
+    ensure_personal_organization,
+    get_user_by_id,
+    list_user_organizations,
+    load_refresh_session_record,
+    revoke_refresh_session_record,
+    rotate_refresh_session_record,
 )
 
 OAUTH_SCOPE = "mcp"
@@ -371,31 +371,31 @@ class SibylMcpOAuthProvider(
         return authed
 
     async def _create_session_record(self, **kwargs) -> object:
-        return await create_legacy_session_record(**kwargs)
+        return await create_session_record(**kwargs)
 
     async def _load_refresh_session_record(self, refresh_token: str):
-        return await load_legacy_refresh_session_record(refresh_token)
+        return await load_refresh_session_record(refresh_token)
 
     async def _rotate_refresh_session_record(self, refresh_token: str, **kwargs):
-        return await rotate_legacy_refresh_session_record(refresh_token, **kwargs)
+        return await rotate_refresh_session_record(refresh_token, **kwargs)
 
     async def _revoke_refresh_session_record(self, refresh_token: str) -> None:
-        await revoke_legacy_refresh_session_record(refresh_token)
+        await revoke_refresh_session_record(refresh_token)
 
     async def _authenticate_api_key(self, raw_key: str):
-        return await authenticate_legacy_api_key(raw_key)
+        return await authenticate_api_key(raw_key)
 
     async def _authenticate_local_user(self, *, email: str, password: str):
-        return await authenticate_legacy_local_user(email=email, password=password)
+        return await authenticate_local_user(email=email, password=password)
 
     async def _list_user_orgs(self, *, user_id: UUID) -> list[Any]:
-        return await list_legacy_user_organizations(user_id=user_id)
+        return await list_user_organizations(user_id=user_id)
 
     async def _ensure_personal_org(self, *, user_id: UUID) -> Any | None:
-        return await ensure_legacy_personal_organization(user_id=user_id)
+        return await ensure_personal_organization(user_id=user_id)
 
     async def _get_user(self, user_id: UUID):
-        return await get_legacy_user_by_id(user_id)
+        return await get_user_by_id(user_id)
 
     async def ui_login_get(self, request: Request) -> Response:
         request_id = (request.query_params.get("req") or "").strip()
