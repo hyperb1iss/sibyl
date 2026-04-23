@@ -49,6 +49,11 @@ require_legacy_setup_mode_or_admin = _make_auth_runtime_proxy(
     "require_legacy_setup_mode_or_admin"
 )
 require_legacy_setup_mode_or_auth = _make_auth_runtime_proxy("require_legacy_setup_mode_or_auth")
+get_setup_status = get_legacy_setup_status
+is_setup_mode = is_legacy_setup_mode
+require_settings_admin = require_legacy_settings_admin
+require_setup_mode_or_admin = require_legacy_setup_mode_or_admin
+require_setup_mode_or_auth = require_legacy_setup_mode_or_auth
 
 __all__ = [
     "attach_legacy_backup_job",
@@ -59,7 +64,9 @@ __all__ = [
     "get_legacy_backup_retention",
     "get_legacy_backup_settings",
     "get_legacy_setup_status",
+    "get_setup_status",
     "is_legacy_setup_mode",
+    "is_setup_mode",
     "list_legacy_backups",
     "list_legacy_oauth_connections",
     "remove_legacy_oauth_connection",
@@ -67,5 +74,8 @@ __all__ = [
     "require_legacy_settings_admin",
     "require_legacy_setup_mode_or_admin",
     "require_legacy_setup_mode_or_auth",
+    "require_settings_admin",
+    "require_setup_mode_or_admin",
+    "require_setup_mode_or_auth",
     "update_legacy_backup_settings",
 ]

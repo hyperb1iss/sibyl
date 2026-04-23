@@ -27,7 +27,7 @@ async def test_operations_runtime_dispatches_setup_status_to_surreal(
     monkeypatch.setattr(surreal_setup, "get_legacy_setup_status", surreal_status)
     monkeypatch.setattr(legacy_setup, "get_legacy_setup_status", legacy_status)
 
-    assert await operations_runtime.get_legacy_setup_status() == expected
+    assert await operations_runtime.get_setup_status() == expected
     surreal_status.assert_awaited_once_with()
     legacy_status.assert_not_called()
 
@@ -44,7 +44,7 @@ async def test_operations_runtime_dispatches_settings_admin_to_postgres(
     monkeypatch.setattr(legacy_setup, "require_legacy_settings_admin", legacy_admin)
     monkeypatch.setattr(surreal_setup, "require_legacy_settings_admin", surreal_admin)
 
-    await operations_runtime.require_legacy_settings_admin(request)
+    await operations_runtime.require_settings_admin(request)
 
     legacy_admin.assert_awaited_once_with(request)
     surreal_admin.assert_not_called()

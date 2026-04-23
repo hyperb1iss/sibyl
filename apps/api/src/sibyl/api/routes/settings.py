@@ -15,8 +15,8 @@ from pydantic import BaseModel, Field
 
 from sibyl.persistence.graph_runtime import reset_graph_runtime as _service_reset_graph_runtime
 from sibyl.persistence.operations_runtime import (
-    is_legacy_setup_mode,
-    require_legacy_settings_admin,
+    is_setup_mode,
+    require_settings_admin,
 )
 from sibyl.services.settings import get_settings_service
 
@@ -24,12 +24,8 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 log = structlog.get_logger()
 
 
-async def reset_legacy_graph_runtime() -> None:
-    await _service_reset_graph_runtime()
-
-
 async def reset_graph_runtime() -> None:
-    await reset_legacy_graph_runtime()
+    await _service_reset_graph_runtime()
 
 
 async def _try_reset_graph_client(context: str) -> None:
@@ -147,7 +143,7 @@ async def get_settings(
     This endpoint works without authentication during setup mode (no users exist).
     Otherwise, admin role is required.
     """
-    await require_legacy_settings_admin(request)
+    await require_settings_admin(request)
 
     service = get_settings_service()
     all_settings = await service.get_all(include_secrets=False)
@@ -177,7 +173,7 @@ async def update_settings(
     This endpoint works without authentication during setup mode (no users exist).
     Otherwise, admin role is required.
     """
-    await require_legacy_settings_admin(request)
+    await require_settings_admin(request)
 
     service = get_settings_service()
     updated: list[str] = []
@@ -242,10 +238,10 @@ async def delete_setting(
 
     Requires admin role (not available during setup mode).
     """
-    if await is_legacy_setup_mode():
+    if await is_setup_mode():
         raise HTTPException(status_code=403, detail="Cannot delete settings during setup mode")
 
-    await require_legacy_settings_admin(request)
+    await require_settings_admin(request)
 
     service = get_settings_service()
     deleted = await service.delete(key)

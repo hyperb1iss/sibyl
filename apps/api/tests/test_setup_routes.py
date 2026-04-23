@@ -10,7 +10,7 @@ from sibyl.persistence.surreal import setup as surreal_setup
 
 
 @pytest.mark.asyncio
-async def test_get_setup_status_uses_legacy_status_and_validates_keys(
+async def test_get_setup_status_uses_runtime_status_and_validates_keys(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = AsyncMock()
@@ -19,7 +19,7 @@ async def test_get_setup_status_uses_legacy_status_and_validates_keys(
 
     monkeypatch.setattr(
         setup_routes,
-        "get_legacy_setup_status",
+        "get_runtime_setup_status",
         AsyncMock(return_value=LegacySetupStatus(has_users=True, has_orgs=False)),
     )
     monkeypatch.setattr(setup_routes, "get_settings_service", lambda: service)

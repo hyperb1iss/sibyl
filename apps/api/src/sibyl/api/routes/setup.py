@@ -16,9 +16,9 @@ from pydantic import BaseModel, Field
 
 from sibyl.config import settings
 from sibyl.persistence.operations_runtime import (
-    get_legacy_setup_status,
-    require_legacy_setup_mode_or_admin,
-    require_legacy_setup_mode_or_auth,
+    get_setup_status as get_runtime_setup_status,
+    require_setup_mode_or_admin,
+    require_setup_mode_or_auth,
 )
 from sibyl.services.settings import get_settings_service
 
@@ -140,7 +140,7 @@ async def get_setup_status(
     This endpoint requires no authentication since it must work
     before any users exist.
     """
-    setup_status = await get_legacy_setup_status()
+    setup_status = await get_runtime_setup_status()
 
     # Check if API keys are configured (non-empty)
     service = get_settings_service()
@@ -173,7 +173,7 @@ async def get_setup_status(
 @router.get(
     "/validate-keys",
     response_model=ApiKeyValidation,
-    dependencies=[Depends(require_legacy_setup_mode_or_auth)],
+    dependencies=[Depends(require_setup_mode_or_auth)],
 )
 async def validate_api_keys() -> ApiKeyValidation:
     """Validate that configured API keys work.
@@ -195,7 +195,7 @@ async def validate_api_keys() -> ApiKeyValidation:
     )
 
 
-@router.get("/mcp-command", dependencies=[Depends(require_legacy_setup_mode_or_auth)])
+@router.get("/mcp-command", dependencies=[Depends(require_setup_mode_or_auth)])
 async def get_mcp_command() -> dict[str, str]:
     """Get the Claude Code command to connect to this Sibyl instance.
 
@@ -247,7 +247,7 @@ class ConfigUpdateResponse(BaseModel):
 @router.post("/config", response_model=ConfigUpdateResponse)
 async def update_config(
     body: ConfigUpdateRequest,
-    _admin: object | None = Depends(require_legacy_setup_mode_or_admin),
+    _admin: object | None = Depends(require_setup_mode_or_admin),
 ) -> ConfigUpdateResponse:
     """Update server configuration (API keys).
 
@@ -314,7 +314,7 @@ class ConfigStatusResponse(BaseModel):
 
 @router.get("/config", response_model=ConfigStatusResponse)
 async def get_config_status(
-    _admin: object | None = Depends(require_legacy_setup_mode_or_admin),
+    _admin: object | None = Depends(require_setup_mode_or_admin),
 ) -> ConfigStatusResponse:
     """Get current server configuration status.
 

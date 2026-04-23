@@ -73,7 +73,7 @@ async def test_get_settings_requires_admin_and_returns_masked_metadata(
         }
     }
 
-    monkeypatch.setattr(settings_routes, "require_legacy_settings_admin", AsyncMock())
+    monkeypatch.setattr(settings_routes, "require_settings_admin", AsyncMock())
     monkeypatch.setattr(settings_routes, "get_settings_service", lambda: service)
 
     response = await settings_routes.get_settings(_request())
@@ -87,7 +87,7 @@ async def test_get_settings_requires_admin_and_returns_masked_metadata(
 async def test_update_settings_uses_request_body_for_environment_updates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(settings_routes, "require_legacy_settings_admin", AsyncMock())
+    monkeypatch.setattr(settings_routes, "require_settings_admin", AsyncMock())
     monkeypatch.setattr(settings_routes, "_validate_openai_key", AsyncMock(return_value=(True, None)))
     monkeypatch.setattr(
         settings_routes,
@@ -116,7 +116,7 @@ async def test_update_settings_uses_request_body_for_environment_updates(
 
 @pytest.mark.asyncio
 async def test_delete_setting_rejects_setup_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings_routes, "is_legacy_setup_mode", AsyncMock(return_value=True))
+    monkeypatch.setattr(settings_routes, "is_setup_mode", AsyncMock(return_value=True))
 
     with pytest.raises(HTTPException, match="Cannot delete settings during setup mode") as exc_info:
         await settings_routes.delete_setting(_request(), key="openai_api_key")
@@ -125,11 +125,11 @@ async def test_delete_setting_rejects_setup_mode(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.asyncio
-async def test_try_reset_graph_client_uses_legacy_runtime_helper(
+async def test_try_reset_graph_client_uses_runtime_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     reset_runtime = AsyncMock()
-    monkeypatch.setattr(settings_routes, "reset_legacy_graph_runtime", reset_runtime)
+    monkeypatch.setattr(settings_routes, "reset_graph_runtime", reset_runtime)
 
     await settings_routes._try_reset_graph_client("test context")
 
