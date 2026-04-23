@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -16,16 +15,13 @@ from sibyl.config import settings
 from sibyl.db.models import OrganizationRole
 from sibyl.persistence.auth_runtime import (
     InvalidAuthClaimsError,
-    LegacyAuthContextResolver,
     UserNotFoundError,
     authenticate_legacy_api_key,
     get_legacy_user_by_id,
-    resolve_surreal_auth_context,
+    resolve_legacy_auth_context,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from sibyl.db.models import User
@@ -48,14 +44,6 @@ if settings.disable_auth:
         "This should only be used for local development. Environment: %s",
         settings.environment,
     )
-
-
-@asynccontextmanager
-async def get_session() -> AsyncGenerator[AsyncSession]:
-    from sibyl.db.connection import get_session as _get_session
-
-    async with _get_session() as session:
-        yield session
 
 
 def _is_rest_request(request: Request) -> bool:
@@ -107,37 +95,22 @@ async def resolve_claims(request: Request, _session: AsyncSession | None = None)
     return None
 
 
-@asynccontextmanager
-async def _auth_session_scope():
-    if settings.auth_store == "postgres":
-        async with get_session() as session:
-            yield session
-        return
-    yield None
-
-
 async def get_current_user(
     request: Request,
 ) -> User:
-    async with _auth_session_scope() as session:
-        claims = await resolve_claims(request, session)
-        if not claims:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    claims = await resolve_claims(request)
+    if not claims:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-        try:
-            user_id = UUID(str(claims.get("sub", "")))
-        except ValueError as e:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from e
+    try:
+        user_id = UUID(str(claims.get("sub", "")))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from e
 
-        if settings.auth_store == "postgres":
-            from sibyl.db.models import User
-
-            user = await session.get(User, user_id)
-        else:
-            user = await get_legacy_user_by_id(user_id)
-        if user is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-        return user
+    user = await get_legacy_user_by_id(user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    return user
 
 
 async def get_current_organization(
@@ -180,18 +153,11 @@ async def build_auth_context(
     This is the core implementation used by both FastAPI dependency injection
     and direct calls from other auth modules (e.g., rls.py).
     """
-    claims = await resolve_claims(request, session)
+    claims = await resolve_claims(request)
     if not claims:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
-        if settings.auth_store == "surreal":
-            return await resolve_surreal_auth_context(claims)
-        if session is not None:
-            resolver = LegacyAuthContextResolver.from_session(session)
-            return await resolver.resolve(claims)
-        async with get_session() as db_session:
-            resolver = LegacyAuthContextResolver.from_session(db_session)
-            return await resolver.resolve(claims)
+        return await resolve_legacy_auth_context(claims=claims, session=session)
     except InvalidAuthClaimsError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from e
     except UserNotFoundError as e:

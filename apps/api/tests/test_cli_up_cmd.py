@@ -11,6 +11,7 @@ from sibyl.cli import up_cmd
 def _clear_runtime_env(monkeypatch) -> None:
     for key in (
         "SIBYL_STORE",
+        "SIBYL_AUTH_STORE",
         "SIBYL_COORDINATION_BACKEND",
         "SIBYL_SURREAL_URL",
         "SIBYL_SURREAL_PORT",
@@ -48,6 +49,7 @@ def test_up_defaults_to_surreal_local_without_redis(tmp_path: Path, monkeypatch)
     run_compose.assert_called_once_with(["up", "-d", "surrealdb"], tmp_path)
     env = start_foreground.call_args.args[2]
     assert env["SIBYL_STORE"] == "surreal"
+    assert env["SIBYL_AUTH_STORE"] == "surreal"
     assert up_cmd._resolve_coordination_backend(env) == "local"
     assert env["SIBYL_SURREAL_URL"] == "ws://127.0.0.1:8000/rpc"
     assert "SIBYL_REDIS_HOST" not in env
@@ -70,6 +72,24 @@ def test_up_starts_redis_when_surreal_coordination_backend_is_redis(
     assert env["SIBYL_COORDINATION_BACKEND"] == "redis"
     assert env["SIBYL_REDIS_HOST"] == "127.0.0.1"
     assert env["SIBYL_REDIS_PORT"] == "6381"
+
+
+def test_up_starts_postgres_when_surreal_store_uses_postgres_auth(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _clear_runtime_env(monkeypatch)
+    (tmp_path / ".env").write_text("SIBYL_AUTH_STORE=postgres\n")
+    run_compose, start_foreground = _prepare_up_command(monkeypatch, tmp_path)
+
+    up_cmd.up()
+
+    run_compose.assert_called_once_with(
+        ["up", "-d", "surrealdb", "postgres"],
+        tmp_path,
+    )
+    env = start_foreground.call_args.args[2]
+    assert env["SIBYL_STORE"] == "surreal"
+    assert env["SIBYL_AUTH_STORE"] == "postgres"
 
 
 def test_up_starts_legacy_stack_when_store_is_legacy(tmp_path: Path, monkeypatch) -> None:

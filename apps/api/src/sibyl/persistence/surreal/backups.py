@@ -9,7 +9,7 @@ from fastapi import HTTPException
 
 from sibyl.config import settings as app_settings
 from sibyl.db.models import Backup, BackupSettings, BackupStatus
-from sibyl.persistence.backups_common import BackupListResult
+from sibyl.persistence.backups_common import BackupListResult, resolve_backup_runtime_options
 from sibyl.persistence.surreal.content import (
     _coerce_bool,
     _coerce_datetime,
@@ -53,11 +53,18 @@ def _sort_key(value: datetime | None) -> datetime:
 
 
 def _postgres_backups_supported() -> bool:
-    return not (app_settings.store == "surreal" and app_settings.auth_store == "surreal")
+    return resolve_backup_runtime_options(
+        store=app_settings.store,
+        auth_store=app_settings.auth_store,
+    ).postgres_dump_supported
 
 
-def _effective_include_postgres(requested: bool) -> bool:
-    return requested and _postgres_backups_supported()
+def _effective_include_postgres(requested: bool | None) -> bool:
+    return resolve_backup_runtime_options(
+        store=app_settings.store,
+        auth_store=app_settings.auth_store,
+        include_postgres=requested,
+    ).include_postgres
 
 
 def _backup_settings_from_record(record: dict[str, object]) -> BackupSettings:

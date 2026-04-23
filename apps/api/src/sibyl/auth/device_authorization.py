@@ -5,7 +5,8 @@ Implements a small, server-managed device code flow for the CLI:
 - User approves: GET/POST /api/auth/device/verify
 - Client polls: POST /api/auth/device/token -> access_token or oauth-style errors
 
-Storage is PostgreSQL-backed via DeviceAuthorizationRequest.
+This manager is the legacy SQL implementation. Route handlers use the active
+auth runtime, which may store device authorization requests in SurrealDB.
 """
 
 from __future__ import annotations

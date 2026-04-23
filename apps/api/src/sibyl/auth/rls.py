@@ -23,10 +23,8 @@ import structlog
 from fastapi import HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sibyl.auth.http import select_access_token
-from sibyl.auth.jwt import JwtError, verify_access_token
 from sibyl.config import settings
-from sibyl.persistence.auth_runtime import authenticate_legacy_api_key
+from sibyl.persistence.auth_runtime import resolve_legacy_request_claims
 
 if TYPE_CHECKING:
     from sibyl.auth.context import AuthContext
@@ -40,42 +38,6 @@ async def get_session() -> AsyncGenerator[AsyncSession]:
 
     async with _get_session() as session:
         yield session
-
-
-async def _resolve_claims_minimal(request: Request, _session: AsyncSession) -> dict | None:
-    """Resolve JWT claims without loading full User/Org objects.
-
-    This is a minimal version optimized for RLS setup - we only need
-    the user_id and org_id, not the full database records.
-    """
-    claims = getattr(request.state, "jwt_claims", None)
-    if claims:
-        return claims
-
-    token = select_access_token(
-        authorization=request.headers.get("authorization"),
-        cookie_token=request.cookies.get("sibyl_access_token"),
-    )
-    if not token:
-        return None
-
-    try:
-        return verify_access_token(token)
-    except JwtError:
-        pass
-
-    # API key fallback
-    if token.startswith("sk_"):
-        auth = await authenticate_legacy_api_key(token)
-        if auth:
-            return {
-                "sub": str(auth.user_id),
-                "org": str(auth.organization_id),
-                "typ": "api_key",
-                "scopes": list(auth.scopes or []),
-            }
-
-    return None
 
 
 async def set_rls_context(
@@ -143,7 +105,7 @@ async def get_rls_session(request: Request) -> AsyncGenerator[AsyncSession]:
             yield session
             return
 
-        claims = await _resolve_claims_minimal(request, session)
+        claims = await resolve_legacy_request_claims(request)
 
         if claims:
             user_id = claims.get("sub")
@@ -181,7 +143,7 @@ async def require_rls_session(request: Request) -> AsyncGenerator[AsyncSession]:
             yield session
             return
 
-        claims = await _resolve_claims_minimal(request, session)
+        claims = await resolve_legacy_request_claims(request)
         if not claims:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

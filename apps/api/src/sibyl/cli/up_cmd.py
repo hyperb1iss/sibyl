@@ -88,28 +88,34 @@ def _resolve_coordination_backend(env: dict[str, str]) -> str:
 
 def _apply_surreal_dev_defaults(env: dict[str, str]) -> None:
     env.setdefault("SIBYL_STORE", "surreal")
+    env.setdefault(
+        "SIBYL_AUTH_STORE",
+        "surreal" if env["SIBYL_STORE"] == "surreal" else "postgres",
+    )
     env.setdefault("SIBYL_COORDINATION_BACKEND", "auto")
+
+    uses_surreal = env["SIBYL_STORE"] == "surreal" or env["SIBYL_AUTH_STORE"] == "surreal"
+    if uses_surreal:
+        env.setdefault("SIBYL_SURREAL_URL", _default_local_surreal_url(env))
+        env.pop("SIBYL_SURREAL_DATA_DIR", None)
+
+        surreal_url = env["SIBYL_SURREAL_URL"]
+        if surreal_url.startswith(
+            (
+                "ws://127.0.0.1",
+                "ws://localhost",
+                "http://127.0.0.1",
+                "http://localhost",
+            )
+        ):
+            env.setdefault("SIBYL_SURREAL_USERNAME", "root")
+            env.setdefault("SIBYL_SURREAL_PASSWORD", "root")
 
     if env["SIBYL_STORE"] != "surreal":
         env.setdefault("SIBYL_REDIS_HOST", "127.0.0.1")
         env.setdefault("SIBYL_REDIS_PORT", "6381")
         env.setdefault("SIBYL_REDIS_PASSWORD", "")
         return
-
-    env.setdefault("SIBYL_SURREAL_URL", _default_local_surreal_url(env))
-    env.pop("SIBYL_SURREAL_DATA_DIR", None)
-
-    surreal_url = env["SIBYL_SURREAL_URL"]
-    if surreal_url.startswith(
-        (
-            "ws://127.0.0.1",
-            "ws://localhost",
-            "http://127.0.0.1",
-            "http://localhost",
-        )
-    ):
-        env.setdefault("SIBYL_SURREAL_USERNAME", "root")
-        env.setdefault("SIBYL_SURREAL_PASSWORD", "root")
 
     if _resolve_coordination_backend(env) == "redis":
         env.setdefault("SIBYL_REDIS_HOST", "127.0.0.1")
@@ -145,10 +151,16 @@ def _load_runtime_env(project_root: Path) -> dict[str, str]:
 
 
 def _compose_services_for_env(env: dict[str, str]) -> list[str]:
-    if env["SIBYL_STORE"] == "legacy":
-        return ["falkordb", "postgres", "redis"]
+    store = env.get("SIBYL_STORE", "surreal")
+    auth_store = env.get("SIBYL_AUTH_STORE", "surreal" if store == "surreal" else "postgres")
+    services: list[str] = []
 
-    services = ["surrealdb"]
+    if store == "legacy":
+        services.append("falkordb")
+    if store == "surreal" or auth_store == "surreal":
+        services.append("surrealdb")
+    if store == "legacy" or auth_store == "postgres":
+        services.append("postgres")
     if _resolve_coordination_backend(env) == "redis":
         services.append("redis")
     return services

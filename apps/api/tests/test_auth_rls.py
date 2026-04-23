@@ -173,7 +173,9 @@ class TestRequireRlsSession:
         with (
             patch("sibyl.auth.rls.get_session", mock_get_session),
             patch("sibyl.auth.rls.settings") as mock_settings,
-            patch("sibyl.auth.rls._resolve_claims_minimal", new_callable=AsyncMock) as mock_resolve,
+            patch(
+                "sibyl.auth.rls.resolve_legacy_request_claims", new_callable=AsyncMock
+            ) as mock_resolve,
         ):
             mock_settings.disable_auth = False
             mock_resolve.return_value = None  # No claims found
@@ -199,7 +201,9 @@ class TestRequireRlsSession:
         with (
             patch("sibyl.auth.rls.get_session", mock_get_session),
             patch("sibyl.auth.rls.settings") as mock_settings,
-            patch("sibyl.auth.rls._resolve_claims_minimal", new_callable=AsyncMock) as mock_resolve,
+            patch(
+                "sibyl.auth.rls.resolve_legacy_request_claims", new_callable=AsyncMock
+            ) as mock_resolve,
         ):
             mock_settings.disable_auth = False
             mock_resolve.return_value = {"org": str(uuid4())}  # No sub

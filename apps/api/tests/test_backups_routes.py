@@ -33,11 +33,15 @@ async def test_get_backup_settings_uses_legacy_helper(monkeypatch: pytest.Monkey
         "load_backup_settings",
         AsyncMock(return_value=settings),
     )
+    monkeypatch.setattr(backup_routes.settings, "store", "legacy")
+    monkeypatch.setattr(backup_routes.settings, "auth_store", "postgres")
 
     response = await backup_routes.get_backup_settings(org=_org())
 
     assert response.enabled is True
     assert response.retention_days == 30
+    assert response.postgres_dump_supported is True
+    assert response.archive_contents == ["postgres.sql", "metadata.json"]
 
 
 @pytest.mark.asyncio
@@ -47,6 +51,8 @@ async def test_create_backup_uses_legacy_record_helpers(monkeypatch: pytest.Monk
     backup = SimpleNamespace(id=uuid4(), status="pending")
     queued = SimpleNamespace(id=backup.id, status="pending")
 
+    monkeypatch.setattr(backup_routes.settings, "store", "legacy")
+    monkeypatch.setattr(backup_routes.settings, "auth_store", "postgres")
     monkeypatch.setattr(backup_routes, "generate_backup_id", lambda _: "backup_fixed")
     monkeypatch.setattr(
         backup_routes,
@@ -71,6 +77,7 @@ async def test_create_backup_uses_legacy_record_helpers(monkeypatch: pytest.Monk
 
     assert response.backup_id == "backup_fixed"
     assert response.job_id == "job-123"
+    assert response.archive_contents == ["postgres.sql", "metadata.json"]
 
 
 @pytest.mark.asyncio
@@ -100,7 +107,7 @@ async def test_create_backup_disables_postgres_in_fully_surreal_mode(
         AsyncMock(return_value="job-123"),
     )
 
-    await backup_routes.create_backup(
+    response = await backup_routes.create_backup(
         request=backup_routes.CreateBackupRequest(include_postgres=True, include_graph=False),
         org=org,
         user=user,
@@ -121,6 +128,7 @@ async def test_create_backup_disables_postgres_in_fully_surreal_mode(
         include_graph=False,
         backup_id="backup_fixed",
     )
+    assert response.archive_contents == ["auth.json", "content.json", "metadata.json"]
 
 
 @pytest.mark.asyncio

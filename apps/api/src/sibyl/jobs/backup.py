@@ -1,8 +1,9 @@
-"""Backup jobs for PostgreSQL and FalkorDB graph data.
+"""Backup jobs for active auth, content, and graph runtimes.
 
 Creates timestamped, compressed backup archives containing:
-- PostgreSQL dump (schema + data)
-- FalkorDB graph export (entities + relationships)
+- SurrealDB auth and content snapshots when those runtimes are active
+- PostgreSQL dump while legacy PostgreSQL remains active
+- Graph export when requested
 - Metadata JSON (checksums, counts, version info)
 """
 
@@ -25,6 +26,7 @@ from sibyl.api.event_types import WSEvent
 from sibyl.backup_ids import generate_backup_id
 from sibyl.config import settings
 from sibyl.persistence.auth_archive import export_auth_archive_payload
+from sibyl.persistence.backups_common import resolve_backup_runtime_options
 from sibyl.persistence.backups_runtime import (
     attach_backup_job,
     create_backup_record,
@@ -71,15 +73,25 @@ class BackupResult:
 
 
 def _effective_include_postgres(requested: bool) -> bool:
-    return requested and not (settings.store == "surreal" and settings.auth_store == "surreal")
+    return resolve_backup_runtime_options(
+        store=settings.store,
+        auth_store=settings.auth_store,
+        include_postgres=requested,
+    ).include_postgres
 
 
 def _include_surreal_auth_snapshot() -> bool:
-    return settings.auth_store == "surreal"
+    return resolve_backup_runtime_options(
+        store=settings.store,
+        auth_store=settings.auth_store,
+    ).include_auth_snapshot
 
 
 def _include_surreal_content_snapshot() -> bool:
-    return settings.store == "surreal"
+    return resolve_backup_runtime_options(
+        store=settings.store,
+        auth_store=settings.auth_store,
+    ).include_content_snapshot
 
 
 def _get_pg_env() -> dict[str, str]:
@@ -208,7 +220,7 @@ async def run_backup(  # noqa: PLR0915
     Args:
         ctx: arq context
         organization_id: Organization UUID to backup
-        include_postgres: Include PostgreSQL dump (default: True)
+        include_postgres: Include legacy PostgreSQL dump when supported
         include_graph: Include graph export (default: True)
         backup_id: Pre-generated backup ID (optional, for API-triggered backups)
 

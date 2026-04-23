@@ -606,6 +606,15 @@ async def resolve_surreal_auth_context(claims: dict[str, Any]) -> Any:
         return await resolver.resolve(claims)
 
 
+async def resolve_legacy_auth_context(
+    *,
+    claims: dict[str, Any],
+    session: Any | None = None,
+) -> Any:
+    del session
+    return await resolve_surreal_auth_context(claims)
+
+
 async def _log_audit_event(
     client: Any,
     *,
@@ -2408,6 +2417,7 @@ __all__ = [
     "login_legacy_device_browser_user",
     "login_legacy_github_identity",
     "login_legacy_local_user",
+    "resolve_legacy_auth_context",
     "resolve_legacy_accessible_project_graph_ids",
     "resolve_legacy_request_claims",
     "resolve_legacy_request_user",

@@ -36,6 +36,7 @@ if TYPE_CHECKING:
         login_legacy_github_identity,
         login_legacy_local_user,
         resolve_legacy_accessible_project_graph_ids,
+        resolve_legacy_auth_context,
         resolve_legacy_request_claims,
         resolve_legacy_request_user,
         resolve_surreal_auth_context,
@@ -100,6 +101,7 @@ __all__ = [
     "login_legacy_local_user",
     "resolve_legacy_accessible_project_graph_ids",
     "resolve_surreal_auth_context",
+    "resolve_legacy_auth_context",
     "resolve_legacy_request_claims",
     "resolve_legacy_request_user",
     "revoke_legacy_access_session",
@@ -279,6 +281,55 @@ async def get_legacy_project_record_by_id(
         "get_legacy_project_record_by_id",
         organization_id=organization_id,
         project_id=project_id,
+    )
+
+
+async def resolve_legacy_auth_context(
+    *,
+    claims: dict[str, Any],
+    session: Any | None = None,
+) -> Any:
+    return await _call_runtime_helper(
+        "resolve_legacy_auth_context",
+        claims=claims,
+        session=session,
+    )
+
+
+async def list_legacy_accessible_project_graph_ids(ctx: Any) -> set[str] | None:
+    return await _call_runtime_helper(
+        "list_legacy_accessible_project_graph_ids",
+        ctx=ctx,
+    )
+
+
+async def resolve_legacy_accessible_project_graph_ids(
+    *,
+    user_id: str,
+    org_id: str,
+    scopes: Any | None = None,
+    api_key_project_ids: Any | None = None,
+) -> set[str] | None:
+    return await _call_runtime_helper(
+        "resolve_legacy_accessible_project_graph_ids",
+        user_id=user_id,
+        org_id=org_id,
+        scopes=scopes,
+        api_key_project_ids=api_key_project_ids,
+    )
+
+
+async def verify_legacy_entity_project_access(
+    *,
+    ctx: Any,
+    entity_project_id: str | None,
+    required_role: Any,
+) -> Any:
+    return await _call_runtime_helper(
+        "verify_legacy_entity_project_access",
+        ctx=ctx,
+        entity_project_id=entity_project_id,
+        required_role=required_role,
     )
 
 

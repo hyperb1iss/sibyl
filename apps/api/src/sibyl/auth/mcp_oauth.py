@@ -11,7 +11,7 @@ Implementation notes:
 - Clients are stored in-memory (re-registration is fine).
 - Authorization codes are short-lived, in-memory, single-use.
 - Access tokens are Sibyl JWT access tokens (Bearer).
-- Refresh tokens are JWT refresh tokens (best-effort in-memory revocation).
+- Refresh tokens are JWT refresh tokens tracked through the active auth runtime.
 """
 
 from __future__ import annotations
@@ -39,7 +39,6 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from sibyl import config as config_module
 from sibyl.auth.jwt import JwtError, create_access_token, verify_access_token
-from sibyl.db.models import Organization
 from sibyl.persistence.auth_runtime import (
     authenticate_legacy_api_key,
     authenticate_legacy_local_user,
@@ -389,10 +388,10 @@ class SibylMcpOAuthProvider(
     async def _authenticate_local_user(self, *, email: str, password: str):
         return await authenticate_legacy_local_user(email=email, password=password)
 
-    async def _list_user_orgs(self, *, user_id: UUID) -> list[Organization]:
+    async def _list_user_orgs(self, *, user_id: UUID) -> list[Any]:
         return await list_legacy_user_organizations(user_id=user_id)
 
-    async def _ensure_personal_org(self, *, user_id: UUID) -> Organization | None:
+    async def _ensure_personal_org(self, *, user_id: UUID) -> Any | None:
         return await ensure_legacy_personal_organization(user_id=user_id)
 
     async def _get_user(self, user_id: UUID):

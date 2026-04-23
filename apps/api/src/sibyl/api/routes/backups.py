@@ -18,6 +18,7 @@ from sibyl.auth.dependencies import get_current_organization, get_current_user, 
 from sibyl.backup_ids import generate_backup_id
 from sibyl.config import settings
 from sibyl.db.models import BackupStatus, Organization, User
+from sibyl.persistence.backups_common import BackupRuntimeOptions, resolve_backup_runtime_options
 from sibyl.persistence.backups_runtime import (
     attach_backup_job as attach_backup_job_record,
     create_backup_record,
@@ -32,8 +33,35 @@ from sibyl.persistence.backups_runtime import (
 log = structlog.get_logger()
 
 
-def _effective_include_postgres(requested: bool) -> bool:
-    return requested and not (settings.store == "surreal" and settings.auth_store == "surreal")
+def _backup_runtime_options(
+    *,
+    include_postgres: bool | None,
+    include_graph: bool,
+) -> BackupRuntimeOptions:
+    return resolve_backup_runtime_options(
+        store=settings.store,
+        auth_store=settings.auth_store,
+        include_postgres=include_postgres,
+        include_graph=include_graph,
+    )
+
+
+def _backup_settings_response(settings) -> "BackupSettingsResponse":
+    options = _backup_runtime_options(
+        include_postgres=settings.include_postgres,
+        include_graph=settings.include_graph,
+    )
+    return BackupSettingsResponse(
+        enabled=settings.enabled,
+        schedule=settings.schedule,
+        retention_days=settings.retention_days,
+        include_postgres=options.include_postgres,
+        include_graph=options.include_graph,
+        postgres_dump_supported=options.postgres_dump_supported,
+        archive_contents=list(options.archive_contents),
+        last_backup_at=settings.last_backup_at.isoformat() if settings.last_backup_at else None,
+        last_backup_id=settings.last_backup_id,
+    )
 
 router = APIRouter(
     prefix="/backups",
@@ -65,6 +93,8 @@ class BackupSettingsResponse(BaseModel):
     retention_days: int
     include_postgres: bool
     include_graph: bool
+    postgres_dump_supported: bool
+    archive_contents: list[str]
     last_backup_at: str | None
     last_backup_id: str | None
 
@@ -72,7 +102,10 @@ class BackupSettingsResponse(BaseModel):
 class CreateBackupRequest(BaseModel):
     """Request to create a new backup."""
 
-    include_postgres: bool = Field(default=True, description="Include PostgreSQL dump")
+    include_postgres: bool | None = Field(
+        default=None,
+        description="Include a legacy PostgreSQL dump when supported by the active runtime",
+    )
     include_graph: bool = Field(default=True, description="Include graph export")
 
 
@@ -84,6 +117,7 @@ class CreateBackupResponse(BaseModel):
     job_id: str
     status: str
     message: str
+    archive_contents: list[str]
 
 
 class BackupInfo(BaseModel):
@@ -138,15 +172,7 @@ async def get_backup_settings(
     """Get backup configuration settings for the organization."""
     settings = await load_backup_settings(org.id)
 
-    return BackupSettingsResponse(
-        enabled=settings.enabled,
-        schedule=settings.schedule,
-        retention_days=settings.retention_days,
-        include_postgres=settings.include_postgres,
-        include_graph=settings.include_graph,
-        last_backup_at=settings.last_backup_at.isoformat() if settings.last_backup_at else None,
-        last_backup_id=settings.last_backup_id,
-    )
+    return _backup_settings_response(settings)
 
 
 @router.patch("/settings")
@@ -172,15 +198,7 @@ async def update_backup_settings(
         retention_days=settings.retention_days,
     )
 
-    return BackupSettingsResponse(
-        enabled=settings.enabled,
-        schedule=settings.schedule,
-        retention_days=settings.retention_days,
-        include_postgres=settings.include_postgres,
-        include_graph=settings.include_graph,
-        last_backup_at=settings.last_backup_at.isoformat() if settings.last_backup_at else None,
-        last_backup_id=settings.last_backup_id,
-    )
+    return _backup_settings_response(settings)
 
 
 # =============================================================================
@@ -197,19 +215,24 @@ async def create_backup(
     """Trigger a new backup job.
 
     Creates a compressed archive containing:
-    - PostgreSQL database dump
-    - FalkorDB graph export
-    - Metadata with checksums
+    - postgres.sql when the legacy PostgreSQL runtime is still active
+    - auth.json when auth runs on SurrealDB
+    - content.json when content runs on SurrealDB
+    - graph.json when graph export is requested
+    - metadata.json with checksums
 
     Returns a job ID that can be used to track progress.
     """
-    include_postgres = _effective_include_postgres(request.include_postgres)
+    options = _backup_runtime_options(
+        include_postgres=request.include_postgres,
+        include_graph=request.include_graph,
+    )
     backup_id = generate_backup_id(str(org.id))
     backup = await create_backup_record(
         org_id=org.id,
         backup_id=backup_id,
-        include_postgres=include_postgres,
-        include_graph=request.include_graph,
+        include_postgres=options.include_postgres,
+        include_graph=options.include_graph,
         created_by_user_id=user.id if user else None,
     )
 
@@ -217,16 +240,17 @@ async def create_backup(
         "backup_requested",
         backup_id=backup_id,
         organization_id=str(org.id),
-        include_postgres=include_postgres,
-        include_graph=request.include_graph,
+        include_postgres=options.include_postgres,
+        include_graph=options.include_graph,
+        archive_contents=list(options.archive_contents),
     )
 
     from sibyl.jobs.queue import enqueue_backup
 
     job_id = await enqueue_backup(
         str(org.id),
-        include_postgres=include_postgres,
-        include_graph=request.include_graph,
+        include_postgres=options.include_postgres,
+        include_graph=options.include_graph,
         backup_id=backup_id,
     )
     backup = await attach_backup_job_record(backup.id, job_id)
@@ -237,6 +261,7 @@ async def create_backup(
         job_id=job_id,
         status=backup.status,
         message="Backup job queued successfully",
+        archive_contents=list(options.archive_contents),
     )
 
 

@@ -12,14 +12,11 @@ from sibyl.auth.authorization import (
     PROJECT_ROLE_LEVELS,
     ProjectAuthorizationError,
     _max_role,
-    get_effective_project_role,
-    get_project_by_id,
     list_accessible_project_graph_ids,
     require_project_admin,
     require_project_read,
     require_project_role,
     require_project_write,
-    resolve_project_by_graph_id,
     verify_entity_project_access,
 )
 from sibyl.db.models import (
@@ -27,6 +24,7 @@ from sibyl.db.models import (
     ProjectRole,
     ProjectVisibility,
 )
+from sibyl.persistence.legacy import auth_runtime as legacy_auth_runtime
 
 
 class TestRoleHierarchy:
@@ -76,7 +74,7 @@ class TestRoleHierarchy:
 
 
 class TestResolveProjectByGraphId:
-    """Tests for resolve_project_by_graph_id."""
+    """Tests for legacy graph project resolution."""
 
     @pytest.mark.asyncio
     async def test_found(self) -> None:
@@ -92,7 +90,9 @@ class TestResolveProjectByGraphId:
         mock_session = AsyncMock()
         mock_session.execute.return_value = mock_result
 
-        result = await resolve_project_by_graph_id(mock_session, org_id, "project_abc123")
+        result = await legacy_auth_runtime._resolve_project_by_graph_id(
+            mock_session, org_id, "project_abc123"
+        )
 
         assert result == project
         mock_session.execute.assert_called_once()
@@ -109,14 +109,16 @@ class TestResolveProjectByGraphId:
         mock_session.execute.return_value = mock_result
 
         with pytest.raises(HTTPException) as exc_info:
-            await resolve_project_by_graph_id(mock_session, org_id, "nonexistent")
+            await legacy_auth_runtime._resolve_project_by_graph_id(
+                mock_session, org_id, "nonexistent"
+            )
 
         assert exc_info.value.status_code == 404
         assert "nonexistent" in exc_info.value.detail
 
 
 class TestGetProjectById:
-    """Tests for get_project_by_id."""
+    """Tests for legacy project UUID resolution."""
 
     @pytest.mark.asyncio
     async def test_found(self) -> None:
@@ -125,14 +127,12 @@ class TestGetProjectById:
         project_id = uuid4()
         project = MagicMock()
         project.id = project_id
-
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = project
+        project.organization_id = org_id
 
         mock_session = AsyncMock()
-        mock_session.execute.return_value = mock_result
+        mock_session.get.return_value = project
 
-        result = await get_project_by_id(mock_session, org_id, project_id)
+        result = await legacy_auth_runtime._get_project_by_id(mock_session, org_id, project_id)
 
         assert result == project
 
@@ -142,20 +142,17 @@ class TestGetProjectById:
         org_id = uuid4()
         project_id = uuid4()
 
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-
         mock_session = AsyncMock()
-        mock_session.execute.return_value = mock_result
+        mock_session.get.return_value = None
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_project_by_id(mock_session, org_id, project_id)
+            await legacy_auth_runtime._get_project_by_id(mock_session, org_id, project_id)
 
         assert exc_info.value.status_code == 404
 
 
 class TestGetEffectiveProjectRole:
-    """Tests for get_effective_project_role."""
+    """Tests for legacy effective project role calculation."""
 
     @pytest.fixture
     def mock_project(self) -> MagicMock:
@@ -184,7 +181,9 @@ class TestGetEffectiveProjectRole:
 
         mock_session = AsyncMock()
 
-        result = await get_effective_project_role(mock_session, ctx, mock_project)
+        result = await legacy_auth_runtime._get_effective_project_role(
+            mock_session, ctx, mock_project
+        )
 
         assert result == ProjectRole.OWNER
         # Should return early without querying DB
@@ -201,7 +200,9 @@ class TestGetEffectiveProjectRole:
 
         mock_session = AsyncMock()
 
-        result = await get_effective_project_role(mock_session, ctx, mock_project)
+        result = await legacy_auth_runtime._get_effective_project_role(
+            mock_session, ctx, mock_project
+        )
 
         assert result == ProjectRole.OWNER
         mock_session.execute.assert_not_called()
@@ -224,7 +225,9 @@ class TestGetEffectiveProjectRole:
         mock_session = AsyncMock()
         mock_session.execute.side_effect = [direct_result, team_result]
 
-        result = await get_effective_project_role(mock_session, ctx, mock_project)
+        result = await legacy_auth_runtime._get_effective_project_role(
+            mock_session, ctx, mock_project
+        )
 
         assert result == ProjectRole.CONTRIBUTOR
 
@@ -246,7 +249,9 @@ class TestGetEffectiveProjectRole:
         mock_session = AsyncMock()
         mock_session.execute.side_effect = [direct_result, team_result]
 
-        result = await get_effective_project_role(mock_session, ctx, mock_project)
+        result = await legacy_auth_runtime._get_effective_project_role(
+            mock_session, ctx, mock_project
+        )
 
         assert result == ProjectRole.MAINTAINER
 
@@ -273,7 +278,9 @@ class TestGetEffectiveProjectRole:
         mock_session = AsyncMock()
         mock_session.execute.side_effect = [direct_result, team_result]
 
-        result = await get_effective_project_role(mock_session, ctx, mock_project)
+        result = await legacy_auth_runtime._get_effective_project_role(
+            mock_session, ctx, mock_project
+        )
 
         assert result == ProjectRole.VIEWER
 
@@ -297,13 +304,37 @@ class TestGetEffectiveProjectRole:
         mock_session = AsyncMock()
         mock_session.execute.side_effect = [direct_result, team_result]
 
-        result = await get_effective_project_role(mock_session, ctx, mock_project)
+        result = await legacy_auth_runtime._get_effective_project_role(
+            mock_session, ctx, mock_project
+        )
 
         assert result is None
 
 
 class TestListAccessibleProjectGraphIds:
     """Tests for list_accessible_project_graph_ids."""
+
+    @pytest.mark.asyncio
+    async def test_public_wrapper_uses_runtime_helper(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Public authorization surface delegates project visibility to auth runtime."""
+        ctx = MagicMock()
+        expected = {"project_alpha"}
+        helper = AsyncMock(return_value=expected)
+        mock_session = AsyncMock()
+
+        monkeypatch.setattr(
+            authorization_module,
+            "list_legacy_accessible_project_graph_ids",
+            helper,
+        )
+
+        result = await list_accessible_project_graph_ids(mock_session, ctx)
+
+        assert result == expected
+        helper.assert_awaited_once_with(ctx)
+        mock_session.execute.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_org_returns_empty(self) -> None:
@@ -313,7 +344,7 @@ class TestListAccessibleProjectGraphIds:
 
         mock_session = AsyncMock()
 
-        result = await list_accessible_project_graph_ids(mock_session, ctx)
+        result = await legacy_auth_runtime._list_accessible_project_graph_ids(mock_session, ctx)
 
         assert result == set()
 
@@ -338,7 +369,7 @@ class TestListAccessibleProjectGraphIds:
         mock_session = AsyncMock()
         mock_session.execute.side_effect = [migration_result, projects_result]
 
-        result = await list_accessible_project_graph_ids(mock_session, ctx)
+        result = await legacy_auth_runtime._list_accessible_project_graph_ids(mock_session, ctx)
 
         assert result == {"proj_1", "proj_2", "proj_3"}
         # Migration check + project list query
@@ -378,12 +409,12 @@ class TestListAccessibleProjectGraphIds:
             team_result,
         ]
 
-        result = await list_accessible_project_graph_ids(mock_session, ctx)
+        result = await legacy_auth_runtime._list_accessible_project_graph_ids(mock_session, ctx)
 
         assert result == {"proj_org1", "proj_org2", "proj_direct", "proj_team"}
 
     @pytest.mark.asyncio
-    @patch("sibyl.auth.authorization.get_graph_projects")
+    @patch("sibyl.persistence.legacy.auth_runtime.get_graph_projects")
     async def test_migration_mode_returns_graph_project_ids(
         self, mock_get_graph_projects: MagicMock
     ) -> None:
@@ -406,7 +437,7 @@ class TestListAccessibleProjectGraphIds:
         mock_session = AsyncMock()
         mock_session.execute.return_value = migration_result
 
-        result = await list_accessible_project_graph_ids(mock_session, ctx)
+        result = await legacy_auth_runtime._list_accessible_project_graph_ids(mock_session, ctx)
 
         assert result == {"project_alpha", "project_beta"}
         # Should only do the migration check query
@@ -414,7 +445,7 @@ class TestListAccessibleProjectGraphIds:
         mock_get_graph_projects.assert_awaited_once_with(str(ctx.organization.id))
 
     @pytest.mark.asyncio
-    @patch("sibyl.auth.authorization.get_graph_projects")
+    @patch("sibyl.persistence.legacy.auth_runtime.get_graph_projects")
     async def test_migration_mode_accepts_uuid_fallback(
         self, mock_get_graph_projects: MagicMock
     ) -> None:
@@ -436,14 +467,14 @@ class TestListAccessibleProjectGraphIds:
         mock_session = AsyncMock()
         mock_session.execute.return_value = migration_result
 
-        result = await list_accessible_project_graph_ids(mock_session, ctx)
+        result = await legacy_auth_runtime._list_accessible_project_graph_ids(mock_session, ctx)
 
         assert result == {"project_alpha", "project_beta"}
         assert mock_session.execute.call_count == 1
         mock_get_graph_projects.assert_awaited_once_with(str(ctx.organization.id))
 
     @pytest.mark.asyncio
-    @patch("sibyl.auth.authorization.get_graph_projects")
+    @patch("sibyl.persistence.legacy.auth_runtime.get_graph_projects")
     async def test_migration_mode_no_org_role_returns_empty(
         self, mock_get_graph_projects: MagicMock
     ) -> None:
@@ -462,7 +493,7 @@ class TestListAccessibleProjectGraphIds:
         mock_session = AsyncMock()
         mock_session.execute.return_value = migration_result
 
-        result = await list_accessible_project_graph_ids(mock_session, ctx)
+        result = await legacy_auth_runtime._list_accessible_project_graph_ids(mock_session, ctx)
 
         # Should return empty set (no access without org membership)
         assert result == set()
@@ -533,7 +564,7 @@ class TestRequireProjectRole:
         assert callable(dep)
 
     @pytest.mark.asyncio
-    async def test_surreal_mode_uses_runtime_project_access(
+    async def test_dependency_uses_runtime_project_access(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         dep = require_project_role(ProjectRole.CONTRIBUTOR)
@@ -547,7 +578,6 @@ class TestRequireProjectRole:
         resolve_project = AsyncMock(return_value=project)
         verify_access = AsyncMock(return_value=ProjectRole.CONTRIBUTOR)
 
-        monkeypatch.setattr(authorization_module.settings, "auth_store", "surreal")
         monkeypatch.setattr(
             authorization_module,
             "get_legacy_project_record_by_graph_id",
@@ -558,12 +588,6 @@ class TestRequireProjectRole:
             "verify_legacy_entity_project_access",
             verify_access,
         )
-        monkeypatch.setattr(
-            authorization_module,
-            "get_session",
-            lambda: (_ for _ in ()).throw(AssertionError("postgres should stay untouched")),
-        )
-
         result = await dep(request=request, ctx=ctx)
 
         assert result is project
@@ -578,9 +602,7 @@ class TestRequireProjectRole:
         )
 
     @pytest.mark.asyncio
-    async def test_surreal_mode_rejects_invalid_project_uuid(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_rejects_invalid_project_uuid(self) -> None:
         dep = require_project_role(ProjectRole.VIEWER, use_graph_id=False)
         request = SimpleNamespace(path_params={"project_id": "not-a-uuid"}, query_params={})
         ctx = SimpleNamespace(
@@ -588,8 +610,6 @@ class TestRequireProjectRole:
             user=SimpleNamespace(id=uuid4()),
             org_role=OrganizationRole.MEMBER,
         )
-
-        monkeypatch.setattr(authorization_module.settings, "auth_store", "surreal")
 
         with pytest.raises(HTTPException) as exc_info:
             await dep(request=request, ctx=ctx)
@@ -681,16 +701,16 @@ class TestVerifyEntityProjectAccess:
         ctx.org_role = OrganizationRole.MEMBER
 
         mock_session = AsyncMock()
-        # Make resolve_project_by_graph_id raise HTTPException (project not found)
+        # Simulate missing legacy project record.
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
 
-        result = await verify_entity_project_access(
+        result = await legacy_auth_runtime._verify_entity_project_access(
             mock_session,
             ctx,
-            entity_project_id="project_unsynced",
-            required_role=ProjectRole.VIEWER,
+            "project_unsynced",
+            ProjectRole.VIEWER,
         )
 
         assert result == ProjectRole.VIEWER
@@ -706,17 +726,17 @@ class TestVerifyEntityProjectAccess:
         ctx.org_role = OrganizationRole.MEMBER
 
         mock_session = AsyncMock()
-        # Make resolve_project_by_graph_id raise HTTPException (project not found)
+        # Simulate missing legacy project record.
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
 
         with pytest.raises(ProjectAuthorizationError) as exc_info:
-            await verify_entity_project_access(
+            await legacy_auth_runtime._verify_entity_project_access(
                 mock_session,
                 ctx,
-                entity_project_id="project_unsynced",
-                required_role=ProjectRole.CONTRIBUTOR,
+                "project_unsynced",
+                ProjectRole.CONTRIBUTOR,
             )
 
         assert exc_info.value.detail["details"]["project_id"] == "project_unsynced"
@@ -733,16 +753,16 @@ class TestVerifyEntityProjectAccess:
         ctx.org_role = OrganizationRole.OWNER
 
         mock_session = AsyncMock()
-        # Make resolve_project_by_graph_id raise HTTPException (project not found)
+        # Simulate missing legacy project record.
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
 
-        result = await verify_entity_project_access(
+        result = await legacy_auth_runtime._verify_entity_project_access(
             mock_session,
             ctx,
-            entity_project_id="project_unsynced",
-            required_role=ProjectRole.MAINTAINER,
+            "project_unsynced",
+            ProjectRole.MAINTAINER,
         )
 
         assert result == ProjectRole.OWNER

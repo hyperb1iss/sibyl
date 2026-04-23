@@ -103,33 +103,14 @@ async def resolve_legacy_accessible_project_graph_ids(
     api_key_project_ids: Sequence[str] | None = None,
 ) -> set[str] | None:
     """Resolve project graph IDs accessible to the given user in an organization."""
-    from sibyl.auth.authorization import list_accessible_project_graph_ids
-    from sibyl.db.connection import get_session
+    from sibyl.persistence.legacy import auth_runtime
 
-    async with get_session() as session:
-        resolver = LegacyAuthContextResolver.from_session(session)
-        try:
-            auth_ctx = await resolver.resolve(
-                {
-                    "sub": user_id,
-                    "org": org_id,
-                    "scopes": list(scopes or []),
-                }
-            )
-        except UserNotFoundError:
-            return set()
-        if auth_ctx.organization is None:
-            return set()
-
-        user_accessible = await list_accessible_project_graph_ids(session, auth_ctx)
-
-    if api_key_project_ids is not None:
-        api_key_allowed = set(api_key_project_ids)
-        if user_accessible is None:
-            return api_key_allowed
-        return user_accessible & api_key_allowed
-
-    return user_accessible
+    return await auth_runtime.resolve_legacy_accessible_project_graph_ids(
+        user_id=user_id,
+        org_id=org_id,
+        scopes=scopes,
+        api_key_project_ids=api_key_project_ids,
+    )
 
 
 async def has_legacy_owner_membership(*, org_id: str, user_id: str | None) -> bool:
@@ -151,11 +132,9 @@ async def list_legacy_accessible_project_graph_ids(
     ctx: AuthContext,
 ) -> set[str] | None:
     """Resolve accessible project graph IDs for an authenticated web context."""
-    from sibyl.auth.authorization import list_accessible_project_graph_ids
-    from sibyl.db.connection import get_session
+    from sibyl.persistence.legacy import auth_runtime
 
-    async with get_session() as session:
-        return await list_accessible_project_graph_ids(session, ctx)
+    return await auth_runtime.list_legacy_accessible_project_graph_ids(ctx)
 
 
 async def verify_legacy_entity_project_access(
@@ -165,16 +144,13 @@ async def verify_legacy_entity_project_access(
     required_role: ProjectRole,
 ) -> ProjectRole | None:
     """Verify project access through a fresh legacy relational session."""
-    from sibyl.auth.authorization import verify_entity_project_access
-    from sibyl.db.connection import get_session
+    from sibyl.persistence.legacy import auth_runtime
 
-    async with get_session() as session:
-        return await verify_entity_project_access(
-            session,
-            ctx,
-            entity_project_id,
-            required_role=required_role,
-        )
+    return await auth_runtime.verify_legacy_entity_project_access(
+        ctx=ctx,
+        entity_project_id=entity_project_id,
+        required_role=required_role,
+    )
 
 
 async def create_legacy_session_record(

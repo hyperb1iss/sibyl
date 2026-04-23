@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from sibyl.db.models import ProjectRole
 from sibyl.persistence import auth_runtime
 from sibyl.persistence.auth_common import InvalidAuthClaimsError, UserNotFoundError
 from sibyl.persistence.legacy import auth_runtime as legacy_auth_runtime
@@ -91,6 +92,24 @@ async def test_auth_runtime_dispatches_profile_patch_to_surreal(
 
 
 @pytest.mark.asyncio
+async def test_auth_runtime_dispatches_auth_context_resolution_to_postgres_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    claims = {"sub": str(uuid4()), "org": str(uuid4())}
+    session = object()
+    expected = object()
+    dispatched = AsyncMock(return_value=expected)
+
+    monkeypatch.setattr(auth_runtime.settings, "auth_store", "postgres")
+    monkeypatch.setattr(legacy_auth_runtime, "resolve_legacy_auth_context", dispatched)
+
+    result = await auth_runtime.resolve_legacy_auth_context(claims=claims, session=session)
+
+    assert result is expected
+    dispatched.assert_awaited_once_with(claims=claims, session=session)
+
+
+@pytest.mark.asyncio
 async def test_auth_runtime_dispatches_oauth_listing_to_postgres_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -151,4 +170,50 @@ async def test_auth_runtime_dispatches_project_lookup_by_id_to_postgres_helper(
     dispatched.assert_awaited_once_with(
         organization_id=organization_id,
         project_id=project_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_auth_runtime_dispatches_project_access_list_to_surreal_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = object()
+    expected = {"project_alpha"}
+    dispatched = AsyncMock(return_value=expected)
+
+    monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "list_legacy_accessible_project_graph_ids",
+        dispatched,
+    )
+
+    result = await auth_runtime.list_legacy_accessible_project_graph_ids(ctx)
+
+    assert result == expected
+    dispatched.assert_awaited_once_with(ctx=ctx)
+
+
+@pytest.mark.asyncio
+async def test_auth_runtime_dispatches_entity_project_access_to_postgres_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = object()
+    expected = ProjectRole.CONTRIBUTOR
+    dispatched = AsyncMock(return_value=expected)
+
+    monkeypatch.setattr(auth_runtime.settings, "auth_store", "postgres")
+    monkeypatch.setattr(legacy_auth_runtime, "verify_legacy_entity_project_access", dispatched)
+
+    result = await auth_runtime.verify_legacy_entity_project_access(
+        ctx=ctx,
+        entity_project_id="project_alpha",
+        required_role=ProjectRole.CONTRIBUTOR,
+    )
+
+    assert result == expected
+    dispatched.assert_awaited_once_with(
+        ctx=ctx,
+        entity_project_id="project_alpha",
+        required_role=ProjectRole.CONTRIBUTOR,
     )

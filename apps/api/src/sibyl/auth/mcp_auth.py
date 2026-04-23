@@ -6,7 +6,7 @@ Bearer token.
 
 Accepted tokens:
 - JWT access tokens issued by Sibyl (/api/auth/*)
-- API keys starting with "sk_" (hashed + stored in Postgres)
+- API keys starting with "sk_" (hashed in the active auth runtime)
 """
 
 from __future__ import annotations
