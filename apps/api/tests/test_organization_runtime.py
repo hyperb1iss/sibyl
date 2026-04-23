@@ -74,6 +74,36 @@ async def test_organization_runtime_dispatches_org_delete_to_surreal(
 
 
 @pytest.mark.asyncio
+async def test_organization_runtime_dispatches_project_member_reads_to_surreal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = object()
+    dispatched = AsyncMock(return_value=expected)
+    actor = SimpleNamespace(id=uuid4())
+    org_id = uuid4()
+
+    monkeypatch.setattr(organization_runtime.settings, "auth_store", "surreal")
+    monkeypatch.setattr(
+        surreal_organization_runtime,
+        "list_legacy_project_members",
+        dispatched,
+    )
+
+    result = await organization_runtime.list_legacy_project_members(
+        project_id="project_123",
+        actor=actor,
+        org_id=org_id,
+    )
+
+    assert result is expected
+    dispatched.assert_awaited_once_with(
+        project_id="project_123",
+        actor=actor,
+        org_id=org_id,
+    )
+
+
+@pytest.mark.asyncio
 async def test_surreal_list_legacy_orgs_materializes_roles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

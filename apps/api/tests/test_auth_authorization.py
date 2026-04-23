@@ -1,11 +1,13 @@
 """Tests for project-level authorization module."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
 
+from sibyl.auth import authorization as authorization_module
 from sibyl.auth.authorization import (
     PROJECT_ROLE_LEVELS,
     ProjectAuthorizationError,
@@ -529,6 +531,67 @@ class TestRequireProjectRole:
         """Can use Postgres UUID instead of graph ID."""
         dep = require_project_role(ProjectRole.VIEWER, use_graph_id=False)
         assert callable(dep)
+
+    @pytest.mark.asyncio
+    async def test_surreal_mode_uses_runtime_project_access(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dep = require_project_role(ProjectRole.CONTRIBUTOR)
+        request = SimpleNamespace(path_params={"project_id": "project_abc123"}, query_params={})
+        ctx = SimpleNamespace(
+            organization=SimpleNamespace(id=uuid4()),
+            user=SimpleNamespace(id=uuid4()),
+            org_role=OrganizationRole.MEMBER,
+        )
+        project = SimpleNamespace(id=uuid4(), graph_project_id="project_abc123")
+        resolve_project = AsyncMock(return_value=project)
+        verify_access = AsyncMock(return_value=ProjectRole.CONTRIBUTOR)
+
+        monkeypatch.setattr(authorization_module.settings, "auth_store", "surreal")
+        monkeypatch.setattr(
+            authorization_module,
+            "_resolve_surreal_project_by_graph_id",
+            resolve_project,
+        )
+        monkeypatch.setattr(
+            authorization_module,
+            "verify_legacy_entity_project_access",
+            verify_access,
+        )
+        monkeypatch.setattr(
+            authorization_module,
+            "get_session",
+            lambda: (_ for _ in ()).throw(AssertionError("postgres should stay untouched")),
+        )
+
+        result = await dep(request=request, ctx=ctx)
+
+        assert result is project
+        resolve_project.assert_awaited_once_with(ctx.organization.id, "project_abc123")
+        verify_access.assert_awaited_once_with(
+            ctx=ctx,
+            entity_project_id="project_abc123",
+            required_role=ProjectRole.CONTRIBUTOR,
+        )
+
+    @pytest.mark.asyncio
+    async def test_surreal_mode_rejects_invalid_project_uuid(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dep = require_project_role(ProjectRole.VIEWER, use_graph_id=False)
+        request = SimpleNamespace(path_params={"project_id": "not-a-uuid"}, query_params={})
+        ctx = SimpleNamespace(
+            organization=SimpleNamespace(id=uuid4()),
+            user=SimpleNamespace(id=uuid4()),
+            org_role=OrganizationRole.MEMBER,
+        )
+
+        monkeypatch.setattr(authorization_module.settings, "auth_store", "surreal")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await dep(request=request, ctx=ctx)
+
+        assert exc_info.value.status_code == 400
 
 
 class TestVerifyEntityProjectAccess:

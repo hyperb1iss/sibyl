@@ -9,7 +9,7 @@ from sibyl.api import app as api_app_module
 
 
 @pytest.mark.asyncio
-async def test_surreal_mode_bootstraps_legacy_postgres_support(
+async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bootstrap_legacy_postgres_support = AsyncMock(return_value=True)
@@ -47,7 +47,7 @@ async def test_surreal_mode_bootstraps_legacy_postgres_support(
     async with app.router.lifespan_context(app):
         pass
 
-    bootstrap_legacy_postgres_support.assert_awaited_once()
+    bootstrap_legacy_postgres_support.assert_not_awaited()
     init_pubsub.assert_awaited_once()
     init_locks.assert_awaited_once()
     shutdown_pubsub.assert_awaited_once()

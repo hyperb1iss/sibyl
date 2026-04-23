@@ -90,12 +90,15 @@ def create_combined_app(  # noqa: PLR0915
                 hint="Set SIBYL_JWT_SECRET for authenticated access",
             )
 
+        fully_surreal = settings.store == "surreal" and settings.auth_store == "surreal"
+
         if settings.store == "surreal" and settings.auth_store != "surreal":
             log.info(
                 "Surreal store mode enabled; bootstrapping remaining PostgreSQL-backed services"
             )
 
-        await bootstrap_legacy_postgres_support()
+        if not fully_surreal:
+            await bootstrap_legacy_postgres_support()
 
         try:
             from sibyl_core.graph.client import get_graph_client

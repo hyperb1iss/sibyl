@@ -6,10 +6,16 @@ Uses SQLAlchemy 2.0 async patterns with SQLModel.
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import structlog
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
@@ -17,40 +23,59 @@ from sibyl.config import settings
 
 log = structlog.get_logger()
 
-# =============================================================================
-# Engine Configuration
-# =============================================================================
-
-# Create async engine with connection pooling
-# Using asyncpg driver for PostgreSQL
-_engine = create_async_engine(
-    settings.postgres_url,
-    echo=settings.log_level == "DEBUG",
-    pool_size=settings.postgres_pool_size,
-    max_overflow=settings.postgres_max_overflow,
-    pool_pre_ping=True,  # Verify connections before use
-    pool_recycle=3600,  # Recycle connections after 1 hour
-)
-
-# For testing - use NullPool to avoid connection issues
-_test_engine = create_async_engine(
-    settings.postgres_url,
-    echo=False,
-    poolclass=NullPool,
-)
-
-# Session factory - creates new sessions for each request
-async_session_factory = async_sessionmaker(
-    bind=_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False,
-)
+_engine: AsyncEngine | None = None
+_test_engine: AsyncEngine | None = None
+_session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
-# =============================================================================
-# Connection Lifecycle
-# =============================================================================
+def _build_engine(*, use_null_pool: bool = False) -> AsyncEngine:
+    engine_kwargs: dict[str, Any] = {
+        "echo": False if use_null_pool else settings.log_level == "DEBUG",
+    }
+    if use_null_pool:
+        engine_kwargs["poolclass"] = NullPool
+    else:
+        engine_kwargs.update(
+            pool_size=settings.postgres_pool_size,
+            max_overflow=settings.postgres_max_overflow,
+            pool_pre_ping=True,
+            pool_recycle=3600,
+        )
+    return create_async_engine(settings.postgres_url, **engine_kwargs)
+
+
+def _get_engine() -> AsyncEngine:
+    global _engine  # noqa: PLW0603
+    if _engine is None:
+        _engine = _build_engine()
+    return _engine
+
+
+def _get_test_engine() -> AsyncEngine:
+    global _test_engine  # noqa: PLW0603
+    if _test_engine is None:
+        _test_engine = _build_engine(use_null_pool=True)
+    return _test_engine
+
+
+def _get_async_session_factory() -> async_sessionmaker[AsyncSession]:
+    global _session_factory  # noqa: PLW0603
+    if _session_factory is None:
+        _session_factory = async_sessionmaker(
+            bind=_get_engine(),
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+    return _session_factory
+
+
+class _AsyncSessionFactoryProxy:
+    def __call__(self, *args: Any, **kwargs: Any) -> AsyncSession:
+        return _get_async_session_factory()(*args, **kwargs)
+
+
+async_session_factory = _AsyncSessionFactoryProxy()
 
 
 async def init_db() -> None:
@@ -59,12 +84,9 @@ async def init_db() -> None:
     Creates all SQLModel tables if they don't exist.
     Should be called once at application startup.
     """
-    async with _engine.begin() as conn:
-        # Enable pgvector extension
+    async with _get_engine().begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         log.info("Enabled pgvector extension")
-
-        # Create all tables
         await conn.run_sync(SQLModel.metadata.create_all)
         log.info("Database tables initialized")
 
@@ -74,13 +96,16 @@ async def close_db() -> None:
 
     Should be called at application shutdown.
     """
-    await _engine.dispose()
+    global _engine, _test_engine, _session_factory  # noqa: PLW0603
+
+    if _engine is not None:
+        await _engine.dispose()
+        _engine = None
+    if _test_engine is not None:
+        await _test_engine.dispose()
+        _test_engine = None
+    _session_factory = None
     log.info("Database connections closed")
-
-
-# =============================================================================
-# Session Management
-# =============================================================================
 
 
 @asynccontextmanager
@@ -95,7 +120,7 @@ async def get_session() -> AsyncGenerator[AsyncSession]:
         AsyncSession: Database session that auto-commits on success,
             rolls back on exception.
     """
-    session = async_session_factory()
+    session = _get_async_session_factory()()
     try:
         yield session
         await session.commit()
@@ -118,11 +143,6 @@ async def get_session_dependency() -> AsyncGenerator[AsyncSession]:
         yield session
 
 
-# =============================================================================
-# Health Check
-# =============================================================================
-
-
 async def check_postgres_health() -> dict[str, str | None]:
     """Check PostgreSQL connection health.
 
@@ -134,7 +154,6 @@ async def check_postgres_health() -> dict[str, str | None]:
             result = await session.execute(text("SELECT version()"))
             version = result.scalar()
 
-            # Check pgvector extension
             result = await session.execute(
                 text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
             )

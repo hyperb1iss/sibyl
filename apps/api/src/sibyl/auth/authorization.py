@@ -12,6 +12,7 @@ Inheritance rules:
 """
 
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
@@ -23,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context
 from sibyl.config import settings
-from sibyl.db.connection import get_session_dependency
+from sibyl.db.connection import get_session
 from sibyl.db.models import (
     OrganizationRole,
     Project,
@@ -139,6 +140,93 @@ async def get_project_by_id(
         )
 
     return project
+
+
+def _normalize_surreal_records(result: Any) -> list[dict[str, Any]]:
+    if result is None:
+        return []
+    if isinstance(result, dict):
+        result = [result]
+    if not isinstance(result, list):
+        return []
+
+    records: list[dict[str, Any]] = []
+    for item in result:
+        if isinstance(item, list):
+            nested_items = item
+        else:
+            nested_items = [item]
+        for nested in nested_items:
+            if not isinstance(nested, dict):
+                continue
+            record = dict(nested)
+            record.pop("id", None)
+            records.append(record)
+    return records
+
+
+def _project_from_surreal_record(record: dict[str, Any]) -> Any:
+    owner_user_id = record.get("owner_user_id")
+    return SimpleNamespace(
+        id=UUID(str(record["uuid"])),
+        organization_id=UUID(str(record["organization_id"])),
+        graph_project_id=str(record.get("graph_project_id") or ""),
+        name=record.get("name"),
+        description=record.get("description"),
+        visibility=ProjectVisibility(str(record.get("visibility") or ProjectVisibility.ORG.value)),
+        default_role=ProjectRole(str(record.get("default_role") or ProjectRole.VIEWER.value)),
+        owner_user_id=UUID(str(owner_user_id)) if owner_user_id else None,
+    )
+
+
+async def _resolve_surreal_project_by_graph_id(org_id: UUID, graph_project_id: str) -> Any:
+    from sibyl.persistence.surreal.auth import build_surreal_auth_client
+
+    client = build_surreal_auth_client()
+    try:
+        records = _normalize_surreal_records(
+            await client.execute_query(
+                "SELECT * FROM projects "
+                "WHERE organization_id = $organization_id AND graph_project_id = $graph_project_id "
+                "LIMIT 1;",
+                organization_id=str(org_id),
+                graph_project_id=graph_project_id,
+            )
+        )
+    finally:
+        await client.close()
+
+    if not records:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project not found: {graph_project_id}",
+        )
+    return _project_from_surreal_record(records[0])
+
+
+async def _resolve_surreal_project_by_id(org_id: UUID, project_id: UUID) -> Any:
+    from sibyl.persistence.surreal.auth import build_surreal_auth_client
+
+    client = build_surreal_auth_client()
+    try:
+        records = _normalize_surreal_records(
+            await client.execute_query(
+                "SELECT * FROM projects "
+                "WHERE organization_id = $organization_id AND uuid = $project_id "
+                "LIMIT 1;",
+                organization_id=str(org_id),
+                project_id=str(project_id),
+            )
+        )
+    finally:
+        await client.close()
+
+    if not records:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project not found: {project_id}",
+        )
+    return _project_from_surreal_record(records[0])
 
 
 # =============================================================================
@@ -356,7 +444,6 @@ def require_project_role(
     async def dependency(
         request: Request,
         ctx: AuthContext = Depends(get_auth_context),
-        session: AsyncSession = Depends(get_session_dependency),
     ) -> Project:
         if ctx.organization is None:
             raise HTTPException(
@@ -375,48 +462,85 @@ def require_project_role(
                 detail=f"Missing required parameter: {project_id_param}",
             )
 
-        # Resolve project
-        if use_graph_id:
-            project = await resolve_project_by_graph_id(
-                session, ctx.organization.id, project_id_value
-            )
-        else:
-            try:
-                project_uuid = UUID(project_id_value)
-            except ValueError as e:
+        required_role = min(allowed_roles, key=lambda r: PROJECT_ROLE_LEVELS[r])
+
+        if settings.auth_store == "surreal":
+            if use_graph_id:
+                project = await _resolve_surreal_project_by_graph_id(
+                    ctx.organization.id, project_id_value
+                )
+            else:
+                try:
+                    project_uuid = UUID(project_id_value)
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid project ID format: {project_id_value}",
+                    ) from e
+                project = await _resolve_surreal_project_by_id(ctx.organization.id, project_uuid)
+
+            graph_project_id = str(project.graph_project_id or "").strip()
+            if not graph_project_id:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid project ID format: {project_id_value}",
-                ) from e
-            project = await get_project_by_id(session, ctx.organization.id, project_uuid)
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Project record is missing graph_project_id",
+                )
 
-        # Check role
-        effective_role = await get_effective_project_role(session, ctx, project)
-
-        if effective_role is None:
-            raise ProjectAuthorizationError(
-                project_id=project_id_value,
-                required_role=min(allowed_roles, key=lambda r: PROJECT_ROLE_LEVELS[r]),
-                actual_role=None,
+            effective_role = await verify_legacy_entity_project_access(
+                ctx=ctx,
+                entity_project_id=graph_project_id,
+                required_role=required_role,
             )
-
-        # Check if effective role is in allowed roles or higher
-        min_required_level = min(PROJECT_ROLE_LEVELS[r] for r in allowed_roles)
-        if PROJECT_ROLE_LEVELS[effective_role] < min_required_level:
-            raise ProjectAuthorizationError(
+            log.debug(
+                "project_access_granted",
                 project_id=project_id_value,
-                required_role=min(allowed_roles, key=lambda r: PROJECT_ROLE_LEVELS[r]),
-                actual_role=effective_role,
+                user_id=str(ctx.user.id),
+                effective_role=effective_role.value,
             )
+            return project
 
-        log.debug(
-            "project_access_granted",
-            project_id=project_id_value,
-            user_id=str(ctx.user.id),
-            effective_role=effective_role.value,
-        )
+        async with get_session() as session:
+            # Resolve project
+            if use_graph_id:
+                project = await resolve_project_by_graph_id(
+                    session, ctx.organization.id, project_id_value
+                )
+            else:
+                try:
+                    project_uuid = UUID(project_id_value)
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid project ID format: {project_id_value}",
+                    ) from e
+                project = await get_project_by_id(session, ctx.organization.id, project_uuid)
 
-        return project
+            # Check role
+            effective_role = await get_effective_project_role(session, ctx, project)
+
+            if effective_role is None:
+                raise ProjectAuthorizationError(
+                    project_id=project_id_value,
+                    required_role=required_role,
+                    actual_role=None,
+                )
+
+            # Check if effective role is in allowed roles or higher
+            min_required_level = PROJECT_ROLE_LEVELS[required_role]
+            if PROJECT_ROLE_LEVELS[effective_role] < min_required_level:
+                raise ProjectAuthorizationError(
+                    project_id=project_id_value,
+                    required_role=required_role,
+                    actual_role=effective_role,
+                )
+
+            log.debug(
+                "project_access_granted",
+                project_id=project_id_value,
+                user_id=str(ctx.user.id),
+                effective_role=effective_role.value,
+            )
+            return project
 
     return dependency
 

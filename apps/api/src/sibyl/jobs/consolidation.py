@@ -17,6 +17,40 @@ import structlog
 log = structlog.get_logger()
 
 
+async def _list_organization_ids() -> list[str]:
+    from sibyl.config import settings
+
+    if settings.auth_store == "surreal":
+        from sibyl.persistence.surreal.auth import build_surreal_auth_client
+
+        client = build_surreal_auth_client()
+        try:
+            records = await client.execute_query(
+                "SELECT * FROM organizations ORDER BY created_at ASC;"
+            )
+            if not isinstance(records, list):
+                return []
+            org_ids: list[str] = []
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                org_id = record.get("uuid")
+                if isinstance(org_id, str) and org_id:
+                    org_ids.append(org_id)
+            return org_ids
+        finally:
+            await client.close()
+
+    from sqlalchemy import select
+
+    from sibyl.db.connection import get_session
+    from sibyl.db.models import Organization
+
+    async with get_session() as session:
+        result = await session.execute(select(Organization))
+        return [str(org.id) for (org,) in result.all()]
+
+
 async def consolidate_org(
     ctx: dict[str, Any],  # noqa: ARG001
     group_id: str,
@@ -210,16 +244,7 @@ async def consolidate_all_orgs(
     log.info("consolidate_all_orgs_started")
 
     try:
-        # Enumerate orgs from PostgreSQL (source of truth), not the graph
-        from sqlalchemy import select
-
-        from sibyl.db.connection import get_session
-        from sibyl.db.models import Organization
-
-        org_ids: list[str] = []
-        async with get_session() as session:
-            result = await session.execute(select(Organization))
-            org_ids = [str(org.id) for (org,) in result.all()]
+        org_ids = await _list_organization_ids()
 
         log.info("consolidate_all_orgs_discovered", org_count=len(org_ids))
 

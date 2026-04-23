@@ -299,3 +299,45 @@ async def test_priority_decay_respects_archive_cap_across_pages(
         "episode-2",
         "episode-3",
     ]
+
+
+@pytest.mark.asyncio
+async def test_consolidate_all_orgs_uses_surreal_org_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl import config as config_module
+    from sibyl.persistence.surreal import auth as surreal_auth
+
+    fake_client = MagicMock()
+    fake_client.execute_query = AsyncMock(
+        return_value=[
+            {"uuid": "org-1"},
+            {"uuid": "org-2"},
+        ]
+    )
+    fake_client.close = AsyncMock()
+
+    monkeypatch.setattr(config_module.settings, "auth_store", "surreal")
+    monkeypatch.setattr(surreal_auth, "build_surreal_auth_client", lambda: fake_client)
+    monkeypatch.setattr(
+        consolidation_module,
+        "consolidate_org",
+        AsyncMock(side_effect=lambda ctx, group_id: {"group_id": group_id, "ok": True}),
+    )
+    monkeypatch.setattr(
+        consolidation_module,
+        "priority_decay",
+        AsyncMock(side_effect=lambda ctx, group_id: {"group_id": group_id, "ok": True}),
+    )
+
+    result = await consolidation_module.consolidate_all_orgs({})
+
+    fake_client.execute_query.assert_awaited_once_with(
+        "SELECT * FROM organizations ORDER BY created_at ASC;"
+    )
+    fake_client.close.assert_awaited_once_with()
+    assert result == {
+        "orgs_processed": 2,
+        "orgs_succeeded": 2,
+        "orgs_failed": 0,
+    }
