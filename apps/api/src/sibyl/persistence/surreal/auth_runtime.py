@@ -220,7 +220,7 @@ def _ns(
 ) -> SimpleNamespace | None:
     if record is None:
         return None
-    values: dict[str, Any] = {}
+    values: dict[str, Any] = dict.fromkeys(uuid_fields | datetime_fields, None)
     for key, value in record.items():
         if key in uuid_fields:
             values[key] = _coerce_optional_uuid(value)
