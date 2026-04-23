@@ -53,7 +53,7 @@ class BackupMetadata:
     created_at: str
     organization_id: str
     hostname: str
-    pg_entities: int
+    database_dump_tables: int
     graph_entities: int
     graph_relationships: int
     files: dict[str, str] = field(default_factory=dict)  # filename -> sha256
@@ -67,7 +67,7 @@ class BackupResult:
     backup_id: str
     archive_path: str | None
     archive_size_bytes: int
-    pg_size_bytes: int
+    database_dump_size_bytes: int
     graph_size_bytes: int
     entity_count: int
     relationship_count: int
@@ -406,7 +406,7 @@ async def run_backup(  # noqa: PLR0915
                 created_at=datetime.now(UTC).isoformat(),
                 organization_id=organization_id,
                 hostname=socket.gethostname(),
-                pg_entities=0,  # Could count tables if needed
+                database_dump_tables=0,
                 graph_entities=entity_count,
                 graph_relationships=relationship_count,
                 files=file_checksums,
@@ -464,7 +464,6 @@ async def run_backup(  # noqa: PLR0915
                 "archive_path": str(archive_path),
                 "archive_size_bytes": archive_size,
                 "database_dump_size_bytes": database_dump_size,
-                "pg_size_bytes": database_dump_size,
                 "graph_size_bytes": graph_size,
                 "entity_count": entity_count,
                 "relationship_count": relationship_count,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tarfile
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -231,7 +232,7 @@ async def test_run_backup_in_fully_surreal_mode_includes_runtime_snapshots(
     assert result["success"] is True
     assert result["backup_id"] == "backup_fixed"
     assert result["database_dump_size_bytes"] == 0
-    assert result["pg_size_bytes"] == 0
+    assert "pg_size_bytes" not in result
     export_auth.assert_awaited_once_with()
     export_content.assert_awaited_once_with()
     create_graph_backup.assert_awaited_once_with(organization_id=org_id)
@@ -242,6 +243,9 @@ async def test_run_backup_in_fully_surreal_mode_includes_runtime_snapshots(
 
     with tarfile.open(archive_path, "r:gz") as archive:
         names = set(archive.getnames())
+        metadata = json.load(archive.extractfile("metadata.json"))
 
     assert {"metadata.json", "auth.json", "content.json", "graph.json"} <= names
     assert "postgres.sql" not in names
+    assert metadata["database_dump_tables"] == 0
+    assert "pg_entities" not in metadata
