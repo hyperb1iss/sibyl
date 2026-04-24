@@ -42,7 +42,7 @@ def _enable_dev_signal_diagnostics() -> None:
 
 
 async def _bootstrap_relational_sidecar_support() -> bool:
-    from sibyl.legacy_postgres_startup import bootstrap_relational_sidecar_support
+    from sibyl.relational_sidecar_startup import bootstrap_relational_sidecar_support
 
     return await bootstrap_relational_sidecar_support()
 
