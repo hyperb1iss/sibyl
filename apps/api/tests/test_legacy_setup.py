@@ -65,7 +65,7 @@ async def test_require_legacy_setup_mode_or_auth_allows_setup_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     verify = AsyncMock()
-    monkeypatch.setattr(legacy_setup, "is_legacy_setup_mode", AsyncMock(return_value=True))
+    monkeypatch.setattr(legacy_setup, "is_setup_mode", AsyncMock(return_value=True))
     monkeypatch.setattr(legacy_setup, "verify_access_token", verify)
 
     await legacy_setup.require_legacy_setup_mode_or_auth(_request())
@@ -77,7 +77,7 @@ async def test_require_legacy_setup_mode_or_auth_allows_setup_mode(
 async def test_require_legacy_setup_mode_or_auth_rejects_missing_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(legacy_setup, "is_legacy_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(legacy_setup, "is_setup_mode", AsyncMock(return_value=False))
 
     with pytest.raises(HTTPException, match="Authentication required") as exc_info:
         await legacy_setup.require_legacy_setup_mode_or_auth(_request())
@@ -96,7 +96,7 @@ async def test_require_legacy_setup_mode_or_admin_returns_admin(
     session_manager.__aenter__.return_value = session
     session_manager.__aexit__.return_value = False
 
-    monkeypatch.setattr(legacy_setup, "is_legacy_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(legacy_setup, "is_setup_mode", AsyncMock(return_value=False))
     monkeypatch.setattr(legacy_setup, "verify_access_token", lambda _: {"sub": str(user_id)})
     monkeypatch.setattr(legacy_setup, "get_session", lambda: session_manager)
 
@@ -118,7 +118,7 @@ async def test_require_legacy_setup_mode_or_admin_rejects_non_admin(
     session_manager.__aenter__.return_value = session
     session_manager.__aexit__.return_value = False
 
-    monkeypatch.setattr(legacy_setup, "is_legacy_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(legacy_setup, "is_setup_mode", AsyncMock(return_value=False))
     monkeypatch.setattr(legacy_setup, "verify_access_token", lambda _: {"sub": str(user_id)})
     monkeypatch.setattr(legacy_setup, "get_session", lambda: session_manager)
 
@@ -128,3 +128,9 @@ async def test_require_legacy_setup_mode_or_admin_rejects_non_admin(
         )
 
     assert exc_info.value.status_code == 403
+
+
+def test_legacy_setup_keeps_compat_aliases_pointed_at_neutral_exports() -> None:
+    assert legacy_setup.is_legacy_setup_mode is legacy_setup.is_setup_mode
+    assert legacy_setup.get_legacy_setup_status is legacy_setup.get_setup_status
+    assert legacy_setup.require_legacy_setup_mode_or_auth is legacy_setup.require_setup_mode_or_auth

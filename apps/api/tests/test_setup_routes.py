@@ -5,7 +5,7 @@ import pytest
 from sibyl.api.routes import setup as setup_routes
 from sibyl.persistence import operations_runtime
 from sibyl.persistence.legacy import setup as legacy_setup
-from sibyl.persistence.setup_common import LegacySetupStatus
+from sibyl.persistence.setup_common import SetupStatus
 from sibyl.persistence.surreal import setup as surreal_setup
 
 
@@ -20,7 +20,7 @@ async def test_get_setup_status_uses_runtime_status_and_validates_keys(
     monkeypatch.setattr(
         setup_routes,
         "get_runtime_setup_status",
-        AsyncMock(return_value=LegacySetupStatus(has_users=True, has_orgs=False)),
+        AsyncMock(return_value=SetupStatus(has_users=True, has_orgs=False)),
     )
     monkeypatch.setattr(setup_routes, "get_settings_service", lambda: service)
     monkeypatch.setattr(setup_routes, "_check_openai_key", AsyncMock(return_value=(True, None)))
@@ -45,12 +45,12 @@ async def test_get_setup_status_uses_surreal_setup_runtime_in_surreal_mode(
     service.get_openai_key.return_value = None
     service.get_anthropic_key.return_value = None
 
-    surreal_status = AsyncMock(return_value=LegacySetupStatus(has_users=True, has_orgs=True))
+    surreal_status = AsyncMock(return_value=SetupStatus(has_users=True, has_orgs=True))
     legacy_status = AsyncMock(side_effect=AssertionError("legacy setup status should not run"))
 
     monkeypatch.setattr(operations_runtime.settings, "auth_store", "surreal")
-    monkeypatch.setattr(surreal_setup, "get_legacy_setup_status", surreal_status)
-    monkeypatch.setattr(legacy_setup, "get_legacy_setup_status", legacy_status)
+    monkeypatch.setattr(surreal_setup, "get_setup_status", surreal_status)
+    monkeypatch.setattr(legacy_setup, "get_setup_status", legacy_status)
     monkeypatch.setattr(setup_routes, "get_settings_service", lambda: service)
 
     response = await setup_routes.get_setup_status(validate_keys=False)

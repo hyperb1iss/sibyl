@@ -4,6 +4,11 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
-class LegacySetupStatus:
+class SetupStatus:
     has_users: bool
     has_orgs: bool
+
+
+LegacySetupStatus = SetupStatus
+
+__all__ = ["SetupStatus", "LegacySetupStatus"]

@@ -10,7 +10,7 @@ from starlette.requests import Request
 from sibyl.auth.dependencies import build_auth_context
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import JwtError, verify_access_token
-from sibyl.persistence.setup_common import LegacySetupStatus
+from sibyl.persistence.setup_common import SetupStatus
 from sibyl.persistence.surreal.auth import (
     SurrealOrganizationRepository,
     SurrealUserRepository,
@@ -21,7 +21,7 @@ from sibyl_core.auth import AuthUser, OrganizationRole
 _ADMIN_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN)
 
 
-async def is_legacy_setup_mode() -> bool:
+async def is_setup_mode() -> bool:
     """Return whether the system has no users and is still in setup mode."""
     client = build_surreal_auth_client()
     try:
@@ -31,7 +31,7 @@ async def is_legacy_setup_mode() -> bool:
         await client.close()
 
 
-async def get_legacy_setup_status() -> LegacySetupStatus:
+async def get_setup_status() -> SetupStatus:
     """Return whether Surreal auth storage has users and organizations."""
     client = build_surreal_auth_client()
     try:
@@ -39,7 +39,7 @@ async def get_legacy_setup_status() -> LegacySetupStatus:
         orgs = SurrealOrganizationRepository.from_client(client)
         has_users = await users.has_any_users()
         has_orgs = bool(await orgs.list_all(limit=1))
-        return LegacySetupStatus(has_users=has_users, has_orgs=has_orgs)
+        return SetupStatus(has_users=has_users, has_orgs=has_orgs)
     finally:
         await client.close()
 
@@ -74,18 +74,18 @@ def _verify_token_claims(token: str) -> dict[str, object]:
     return claims
 
 
-async def require_legacy_setup_mode_or_auth(request: Request) -> None:
+async def require_setup_mode_or_auth(request: Request) -> None:
     """Allow setup mode access, otherwise require a valid access token."""
-    if await is_legacy_setup_mode():
+    if await is_setup_mode():
         return
 
     token = _require_request_token(request)
     _verify_token_claims(token)
 
 
-async def require_legacy_setup_mode_or_admin(request: Request) -> AuthUser | None:
+async def require_setup_mode_or_admin(request: Request) -> AuthUser | None:
     """Allow setup mode access, otherwise require an authenticated admin."""
-    if await is_legacy_setup_mode():
+    if await is_setup_mode():
         return None
 
     token = _require_request_token(request)
@@ -108,11 +108,35 @@ async def require_legacy_setup_mode_or_admin(request: Request) -> AuthUser | Non
     return ctx.user
 
 
-async def require_legacy_settings_admin(request: Request) -> None:
+async def require_settings_admin(request: Request) -> None:
     """Allow setup-mode bootstrap access, otherwise require an org admin."""
-    if await is_legacy_setup_mode():
+    if await is_setup_mode():
         return
 
     ctx = await build_auth_context(request, None)
     if ctx.organization is None or ctx.org_role not in _ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admin or owner role required")
+
+
+is_legacy_setup_mode = is_setup_mode
+get_legacy_setup_status = get_setup_status
+require_legacy_setup_mode_or_auth = require_setup_mode_or_auth
+require_legacy_setup_mode_or_admin = require_setup_mode_or_admin
+require_legacy_settings_admin = require_settings_admin
+
+__all__ = [
+    "SetupStatus",
+    "SurrealOrganizationRepository",
+    "SurrealUserRepository",
+    "build_surreal_auth_client",
+    "get_setup_status",
+    "get_legacy_setup_status",
+    "is_setup_mode",
+    "is_legacy_setup_mode",
+    "require_settings_admin",
+    "require_legacy_settings_admin",
+    "require_setup_mode_or_admin",
+    "require_legacy_setup_mode_or_admin",
+    "require_setup_mode_or_auth",
+    "require_legacy_setup_mode_or_auth",
+]
