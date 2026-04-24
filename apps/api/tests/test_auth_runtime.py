@@ -53,6 +53,13 @@ def test_auth_runtime_maps_auth_exports_for_surreal(
     )
 
 
+def test_auth_runtime_keeps_legacy_helper_aliases_pointed_at_neutral_exports() -> None:
+    assert auth_runtime.resolve_legacy_auth_context is auth_runtime.resolve_auth_context
+    assert auth_runtime.patch_legacy_auth_user is auth_runtime.patch_auth_user
+    assert auth_runtime.get_legacy_project_record_by_graph_id is auth_runtime.get_project_record_by_graph_id
+    assert auth_runtime.list_legacy_oauth_connections is auth_runtime.list_oauth_connections
+
+
 def test_auth_runtime_surreal_backend_covers_public_exports(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

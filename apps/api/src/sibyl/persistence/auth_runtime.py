@@ -213,208 +213,6 @@ async def _call_backend_export(export_name: str, *args: object, **kwargs: object
     return await export(*args, **kwargs)
 
 
-async def patch_legacy_auth_user(
-    *,
-    user_id: UUID,
-    updates: dict[str, Any],
-    organization_id: UUID | None,
-    request: Any,
-):
-    return await _call_runtime_helper(
-        "patch_legacy_auth_user",
-        user_id=user_id,
-        updates=updates,
-        organization_id=organization_id,
-        request=request,
-    )
-
-
-async def create_legacy_project_record(
-    *,
-    organization_id: UUID,
-    owner_user_id: UUID,
-    graph_project_id: str,
-    name: str,
-    description: str | None = None,
-) -> Any:
-    return await _call_runtime_helper(
-        "create_legacy_project_record",
-        organization_id=organization_id,
-        owner_user_id=owner_user_id,
-        graph_project_id=graph_project_id,
-        name=name,
-        description=description,
-    )
-
-
-async def update_legacy_project_record(
-    *,
-    organization_id: UUID,
-    graph_project_id: str,
-    name: str | None = None,
-    description: str | None = None,
-) -> bool:
-    return await _call_runtime_helper(
-        "update_legacy_project_record",
-        organization_id=organization_id,
-        graph_project_id=graph_project_id,
-        name=name,
-        description=description,
-    )
-
-
-async def delete_legacy_project_record(
-    *,
-    organization_id: UUID,
-    graph_project_id: str,
-) -> bool:
-    return await _call_runtime_helper(
-        "delete_legacy_project_record",
-        organization_id=organization_id,
-        graph_project_id=graph_project_id,
-    )
-
-
-async def get_legacy_project_record_by_graph_id(
-    *,
-    organization_id: UUID,
-    graph_project_id: str,
-) -> Any:
-    return await _call_runtime_helper(
-        "get_legacy_project_record_by_graph_id",
-        organization_id=organization_id,
-        graph_project_id=graph_project_id,
-    )
-
-
-async def get_legacy_project_record_by_id(
-    *,
-    organization_id: UUID,
-    project_id: UUID,
-) -> Any:
-    return await _call_runtime_helper(
-        "get_legacy_project_record_by_id",
-        organization_id=organization_id,
-        project_id=project_id,
-    )
-
-
-async def resolve_legacy_auth_context(
-    *,
-    claims: dict[str, Any],
-    session: Any | None = None,
-) -> Any:
-    return await _call_runtime_helper(
-        "resolve_legacy_auth_context",
-        claims=claims,
-        session=session,
-    )
-
-
-async def list_legacy_accessible_project_graph_ids(ctx: Any) -> set[str] | None:
-    return await _call_runtime_helper(
-        "list_legacy_accessible_project_graph_ids",
-        ctx=ctx,
-    )
-
-
-async def resolve_legacy_accessible_project_graph_ids(
-    *,
-    user_id: str,
-    org_id: str,
-    scopes: Any | None = None,
-    api_key_project_ids: Any | None = None,
-) -> set[str] | None:
-    return await _call_runtime_helper(
-        "resolve_legacy_accessible_project_graph_ids",
-        user_id=user_id,
-        org_id=org_id,
-        scopes=scopes,
-        api_key_project_ids=api_key_project_ids,
-    )
-
-
-async def verify_legacy_entity_project_access(
-    *,
-    ctx: Any,
-    entity_project_id: str | None,
-    required_role: Any,
-) -> Any:
-    return await _call_runtime_helper(
-        "verify_legacy_entity_project_access",
-        ctx=ctx,
-        entity_project_id=entity_project_id,
-        required_role=required_role,
-    )
-
-
-async def list_legacy_user_sessions(
-    *,
-    user_id: UUID,
-    include_expired: bool = False,
-):
-    return await _call_runtime_helper(
-        "list_legacy_user_sessions",
-        user_id=user_id,
-        include_expired=include_expired,
-    )
-
-
-async def revoke_all_legacy_user_sessions(
-    *,
-    user_id: UUID,
-    exclude_token_hash: str | None = None,
-) -> int:
-    return await _call_runtime_helper(
-        "revoke_all_legacy_user_sessions",
-        user_id=user_id,
-        exclude_token_hash=exclude_token_hash,
-    )
-
-
-async def revoke_legacy_user_session(
-    *,
-    user_id: UUID,
-    session_id: UUID,
-) -> bool:
-    return await _call_runtime_helper(
-        "revoke_legacy_user_session",
-        user_id=user_id,
-        session_id=session_id,
-    )
-
-
-async def request_legacy_password_reset(email: str) -> None:
-    await _call_runtime_helper("request_legacy_password_reset", email=email)
-
-
-async def confirm_legacy_password_reset(token: str, new_password: str) -> None:
-    await _call_runtime_helper(
-        "confirm_legacy_password_reset",
-        token=token,
-        new_password=new_password,
-    )
-
-
-async def list_legacy_oauth_connections(*, user_id: UUID):
-    return await _call_runtime_helper(
-        "list_legacy_oauth_connections",
-        user_id=user_id,
-    )
-
-
-async def remove_legacy_oauth_connection(
-    *,
-    user_id: UUID,
-    connection_id: UUID,
-):
-    return await _call_runtime_helper(
-        "remove_legacy_oauth_connection",
-        user_id=user_id,
-        connection_id=connection_id,
-    )
-
-
 async def authenticate_api_key(raw_key: str):
     return await _call_backend_export("authenticate_legacy_api_key", raw_key)
 
@@ -528,7 +326,11 @@ async def resolve_auth_context(
     claims: dict[str, Any],
     session: Any | None = None,
 ) -> Any:
-    return await resolve_legacy_auth_context(claims=claims, session=session)
+    return await _call_runtime_helper(
+        "resolve_legacy_auth_context",
+        claims=claims,
+        session=session,
+    )
 
 
 async def list_user_organizations(*, user_id: UUID):
@@ -542,7 +344,8 @@ async def patch_auth_user(
     organization_id: UUID | None,
     request: Any,
 ):
-    return await patch_legacy_auth_user(
+    return await _call_runtime_helper(
+        "patch_legacy_auth_user",
         user_id=user_id,
         updates=updates,
         organization_id=organization_id,
@@ -559,7 +362,8 @@ async def get_project_record_by_graph_id(
     organization_id: UUID,
     graph_project_id: str,
 ) -> Any:
-    return await get_legacy_project_record_by_graph_id(
+    return await _call_runtime_helper(
+        "get_legacy_project_record_by_graph_id",
         organization_id=organization_id,
         graph_project_id=graph_project_id,
     )
@@ -573,7 +377,8 @@ async def create_project_record(
     name: str,
     description: str | None = None,
 ) -> Any:
-    return await create_legacy_project_record(
+    return await _call_runtime_helper(
+        "create_legacy_project_record",
         organization_id=organization_id,
         owner_user_id=owner_user_id,
         graph_project_id=graph_project_id,
@@ -589,7 +394,8 @@ async def update_project_record(
     name: str | None = None,
     description: str | None = None,
 ) -> bool:
-    return await update_legacy_project_record(
+    return await _call_runtime_helper(
+        "update_legacy_project_record",
         organization_id=organization_id,
         graph_project_id=graph_project_id,
         name=name,
@@ -602,7 +408,8 @@ async def delete_project_record(
     organization_id: UUID,
     graph_project_id: str,
 ) -> bool:
-    return await delete_legacy_project_record(
+    return await _call_runtime_helper(
+        "delete_legacy_project_record",
         organization_id=organization_id,
         graph_project_id=graph_project_id,
     )
@@ -613,14 +420,18 @@ async def get_project_record_by_id(
     organization_id: UUID,
     project_id: UUID,
 ) -> Any:
-    return await get_legacy_project_record_by_id(
+    return await _call_runtime_helper(
+        "get_legacy_project_record_by_id",
         organization_id=organization_id,
         project_id=project_id,
     )
 
 
 async def list_accessible_project_graph_ids(ctx: Any) -> set[str] | None:
-    return await list_legacy_accessible_project_graph_ids(ctx)
+    return await _call_runtime_helper(
+        "list_legacy_accessible_project_graph_ids",
+        ctx=ctx,
+    )
 
 
 async def resolve_accessible_project_graph_ids(
@@ -630,7 +441,8 @@ async def resolve_accessible_project_graph_ids(
     scopes: Any | None = None,
     api_key_project_ids: Any | None = None,
 ) -> set[str] | None:
-    return await resolve_legacy_accessible_project_graph_ids(
+    return await _call_runtime_helper(
+        "resolve_legacy_accessible_project_graph_ids",
         user_id=user_id,
         org_id=org_id,
         scopes=scopes,
@@ -644,7 +456,8 @@ async def verify_entity_project_access(
     entity_project_id: str | None,
     required_role: Any,
 ) -> Any:
-    return await verify_legacy_entity_project_access(
+    return await _call_runtime_helper(
+        "verify_legacy_entity_project_access",
         ctx=ctx,
         entity_project_id=entity_project_id,
         required_role=required_role,
@@ -660,7 +473,11 @@ async def list_user_sessions(
     user_id: UUID,
     include_expired: bool = False,
 ):
-    return await list_legacy_user_sessions(user_id=user_id, include_expired=include_expired)
+    return await _call_runtime_helper(
+        "list_legacy_user_sessions",
+        user_id=user_id,
+        include_expired=include_expired,
+    )
 
 
 async def revoke_all_user_sessions(
@@ -668,7 +485,8 @@ async def revoke_all_user_sessions(
     user_id: UUID,
     exclude_token_hash: str | None = None,
 ) -> int:
-    return await revoke_all_legacy_user_sessions(
+    return await _call_runtime_helper(
+        "revoke_all_legacy_user_sessions",
         user_id=user_id,
         exclude_token_hash=exclude_token_hash,
     )
@@ -679,19 +497,30 @@ async def revoke_user_session(
     user_id: UUID,
     session_id: UUID,
 ) -> bool:
-    return await revoke_legacy_user_session(user_id=user_id, session_id=session_id)
+    return await _call_runtime_helper(
+        "revoke_legacy_user_session",
+        user_id=user_id,
+        session_id=session_id,
+    )
 
 
 async def request_password_reset(email: str) -> None:
-    await request_legacy_password_reset(email)
+    await _call_runtime_helper("request_legacy_password_reset", email=email)
 
 
 async def confirm_password_reset(token: str, new_password: str) -> None:
-    await confirm_legacy_password_reset(token, new_password)
+    await _call_runtime_helper(
+        "confirm_legacy_password_reset",
+        token=token,
+        new_password=new_password,
+    )
 
 
 async def list_oauth_connections(*, user_id: UUID):
-    return await list_legacy_oauth_connections(user_id=user_id)
+    return await _call_runtime_helper(
+        "list_legacy_oauth_connections",
+        user_id=user_id,
+    )
 
 
 async def remove_oauth_connection(
@@ -699,4 +528,56 @@ async def remove_oauth_connection(
     user_id: UUID,
     connection_id: UUID,
 ):
-    return await remove_legacy_oauth_connection(user_id=user_id, connection_id=connection_id)
+    return await _call_runtime_helper(
+        "remove_legacy_oauth_connection",
+        user_id=user_id,
+        connection_id=connection_id,
+    )
+
+
+patch_legacy_auth_user = patch_auth_user
+create_legacy_project_record = create_project_record
+update_legacy_project_record = update_project_record
+delete_legacy_project_record = delete_project_record
+get_legacy_project_record_by_graph_id = get_project_record_by_graph_id
+get_legacy_project_record_by_id = get_project_record_by_id
+resolve_legacy_auth_context = resolve_auth_context
+list_legacy_user_sessions = list_user_sessions
+revoke_all_legacy_user_sessions = revoke_all_user_sessions
+revoke_legacy_user_session = revoke_user_session
+request_legacy_password_reset = request_password_reset
+confirm_legacy_password_reset = confirm_password_reset
+list_legacy_oauth_connections = list_oauth_connections
+remove_legacy_oauth_connection = remove_oauth_connection
+
+
+async def list_legacy_accessible_project_graph_ids(ctx: Any) -> set[str] | None:
+    return await list_accessible_project_graph_ids(ctx)
+
+
+async def resolve_legacy_accessible_project_graph_ids(
+    *,
+    user_id: str,
+    org_id: str,
+    scopes: Any | None = None,
+    api_key_project_ids: Any | None = None,
+) -> set[str] | None:
+    return await resolve_accessible_project_graph_ids(
+        user_id=user_id,
+        org_id=org_id,
+        scopes=scopes,
+        api_key_project_ids=api_key_project_ids,
+    )
+
+
+async def verify_legacy_entity_project_access(
+    *,
+    ctx: Any,
+    entity_project_id: str | None,
+    required_role: Any,
+) -> Any:
+    return await verify_entity_project_access(
+        ctx=ctx,
+        entity_project_id=entity_project_id,
+        required_role=required_role,
+    )
