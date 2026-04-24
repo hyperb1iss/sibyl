@@ -257,27 +257,8 @@ class TestGraphStoreDependencies:
         assert service._store is store
 
     @pytest.mark.asyncio
-    async def test_legacy_graph_store_wrapper_uses_active_dependency(
-        self, mock_org: MagicMock
-    ) -> None:
-        store = MagicMock()
+    async def test_legacy_graph_store_alias_uses_active_dependency(self) -> None:
+        assert get_legacy_graph_store is get_graph_store
 
-        with patch("sibyl.api.dependencies.get_graph_store", AsyncMock(return_value=store)) as getter:
-            result = await get_legacy_graph_store(org=mock_org)
-
-        assert result is store
-        getter.assert_awaited_once_with(org=mock_org)
-
-    @pytest.mark.asyncio
-    async def test_legacy_knowledge_read_service_wrapper_uses_active_dependency(self) -> None:
-        store = MagicMock()
-        service = MagicMock()
-
-        with patch(
-            "sibyl.api.dependencies.get_knowledge_read_service",
-            AsyncMock(return_value=service),
-        ) as getter:
-            result = await get_legacy_knowledge_read_service(graph_store=store)
-
-        assert result is service
-        getter.assert_awaited_once_with(graph_store=store)
+    def test_legacy_knowledge_read_service_alias_uses_active_dependency(self) -> None:
+        assert get_legacy_knowledge_read_service is get_knowledge_read_service

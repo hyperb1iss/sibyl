@@ -28,8 +28,10 @@ if TYPE_CHECKING:
     from sibyl_core.graph.client import GraphClient
 
 
-LegacyGraphStore = ActiveGraphStore
-LegacyKnowledgeReadAdapter = GraphReadServiceAdapter
+GraphStore = ActiveGraphStore
+KnowledgeReadAdapter = GraphReadServiceAdapter
+LegacyGraphStore = GraphStore
+LegacyKnowledgeReadAdapter = KnowledgeReadAdapter
 
 
 async def get_graph() -> GraphClient:
@@ -104,18 +106,8 @@ async def get_knowledge_read_service(
     return GraphReadServiceAdapter(graph_store)
 
 
-async def get_legacy_graph_store(
-    org: Organization = Depends(get_current_organization),
-) -> ActiveGraphStore:
-    """Compatibility wrapper for callers still using the legacy name."""
-    return await get_graph_store(org=org)
-
-
-async def get_legacy_knowledge_read_service(
-    graph_store: ActiveGraphStore = Depends(get_graph_store),
-) -> KnowledgeReadService:
-    """Compatibility wrapper for callers still using the legacy name."""
-    return await get_knowledge_read_service(graph_store=graph_store)
+get_legacy_graph_store = get_graph_store
+get_legacy_knowledge_read_service = get_knowledge_read_service
 
 
 async def get_group_id(
