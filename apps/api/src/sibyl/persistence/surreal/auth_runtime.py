@@ -707,7 +707,7 @@ async def _issue_auth_session(
     request: Any,
     action: str,
     details: dict[str, Any],
-) -> LegacyIssuedAuthSession:
+) -> IssuedAuthSession:
     access_token = create_access_token(user_id=user.id, organization_id=organization.id)
     refresh_token, refresh_expires = create_refresh_token(
         user_id=user.id,
@@ -733,7 +733,7 @@ async def _issue_auth_session(
         request=request,
         details=details,
     )
-    return LegacyIssuedAuthSession(
+    return IssuedAuthSession(
         user=user,
         organization=organization,
         access_token=access_token,
@@ -949,7 +949,7 @@ async def revoke_legacy_refresh_session_record(refresh_token: str) -> None:
         await repo.replace_record("user_sessions", uuid=existing.id, record=updated)
 
 
-async def login_legacy_github_identity(*, identity, request) -> LegacyIssuedAuthSession:
+async def login_legacy_github_identity(*, identity, request) -> IssuedAuthSession:
     async with _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
         orgs = SurrealOrganizationRepository.from_client(client)
@@ -1264,7 +1264,7 @@ async def resolve_legacy_request_claims(request) -> dict[str, Any] | None:
     except JwtError:
         pass
     if token.startswith("sk_"):
-        auth = await authenticate_legacy_api_key(token)
+        auth = await authenticate_api_key(token)
         if auth is None:
             return None
         return {
@@ -1277,21 +1277,21 @@ async def resolve_legacy_request_claims(request) -> dict[str, Any] | None:
 
 
 async def resolve_legacy_request_user(request):
-    claims = await resolve_legacy_request_claims(request)
+    claims = await resolve_request_claims(request)
     if not claims:
         return None
     try:
         user_id = UUID(str(claims.get("sub", "")))
     except ValueError:
         return None
-    return await get_legacy_user_by_id(user_id)
+    return await get_user_by_id(user_id)
 
 
 async def login_legacy_device_browser_user(*, email: str, password: str, request):
-    issued = await login_legacy_local_user(email=email, password=password, request=request)
+    issued = await login_local_user(email=email, password=password, request=request)
     if issued is None:
         return None
-    return LegacyDeviceBrowserLogin(
+    return DeviceBrowserLogin(
         user=issued.user,
         organization=issued.organization,
         access_token=issued.access_token,
@@ -1301,7 +1301,7 @@ async def login_legacy_device_browser_user(*, email: str, password: str, request
 async def deny_legacy_device_authorization(*, user_id: UUID, user_code: str, request):
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
-        user = await get_legacy_user_by_id(user_id)
+        user = await get_user_by_id(user_id)
         if user is None:
             return None
         record = await repo.select_one(
@@ -1426,7 +1426,7 @@ async def rotate_legacy_refresh_exchange(
             request=request,
             details={"session_id": str(existing.id)},
         )
-        return LegacyRefreshRotation(
+        return RefreshRotation(
             session_id=existing.id,
             access_token=access_token,
             refresh_token=new_refresh_token,
