@@ -211,7 +211,7 @@ def _sort_auth_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     return sorted(rows, key=_key)
 
 
-async def _export_postgres_auth_archive_payload() -> dict[str, object]:
+async def _export_relational_auth_archive_payload() -> dict[str, object]:
     tables: dict[str, list[dict[str, object]]] = {}
     row_counts: dict[str, int] = {}
 
@@ -267,7 +267,7 @@ async def export_auth_archive_payload() -> dict[str, object]:
 
     if not config_module.settings.uses_relational_auth:
         return await _export_surreal_auth_archive_payload()
-    return await _export_postgres_auth_archive_payload()
+    return await _export_relational_auth_archive_payload()
 
 
 async def restore_auth_archive_payload(

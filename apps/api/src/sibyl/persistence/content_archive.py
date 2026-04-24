@@ -260,7 +260,7 @@ def _normalize_content_archive_restore_row(
     return normalized
 
 
-async def _export_postgres_content_archive_payload() -> dict[str, object]:
+async def _export_relational_content_archive_payload() -> dict[str, object]:
     tables: dict[str, list[dict[str, object]]] = {}
     row_counts: dict[str, int] = {}
 
@@ -326,7 +326,7 @@ async def export_content_archive_payload() -> dict[str, object]:
 
     if config_module.settings.store == "surreal":
         return await _export_surreal_content_archive_payload()
-    return await _export_postgres_content_archive_payload()
+    return await _export_relational_content_archive_payload()
 
 
 async def restore_content_archive_payload(
