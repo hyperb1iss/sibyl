@@ -185,32 +185,34 @@ function CreateBackupModal({
   onClose,
   onConfirm,
   isPending,
-  defaultIncludePostgres,
+  defaultIncludeDatabaseDump,
   defaultIncludeGraph,
+  databaseDumpSupported,
+  archiveContents,
   lastBackupSize,
 }: {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (options: { include_postgres: boolean; include_graph: boolean }) => void;
+  onConfirm: (options: { include_database_dump: boolean; include_graph: boolean }) => void;
   isPending: boolean;
-  defaultIncludePostgres: boolean;
+  defaultIncludeDatabaseDump: boolean;
   defaultIncludeGraph: boolean;
+  databaseDumpSupported: boolean;
+  archiveContents: string[];
   lastBackupSize?: number;
 }) {
-  const [includePostgres, setIncludePostgres] = useState(defaultIncludePostgres);
+  const [includeDatabaseDump, setIncludeDatabaseDump] = useState(defaultIncludeDatabaseDump);
   const [includeGraph, setIncludeGraph] = useState(defaultIncludeGraph);
   const [step, setStep] = useState<'options' | 'running' | 'success'>('options');
 
-  // Reset state when modal opens
   useEffect(() => {
     if (isOpen) {
-      setIncludePostgres(defaultIncludePostgres);
+      setIncludeDatabaseDump(defaultIncludeDatabaseDump);
       setIncludeGraph(defaultIncludeGraph);
       setStep('options');
     }
-  }, [isOpen, defaultIncludePostgres, defaultIncludeGraph]);
+  }, [isOpen, defaultIncludeDatabaseDump, defaultIncludeGraph]);
 
-  // Track when backup completes
   useEffect(() => {
     if (step === 'running' && !isPending) {
       setStep('success');
@@ -221,10 +223,15 @@ function CreateBackupModal({
 
   const handleConfirm = () => {
     setStep('running');
-    onConfirm({ include_postgres: includePostgres, include_graph: includeGraph });
+    onConfirm({ include_database_dump: includeDatabaseDump, include_graph: includeGraph });
   };
 
-  const canCreate = includePostgres || includeGraph;
+  const canCreate = includeDatabaseDump || includeGraph;
+  const dataSnapshotLabel = databaseDumpSupported ? 'Database Dump' : 'Surreal Data Snapshot';
+  const dataSnapshotDescription = databaseDumpSupported
+    ? 'Relational database dump for legacy or mixed runtimes'
+    : 'Auth, content, crawler data, sessions, API keys, and settings from SurrealDB';
+  const archiveSummary = archiveContents.length > 0 ? archiveContents.join(', ') : 'runtime data';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -253,31 +260,28 @@ function CreateBackupModal({
         <div className="px-6 py-5">
           {step === 'options' && (
             <div className="space-y-4">
-              {/* PostgreSQL Option */}
               <div
                 className={`p-4 rounded-lg border transition-all cursor-pointer ${
-                  includePostgres
+                  includeDatabaseDump
                     ? 'bg-sc-cyan/5 border-sc-cyan/30'
                     : 'bg-sc-bg-highlight/30 border-sc-fg-subtle/10 hover:border-sc-fg-subtle/20'
                 }`}
-                onClick={() => setIncludePostgres(!includePostgres)}
+                onClick={() => setIncludeDatabaseDump(!includeDatabaseDump)}
               >
                 <div className="flex items-start gap-3">
                   <div
                     className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
-                      includePostgres ? 'bg-sc-cyan border-sc-cyan' : 'border-sc-fg-subtle/40'
+                      includeDatabaseDump ? 'bg-sc-cyan border-sc-cyan' : 'border-sc-fg-subtle/40'
                     }`}
                   >
-                    {includePostgres && <Check width={12} height={12} className="text-white" />}
+                    {includeDatabaseDump && <Check width={12} height={12} className="text-white" />}
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <Database width={16} height={16} className="text-sc-cyan" />
-                      <span className="font-medium text-sc-fg-primary">PostgreSQL Database</span>
+                      <span className="font-medium text-sc-fg-primary">{dataSnapshotLabel}</span>
                     </div>
-                    <p className="text-xs text-sc-fg-muted mt-1">
-                      Users, organizations, teams, API keys, sessions, and all application data
-                    </p>
+                    <p className="text-xs text-sc-fg-muted mt-1">{dataSnapshotDescription}</p>
                   </div>
                 </div>
               </div>
@@ -315,7 +319,7 @@ function CreateBackupModal({
               <div className="flex items-start gap-2 p-3 rounded-lg bg-sc-bg-highlight/50 text-xs text-sc-fg-muted">
                 <Clock width={14} height={14} className="flex-shrink-0 mt-0.5" />
                 <div>
-                  <p>Backups are compressed and typically complete in under a minute.</p>
+                  <p>Backups are compressed and include {archiveSummary}.</p>
                   {lastBackupSize && lastBackupSize > 0 && (
                     <p className="mt-1">
                       Last backup size:{' '}
@@ -346,17 +350,17 @@ function CreateBackupModal({
               </div>
               <h3 className="text-lg font-semibold text-sc-fg-primary mb-1">Creating Backup</h3>
               <p className="text-sm text-sc-fg-muted">
-                {includePostgres && includeGraph
-                  ? 'Exporting database and knowledge graph...'
-                  : includePostgres
-                    ? 'Exporting PostgreSQL database...'
+                {includeDatabaseDump && includeGraph
+                  ? 'Exporting data snapshot and knowledge graph...'
+                  : includeDatabaseDump
+                    ? 'Exporting data snapshot...'
                     : 'Exporting knowledge graph...'}
               </p>
               <div className="mt-4 flex items-center justify-center gap-4 text-xs text-sc-fg-muted">
-                {includePostgres && (
+                {includeDatabaseDump && (
                   <span className="flex items-center gap-1.5">
                     <Database width={12} height={12} className="text-sc-cyan" />
-                    PostgreSQL
+                    Data
                   </span>
                 )}
                 {includeGraph && (
@@ -435,7 +439,7 @@ export default function BackupsPage() {
   const lastCompletedBackup = backupsData?.backups.find(b => b.status === 'completed');
 
   const handleCreateBackup = async (options: {
-    include_postgres: boolean;
+    include_database_dump: boolean;
     include_graph: boolean;
   }) => {
     try {
@@ -459,7 +463,7 @@ export default function BackupsPage() {
     enabled?: boolean;
     schedule?: string;
     retention_days?: number;
-    include_postgres?: boolean;
+    include_database_dump?: boolean;
     include_graph?: boolean;
   }) => {
     try {
@@ -493,8 +497,10 @@ export default function BackupsPage() {
         onClose={() => setIsModalOpen(false)}
         onConfirm={handleCreateBackup}
         isPending={createBackup.isPending}
-        defaultIncludePostgres={settings?.include_postgres ?? true}
+        defaultIncludeDatabaseDump={settings?.include_database_dump ?? true}
         defaultIncludeGraph={settings?.include_graph ?? true}
+        databaseDumpSupported={settings?.database_dump_supported ?? false}
+        archiveContents={settings?.archive_contents ?? []}
         lastBackupSize={lastCompletedBackup?.size_bytes}
       />
 
@@ -515,7 +521,7 @@ export default function BackupsPage() {
           </button>
         </div>
         <p className="text-sc-fg-muted text-sm">
-          Create and manage backup archives of your knowledge graph and PostgreSQL data.
+          Create and manage backup archives of your SurrealDB data and knowledge graph.
         </p>
       </div>
 
@@ -611,12 +617,16 @@ export default function BackupsPage() {
                 <div className="flex items-center justify-between p-3 rounded-lg bg-sc-bg-highlight/50 border border-sc-fg-subtle/10">
                   <div className="flex items-center gap-3">
                     <Database width={18} height={18} className="text-sc-cyan" />
-                    <span className="text-sm text-sc-fg-primary">PostgreSQL Database</span>
+                    <span className="text-sm text-sc-fg-primary">
+                      {settings.database_dump_supported ? 'Database Dump' : 'Surreal Data Snapshot'}
+                    </span>
                   </div>
                   <Toggle
-                    enabled={settings.include_postgres}
+                    enabled={settings.include_database_dump}
                     onChange={() =>
-                      handleUpdateSetting({ include_postgres: !settings.include_postgres })
+                      handleUpdateSetting({
+                        include_database_dump: !settings.include_database_dump,
+                      })
                     }
                     disabled={updateSettings.isPending}
                   />

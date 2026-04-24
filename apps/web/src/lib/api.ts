@@ -1097,8 +1097,10 @@ export interface BackupSettingsResponse {
   enabled: boolean;
   schedule: string;
   retention_days: number;
-  include_postgres: boolean;
+  include_database_dump: boolean;
   include_graph: boolean;
+  database_dump_supported: boolean;
+  archive_contents: string[];
   last_backup_at: string | null;
   last_backup_id: string | null;
 }
@@ -1107,7 +1109,7 @@ export interface BackupSettingsUpdate {
   enabled?: boolean;
   schedule?: string;
   retention_days?: number;
-  include_postgres?: boolean;
+  include_database_dump?: boolean;
   include_graph?: boolean;
 }
 
@@ -1133,7 +1135,7 @@ export interface BackupListResponse {
 }
 
 export interface CreateBackupRequest {
-  include_postgres?: boolean;
+  include_database_dump?: boolean;
   include_graph?: boolean;
 }
 
@@ -1143,6 +1145,7 @@ export interface CreateBackupResponse {
   job_id: string;
   status: string;
   message: string;
+  archive_contents: string[];
 }
 
 export interface BackupJobStatus {

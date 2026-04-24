@@ -184,9 +184,13 @@ async def get_health() -> CrawlHealthResponse:
     relational_backend_enabled = settings.requires_relational_support
 
     if not relational_backend_enabled:
-        pg_health = {"status": "disabled", "postgres_version": None, "pgvector_version": None}
+        relational_health = {
+            "status": "disabled",
+            "postgres_version": None,
+            "pgvector_version": None,
+        }
     else:
-        pg_health = await _check_relational_backend_health()
+        relational_health = await _check_relational_backend_health()
 
     # Check Crawl4AI availability
     crawl4ai_available = False
@@ -199,11 +203,13 @@ async def get_health() -> CrawlHealthResponse:
 
     return CrawlHealthResponse(
         relational_backend_enabled=relational_backend_enabled,
-        relational_backend_healthy=pg_health["status"] in {"healthy", "disabled"},
-        relational_backend_version=pg_health.get("postgres_version"),
-        vector_extension_version=pg_health.get("pgvector_version"),
+        relational_backend_healthy=relational_health["status"] in {"healthy", "disabled"},
+        relational_backend_version=relational_health.get("postgres_version"),
+        vector_extension_version=relational_health.get("pgvector_version"),
         crawl4ai_available=crawl4ai_available,
-        error=None if pg_health["status"] == "disabled" else pg_health.get("error"),
+        error=None
+        if relational_health["status"] == "disabled"
+        else relational_health.get("error"),
     )
 
 

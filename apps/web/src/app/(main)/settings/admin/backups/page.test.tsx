@@ -20,8 +20,10 @@ describe('BackupsPage', () => {
         enabled: true,
         schedule: '0 2 * * *',
         retention_days: 30,
-        include_postgres: true,
+        include_database_dump: true,
         include_graph: true,
+        database_dump_supported: false,
+        archive_contents: ['auth.json', 'content.json', 'graph.json', 'metadata.json'],
         last_backup_at: '2026-04-14T16:00:00Z',
         last_backup_id: 'backup_123',
       },
@@ -86,6 +88,7 @@ describe('BackupsPage', () => {
     expect(screen.getByRole('heading', { name: 'Backup Management' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /create backup/i })).toBeInTheDocument();
     expect(screen.getByText('Scheduled Backups')).toBeInTheDocument();
+    expect(screen.getByText('Surreal Data Snapshot')).toBeInTheDocument();
     expect(screen.getByText('Archives (2)')).toBeInTheDocument();
     expect(screen.getByText('backup_123')).toBeInTheDocument();
     expect(screen.getByText('backup_124')).toBeInTheDocument();
