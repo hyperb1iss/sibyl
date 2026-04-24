@@ -1110,43 +1110,14 @@ LegacyKnowledgeWriteAdapter = GraphWriteServiceAdapter
 LegacyTaskRuntime = TaskGraphRuntime
 LegacyGraphQueryAdapter = GraphQueryAdapter
 
-
-async def get_legacy_knowledge_read_adapter(group_id: str) -> GraphReadServiceAdapter:
-    return await get_knowledge_read_adapter(group_id)
-
-
-async def get_legacy_graph_query_adapter(group_id: str) -> GraphQueryAdapter:
-    return await get_graph_query_adapter(group_id)
-
-
-async def get_legacy_task_runtime(group_id: str) -> TaskGraphRuntime:
-    return await get_task_graph_runtime(group_id)
-
-
-async def get_legacy_entity_runtime(group_id: str) -> TaskGraphRuntime:
-    return await get_legacy_task_runtime(group_id)
-
-
-async def get_legacy_graph_stats_payload(group_id: str) -> dict[str, object]:
-    service = await get_legacy_knowledge_read_adapter(group_id)
-    stats = await service.stats()
-    return graph_stats_payload(stats)
-
-
-async def ensure_legacy_graph_indexes(group_id: str) -> None:
-    await ensure_graph_indexes(group_id)
-
-
-async def reset_legacy_graph_runtime() -> None:
-    await reset_graph_runtime()
-
-
-async def execute_legacy_debug_query(
-    cypher: str,
-    group_id: str,
-    **params: object,
-) -> list[dict[str, object]]:
-    return await execute_debug_query(cypher, group_id, **params)
+get_legacy_knowledge_read_adapter = get_knowledge_read_adapter
+get_legacy_graph_query_adapter = get_graph_query_adapter
+get_legacy_task_runtime = get_task_graph_runtime
+get_legacy_entity_runtime = get_entity_graph_runtime
+get_legacy_graph_stats_payload = get_graph_stats_payload
+ensure_legacy_graph_indexes = ensure_graph_indexes
+reset_legacy_graph_runtime = reset_graph_runtime
+execute_legacy_debug_query = execute_debug_query
 
 
 def _collect_related_ids(entity_id: str, relationships: Sequence[Relationship]) -> Iterable[str]:
