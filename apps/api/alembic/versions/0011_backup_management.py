@@ -38,7 +38,12 @@ def upgrade() -> None:
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("schedule", sa.String(64), nullable=False, server_default="0 2 * * *"),
         sa.Column("retention_days", sa.Integer(), nullable=False, server_default="30"),
-        sa.Column("include_postgres", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+        sa.Column(
+            "include_database_dump",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("true"),
+        ),
         sa.Column("include_graph", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         # Last backup info (denormalized)
         sa.Column("last_backup_at", sa.DateTime(), nullable=True),
@@ -68,7 +73,12 @@ def upgrade() -> None:
         sa.Column("file_path", sa.String(1024), nullable=True),
         sa.Column("size_bytes", sa.BigInteger(), nullable=False, server_default="0"),
         # Contents
-        sa.Column("include_postgres", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+        sa.Column(
+            "include_database_dump",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("true"),
+        ),
         sa.Column("include_graph", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("entity_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("relationship_count", sa.Integer(), nullable=False, server_default="0"),

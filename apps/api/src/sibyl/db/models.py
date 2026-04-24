@@ -1232,7 +1232,7 @@ class BackupSettings(TimestampMixin, table=True):
     # Backup options
     include_database_dump: bool = Field(
         default=True,
-        sa_column=Column("include_postgres", Boolean, nullable=False, server_default=text("true")),
+        sa_column=Column(Boolean, nullable=False, server_default=text("true")),
         description="Include a relational database dump sidecar in backups when supported",
     )
     include_graph: bool = Field(default=True, description="Include knowledge graph in backups")
@@ -1296,7 +1296,7 @@ class Backup(TimestampMixin, table=True):
     # Backup contents
     include_database_dump: bool = Field(
         default=True,
-        sa_column=Column("include_postgres", Boolean, nullable=False, server_default=text("true")),
+        sa_column=Column(Boolean, nullable=False, server_default=text("true")),
         description="Includes a relational database dump sidecar when supported",
     )
     include_graph: bool = Field(default=True, description="Includes knowledge graph")
