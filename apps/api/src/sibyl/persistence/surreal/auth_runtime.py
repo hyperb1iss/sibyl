@@ -606,7 +606,7 @@ async def resolve_surreal_auth_context(claims: dict[str, Any]) -> Any:
         return await resolver.resolve(claims)
 
 
-async def resolve_legacy_auth_context(
+async def resolve_auth_context(
     *,
     claims: dict[str, Any],
     session: Any | None = None,
@@ -742,7 +742,7 @@ async def _issue_auth_session(
     )
 
 
-async def authenticate_legacy_api_key(raw_key: str):
+async def authenticate_api_key(raw_key: str):
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         candidates = await repo.select_many(
@@ -789,7 +789,7 @@ async def authenticate_legacy_api_key(raw_key: str):
     return None
 
 
-async def authenticate_legacy_local_user(*, email: str, password: str):
+async def authenticate_local_user(*, email: str, password: str):
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         record = await repo.select_one(
@@ -811,7 +811,7 @@ async def authenticate_legacy_local_user(*, email: str, password: str):
         return _auth_user_namespace(record)
 
 
-async def get_legacy_user_by_id(user_id: UUID):
+async def get_user_by_id(user_id: UUID):
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         record = await repo.select_one(
@@ -821,13 +821,13 @@ async def get_legacy_user_by_id(user_id: UUID):
         return _auth_user_namespace(record)
 
 
-async def list_legacy_user_organizations(*, user_id: UUID) -> list[SimpleNamespace]:
+async def list_user_organizations(*, user_id: UUID) -> list[SimpleNamespace]:
     async with _auth_client_scope() as client:
         records = await _list_user_org_records(client, user_id=user_id)
         return [org for record in records if (org := _auth_org_namespace(record)) is not None]
 
 
-async def ensure_legacy_personal_organization(*, user_id: UUID):
+async def ensure_personal_organization(*, user_id: UUID):
     async with _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
         orgs = SurrealOrganizationRepository.from_client(client)
@@ -852,7 +852,7 @@ async def ensure_legacy_personal_organization(*, user_id: UUID):
         )
 
 
-async def create_legacy_session_record(
+async def create_session_record(
     *,
     user_id: UUID,
     token: str,
@@ -892,7 +892,7 @@ async def create_legacy_session_record(
         return _session_namespace(record)
 
 
-async def load_legacy_refresh_session_record(refresh_token: str):
+async def load_refresh_session_record(refresh_token: str):
     async with _auth_client_scope() as client:
         sessions = SurrealSessionRepository.from_client(client)
         session = await sessions.get_session_by_refresh_token(refresh_token)
@@ -905,7 +905,7 @@ async def load_legacy_refresh_session_record(refresh_token: str):
         return _session_namespace(record)
 
 
-async def rotate_legacy_refresh_session_record(
+async def rotate_refresh_session_record(
     refresh_token: str,
     *,
     new_access_token: str,
@@ -932,7 +932,7 @@ async def rotate_legacy_refresh_session_record(
         return _session_namespace(record)
 
 
-async def revoke_legacy_refresh_session_record(refresh_token: str) -> None:
+async def revoke_refresh_session_record(refresh_token: str) -> None:
     async with _auth_client_scope() as client:
         sessions = SurrealSessionRepository.from_client(client)
         existing = await sessions.get_session_by_refresh_token(refresh_token)
@@ -949,7 +949,7 @@ async def revoke_legacy_refresh_session_record(refresh_token: str) -> None:
         await repo.replace_record("user_sessions", uuid=existing.id, record=updated)
 
 
-async def login_legacy_github_identity(*, identity, request) -> IssuedAuthSession:
+async def login_github_identity(*, identity, request) -> IssuedAuthSession:
     async with _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
         orgs = SurrealOrganizationRepository.from_client(client)
@@ -998,7 +998,7 @@ async def login_legacy_github_identity(*, identity, request) -> IssuedAuthSessio
         )
 
 
-async def signup_legacy_local_user(*, email: str, password: str, name: str, request):
+async def signup_local_user(*, email: str, password: str, name: str, request):
     async with _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
         orgs = SurrealOrganizationRepository.from_client(client)
@@ -1052,7 +1052,7 @@ async def signup_legacy_local_user(*, email: str, password: str, name: str, requ
         )
 
 
-async def login_legacy_local_user(*, email: str, password: str, request):
+async def login_local_user(*, email: str, password: str, request):
     async with _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
         orgs = SurrealOrganizationRepository.from_client(client)
@@ -1102,7 +1102,7 @@ async def login_legacy_local_user(*, email: str, password: str, request):
         )
 
 
-async def start_legacy_device_authorization(
+async def start_device_authorization(
     *,
     client_name: str | None,
     scope: str,
@@ -1157,7 +1157,7 @@ async def start_legacy_device_authorization(
     raise RuntimeError(msg)
 
 
-async def exchange_legacy_device_code(*, device_code: str) -> dict[str, object]:
+async def exchange_device_code(*, device_code: str) -> dict[str, object]:
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         sessions = SurrealSessionRepository.from_client(client)
@@ -1239,7 +1239,7 @@ async def exchange_legacy_device_code(*, device_code: str) -> dict[str, object]:
         }
 
 
-async def get_legacy_device_request_by_user_code(user_code: str):
+async def get_device_request_by_user_code(user_code: str):
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         record = await repo.select_one(
@@ -1249,7 +1249,7 @@ async def get_legacy_device_request_by_user_code(user_code: str):
         return _device_request_namespace(record)
 
 
-async def resolve_legacy_request_claims(request) -> dict[str, Any] | None:
+async def resolve_request_claims(request) -> dict[str, Any] | None:
     claims = getattr(request.state, "jwt_claims", None)
     if claims:
         return claims
@@ -1276,7 +1276,7 @@ async def resolve_legacy_request_claims(request) -> dict[str, Any] | None:
     return None
 
 
-async def resolve_legacy_request_user(request):
+async def resolve_request_user(request):
     claims = await resolve_request_claims(request)
     if not claims:
         return None
@@ -1287,7 +1287,7 @@ async def resolve_legacy_request_user(request):
     return await get_user_by_id(user_id)
 
 
-async def login_legacy_device_browser_user(*, email: str, password: str, request):
+async def login_device_browser_user(*, email: str, password: str, request):
     issued = await login_local_user(email=email, password=password, request=request)
     if issued is None:
         return None
@@ -1298,7 +1298,7 @@ async def login_legacy_device_browser_user(*, email: str, password: str, request
     )
 
 
-async def deny_legacy_device_authorization(*, user_id: UUID, user_code: str, request):
+async def deny_device_authorization(*, user_id: UUID, user_code: str, request):
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         user = await get_user_by_id(user_id)
@@ -1334,7 +1334,7 @@ async def deny_legacy_device_authorization(*, user_id: UUID, user_code: str, req
         return _device_request_namespace(written)
 
 
-async def approve_legacy_device_authorization(*, user_id: UUID, user_code: str, request):
+async def approve_device_authorization(*, user_id: UUID, user_code: str, request):
     async with _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
         orgs = SurrealOrganizationRepository.from_client(client)
@@ -1392,7 +1392,7 @@ async def approve_legacy_device_authorization(*, user_id: UUID, user_code: str, 
         )
 
 
-async def rotate_legacy_refresh_exchange(
+async def rotate_refresh_exchange(
     *,
     refresh_token: str,
     user_id: UUID,
@@ -1436,7 +1436,7 @@ async def rotate_legacy_refresh_exchange(
         )
 
 
-async def revoke_legacy_access_session(token: str) -> None:
+async def revoke_access_session(token: str) -> None:
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         sessions = SurrealSessionRepository.from_client(client)
@@ -1453,7 +1453,7 @@ async def revoke_legacy_access_session(token: str) -> None:
         await repo.replace_record("user_sessions", uuid=existing.id, record=updated)
 
 
-async def log_legacy_audit_event(
+async def log_audit_event(
     *,
     action: str,
     user_id: UUID | None,
@@ -1516,7 +1516,7 @@ def _project_record_namespace(record: dict[str, Any]) -> SimpleNamespace:
     )
 
 
-async def create_legacy_project_record(
+async def create_project_record(
     *,
     organization_id: UUID,
     owner_user_id: UUID,
@@ -1562,7 +1562,7 @@ async def create_legacy_project_record(
         )
 
 
-async def update_legacy_project_record(
+async def update_project_record(
     *,
     organization_id: UUID,
     graph_project_id: str,
@@ -1598,7 +1598,7 @@ async def update_legacy_project_record(
         return True
 
 
-async def delete_legacy_project_record(
+async def delete_project_record(
     *,
     organization_id: UUID,
     graph_project_id: str,
@@ -1636,7 +1636,7 @@ async def delete_legacy_project_record(
         return True
 
 
-async def get_legacy_project_record_by_graph_id(
+async def get_project_record_by_graph_id(
     *,
     organization_id: UUID,
     graph_project_id: str,
@@ -1655,7 +1655,7 @@ async def get_legacy_project_record_by_graph_id(
         return _project_record_namespace(record)
 
 
-async def get_legacy_project_record_by_id(
+async def get_project_record_by_id(
     *,
     organization_id: UUID,
     project_id: UUID,
@@ -1674,7 +1674,7 @@ async def get_legacy_project_record_by_id(
         return _project_record_namespace(record)
 
 
-async def list_legacy_api_keys_for_user(*, organization_id: UUID, user_id: UUID):
+async def list_api_keys_for_user(*, organization_id: UUID, user_id: UUID):
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         records = await repo.select_many(
@@ -1687,7 +1687,7 @@ async def list_legacy_api_keys_for_user(*, organization_id: UUID, user_id: UUID)
         return [key for record in records if (key := _api_key_namespace(record)) is not None]
 
 
-async def create_legacy_api_key_for_user(
+async def create_api_key_for_user(
     *,
     organization_id: UUID,
     user_id: UUID,
@@ -1737,7 +1737,7 @@ async def create_legacy_api_key_for_user(
         return key, raw
 
 
-async def revoke_legacy_api_key_for_user(
+async def revoke_api_key_for_user(
     *,
     api_key_id: UUID,
     organization_id: UUID,
@@ -1769,7 +1769,7 @@ async def revoke_legacy_api_key_for_user(
         )
 
 
-async def update_legacy_auth_user(
+async def update_auth_user(
     *,
     user_id: UUID,
     email: str | None,
@@ -1847,7 +1847,7 @@ async def update_legacy_auth_user(
         return _auth_user_namespace(written)
 
 
-async def patch_legacy_auth_user(
+async def patch_auth_user(
     *,
     user_id: UUID,
     updates: dict[str, Any],
@@ -1916,7 +1916,7 @@ async def patch_legacy_auth_user(
         return _auth_user_namespace(written)
 
 
-async def list_legacy_user_sessions(
+async def list_user_sessions(
     *,
     user_id: UUID,
     include_expired: bool = False,
@@ -1941,7 +1941,7 @@ async def list_legacy_user_sessions(
         return sessions
 
 
-async def revoke_all_legacy_user_sessions(
+async def revoke_all_user_sessions(
     *,
     user_id: UUID,
     exclude_token_hash: str | None = None,
@@ -1951,7 +1951,7 @@ async def revoke_all_legacy_user_sessions(
         return await sessions.revoke_all_sessions(user_id, exclude_token_hash=exclude_token_hash)
 
 
-async def revoke_legacy_user_session(
+async def revoke_user_session(
     *,
     user_id: UUID,
     session_id: UUID,
@@ -1961,7 +1961,7 @@ async def revoke_legacy_user_session(
         return await sessions.revoke_session(session_id, user_id)
 
 
-async def request_legacy_password_reset(email: str) -> None:
+async def request_password_reset(email: str) -> None:
     normalized_email = email.strip().lower()
     if not normalized_email:
         return
@@ -2051,7 +2051,7 @@ async def request_legacy_password_reset(email: str) -> None:
         )
 
 
-async def confirm_legacy_password_reset(token: str, new_password: str) -> None:
+async def confirm_password_reset(token: str, new_password: str) -> None:
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         token_record = await repo.select_one(
@@ -2107,7 +2107,7 @@ async def confirm_legacy_password_reset(token: str, new_password: str) -> None:
         )
 
 
-async def list_legacy_oauth_connections(*, user_id: UUID) -> list[SimpleNamespace]:
+async def list_oauth_connections(*, user_id: UUID) -> list[SimpleNamespace]:
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         rows = await repo.select_many(
@@ -2117,7 +2117,7 @@ async def list_legacy_oauth_connections(*, user_id: UUID) -> list[SimpleNamespac
         return [row for record in rows if (row := _oauth_connection_namespace(record)) is not None]
 
 
-async def remove_legacy_oauth_connection(
+async def remove_oauth_connection(
     *,
     user_id: UUID,
     connection_id: UUID,
@@ -2153,7 +2153,7 @@ async def remove_legacy_oauth_connection(
         return connection
 
 
-async def has_legacy_owner_membership(*, org_id: str, user_id: str | None) -> bool:
+async def has_owner_membership(*, org_id: str, user_id: str | None) -> bool:
     if user_id is None:
         return False
     async with _auth_client_scope() as client:
@@ -2162,7 +2162,7 @@ async def has_legacy_owner_membership(*, org_id: str, user_id: str | None) -> bo
         return _role_value(membership.role if membership is not None else None) == "owner"
 
 
-async def list_legacy_accessible_project_graph_ids(ctx) -> set[str]:
+async def list_accessible_project_graph_ids(ctx) -> set[str]:
     if ctx.organization is None:
         return set()
     async with _auth_client_scope() as client:
@@ -2241,7 +2241,7 @@ async def list_legacy_accessible_project_graph_ids(ctx) -> set[str]:
         return accessible
 
 
-async def resolve_legacy_accessible_project_graph_ids(
+async def resolve_accessible_project_graph_ids(
     *,
     user_id: str,
     org_id: str,
@@ -2265,7 +2265,7 @@ async def resolve_legacy_accessible_project_graph_ids(
     return user_accessible
 
 
-async def verify_legacy_entity_project_access(
+async def verify_entity_project_access(
     *,
     ctx,
     entity_project_id: str | None,
@@ -2454,48 +2454,48 @@ OrganizationMembershipRepository = SurrealOrganizationMembershipRepository
 OrganizationRepository = SurrealOrganizationRepository
 SessionRepository = SurrealSessionRepository
 UserRepository = SurrealUserRepository
-approve_device_authorization = approve_legacy_device_authorization
-authenticate_api_key = authenticate_legacy_api_key
-authenticate_local_user = authenticate_legacy_local_user
-create_api_key_for_user = create_legacy_api_key_for_user
-create_project_record = create_legacy_project_record
-create_session_record = create_legacy_session_record
-delete_project_record = delete_legacy_project_record
-deny_device_authorization = deny_legacy_device_authorization
-ensure_personal_organization = ensure_legacy_personal_organization
-exchange_device_code = exchange_legacy_device_code
-get_device_request_by_user_code = get_legacy_device_request_by_user_code
-get_project_record_by_graph_id = get_legacy_project_record_by_graph_id
-get_project_record_by_id = get_legacy_project_record_by_id
-get_user_by_id = get_legacy_user_by_id
-has_owner_membership = has_legacy_owner_membership
-list_accessible_project_graph_ids = list_legacy_accessible_project_graph_ids
-list_api_keys_for_user = list_legacy_api_keys_for_user
-list_oauth_connections = list_legacy_oauth_connections
-list_user_organizations = list_legacy_user_organizations
-list_user_sessions = list_legacy_user_sessions
-load_refresh_session_record = load_legacy_refresh_session_record
-log_audit_event = log_legacy_audit_event
-login_device_browser_user = login_legacy_device_browser_user
-login_github_identity = login_legacy_github_identity
-login_local_user = login_legacy_local_user
-patch_auth_user = patch_legacy_auth_user
-confirm_password_reset = confirm_legacy_password_reset
-remove_oauth_connection = remove_legacy_oauth_connection
-request_password_reset = request_legacy_password_reset
-resolve_accessible_project_graph_ids = resolve_legacy_accessible_project_graph_ids
-resolve_auth_context = resolve_legacy_auth_context
-resolve_request_claims = resolve_legacy_request_claims
-resolve_request_user = resolve_legacy_request_user
-revoke_access_session = revoke_legacy_access_session
-revoke_api_key_for_user = revoke_legacy_api_key_for_user
-revoke_all_user_sessions = revoke_all_legacy_user_sessions
-revoke_refresh_session_record = revoke_legacy_refresh_session_record
-revoke_user_session = revoke_legacy_user_session
-rotate_refresh_exchange = rotate_legacy_refresh_exchange
-rotate_refresh_session_record = rotate_legacy_refresh_session_record
-signup_local_user = signup_legacy_local_user
-start_device_authorization = start_legacy_device_authorization
-update_auth_user = update_legacy_auth_user
-update_project_record = update_legacy_project_record
-verify_entity_project_access = verify_legacy_entity_project_access
+approve_legacy_device_authorization = approve_device_authorization
+authenticate_legacy_api_key = authenticate_api_key
+authenticate_legacy_local_user = authenticate_local_user
+create_legacy_api_key_for_user = create_api_key_for_user
+create_legacy_project_record = create_project_record
+create_legacy_session_record = create_session_record
+delete_legacy_project_record = delete_project_record
+deny_legacy_device_authorization = deny_device_authorization
+ensure_legacy_personal_organization = ensure_personal_organization
+exchange_legacy_device_code = exchange_device_code
+get_legacy_device_request_by_user_code = get_device_request_by_user_code
+get_legacy_project_record_by_graph_id = get_project_record_by_graph_id
+get_legacy_project_record_by_id = get_project_record_by_id
+get_legacy_user_by_id = get_user_by_id
+has_legacy_owner_membership = has_owner_membership
+list_legacy_accessible_project_graph_ids = list_accessible_project_graph_ids
+list_legacy_api_keys_for_user = list_api_keys_for_user
+list_legacy_oauth_connections = list_oauth_connections
+list_legacy_user_organizations = list_user_organizations
+list_legacy_user_sessions = list_user_sessions
+load_legacy_refresh_session_record = load_refresh_session_record
+log_legacy_audit_event = log_audit_event
+login_legacy_device_browser_user = login_device_browser_user
+login_legacy_github_identity = login_github_identity
+login_legacy_local_user = login_local_user
+patch_legacy_auth_user = patch_auth_user
+confirm_legacy_password_reset = confirm_password_reset
+remove_legacy_oauth_connection = remove_oauth_connection
+request_legacy_password_reset = request_password_reset
+resolve_legacy_accessible_project_graph_ids = resolve_accessible_project_graph_ids
+resolve_legacy_auth_context = resolve_auth_context
+resolve_legacy_request_claims = resolve_request_claims
+resolve_legacy_request_user = resolve_request_user
+revoke_legacy_access_session = revoke_access_session
+revoke_legacy_api_key_for_user = revoke_api_key_for_user
+revoke_all_legacy_user_sessions = revoke_all_user_sessions
+revoke_legacy_refresh_session_record = revoke_refresh_session_record
+revoke_legacy_user_session = revoke_user_session
+rotate_legacy_refresh_exchange = rotate_refresh_exchange
+rotate_legacy_refresh_session_record = rotate_refresh_session_record
+signup_legacy_local_user = signup_local_user
+start_legacy_device_authorization = start_device_authorization
+update_legacy_auth_user = update_auth_user
+update_legacy_project_record = update_project_record
+verify_legacy_entity_project_access = verify_entity_project_access
