@@ -1504,8 +1504,3 @@ async def hybrid_search_chunks(
         reverse=True,
     )
     return combined[:match_count]
-
-
-list_legacy_raw_captures = list_raw_captures
-get_legacy_raw_capture = get_raw_capture
-resolve_legacy_document_entity = resolve_document_entity

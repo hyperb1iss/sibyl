@@ -67,11 +67,22 @@ def test_auth_runtime_only_exports_neutral_runtime_surface() -> None:
         assert legacy_name not in auth_runtime.__all__
         assert not hasattr(auth_runtime, legacy_name)
 
-    assert legacy_auth_runtime.resolve_auth_context is legacy_auth_runtime.resolve_legacy_auth_context
-    assert legacy_auth_runtime.patch_auth_user is legacy_auth_runtime.patch_legacy_auth_user
-    assert surreal_auth_runtime.LegacyAuthContextResolver is surreal_auth_runtime.AuthContextResolver
-    assert surreal_auth_runtime.authenticate_api_key is surreal_auth_runtime.authenticate_legacy_api_key
-    assert surreal_auth_runtime.LegacySessionRepository is surreal_auth_runtime.SessionRepository
+    assert hasattr(legacy_auth_runtime, "resolve_auth_context")
+    assert hasattr(legacy_auth_runtime, "patch_auth_user")
+    assert "AuthContextResolver" in surreal_auth_runtime.__all__
+    assert "authenticate_api_key" in surreal_auth_runtime.__all__
+    assert "SessionRepository" in surreal_auth_runtime.__all__
+    assert "list_accessible_project_graph_ids" in surreal_auth_runtime.__all__
+    assert "verify_entity_project_access" in surreal_auth_runtime.__all__
+    for legacy_name in [
+        "LegacyAuthContextResolver",
+        "LegacySessionRepository",
+        "authenticate_legacy_api_key",
+        "list_legacy_accessible_project_graph_ids",
+        "verify_legacy_entity_project_access",
+    ]:
+        assert legacy_name not in surreal_auth_runtime.__all__
+        assert not hasattr(surreal_auth_runtime, legacy_name)
     assert surreal_auth_runtime.SessionRepository is SurrealSessionRepository
 
 

@@ -117,26 +117,14 @@ async def require_settings_admin(request: Request) -> None:
     if ctx.organization is None or ctx.org_role not in _ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admin or owner role required")
 
-
-is_legacy_setup_mode = is_setup_mode
-get_legacy_setup_status = get_setup_status
-require_legacy_setup_mode_or_auth = require_setup_mode_or_auth
-require_legacy_setup_mode_or_admin = require_setup_mode_or_admin
-require_legacy_settings_admin = require_settings_admin
-
 __all__ = [
     "SetupStatus",
     "SurrealOrganizationRepository",
     "SurrealUserRepository",
     "build_surreal_auth_client",
     "get_setup_status",
-    "get_legacy_setup_status",
     "is_setup_mode",
-    "is_legacy_setup_mode",
     "require_settings_admin",
-    "require_legacy_settings_admin",
     "require_setup_mode_or_admin",
-    "require_legacy_setup_mode_or_admin",
     "require_setup_mode_or_auth",
-    "require_legacy_setup_mode_or_auth",
 ]

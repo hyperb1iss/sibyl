@@ -2256,7 +2256,7 @@ async def resolve_accessible_project_graph_ids(
         return set()
     if auth_ctx.organization is None:
         return set()
-    user_accessible = await list_legacy_accessible_project_graph_ids(auth_ctx)
+    user_accessible = await list_accessible_project_graph_ids(auth_ctx)
     if api_key_project_ids is not None:
         api_key_allowed = {str(project_id) for project_id in api_key_project_ids}
         if user_accessible is None:
@@ -2383,111 +2383,71 @@ def _coerce_project_role(value: object | None) -> ProjectRole | None:
 
 
 __all__ = [
-    "LegacyDeviceBrowserLogin",
-    "LegacyIssuedAuthSession",
-    "LegacyRefreshRotation",
+    "AuthContextResolver",
+    "DeviceBrowserLogin",
+    "IssuedAuthSession",
+    "OrganizationMembershipRepository",
+    "OrganizationRepository",
+    "RefreshRotation",
+    "SessionRepository",
     "SurrealAuthContextResolver",
     "SurrealOrganizationMembershipRepository",
     "SurrealOrganizationRepository",
     "SurrealSessionRepository",
     "SurrealUserRepository",
-    "approve_legacy_device_authorization",
-    "authenticate_legacy_api_key",
-    "authenticate_legacy_local_user",
+    "UserRepository",
+    "approve_device_authorization",
+    "authenticate_api_key",
+    "authenticate_local_user",
     "build_surreal_auth_client",
-    "create_legacy_api_key_for_user",
-    "create_legacy_project_record",
-    "create_legacy_session_record",
-    "delete_legacy_project_record",
-    "deny_legacy_device_authorization",
-    "ensure_legacy_personal_organization",
-    "exchange_legacy_device_code",
-    "get_legacy_device_request_by_user_code",
-    "get_legacy_project_record_by_graph_id",
-    "get_legacy_project_record_by_id",
-    "get_legacy_user_by_id",
-    "has_legacy_owner_membership",
-    "list_legacy_accessible_project_graph_ids",
-    "list_legacy_api_keys_for_user",
-    "list_legacy_user_sessions",
-    "list_legacy_user_organizations",
-    "load_legacy_refresh_session_record",
-    "log_legacy_audit_event",
-    "login_legacy_device_browser_user",
-    "login_legacy_github_identity",
-    "login_legacy_local_user",
-    "resolve_legacy_auth_context",
-    "resolve_legacy_accessible_project_graph_ids",
-    "resolve_legacy_request_claims",
-    "resolve_legacy_request_user",
+    "confirm_password_reset",
+    "create_api_key_for_user",
+    "create_project_record",
+    "create_session_record",
+    "delete_project_record",
+    "deny_device_authorization",
+    "ensure_personal_organization",
+    "exchange_device_code",
+    "get_device_request_by_user_code",
+    "get_project_record_by_graph_id",
+    "get_project_record_by_id",
+    "get_user_by_id",
+    "has_owner_membership",
+    "list_accessible_project_graph_ids",
+    "list_api_keys_for_user",
+    "list_oauth_connections",
+    "list_user_organizations",
+    "list_user_sessions",
+    "load_refresh_session_record",
+    "log_audit_event",
+    "login_device_browser_user",
+    "login_github_identity",
+    "login_local_user",
+    "patch_auth_user",
+    "remove_oauth_connection",
+    "request_password_reset",
+    "resolve_accessible_project_graph_ids",
+    "resolve_auth_context",
+    "resolve_request_claims",
+    "resolve_request_user",
     "resolve_surreal_auth_context",
-    "revoke_legacy_access_session",
-    "revoke_legacy_api_key_for_user",
-    "revoke_legacy_user_session",
-    "revoke_all_legacy_user_sessions",
-    "revoke_legacy_refresh_session_record",
-    "rotate_legacy_refresh_exchange",
-    "rotate_legacy_refresh_session_record",
-    "signup_legacy_local_user",
-    "start_legacy_device_authorization",
-    "patch_legacy_auth_user",
-    "update_legacy_auth_user",
-    "update_legacy_project_record",
-    "verify_legacy_entity_project_access",
+    "revoke_access_session",
+    "revoke_all_user_sessions",
+    "revoke_api_key_for_user",
+    "revoke_refresh_session_record",
+    "revoke_user_session",
+    "rotate_refresh_exchange",
+    "rotate_refresh_session_record",
+    "signup_local_user",
+    "start_device_authorization",
+    "update_auth_user",
+    "update_project_record",
+    "verify_entity_project_access",
 ]
 
 
-LegacyIssuedAuthSession = IssuedAuthSession
-LegacyDeviceBrowserLogin = DeviceBrowserLogin
-LegacyRefreshRotation = RefreshRotation
-LegacyAuthContextResolver = SurrealAuthContextResolver
-LegacyOrganizationMembershipRepository = SurrealOrganizationMembershipRepository
-LegacyOrganizationRepository = SurrealOrganizationRepository
-LegacySessionRepository = SurrealSessionRepository
-LegacyUserRepository = SurrealUserRepository
 AuthContextResolver = SurrealAuthContextResolver
 OrganizationMembershipRepository = SurrealOrganizationMembershipRepository
 OrganizationRepository = SurrealOrganizationRepository
 SessionRepository = SurrealSessionRepository
 UserRepository = SurrealUserRepository
-approve_legacy_device_authorization = approve_device_authorization
-authenticate_legacy_api_key = authenticate_api_key
-authenticate_legacy_local_user = authenticate_local_user
-create_legacy_api_key_for_user = create_api_key_for_user
-create_legacy_project_record = create_project_record
-create_legacy_session_record = create_session_record
-delete_legacy_project_record = delete_project_record
-deny_legacy_device_authorization = deny_device_authorization
-ensure_legacy_personal_organization = ensure_personal_organization
-exchange_legacy_device_code = exchange_device_code
-get_legacy_device_request_by_user_code = get_device_request_by_user_code
-get_legacy_project_record_by_graph_id = get_project_record_by_graph_id
-get_legacy_project_record_by_id = get_project_record_by_id
-get_legacy_user_by_id = get_user_by_id
-has_legacy_owner_membership = has_owner_membership
-list_legacy_accessible_project_graph_ids = list_accessible_project_graph_ids
-list_legacy_api_keys_for_user = list_api_keys_for_user
-list_legacy_user_organizations = list_user_organizations
-list_legacy_user_sessions = list_user_sessions
-load_legacy_refresh_session_record = load_refresh_session_record
-log_legacy_audit_event = log_audit_event
-login_legacy_device_browser_user = login_device_browser_user
-login_legacy_github_identity = login_github_identity
-login_legacy_local_user = login_local_user
-patch_legacy_auth_user = patch_auth_user
-resolve_legacy_accessible_project_graph_ids = resolve_accessible_project_graph_ids
-resolve_legacy_auth_context = resolve_auth_context
-resolve_legacy_request_claims = resolve_request_claims
-resolve_legacy_request_user = resolve_request_user
-revoke_legacy_access_session = revoke_access_session
-revoke_legacy_api_key_for_user = revoke_api_key_for_user
-revoke_all_legacy_user_sessions = revoke_all_user_sessions
-revoke_legacy_refresh_session_record = revoke_refresh_session_record
-revoke_legacy_user_session = revoke_user_session
-rotate_legacy_refresh_exchange = rotate_refresh_exchange
-rotate_legacy_refresh_session_record = rotate_refresh_session_record
-signup_legacy_local_user = signup_local_user
-start_legacy_device_authorization = start_device_authorization
-update_legacy_auth_user = update_auth_user
-update_legacy_project_record = update_project_record
-verify_legacy_entity_project_access = verify_entity_project_access

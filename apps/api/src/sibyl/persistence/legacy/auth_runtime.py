@@ -32,10 +32,10 @@ from sibyl.db.sync import get_graph_projects
 from sibyl.persistence.auth_common import UserNotFoundError
 from sibyl.persistence.legacy.auth import LegacyAuthContextResolver
 from sibyl.persistence.legacy.users import (
-    confirm_password_reset as legacy_confirm_password_reset,
-    list_oauth_connections as legacy_list_oauth_connections,
-    remove_oauth_connection as legacy_remove_oauth_connection,
-    request_password_reset as legacy_request_password_reset,
+    confirm_password_reset as confirm_password_reset_helper,
+    list_oauth_connections as list_oauth_connections_helper,
+    remove_oauth_connection as remove_oauth_connection_helper,
+    request_password_reset as request_password_reset_helper,
 )
 
 _PROJECT_ROLE_LEVELS: dict[ProjectRole, int] = {
@@ -476,16 +476,16 @@ async def revoke_legacy_user_session(
 
 
 async def request_password_reset(email: str) -> None:
-    await legacy_request_password_reset(email)
+    await request_password_reset_helper(email)
 
 
 async def confirm_password_reset(token: str, new_password: str) -> None:
-    await legacy_confirm_password_reset(token, new_password)
+    await confirm_password_reset_helper(token, new_password)
 
 
 async def list_oauth_connections(*, user_id: UUID):
     async with get_session() as session:
-        return await legacy_list_oauth_connections(session, user_id)
+        return await list_oauth_connections_helper(session, user_id)
 
 
 async def remove_oauth_connection(
@@ -494,7 +494,7 @@ async def remove_oauth_connection(
     connection_id: UUID,
 ):
     async with get_session() as session:
-        return await legacy_remove_oauth_connection(
+        return await remove_oauth_connection_helper(
             session,
             user_id=user_id,
             connection_id=connection_id,

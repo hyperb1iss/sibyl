@@ -22,6 +22,20 @@ class _StaticAuthClientScope:
         return False
 
 
+def test_surreal_auth_runtime_exports_neutral_surface_only() -> None:
+    assert "start_device_authorization" in surreal_auth_runtime.__all__
+    assert "exchange_device_code" in surreal_auth_runtime.__all__
+    assert "list_accessible_project_graph_ids" in surreal_auth_runtime.__all__
+
+    for legacy_name in [
+        "start_legacy_device_authorization",
+        "exchange_legacy_device_code",
+        "list_legacy_accessible_project_graph_ids",
+    ]:
+        assert legacy_name not in surreal_auth_runtime.__all__
+        assert not hasattr(surreal_auth_runtime, legacy_name)
+
+
 def test_coerce_datetime_normalizes_aware_datetime_instances() -> None:
     aware = datetime(2026, 4, 23, 16, 0, tzinfo=UTC)
 
@@ -45,7 +59,7 @@ def test_surreal_session_repository_accepts_aware_expiry_datetimes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_legacy_device_authorization_uses_shared_device_code_primitives(
+async def test_start_device_authorization_uses_shared_device_code_primitives(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     now = datetime(2026, 4, 23, 16, 0, tzinfo=UTC)
@@ -67,7 +81,7 @@ async def test_start_legacy_device_authorization_uses_shared_device_code_primiti
     monkeypatch.setattr(surreal_auth_runtime, "generate_user_code", lambda: "ABCD-EFGH")
     monkeypatch.setattr(surreal_auth_runtime._SurrealRepository, "select_one", select_one)
 
-    req, raw_device_code = await surreal_auth_runtime.start_legacy_device_authorization(
+    req, raw_device_code = await surreal_auth_runtime.start_device_authorization(
         client_name="sibyl-cli",
         scope="mcp",
         expires_in=timedelta(minutes=10),
@@ -86,7 +100,7 @@ async def test_start_legacy_device_authorization_uses_shared_device_code_primiti
 
 
 @pytest.mark.asyncio
-async def test_exchange_legacy_device_code_accepts_aware_datetime_rows(
+async def test_exchange_device_code_accepts_aware_datetime_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     device_request_id = uuid4()
@@ -135,7 +149,7 @@ async def test_exchange_legacy_device_code_accepts_aware_datetime_rows(
         lambda client: SimpleNamespace(create_session=create_session),
     )
 
-    token = await surreal_auth_runtime.exchange_legacy_device_code(device_code="device-code")
+    token = await surreal_auth_runtime.exchange_device_code(device_code="device-code")
 
     assert token["access_token"] == "access-token"
     assert token["refresh_token"] == "refresh-token"
@@ -144,7 +158,7 @@ async def test_exchange_legacy_device_code_accepts_aware_datetime_rows(
 
 
 @pytest.mark.asyncio
-async def test_exchange_legacy_device_code_handles_missing_last_polled_at(
+async def test_exchange_device_code_handles_missing_last_polled_at(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     device_request_id = uuid4()
@@ -174,7 +188,7 @@ async def test_exchange_legacy_device_code_handles_missing_last_polled_at(
     monkeypatch.setattr(surreal_auth_runtime._SurrealRepository, "replace_record", replace_record)
 
     with pytest.raises(DeviceTokenError, match="Authorization pending") as exc_info:
-        await surreal_auth_runtime.exchange_legacy_device_code(device_code="device-code")
+        await surreal_auth_runtime.exchange_device_code(device_code="device-code")
 
     assert exc_info.value.error == "authorization_pending"
     replace_record.assert_awaited_once()

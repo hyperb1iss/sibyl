@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from sibyl.persistence.legacy import setup as legacy_setup
+from sibyl.persistence.surreal import setup as surreal_setup
 
 
 def _request(*, authorization: str | None = None, cookie_token: str | None = None) -> Request:
@@ -130,7 +131,29 @@ async def test_require_legacy_setup_mode_or_admin_rejects_non_admin(
     assert exc_info.value.status_code == 403
 
 
-def test_legacy_setup_keeps_compat_aliases_pointed_at_neutral_exports() -> None:
-    assert legacy_setup.is_legacy_setup_mode is legacy_setup.is_setup_mode
-    assert legacy_setup.get_legacy_setup_status is legacy_setup.get_setup_status
-    assert legacy_setup.require_legacy_setup_mode_or_auth is legacy_setup.require_setup_mode_or_auth
+def test_legacy_setup_exposes_neutral_helpers() -> None:
+    assert hasattr(legacy_setup, "is_setup_mode")
+    assert hasattr(legacy_setup, "get_setup_status")
+    assert hasattr(legacy_setup, "require_setup_mode_or_auth")
+
+
+def test_surreal_setup_only_exports_neutral_runtime_surface() -> None:
+    assert surreal_setup.__all__ == [
+        "SetupStatus",
+        "SurrealOrganizationRepository",
+        "SurrealUserRepository",
+        "build_surreal_auth_client",
+        "get_setup_status",
+        "is_setup_mode",
+        "require_settings_admin",
+        "require_setup_mode_or_admin",
+        "require_setup_mode_or_auth",
+    ]
+    for legacy_name in [
+        "is_legacy_setup_mode",
+        "get_legacy_setup_status",
+        "require_legacy_setup_mode_or_auth",
+        "require_legacy_setup_mode_or_admin",
+        "require_legacy_settings_admin",
+    ]:
+        assert not hasattr(surreal_setup, legacy_name)

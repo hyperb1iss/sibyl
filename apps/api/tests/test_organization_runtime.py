@@ -33,16 +33,30 @@ def test_organization_runtime_only_exports_neutral_runtime_surface() -> None:
     assert not hasattr(organization_runtime, "create_legacy_org")
     assert not hasattr(organization_runtime, "list_legacy_orgs")
     assert not hasattr(organization_runtime, "can_manage_legacy_project_members")
-    assert legacy_orgs_runtime.list_orgs is legacy_orgs_runtime.list_legacy_orgs
-    assert (
-        legacy_project_members_runtime.list_project_members
-        is legacy_project_members_runtime.list_legacy_project_members
-    )
-    assert surreal_organization_runtime.list_orgs is surreal_organization_runtime.list_legacy_orgs
-    assert (
-        surreal_organization_runtime.list_project_members
-        is surreal_organization_runtime.list_legacy_project_members
-    )
+    assert hasattr(legacy_orgs_runtime, "list_orgs")
+    assert hasattr(legacy_project_members_runtime, "list_project_members")
+    for legacy_name in [
+        "list_legacy_orgs",
+        "list_legacy_org_ids",
+        "create_legacy_org",
+        "get_legacy_org",
+        "switch_legacy_org",
+        "update_legacy_org",
+        "delete_legacy_org",
+        "list_legacy_org_members",
+        "add_legacy_org_member",
+        "update_legacy_org_member_role",
+        "remove_legacy_org_member",
+        "list_legacy_org_invitations",
+        "create_legacy_org_invitation",
+        "delete_legacy_org_invitation",
+        "accept_legacy_org_invitation",
+        "list_legacy_project_members",
+        "add_legacy_project_member",
+        "update_legacy_project_member_role",
+        "remove_legacy_project_member",
+    ]:
+        assert not hasattr(surreal_organization_runtime, legacy_name)
     assert organization_common.__all__ == [
         "InvitationAcceptance",
         "InvitationRecord",
@@ -171,7 +185,7 @@ async def test_organization_runtime_dispatches_neutral_project_member_reads_to_s
 
 
 @pytest.mark.asyncio
-async def test_surreal_list_legacy_orgs_materializes_roles(
+async def test_surreal_list_orgs_materializes_roles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_id = uuid4()
@@ -235,7 +249,7 @@ async def test_surreal_list_legacy_orgs_materializes_roles(
         lambda _client: membership_repo,
     )
 
-    result = await surreal_organization_runtime.list_legacy_orgs(user_id=user_id)
+    result = await surreal_organization_runtime.list_orgs(user_id=user_id)
 
     assert [org.slug for org in result] == ["alpha", "zeta"]
     assert result[0].role == OrganizationRole.OWNER
@@ -243,7 +257,7 @@ async def test_surreal_list_legacy_orgs_materializes_roles(
 
 
 @pytest.mark.asyncio
-async def test_surreal_list_legacy_org_ids_uses_repository_order(
+async def test_surreal_list_org_ids_uses_repository_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     organizations = [
@@ -268,14 +282,14 @@ async def test_surreal_list_legacy_org_ids_uses_repository_order(
         lambda _client: org_repo,
     )
 
-    result = await surreal_organization_runtime.list_legacy_org_ids()
+    result = await surreal_organization_runtime.list_org_ids()
 
     org_repo.list_all.assert_awaited_once_with(limit=100_000)
     assert result == [str(org.id) for org in organizations]
 
 
 @pytest.mark.asyncio
-async def test_surreal_create_legacy_org_rotates_current_session(
+async def test_surreal_create_org_rotates_current_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_id = uuid4()
@@ -345,7 +359,7 @@ async def test_surreal_create_legacy_org_rotates_current_session(
     )
     monkeypatch.setattr(surreal_organization_runtime, "log_audit_event", audit_log)
 
-    result = await surreal_organization_runtime.create_legacy_org(
+    result = await surreal_organization_runtime.create_org(
         request=_request(),
         user_id=user_id,
         name="Electric Coven",
@@ -399,7 +413,7 @@ async def test_surreal_remove_org_member_allows_self_service(
     )
     monkeypatch.setattr(surreal_organization_runtime, "log_audit_event", audit_log)
 
-    result = await surreal_organization_runtime.remove_legacy_org_member(
+    result = await surreal_organization_runtime.remove_org_member(
         slug="electric-coven",
         actor_id=actor_id,
         target_user_id=actor_id,
@@ -415,7 +429,7 @@ async def test_surreal_remove_org_member_allows_self_service(
 
 
 @pytest.mark.asyncio
-async def test_surreal_list_legacy_org_invitations_filters_accepted_rows(
+async def test_surreal_list_org_invitations_filters_accepted_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     organization = SimpleNamespace(id=uuid4(), slug="electric-coven")
@@ -460,7 +474,7 @@ async def test_surreal_list_legacy_org_invitations_filters_accepted_rows(
         AsyncMock(return_value=(organization, SimpleNamespace(role=OrganizationRole.ADMIN))),
     )
 
-    result = await surreal_organization_runtime.list_legacy_org_invitations(
+    result = await surreal_organization_runtime.list_org_invitations(
         slug="electric-coven",
         actor_id=uuid4(),
     )
@@ -563,7 +577,7 @@ async def test_surreal_accept_org_invitation_creates_session_and_marks_accepted(
     )
     monkeypatch.setattr(surreal_organization_runtime, "log_audit_event", audit_log)
 
-    result = await surreal_organization_runtime.accept_legacy_org_invitation(
+    result = await surreal_organization_runtime.accept_org_invitation(
         token="invite-token",
         user=user,
         request=_request(),
@@ -619,7 +633,7 @@ async def test_surreal_add_project_member_rejects_existing_membership(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await surreal_organization_runtime.add_legacy_project_member(
+        await surreal_organization_runtime.add_project_member(
             request=SimpleNamespace(),
             project_id="project_123",
             actor=actor,
@@ -670,7 +684,7 @@ async def test_surreal_add_project_member_handles_unique_index_conflict(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await surreal_organization_runtime.add_legacy_project_member(
+        await surreal_organization_runtime.add_project_member(
             request=_request(),
             project_id="project_123",
             actor=actor,
