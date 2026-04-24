@@ -306,3 +306,12 @@ async def switch_legacy_org(
             refresh_token=refresh_token,
             refresh_expires=refresh_expires,
         )
+
+
+list_orgs = list_legacy_orgs
+list_org_ids = list_legacy_org_ids
+create_org = create_legacy_org
+get_org = get_legacy_org
+switch_org = switch_legacy_org
+update_org = update_legacy_org
+delete_org = delete_legacy_org

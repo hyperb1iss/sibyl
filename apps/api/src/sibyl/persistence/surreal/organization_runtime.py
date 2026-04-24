@@ -224,7 +224,7 @@ async def _replace_org_invitation_record(client: Any, *, uuid: UUID, record: dic
     return created[0]
 
 
-async def list_legacy_orgs(*, user_id: UUID) -> list[OrgSummary]:
+async def list_orgs(*, user_id: UUID) -> list[OrgSummary]:
     async with _auth_client_scope() as client:
         orgs = SurrealOrganizationRepository.from_client(client)
         memberships = SurrealOrganizationMembershipRepository.from_client(client)
@@ -255,14 +255,14 @@ async def list_legacy_orgs(*, user_id: UUID) -> list[OrgSummary]:
         return summaries
 
 
-async def list_legacy_org_ids() -> list[str]:
+async def list_org_ids() -> list[str]:
     async with _auth_client_scope() as client:
         orgs = SurrealOrganizationRepository.from_client(client)
         organizations = await orgs.list_all(limit=100_000)
         return [str(org.id) for org in organizations]
 
 
-async def create_legacy_org(
+async def create_org(
     *,
     request: Request,
     user_id: UUID,
@@ -323,7 +323,7 @@ async def create_legacy_org(
         )
 
 
-async def get_legacy_org(*, slug: str, user_id: UUID) -> OrgRoleResult:
+async def get_org(*, slug: str, user_id: UUID) -> OrgRoleResult:
     async with _auth_client_scope() as client:
         orgs = SurrealOrganizationRepository.from_client(client)
         memberships = SurrealOrganizationMembershipRepository.from_client(client)
@@ -341,7 +341,7 @@ async def get_legacy_org(*, slug: str, user_id: UUID) -> OrgRoleResult:
         )
 
 
-async def switch_legacy_org(
+async def switch_org(
     *,
     request: Request,
     slug: str,
@@ -388,7 +388,7 @@ async def switch_legacy_org(
         )
 
 
-async def update_legacy_org(
+async def update_org(
     *,
     request: Request,
     slug: str,
@@ -474,7 +474,7 @@ async def update_legacy_org(
         )
 
 
-async def delete_legacy_org(*, request: Request, slug: str, user_id: UUID) -> None:
+async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
     async with _auth_client_scope() as client:
         orgs = SurrealOrganizationRepository.from_client(client)
         memberships = SurrealOrganizationMembershipRepository.from_client(client)
@@ -596,7 +596,7 @@ async def delete_legacy_org(*, request: Request, slug: str, user_id: UUID) -> No
         await orgs.delete(organization)
 
 
-async def list_legacy_org_members(*, slug: str, actor_id: UUID) -> list[dict[str, object]]:
+async def list_org_members(*, slug: str, actor_id: UUID) -> list[dict[str, object]]:
     async with _auth_client_scope() as client:
         orgs = SurrealOrganizationRepository.from_client(client)
         memberships = SurrealOrganizationMembershipRepository.from_client(client)
@@ -631,7 +631,7 @@ async def list_legacy_org_members(*, slug: str, actor_id: UUID) -> list[dict[str
         return rows
 
 
-async def add_legacy_org_member(
+async def add_org_member(
     *,
     slug: str,
     actor_id: UUID,
@@ -674,7 +674,7 @@ async def add_legacy_org_member(
         )
 
 
-async def update_legacy_org_member_role(
+async def update_org_member_role(
     *,
     slug: str,
     actor_id: UUID,
@@ -718,7 +718,7 @@ async def update_legacy_org_member_role(
         )
 
 
-async def remove_legacy_org_member(
+async def remove_org_member(
     *,
     slug: str,
     actor_id: UUID,
@@ -759,7 +759,7 @@ async def remove_legacy_org_member(
         return OrgMemberChange(org_id=organization.id, user_id=target_user_id)
 
 
-async def list_legacy_org_invitations(
+async def list_org_invitations(
     *,
     slug: str,
     actor_id: UUID,
@@ -780,7 +780,7 @@ async def list_legacy_org_invitations(
         ]
 
 
-async def create_legacy_org_invitation(
+async def create_org_invitation(
     *,
     slug: str,
     actor_id: UUID,
@@ -826,7 +826,7 @@ async def create_legacy_org_invitation(
         return _invitation_from_record(invite, include_accept_url=True)
 
 
-async def delete_legacy_org_invitation(
+async def delete_org_invitation(
     *,
     slug: str,
     actor_id: UUID,
@@ -848,7 +848,7 @@ async def delete_legacy_org_invitation(
         )
 
 
-async def accept_legacy_org_invitation(
+async def accept_org_invitation(
     *,
     token: str,
     user: User,
@@ -1026,7 +1026,7 @@ async def _delete_project_member_records(
         )
 
 
-async def list_legacy_project_members(
+async def list_project_members(
     *,
     project_id: str,
     actor,
@@ -1095,7 +1095,7 @@ async def list_legacy_project_members(
         )
 
 
-async def add_legacy_project_member(
+async def add_project_member(
     *,
     request: Request,
     project_id: str,
@@ -1168,7 +1168,7 @@ async def add_legacy_project_member(
         )
 
 
-async def update_legacy_project_member_role(
+async def update_project_member_role(
     *,
     request: Request,
     project_id: str,
@@ -1227,7 +1227,7 @@ async def update_legacy_project_member_role(
         )
 
 
-async def remove_legacy_project_member(
+async def remove_project_member(
     *,
     request: Request,
     project_id: str,
@@ -1278,22 +1278,22 @@ async def remove_legacy_project_member(
         )
 
 
-list_orgs = list_legacy_orgs
-list_org_ids = list_legacy_org_ids
-create_org = create_legacy_org
-get_org = get_legacy_org
-switch_org = switch_legacy_org
-update_org = update_legacy_org
-delete_org = delete_legacy_org
-list_org_members = list_legacy_org_members
-add_org_member = add_legacy_org_member
-update_org_member_role = update_legacy_org_member_role
-remove_org_member = remove_legacy_org_member
-list_org_invitations = list_legacy_org_invitations
-create_org_invitation = create_legacy_org_invitation
-delete_org_invitation = delete_legacy_org_invitation
-accept_org_invitation = accept_legacy_org_invitation
-list_project_members = list_legacy_project_members
-add_project_member = add_legacy_project_member
-update_project_member_role = update_legacy_project_member_role
-remove_project_member = remove_legacy_project_member
+list_legacy_orgs = list_orgs
+list_legacy_org_ids = list_org_ids
+create_legacy_org = create_org
+get_legacy_org = get_org
+switch_legacy_org = switch_org
+update_legacy_org = update_org
+delete_legacy_org = delete_org
+list_legacy_org_members = list_org_members
+add_legacy_org_member = add_org_member
+update_legacy_org_member_role = update_org_member_role
+remove_legacy_org_member = remove_org_member
+list_legacy_org_invitations = list_org_invitations
+create_legacy_org_invitation = create_org_invitation
+delete_legacy_org_invitation = delete_org_invitation
+accept_legacy_org_invitation = accept_org_invitation
+list_legacy_project_members = list_project_members
+add_legacy_project_member = add_project_member
+update_legacy_project_member_role = update_project_member_role
+remove_legacy_project_member = remove_project_member

@@ -331,3 +331,10 @@ async def remove_legacy_project_member(
             project_db_id=project.id,
             user_id=target_user_id,
         )
+
+
+get_project_and_user_role = get_legacy_project_and_user_role
+list_project_members = list_legacy_project_members
+add_project_member = add_legacy_project_member
+update_project_member_role = update_legacy_project_member_role
+remove_project_member = remove_legacy_project_member

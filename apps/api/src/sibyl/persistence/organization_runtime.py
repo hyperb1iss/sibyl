@@ -32,75 +32,19 @@ _NEUTRAL_EXPORT_ALIASES = {
     "update_project_member_role": "update_legacy_project_member_role",
 }
 
+_BACKEND_MODULES = {
+    "postgres": (
+        "sibyl.persistence.legacy.orgs",
+        "sibyl.persistence.legacy.org_members",
+        "sibyl.persistence.legacy.org_invitations",
+        "sibyl.persistence.legacy.project_members",
+    ),
+    "surreal": ("sibyl.persistence.surreal.organization_runtime",),
+}
+
 _LEGACY_EXPORT_ALIASES = {
     legacy_name: neutral_name
     for neutral_name, legacy_name in _NEUTRAL_EXPORT_ALIASES.items()
-}
-
-_POSTGRES_LEGACY_EXPORTS: dict[str, tuple[str, str]] = {
-    "accept_legacy_org_invitation": (
-        "sibyl.persistence.legacy.org_invitations",
-        "accept_legacy_org_invitation",
-    ),
-    "add_legacy_org_member": ("sibyl.persistence.legacy.org_members", "add_legacy_org_member"),
-    "add_legacy_project_member": (
-        "sibyl.persistence.legacy.project_members",
-        "add_legacy_project_member",
-    ),
-    "create_legacy_org": ("sibyl.persistence.legacy.orgs", "create_legacy_org"),
-    "create_legacy_org_invitation": (
-        "sibyl.persistence.legacy.org_invitations",
-        "create_legacy_org_invitation",
-    ),
-    "delete_legacy_org": ("sibyl.persistence.legacy.orgs", "delete_legacy_org"),
-    "delete_legacy_org_invitation": (
-        "sibyl.persistence.legacy.org_invitations",
-        "delete_legacy_org_invitation",
-    ),
-    "get_legacy_org": ("sibyl.persistence.legacy.orgs", "get_legacy_org"),
-    "list_legacy_org_ids": ("sibyl.persistence.legacy.orgs", "list_legacy_org_ids"),
-    "list_legacy_org_invitations": (
-        "sibyl.persistence.legacy.org_invitations",
-        "list_legacy_org_invitations",
-    ),
-    "list_legacy_org_members": (
-        "sibyl.persistence.legacy.org_members",
-        "list_legacy_org_members",
-    ),
-    "list_legacy_orgs": ("sibyl.persistence.legacy.orgs", "list_legacy_orgs"),
-    "list_legacy_project_members": (
-        "sibyl.persistence.legacy.project_members",
-        "list_legacy_project_members",
-    ),
-    "remove_legacy_org_member": (
-        "sibyl.persistence.legacy.org_members",
-        "remove_legacy_org_member",
-    ),
-    "remove_legacy_project_member": (
-        "sibyl.persistence.legacy.project_members",
-        "remove_legacy_project_member",
-    ),
-    "switch_legacy_org": ("sibyl.persistence.legacy.orgs", "switch_legacy_org"),
-    "update_legacy_org": ("sibyl.persistence.legacy.orgs", "update_legacy_org"),
-    "update_legacy_org_member_role": (
-        "sibyl.persistence.legacy.org_members",
-        "update_legacy_org_member_role",
-    ),
-    "update_legacy_project_member_role": (
-        "sibyl.persistence.legacy.project_members",
-        "update_legacy_project_member_role",
-    ),
-}
-
-_BACKEND_EXPORTS: dict[str, dict[str, tuple[str, str]]] = {
-    "postgres": {
-        neutral_name: _POSTGRES_LEGACY_EXPORTS[legacy_name]
-        for neutral_name, legacy_name in _NEUTRAL_EXPORT_ALIASES.items()
-    },
-    "surreal": {
-        neutral_name: ("sibyl.persistence.surreal.organization_runtime", neutral_name)
-        for neutral_name in _NEUTRAL_EXPORT_ALIASES
-    },
 }
 
 __all__ = [
@@ -115,8 +59,12 @@ can_manage_legacy_project_members = can_manage_project_members
 
 
 def _resolve_backend_export(name: str) -> Any:
-    module_path, attr_name = _BACKEND_EXPORTS[settings.auth_store][name]
-    return getattr(import_module(module_path), attr_name)
+    for module_path in _BACKEND_MODULES[settings.auth_store]:
+        module = import_module(module_path)
+        if hasattr(module, name):
+            return getattr(module, name)
+    msg = f"{name} is not implemented for SIBYL_AUTH_STORE={settings.auth_store!r}"
+    raise AttributeError(msg)
 
 
 def _make_runtime_proxy(name: str) -> Any:

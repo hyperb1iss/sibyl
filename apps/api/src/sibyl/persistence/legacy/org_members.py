@@ -155,3 +155,9 @@ async def remove_legacy_org_member(
             details={"target_user_id": str(target_user_id)},
         )
         return LegacyOrgMemberChange(org_id=org_id, user_id=target_user_id)
+
+
+list_org_members = list_legacy_org_members
+add_org_member = add_legacy_org_member
+update_org_member_role = update_legacy_org_member_role
+remove_org_member = remove_legacy_org_member

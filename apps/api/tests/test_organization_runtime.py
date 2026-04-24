@@ -11,6 +11,10 @@ from fastapi import HTTPException
 
 from sibyl.db.models import OrganizationRole, ProjectRole
 from sibyl.persistence import organization_common, organization_runtime
+from sibyl.persistence.legacy import (
+    orgs as legacy_orgs_runtime,
+    project_members as legacy_project_members_runtime,
+)
 from sibyl.persistence.surreal import organization_runtime as surreal_organization_runtime
 
 
@@ -28,6 +32,11 @@ def _request(*, authorization: str | None = "Bearer current-token") -> SimpleNam
 def test_organization_runtime_keeps_legacy_aliases_pointed_at_neutral_exports() -> None:
     assert organization_runtime.create_legacy_org is organization_runtime.create_org
     assert organization_runtime.list_legacy_orgs is organization_runtime.list_orgs
+    assert legacy_orgs_runtime.list_orgs is legacy_orgs_runtime.list_legacy_orgs
+    assert (
+        legacy_project_members_runtime.list_project_members
+        is legacy_project_members_runtime.list_legacy_project_members
+    )
     assert surreal_organization_runtime.list_orgs is surreal_organization_runtime.list_legacy_orgs
     assert (
         surreal_organization_runtime.list_project_members
@@ -39,6 +48,18 @@ def test_organization_runtime_keeps_legacy_aliases_pointed_at_neutral_exports() 
     )
     assert organization_common.OrgSummary is organization_common.LegacyOrgSummary
     assert organization_common.ProjectMembersResult is organization_common.LegacyProjectMembersResult
+
+
+def test_organization_runtime_resolves_postgres_neutral_exports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(organization_runtime.settings, "auth_store", "postgres")
+
+    assert organization_runtime._resolve_backend_export("list_orgs") is legacy_orgs_runtime.list_orgs
+    assert (
+        organization_runtime._resolve_backend_export("list_project_members")
+        is legacy_project_members_runtime.list_project_members
+    )
 
 
 @pytest.mark.asyncio

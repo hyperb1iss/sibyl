@@ -11,7 +11,7 @@ from sibyl.db.models import OrganizationRole, ProjectRole
 
 
 @dataclass
-class LegacyOrgSummary:
+class OrgSummary:
     id: UUID
     slug: str
     name: str
@@ -20,7 +20,7 @@ class LegacyOrgSummary:
 
 
 @dataclass
-class LegacyOrgAuthResult:
+class OrgAuthResult:
     id: UUID
     slug: str
     name: str
@@ -30,7 +30,7 @@ class LegacyOrgAuthResult:
 
 
 @dataclass
-class LegacyOrgRoleResult:
+class OrgRoleResult:
     id: UUID
     slug: str
     name: str
@@ -38,14 +38,14 @@ class LegacyOrgRoleResult:
 
 
 @dataclass
-class LegacyOrgMemberChange:
+class OrgMemberChange:
     org_id: UUID
     user_id: UUID
     role: OrganizationRole | None = None
 
 
 @dataclass
-class LegacyInvitationRecord:
+class InvitationRecord:
     id: UUID
     email: str
     role: OrganizationRole
@@ -55,7 +55,7 @@ class LegacyInvitationRecord:
 
 
 @dataclass
-class LegacyInvitationAcceptance:
+class InvitationAcceptance:
     access_token: str
     refresh_token: str
     refresh_expires: datetime
@@ -64,27 +64,27 @@ class LegacyInvitationAcceptance:
 
 
 @dataclass
-class LegacyProjectMembersResult:
+class ProjectMembersResult:
     members: list[dict[str, object]]
     can_manage: bool
 
 
 @dataclass
-class LegacyProjectMemberChange:
+class ProjectMemberChange:
     org_id: UUID
     project_db_id: UUID
     user_id: UUID
     role: ProjectRole | None = None
 
 
-OrgSummary = LegacyOrgSummary
-OrgAuthResult = LegacyOrgAuthResult
-OrgRoleResult = LegacyOrgRoleResult
-OrgMemberChange = LegacyOrgMemberChange
-InvitationRecord = LegacyInvitationRecord
-InvitationAcceptance = LegacyInvitationAcceptance
-ProjectMembersResult = LegacyProjectMembersResult
-ProjectMemberChange = LegacyProjectMemberChange
+LegacyOrgSummary = OrgSummary
+LegacyOrgAuthResult = OrgAuthResult
+LegacyOrgRoleResult = OrgRoleResult
+LegacyOrgMemberChange = OrgMemberChange
+LegacyInvitationRecord = InvitationRecord
+LegacyInvitationAcceptance = InvitationAcceptance
+LegacyProjectMembersResult = ProjectMembersResult
+LegacyProjectMemberChange = ProjectMemberChange
 
 
 def can_manage_project_members(

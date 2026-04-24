@@ -184,3 +184,9 @@ async def accept_legacy_org_invitation(
             organization_id=invite.organization_id,
             invitation_id=invite.id,
         )
+
+
+list_org_invitations = list_legacy_org_invitations
+create_org_invitation = create_legacy_org_invitation
+delete_org_invitation = delete_legacy_org_invitation
+accept_org_invitation = accept_legacy_org_invitation
