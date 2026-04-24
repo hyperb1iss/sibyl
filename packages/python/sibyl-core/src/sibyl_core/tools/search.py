@@ -22,12 +22,8 @@ from sibyl_core.utils.resilience import TIMEOUTS, with_timeout
 log = structlog.get_logger()
 
 
-async def get_legacy_graph_runtime(group_id: str):
-    return await _service_get_graph_runtime(group_id)
-
-
 async def get_graph_runtime(group_id: str):
-    return await get_legacy_graph_runtime(group_id)
+    return await _service_get_graph_runtime(group_id)
 
 __all__ = [
     "_dedupe_document_rows",

@@ -23,9 +23,6 @@ from sibyl_core.services import (
 from sibyl_core.services import (
     get_graph_client as _service_get_graph_client,
 )
-from sibyl_core.services import (
-    get_graph_runtime as _service_get_graph_runtime,
-)
 from sibyl_core.services.crawl_sources import (
     _crawl_source_exists,
     _create_or_get_crawl_source,
@@ -52,47 +49,36 @@ def _compat_relationship_manager(*args: Any, **kwargs: Any) -> Any:
     raise RuntimeError("RelationshipManager compatibility shim should be patched in tests")
 
 
-get_graph_client = _default_get_graph_client
 EntityManager = _compat_entity_manager
 RelationshipManager = _compat_relationship_manager
 GraphIntegrationService: Any = None
 
 
-async def get_legacy_graph_client() -> Any:
-    return await get_graph_client()
+async def get_graph_client() -> Any:
+    return await _default_get_graph_client()
 
 
-async def get_legacy_graph_runtime(group_id: str) -> ActiveGraphRuntime:
-    if (
-        get_graph_client is _default_get_graph_client
-        and EntityManager is _compat_entity_manager
-        and RelationshipManager is _compat_relationship_manager
-    ):
-        return await _service_get_graph_runtime(group_id)
-
-    runtime = await _service_get_graph_runtime(group_id)
+async def get_graph_runtime(group_id: str) -> ActiveGraphRuntime:
     client = await get_graph_client()
-    entity_manager = runtime.entity_manager
-    relationship_manager = runtime.relationship_manager
 
-    if EntityManager is not _compat_entity_manager:
-        entity_manager = EntityManager(client, group_id=str(group_id))
+    entity_manager_factory = EntityManager
+    if entity_manager_factory is _compat_entity_manager:
+        from sibyl_core.graph.entities import EntityManager as entity_manager_factory
 
-    if RelationshipManager is not _compat_relationship_manager:
-        relationship_manager = RelationshipManager(client, group_id=str(group_id))
+    relationship_manager_factory = RelationshipManager
+    if relationship_manager_factory is _compat_relationship_manager:
+        from sibyl_core.graph.relationships import (
+            RelationshipManager as relationship_manager_factory,
+        )
+
+    entity_manager = entity_manager_factory(client, group_id=str(group_id))
+    relationship_manager = relationship_manager_factory(client, group_id=str(group_id))
 
     return ActiveGraphRuntime(
         client=client,
         entity_manager=entity_manager,
         relationship_manager=relationship_manager,
     )
-
-
-LegacyGraphRuntime = ActiveGraphRuntime
-
-
-async def get_graph_runtime(group_id: str) -> ActiveGraphRuntime:
-    return await get_legacy_graph_runtime(group_id)
 
 
 # =============================================================================

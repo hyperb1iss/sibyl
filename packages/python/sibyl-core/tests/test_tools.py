@@ -71,13 +71,13 @@ class MockEnum:
         self.value = value
 
 
-def make_legacy_graph_runtime(
+def make_graph_runtime(
     *,
     client: Any | None = None,
     entity_manager: Any | None = None,
     relationship_manager: Any | None = None,
 ) -> SimpleNamespace:
-    """Build a lightweight legacy graph runtime for tool tests."""
+    """Build a lightweight graph runtime for tool tests."""
 
     return SimpleNamespace(
         client=client if client is not None else MagicMock(),
@@ -262,7 +262,7 @@ class TestGetProjectTags:
                 ),
             ]
         )
-        runtime = make_legacy_graph_runtime(entity_manager=entity_manager)
+        runtime = make_graph_runtime(entity_manager=entity_manager)
 
         tags = await get_project_tags(runtime, "project-123")
 
@@ -931,9 +931,9 @@ class TestSearchTool:
 
         with (
             patch(
-                "sibyl_core.tools.search.get_legacy_graph_runtime",
+                "sibyl_core.tools.search.get_graph_runtime",
                 AsyncMock(
-                    return_value=make_legacy_graph_runtime(
+                    return_value=make_graph_runtime(
                         client=mock_client,
                         entity_manager=mock_entity_manager,
                     )
@@ -976,9 +976,9 @@ class TestSearchTool:
 
         with (
             patch(
-                "sibyl_core.tools.search.get_legacy_graph_runtime",
+                "sibyl_core.tools.search.get_graph_runtime",
                 AsyncMock(
-                    return_value=make_legacy_graph_runtime(
+                    return_value=make_graph_runtime(
                         client=mock_client,
                         entity_manager=mock_entity_manager,
                     )
@@ -1022,9 +1022,9 @@ class TestSearchTool:
 
         with (
             patch(
-                "sibyl_core.tools.search.get_legacy_graph_runtime",
+                "sibyl_core.tools.search.get_graph_runtime",
                 AsyncMock(
-                    return_value=make_legacy_graph_runtime(
+                    return_value=make_graph_runtime(
                         client=mock_client,
                         entity_manager=mock_entity_manager,
                     )
@@ -1194,9 +1194,9 @@ class TestExploreTool:
         mock_entity_manager.list_by_type = AsyncMock(return_value=[])
 
         with patch(
-            "sibyl_core.tools.explore.get_legacy_graph_runtime",
+            "sibyl_core.tools.explore.get_graph_runtime",
             AsyncMock(
-                return_value=make_legacy_graph_runtime(
+                return_value=make_graph_runtime(
                     client=mock_client,
                     entity_manager=mock_entity_manager,
                 )
@@ -1219,9 +1219,9 @@ class TestExploreTool:
         mock_rel_manager.get_related_entities = AsyncMock(return_value=[])
 
         with patch(
-            "sibyl_core.tools.explore.get_legacy_graph_runtime",
+            "sibyl_core.tools.explore.get_graph_runtime",
             AsyncMock(
-                return_value=make_legacy_graph_runtime(
+                return_value=make_graph_runtime(
                     client=mock_client,
                     relationship_manager=mock_rel_manager,
                 )
@@ -1246,9 +1246,9 @@ class TestExploreTool:
         mock_entity_manager.list_by_type = AsyncMock(return_value=[])
 
         with patch(
-            "sibyl_core.tools.explore.get_legacy_graph_runtime",
+            "sibyl_core.tools.explore.get_graph_runtime",
             AsyncMock(
-                return_value=make_legacy_graph_runtime(
+                return_value=make_graph_runtime(
                     client=mock_client,
                     entity_manager=mock_entity_manager,
                 )
@@ -1277,9 +1277,9 @@ class TestExploreTool:
         mock_entity_manager.list_by_type = AsyncMock(return_value=[])
 
         with patch(
-            "sibyl_core.tools.explore.get_legacy_graph_runtime",
+            "sibyl_core.tools.explore.get_graph_runtime",
             AsyncMock(
-                return_value=make_legacy_graph_runtime(
+                return_value=make_graph_runtime(
                     client=mock_client,
                     entity_manager=mock_entity_manager,
                 )
@@ -1345,9 +1345,9 @@ class TestExploreTool:
         mock_entity_manager.list_by_type = AsyncMock(return_value=[])
 
         with patch(
-            "sibyl_core.tools.explore.get_legacy_graph_runtime",
+            "sibyl_core.tools.explore.get_graph_runtime",
             AsyncMock(
-                return_value=make_legacy_graph_runtime(
+                return_value=make_graph_runtime(
                     client=mock_client,
                     entity_manager=mock_entity_manager,
                 )
@@ -1586,8 +1586,8 @@ class TestAddTool:
         from sibyl_core.tools.add import add
 
         with patch(
-            "sibyl_core.tools.add.get_legacy_graph_runtime",
-            AsyncMock(return_value=make_legacy_graph_runtime()),
+            "sibyl_core.tools.add.get_graph_runtime",
+            AsyncMock(return_value=make_graph_runtime()),
         ):
             response = await add(
                 title="Test Task",
@@ -1605,8 +1605,8 @@ class TestAddTool:
         from sibyl_core.tools.add import add
 
         with patch(
-            "sibyl_core.tools.add.get_legacy_graph_runtime",
-            AsyncMock(return_value=make_legacy_graph_runtime()),
+            "sibyl_core.tools.add.get_graph_runtime",
+            AsyncMock(return_value=make_graph_runtime()),
         ):
             response = await add(
                 title="Test Epic",
@@ -1641,9 +1641,9 @@ class TestAddTool:
         mock_entity_manager.create = AsyncMock(return_value="episode_123")
 
         with patch(
-            "sibyl_core.tools.add.get_legacy_graph_runtime",
+            "sibyl_core.tools.add.get_graph_runtime",
             AsyncMock(
-                return_value=make_legacy_graph_runtime(
+                return_value=make_graph_runtime(
                     client=mock_client,
                     entity_manager=mock_entity_manager,
                 )
@@ -1676,9 +1676,9 @@ class TestAddTool:
         mock_entity_manager.create_direct = capture_create
 
         with patch(
-            "sibyl_core.tools.add.get_legacy_graph_runtime",
+            "sibyl_core.tools.add.get_graph_runtime",
             AsyncMock(
-                return_value=make_legacy_graph_runtime(
+                return_value=make_graph_runtime(
                     client=mock_client,
                     entity_manager=mock_entity_manager,
                 )
@@ -1717,9 +1717,9 @@ class TestAddEntityTypes:
         mock_entity_manager.create_direct = capture_create
 
         with patch(
-            "sibyl_core.tools.add.get_legacy_graph_runtime",
+            "sibyl_core.tools.add.get_graph_runtime",
             AsyncMock(
-                return_value=make_legacy_graph_runtime(
+                return_value=make_graph_runtime(
                     client=mock_client,
                     entity_manager=mock_entity_manager,
                 )
@@ -1755,9 +1755,9 @@ class TestAddEntityTypes:
         mock_entity_manager.create_direct = capture_create
 
         with patch(
-            "sibyl_core.tools.add.get_legacy_graph_runtime",
+            "sibyl_core.tools.add.get_graph_runtime",
             AsyncMock(
-                return_value=make_legacy_graph_runtime(
+                return_value=make_graph_runtime(
                     client=mock_client,
                     entity_manager=mock_entity_manager,
                 )
@@ -1797,9 +1797,9 @@ class TestAddEntityTypes:
 
         with (
             patch(
-                "sibyl_core.tools.add.get_legacy_graph_runtime",
+                "sibyl_core.tools.add.get_graph_runtime",
                 AsyncMock(
-                    return_value=make_legacy_graph_runtime(
+                    return_value=make_graph_runtime(
                         client=mock_client,
                         entity_manager=mock_entity_manager,
                         relationship_manager=mock_rel_manager,

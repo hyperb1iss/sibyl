@@ -1,4 +1,4 @@
-"""Tests for active graph runtime service aliases."""
+"""Tests for active graph runtime services."""
 
 from __future__ import annotations
 
@@ -7,14 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import sibyl_core.services as services
 from sibyl_core.services import (
     ActiveGraphRuntime,
-    LegacyGraphRuntime,
     execute_graph_query,
-    execute_legacy_graph_query,
+    get_graph_client,
     get_graph_runtime,
-    get_legacy_graph_client,
-    get_legacy_graph_runtime,
 )
 
 
@@ -35,7 +33,6 @@ async def test_get_graph_runtime_binds_active_store_managers() -> None:
         runtime = await get_graph_runtime("org-123")
 
     assert isinstance(runtime, ActiveGraphRuntime)
-    assert isinstance(runtime, LegacyGraphRuntime)
     assert runtime.client is client
     assert runtime.entity_manager is entity_manager
     assert runtime.relationship_manager is relationship_manager
@@ -43,25 +40,15 @@ async def test_get_graph_runtime_binds_active_store_managers() -> None:
     relationship_ctor.assert_called_once_with(client, group_id="org-123")
 
 
-@pytest.mark.asyncio
-async def test_legacy_aliases_delegate_to_active_graph_helpers() -> None:
-    client = AsyncMock()
-    normalized = [{"ok": True}]
-    client.client.driver.clone.return_value.execute_query = AsyncMock(return_value=[{"ok": True}])
-    client.normalize_result.return_value = normalized
-    runtime = ActiveGraphRuntime(client=client, entity_manager=object(), relationship_manager=object())
-
-    with (
-        patch("sibyl_core.services.legacy_graph.get_graph_client", AsyncMock(return_value=client)),
-        patch("sibyl_core.services.legacy_graph.get_graph_runtime", AsyncMock(return_value=runtime)),
-        patch(
-            "sibyl_core.services.legacy_graph.execute_graph_query",
-            AsyncMock(return_value=normalized),
-        ),
-    ):
-        assert await get_legacy_graph_client() is client
-        assert await get_legacy_graph_runtime("org-123") is runtime
-        assert await execute_legacy_graph_query("org-123", "RETURN 1") == normalized
+def test_services_package_exports_only_neutral_graph_helpers() -> None:
+    assert services.ActiveGraphRuntime is ActiveGraphRuntime
+    assert services.get_graph_client is get_graph_client
+    assert services.get_graph_runtime is get_graph_runtime
+    assert services.execute_graph_query is execute_graph_query
+    assert "LegacyGraphRuntime" not in services.__all__
+    assert "get_legacy_graph_client" not in services.__all__
+    assert "get_legacy_graph_runtime" not in services.__all__
+    assert "execute_legacy_graph_query" not in services.__all__
 
 
 @pytest.mark.asyncio
@@ -73,7 +60,7 @@ async def test_execute_graph_query_normalizes_driver_result() -> None:
     client.client.driver.clone.return_value = driver
     client.normalize_result.return_value = [{"row": "value"}]
 
-    with patch("sibyl_core.services.legacy_graph.get_graph_client", AsyncMock(return_value=client)):
+    with patch("sibyl_core.services.graph_runtime.get_graph_client", AsyncMock(return_value=client)):
         result = await execute_graph_query("org-123", "RETURN $value", value="x")
 
     assert result == [{"row": "value"}]

@@ -29,20 +29,12 @@ from sibyl_core.services import (
 log = structlog.get_logger()
 
 
-async def get_legacy_graph_client():
+async def get_graph_client():
     return await _service_get_graph_client()
 
 
-async def get_graph_client():
-    return await get_legacy_graph_client()
-
-
-async def get_legacy_graph_runtime(group_id: str):
-    return await _service_get_graph_runtime(group_id)
-
-
 async def get_graph_runtime(group_id: str):
-    return await get_legacy_graph_runtime(group_id)
+    return await _service_get_graph_runtime(group_id)
 
 BACKFILL_PAGE_SIZE = 1000
 

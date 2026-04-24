@@ -606,7 +606,7 @@ class TestGetHealth:
         async def failing_client() -> None:
             raise ConnectionError("Cannot connect to FalkorDB")
 
-        with patch("sibyl_core.tools.health.get_legacy_graph_client", failing_client):
+        with patch("sibyl_core.tools.health.get_graph_client", failing_client):
             result = await get_health()
 
             assert result["status"] == "unhealthy"

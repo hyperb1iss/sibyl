@@ -171,7 +171,7 @@ class TestBackupInventory:
 
         with (
             patch.object(admin_module.settings, "store", "legacy"),
-            patch("sibyl_core.tools.admin.get_legacy_graph_runtime", AsyncMock(return_value=runtime)),
+            patch("sibyl_core.tools.admin.get_graph_runtime", AsyncMock(return_value=runtime)),
         ):
             result = await create_backup(organization_id=org_id)
 
@@ -198,6 +198,8 @@ class TestHealthAndStats:
         """health_check should count through entity-manager pagination."""
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
+        entity_manager._driver = None
+        entity_manager._group_id = None
         entity_manager.list_all = AsyncMock(
             side_effect=[
                 [
@@ -215,7 +217,7 @@ class TestHealthAndStats:
         entity_manager.search = AsyncMock(return_value=[])
 
         with patch(
-            "sibyl_core.tools.admin.get_legacy_graph_runtime",
+            "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
                     client=AsyncMock(),
@@ -244,6 +246,8 @@ class TestHealthAndStats:
         """get_stats should sum counts from paged entity listings."""
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
+        entity_manager._driver = None
+        entity_manager._group_id = None
         entity_manager.list_all = AsyncMock(
             side_effect=[
                 [
@@ -260,7 +264,7 @@ class TestHealthAndStats:
         )
 
         with patch(
-            "sibyl_core.tools.admin.get_legacy_graph_runtime",
+            "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
                     client=AsyncMock(),
@@ -322,7 +326,7 @@ class TestRestoreBackup:
         )
 
         with patch(
-            "sibyl_core.tools.admin.get_legacy_graph_runtime",
+            "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
                     client=SimpleNamespace(get_org_driver=lambda group_id: driver),
@@ -379,7 +383,7 @@ class TestRestoreBackup:
         )
 
         with patch(
-            "sibyl_core.tools.admin.get_legacy_graph_runtime",
+            "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
                     client=SimpleNamespace(get_org_driver=lambda group_id: driver),
@@ -450,7 +454,7 @@ class TestRestoreBackup:
         )
 
         with patch(
-            "sibyl_core.tools.admin.get_legacy_graph_runtime",
+            "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
                     client=SimpleNamespace(get_org_driver=lambda group_id: driver),
@@ -513,7 +517,7 @@ class TestBackfillTaskProjectRelationships:
 
         with (
             patch(
-                "sibyl_core.tools.admin.get_legacy_graph_runtime",
+                "sibyl_core.tools.admin.get_graph_runtime",
                 AsyncMock(
                     return_value=SimpleNamespace(
                         client=client,
@@ -555,7 +559,7 @@ class TestBackfillTaskProjectRelationships:
         relationship_manager.get_for_entity = AsyncMock(return_value=[])
 
         with patch(
-            "sibyl_core.tools.admin.get_legacy_graph_runtime",
+            "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
                     client=client,
@@ -629,7 +633,7 @@ class TestBackfillProjectIdFromRelationships:
 
         with (
             patch(
-                "sibyl_core.tools.admin.get_legacy_graph_runtime",
+                "sibyl_core.tools.admin.get_graph_runtime",
                 AsyncMock(
                     return_value=SimpleNamespace(
                         entity_manager=entity_manager,
@@ -716,7 +720,7 @@ class TestBackfillProjectIdFromRelationships:
         )
 
         with patch(
-            "sibyl_core.tools.admin.get_legacy_graph_runtime",
+            "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
                     entity_manager=entity_manager,
@@ -768,7 +772,7 @@ class TestBackfillSharedProjectRelationships:
 
         with (
             patch(
-                "sibyl_core.tools.admin.get_legacy_graph_runtime",
+                "sibyl_core.tools.admin.get_graph_runtime",
                 AsyncMock(
                     return_value=SimpleNamespace(
                         entity_manager=entity_manager,
@@ -821,7 +825,7 @@ class TestBackfillSharedProjectRelationships:
         relationship_manager.create = AsyncMock()
 
         with patch(
-            "sibyl_core.tools.admin.get_legacy_graph_runtime",
+            "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
                     entity_manager=entity_manager,
@@ -898,7 +902,7 @@ class TestBackfillEpisodeTaskRelationships:
 
         with (
             patch(
-                "sibyl_core.tools.admin.get_legacy_graph_runtime",
+                "sibyl_core.tools.admin.get_graph_runtime",
                 AsyncMock(
                     return_value=SimpleNamespace(
                         entity_manager=entity_manager,
@@ -958,7 +962,7 @@ class TestBackfillEpisodeTaskRelationships:
         relationship_manager.create = AsyncMock()
 
         with patch(
-            "sibyl_core.tools.admin.get_legacy_graph_runtime",
+            "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
                     entity_manager=entity_manager,

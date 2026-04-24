@@ -25,12 +25,8 @@ log = structlog.get_logger()
 __all__ = ["find_conflicts", "get_entity_history", "temporal_query"]
 
 
-async def get_legacy_graph_client() -> Any:
-    return await _service_get_graph_client()
-
-
 async def get_graph_client() -> Any:
-    return await get_legacy_graph_client()
+    return await _service_get_graph_client()
 
 
 async def temporal_query(

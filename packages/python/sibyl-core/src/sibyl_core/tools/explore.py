@@ -28,12 +28,8 @@ log = structlog.get_logger()
 __all__ = ["DependencyNode", "explore"]
 
 
-async def get_legacy_graph_runtime(group_id: str):
-    return await _service_get_graph_runtime(group_id)
-
-
 async def get_graph_runtime(group_id: str):
-    return await get_legacy_graph_runtime(group_id)
+    return await _service_get_graph_runtime(group_id)
 
 
 def _normalize_project_ids(

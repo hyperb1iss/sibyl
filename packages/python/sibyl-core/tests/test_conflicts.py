@@ -219,7 +219,7 @@ class TestFindSimilarEntities:
         mock_entity_manager.search = AsyncMock(return_value=[])
 
         with patch(
-            "sibyl_core.tools.conflicts.get_legacy_graph_runtime",
+            "sibyl_core.tools.conflicts.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
                     entity_manager=mock_entity_manager,
@@ -254,7 +254,7 @@ class TestFindSimilarEntities:
         )
 
         with patch(
-            "sibyl_core.tools.conflicts.get_legacy_graph_runtime",
+            "sibyl_core.tools.conflicts.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
                     entity_manager=mock_entity_manager,
@@ -290,7 +290,7 @@ class TestFindSimilarEntities:
         )
 
         with patch(
-            "sibyl_core.tools.conflicts.get_legacy_graph_runtime",
+            "sibyl_core.tools.conflicts.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
                     entity_manager=mock_entity_manager,

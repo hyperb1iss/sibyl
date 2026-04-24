@@ -16,12 +16,6 @@ class ActiveGraphRuntime:
     relationship_manager: Any
 
 
-def _legacy_services_module() -> Any:
-    from sibyl_core.services import legacy_graph
-
-    return legacy_graph
-
-
 async def get_graph_client() -> Any:
     """Return the shared graph client for the active store."""
 
@@ -121,29 +115,7 @@ async def execute_graph_query(
 ) -> list[dict[str, Any]]:
     """Execute a raw org-scoped graph query and normalize the result."""
 
-    client = await _legacy_services_module().get_graph_client()
+    client = await get_graph_client()
     driver = client.client.driver.clone(group_id)
     result = await driver.execute_query(query, **params)
     return client.normalize_result(result)
-
-
-LegacyGraphRuntime = ActiveGraphRuntime
-
-
-async def get_legacy_graph_client() -> Any:
-    """Compatibility wrapper for callers still using the legacy name."""
-    return await _legacy_services_module().get_graph_client()
-
-
-async def get_legacy_graph_runtime(group_id: str) -> ActiveGraphRuntime:
-    """Compatibility wrapper for callers still using the legacy name."""
-    return await _legacy_services_module().get_graph_runtime(group_id)
-
-
-async def execute_legacy_graph_query(
-    group_id: str,
-    query: str,
-    **params: Any,
-) -> list[dict[str, Any]]:
-    """Compatibility wrapper for callers still using the legacy name."""
-    return await _legacy_services_module().execute_graph_query(group_id, query, **params)

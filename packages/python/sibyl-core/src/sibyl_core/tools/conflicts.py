@@ -32,12 +32,8 @@ __all__ = ["detect_conflicts", "find_similar_entities"]
 get_graph_client = _service_get_graph_client
 
 
-async def get_legacy_graph_runtime(group_id: str):
-    return await _service_get_graph_runtime(group_id)
-
-
 async def get_graph_runtime(group_id: str):
-    return await get_legacy_graph_runtime(group_id)
+    return await _service_get_graph_runtime(group_id)
 
 
 EntityManager = None
