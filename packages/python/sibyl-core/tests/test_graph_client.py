@@ -44,13 +44,21 @@ def test_clone_preserves_search_interface() -> None:
     assert cloned.some_shared_state is driver.some_shared_state
 
 
-def test_core_config_uses_graph_backend_alias(monkeypatch) -> None:
+def test_core_config_uses_store_env(monkeypatch) -> None:
+    monkeypatch.setenv("SIBYL_STORE", "surreal")
+
+    settings = CoreConfig(_env_file=None)
+
+    assert settings.store == "surreal"
+
+
+def test_core_config_ignores_removed_graph_backend_alias(monkeypatch) -> None:
     monkeypatch.delenv("SIBYL_STORE", raising=False)
     monkeypatch.setenv("SIBYL_GRAPH_BACKEND", "surrealdb")
 
     settings = CoreConfig(_env_file=None)
 
-    assert settings.store == "surreal"
+    assert settings.store == "legacy"
 
 
 @pytest.mark.asyncio

@@ -100,15 +100,6 @@ class CoreConfig(BaseSettings):
     @model_validator(mode="after")
     def check_api_key_fallbacks(self) -> "CoreConfig":
         """Fall back to non-prefixed env vars for API keys."""
-        if "store" not in self.model_fields_set:
-            legacy_backend = os.environ.get("SIBYL_GRAPH_BACKEND", "").strip().lower()
-            legacy_store = {
-                "falkordb": "legacy",
-                "surrealdb": "surreal",
-            }.get(legacy_backend)
-            if legacy_store is not None:
-                object.__setattr__(self, "store", legacy_store)
-
         if not self.anthropic_api_key.get_secret_value():
             fallback = os.environ.get("ANTHROPIC_API_KEY", "")
             if fallback:

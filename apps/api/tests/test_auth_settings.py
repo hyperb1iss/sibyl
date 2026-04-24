@@ -33,9 +33,8 @@ def test_settings_store_defaults_to_legacy() -> None:
     assert s.resolved_coordination_backend == "redis"
 
 
-def test_settings_store_uses_graph_backend_alias(monkeypatch) -> None:
-    monkeypatch.delenv("SIBYL_STORE", raising=False)
-    monkeypatch.setenv("SIBYL_GRAPH_BACKEND", "surrealdb")
+def test_settings_store_uses_store_env(monkeypatch) -> None:
+    monkeypatch.setenv("SIBYL_STORE", "surreal")
 
     s = Settings(_env_file=None)
 
@@ -45,6 +44,15 @@ def test_settings_store_uses_graph_backend_alias(monkeypatch) -> None:
     assert s.uses_relational_auth is False
     assert s.requires_relational_support is False
     assert s.resolved_coordination_backend == "local"
+
+
+def test_settings_store_ignores_removed_graph_backend_alias(monkeypatch) -> None:
+    monkeypatch.delenv("SIBYL_STORE", raising=False)
+    monkeypatch.setenv("SIBYL_GRAPH_BACKEND", "surrealdb")
+
+    s = Settings(_env_file=None)
+
+    assert s.store == "legacy"
 
 
 def test_settings_auth_store_can_use_surreal(monkeypatch) -> None:
