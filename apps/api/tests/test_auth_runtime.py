@@ -58,6 +58,8 @@ def test_auth_runtime_keeps_legacy_helper_aliases_pointed_at_neutral_exports() -
     assert auth_runtime.patch_legacy_auth_user is auth_runtime.patch_auth_user
     assert auth_runtime.get_legacy_project_record_by_graph_id is auth_runtime.get_project_record_by_graph_id
     assert auth_runtime.list_legacy_oauth_connections is auth_runtime.list_oauth_connections
+    assert surreal_auth_runtime.authenticate_api_key is surreal_auth_runtime.authenticate_legacy_api_key
+    assert surreal_auth_runtime.SessionRepository is SurrealSessionRepository
 
 
 def test_auth_runtime_surreal_backend_covers_public_exports(
@@ -85,7 +87,7 @@ async def test_auth_runtime_dispatches_profile_patch_to_surreal(
     dispatched = AsyncMock(return_value=expected)
 
     monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
-    monkeypatch.setattr(surreal_auth_runtime, "patch_legacy_auth_user", dispatched)
+    monkeypatch.setattr(surreal_auth_runtime, "patch_auth_user", dispatched)
 
     result = await auth_runtime.patch_legacy_auth_user(
         user_id=user_id,
@@ -111,7 +113,7 @@ async def test_auth_runtime_neutral_api_key_alias_dispatches_to_surreal(
     dispatched = AsyncMock(return_value=expected)
 
     monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
-    monkeypatch.setattr(surreal_auth_runtime, "authenticate_legacy_api_key", dispatched)
+    monkeypatch.setattr(surreal_auth_runtime, "authenticate_api_key", dispatched)
 
     result = await auth_runtime.authenticate_api_key("sk_live_test")
 
@@ -128,7 +130,7 @@ async def test_auth_runtime_neutral_login_alias_dispatches_to_surreal(
     dispatched = AsyncMock(return_value=expected)
 
     monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
-    monkeypatch.setattr(surreal_auth_runtime, "login_legacy_local_user", dispatched)
+    monkeypatch.setattr(surreal_auth_runtime, "login_local_user", dispatched)
 
     result = await auth_runtime.login_local_user(
         email="nova@example.com",
@@ -188,7 +190,7 @@ async def test_auth_runtime_dispatches_project_lookup_by_graph_id_to_surreal(
     dispatched = AsyncMock(return_value=expected)
 
     monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
-    monkeypatch.setattr(surreal_auth_runtime, "get_legacy_project_record_by_graph_id", dispatched)
+    monkeypatch.setattr(surreal_auth_runtime, "get_project_record_by_graph_id", dispatched)
 
     result = await auth_runtime.get_legacy_project_record_by_graph_id(
         organization_id=organization_id,
@@ -237,7 +239,7 @@ async def test_auth_runtime_dispatches_project_access_list_to_surreal_helper(
     monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
     monkeypatch.setattr(
         surreal_auth_runtime,
-        "list_legacy_accessible_project_graph_ids",
+        "list_accessible_project_graph_ids",
         dispatched,
     )
 
