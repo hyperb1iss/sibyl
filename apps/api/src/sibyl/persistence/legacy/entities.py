@@ -10,10 +10,10 @@ from sqlmodel import col, select
 
 from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk
 from sibyl.db.models import ChunkType, RawCapture
-from sibyl.persistence.content_common import LegacyDocumentEntityRecord
+from sibyl.persistence.content_common import DocumentEntityRecord
 
 
-async def list_legacy_raw_captures(
+async def list_raw_captures(
     session: Any,
     *,
     organization_id: UUID,
@@ -50,7 +50,7 @@ async def list_legacy_raw_captures(
     return rows[:limit], len(rows) > limit
 
 
-async def get_legacy_raw_capture(
+async def get_raw_capture(
     session: Any,
     *,
     organization_id: UUID,
@@ -80,12 +80,12 @@ async def save_raw_capture_record(
     return capture
 
 
-async def resolve_legacy_document_entity(
+async def resolve_document_entity(
     session: Any,
     *,
     organization_id: UUID,
     entity_id: str,
-) -> LegacyDocumentEntityRecord | None:
+) -> DocumentEntityRecord | None:
     """Resolve a document chunk entity by exact UUID or UUID prefix."""
 
     row = None
@@ -141,9 +141,14 @@ async def resolve_legacy_document_entity(
             section_parts.append(following_chunk.content or "")
         content = "\n\n".join(section_parts)
 
-    return LegacyDocumentEntityRecord(
+    return DocumentEntityRecord(
         chunk=chunk,
         document=document,
         source=source,
         content=content,
     )
+
+
+list_legacy_raw_captures = list_raw_captures
+get_legacy_raw_capture = get_raw_capture
+resolve_legacy_document_entity = resolve_document_entity

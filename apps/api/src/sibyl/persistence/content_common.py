@@ -7,7 +7,7 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class LegacyCrawlStats:
+class CrawlStats:
     total_sources: int
     total_documents: int
     total_chunks: int
@@ -16,7 +16,7 @@ class LegacyCrawlStats:
 
 
 @dataclass(frozen=True)
-class LegacyDocumentEntityRecord:
+class DocumentEntityRecord:
     """Resolved document-backed entity payload for entity routes."""
 
     chunk: Any
@@ -25,5 +25,5 @@ class LegacyDocumentEntityRecord:
     content: str
 
 
-CrawlStats = LegacyCrawlStats
-DocumentEntityRecord = LegacyDocumentEntityRecord
+LegacyCrawlStats = CrawlStats
+LegacyDocumentEntityRecord = DocumentEntityRecord

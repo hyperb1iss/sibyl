@@ -1041,7 +1041,7 @@ async def count_remaining_unlinked_chunks(
     return sum(1 for chunk in chunks if not chunk.has_entities)
 
 
-async def list_legacy_raw_captures(
+async def list_raw_captures(
     _session: Any,
     *,
     organization_id: UUID,
@@ -1083,7 +1083,7 @@ async def list_legacy_raw_captures(
     return paged[:limit], len(paged) > limit
 
 
-async def get_legacy_raw_capture(
+async def get_raw_capture(
     _session: Any,
     *,
     organization_id: UUID,
@@ -1115,7 +1115,7 @@ async def save_raw_capture_record(
     return _raw_capture_from_record(record)
 
 
-async def resolve_legacy_document_entity(
+async def resolve_document_entity(
     _session: Any,
     *,
     organization_id: UUID,
@@ -1506,6 +1506,6 @@ async def hybrid_search_chunks(
     return combined[:match_count]
 
 
-list_raw_captures = list_legacy_raw_captures
-get_raw_capture = get_legacy_raw_capture
-resolve_document_entity = resolve_legacy_document_entity
+list_legacy_raw_captures = list_raw_captures
+get_legacy_raw_capture = get_raw_capture
+resolve_legacy_document_entity = resolve_document_entity

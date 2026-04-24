@@ -22,14 +22,6 @@ _BACKEND_MODULES = {
     "surreal": ("sibyl.persistence.surreal.content",),
 }
 
-_BACKEND_NAME_OVERRIDES = {
-    "legacy": {
-        "get_raw_capture": "get_legacy_raw_capture",
-        "list_raw_captures": "list_legacy_raw_captures",
-        "resolve_document_entity": "resolve_legacy_document_entity",
-    },
-}
-
 _BACKEND_EXPORTS = [
     "create_crawl_source_record",
     "count_remaining_unlinked_chunks",
@@ -85,11 +77,10 @@ def _active_backend_name() -> str:
 
 def _resolve_backend_export(name: str) -> Any:
     backend = _active_backend_name()
-    export_name = _BACKEND_NAME_OVERRIDES.get(backend, {}).get(name, name)
     for module_name in _BACKEND_MODULES[backend]:
         module = import_module(module_name)
-        if hasattr(module, export_name):
-            return getattr(module, export_name)
+        if hasattr(module, name):
+            return getattr(module, name)
     msg = f"{name} is not implemented for SIBYL_STORE={backend!r}"
     raise AttributeError(msg)
 

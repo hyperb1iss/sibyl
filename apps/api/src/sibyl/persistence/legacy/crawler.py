@@ -10,7 +10,7 @@ from sqlmodel import col
 
 from sibyl.db import CrawledDocument, CrawlSource, CrawlStatus, DocumentChunk
 from sibyl.db.models import SourceType
-from sibyl.persistence.content_common import LegacyCrawlStats
+from sibyl.persistence.content_common import CrawlStats
 from sibyl_core.services.link_graph_status import get_link_graph_status_data
 
 
@@ -155,7 +155,7 @@ async def get_crawl_stats_payload(
     session: Any,
     *,
     organization_id: UUID,
-) -> LegacyCrawlStats:
+) -> CrawlStats:
     """Aggregate crawl stats for an organization."""
 
     sources_result = await session.execute(
@@ -202,7 +202,7 @@ async def get_crawl_stats_payload(
         for status, count in status_result.all()
     }
 
-    return LegacyCrawlStats(
+    return CrawlStats(
         total_sources=total_sources,
         total_documents=total_documents,
         total_chunks=total_chunks,
