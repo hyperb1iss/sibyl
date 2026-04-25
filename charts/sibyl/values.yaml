@@ -1,12 +1,26 @@
 # Sibyl Helm Chart Values
-# This chart deploys the Sibyl application (backend + frontend + worker)
-# It does NOT include infrastructure (PostgreSQL, FalkorDB, Kong)
-# Those should be deployed separately using their respective charts
+# This chart deploys the Sibyl application (backend + frontend + worker).
+# It does NOT include infrastructure (SurrealDB, PostgreSQL, FalkorDB, Kong).
+# Those should be deployed separately using their respective charts.
 
 # -- Global settings
 global:
   # -- Image pull secrets for private registries
   imagePullSecrets: []
+
+# -- Storage mode configuration
+# Default: fully Surreal (graph + content + auth in one SurrealDB instance).
+# For the legacy FalkorDB + PostgreSQL stack, set:
+#   store: "legacy"
+#   authStore: "postgres"
+#   coordinationBackend: "redis"
+# See docs/guide/storage-modes.md for the full matrix.
+# -- Active persistence runtime: "surreal" or "legacy"
+store: "surreal"
+# -- Auth persistence runtime: "surreal" or "postgres"
+authStore: "surreal"
+# -- Coordination backend: "auto" (surreal→local, legacy→redis), "local", or "redis"
+coordinationBackend: "auto"
 
 # -- Database migrations configuration
 migrations:
@@ -152,7 +166,25 @@ backend:
     # -- PostgreSQL user (only used if existingSecret is empty)
     user: "sibyl"
 
-  # -- FalkorDB connection settings
+  # -- SurrealDB connection settings (used when store or authStore is "surreal")
+  surreal:
+    # -- SurrealDB connection URL (ws:// or http:// to an external Surreal instance)
+    url: "ws://surrealdb:8000/rpc"
+    # -- Root username
+    username: "root"
+    # -- Reference to existing secret containing SIBYL_SURREAL_PASSWORD
+    # When empty, a password is auto-generated and stored in `<release>-surreal`.
+    existingSecret: ""
+    # -- Secret key containing the password (only used if existingSecret is set)
+    secretKey: "password"
+    # -- Inline password (ignored when existingSecret is set; auto-generated otherwise)
+    password: ""
+    # -- Namespace prefix for org isolation (e.g., "org_" → "org_<uuid_hex>")
+    namespacePrefix: "org_"
+    # -- Database name inside each org namespace
+    database: "graph"
+
+  # -- FalkorDB connection settings (used only when store is "legacy")
   falkordb:
     # -- FalkorDB host
     host: "falkordb"

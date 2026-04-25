@@ -40,7 +40,7 @@ class CoreConfig(BaseSettings):
     )
 
     store: Literal["legacy", "surreal"] = Field(
-        default="legacy",
+        default="surreal",
         description="Active persistence runtime for this process",
     )
 
@@ -132,7 +132,7 @@ class CoreConfig(BaseSettings):
         default=50,
         ge=1,
         le=100,
-        description="Graphiti concurrent operations limit (controls SEMAPHORE_LIMIT). Higher = more parallelism but more FalkorDB load.",
+        description="Graphiti concurrent operations limit (controls SEMAPHORE_LIMIT). Higher = more parallelism but more store/LLM load.",
     )
 
     # Retrieval: cross-encoder reranking

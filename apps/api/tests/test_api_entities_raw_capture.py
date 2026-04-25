@@ -26,7 +26,12 @@ def _session() -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_quick_capture_creates_raw_archive_record() -> None:
+async def test_quick_capture_creates_raw_archive_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl.config import settings
+
+    monkeypatch.setattr(settings, "store", "legacy")
     org = MagicMock()
     org.id = uuid4()
 

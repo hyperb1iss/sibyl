@@ -1,8 +1,8 @@
 # ============================================================================
-# Sibyl Quickstart - Zero-Config for Individual Developers
+# Sibyl Quickstart — Zero-Config for Individual Developers
 # ============================================================================
 #
-# Get running in 5 minutes with pre-built Docker images. No .env file required!
+# Get running in 5 minutes with pre-built Docker images. No .env file required.
 #
 # Quick Start:
 #   docker compose -f docker-compose.quickstart.yml up -d
@@ -12,17 +12,23 @@
 # All configuration happens through the web UI:
 #   - API keys saved to encrypted database storage
 #   - JWT secret auto-generated if not set
-#   - Default passwords suitable for local development
+#   - Default passwords suitable for local development only
+#
+# Default mode: fully Surreal (graph + content + auth in one SurrealDB instance).
+# To run the legacy FalkorDB+Postgres stack instead, use docker-compose.yml
+# with `--profile legacy` and migrate via `sibyld migrate`. See
+# docs/guide/migrating-from-falkor.md.
 #
 # Optional environment variables for advanced setup:
-#   SIBYL_OPENAI_API_KEY      - Pre-configure via env (or enter in UI)
-#   SIBYL_ANTHROPIC_API_KEY   - Pre-configure via env (or enter in UI)
-#   SIBYL_SETTINGS_KEY        - Fernet key for settings encryption (auto-generated)
-#   SIBYL_JWT_SECRET          - JWT signing key (auto-generated)
+#   SIBYL_OPENAI_API_KEY      — Pre-configure via env (or enter in UI)
+#   SIBYL_ANTHROPIC_API_KEY   — Pre-configure via env (or enter in UI)
+#   SIBYL_SETTINGS_KEY        — Fernet key for settings encryption (auto-generated)
+#   SIBYL_JWT_SECRET          — JWT signing key (auto-generated)
+#   SIBYL_SURREAL_PASSWORD    — SurrealDB root password (default: sibyl_quickstart)
 #
-# Running alongside existing dev setup (use different ports):
-#   SIBYL_SERVER_PORT=3344 SIBYL_WEB_PORT=3347 SIBYL_FALKORDB_PORT=6390 \
-#   SIBYL_POSTGRES_PORT=5443 docker compose -f docker-compose.quickstart.yml -p sibyl-qs up -d
+# Running alongside an existing dev setup (different ports):
+#   SIBYL_SERVER_PORT=3344 SIBYL_WEB_PORT=3347 SIBYL_SURREAL_PORT=8010 \
+#     docker compose -f docker-compose.quickstart.yml -p sibyl-qs up -d
 #
 # ============================================================================
 
@@ -36,25 +42,22 @@ services:
     ports:
       - "${SIBYL_SERVER_PORT:-3334}:3334"
     depends_on:
-      falkordb:
-        condition: service_healthy
-      postgres:
+      surrealdb:
         condition: service_healthy
     environment:
-      # Database connections (internal Docker network)
-      SIBYL_POSTGRES_HOST: postgres
-      SIBYL_POSTGRES_PORT: 5432
-      SIBYL_POSTGRES_USER: sibyl
-      SIBYL_POSTGRES_PASSWORD: ${SIBYL_POSTGRES_PASSWORD:-sibyl_quickstart}
-      SIBYL_POSTGRES_DB: sibyl
-      SIBYL_FALKORDB_HOST: falkordb
-      SIBYL_FALKORDB_PORT: 6379
-      SIBYL_FALKORDB_PASSWORD: ${SIBYL_FALKORDB_PASSWORD:-sibyl_quickstart}
-      # Auth - auto-generate if not provided
+      # Store configuration — fully Surreal by default
+      SIBYL_STORE: ${SIBYL_STORE:-surreal}
+      SIBYL_AUTH_STORE: ${SIBYL_AUTH_STORE:-surreal}
+      SIBYL_COORDINATION_BACKEND: ${SIBYL_COORDINATION_BACKEND:-auto}
+      # SurrealDB connection (internal Docker network)
+      SIBYL_SURREAL_URL: ws://surrealdb:8000/rpc
+      SIBYL_SURREAL_USERNAME: ${SIBYL_SURREAL_USERNAME:-root}
+      SIBYL_SURREAL_PASSWORD: ${SIBYL_SURREAL_PASSWORD:-sibyl_quickstart}
+      # Auth — auto-generate if not provided
       SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET:-}
       SIBYL_SETTINGS_KEY: ${SIBYL_SETTINGS_KEY:-}
       SIBYL_PUBLIC_URL: http://localhost:${SIBYL_WEB_PORT:-3337}
-      # AI Providers (optional - can be configured via UI during onboarding)
+      # AI Providers (optional — can be configured via UI during onboarding)
       SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:-}
       SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:-}
       SIBYL_LLM_PROVIDER: anthropic
@@ -84,14 +87,12 @@ services:
       api:
         condition: service_healthy
     environment:
-      SIBYL_POSTGRES_HOST: postgres
-      SIBYL_POSTGRES_PORT: 5432
-      SIBYL_POSTGRES_USER: sibyl
-      SIBYL_POSTGRES_PASSWORD: ${SIBYL_POSTGRES_PASSWORD:-sibyl_quickstart}
-      SIBYL_POSTGRES_DB: sibyl
-      SIBYL_FALKORDB_HOST: falkordb
-      SIBYL_FALKORDB_PORT: 6379
-      SIBYL_FALKORDB_PASSWORD: ${SIBYL_FALKORDB_PASSWORD:-sibyl_quickstart}
+      SIBYL_STORE: ${SIBYL_STORE:-surreal}
+      SIBYL_AUTH_STORE: ${SIBYL_AUTH_STORE:-surreal}
+      SIBYL_COORDINATION_BACKEND: ${SIBYL_COORDINATION_BACKEND:-auto}
+      SIBYL_SURREAL_URL: ws://surrealdb:8000/rpc
+      SIBYL_SURREAL_USERNAME: ${SIBYL_SURREAL_USERNAME:-root}
+      SIBYL_SURREAL_PASSWORD: ${SIBYL_SURREAL_PASSWORD:-sibyl_quickstart}
       SIBYL_SETTINGS_KEY: ${SIBYL_SETTINGS_KEY:-}
       SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:-}
       SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:-}
@@ -124,41 +125,28 @@ services:
     restart: unless-stopped
 
   # ==========================================================================
-  # FalkorDB (Knowledge Graph Database)
+  # SurrealDB (graph + content + auth, unified)
   # ==========================================================================
-  falkordb:
-    image: falkordb/falkordb:latest
-    container_name: sibyl-falkordb
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    container_name: sibyl-surrealdb
+    command:
+      [
+        "start",
+        "--log",
+        "info",
+        "--user",
+        "${SIBYL_SURREAL_USERNAME:-root}",
+        "--pass",
+        "${SIBYL_SURREAL_PASSWORD:-sibyl_quickstart}",
+        "rocksdb:///data/sibyl.db",
+      ]
     ports:
-      - "${SIBYL_FALKORDB_PORT:-6380}:6379" # Redis protocol
-      - "${SIBYL_FALKORDB_BROWSER_PORT:-3335}:3000" # Browser UI (optional)
+      - "${SIBYL_SURREAL_PORT:-8000}:8000"
     volumes:
-      - sibyl_falkordb:/var/lib/falkordb/data
-    environment:
-      FALKORDB_ARGS: --requirepass ${SIBYL_FALKORDB_PASSWORD:-sibyl_quickstart}
+      - sibyl_surreal:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${SIBYL_FALKORDB_PASSWORD:-sibyl_quickstart}", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-
-  # ==========================================================================
-  # PostgreSQL (User data, embeddings, crawled documents)
-  # ==========================================================================
-  postgres:
-    image: pgvector/pgvector:pg18
-    container_name: sibyl-postgres
-    ports:
-      - "${SIBYL_POSTGRES_PORT:-5433}:5432"
-    volumes:
-      - sibyl_postgres:/var/lib/postgresql
-    environment:
-      POSTGRES_USER: sibyl
-      POSTGRES_PASSWORD: ${SIBYL_POSTGRES_PASSWORD:-sibyl_quickstart}
-      POSTGRES_DB: sibyl
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sibyl -d sibyl"]
+      test: ["CMD", "/surreal", "is-ready", "--conn", "http://localhost:8000"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -167,10 +155,8 @@ services:
 volumes:
   sibyl_secrets:
     name: sibyl_secrets
-  sibyl_falkordb:
-    name: sibyl_falkordb
-  sibyl_postgres:
-    name: sibyl_postgres
+  sibyl_surreal:
+    name: sibyl_surreal
 
 networks:
   default:

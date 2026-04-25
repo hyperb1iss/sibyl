@@ -7,8 +7,8 @@ Deploy Sibyl to a production Kubernetes cluster using Helm.
 - Kubernetes cluster (1.27+)
 - kubectl configured for your cluster
 - Helm 3.x
-- External PostgreSQL with pgvector extension
-- External FalkorDB or Redis with FalkorDB module
+- **SurrealDB** instance (in-cluster StatefulSet, Surreal Cloud, or another external host)
+- Legacy mode only: External PostgreSQL with pgvector, external FalkorDB/Redis+FalkorDB module
 
 ## Architecture Overview
 
@@ -20,18 +20,22 @@ Deploy Sibyl to a production Kubernetes cluster using Helm.
 |  |  (Kong/Nginx)    |---->|    HPA: 2-10     |     |   HPA: 2-10      |      |
 |  +------------------+     +--------+---------+     +------------------+      |
 |                                    |                                         |
-|                          +--------+---------+                                |
+|                          +---------+--------+                                |
 |                          |    Worker (n)    |                                |
 |                          |    HPA: 1-5      |                                |
 |                          +------------------+                                |
 |                                                                              |
 +------------------------------------------------------------------------------+
-                |                           |
-     +----------+----------+     +----------+----------+
-     |   External Postgres |     |   External FalkorDB |
-     |   (RDS, Cloud SQL)  |     |   (Redis Cloud)     |
-     +---------------------+     +---------------------+
+                                    |
+                         +----------+-----------+
+                         |      SurrealDB       |
+                         | graph + content +    |
+                         | auth (unified)       |
+                         +----------------------+
 ```
+
+For the legacy stack, swap SurrealDB for two external dependencies (PostgreSQL with pgvector and
+FalkorDB). See [storage-modes.md](../guide/storage-modes.md).
 
 ## Quick Start
 
@@ -39,17 +43,14 @@ Deploy Sibyl to a production Kubernetes cluster using Helm.
 # Add namespace
 kubectl create namespace sibyl
 
-# Create secrets
+# Create secrets (Surreal default)
 kubectl create secret generic sibyl-secrets -n sibyl \
   --from-literal=SIBYL_JWT_SECRET=$(openssl rand -hex 32) \
   --from-literal=SIBYL_OPENAI_API_KEY=sk-... \
   --from-literal=SIBYL_ANTHROPIC_API_KEY=sk-ant-...
 
-kubectl create secret generic sibyl-postgres -n sibyl \
-  --from-literal=password=<your-postgres-password>
-
-kubectl create secret generic sibyl-falkordb -n sibyl \
-  --from-literal=password=<your-falkordb-password>
+kubectl create secret generic sibyl-surreal -n sibyl \
+  --from-literal=password=<your-surreal-password>
 
 # Install with Helm
 helm upgrade --install sibyl ./charts/sibyl \
@@ -57,11 +58,19 @@ helm upgrade --install sibyl ./charts/sibyl \
   -f values-production.yaml
 ```
 
+For legacy mode, substitute `sibyl-surreal` with `sibyl-postgres` and `sibyl-falkordb` secrets, and
+set `store: legacy` + `authStore: postgres` in your values file.
+
 ## Values Configuration
 
-Create a `values-production.yaml`:
+Create a `values-production.yaml` (Surreal default):
 
 ```yaml
+# Storage mode (default is already "surreal" / "surreal")
+store: "surreal"
+authStore: "surreal"
+coordinationBackend: "auto"
+
 backend:
   replicaCount: 2
 
@@ -73,20 +82,13 @@ backend:
   # Reference pre-created secrets
   existingSecret: sibyl-secrets
 
-  # External PostgreSQL
-  database:
-    existingSecret: "" # Empty = use manual config below
-    host: "your-postgres.example.com"
-    port: "5432"
-    database: "sibyl"
-    user: "sibyl"
-    # Password from sibyl-postgres secret
-
-  # External FalkorDB
-  falkordb:
-    host: "your-falkordb.example.com"
-    port: "6379"
-    existingSecret: sibyl-falkordb
+  # SurrealDB connection
+  surreal:
+    url: "ws://your-surrealdb.example.com:8000/rpc"
+    username: "root"
+    existingSecret: sibyl-surreal
+    namespacePrefix: "org_"
+    database: "graph"
 
   env:
     SIBYL_SERVER_HOST: "0.0.0.0"
@@ -182,27 +184,29 @@ ingress:
 
 ## Database Setup
 
-### PostgreSQL Requirements
+### SurrealDB Requirements (default)
 
-- PostgreSQL 15+ recommended
-- pgvector extension installed
-- Sufficient connections (backend.postgres_pool_size \* replicas)
+- SurrealDB 2.x
+- RocksDB-backed storage (StatefulSet with PVC in-cluster, or managed service)
+- Root credentials set at start (`--user` / `--pass`)
+- Persistence: backups are a single RocksDB directory; snapshot the PVC
+
+Example in-cluster StatefulSet is out of scope for this chart — common patterns are the official
+SurrealDB Helm chart or a small custom StatefulSet mounting a PVC to `/data`.
+
+### Legacy Stack (opt-in)
+
+**PostgreSQL** — PostgreSQL 15+ with pgvector:
 
 ```sql
--- Create database and user
 CREATE USER sibyl WITH PASSWORD 'secure-password';
 CREATE DATABASE sibyl OWNER sibyl;
-
--- Connect to sibyl database and enable pgvector
 \c sibyl
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-### FalkorDB Requirements
-
-- FalkorDB or Redis with FalkorDB module
-- Persistence enabled (RDB or AOF)
-- Sufficient memory for graph data
+**FalkorDB** — FalkorDB or Redis + FalkorDB module with RDB/AOF persistence and enough memory for
+graph data.
 
 ## Secrets Management
 
@@ -250,7 +254,9 @@ kubectl apply -f sibyl-secrets-sealed.yaml
 
 ## Database Migrations
 
-The Helm chart includes a migration job that runs as a pre-upgrade hook:
+The Helm chart ships an Alembic migration job that runs as a pre-upgrade hook **only when
+`authStore: postgres`**. Fully Surreal deployments bootstrap their schema inline at startup and skip
+this step entirely.
 
 ```yaml
 migrations:
@@ -259,7 +265,7 @@ migrations:
   ttlSecondsAfterFinished: 600
 ```
 
-This runs `alembic upgrade head` before deploying new pods.
+When the hook runs, it executes `alembic upgrade head` before deploying new pods.
 
 To run migrations manually:
 

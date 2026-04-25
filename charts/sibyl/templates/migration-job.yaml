@@ -1,4 +1,4 @@
-{{- if .Values.migrations.enabled }}
+{{- if and .Values.migrations.enabled (eq .Values.authStore "postgres") }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -38,7 +38,7 @@ spec:
             - configMapRef:
                 name: {{ include "sibyl.fullname" . }}-config
           env:
-            {{- if .Values.backend.database.existingSecret }}
+            {{- if and (eq .Values.authStore "postgres") .Values.backend.database.existingSecret }}
             - name: SIBYL_POSTGRES_HOST
               valueFrom:
                 secretKeyRef:

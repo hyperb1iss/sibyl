@@ -54,11 +54,11 @@ def test_core_config_uses_store_env(monkeypatch) -> None:
 
 def test_core_config_ignores_removed_graph_backend_alias(monkeypatch) -> None:
     monkeypatch.delenv("SIBYL_STORE", raising=False)
-    monkeypatch.setenv("SIBYL_GRAPH_BACKEND", "surrealdb")
+    monkeypatch.setenv("SIBYL_GRAPH_BACKEND", "falkordb")
 
     settings = CoreConfig(_env_file=None)
 
-    assert settings.store == "legacy"
+    assert settings.store == "surreal"
 
 
 @pytest.mark.asyncio

@@ -9,8 +9,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Graphiti-Memory-e135ff?style=for-the-badge&logo=neo4j&logoColor=white" alt="Graphiti">
-  <img src="https://img.shields.io/badge/FalkorDB-Graph-00aaff?style=for-the-badge&logo=redis&logoColor=white" alt="FalkorDB">
-  <img src="https://img.shields.io/badge/PostgreSQL_18-Data-336791?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL">
+  <img src="https://img.shields.io/badge/SurrealDB-Store-ff00a0?style=for-the-badge&logo=surrealdb&logoColor=white" alt="SurrealDB">
   <img src="https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/Next.js_16-Frontend-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js">
   <img src="https://img.shields.io/badge/moon-Monorepo-af63d3?style=for-the-badge&logo=moonrepo&logoColor=white" alt="moon">
@@ -160,19 +159,19 @@ cp .env.example .env
 # Install CLIs globally (editable, source changes reflect immediately)
 moon run install-dev
 
-# Launch the Surreal local-dev path
-moon run dev-surreal
+# Launch the default (Surreal) local-dev path
+moon run dev
 
 # Legacy Falkor/Postgres dev path
-moon run dev
+moon run dev-legacy
 
 # Verify
 curl http://localhost:3334/api/health
 ```
 
-`moon run dev-surreal` is the recommended single-machine flow. It starts local SurrealDB and runs
-jobs plus schedules in-process under `sibyld serve`. Redis stays opt-in for multi-process or
-distributed dev work.
+`moon run dev` is the Surreal single-machine flow. It starts local SurrealDB and runs jobs plus
+schedules in-process under `sibyld serve`. Redis stays opt-in for multi-process or distributed dev
+work. `moon run dev-legacy` is the opt-in path for the FalkorDB + PostgreSQL stack.
 
 ### Retrieval Benchmarks
 
@@ -377,11 +376,15 @@ sibyl/
 
 **Stack:**
 
-- **Backend:** Python 3.13 / FastMCP / FastAPI / Graphiti / FalkorDB
+- **Backend:** Python 3.13 / FastMCP / FastAPI / Graphiti / SurrealDB
 - **Frontend:** Next.js 16 / React 19 / React Query / Tailwind 4
-- **Database:** FalkorDB (graph) + PostgreSQL (relational)
+- **Storage:** SurrealDB (graph + content + auth, unified). Legacy FalkorDB + PostgreSQL still
+  supported via `SIBYL_STORE=legacy`.
 - **Build:** moonrepo + uv (Python) + pnpm (TypeScript)
 - **Integrations:** Claude Code, MCP clients, and project-local hooks
+
+See [`docs/guide/why-surreal.md`](docs/guide/why-surreal.md) for the rationale and
+[`docs/guide/storage-modes.md`](docs/guide/storage-modes.md) for the mode matrix.
 
 ## Authentication
 
@@ -439,17 +442,14 @@ moon run install-dev
 # Install CLIs globally (frozen copy, for CI / production)
 moon run install
 
-# Start everything
+# Start everything (Surreal-first, default)
 moon run dev
 
-# Recommended Surreal local-dev path.
-moon run dev-surreal
+# Legacy FalkorDB + PostgreSQL path
+moon run dev-legacy
 
 # Move one local org from Falkor/Postgres into local Surreal and verify it.
 moon run migrate-local-surreal -- --org-id <org-uuid>
-
-# Falkor/Postgres alias
-moon run dev-legacy
 
 # Individual services
 moon run dev-api          # API only
@@ -466,10 +466,9 @@ moon run docker-up        # Start default local data services (SurrealDB)
 moon run docker-down      # Stop databases
 ```
 
-`moon run dev` stays on the FalkorDB/PostgreSQL stack for now while the Surreal path stabilizes.
-`moon run dev-surreal` is the explicit Surreal server-mode flow. When `SIBYL_SURREAL_URL` is unset
-it starts local SurrealDB, points the API at `ws://127.0.0.1:8000/rpc`, and stores local database
-files in `.moon/cache/surreal-dev`. Jobs and schedules run in-process by default with
+`moon run dev` is the Surreal server-mode flow. When `SIBYL_SURREAL_URL` is unset it starts local
+SurrealDB, points the API at `ws://127.0.0.1:8000/rpc`, and stores local database files in
+`.moon/cache/surreal-dev`. Jobs and schedules run in-process by default with
 `SIBYL_COORDINATION_BACKEND=local`. Set `SURREAL_DATA_DIR=/your/path` if you want the local Docker
 volume somewhere else. Set `SIBYL_SURREAL_URL` to a hosted SurrealDB endpoint, including Surreal
 Cloud, to skip the local database and connect remotely instead.
@@ -479,10 +478,13 @@ and start Redis explicitly:
 
 ```bash
 docker compose --profile redis up -d surrealdb redis
-moon run dev-surreal
+moon run dev
 ```
 
-`moon run dev-legacy` remains as an alias for the Falkor/PostgreSQL path.
+`moon run dev-legacy` is the opt-in path for the FalkorDB + PostgreSQL stack, kept for users who
+haven't migrated yet. See
+[`docs/guide/migrating-from-falkor.md`](docs/guide/migrating-from-falkor.md) for the migration
+playbook.
 
 `moon run migrate-local-surreal -- --org-id <uuid>` is the simple local data move: it exports the
 org from legacy storage, imports it into the local Surreal server, and verifies the result. Use

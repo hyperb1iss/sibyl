@@ -83,7 +83,7 @@ spec:
                   key: SIBYL_ANTHROPIC_API_KEY
                   optional: true
             {{- end }}
-            {{- if .Values.backend.database.existingSecret }}
+            {{- if and (eq .Values.authStore "postgres") .Values.backend.database.existingSecret }}
             # Pull all database connection info from CNPG-generated secret
             - name: SIBYL_POSTGRES_HOST
               valueFrom:
@@ -111,6 +111,20 @@ spec:
                   name: {{ .Values.backend.database.existingSecret }}
                   key: password
             {{- end }}
+            {{- if or (eq .Values.store "surreal") (eq .Values.authStore "surreal") }}
+            # SurrealDB password from existing secret or auto-generated
+            - name: SIBYL_SURREAL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.backend.surreal.existingSecret }}
+                  name: {{ .Values.backend.surreal.existingSecret }}
+                  key: {{ .Values.backend.surreal.secretKey | default "password" }}
+                  {{- else }}
+                  name: {{ include "sibyl.fullname" . }}-surreal
+                  key: password
+                  {{- end }}
+            {{- end }}
+            {{- if eq .Values.store "legacy" }}
             # FalkorDB password from existing secret or auto-generated
             - name: SIBYL_FALKORDB_PASSWORD
               valueFrom:
@@ -122,6 +136,7 @@ spec:
                   name: {{ include "sibyl.fullname" . }}-falkordb
                   key: password
                   {{- end }}
+            {{- end }}
           livenessProbe:
             {{- toYaml .Values.backend.livenessProbe | nindent 12 }}
           readinessProbe:

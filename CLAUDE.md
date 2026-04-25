@@ -91,7 +91,8 @@ cross-package dependencies. Never use raw `pnpm`/`uv` commands for lint, test, b
 
 ```bash
 # Lifecycle
-moon run dev              # Start everything (FalkorDB, API, worker, web)
+moon run dev              # Start everything (SurrealDB, API, worker, web). Default.
+moon run dev-legacy       # Opt-in legacy stack (FalkorDB + PostgreSQL + Redis)
 moon run stop             # Stop all services
 
 # Quality (from any directory)
@@ -146,11 +147,13 @@ sibyl logs tail --json
 
 ### Ports
 
-| Service   | Port |
-| --------- | ---- |
-| API + MCP | 3334 |
-| Frontend  | 3337 |
-| FalkorDB  | 6380 |
+| Service             | Port |
+| ------------------- | ---- |
+| API + MCP           | 3334 |
+| Frontend            | 3337 |
+| SurrealDB (default) | 8000 |
+| FalkorDB (legacy)   | 6380 |
+| PostgreSQL (legacy) | 5433 |
 
 ---
 
@@ -164,13 +167,15 @@ sibyl logs tail --json
 manager = EntityManager(client, group_id=str(org.id))
 ```
 
-Each organization gets its own isolated FalkorDB graph. Forgetting org scope queries the wrong graph
-or breaks isolation.
+Each organization gets its own isolated namespace (Surreal: `org_<uuid_hex>`, legacy Falkor: a named
+graph). Forgetting org scope queries the wrong namespace or breaks isolation.
 
-### FalkorDB Write Concurrency
+### Surreal Write Concurrency
 
-FalkorDB's `BlockingConnectionPool` (50 connections, 60s timeout) handles write concurrency
-natively. No application-level locking is needed.
+The SurrealDB driver serializes websocket queries through a per-client `asyncio.Lock`. Do not hold
+the lock across awaits you don't control, and don't share a single driver instance across orgs — use
+`driver.clone(group_id)` to get an isolated client. In legacy mode, FalkorDB's
+`BlockingConnectionPool` (50 connections, 60s timeout) handles concurrency natively.
 
 ### Node Labels
 
@@ -201,7 +206,15 @@ from sibyl.cli.common import ELECTRIC_PURPLE
 
 ## Common Gotchas
 
-### FalkorDB
+### SurrealDB (default)
+
+- **Port 8000** for ws/http; RPC path is `/rpc`
+- **Embedded mode** uses RocksDB at `.moon/cache/surreal-dev` by default; single-writer
+- **Namespace-per-org** (`org_<uuid_hex>`): missing group_id routes queries to the wrong namespace
+- **Memory mode** (`memory://`) is test-only; forbidden in production via config validator
+- **SEMAPHORE_LIMIT** still applies for Graphiti concurrency; set before importing graphiti
+
+### FalkorDB (legacy, opt-in)
 
 - **Port 6380** (not 6379) to avoid Redis conflicts
 - **Graph corruption** can crash - nuke with `GRAPH.DELETE <org-uuid>`

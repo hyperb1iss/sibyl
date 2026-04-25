@@ -12,12 +12,13 @@ tasks:
     command: bash tools/dev/run-surreal-dev.sh
     env:
       FORCE_COLOR: "1"
-      SIBYL_STORE: "legacy"
-      SIBYL_COORDINATION_BACKEND: "auto"
+      SIBYL_STORE: "surreal"
+      SIBYL_COORDINATION_BACKEND: "local"
     preset: server
     options:
       persistent: true
 
+  # Alias kept for muscle memory; will be removed in a future release.
   dev-surreal:
     command: bash tools/dev/run-surreal-dev.sh
     env:
@@ -104,10 +105,10 @@ tasks:
       fi
       docker compose -f docker-compose.quickstart.yml --env-file .env.quickstart up -d
       echo ""
-      echo "🚀 Sibyl quickstart running!"
+      echo "🔮 Sibyl quickstart running!"
       echo "   Web UI:   http://localhost:${SIBYL_WEB_PORT:-3337}"
       echo "   API:      http://localhost:${SIBYL_SERVER_PORT:-3334}"
-      echo "   Graph UI: http://localhost:${SIBYL_FALKORDB_BROWSER_PORT:-3335}"
+      echo "   SurrealDB: http://localhost:${SIBYL_SURREAL_PORT:-8000}"
     preset: server
 
   quickstart-stop:
@@ -130,9 +131,9 @@ tasks:
       docker compose -f docker-compose.quickstart.yml -f docker-compose.quickstart.test.yml --env-file .env.quickstart up -d
       echo ""
       echo "🧪 Sibyl TEST instance running (separate from dev)!"
-      echo "   Web UI:   http://localhost:3347"
-      echo "   API:      http://localhost:3344"
-      echo "   Graph UI: http://localhost:3345"
+      echo "   Web UI:    http://localhost:3347"
+      echo "   API:       http://localhost:3344"
+      echo "   SurrealDB: http://localhost:8010"
     preset: server
 
   quickstart-test-stop:

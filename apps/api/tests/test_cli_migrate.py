@@ -223,6 +223,8 @@ def test_migrate_export_writes_graph_and_postgres_archive(tmp_path: Path) -> Non
     }
 
     with (
+        patch.object(migrate_cli.settings, "store", "legacy"),
+        patch.object(migrate_cli.settings, "auth_store", "postgres"),
         patch(
             "sibyl.cli.migrate._load_graph_export",
             return_value=(graph_payload, json.dumps(graph_payload).encode("utf-8")),
@@ -463,7 +465,10 @@ def test_migrate_import_warns_when_auth_payload_is_skipped_in_postgres_mode(tmp_
     archive_path = tmp_path / "migration.tar.gz"
     _write_full_archive(archive_path, include_auth=True)
 
-    with patch("sibyl.cli.migrate._restore_graph_payload", return_value=True):
+    with (
+        patch.object(migrate_cli.settings, "auth_store", "postgres"),
+        patch("sibyl.cli.migrate._restore_graph_payload", return_value=True),
+    ):
         result = runner.invoke(migrate_cli.app, ["import", str(archive_path), "--yes"])
 
     assert result.exit_code == 0
@@ -493,7 +498,10 @@ def test_migrate_import_warns_when_content_payload_is_skipped_in_legacy_store(
     archive_path = tmp_path / "migration.tar.gz"
     _write_full_archive(archive_path, include_content=True)
 
-    with patch("sibyl.cli.migrate._restore_graph_payload", return_value=True):
+    with (
+        patch.object(migrate_cli.settings, "store", "legacy"),
+        patch("sibyl.cli.migrate._restore_graph_payload", return_value=True),
+    ):
         result = runner.invoke(migrate_cli.app, ["import", str(archive_path), "--yes"])
 
     assert result.exit_code == 0

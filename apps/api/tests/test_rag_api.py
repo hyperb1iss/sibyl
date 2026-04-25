@@ -139,6 +139,7 @@ class TestRAGSearchEndpoint:
     @pytest.mark.asyncio
     async def test_basic_search(
         self,
+        monkeypatch,
         mock_embed_text,
         mock_session,
         mock_content_session,
@@ -148,6 +149,9 @@ class TestRAGSearchEndpoint:
         sample_source,
     ):
         """Test basic RAG search functionality."""
+        from sibyl.persistence import content_runtime
+
+        monkeypatch.setattr(content_runtime.settings, "store", "legacy")
         # Setup mock query result
         mock_result = MagicMock()
         mock_result.all.return_value = [
@@ -284,6 +288,7 @@ class TestCodeExampleSearch:
     @pytest.mark.asyncio
     async def test_code_search(
         self,
+        monkeypatch,
         mock_embed_text,
         mock_session,
         mock_content_session,
@@ -293,6 +298,9 @@ class TestCodeExampleSearch:
         sample_source,
     ):
         """Test code example search."""
+        from sibyl.persistence import content_runtime
+
+        monkeypatch.setattr(content_runtime.settings, "store", "legacy")
         mock_result = MagicMock()
         mock_result.all.return_value = [
             (sample_code_chunk, sample_document, sample_source.id, sample_source.name, 0.82)

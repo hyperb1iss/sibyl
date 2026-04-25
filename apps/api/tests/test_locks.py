@@ -424,11 +424,15 @@ class TestGlobalLockManager:
         # Cleanup
         sibyl.locks._lock_manager = None
 
-    def test_get_lock_manager_creates_if_none(self) -> None:
-        """get_lock_manager creates new instance if none exists."""
+    def test_get_lock_manager_creates_if_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """get_lock_manager creates the Redis-backed EntityLockManager in legacy mode."""
+        import sibyl.coordination.locks as coord_locks
         import sibyl.locks
 
+        monkeypatch.setattr(coord_locks, "get_coordination_backend", lambda: "redis")
         sibyl.locks._lock_manager = None
+        coord_locks._locks = None
+        coord_locks._locks_backend = None
 
         manager = get_lock_manager()
         assert manager is not None
@@ -436,3 +440,5 @@ class TestGlobalLockManager:
 
         # Cleanup
         sibyl.locks._lock_manager = None
+        coord_locks._locks = None
+        coord_locks._locks_backend = None

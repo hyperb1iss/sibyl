@@ -5,15 +5,16 @@ clusters.
 
 ## Architecture
 
-Sibyl consists of four main components:
+Sibyl consists of four components plus one unified storage backend (SurrealDB by default):
 
-| Component    | Purpose                             | Port   |
-| ------------ | ----------------------------------- | ------ |
-| **Backend**  | FastAPI + MCP server (sibyld serve) | 3334   |
-| **Worker**   | arq job queue processor             | -      |
-| **Frontend** | Next.js 16 web UI                   | 3337   |
-| **FalkorDB** | Graph database (Redis + FalkorDB)   | 6379\* |
-| **Postgres** | Relational data (users, crawl docs) | 5432\* |
+| Component     | Purpose                             | Port   |
+| ------------- | ----------------------------------- | ------ |
+| **Backend**   | FastAPI + MCP server (sibyld serve) | 3334   |
+| **Worker**    | arq job queue processor             | -      |
+| **Frontend**  | Next.js 16 web UI                   | 3337   |
+| **SurrealDB** | Graph + content + auth (default)    | 8000\* |
+| **FalkorDB**  | Graph database (legacy, opt-in)     | 6379\* |
+| **Postgres**  | Relational auth (legacy/mixed mode) | 5432\* |
 
 \*Default internal ports. External mappings vary by deployment mode.
 
@@ -33,22 +34,28 @@ Sibyl consists of four main components:
                          +-------->+     Backend      |
                                    | (FastAPI + MCP)  |
                                    |     :3334        |
-                                   +----+-------+-----+
-                                        |       |
-                          +-------------+       +-------------+
-                          |                                   |
-              +-----------+----------+          +-------------+---------+
-              |     PostgreSQL       |          |       FalkorDB        |
-              |   (users, docs)      |          |    (knowledge graph)  |
-              |       :5432          |          |         :6379         |
-              +----------------------+          +-----------------------+
-                          ^
-                          |
-              +-----------+----------+
-              |       Worker         |
-              |   (arq processor)    |
-              +----------------------+
+                                   +--------+---------+
+                                            |
+                                            | ws://:8000/rpc
+                                            v
+                                   +------------------+
+                                   |     SurrealDB    |
+                                   |  graph + content |
+                                   |      + auth      |
+                                   |      :8000       |
+                                   +--------+---------+
+                                            ^
+                                            |
+                                   +--------+---------+
+                                   |     Worker       |
+                                   |  (arq processor) |
+                                   +------------------+
 ```
+
+For the legacy FalkorDB + PostgreSQL stack (`SIBYL_STORE=legacy`), the Backend and Worker connect to
+FalkorDB (knowledge graph) and PostgreSQL (relational data) instead. See
+[storage-modes.md](../guide/storage-modes.md) and
+[migrating-from-falkor.md](../guide/migrating-from-falkor.md).
 
 ## Deployment Modes
 
@@ -99,13 +106,14 @@ Sibyl consists of four main components:
 
 ### Docker Compose (Local Dev)
 
-| Service  | Host Port | Container Port | Notes                  |
-| -------- | --------- | -------------- | ---------------------- |
-| Backend  | 3334      | 3334           | API + MCP              |
-| Frontend | 3337      | 3337           | Next.js UI             |
-| FalkorDB | 6380      | 6379           | Avoids Redis conflicts |
-| FalkorDB | 3335      | 3000           | Browser UI             |
-| Postgres | 5433      | 5432           | Avoids local Postgres  |
+| Service             | Host Port | Container Port | Notes                  |
+| ------------------- | --------- | -------------- | ---------------------- |
+| Backend             | 3334      | 3334           | API + MCP              |
+| Frontend            | 3337      | 3337           | Next.js UI             |
+| SurrealDB (default) | 8000      | 8000           | ws/http, RPC at `/rpc` |
+| FalkorDB (legacy)   | 6380      | 6379           | Avoids Redis conflicts |
+| FalkorDB (legacy)   | 3335      | 3000           | Browser UI             |
+| Postgres (legacy)   | 5433      | 5432           | Avoids local Postgres  |
 
 ### Tilt/Minikube
 

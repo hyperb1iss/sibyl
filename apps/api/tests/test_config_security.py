@@ -36,8 +36,13 @@ class TestDisableAuthSecurity:
     def test_auth_enabled_works_everywhere(self) -> None:
         """disable_auth=False should work in all environments."""
         for env in ["development", "staging", "production"]:
-            # Production requires non-default passwords
-            kwargs: dict[str, object] = {"environment": env, "disable_auth": False}
+            # Production requires non-default passwords and a non-memory store
+            kwargs: dict[str, object] = {
+                "environment": env,
+                "disable_auth": False,
+                "store": "legacy",
+                "auth_store": "postgres",
+            }
             if env == "production":
                 kwargs["falkordb_password"] = "secure_falkordb_pw"
                 kwargs["postgres_password"] = "secure_postgres_pw"
@@ -65,8 +70,12 @@ class TestEnvironmentValidation:
     def test_valid_environments(self) -> None:
         """Valid environments should be accepted."""
         for env in ["development", "staging", "production"]:
-            # Production requires non-default passwords
-            kwargs: dict[str, object] = {"environment": env}
+            # Production requires non-default passwords and a non-memory store
+            kwargs: dict[str, object] = {
+                "environment": env,
+                "store": "legacy",
+                "auth_store": "postgres",
+            }
             if env == "production":
                 kwargs["falkordb_password"] = "secure_falkordb_pw"
                 kwargs["postgres_password"] = "secure_postgres_pw"
@@ -119,6 +128,8 @@ class TestProductionPasswordSecurity:
         """Non-default passwords should work in production."""
         settings = Settings(
             environment="production",
+            store="legacy",
+            auth_store="postgres",
             falkordb_password="my_secure_falkordb",
             postgres_password="my_secure_postgres",
         )

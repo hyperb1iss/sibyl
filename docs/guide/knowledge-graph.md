@@ -10,21 +10,30 @@ semantic search. This guide explains how the graph works.
 
 ## Architecture Overview
 
-Sibyl uses a two-database architecture:
+Sibyl runs on a unified storage backend by default:
 
-| Database          | Purpose                                 | Technology |
-| ----------------- | --------------------------------------- | ---------- |
-| **Graph DB**      | Entities, relationships, embeddings     | FalkorDB   |
-| **Relational DB** | Users, sessions, API keys, crawled docs | PostgreSQL |
+| Default (fully Surreal)                           | Legacy (opt-in)                                                |
+| ------------------------------------------------- | -------------------------------------------------------------- |
+| Graph + content + auth in one SurrealDB instance. | FalkorDB (graph) + PostgreSQL (relational auth, crawled docs). |
 
-### FalkorDB
+Set `SIBYL_STORE=legacy` and `SIBYL_AUTH_STORE=postgres` to use the legacy stack. See
+[storage-modes.md](./storage-modes.md).
 
-FalkorDB is a Redis-compatible graph database that Sibyl uses via
-[Graphiti](https://github.com/getzep/graphiti), a Graph RAG framework. It provides:
+### SurrealDB (default)
 
-- **Cypher queries** - Graph query language
-- **Vector search** - Native embedding support
-- **High performance** - Redis-speed operations
+SurrealDB is a multi-model database. Sibyl uses it as the store behind
+[Graphiti](https://github.com/getzep/graphiti), with `org_<uuid_hex>` namespaces for per-org
+isolation. It provides:
+
+- **SurrealQL queries** — graph traversal, full-text, and vector search in one language
+- **HNSW vector indexes** — native embedding support for semantic recall
+- **Embedded or remote** — RocksDB for dev, WebSocket/HTTP for services
+
+### FalkorDB (legacy)
+
+FalkorDB is a Redis-compatible graph database used when `SIBYL_STORE=legacy`. It speaks Cypher via
+Graphiti, pairs with PostgreSQL for relational auth, and remains supported for users who haven't
+migrated yet.
 
 ### Graphiti Integration
 
@@ -122,23 +131,23 @@ Selected types shown. See [Entity Types](/guide/entity-types) for the complete l
 
 ## Multi-Tenancy
 
-Each organization gets its own isolated graph:
+Each organization gets its own isolated namespace:
 
 ```python
-# Graph named by organization UUID
-graph_name = str(org.id)  # e.g., "550e8400-e29b-41d4-a716-446655440000"
-
+# Surreal: namespace named org_<uuid_hex>
+# Legacy (Falkor): graph named by organization UUID
 # All operations require org context
 manager = EntityManager(client, group_id=str(org.id))
 ```
 
-::: danger Always Scope by Organization Never query without org scope - it will hit the wrong graph
-or break isolation. :::
+::: danger Always Scope by Organization Never query without org scope — it routes to the wrong
+namespace or breaks isolation. :::
 
 ## Write Concurrency
 
-FalkorDB's connection pool handles write concurrency natively. No application-level locking is
-needed.
+The Surreal driver guards the WebSocket with a per-client `asyncio.Lock`; the legacy FalkorDB
+driver's `BlockingConnectionPool` handles concurrency natively. In either mode, `EntityManager`
+methods are safe to call concurrently — no application-level locking needed.
 
 ## Hybrid Search
 
@@ -302,8 +311,8 @@ MATCH (n) WHERE (n:Episodic OR n:Entity) AND n.entity_type = 'pattern'
 
 ### 3. Write Concurrency
 
-FalkorDB's connection pool handles write concurrency natively. `EntityManager` methods are safe to
-call concurrently without application-level locking.
+`EntityManager` methods are safe to call concurrently in both Surreal and legacy modes. The driver
+handles serialization; no application-level locking needed.
 
 ### 4. Filter Early in Queries
 
@@ -322,13 +331,16 @@ LIMIT 100
 
 ### Graph Corruption
 
-If you encounter corruption errors:
+Surreal mode: drop the per-org namespace from SurrealQL:
+
+```surql
+REMOVE NAMESPACE org_<uuid_hex>;
+```
+
+Legacy FalkorDB:
 
 ```bash
-# Connect to FalkorDB
 redis-cli -p 6380
-
-# Delete the corrupted graph
 GRAPH.DELETE <org-uuid>
 ```
 

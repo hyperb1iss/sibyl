@@ -68,11 +68,11 @@ class Settings(BaseSettings):
         description="Logging level",
     )
     store: Literal["legacy", "surreal"] = Field(
-        default="legacy",
+        default="surreal",
         description="Active persistence runtime for this process",
     )
     auth_store: Literal["postgres", "surreal"] = Field(
-        default="postgres",
+        default="surreal",
         description="Active auth persistence runtime for this process",
     )
     coordination_backend: Literal["auto", "local", "redis"] = Field(
@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_security_settings(self) -> "Settings":
         """Prevent insecure settings in production."""
-        if self.store == "surreal" and "auth_store" not in self.model_fields_set:
+        if "auth_store" not in self.model_fields_set:
             object.__setattr__(self, "auth_store", default_auth_store(store=self.store))
         if self.environment == "production":
             if self.disable_auth:
@@ -291,8 +291,8 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def check_api_key_fallbacks(self) -> "Settings":
         """Fall back to non-prefixed env vars for API keys."""
-        if self.store == "surreal" and "auth_store" not in self.model_fields_set:
-            object.__setattr__(self, "auth_store", "surreal")
+        if "auth_store" not in self.model_fields_set:
+            object.__setattr__(self, "auth_store", default_auth_store(store=self.store))
 
         # Anthropic: check ANTHROPIC_API_KEY if SIBYL_ANTHROPIC_API_KEY not set
         if not self.anthropic_api_key.get_secret_value():

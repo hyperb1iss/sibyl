@@ -77,6 +77,14 @@ export default defineConfig({
                     ],
                 },
                 {
+                    text: 'Storage',
+                    items: [
+                        { text: 'Storage Modes', link: '/guide/storage-modes' },
+                        { text: 'Why SurrealDB', link: '/guide/why-surreal' },
+                        { text: 'Migrating from FalkorDB', link: '/guide/migrating-from-falkor' },
+                    ],
+                },
+                {
                     text: 'Workflows',
                     items: [
                         { text: 'Task Management', link: '/guide/task-management' },

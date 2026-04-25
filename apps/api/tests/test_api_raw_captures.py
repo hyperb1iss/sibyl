@@ -50,7 +50,12 @@ def _capture(
 
 
 @pytest.mark.asyncio
-async def test_list_raw_captures_returns_paginated_summaries() -> None:
+async def test_list_raw_captures_returns_paginated_summaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl.config import settings
+
+    monkeypatch.setattr(settings, "store", "legacy")
     org = _org()
     session = MagicMock()
     result = MagicMock()
@@ -80,7 +85,12 @@ async def test_list_raw_captures_returns_paginated_summaries() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_raw_captures_supports_review_state_filter() -> None:
+async def test_list_raw_captures_supports_review_state_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl.config import settings
+
+    monkeypatch.setattr(settings, "store", "legacy")
     org = _org()
     session = MagicMock()
     result = MagicMock()
@@ -104,7 +114,12 @@ async def test_list_raw_captures_supports_review_state_filter() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_raw_capture_returns_verbatim_content() -> None:
+async def test_get_raw_capture_returns_verbatim_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl.config import settings
+
+    monkeypatch.setattr(settings, "store", "legacy")
     org = _org()
     capture = _capture(org_id=org.id, title="Quick memory", surface="dashboard")
     session = MagicMock()

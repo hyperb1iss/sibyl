@@ -10,14 +10,17 @@ knowledge graph, ensuring security and separation.
 
 ## How It Works
 
-### Isolated Graphs
+### Isolated Namespaces
 
-FalkorDB supports multiple named graphs within a single database instance. Sibyl uses the
-organization UUID as the graph name:
+Each organization gets its own isolated namespace. The exact mechanism depends on the active store:
+
+- **SurrealDB (default):** per-org namespace named `org_<uuid_hex>` (hyphens stripped). All graph
+  tables live inside that namespace.
+- **FalkorDB (legacy):** a named graph keyed by the organization UUID.
 
 ```python
-# Each org gets its own graph
-graph_name = str(org.id)  # e.g., "550e8400-e29b-41d4-a716-446655440000"
+# Sibyl derives the namespace/graph name from the organization UUID
+# All operations require the group_id context
 ```
 
 ### Organization Context

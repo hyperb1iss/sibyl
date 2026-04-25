@@ -1040,8 +1040,12 @@ class TestSourceActions:
         assert "entity_id" in response.message or "source ID" in response.message
 
     @pytest.mark.asyncio
-    async def test_link_graph_scopes_chunks_by_org_and_forwards_create_new(self) -> None:
+    async def test_link_graph_scopes_chunks_by_org_and_forwards_create_new(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """link_graph should only inspect org-owned chunks and pass create-new through."""
+        monkeypatch.setattr(manage_tool.settings, "store", "legacy")
         org_id = "00000000-0000-0000-0000-000000000111"
         source_id = "00000000-0000-0000-0000-000000000222"
         chunk = MagicMock()
@@ -1131,8 +1135,12 @@ class TestSourceActions:
         }
 
     @pytest.mark.asyncio
-    async def test_link_graph_status_is_org_scoped_and_keeps_sources_distinct(self) -> None:
+    async def test_link_graph_status_is_org_scoped_and_keeps_sources_distinct(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """link_graph_status should scope counts by org and avoid merging same-name sources."""
+        monkeypatch.setattr(manage_tool.settings, "store", "legacy")
         org_id = "00000000-0000-0000-0000-000000000111"
         session = AsyncMock()
         status = LinkGraphStatusData(

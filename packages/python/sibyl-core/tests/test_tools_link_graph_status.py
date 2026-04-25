@@ -21,8 +21,12 @@ class TestGetLinkGraphStatusData:
     """Tests for the shared link-graph status aggregation helper."""
 
     @pytest.mark.asyncio
-    async def test_org_scoped_and_keeps_sources_distinct(self) -> None:
+    async def test_org_scoped_and_keeps_sources_distinct(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """The helper should scope by org and keep source IDs distinct."""
+        monkeypatch.setattr(status_service.settings, "store", "legacy")
         org_id = UUID("00000000-0000-0000-0000-000000000111")
 
         session = AsyncMock()

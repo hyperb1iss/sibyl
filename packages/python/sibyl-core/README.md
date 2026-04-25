@@ -18,7 +18,8 @@ moon run core:test        # Pytest
 ## What's Here
 
 - **models/:** Domain entities (Task, Project, Epic, Source, etc.)
-- **graph/:** FalkorDB/Graphiti client, entity management
+- **graph/:** Graphiti client with pluggable backends (SurrealDB default, FalkorDB legacy)
+- **backends/surreal/:** SurrealDB driver, schema, and per-table ops
 - **retrieval/:** Graphiti node-hybrid search, fusion, deduplication
 - **tools/:** MCP tool implementations (search, explore, add, manage)
 - **tasks/:** Workflow engine, dependency resolution

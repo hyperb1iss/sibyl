@@ -81,7 +81,7 @@ spec:
                   key: SIBYL_ANTHROPIC_API_KEY
                   optional: true
             {{- end }}
-            {{- if .Values.backend.database.existingSecret }}
+            {{- if and (eq .Values.authStore "postgres") .Values.backend.database.existingSecret }}
             - name: SIBYL_POSTGRES_HOST
               valueFrom:
                 secretKeyRef:
@@ -108,6 +108,19 @@ spec:
                   name: {{ .Values.backend.database.existingSecret }}
                   key: password
             {{- end }}
+            {{- if or (eq .Values.store "surreal") (eq .Values.authStore "surreal") }}
+            - name: SIBYL_SURREAL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.backend.surreal.existingSecret }}
+                  name: {{ .Values.backend.surreal.existingSecret }}
+                  key: {{ .Values.backend.surreal.secretKey | default "password" }}
+                  {{- else }}
+                  name: {{ include "sibyl.fullname" . }}-surreal
+                  key: password
+                  {{- end }}
+            {{- end }}
+            {{- if eq .Values.store "legacy" }}
             - name: SIBYL_FALKORDB_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -118,6 +131,7 @@ spec:
                   name: {{ include "sibyl.fullname" . }}-falkordb
                   key: password
                   {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           volumeMounts:

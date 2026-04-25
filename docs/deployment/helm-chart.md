@@ -185,9 +185,35 @@ backend:
   existingSecret: ""
 ```
 
-### Database Connection
+### Storage Mode
 
-Two options for PostgreSQL configuration:
+Pick the active persistence runtime at the top level:
+
+```yaml
+store: "surreal" # or "legacy" for FalkorDB
+authStore: "surreal" # or "postgres" for relational auth
+coordinationBackend: "auto"
+```
+
+See [storage-modes.md](../guide/storage-modes.md) for the mode matrix.
+
+### SurrealDB Connection (default)
+
+```yaml
+backend:
+  surreal:
+    url: "ws://surrealdb:8000/rpc"
+    username: "root"
+    # Reference to secret containing password (auto-generated if empty)
+    existingSecret: ""
+    secretKey: "password"
+    namespacePrefix: "org_"
+    database: "graph"
+```
+
+### PostgreSQL Connection (legacy/mixed auth)
+
+Used when `authStore: "postgres"`.
 
 #### Option 1: CNPG Secret (Recommended)
 
@@ -211,7 +237,9 @@ backend:
     # Password must be in a separate secret
 ```
 
-### FalkorDB Connection
+### FalkorDB Connection (legacy)
+
+Used only when `store: "legacy"`.
 
 ```yaml
 backend:
@@ -437,6 +465,10 @@ global:
   imagePullSecrets:
     - name: ghcr-pull-secret
 
+store: "surreal"
+authStore: "surreal"
+coordinationBackend: "auto"
+
 backend:
   replicaCount: 3
   image:
@@ -444,15 +476,12 @@ backend:
     tag: "0.1.0"
     pullPolicy: Always
   existingSecret: sibyl-secrets
-  database:
-    host: "prod-postgres.internal"
-    port: "5432"
-    database: "sibyl"
-    user: "sibyl"
-  falkordb:
-    host: "prod-falkordb.internal"
-    port: "6379"
-    existingSecret: sibyl-falkordb
+  surreal:
+    url: "ws://prod-surrealdb.internal:8000/rpc"
+    username: "root"
+    existingSecret: sibyl-surreal
+    namespacePrefix: "org_"
+    database: "graph"
   env:
     SIBYL_ENVIRONMENT: "production"
     SIBYL_PUBLIC_URL: "https://sibyl.example.com"
@@ -531,21 +560,22 @@ serviceAccount:
 
 The chart includes these templates:
 
-| Template                 | Purpose                          |
-| ------------------------ | -------------------------------- |
-| backend-deployment.yaml  | Backend Deployment               |
-| backend-service.yaml     | Backend ClusterIP Service        |
-| backend-hpa.yaml         | Backend HorizontalPodAutoscaler  |
-| frontend-deployment.yaml | Frontend Deployment              |
-| frontend-service.yaml    | Frontend ClusterIP Service       |
-| frontend-hpa.yaml        | Frontend HorizontalPodAutoscaler |
-| worker-deployment.yaml   | Worker Deployment                |
-| worker-hpa.yaml          | Worker HorizontalPodAutoscaler   |
-| pdb.yaml                 | PodDisruptionBudgets             |
-| configmap.yaml           | Non-secret environment config    |
-| falkordb-secret.yaml     | Auto-generated FalkorDB secret   |
-| migration-job.yaml       | Database migration Job (hook)    |
-| serviceaccount.yaml      | ServiceAccount                   |
+| Template                 | Purpose                                      |
+| ------------------------ | -------------------------------------------- |
+| backend-deployment.yaml  | Backend Deployment                           |
+| backend-service.yaml     | Backend ClusterIP Service                    |
+| backend-hpa.yaml         | Backend HorizontalPodAutoscaler              |
+| frontend-deployment.yaml | Frontend Deployment                          |
+| frontend-service.yaml    | Frontend ClusterIP Service                   |
+| frontend-hpa.yaml        | Frontend HorizontalPodAutoscaler             |
+| worker-deployment.yaml   | Worker Deployment                            |
+| worker-hpa.yaml          | Worker HorizontalPodAutoscaler               |
+| pdb.yaml                 | PodDisruptionBudgets                         |
+| configmap.yaml           | Non-secret environment config                |
+| surreal-secret.yaml      | Auto-generated Surreal secret (default)      |
+| falkordb-secret.yaml     | Auto-generated FalkorDB secret (legacy only) |
+| migration-job.yaml       | Alembic migration Job (postgres auth only)   |
+| serviceaccount.yaml      | ServiceAccount                               |
 
 ## Debugging
 

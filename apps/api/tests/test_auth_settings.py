@@ -22,37 +22,37 @@ def test_settings_server_url_default() -> None:
     assert s.server_url == "http://localhost:3334"
 
 
-def test_settings_store_defaults_to_legacy() -> None:
+def test_settings_store_defaults_to_surreal() -> None:
     s = Settings(_env_file=None)
-    assert s.store == "legacy"
-    assert s.auth_store == "postgres"
-    assert s.fully_surreal is False
-    assert s.uses_relational_auth is True
-    assert s.requires_relational_support is True
-    assert s.coordination_backend == "auto"
-    assert s.resolved_coordination_backend == "redis"
-
-
-def test_settings_store_uses_store_env(monkeypatch) -> None:
-    monkeypatch.setenv("SIBYL_STORE", "surreal")
-
-    s = Settings(_env_file=None)
-
     assert s.store == "surreal"
     assert s.auth_store == "surreal"
     assert s.fully_surreal is True
     assert s.uses_relational_auth is False
     assert s.requires_relational_support is False
+    assert s.coordination_backend == "auto"
     assert s.resolved_coordination_backend == "local"
 
 
-def test_settings_store_ignores_removed_graph_backend_alias(monkeypatch) -> None:
-    monkeypatch.delenv("SIBYL_STORE", raising=False)
-    monkeypatch.setenv("SIBYL_GRAPH_BACKEND", "surrealdb")
+def test_settings_store_uses_store_env(monkeypatch) -> None:
+    monkeypatch.setenv("SIBYL_STORE", "legacy")
 
     s = Settings(_env_file=None)
 
     assert s.store == "legacy"
+    assert s.auth_store == "postgres"
+    assert s.fully_surreal is False
+    assert s.uses_relational_auth is True
+    assert s.requires_relational_support is True
+    assert s.resolved_coordination_backend == "redis"
+
+
+def test_settings_store_ignores_removed_graph_backend_alias(monkeypatch) -> None:
+    monkeypatch.delenv("SIBYL_STORE", raising=False)
+    monkeypatch.setenv("SIBYL_GRAPH_BACKEND", "falkordb")
+
+    s = Settings(_env_file=None)
+
+    assert s.store == "surreal"
 
 
 def test_settings_auth_store_can_use_surreal(monkeypatch) -> None:
