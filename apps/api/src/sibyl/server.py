@@ -403,6 +403,7 @@ def _register_tools(mcp: FastMCP) -> None:
         from sibyl_core.tools.core import (
             compile_context as _compile_context,
             context_pack_to_dict,
+            context_pack_to_markdown,
         )
 
         ctx = await _require_mcp_context()
@@ -416,7 +417,9 @@ def _register_tools(mcp: FastMCP) -> None:
             related_limit=related_limit,
             organization_id=ctx.org_id,
         )
-        return context_pack_to_dict(pack)
+        payload = context_pack_to_dict(pack)
+        payload["markdown"] = context_pack_to_markdown(pack)
+        return payload
 
     # =========================================================================
     # TOOL 3: explore

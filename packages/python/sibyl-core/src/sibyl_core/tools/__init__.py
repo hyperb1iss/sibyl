@@ -32,6 +32,7 @@ from sibyl_core.tools.core import (
     add,
     compile_context,
     context_pack_to_dict,
+    context_pack_to_markdown,
     explore,
     # Resources
     get_health,
@@ -69,6 +70,7 @@ __all__ = [
     "add",
     "compile_context",
     "context_pack_to_dict",
+    "context_pack_to_markdown",
     # Conflict detection functions
     "detect_conflicts",
     "explore",

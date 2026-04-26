@@ -47,6 +47,7 @@ def _context_pack() -> dict:
         ],
         "total_items": 1,
         "usage_hint": "Capture new memory back into Sibyl.",
+        "markdown": "# Sibyl Context Pack: ship faster\n\n## Decisions\n- **Use context packs**",
     }
 
 
@@ -106,3 +107,21 @@ def test_context_pack_all_projects_omits_project_scope(
         related_limit=3,
     )
     mock_resolve_project_from_cwd.assert_not_called()
+
+
+@patch("sibyl_cli.context.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.context.get_client")
+def test_context_pack_markdown_outputs_server_rendering(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.context_pack = AsyncMock(return_value=_context_pack())
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["context", "pack", "ship faster", "--markdown"])
+
+    assert result.exit_code == 0
+    assert "# Sibyl Context Pack: ship faster" in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()

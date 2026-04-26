@@ -33,7 +33,11 @@ async def context_pack(
 ) -> ContextPackResponse:
     """Compile a structured context pack for an agent goal."""
     try:
-        from sibyl_core.tools.context import compile_context, context_pack_to_dict
+        from sibyl_core.tools.context import (
+            compile_context,
+            context_pack_to_dict,
+            context_pack_to_markdown,
+        )
 
         accessible_projects = set(await list_accessible_project_graph_ids(ctx))
         if request.project and request.project not in accessible_projects:
@@ -53,7 +57,9 @@ async def context_pack(
             include_related=request.include_related,
             related_limit=request.related_limit,
         )
-        return ContextPackResponse.model_validate(context_pack_to_dict(pack))
+        payload = context_pack_to_dict(pack)
+        payload["markdown"] = context_pack_to_markdown(pack)
+        return ContextPackResponse.model_validate(payload)
 
     except HTTPException:
         raise

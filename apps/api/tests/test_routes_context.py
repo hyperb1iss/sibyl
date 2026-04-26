@@ -47,6 +47,8 @@ class TestContextPackRoute:
 
         list_projects.assert_awaited_once_with(ctx)
         assert response.goal == "ship faster"
+        assert response.markdown is not None
+        assert response.markdown.startswith("# Sibyl Context Pack")
         assert compile_context.await_args.kwargs["accessible_projects"] == {"proj_1"}
         assert compile_context.await_args.kwargs["project"] is None
         assert compile_context.await_args.kwargs["include_related"] is True

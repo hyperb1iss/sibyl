@@ -310,6 +310,10 @@ class ContextPackResponse(BaseModel):
     sections: list[ContextPackSection] = Field(default_factory=list)
     total_items: int = 0
     usage_hint: str
+    markdown: str | None = Field(
+        default=None,
+        description="Compact Markdown rendering for agent prompt injection",
+    )
 
 
 # =============================================================================

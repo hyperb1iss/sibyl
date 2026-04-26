@@ -236,6 +236,68 @@ def _dedupe_sections(sections: list[ContextSection], limit: int) -> list[Context
     return deduped
 
 
+def _compact_text(value: str, max_chars: int) -> str:
+    compact = " ".join(value.strip().split())
+    if len(compact) <= max_chars:
+        return compact
+    cutoff = compact.rfind(" ", 0, max_chars + 1)
+    if cutoff < max_chars // 2:
+        cutoff = max_chars
+    return compact[:cutoff].rstrip() + "..."
+
+
+def context_pack_to_markdown(
+    pack: ContextPack,
+    *,
+    max_items: int = 8,
+    items_per_section: int = 3,
+    max_content_chars: int = 280,
+    include_related: bool = True,
+) -> str:
+    """Render a context pack as compact Markdown for agent injection."""
+
+    max_items = max(1, min(max_items, 50))
+    items_per_section = max(1, min(items_per_section, 10))
+    max_content_chars = max(80, min(max_content_chars, 1200))
+
+    lines = [
+        f"# Sibyl Context Pack: {pack.goal}",
+        f"Intent: {pack.intent.value}",
+        f"Query: {pack.query}",
+    ]
+    if pack.domain:
+        lines.append(f"Domain: {pack.domain}")
+    if pack.project:
+        lines.append(f"Project: {pack.project}")
+
+    remaining = max_items
+    for section in pack.sections:
+        if remaining <= 0:
+            break
+        lines.extend(["", f"## {section.title}"])
+        for item in section.items[:items_per_section]:
+            if remaining <= 0:
+                break
+            type_label = f" ({item.type})" if item.type else ""
+            lines.append(f"- **{item.name}**{type_label} `{item.id}`")
+            if item.reason:
+                lines.append(f"  - Why: {item.reason}")
+            if item.content:
+                lines.append(f"  - Memory: {_compact_text(item.content, max_content_chars)}")
+            if include_related and item.related:
+                related = "; ".join(
+                    f"{candidate.relationship} {candidate.name} ({candidate.type})"
+                    for candidate in item.related[:3]
+                )
+                lines.append(f"  - Related: {related}")
+            remaining -= 1
+
+    if pack.usage_hint:
+        lines.extend(["", f"_Hint: {pack.usage_hint}_"])
+
+    return "\n".join(lines)
+
+
 async def _attach_related_items(
     sections: list[ContextSection],
     *,
@@ -346,4 +408,5 @@ __all__ = [
     "INTENT_FACETS",
     "compile_context",
     "context_pack_to_dict",
+    "context_pack_to_markdown",
 ]

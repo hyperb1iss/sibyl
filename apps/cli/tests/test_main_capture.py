@@ -195,3 +195,35 @@ def test_remember_command_reads_body_from_stdin(mock_get_client: MagicMock) -> N
         },
         sync=False,
     )
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_recall_command_outputs_markdown_context(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.context_pack = AsyncMock(
+        return_value={
+            "goal": "ship faster",
+            "markdown": "# Sibyl Context Pack: ship faster\n\n## Decisions",
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["recall", "ship faster", "--intent", "plan"])
+
+    assert result.exit_code == 0
+    assert "# Sibyl Context Pack: ship faster" in result.stdout
+    mock_client.context_pack.assert_awaited_once_with(
+        goal="ship faster",
+        intent="plan",
+        domain=None,
+        project="project_123",
+        limit=12,
+        include_related=True,
+        related_limit=3,
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()

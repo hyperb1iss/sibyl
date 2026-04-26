@@ -414,6 +414,53 @@ def capture_memory(
     run_capture()
 
 
+@app.command("recall")
+def recall_context(
+    goal: str = typer.Argument(..., help="Agent goal or user task"),
+    intent: str = typer.Option(
+        "build",
+        "--intent",
+        "-i",
+        help="Agent intent: build, plan, ideate, research, debug, decide, learn, general",
+    ),
+    domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    all_projects: bool = typer.Option(False, "--all", "-a", help="Use all accessible projects"),
+    limit: int = typer.Option(12, "--limit", "-l", min=1, max=50, help="Maximum context items"),
+    related: bool = typer.Option(
+        True,
+        "--related/--no-related",
+        help="Include one-hop related graph context",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output full JSON"),
+) -> None:
+    """Recall a compact working context pack for an agent."""
+    effective_project = project or (None if all_projects else resolve_project_from_cwd())
+
+    @run_async
+    async def run_recall() -> None:
+        try:
+            async with get_client() as client:
+                pack = await client.context_pack(
+                    goal=goal,
+                    intent=intent,
+                    domain=domain,
+                    project=effective_project,
+                    limit=limit,
+                    include_related=related,
+                    related_limit=3,
+                )
+
+            if json_output:
+                print_json(pack)
+                return
+            console.print(pack.get("markdown") or "")
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_recall()
+
+
 @app.command("remember")
 def remember_memory(
     title: str = typer.Argument(..., help="Title/name of the memory"),

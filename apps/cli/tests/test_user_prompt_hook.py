@@ -54,6 +54,14 @@ def test_user_prompt_hook_formats_context_pack_sections() -> None:
     assert "_Why:_ decision records a choice" in formatted
 
 
+def test_user_prompt_hook_prefers_server_markdown() -> None:
+    hook = _load_hook()
+
+    formatted = hook.format_context_pack({"markdown": "# Sibyl Context Pack: boop"})
+
+    assert formatted == "# Sibyl Context Pack: boop"
+
+
 def test_user_prompt_hook_uses_context_pack_before_search(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

@@ -12,7 +12,11 @@ are now split across focused modules:
 
 # Re-export everything for backwards compatibility
 from sibyl_core.tools.add import add
-from sibyl_core.tools.context import compile_context, context_pack_to_dict
+from sibyl_core.tools.context import (
+    compile_context,
+    context_pack_to_dict,
+    context_pack_to_markdown,
+)
 from sibyl_core.tools.explore import explore
 from sibyl_core.tools.health import get_health, get_stats
 from sibyl_core.tools.helpers import (
@@ -61,6 +65,7 @@ __all__ = [
     "auto_tag_task",
     "compile_context",
     "context_pack_to_dict",
+    "context_pack_to_markdown",
     "explore",
     # Health/stats
     "get_health",

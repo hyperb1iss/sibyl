@@ -346,6 +346,10 @@ def pack_cmd(
         int,
         typer.Option("--related-limit", min=0, max=5, help="Related items per context item"),
     ] = 3,
+    markdown: Annotated[
+        bool,
+        typer.Option("--markdown", "-m", help="Output compact Markdown for agent injection"),
+    ] = False,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -372,6 +376,9 @@ def pack_cmd(
 
         if json_out:
             print_json(pack)
+            return
+        if markdown:
+            console.print(pack.get("markdown") or "")
             return
 
         console.print()

@@ -21,6 +21,7 @@ sibyl project link <project_id>
 
 ```bash
 sibyl search "query"                    # Semantic search
+sibyl recall "goal"                     # Agent-ready context before work
 sibyl add "title" "content"             # Add knowledge
 sibyl capture "content"                 # Quick capture from the CLI
 sibyl remember "title" "content" --kind decision # Agent memory capture
@@ -36,6 +37,7 @@ sibyl task complete <id> --learnings "..." # Complete with learnings
 | ----------- | -------------------------------------------------------- |
 | `health`    | Check API connectivity and health                        |
 | `search`    | Semantic search                                          |
+| `recall`    | Agent-ready Markdown or JSON context before work         |
 | `add`       | Add knowledge                                            |
 | `capture`   | Quick capture from CLI arguments or stdin                |
 | `remember`  | Capture decisions, plans, ideas, claims, artifacts, and session memory |
@@ -82,6 +84,7 @@ compatibility.
 ## Capture And Archive
 
 ```bash
+sibyl recall "ship the SurrealDB-native memory path" --intent build
 sibyl capture "Redis TTL mismatch caused the stale auth token bug"
 sibyl remember "Token TTL decision" "Keep refresh token TTL longer than access token TTL." --kind decision --domain auth
 sibyl archive list --surface cli

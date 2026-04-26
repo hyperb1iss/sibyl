@@ -82,10 +82,11 @@ sibyl task complete task_a1b2c3d4e5f6 --learnings "OAuth tokens expire..."
 
 ```
 1. SEARCH           -> sibyl search "topic"
-2. RETRIEVE         -> sibyl entity show <id>  (get full content by ID from search)
-3. CHECK TASKS      -> sibyl task list --status doing
-4. WORK & REMEMBER  -> sibyl remember "Title" "Decision, plan, idea, or learning..."
-5. COMPLETE         -> sibyl task complete --learnings "..."
+2. RECALL           -> sibyl recall "goal" --intent build
+3. RETRIEVE         -> sibyl entity show <id>  (get full content by ID from search)
+4. CHECK TASKS      -> sibyl task list --status doing
+5. WORK & REMEMBER  -> sibyl remember "Title" "Decision, plan, idea, or learning..."
+6. COMPLETE         -> sibyl task complete --learnings "..."
 ```
 
 **Key insight:** Search shows IDs. Use `sibyl entity show <id>` to fetch full content.
@@ -154,6 +155,20 @@ sibyl entity show "convention:abe924cb-8cee-4cb5-9dd1-818201c1c946"
 ```
 
 **When to use:** Before implementing anything. Find existing patterns, past solutions, gotchas.
+
+---
+
+### Recall - Agent Working Context
+
+```bash
+# Get compact Markdown context before work
+sibyl recall "ship the context graph" --intent build
+
+# JSON for scripts and agent injectors
+sibyl recall "plan the launch" --intent plan --json
+```
+
+**When to use:** Before acting. This is the agent-ready working memory view.
 
 ---
 

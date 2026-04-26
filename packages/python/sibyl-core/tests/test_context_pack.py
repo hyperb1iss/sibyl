@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from sibyl_core.models.context import ContextFacet, ContextIntent, ContextRelatedItem
-from sibyl_core.tools.context import compile_context, context_pack_to_dict
+from sibyl_core.tools.context import compile_context, context_pack_to_dict, context_pack_to_markdown
 from sibyl_core.tools.responses import SearchResponse, SearchResult
 
 
@@ -181,6 +181,17 @@ async def test_context_pack_to_dict_serializes_dataclasses() -> None:
 
     assert payload["goal"] == "ship faster"
     assert payload["sections"][0]["items"][0]["id"] == "task-1"
+
+
+@pytest.mark.asyncio
+async def test_context_pack_to_markdown_renders_injection_shape() -> None:
+    pack = await async_compile_context_for_serialization()
+    markdown = context_pack_to_markdown(pack)
+
+    assert "# Sibyl Context Pack: ship faster" in markdown
+    assert "## Active Work" in markdown
+    assert "**Task** (task) `task-1`" in markdown
+    assert "Hint:" in markdown
 
 
 async def async_compile_context_for_serialization():

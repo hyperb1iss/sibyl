@@ -327,6 +327,10 @@ def infer_intent(prompt: str) -> str:
 
 def format_context_pack(pack: dict) -> str:
     """Format a structured context pack for injection."""
+    markdown = pack.get("markdown")
+    if isinstance(markdown, str) and markdown.strip():
+        return markdown.strip()
+
     sections = pack.get("sections", [])
     if not sections:
         return ""
