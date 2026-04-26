@@ -366,7 +366,54 @@ def _register_tools(mcp: FastMCP) -> None:
         return _to_dict(result)
 
     # =========================================================================
-    # TOOL 2: explore
+    # TOOL 2: context
+    # =========================================================================
+
+    @mcp.tool()
+    async def context(
+        goal: str,
+        intent: Literal[
+            "build", "plan", "ideate", "research", "debug", "decide", "learn", "general"
+        ] = "build",
+        domain: str | None = None,
+        project: str | None = None,
+        limit: int = 24,
+    ) -> dict[str, Any]:
+        """Compile a precise context pack for an agent goal.
+
+        Context packs are structured for action, not generic search browsing.
+        They group relevant memories into facets like active work, decisions,
+        plans, ideas, constraints, artifacts, procedures, gotchas, and recent
+        sessions. Use this before dispatching or resuming agents.
+
+        Args:
+            goal: What the agent is trying to accomplish.
+            intent: Goal mode - build, plan, ideate, research, debug, decide,
+                learn, or general.
+            domain: Optional domain/category to scope context. This can be
+                software, creative work, home projects, research, or any other
+                modeled domain.
+            project: Optional project ID to scope active work.
+            limit: Maximum total context items, clamped to 1-50.
+        """
+        from sibyl_core.tools.core import (
+            compile_context as _compile_context,
+            context_pack_to_dict,
+        )
+
+        ctx = await _require_mcp_context()
+        pack = await _compile_context(
+            goal=goal,
+            intent=intent,
+            domain=domain,
+            project=project,
+            limit=limit,
+            organization_id=ctx.org_id,
+        )
+        return context_pack_to_dict(pack)
+
+    # =========================================================================
+    # TOOL 3: explore
     # =========================================================================
 
     @mcp.tool()
@@ -438,7 +485,7 @@ def _register_tools(mcp: FastMCP) -> None:
         return _to_dict(result)
 
     # =========================================================================
-    # TOOL 3: add
+    # TOOL 4: add
     # =========================================================================
 
     @mcp.tool()
@@ -536,7 +583,7 @@ def _register_tools(mcp: FastMCP) -> None:
         return _to_dict(result)
 
     # =========================================================================
-    # TOOL 4: manage
+    # TOOL 5: manage
     # =========================================================================
 
     @mcp.tool()

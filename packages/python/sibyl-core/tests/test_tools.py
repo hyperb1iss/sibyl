@@ -108,6 +108,9 @@ class TestValidEntityTypes:
         assert "task" in VALID_ENTITY_TYPES
         assert "project" in VALID_ENTITY_TYPES
         assert "epic" in VALID_ENTITY_TYPES
+        assert "decision" in VALID_ENTITY_TYPES
+        assert "idea" in VALID_ENTITY_TYPES
+        assert "artifact" in VALID_ENTITY_TYPES
 
     def test_valid_entity_types_all_lowercase(self) -> None:
         """All valid entity types are lowercase."""
@@ -1807,6 +1810,44 @@ class TestAddEntityTypes:
             assert response.success is True
             assert created_entity is not None
             assert created_entity.entity_type == EntityType.PROJECT
+
+    @pytest.mark.asyncio
+    async def test_add_domain_general_decision(self) -> None:
+        """Add creates generic domain memory entities directly."""
+        from sibyl_core.tools.add import add
+
+        mock_client = AsyncMock()
+        mock_entity_manager = MagicMock()
+        created_entity = None
+
+        async def capture_create(entity):
+            nonlocal created_entity
+            created_entity = entity
+            return entity.id
+
+        mock_entity_manager.create_direct = capture_create
+
+        with patch(
+            "sibyl_core.tools.add.get_graph_runtime",
+            AsyncMock(
+                return_value=make_graph_runtime(
+                    client=mock_client,
+                    entity_manager=mock_entity_manager,
+                )
+            ),
+        ):
+            response = await add(
+                title="Choose venue layout",
+                content="Use a runway layout because it improves audience sight lines.",
+                entity_type="decision",
+                category="performance",
+                metadata={"organization_id": "org_123"},
+                sync=True,
+            )
+            assert response.success is True
+            assert created_entity is not None
+            assert created_entity.entity_type == EntityType.DECISION
+            assert created_entity.metadata["category"] == "performance"
 
     @pytest.mark.asyncio
     async def test_add_task_with_relationships(self) -> None:

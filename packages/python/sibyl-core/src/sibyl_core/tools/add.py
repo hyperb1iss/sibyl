@@ -6,6 +6,7 @@ from typing import Any
 import structlog
 
 from sibyl_core.models.entities import (
+    Entity,
     EntityType,
     Episode,
     Pattern,
@@ -37,6 +38,23 @@ from sibyl_core.tools.responses import AddResponse, ConflictWarning
 log = structlog.get_logger()
 
 __all__ = ["add"]
+
+DIRECT_ENTITY_TYPES = {
+    "artifact",
+    "claim",
+    "decision",
+    "domain",
+    "epic",
+    "idea",
+    "pattern",
+    "plan",
+    "project",
+    "procedure",
+    "rule",
+    "session",
+    "task",
+    "template",
+}
 
 
 async def get_graph_runtime(group_id: str):
@@ -250,7 +268,7 @@ async def add(
         }
 
         # Create appropriate entity type
-        entity: Episode | Pattern | Procedure | Task | Project
+        entity: Entity | Episode | Pattern | Procedure | Task | Project
         relationship_manager = runtime.relationship_manager
 
         if entity_type == "task":
@@ -392,10 +410,15 @@ async def add(
             )
 
         else:
-            # Default to Episode for temporal knowledge
-            entity = Episode(
+            try:
+                generic_entity_type = EntityType(entity_type)
+            except ValueError:
+                generic_entity_type = EntityType.EPISODE
+
+            entity_cls = Episode if generic_entity_type == EntityType.EPISODE else Entity
+            entity = entity_cls(
                 id=entity_id,
-                entity_type=EntityType.EPISODE,
+                entity_type=generic_entity_type,
                 name=title,
                 description=content[:500] if len(content) > 500 else content,
                 content=content,
@@ -475,7 +498,7 @@ async def add(
         if sync:
             # Use create_direct() for structured entities (faster, generates embeddings)
             # Use create() for episodes (LLM extraction may add value)
-            if entity_type in ("task", "project", "epic", "pattern"):
+            if entity_type in DIRECT_ENTITY_TYPES:
                 created_id = await entity_manager.create_direct(entity)
             else:
                 created_id = await entity_manager.create(entity)
@@ -557,7 +580,7 @@ async def add(
             # If arq queue fails, fall back to sync creation
             log.warning("arq_queue_failed_falling_back_to_sync", error=str(e))
             # Use create_direct() for structured entities (faster, generates embeddings)
-            if entity_type in ("task", "project", "epic", "pattern"):
+            if entity_type in DIRECT_ENTITY_TYPES:
                 created_id = await entity_manager.create_direct(entity)
             else:
                 created_id = await entity_manager.create(entity)

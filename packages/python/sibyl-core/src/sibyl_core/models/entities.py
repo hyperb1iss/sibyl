@@ -43,6 +43,15 @@ class EntityType(StrEnum):
     # Collaboration types
     NOTE = "note"  # Timestamped note on a task
 
+    # Domain-general context memory
+    DOMAIN = "domain"  # Any modeled problem space, software or otherwise
+    ARTIFACT = "artifact"  # File, object, document, asset, system, venue, or other work product
+    DECISION = "decision"  # Chosen direction with rationale and rejected alternatives
+    PLAN = "plan"  # Intentional sequence of work, milestones, or strategy
+    IDEA = "idea"  # Brainstormed concept, possibility, or unresolved option
+    CLAIM = "claim"  # Atomic fact or assertion with provenance/confidence
+    SESSION = "session"  # Work session or conversation checkpoint
+
 
 class RelationshipType(StrEnum):
     """Types of relationships between entities."""
@@ -78,6 +87,15 @@ class RelationshipType(StrEnum):
     CRAWLED_FROM = "CRAWLED_FROM"  # Document -> Source
     CHILD_OF = "CHILD_OF"  # Document -> Document (page hierarchy)
     MENTIONS = "MENTIONS"  # Document -> Entity (extracted reference)
+
+    # Domain-general context relationships
+    ABOUT = "ABOUT"  # Memory -> Domain/Topic
+    PRODUCES = "PRODUCES"  # Task/Session/Procedure -> Artifact
+    TOUCHES = "TOUCHES"  # Work item -> Artifact/System/Domain object
+    DECIDES = "DECIDES"  # Decision -> Plan/Task/Domain
+    SUPPORTS = "SUPPORTS"  # Claim/Evidence -> Decision/Plan
+    CONTRADICTS = "CONTRADICTS"  # Claim/Decision -> Claim/Decision
+    CAPTURED_IN = "CAPTURED_IN"  # Memory -> Session/Source
 
 
 class Entity(BaseModel):

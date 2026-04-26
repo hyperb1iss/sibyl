@@ -30,6 +30,8 @@ from sibyl_core.tools.core import (
     SearchResponse,
     SearchResult,
     add,
+    compile_context,
+    context_pack_to_dict,
     explore,
     # Resources
     get_health,
@@ -65,6 +67,8 @@ __all__ = [
     "TemporalEdge",
     "TemporalResponse",
     "add",
+    "compile_context",
+    "context_pack_to_dict",
     # Conflict detection functions
     "detect_conflicts",
     "explore",

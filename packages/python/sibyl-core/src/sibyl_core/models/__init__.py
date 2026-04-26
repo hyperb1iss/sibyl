@@ -1,5 +1,12 @@
 """Pydantic models for Sibyl knowledge graph operations."""
 
+from sibyl_core.models.context import (
+    ContextFacet,
+    ContextIntent,
+    ContextItem,
+    ContextPack,
+    ContextSection,
+)
 from sibyl_core.models.entities import (
     ConfigFile,
     Entity,
@@ -69,25 +76,23 @@ from sibyl_core.models.tools import (
 )
 
 __all__ = [
-    # Shared project constants
     "SHARED_PROJECT_DESCRIPTION",
     "SHARED_PROJECT_NAME",
     "SHARED_PROJECT_SLUG",
-    # Tool inputs
     "AddLearningInput",
-    # Notes
     "AuthorType",
-    # Documentation crawling
     "Community",
-    # Base entities
     "ConfigFile",
+    "ContextFacet",
+    "ContextIntent",
+    "ContextItem",
+    "ContextPack",
+    "ContextSection",
     "CrawlStatus",
     "Document",
     "Entity",
-    # Responses
     "EntityResponse",
     "EntityType",
-    # Task management
     "Epic",
     "EpicStatus",
     "Episode",
