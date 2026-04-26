@@ -118,6 +118,17 @@ INTENT_FACETS = {
 }
 
 
+def _facet_for_type(entity_type: str, facets: list[ContextFacet]) -> ContextFacet:
+    normalized_type = entity_type.lower()
+    for facet in facets:
+        if normalized_type in FACET_TYPES[facet]:
+            return facet
+    for fallback in (ContextFacet.RECENT_MEMORY, ContextFacet.DOMAIN, ContextFacet.ACTIVE_WORK):
+        if fallback in facets:
+            return fallback
+    return facets[0]
+
+
 def _coerce_intent(intent: str | ContextIntent) -> ContextIntent:
     if isinstance(intent, ContextIntent):
         return intent
@@ -423,6 +434,42 @@ async def _attach_related_items(
     return enriched_sections
 
 
+async def _compile_fallback_sections(
+    *,
+    query: str,
+    facets: list[ContextFacet],
+    domain: str | None,
+    project: str | None,
+    accessible_projects: set[str] | None,
+    organization_id: str,
+    limit: int,
+    search_fn: SearchFn,
+) -> list[ContextSection]:
+    response = await search_fn(
+        query=query,
+        types=None,
+        category=domain,
+        project=project,
+        accessible_projects=accessible_projects,
+        limit=limit,
+        include_content=True,
+        include_documents=True,
+        include_graph=True,
+        organization_id=organization_id,
+    )
+
+    grouped: dict[ContextFacet, list[ContextItem]] = {facet: [] for facet in facets}
+    for result in response.results:
+        facet = _facet_for_type(result.type or "", facets)
+        grouped[facet].append(_item_from_result(result, facet))
+
+    return [
+        ContextSection(facet=facet, title=FACET_TITLES[facet], items=items)
+        for facet in facets
+        if (items := grouped[facet])
+    ]
+
+
 async def compile_context(
     goal: str,
     *,
@@ -472,6 +519,20 @@ async def compile_context(
             sections.append(ContextSection(facet=facet, title=FACET_TITLES[facet], items=items))
 
     sections = _dedupe_sections(sections, limit)
+    if not sections:
+        sections = _dedupe_sections(
+            await _compile_fallback_sections(
+                query=query,
+                facets=facets,
+                domain=domain,
+                project=project,
+                accessible_projects=accessible_projects,
+                organization_id=organization_id,
+                limit=limit,
+                search_fn=search_fn,
+            ),
+            limit,
+        )
     if include_related:
         sections = await _attach_related_items(
             sections,
