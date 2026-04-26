@@ -11,6 +11,7 @@ from sibyl.server import (
     _get_accessible_projects,
     _get_mcp_context,
     _require_owner_mcp_context,
+    _resolve_mcp_project_scope,
 )
 from sibyl_core.auth import AuthOrganization, AuthUser
 
@@ -49,6 +50,52 @@ async def test_accessible_projects_returns_empty_when_user_disappears() -> None:
         result = await _get_accessible_projects(ctx)
 
     assert result == set()
+
+
+@pytest.mark.asyncio
+async def test_resolve_mcp_project_scope_filters_unscoped_reads() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+
+    with patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})):
+        result = await _resolve_mcp_project_scope(ctx, project=None)
+
+    assert result == {"project-a"}
+
+
+@pytest.mark.asyncio
+async def test_resolve_mcp_project_scope_allows_explicit_accessible_project() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+
+    with patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})):
+        result = await _resolve_mcp_project_scope(ctx, project="project-a")
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_mcp_project_scope_rejects_inaccessible_project() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+
+    with (
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        pytest.raises(ValueError, match="Project access denied: project-b"),
+    ):
+        await _resolve_mcp_project_scope(ctx, project="project-b")
+
+
+@pytest.mark.asyncio
+async def test_resolve_mcp_project_scope_requires_project_for_restricted_writes() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+
+    with (
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        pytest.raises(ValueError, match="Project is required"),
+    ):
+        await _resolve_mcp_project_scope(
+            ctx,
+            project=None,
+            require_project_when_restricted=True,
+        )
 
 
 @pytest.mark.asyncio

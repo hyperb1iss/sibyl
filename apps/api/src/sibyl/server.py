@@ -132,6 +132,25 @@ async def _get_accessible_projects(ctx: McpContext) -> set[str] | None:
     )
 
 
+async def _resolve_mcp_project_scope(
+    ctx: McpContext,
+    project: str | None,
+    *,
+    require_project_when_restricted: bool = False,
+) -> set[str] | None:
+    """Resolve accessible project scope for MCP tools."""
+    accessible_projects = await _get_accessible_projects(ctx)
+    if accessible_projects is None:
+        return None
+    if project:
+        if project not in accessible_projects:
+            raise ValueError(f"Project access denied: {project}")
+        return None
+    if require_project_when_restricted:
+        raise ValueError("Project is required when MCP credentials are project-scoped.")
+    return accessible_projects
+
+
 async def _require_org_id() -> str:
     """Require organization ID from MCP context.
 
@@ -412,6 +431,7 @@ def _register_tools(mcp: FastMCP) -> None:
             intent=intent,
             domain=domain,
             project=project,
+            accessible_projects=await _resolve_mcp_project_scope(ctx, project),
             limit=limit,
             include_related=include_related,
             related_limit=related_limit,
@@ -684,6 +704,11 @@ def _register_tools(mcp: FastMCP) -> None:
         )
 
         ctx = await _require_mcp_context()
+        await _resolve_mcp_project_scope(
+            ctx,
+            project,
+            require_project_when_restricted=persist,
+        )
         pack = await _reflect_memory(
             content=content,
             source_title=source_title,
