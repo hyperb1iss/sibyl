@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -15,6 +15,10 @@ def _result(
     name: str,
     *,
     score: float = 0.8,
+    source: str | None = None,
+    url: str | None = None,
+    result_origin: Literal["graph", "document"] = "graph",
+    metadata: dict[str, Any] | None = None,
 ) -> SearchResult:
     return SearchResult(
         id=entity_id,
@@ -22,7 +26,10 @@ def _result(
         name=name,
         content=f"{name} content",
         score=score,
-        metadata={"entity_type": entity_type},
+        source=source,
+        url=url,
+        result_origin=result_origin,
+        metadata={"entity_type": entity_type, **(metadata or {})},
     )
 
 
@@ -166,6 +173,49 @@ async def test_compile_context_can_attach_one_hop_related_items() -> None:
 
 
 @pytest.mark.asyncio
+async def test_compile_context_adds_compact_quality_metadata_from_search_result() -> None:
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(
+            results=[
+                _result(
+                    "doc-1",
+                    "document",
+                    "Surreal docs",
+                    source="Sibyl docs",
+                    url="https://docs.example.test/sibyl/context",
+                    result_origin="document",
+                    metadata={
+                        "source_id": "source-1",
+                        "project_id": "project-123",
+                        "updated_at": "2026-04-20T10:30:00Z",
+                        "created_at": "2026-04-01T09:00:00Z",
+                        "heading_path": ["Context", "Packs"],
+                    },
+                )
+            ],
+            total=1,
+            query=kwargs["query"],
+            filters={},
+        )
+
+    pack = await compile_context(
+        "judge memory freshness",
+        intent="research",
+        organization_id="org-123",
+        limit=1,
+        search_fn=fake_search,
+    )
+
+    quality = pack.items[0].quality
+    assert quality.origin == "document"
+    assert quality.source == "Sibyl docs"
+    assert quality.url == "https://docs.example.test/sibyl/context"
+    assert quality.project_id == "project-123"
+    assert quality.updated_at == "2026-04-20T10:30:00Z"
+    assert quality.created_at == "2026-04-01T09:00:00Z"
+
+
+@pytest.mark.asyncio
 async def test_compile_context_requires_goal_and_org() -> None:
     with pytest.raises(ValueError, match="goal is required"):
         await compile_context("", organization_id="org-123")
@@ -181,6 +231,7 @@ async def test_context_pack_to_dict_serializes_dataclasses() -> None:
 
     assert payload["goal"] == "ship faster"
     assert payload["sections"][0]["items"][0]["id"] == "task-1"
+    assert payload["sections"][0]["items"][0]["quality"]["origin"] == "graph"
 
 
 @pytest.mark.asyncio
@@ -191,13 +242,27 @@ async def test_context_pack_to_markdown_renders_injection_shape() -> None:
     assert "# Sibyl Context Pack: ship faster" in markdown
     assert "## Active Work" in markdown
     assert "**Task** (task) `task-1`" in markdown
+    assert (
+        "_graph; src=task-source.md; project=project-123; updated=2026-04-20T10:30:00Z"
+    ) in markdown
     assert "Hint:" in markdown
 
 
 async def async_compile_context_for_serialization():
     async def fake_search(**kwargs: Any) -> SearchResponse:
         return SearchResponse(
-            results=[_result("task-1", "task", "Task")],
+            results=[
+                _result(
+                    "task-1",
+                    "task",
+                    "Task",
+                    source="task-source.md",
+                    metadata={
+                        "project_id": "project-123",
+                        "updated_at": "2026-04-20T10:30:00Z",
+                    },
+                )
+            ],
             total=1,
             query=kwargs["query"],
             filters={},

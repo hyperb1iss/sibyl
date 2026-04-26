@@ -43,6 +43,17 @@ class ContextRelatedItem:
 
 
 @dataclass(frozen=True)
+class ContextItemQualityMetadata:
+    origin: str | None = None
+    source: str | None = None
+    url: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    valid_at: str | None = None
+    project_id: str | None = None
+
+
+@dataclass(frozen=True)
 class ContextItem:
     id: str
     type: str
@@ -52,6 +63,7 @@ class ContextItem:
     facet: ContextFacet
     reason: str
     source: str | None = None
+    quality: ContextItemQualityMetadata = field(default_factory=ContextItemQualityMetadata)
     metadata: dict[str, Any] = field(default_factory=dict)
     related: list[ContextRelatedItem] = field(default_factory=list)
 

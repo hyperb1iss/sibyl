@@ -10,6 +10,7 @@ from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
     ContextItem,
+    ContextItemQualityMetadata,
     ContextPack,
     ContextRelatedItem,
     ContextSection,
@@ -163,6 +164,53 @@ def _project_id_for(entity: Any) -> str | None:
     return str(value) if value is not None else None
 
 
+def _compact_metadata_value(value: Any, max_chars: int = 120) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        value = value.isoformat()
+    elif isinstance(value, bool | int | float):
+        value = str(value)
+    elif not isinstance(value, str):
+        return None
+
+    compact = " ".join(value.strip().split())
+    if not compact:
+        return None
+    if len(compact) <= max_chars:
+        return compact
+    return compact[: max_chars - 3].rstrip() + "..."
+
+
+def _first_metadata_value(metadata: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        if value := _compact_metadata_value(metadata.get(key)):
+            return value
+    return None
+
+
+def _quality_metadata_from_result(result: SearchResult) -> ContextItemQualityMetadata:
+    metadata = result.metadata or {}
+    return ContextItemQualityMetadata(
+        origin=_compact_metadata_value(result.result_origin),
+        source=_compact_metadata_value(result.source)
+        or _first_metadata_value(
+            metadata,
+            "source",
+            "source_file",
+            "source_name",
+            "source_title",
+            "source_id",
+            "reflection_source_title",
+        ),
+        url=_compact_metadata_value(result.url) or _first_metadata_value(metadata, "url"),
+        created_at=_first_metadata_value(metadata, "created_at", "created", "captured_at"),
+        updated_at=_first_metadata_value(metadata, "updated_at", "modified_at", "last_updated"),
+        valid_at=_first_metadata_value(metadata, "valid_at", "timestamp", "event_time"),
+        project_id=_first_metadata_value(metadata, "project_id", "project"),
+    )
+
+
 async def _default_related_items(
     *,
     entity_id: str,
@@ -208,6 +256,7 @@ def _item_from_result(result: SearchResult, facet: ContextFacet) -> ContextItem:
         facet=facet,
         reason=_reason_for(result, facet),
         source=result.source,
+        quality=_quality_metadata_from_result(result),
         metadata=dict(result.metadata),
     )
 
@@ -246,6 +295,25 @@ def _compact_text(value: str, max_chars: int) -> str:
     return compact[:cutoff].rstrip() + "..."
 
 
+def _quality_metadata_to_markdown(quality: ContextItemQualityMetadata) -> str:
+    parts: list[str] = []
+    if quality.origin:
+        parts.append(quality.origin)
+    if quality.source:
+        parts.append(f"src={quality.source}")
+    if quality.project_id:
+        parts.append(f"project={quality.project_id}")
+    if quality.updated_at:
+        parts.append(f"updated={quality.updated_at}")
+    elif quality.created_at:
+        parts.append(f"created={quality.created_at}")
+    if quality.valid_at:
+        parts.append(f"valid={quality.valid_at}")
+    if quality.url:
+        parts.append(f"url={quality.url}")
+    return "; ".join(parts)
+
+
 def context_pack_to_markdown(
     pack: ContextPack,
     *,
@@ -279,7 +347,9 @@ def context_pack_to_markdown(
             if remaining <= 0:
                 break
             type_label = f" ({item.type})" if item.type else ""
-            lines.append(f"- **{item.name}**{type_label} `{item.id}`")
+            quality = _quality_metadata_to_markdown(item.quality)
+            quality_label = f" _{quality}_" if quality else ""
+            lines.append(f"- **{item.name}**{type_label} `{item.id}`{quality_label}")
             if item.reason:
                 lines.append(f"  - Why: {item.reason}")
             if item.content:
