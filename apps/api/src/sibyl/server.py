@@ -511,18 +511,30 @@ def _register_tools(mcp: FastMCP) -> None:
         """Add new knowledge to the graph.
 
         Creates a new knowledge entity that can be searched and explored.
-        Supports episodes (learnings), patterns, tasks, and projects.
+        Supports episodes, patterns, procedures, tasks, epics, projects, and
+        domain-general memories such as decisions, plans, ideas, claims,
+        artifacts, sessions, and domains.
 
         ENTITY TYPES:
         - episode: Temporal knowledge (default) - insights, learnings, discoveries
         - pattern: Coding pattern or best practice
+        - procedure: Repeatable workflow or runbook
+        - decision: Chosen direction with rationale
+        - plan: Strategy, sequencing, milestones, or project plan
+        - idea: Brainstormed concept or unresolved option
+        - claim: Atomic fact or assertion with provenance/confidence
+        - artifact: File, object, document, asset, system, or work product
+        - session: Conversation or work-session checkpoint
+        - domain: Any modeled problem space, software or otherwise
         - task: Work item with workflow state machine (REQUIRES project)
+        - epic: Feature initiative grouping tasks (REQUIRES project)
         - project: Container for related tasks
 
         Args:
             title: Short title for the knowledge (max 200 chars)
             content: Full content/description (max 50000 chars)
-            entity_type: Type - "episode" (default), "pattern", "task", or "project"
+            entity_type: Type such as episode, decision, plan, idea, claim,
+                artifact, procedure, task, epic, or project
             category: Category for organization (e.g., "debugging", "architecture")
             languages: Applicable programming languages
             tags: Searchable tags for discovery
@@ -583,7 +595,56 @@ def _register_tools(mcp: FastMCP) -> None:
         return _to_dict(result)
 
     # =========================================================================
-    # TOOL 5: manage
+    # TOOL 5: remember
+    # =========================================================================
+
+    @mcp.tool()
+    async def remember(
+        title: str,
+        content: str,
+        kind: Literal[
+            "episode",
+            "decision",
+            "plan",
+            "idea",
+            "claim",
+            "artifact",
+            "procedure",
+            "domain",
+            "session",
+            "pattern",
+            "rule",
+        ] = "episode",
+        domain: str | None = None,
+        tags: list[str] | None = None,
+        related_to: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Remember durable context from planning, ideation, building, or any domain.
+
+        Use this aggressively during agent work to capture decisions, plans,
+        ideas, claims, procedures, artifacts, sessions, and domain facts. This
+        is the capture companion to the context tool: context retrieves what
+        matters, remember stores what future agents should not have to relearn.
+        """
+
+        full_metadata = dict(metadata or {})
+        full_metadata["capture_kind"] = kind
+        if domain:
+            full_metadata["domain"] = domain
+
+        return await add(
+            title=title,
+            content=content,
+            entity_type=kind,
+            category=domain,
+            tags=tags,
+            related_to=related_to,
+            metadata=full_metadata,
+        )
+
+    # =========================================================================
+    # TOOL 6: manage
     # =========================================================================
 
     @mcp.tool()
