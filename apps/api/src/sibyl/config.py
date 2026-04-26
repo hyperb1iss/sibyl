@@ -247,6 +247,10 @@ class Settings(BaseSettings):
         default=SecretStr(""),
         description="SurrealDB password for remote runtimes",
     )
+    surreal_token: SecretStr = Field(
+        default=SecretStr(""),
+        description="SurrealDB bearer token for remote runtimes",
+    )
     surreal_namespace_prefix: str = Field(
         default="org_",
         description="Namespace prefix for org-scoped SurrealDB data",

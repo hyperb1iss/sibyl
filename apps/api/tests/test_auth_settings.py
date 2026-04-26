@@ -63,6 +63,14 @@ def test_settings_auth_store_can_use_surreal(monkeypatch) -> None:
     assert s.auth_store == "surreal"
 
 
+def test_settings_reads_surreal_token(monkeypatch) -> None:
+    monkeypatch.setenv("SIBYL_SURREAL_TOKEN", "token-123")
+
+    s = Settings(_env_file=None)
+
+    assert s.surreal_token.get_secret_value() == "token-123"
+
+
 def test_settings_surreal_store_keeps_explicit_postgres_auth(monkeypatch) -> None:
     monkeypatch.setenv("SIBYL_STORE", "surreal")
     monkeypatch.setenv("SIBYL_AUTH_STORE", "postgres")

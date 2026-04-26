@@ -113,6 +113,7 @@ def build_surreal_content_client() -> SurrealContentClient:
         url=config_module.settings.resolved_surreal_url,
         username=config_module.settings.surreal_username,
         password=config_module.settings.surreal_password.get_secret_value(),
+        token=config_module.settings.surreal_token.get_secret_value(),
     )
 
 

@@ -14,12 +14,14 @@ class SurrealAuthClient:
         url: str,
         username: str = "",
         password: str = "",
+        token: str = "",
         namespace: str = "sibyl_auth",
         database: str = "auth",
     ) -> None:
         self._url = url
         self._username = username
         self._password = password
+        self._token = token
         self._namespace = namespace
         self._database = database
         self._client: Any | None = None
@@ -39,8 +41,11 @@ class SurrealAuthClient:
         from surrealdb import AsyncSurreal
 
         client = AsyncSurreal(self._url)
-        if self._requires_auth() and self._username and self._password:
-            await client.signin({"username": self._username, "password": self._password})
+        if self._requires_auth():
+            if self._token:
+                await client.authenticate(self._token)
+            elif self._username and self._password:
+                await client.signin({"username": self._username, "password": self._password})
         await client.use(self._namespace, self._database)
         self._client = client
         return client

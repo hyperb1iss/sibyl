@@ -52,6 +52,14 @@ def test_core_config_uses_store_env(monkeypatch) -> None:
     assert settings.store == "surreal"
 
 
+def test_core_config_reads_surreal_token(monkeypatch) -> None:
+    monkeypatch.setenv("SIBYL_SURREAL_TOKEN", "token-123")
+
+    settings = CoreConfig(_env_file=None)
+
+    assert settings.surreal_token.get_secret_value() == "token-123"
+
+
 def test_core_config_ignores_removed_graph_backend_alias(monkeypatch) -> None:
     monkeypatch.delenv("SIBYL_STORE", raising=False)
     monkeypatch.setenv("SIBYL_GRAPH_BACKEND", "falkordb")
@@ -115,6 +123,11 @@ async def test_connect_surreal_constructs_surreal_driver(monkeypatch) -> None:
         _graph_client.settings,
         "surreal_password",
         _graph_client.settings.surreal_password,
+    )
+    monkeypatch.setattr(
+        _graph_client.settings,
+        "surreal_token",
+        _graph_client.settings.surreal_token,
     )
     monkeypatch.setattr(client, "_create_llm_client", lambda: object())
 

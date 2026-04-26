@@ -309,6 +309,7 @@ class GraphClient:
                 url,
                 username=settings.surreal_username or None,
                 password=settings.surreal_password.get_secret_value() or None,
+                token=settings.surreal_token.get_secret_value() or None,
                 namespace_prefix=settings.surreal_namespace_prefix,
                 default_database=settings.surreal_database,
             )

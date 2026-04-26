@@ -115,12 +115,14 @@ class SurrealDriver(GraphDriver):
         *,
         username: str | None = None,
         password: str | None = None,
+        token: str | None = None,
         namespace_prefix: str = "org_",
         default_database: str = "graph",
     ) -> None:
         self._url = url
         self._username = username
         self._password = password
+        self._token = token
         self._namespace_prefix = namespace_prefix
         self._default_database = default_database
         self._database: str = ""
@@ -251,8 +253,11 @@ class SurrealDriver(GraphDriver):
 
         client = AsyncSurreal(self._url)
 
-        if self._requires_auth() and self._username and self._password:
-            await client.signin({"username": self._username, "password": self._password})
+        if self._requires_auth():
+            if self._token:
+                await client.authenticate(self._token)
+            elif self._username and self._password:
+                await client.signin({"username": self._username, "password": self._password})
 
         namespace = _namespace_for_group(self._namespace_prefix, self._database)
         await client.use(namespace, self._default_database)
