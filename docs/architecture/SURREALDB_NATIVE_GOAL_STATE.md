@@ -165,8 +165,8 @@ constraints, active work, and directly connected artifacts over a wall of semant
 The goal state needs both:
 
 - raw capture for every meaningful planning, ideation, and implementation moment
-- task-aware capture that links memories to the exact active work when the project has one clear
-  `doing` task
+- task-aware capture and reflection that link memories to the exact active work when the project has
+  one clear `doing` task
 - structured extraction into nodes and relationships
 - source-preserving summaries
 - contradiction handling

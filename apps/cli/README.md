@@ -90,14 +90,15 @@ sibyl recall "ship the SurrealDB-native memory path" --intent build
 sibyl capture "Redis TTL mismatch caused the stale auth token bug"
 sibyl remember "Token TTL decision" "Keep refresh token TTL longer than access token TTL." --kind decision --domain auth
 sibyl remember "Worker routing decision" "Verifier agents run after non-trivial patches." --kind decision --task task_abc
-echo "Raw planning notes..." | sibyl reflect --title "Planning session" --persist
+echo "Raw planning notes..." | sibyl reflect --title "Planning session" --persist --task task_abc
 sibyl archive list --surface cli
 sibyl archive show <capture_id>
 ```
 
 In a linked project, `sibyl remember` also links to the single active `doing` task when exactly one
 exists. Use `--task` for explicit links or `--no-active-task` to capture project memory without a
-task edge.
+task edge. Persisted `sibyl reflect` output follows the same task-linking rules for its raw session
+source and extracted candidates.
 
 `sibyl reflect` accepts either an argument or stdin. By default, `--persist` writes extracted
 candidates and keeps the raw notes as a `session` source for provenance. Add `--no-source` when the

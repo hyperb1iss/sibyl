@@ -136,7 +136,7 @@ def _append_unique_ids(existing: list[str], additions: list[str]) -> list[str]:
     return combined
 
 
-async def _resolve_remember_links(
+async def _resolve_capture_links(
     client: Any,
     project: str | None,
     related_ids: list[str],
@@ -617,7 +617,7 @@ def remember_memory(
     async def run_remember() -> None:
         try:
             async with get_client() as client:
-                resolved_links = await _resolve_remember_links(
+                resolved_links = await _resolve_capture_links(
                     client=client,
                     project=effective_project,
                     related_ids=related_ids,
@@ -677,6 +677,16 @@ def reflect_memory(
         "--related-to",
         help="Comma-separated entity IDs to link persisted candidates to",
     ),
+    task: str | None = typer.Option(
+        None,
+        "--task",
+        help="Comma-separated task IDs to link persisted output to",
+    ),
+    active_task: bool = typer.Option(
+        True,
+        "--active-task/--no-active-task",
+        help="When persisting, auto-link to the single active task in the current project",
+    ),
     persist: bool = typer.Option(False, "--persist", help="Persist candidates into the graph"),
     persist_source: bool = typer.Option(
         True,
@@ -698,21 +708,27 @@ def reflect_memory(
         raise typer.Exit(code=1)
 
     effective_project = project or (None if all_projects else resolve_project_from_cwd())
-    related_ids = (
-        [item.strip() for item in related_to.split(",") if item.strip()] if related_to else None
-    )
+    related_ids = _parse_csv_ids(related_to)
+    task_ids = _parse_csv_ids(task)
 
     @run_async
     async def run_reflect() -> None:
         try:
             async with get_client() as client:
+                resolved_links = await _resolve_capture_links(
+                    client=client,
+                    project=effective_project,
+                    related_ids=related_ids,
+                    task_ids=task_ids,
+                    active_task=active_task and persist,
+                )
                 data = await client.reflect(
                     content=resolved_content,
                     source_title=title,
                     intent=intent,
                     domain=domain,
                     project=effective_project,
-                    related_to=related_ids,
+                    related_to=resolved_links,
                     persist=persist,
                     persist_source=persist_source,
                     limit=limit,

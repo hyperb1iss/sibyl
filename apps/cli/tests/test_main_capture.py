@@ -398,6 +398,7 @@ def test_reflect_command_outputs_markdown_candidates(
             "markdown": "# Sibyl Reflection: Planning\n\n## Decision: Use reflect",
         }
     )
+    mock_client.explore = AsyncMock(return_value={"entities": []})
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
@@ -434,6 +435,13 @@ def test_reflect_command_outputs_markdown_candidates(
         persist_source=True,
         limit=12,
     )
+    mock_client.explore.assert_awaited_once_with(
+        mode="list",
+        types=["task"],
+        status="doing",
+        project="project_123",
+        limit=2,
+    )
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
@@ -450,6 +458,7 @@ def test_reflect_command_reads_notes_from_stdin(
             "markdown": "# Sibyl Reflection: Planning\n\n## Plan: Build reflect",
         }
     )
+    mock_client.explore = AsyncMock()
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
@@ -468,6 +477,7 @@ def test_reflect_command_reads_notes_from_stdin(
         persist_source=True,
         limit=12,
     )
+    mock_client.explore.assert_not_called()
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
@@ -488,6 +498,7 @@ def test_reflect_command_can_persist_candidates_without_source(
             "markdown": "# Sibyl Reflection: Planning\n\n## Claim: Reflect works",
         }
     )
+    mock_client.explore = AsyncMock(return_value={"entities": []})
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
@@ -518,4 +529,94 @@ def test_reflect_command_can_persist_candidates_without_source(
         persist_source=False,
         limit=12,
     )
+    mock_client.explore.assert_awaited_once_with(
+        mode="list",
+        types=["task"],
+        status="doing",
+        project="project_123",
+        limit=2,
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_reflect_command_persist_auto_links_single_active_project_task(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.reflect = AsyncMock(
+        return_value={
+            "source_title": "Planning",
+            "source_id": "session_123",
+            "persisted_count": 1,
+            "total_candidates": 1,
+            "candidates": [{"kind": "decision", "persisted_id": "decision_123"}],
+            "markdown": "# Sibyl Reflection: Planning",
+        }
+    )
+    mock_client.explore = AsyncMock(return_value={"entities": [{"id": "task_active"}]})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "reflect",
+            "We decided to link reflection output to active task context.",
+            "--title",
+            "Planning",
+            "--persist",
+        ],
+    )
+
+    assert result.exit_code == 0
+    mock_client.reflect.assert_awaited_once()
+    payload = mock_client.reflect.await_args.kwargs
+    assert payload["related_to"] == ["task_active"]
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_reflect_command_explicit_task_links_and_no_active_task(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.reflect = AsyncMock(
+        return_value={
+            "source_title": "Planning",
+            "source_id": "session_123",
+            "persisted_count": 1,
+            "total_candidates": 1,
+            "candidates": [{"kind": "decision", "persisted_id": "decision_123"}],
+            "markdown": "# Sibyl Reflection: Planning",
+        }
+    )
+    mock_client.explore = AsyncMock()
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "reflect",
+            "Explicit task links should not require active-task lookup.",
+            "--title",
+            "Planning",
+            "--persist",
+            "--related-to",
+            "plan_1",
+            "--task",
+            "task_1,plan_1",
+            "--no-active-task",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = mock_client.reflect.await_args.kwargs
+    assert payload["related_to"] == ["plan_1", "task_1"]
+    mock_client.explore.assert_not_called()
     mock_resolve_project_from_cwd.assert_called_once_with()
