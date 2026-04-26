@@ -570,6 +570,11 @@ def reflect_memory(
         help="Comma-separated entity IDs to link persisted candidates to",
     ),
     persist: bool = typer.Option(False, "--persist", help="Persist candidates into the graph"),
+    persist_source: bool = typer.Option(
+        True,
+        "--source/--no-source",
+        help="When persisting, also store the raw notes as a session memory",
+    ),
     limit: int = typer.Option(12, "--limit", "-l", min=1, max=25, help="Maximum candidates"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ) -> None:
@@ -601,6 +606,7 @@ def reflect_memory(
                     project=effective_project,
                     related_to=related_ids,
                     persist=persist,
+                    persist_source=persist_source,
                     limit=limit,
                 )
 

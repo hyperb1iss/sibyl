@@ -229,6 +229,7 @@ async def reflect_memory(
     related_to: list[str] | None = None,
     organization_id: str | None = None,
     persist: bool = False,
+    persist_source: bool = True,
     limit: int = 12,
     add_fn: AddFn = default_add,
 ) -> ReflectionPack:
@@ -270,12 +271,43 @@ async def reflect_memory(
         ]
     candidates = _dedupe(candidates, limit)
 
+    source_id: str | None = None
+    if persist and persist_source:
+        source_metadata: dict[str, Any] = {
+            "organization_id": organization_id,
+            "capture_mode": "reflect",
+            "capture_surface": "reflection",
+            "remember_kind": "session",
+            "reflection_intent": intent,
+            "reflection_source": True,
+        }
+        if domain:
+            source_metadata["domain"] = domain
+        if project:
+            source_metadata["project_id"] = project
+        source = await add_fn(
+            title=source_title,
+            content=content,
+            entity_type="session",
+            category=domain,
+            tags=_tags_for("session", domain),
+            related_to=related_to,
+            metadata=source_metadata,
+            sync=True,
+            check_conflicts=False,
+        )
+        if source.success:
+            source_id = source.id
+
     persisted: list[ReflectionCandidate] = []
     for candidate in candidates:
         if not persist:
             persisted.append(candidate)
             continue
 
+        candidate_related_to = list(related_to or [])
+        if source_id:
+            candidate_related_to.append(source_id)
         metadata = {
             **candidate.metadata,
             "organization_id": organization_id,
@@ -287,13 +319,15 @@ async def reflect_memory(
         }
         if domain:
             metadata["domain"] = domain
+        if source_id:
+            metadata["reflection_source_id"] = source_id
         result = await add_fn(
             title=candidate.title,
             content=candidate.content,
             entity_type=candidate.kind,
             category=domain,
             tags=candidate.tags,
-            related_to=related_to,
+            related_to=candidate_related_to or None,
             metadata=metadata,
             sync=True,
             check_conflicts=True,
@@ -302,6 +336,7 @@ async def reflect_memory(
 
     return ReflectionPack(
         source_title=source_title,
+        source_id=source_id,
         intent=intent,
         domain=domain,
         project=project,
@@ -320,6 +355,8 @@ def reflection_pack_to_markdown(pack: ReflectionPack) -> str:
         f"# Sibyl Reflection: {pack.source_title}",
         f"Intent: {pack.intent}",
     ]
+    if pack.source_id:
+        lines.append(f"Source: `{pack.source_id}`")
     if pack.domain:
         lines.append(f"Domain: {pack.domain}")
     if pack.project:

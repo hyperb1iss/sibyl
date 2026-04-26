@@ -328,6 +328,10 @@ class ReflectionRequest(BaseModel):
         default=None, description="Entity IDs to link persisted candidates to"
     )
     persist: bool = Field(default=False, description="Persist candidates into the graph")
+    persist_source: bool = Field(
+        default=True,
+        description="When persisting, also store the raw source notes as a session memory",
+    )
     limit: int = Field(default=12, ge=1, le=25, description="Maximum candidates")
 
 
@@ -348,6 +352,7 @@ class ReflectionResponse(BaseModel):
     """Reflection output with reviewable memory candidates."""
 
     source_title: str
+    source_id: str | None = None
     intent: str
     domain: str | None = None
     project: str | None = None

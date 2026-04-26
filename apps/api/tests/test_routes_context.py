@@ -102,6 +102,7 @@ class TestContextPackRoute:
 def _reflection_pack() -> ReflectionPack:
     return ReflectionPack(
         source_title="Planning",
+        source_id="session_1",
         intent="build",
         domain="sibyl",
         project="proj_1",
@@ -148,11 +149,13 @@ class TestReflectRoute:
             )
 
         assert response.source_title == "Planning"
+        assert response.source_id == "session_1"
         assert response.markdown is not None
         assert response.persisted_count == 0
         assert reflect_memory.await_args.kwargs["organization_id"] == str(org.id)
         assert reflect_memory.await_args.kwargs["project"] == "proj_1"
         assert reflect_memory.await_args.kwargs["persist"] is True
+        assert reflect_memory.await_args.kwargs["persist_source"] is True
 
     @pytest.mark.asyncio
     async def test_reflect_rejects_inaccessible_project(self) -> None:

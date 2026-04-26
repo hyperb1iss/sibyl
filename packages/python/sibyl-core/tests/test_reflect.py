@@ -43,7 +43,7 @@ async def test_reflect_memory_can_persist_candidates_with_provenance() -> None:
         calls.append(kwargs)
         return AddResponse(
             success=True,
-            id=f"{kwargs['entity_type']}_new",
+            id=f"{kwargs['entity_type']}_{len(calls)}",
             message="ok",
             timestamp=datetime.now(UTC),
         )
@@ -61,12 +61,16 @@ async def test_reflect_memory_can_persist_candidates_with_provenance() -> None:
     )
 
     assert pack.persisted_count == len(pack.candidates)
-    assert calls
-    assert calls[0]["metadata"]["organization_id"] == "org_123"
-    assert calls[0]["metadata"]["capture_mode"] == "reflect"
-    assert calls[0]["metadata"]["project_id"] == "project_123"
-    assert calls[0]["related_to"] == ["project_123"]
-    assert calls[0]["sync"] is True
+    assert pack.source_id == "session_1"
+    assert calls[0]["entity_type"] == "session"
+    assert calls[0]["content"].startswith("Confirmed the local Sibyl project")
+    assert calls[0]["metadata"]["reflection_source"] is True
+    assert calls[1]["metadata"]["organization_id"] == "org_123"
+    assert calls[1]["metadata"]["capture_mode"] == "reflect"
+    assert calls[1]["metadata"]["project_id"] == "project_123"
+    assert calls[1]["metadata"]["reflection_source_id"] == "session_1"
+    assert calls[1]["related_to"] == ["project_123", "session_1"]
+    assert calls[1]["sync"] is True
 
 
 @pytest.mark.asyncio
@@ -88,4 +92,5 @@ async def test_reflection_pack_serializes_and_renders_markdown() -> None:
     assert payload["source_title"] == "Planning"
     assert payload["candidates"][0]["kind"] == "decision"
     assert "# Sibyl Reflection: Planning" in markdown
+    assert "Source:" not in markdown
     assert "## Decision:" in markdown

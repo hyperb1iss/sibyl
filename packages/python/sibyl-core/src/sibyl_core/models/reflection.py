@@ -21,6 +21,7 @@ class ReflectionCandidate:
 @dataclass(frozen=True)
 class ReflectionPack:
     source_title: str
+    source_id: str | None
     intent: str
     domain: str | None
     project: str | None

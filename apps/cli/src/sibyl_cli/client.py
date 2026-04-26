@@ -792,6 +792,7 @@ class SibylClient:
         project: str | None = None,
         related_to: list[str] | None = None,
         persist: bool = False,
+        persist_source: bool = True,
         limit: int = 12,
     ) -> dict[str, Any]:
         """Reflect raw notes into durable memory candidates."""
@@ -800,6 +801,7 @@ class SibylClient:
             "source_title": source_title,
             "intent": intent,
             "persist": persist,
+            "persist_source": persist_source,
             "limit": limit,
         }
         if domain:

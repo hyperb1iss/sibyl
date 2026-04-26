@@ -108,6 +108,7 @@ async def reflect_context(
             related_to=request.related_to,
             organization_id=str(org.id),
             persist=request.persist,
+            persist_source=request.persist_source,
             limit=request.limit,
         )
         payload = reflection_pack_to_dict(pack)

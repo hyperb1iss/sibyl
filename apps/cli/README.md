@@ -25,7 +25,7 @@ sibyl recall "goal"                     # Agent-ready context before work
 sibyl add "title" "content"             # Add knowledge
 sibyl capture "content"                 # Quick capture from the CLI
 sibyl remember "title" "content" --kind decision # Agent memory capture
-sibyl reflect "raw notes" --persist     # Extract memory candidates from a session
+sibyl reflect "raw notes" --persist     # Extract candidates and preserve raw session source
 sibyl session bundle                    # Wake up with active context
 sibyl task list --status todo,doing     # List tasks
 sibyl task start <id>                   # Start task
@@ -42,7 +42,7 @@ sibyl task complete <id> --learnings "..." # Complete with learnings
 | `add`      | Add knowledge                                                                                       |
 | `capture`  | Quick capture from CLI arguments or stdin                                                           |
 | `remember` | Capture decisions, plans, ideas, claims, artifacts, and session memory                              |
-| `reflect`  | Extract reviewable memory candidates from raw notes or stdin                                        |
+| `reflect`  | Extract reviewable candidates from raw notes, optionally preserving the raw session source          |
 | `stats`    | Show knowledge graph statistics                                                                     |
 | `version`  | Show CLI version information                                                                        |
 | `task`     | Task lifecycle (list, show, create, start, block, unblock, review, complete, archive, update, note) |

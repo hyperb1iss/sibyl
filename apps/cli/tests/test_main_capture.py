@@ -272,6 +272,7 @@ def test_reflect_command_outputs_markdown_candidates(
         project="project_123",
         related_to=["project_123"],
         persist=True,
+        persist_source=True,
         limit=12,
     )
     mock_resolve_project_from_cwd.assert_called_once_with()

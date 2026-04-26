@@ -52,8 +52,8 @@ Sibyl is the agent's durable brain. Use it as a loop, not a lookup box:
    future agents should not rediscover a decision, plan, idea, claim, artifact, session, procedure,
    or gotcha.
 4. **Reflect at clean breakpoints.** Run `sibyl reflect "<raw notes>" --title "<session>"` to
-   extract reviewable candidates, and add `--persist` when those candidates should be written into
-   the graph immediately. On task completion, still use `sibyl task complete --learnings "..."`.
+   extract reviewable candidates. Add `--persist` to write candidates and preserve the raw session
+   source as provenance. On task completion, still use `sibyl task complete --learnings "..."`.
 
 **Perfect interface shape:** `recall -> act -> remember -> reflect`.
 
@@ -224,7 +224,7 @@ echo "Exact session notes..." | sibyl remember "Planning session" --kind session
 # Preview reviewable memory candidates
 sibyl reflect "We decided X. Next we will build Y." --title "Planning checkpoint"
 
-# Persist extracted candidates into the graph
+# Persist extracted candidates and the raw source session into the graph
 echo "Raw session notes..." | sibyl reflect --title "Build session" --intent build --persist
 ```
 

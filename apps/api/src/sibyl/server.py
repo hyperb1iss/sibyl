@@ -667,6 +667,7 @@ def _register_tools(mcp: FastMCP) -> None:
         project: str | None = None,
         related_to: list[str] | None = None,
         persist: bool = False,
+        persist_source: bool = True,
         limit: int = 12,
     ) -> dict[str, Any]:
         """Reflect raw notes into reviewable durable memory candidates.
@@ -692,6 +693,7 @@ def _register_tools(mcp: FastMCP) -> None:
             related_to=related_to,
             organization_id=ctx.org_id,
             persist=persist,
+            persist_source=persist_source,
             limit=limit,
         )
         payload = reflection_pack_to_dict(pack)
