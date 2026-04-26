@@ -15,9 +15,9 @@ operational surface was heavier than the product itself.
 
 ## What you get
 
-- **One database, one namespace, one backup.** Graph nodes, document chunks, user accounts, and API
-  keys all live in the same SurrealDB instance. Per-org isolation is a namespace, not a separate
-  cluster. Backups are a single RocksDB directory or one SurrealQL export.
+- **One engine, one backup strategy.** Graph memory, document chunks, auth records, API keys, and
+  tasks can live in the same SurrealDB instance. Per-org graph isolation is a namespace, not a
+  separate cluster. Backups are a single RocksDB directory or one SurrealQL export.
 - **Embedded mode for dev.** Point Sibyl at a local `surrealkv://` path and you're running with zero
   external services. No Docker required for a fresh checkout.
 - **Native hybrid search.** HNSW vector indexes and full-text search live next to the graph data, so
@@ -31,23 +31,23 @@ operational surface was heavier than the product itself.
 ## Honest tradeoffs
 
 - **Less battle-tested than Postgres** for deep relational workloads. If you have a mature Postgres
-  story (PITR, managed service, replicas), the legacy stack still makes sense for auth — run mixed
-  mode with `SIBYL_STORE=surreal` + `SIBYL_AUTH_STORE=postgres`.
+  story (PITR, managed service, replicas), mixed mode can be a staging point while you migrate, not
+  a long-term destination.
 - **Embedded mode is single-writer.** Multi-process local dev on embedded Surreal serializes through
   one writer; for real concurrency, run SurrealDB as a service (`ws://...`).
 - **Younger tooling.** Third-party tooling around SurrealDB (observability dashboards, migration
-  frameworks) is thinner than Postgres'. We keep an Alembic path for relational auth so teams that
-  depend on that ecosystem can stage the move.
+  frameworks) is thinner than Postgres'. The relational auth path exists to stage the move, not to
+  keep two product stacks forever.
 
 ## When to stay on legacy
 
 Run `SIBYL_STORE=legacy` if you already have FalkorDB + PostgreSQL in production, haven't planned a
 migration window, or have internal tooling that reads the Postgres schema directly. Both stacks are
-supported. See [storage-modes.md](./storage-modes.md) for the mode matrix and
-[migrating-from-falkor.md](./migrating-from-falkor.md) for the cutover playbook.
+supported during the migration window. See [storage-modes.md](./storage-modes.md) for the mode
+matrix and [migrating-from-falkor.md](./migrating-from-falkor.md) for the cutover playbook.
 
-For the long-term SurrealDB-native architecture target, see
-[SurrealDB-Native Sibyl Goal State](../architecture/SURREALDB_NATIVE_GOAL_STATE.md).
+For the larger product and architecture direction, see
+[Sibyl Northstar](../architecture/SIBYL_NORTHSTAR.md).
 
-The direction is clear — new installs default to fully Surreal — but nobody has to migrate on a
-schedule they didn't pick.
+The direction is clear: new installs default to fully Surreal, existing installs migrate
+deliberately, then FalkorDB and PostgreSQL leave the product surface.
