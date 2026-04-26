@@ -24,8 +24,9 @@ operational surface was heavier than the product itself.
   retrieval doesn't have to fan out across stores.
 - **Fewer connection boundaries.** One driver, one auth model, one set of queries. The API and
   worker talk to the same WebSocket endpoint.
-- **Graphiti compatibility.** The SurrealDriver plugs into Graphiti the same way the FalkorDriver
-  does, so the entity/episode/community model stays identical. No data model rewrite.
+- **Graphiti transition compatibility.** The SurrealDriver plugs into Graphiti during migration, so
+  existing entity, episode, and community behavior can keep working while native SurrealDB paths are
+  built and verified.
 
 ## Honest tradeoffs
 
@@ -44,6 +45,9 @@ Run `SIBYL_STORE=legacy` if you already have FalkorDB + PostgreSQL in production
 migration window, or have internal tooling that reads the Postgres schema directly. Both stacks are
 supported. See [storage-modes.md](./storage-modes.md) for the mode matrix and
 [migrating-from-falkor.md](./migrating-from-falkor.md) for the cutover playbook.
+
+For the long-term SurrealDB-native architecture target, see
+[SurrealDB-Native Sibyl Goal State](../architecture/SURREALDB_NATIVE_GOAL_STATE.md).
 
 The direction is clear — new installs default to fully Surreal — but nobody has to migrate on a
 schedule they didn't pick.
