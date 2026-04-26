@@ -2,15 +2,15 @@
 """Sibyl UserPromptSubmit Hook - Intelligent context injection.
 
 Uses Haiku 4.5 to generate semantic search queries from conversation
-context, then injects relevant knowledge from Sibyl's graph.
+context, then injects a structured Sibyl context pack.
 
 Architecture:
-  Hook Input → Transcript Parse → Haiku 4.5 (query gen) → Sibyl Search → Format → Output
+  Hook Input → Transcript Parse → Query/Intent → Sibyl Context Pack → Format → Output
 
 Latency budget: <500ms total
   - Transcript parse: <50ms
   - Haiku 4.5: <250ms
-  - Sibyl search: <150ms
+  - Sibyl context pack: <150ms
   - Format: <50ms
 """
 
@@ -308,8 +308,60 @@ def fallback_extract_terms(prompt: str) -> str | None:
     return query if len(query) >= 8 else None
 
 
+def infer_intent(prompt: str) -> str:
+    """Infer the context pack intent from the user prompt."""
+    lowered = prompt.lower()
+    keyword_intents = (
+        ("debug", ("debug", "fix", "broken", "error", "failing", "failure", "wtf")),
+        ("plan", ("plan", "roadmap", "break down", "decompose", "milestone")),
+        ("ideate", ("brainstorm", "ideate", "ideas", "explore options", "concept")),
+        ("research", ("research", "investigate", "latest", "compare", "evaluate")),
+        ("decide", ("decide", "decision", "choose", "tradeoff", "recommend")),
+        ("learn", ("remember", "capture", "learn", "what did we learn")),
+    )
+    for intent, keywords in keyword_intents:
+        if any(keyword in lowered for keyword in keywords):
+            return intent
+    return "build"
+
+
+def format_context_pack(pack: dict) -> str:
+    """Format a structured context pack for injection."""
+    sections = pack.get("sections", [])
+    if not sections:
+        return ""
+
+    lines = []
+    remaining = 6
+    for section in sections:
+        items = section.get("items", [])
+        if not items:
+            continue
+        title = section.get("title", "Context")
+        lines.append(f"**{title}:**")
+        for item in items[:2]:
+            if remaining <= 0:
+                break
+            name = item.get("name", item.get("title", ""))
+            entity_type = item.get("type", item.get("entity_type", ""))
+            reason = item.get("reason", "")
+            content = " ".join(str(item.get("content", "")).split())[:220]
+            if name:
+                type_label = f" ({entity_type})" if entity_type else ""
+                lines.append(f"- **{name}**{type_label}")
+                if reason:
+                    lines.append(f"  _Why:_ {reason}")
+                if content:
+                    lines.append(f"  {content}")
+                remaining -= 1
+        if remaining <= 0:
+            break
+
+    return "\n".join(lines)
+
+
 def format_results(results: list[dict]) -> str:
-    """Format search results for injection."""
+    """Format raw search results for fallback injection."""
     if not results:
         return ""
 
@@ -365,24 +417,38 @@ def main():
             sys.exit(0)
         assert search_query is not None
 
-        # Search Sibyl (target: <150ms)
-        output = run_sibyl("search", search_query, "--limit", "3", "-j", timeout=3)
-        if not output:
-            sys.exit(0)
-        assert output is not None
+        intent = infer_intent(prompt)
 
-        # Parse results
-        try:
-            search_data = json.loads(output)
-            results = search_data.get("results", [])
-        except json.JSONDecodeError:
-            sys.exit(0)
+        # Ask Sibyl for a structured context pack first, then fall back to search.
+        output = run_sibyl(
+            "context",
+            "pack",
+            search_query,
+            "--intent",
+            intent,
+            "--limit",
+            "6",
+            "-j",
+            timeout=5,
+        )
+        formatted = ""
+        if output:
+            try:
+                pack = json.loads(output)
+                formatted = format_context_pack(pack) if isinstance(pack, dict) else ""
+            except json.JSONDecodeError:
+                formatted = ""
 
-        if not results:
-            sys.exit(0)
+        if not formatted:
+            output = run_sibyl("search", search_query, "--limit", "3", "-j", timeout=3)
+            if output:
+                try:
+                    search_data = json.loads(output)
+                    results = search_data.get("results", [])
+                    formatted = format_results(results)
+                except json.JSONDecodeError:
+                    formatted = ""
 
-        # Format for injection
-        formatted = format_results(results)
         if not formatted:
             sys.exit(0)
 
@@ -390,7 +456,7 @@ def main():
         elapsed = time.time() - start_time
         debug_info = ""
         if os.environ.get("SIBYL_HOOK_DEBUG"):
-            debug_info = f"\n_Query: `{search_query}` ({elapsed:.2f}s)_"
+            debug_info = f"\n_Query: `{search_query}` · intent: `{intent}` ({elapsed:.2f}s)_"
 
         # Output as additional context
         # Include a reminder about the /sibyl skill for assistants that haven't loaded it
