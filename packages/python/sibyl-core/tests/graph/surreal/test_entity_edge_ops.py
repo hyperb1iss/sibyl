@@ -10,6 +10,7 @@ from graphiti_core.errors import EdgeNotFoundError
 from graphiti_core.nodes import EntityNode
 
 from sibyl_core.backends.surreal import SurrealDriver
+from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.graph.surreal.ops.entity_edge_ops import SurrealEntityEdgeOperations
 from sibyl_core.graph.surreal.ops.entity_node_ops import SurrealEntityNodeOperations
 
@@ -109,7 +110,7 @@ class TestEntityEdgeOps:
             target_uuid="ent-b",
             name="KNOWS",
             fact="Alice has known Bob since 2015",
-            fact_embedding=[0.25] * 1536,
+            fact_embedding=[0.25] * EMBEDDING_DIM,
             episodes=["ep-1", "ep-2"],
             attributes={"confidence": 0.9, "source": "interview"},
             created_at=created,
@@ -139,7 +140,7 @@ class TestEntityEdgeOps:
 
         # fact_embedding is returned by the standard SELECT * shape — verify it.
         assert fetched.fact_embedding is not None
-        assert len(fetched.fact_embedding) == 1536
+        assert len(fetched.fact_embedding) == EMBEDDING_DIM
         assert fetched.fact_embedding[0] == pytest.approx(0.25)
 
     async def test_get_by_uuid_missing_raises(self, surreal_schema: SurrealDriver) -> None:
@@ -275,7 +276,7 @@ class TestEntityEdgeOps:
         gid = surreal_schema.group_id
         await _seed_entities(surreal_schema, ["ent-a", "ent-b"])
 
-        embedding = [0.1] * 1536
+        embedding = [0.1] * EMBEDDING_DIM
         await ops.save(
             surreal_schema,
             _make_edge("edge-1", gid, fact_embedding=embedding),
@@ -285,7 +286,7 @@ class TestEntityEdgeOps:
         assert fresh.fact_embedding is None
         await ops.load_embeddings(surreal_schema, fresh)
         assert fresh.fact_embedding is not None
-        assert len(fresh.fact_embedding) == 1536
+        assert len(fresh.fact_embedding) == EMBEDDING_DIM
 
         a = _make_edge("edge-1", gid)
         b = _make_edge("edge-missing", gid)

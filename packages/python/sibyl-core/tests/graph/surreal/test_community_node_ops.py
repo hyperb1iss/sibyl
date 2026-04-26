@@ -9,6 +9,7 @@ from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import CommunityNode
 
 from sibyl_core.backends.surreal import SurrealDriver
+from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.graph.surreal.ops.community_node_ops import SurrealCommunityNodeOperations
 
 
@@ -94,7 +95,7 @@ class TestCommunityNodeOps:
     async def test_load_name_embedding_single_and_bulk(self, surreal_schema: SurrealDriver) -> None:
         ops = SurrealCommunityNodeOperations()
         gid = surreal_schema.group_id
-        embedding = [0.2] * 1536
+        embedding = [0.2] * EMBEDDING_DIM
         await ops.save(
             surreal_schema,
             _make_community("com-1", gid, embedding=embedding),
@@ -105,7 +106,7 @@ class TestCommunityNodeOps:
         assert fresh.name_embedding is None
         await ops.load_name_embedding(surreal_schema, fresh)
         assert fresh.name_embedding is not None
-        assert len(fresh.name_embedding) == 1536
+        assert len(fresh.name_embedding) == EMBEDDING_DIM
 
         # Multi-node: loop manually — mirrors how callers would bulk-hydrate.
         await ops.save(surreal_schema, _make_community("com-2", gid, embedding=embedding))

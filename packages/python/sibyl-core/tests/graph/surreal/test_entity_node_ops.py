@@ -9,6 +9,7 @@ from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import EntityNode
 
 from sibyl_core.backends.surreal import SurrealDriver
+from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.graph.surreal.ops.entity_node_ops import SurrealEntityNodeOperations
 
 
@@ -114,7 +115,7 @@ class TestEntityNodeOps:
     async def test_load_embeddings_single_and_bulk(self, surreal_schema: SurrealDriver) -> None:
         ops = SurrealEntityNodeOperations()
         gid = surreal_schema.group_id
-        embedding = [0.1] * 1536
+        embedding = [0.1] * EMBEDDING_DIM
         await ops.save(
             surreal_schema,
             _make_entity("ent-1", gid, embedding=embedding),
@@ -124,7 +125,7 @@ class TestEntityNodeOps:
         assert fresh.name_embedding is None
         await ops.load_embeddings(surreal_schema, fresh)
         assert fresh.name_embedding is not None
-        assert len(fresh.name_embedding) == 1536
+        assert len(fresh.name_embedding) == EMBEDDING_DIM
         # Bulk
         a = _make_entity("ent-1", gid)
         b = _make_entity("ent-missing", gid)

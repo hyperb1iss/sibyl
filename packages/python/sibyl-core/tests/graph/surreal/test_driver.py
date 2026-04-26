@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from sibyl_core.backends.surreal import SurrealDriver, SurrealDriverSession
-from sibyl_core.backends.surreal.driver import _namespace_for_group
+from sibyl_core.backends.surreal.driver import SurrealQueryError, _namespace_for_group
 from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
 from sibyl_core.graph.surreal.ops.community_edge_ops import SurrealCommunityEdgeOperations
 from sibyl_core.graph.surreal.ops.community_node_ops import SurrealCommunityNodeOperations
@@ -144,6 +144,24 @@ class TestDriverConnection:
         # Must not fail on bound params; exact shape varies by SurrealDB version.
         result = await surreal_driver.execute_query("RETURN $value;", value="hello")
         assert result == "hello" or (isinstance(result, list) and result and result[0] == "hello")
+
+    async def test_execute_query_still_raises_string_errors_for_writes(self, monkeypatch) -> None:
+        driver = SurrealDriver("memory://").clone("org-abc")
+
+        async def fake_query(query: str, params: object | None = None) -> str:
+            return "Expected a array<float, 1024> but the array had 1536 items"
+
+        async def fake_ensure_client() -> SimpleNamespace:
+            return SimpleNamespace(query=fake_query)
+
+        monkeypatch.setattr(
+            driver,
+            "_ensure_client",
+            fake_ensure_client,
+        )
+
+        with pytest.raises(SurrealQueryError, match="array<float"):
+            await driver.execute_query("CREATE entity SET uuid = $uuid;", uuid="ent-1")
 
 
 @pytest.mark.asyncio

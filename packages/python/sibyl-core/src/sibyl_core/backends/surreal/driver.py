@@ -48,6 +48,8 @@ _SURREAL_PROVIDER_TAG: GraphProvider = GraphProvider.NEO4J
 def _raise_if_surreal_error(query: str, result: Any) -> None:
     """Raise a SurrealQueryError when the SDK returned an error envelope."""
     if isinstance(result, str):
+        if query.lstrip().upper().startswith("RETURN "):
+            return
         raise SurrealQueryError(query, result)
     if isinstance(result, list):
         for entry in result:
