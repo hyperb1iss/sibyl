@@ -148,6 +148,9 @@ class RawMemoryRememberRequest(BaseModel):
     source_id: str | None = Field(default=None, description="Stable source/provenance ID")
     memory_scope: MemoryScopeLiteral = Field(default="private", description="Retrieval scope")
     scope_key: str | None = Field(default=None, description="Project/team/shared scope key")
+    diary: bool = Field(default=False, description="Store as a private agent diary entry")
+    agent_id: str | None = Field(default=None, description="Agent identity for diary entries")
+    project_id: str | None = Field(default=None, description="Project associated with this diary")
     tags: list[str] = Field(default_factory=list, description="Searchable tags")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Auxiliary metadata")
     provenance: dict[str, Any] = Field(default_factory=dict, description="Source provenance")
@@ -160,6 +163,9 @@ class RawMemoryRecallRequest(BaseModel):
     query: str = Field(..., min_length=1, description="Full-text recall query")
     memory_scope: MemoryScopeLiteral = Field(default="private", description="Retrieval scope")
     scope_key: str | None = Field(default=None, description="Project/team/shared scope key")
+    diary: bool = Field(default=False, description="Recall private agent diary entries")
+    agent_id: str | None = Field(default=None, description="Agent identity to recall")
+    project_id: str | None = Field(default=None, description="Project diary filter")
     limit: int = Field(default=10, ge=1, le=50, description="Maximum memories to return")
 
 

@@ -233,7 +233,56 @@ class TestSurrealContentHelpers:
         assert params["organization_id"] == "org-1"
         assert params["principal_id"] == "user-a"
         assert params["memory_scope"] == "private"
+        assert params["agent_diary_surface"] == "agent_diary"
+        assert "capture_surface != $agent_diary_surface" in query
         assert [memory.principal_id for memory in memories] == ["user-a"]
+
+    @pytest.mark.asyncio
+    async def test_recall_raw_memory_filters_agent_diaries_explicitly(self) -> None:
+        fake_client = FakeClient(
+            [
+                _query_result(
+                    [
+                        {
+                            "uuid": "memory-1",
+                            "organization_id": "org-1",
+                            "source_id": "source-diary-1",
+                            "principal_id": "user-a",
+                            "memory_scope": "private",
+                            "title": "Nova diary",
+                            "raw_content": "Agent diary remembers implementation stance.",
+                            "metadata": {"agent_id": "nova", "project_id": "project_123"},
+                            "capture_surface": "agent_diary",
+                            "score": 0.97,
+                        }
+                    ]
+                )
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            memories = await recall_raw_memory(
+                organization_id="org-1",
+                principal_id="user-a",
+                query="implementation stance",
+                agent_id="nova",
+                project_id="project_123",
+            )
+
+        query, params = fake_client.calls[0]
+        assert "metadata.agent_id = $agent_id" in query
+        assert "metadata.project_id = $project_id" in query
+        assert "capture_surface != $agent_diary_surface" not in query
+        assert params["agent_id"] == "nova"
+        assert params["project_id"] == "project_123"
+        assert [memory.metadata["agent_id"] for memory in memories] == ["nova"]
 
     @pytest.mark.asyncio
     async def test_recall_raw_memory_falls_back_to_scoped_lexical_search(self) -> None:
@@ -283,7 +332,9 @@ class TestSurrealContentHelpers:
         assert memories[0].score == 1.0
         fallback_query, fallback_params = fake_client.calls[1]
         assert "principal_id = $principal_id" in fallback_query
+        assert "capture_surface != $agent_diary_surface" in fallback_query
         assert fallback_params["principal_id"] == "user-a"
+        assert fallback_params["agent_diary_surface"] == "agent_diary"
 
     @pytest.mark.asyncio
     async def test_recall_raw_memory_requires_scope_key_for_project_scope(self) -> None:

@@ -16,7 +16,12 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.db.models import Organization, OrganizationRole, ProjectRole
 from sibyl.persistence.auth_runtime import get_project_record_by_graph_id
-from sibyl_core.services.surreal_content import RawMemory, recall_raw_memory, remember_raw_memory
+from sibyl_core.services.surreal_content import (
+    AGENT_DIARY_CAPTURE_SURFACE,
+    RawMemory,
+    recall_raw_memory,
+    remember_raw_memory,
+)
 
 log = structlog.get_logger()
 
@@ -70,6 +75,55 @@ async def _authorize_scope(
         )
 
 
+async def _authorize_project_filter(
+    *,
+    org: Organization,
+    ctx: AuthContext,
+    project_id: str | None,
+    required_project_role: ProjectRole,
+) -> None:
+    if not project_id:
+        return
+    await get_project_record_by_graph_id(
+        organization_id=org.id,
+        graph_project_id=project_id,
+    )
+    await verify_entity_project_access(
+        None,
+        ctx,
+        project_id,
+        required_role=required_project_role,
+    )
+
+
+def _diary_metadata(
+    *,
+    metadata: dict[str, object],
+    diary: bool,
+    agent_id: str | None,
+    project_id: str | None,
+) -> dict[str, object]:
+    if not diary:
+        return dict(metadata)
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="agent_id is required for diary memory")
+    out = dict(metadata)
+    out["agent_id"] = agent_id
+    out["memory_kind"] = "agent_diary"
+    if project_id:
+        out["project_id"] = project_id
+    return out
+
+
+def _validate_diary_request(*, diary: bool, agent_id: str | None, memory_scope: str) -> None:
+    if not diary:
+        return
+    if memory_scope != "private":
+        raise HTTPException(status_code=400, detail="diary memory must use private scope")
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="agent_id is required for diary memory")
+
+
 def _raw_memory_response(memory: RawMemory) -> RawMemoryResponse:
     return RawMemoryResponse(
         id=memory.id,
@@ -106,13 +160,33 @@ async def remember_raw(
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
-        source_id = request.source_id or f"{request.capture_surface}:manual"
+        capture_surface = (
+            AGENT_DIARY_CAPTURE_SURFACE if request.diary else request.capture_surface
+        )
+        source_id = request.source_id or f"{capture_surface}:manual"
+        _validate_diary_request(
+            diary=request.diary,
+            agent_id=request.agent_id,
+            memory_scope=request.memory_scope,
+        )
+        await _authorize_project_filter(
+            org=org,
+            ctx=ctx,
+            project_id=request.project_id,
+            required_project_role=ProjectRole.CONTRIBUTOR,
+        )
         await _authorize_scope(
             org=org,
             ctx=ctx,
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
             required_project_role=ProjectRole.CONTRIBUTOR,
+        )
+        metadata = _diary_metadata(
+            metadata=request.metadata,
+            diary=request.diary,
+            agent_id=request.agent_id,
+            project_id=request.project_id,
         )
         memory = await remember_raw_memory(
             organization_id=str(org.id),
@@ -123,9 +197,9 @@ async def remember_raw(
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
             tags=request.tags,
-            metadata=request.metadata,
+            metadata=metadata,
             provenance=request.provenance,
-            capture_surface=request.capture_surface,
+            capture_surface=capture_surface,
         )
         return _raw_memory_response(memory)
     except ValueError as e:
@@ -153,11 +227,22 @@ async def recall_raw(
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
+        _validate_diary_request(
+            diary=request.diary,
+            agent_id=request.agent_id,
+            memory_scope=request.memory_scope,
+        )
         await _authorize_scope(
             org=org,
             ctx=ctx,
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
+            required_project_role=ProjectRole.VIEWER,
+        )
+        await _authorize_project_filter(
+            org=org,
+            ctx=ctx,
+            project_id=request.project_id,
             required_project_role=ProjectRole.VIEWER,
         )
         memories = await recall_raw_memory(
@@ -166,6 +251,8 @@ async def recall_raw(
             query=request.query,
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
+            agent_id=request.agent_id,
+            project_id=request.project_id,
             limit=request.limit,
         )
         return RawMemoryRecallResponse(

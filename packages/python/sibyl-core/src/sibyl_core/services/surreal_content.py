@@ -26,6 +26,7 @@ _CREATE_RECORD = {
     "crawled_documents": "CREATE crawled_documents CONTENT $record;",
     "raw_captures": "CREATE raw_captures CONTENT $record;",
 }
+AGENT_DIARY_CAPTURE_SURFACE = "agent_diary"
 
 
 class MemoryScope(StrEnum):
@@ -496,6 +497,8 @@ def _memory_scope_where(
     principal_id: str,
     memory_scope: MemoryScope,
     scope_key: str | None,
+    agent_id: str | None = None,
+    project_id: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     _validate_raw_memory_scope(memory_scope, scope_key)
     clauses = [
@@ -512,6 +515,15 @@ def _memory_scope_where(
     elif scope_key is not None:
         clauses.append("scope_key = $scope_key")
         params["scope_key"] = scope_key
+    if agent_id:
+        clauses.append("metadata.agent_id = $agent_id")
+        params["agent_id"] = agent_id
+    else:
+        clauses.append("(capture_surface != $agent_diary_surface OR capture_surface = NONE)")
+        params["agent_diary_surface"] = AGENT_DIARY_CAPTURE_SURFACE
+    if project_id:
+        clauses.append("metadata.project_id = $project_id")
+        params["project_id"] = project_id
     return " AND ".join(clauses), params
 
 
@@ -523,6 +535,8 @@ async def _recall_raw_memory_lexical(
     query: str,
     memory_scope: MemoryScope,
     scope_key: str | None,
+    agent_id: str | None,
+    project_id: str | None,
     limit: int,
 ) -> list[RawMemory]:
     where_clause, params = _memory_scope_where(
@@ -530,6 +544,8 @@ async def _recall_raw_memory_lexical(
         principal_id=principal_id,
         memory_scope=memory_scope,
         scope_key=scope_key,
+        agent_id=agent_id,
+        project_id=project_id,
     )
     rows = await _select_many(
         client,
@@ -598,6 +614,8 @@ async def recall_raw_memory(
     query: str,
     memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
     scope_key: str | None = None,
+    agent_id: str | None = None,
+    project_id: str | None = None,
     limit: int = 10,
 ) -> list[RawMemory]:
     normalized_query = query.strip()
@@ -610,6 +628,8 @@ async def recall_raw_memory(
         principal_id=principal_id,
         memory_scope=normalized_scope,
         scope_key=scope_key,
+        agent_id=agent_id,
+        project_id=project_id,
     )
     async with surreal_content_client() as client:
         try:
@@ -631,6 +651,8 @@ async def recall_raw_memory(
                 query=normalized_query,
                 memory_scope=normalized_scope,
                 scope_key=scope_key,
+                agent_id=agent_id,
+                project_id=project_id,
                 limit=limit,
             )
     return [_raw_memory_from_record(row) for row in rows]
@@ -801,6 +823,7 @@ def lexical_score(query_text: str, *fields: str | None) -> float:
 
 
 __all__ = [
+    "AGENT_DIARY_CAPTURE_SURFACE",
     "ContentChunk",
     "ContentDocument",
     "ContentSource",

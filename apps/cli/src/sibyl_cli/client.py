@@ -767,6 +767,9 @@ class SibylClient:
         source_id: str | None = None,
         memory_scope: str = "private",
         scope_key: str | None = None,
+        diary: bool = False,
+        agent_id: str | None = None,
+        project_id: str | None = None,
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         provenance: dict[str, Any] | None = None,
@@ -777,6 +780,7 @@ class SibylClient:
             "title": title,
             "raw_content": raw_content,
             "memory_scope": memory_scope,
+            "diary": diary,
             "tags": tags or [],
             "metadata": metadata or {},
             "provenance": provenance or {},
@@ -786,6 +790,10 @@ class SibylClient:
             data["source_id"] = source_id
         if scope_key:
             data["scope_key"] = scope_key
+        if agent_id:
+            data["agent_id"] = agent_id
+        if project_id:
+            data["project_id"] = project_id
         return await self._request("POST", "/memory/raw", json=data)
 
     async def recall_raw_memory(
@@ -794,16 +802,24 @@ class SibylClient:
         query: str,
         memory_scope: str = "private",
         scope_key: str | None = None,
+        diary: bool = False,
+        agent_id: str | None = None,
+        project_id: str | None = None,
         limit: int = 10,
     ) -> dict[str, Any]:
         """Recall verbatim raw memories."""
         data: dict[str, Any] = {
             "query": query,
             "memory_scope": memory_scope,
+            "diary": diary,
             "limit": limit,
         }
         if scope_key:
             data["scope_key"] = scope_key
+        if agent_id:
+            data["agent_id"] = agent_id
+        if project_id:
+            data["project_id"] = project_id
         return await self._request("POST", "/memory/raw/recall", json=data)
 
     async def context_pack(

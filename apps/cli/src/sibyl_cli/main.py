@@ -548,6 +548,8 @@ def recall_context(
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output full JSON"),
     raw: bool = typer.Option(False, "--raw", help="Recall verbatim raw memories"),
+    diary: bool = typer.Option(False, "--diary", help="Recall a private agent diary"),
+    agent: str | None = typer.Option(None, "--agent", help="Agent identity for diary recall"),
     memory_scope: str = typer.Option("private", "--scope", help="Raw memory scope"),
     scope_key: str | None = typer.Option(None, "--scope-key", help="Project/team/shared scope key"),
 ) -> None:
@@ -558,11 +560,17 @@ def recall_context(
     async def run_recall() -> None:
         try:
             async with get_client() as client:
-                if raw:
+                if diary and not agent:
+                    error("Provide --agent when using --diary.")
+                    raise typer.Exit(code=1)
+                if raw or diary:
                     data = await client.recall_raw_memory(
                         query=goal,
                         memory_scope=memory_scope,
                         scope_key=scope_key,
+                        diary=diary,
+                        agent_id=agent,
+                        project_id=effective_project if diary else None,
                         limit=limit,
                     )
                     if json_output:
@@ -637,6 +645,8 @@ def remember_memory(
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
     raw: bool = typer.Option(False, "--raw", help="Store verbatim raw memory only"),
+    diary: bool = typer.Option(False, "--diary", help="Store a private agent diary entry"),
+    agent: str | None = typer.Option(None, "--agent", help="Agent identity for diary entries"),
     source_id: str | None = typer.Option(None, "--source-id", help="Raw memory source ID"),
     memory_scope: str = typer.Option("private", "--scope", help="Raw memory scope"),
     scope_key: str | None = typer.Option(None, "--scope-key", help="Project/team/shared scope key"),
@@ -671,13 +681,19 @@ def remember_memory(
     async def run_remember() -> None:
         try:
             async with get_client() as client:
-                if raw:
+                if diary and not agent:
+                    error("Provide --agent when using --diary.")
+                    raise typer.Exit(code=1)
+                if raw or diary:
                     data = await client.remember_raw_memory(
                         title=title,
                         raw_content=resolved_content,
                         source_id=source_id,
                         memory_scope=memory_scope,
                         scope_key=scope_key,
+                        diary=diary,
+                        agent_id=agent,
+                        project_id=effective_project if diary else None,
                         tags=parsed_tags,
                         metadata=metadata,
                         provenance={"remember_kind": kind},
@@ -689,7 +705,8 @@ def remember_memory(
                         print_json(data)
                         return
 
-                    success(f"Remembered raw memory: {title}")
+                    label = f"diary entry for {agent}" if diary else "raw memory"
+                    success(f"Remembered {label}: {title}")
                     console.print(f"  [dim]ID: {memory_id}[/dim]")
                     return
 

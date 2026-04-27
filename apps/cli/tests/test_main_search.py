@@ -130,8 +130,74 @@ def test_recall_command_can_render_raw_memories(
         query="context packs",
         memory_scope="private",
         scope_key=None,
+        diary=False,
+        agent_id=None,
+        project_id=None,
         limit=5,
     )
     assert "Context packs" in result.stdout
     assert "memory_123" in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_recall_command_can_render_agent_diary(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.recall_raw_memory = AsyncMock(
+        return_value={
+            "query": "implementation state",
+            "memories": [
+                {
+                    "id": "memory_123",
+                    "title": "Nova diary",
+                    "source_id": "agent_diary:manual",
+                    "memory_scope": "private",
+                    "score": 1.0,
+                    "raw_content": "Keep private implementation state.",
+                }
+            ],
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["recall", "implementation state", "--diary", "--agent", "nova", "--limit", "5"],
+    )
+
+    assert result.exit_code == 0
+    mock_client.recall_raw_memory.assert_awaited_once_with(
+        query="implementation state",
+        memory_scope="private",
+        scope_key=None,
+        diary=True,
+        agent_id="nova",
+        project_id="project_123",
+        limit=5,
+    )
+    assert "Nova diary" in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_recall_command_diary_requires_agent(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.recall_raw_memory = AsyncMock(return_value={"memories": []})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["recall", "implementation state", "--diary"])
+
+    assert result.exit_code == 1
+    assert "Provide --agent" in result.stdout
+    mock_client.recall_raw_memory.assert_not_awaited()
     mock_resolve_project_from_cwd.assert_called_once_with()

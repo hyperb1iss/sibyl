@@ -250,6 +250,9 @@ def test_remember_command_can_store_raw_memory(
         source_id="cli:test",
         memory_scope="private",
         scope_key=None,
+        diary=False,
+        agent_id=None,
+        project_id=None,
         tags=["raw", "memory"],
         metadata={
             "capture_mode": "remember",
@@ -261,6 +264,72 @@ def test_remember_command_can_store_raw_memory(
         capture_surface="cli",
     )
     assert "Remembered raw memory" in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_remember_command_can_store_agent_diary(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.remember_raw_memory = AsyncMock(return_value={"id": "memory_123"})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "remember",
+            "Nova diary",
+            "Keep private implementation state.",
+            "--diary",
+            "--agent",
+            "nova",
+        ],
+    )
+
+    assert result.exit_code == 0
+    mock_client.remember_raw_memory.assert_awaited_once_with(
+        title="Nova diary",
+        raw_content="Keep private implementation state.",
+        source_id=None,
+        memory_scope="private",
+        scope_key=None,
+        diary=True,
+        agent_id="nova",
+        project_id="project_123",
+        tags=None,
+        metadata={
+            "capture_mode": "remember",
+            "capture_surface": "cli",
+            "remember_kind": "episode",
+            "project_id": "project_123",
+        },
+        provenance={"remember_kind": "episode"},
+        capture_surface="cli",
+    )
+    assert "Remembered diary entry for nova" in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_remember_command_diary_requires_agent(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.remember_raw_memory = AsyncMock(return_value={"id": "memory_123"})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["remember", "Diary", "state", "--diary"])
+
+    assert result.exit_code == 1
+    assert "Provide --agent" in result.stdout
+    mock_client.remember_raw_memory.assert_not_awaited()
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 

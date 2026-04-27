@@ -87,6 +87,110 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_remember_raw_diary_sets_agent_metadata_and_surface() -> None:
+    org = _org()
+    ctx = _ctx()
+    with (
+        patch("sibyl.api.routes.memory.get_project_record_by_graph_id", AsyncMock()) as get_project,
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch(
+            "sibyl.api.routes.memory.remember_raw_memory",
+            AsyncMock(
+                return_value=_memory(
+                    organization_id=str(org.id),
+                    source_id="agent_diary:manual",
+                    capture_surface="agent_diary",
+                    metadata={
+                        "agent_id": "nova",
+                        "memory_kind": "agent_diary",
+                        "project_id": "project_123",
+                    },
+                )
+            ),
+        ) as remember,
+    ):
+        response = await remember_raw(
+            RawMemoryRememberRequest(
+                title="Nova diary",
+                raw_content="Keep track of private implementation state.",
+                diary=True,
+                agent_id="nova",
+                project_id="project_123",
+            ),
+            org=org,
+            ctx=ctx,
+        )
+
+    get_project.assert_awaited_once_with(
+        organization_id=org.id,
+        graph_project_id="project_123",
+    )
+    verify.assert_awaited_once_with(
+        None,
+        ctx,
+        "project_123",
+        required_role=ProjectRole.CONTRIBUTOR,
+    )
+    remember.assert_awaited_once_with(
+        organization_id=str(org.id),
+        principal_id="user-123",
+        source_id="agent_diary:manual",
+        raw_content="Keep track of private implementation state.",
+        title="Nova diary",
+        memory_scope="private",
+        scope_key=None,
+        tags=[],
+        metadata={
+            "agent_id": "nova",
+            "memory_kind": "agent_diary",
+            "project_id": "project_123",
+        },
+        provenance={},
+        capture_surface="agent_diary",
+    )
+    assert response.metadata["agent_id"] == "nova"
+    assert response.capture_surface == "agent_diary"
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_diary_requires_agent_id() -> None:
+    with (
+        patch("sibyl.api.routes.memory.remember_raw_memory", AsyncMock()) as remember,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await remember_raw(
+            RawMemoryRememberRequest(raw_content="private state", diary=True),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    assert exc.value.status_code == 400
+    remember.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_diary_requires_private_scope() -> None:
+    with (
+        patch("sibyl.api.routes.memory.remember_raw_memory", AsyncMock()) as remember,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await remember_raw(
+            RawMemoryRememberRequest(
+                raw_content="private state",
+                diary=True,
+                agent_id="nova",
+                memory_scope="project",
+                scope_key="project_123",
+            ),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    assert exc.value.status_code == 400
+    remember.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_remember_raw_defaults_source_id_from_surface() -> None:
     org = _org()
     with patch(
@@ -155,11 +259,93 @@ async def test_recall_raw_returns_scoped_memories() -> None:
         query="raw memory",
         memory_scope="private",
         scope_key=None,
+        agent_id=None,
+        project_id=None,
         limit=5,
     )
     assert response.query == "raw memory"
     assert response.limit == 5
     assert [memory.id for memory in response.memories] == ["memory-1"]
+
+
+@pytest.mark.asyncio
+async def test_recall_raw_diary_filters_agent_and_project() -> None:
+    org = _org()
+    ctx = _ctx()
+    with (
+        patch("sibyl.api.routes.memory.get_project_record_by_graph_id", AsyncMock()) as get_project,
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock(return_value=[])) as recall,
+    ):
+        await recall_raw(
+            RawMemoryRecallRequest(
+                query="implementation state",
+                diary=True,
+                agent_id="nova",
+                project_id="project_123",
+            ),
+            org=org,
+            ctx=ctx,
+        )
+
+    get_project.assert_awaited_once_with(
+        organization_id=org.id,
+        graph_project_id="project_123",
+    )
+    verify.assert_awaited_once_with(
+        None,
+        ctx,
+        "project_123",
+        required_role=ProjectRole.VIEWER,
+    )
+    recall.assert_awaited_once_with(
+        organization_id=str(org.id),
+        principal_id="user-123",
+        query="implementation state",
+        memory_scope="private",
+        scope_key=None,
+        agent_id="nova",
+        project_id="project_123",
+        limit=10,
+    )
+
+
+@pytest.mark.asyncio
+async def test_recall_raw_diary_requires_agent_id() -> None:
+    with (
+        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock()) as recall,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await recall_raw(
+            RawMemoryRecallRequest(query="implementation state", diary=True),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    assert exc.value.status_code == 400
+    recall.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recall_raw_diary_requires_private_scope() -> None:
+    with (
+        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock()) as recall,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await recall_raw(
+            RawMemoryRecallRequest(
+                query="implementation state",
+                diary=True,
+                agent_id="nova",
+                memory_scope="project",
+                scope_key="project_123",
+            ),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    assert exc.value.status_code == 400
+    recall.assert_not_awaited()
 
 
 @pytest.mark.asyncio
