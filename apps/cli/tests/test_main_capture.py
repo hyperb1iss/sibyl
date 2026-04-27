@@ -218,6 +218,52 @@ def test_remember_command_reads_body_from_stdin(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_remember_command_can_store_raw_memory(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.remember_raw_memory = AsyncMock(return_value={"id": "memory_123"})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "remember",
+            "Raw Sibyl note",
+            "Keep verbatim notes before reflection.",
+            "--raw",
+            "--source-id",
+            "cli:test",
+            "--tags",
+            "raw,memory",
+        ],
+    )
+
+    assert result.exit_code == 0
+    mock_client.remember_raw_memory.assert_awaited_once_with(
+        title="Raw Sibyl note",
+        raw_content="Keep verbatim notes before reflection.",
+        source_id="cli:test",
+        memory_scope="private",
+        scope_key=None,
+        tags=["raw", "memory"],
+        metadata={
+            "capture_mode": "remember",
+            "capture_surface": "cli",
+            "remember_kind": "episode",
+            "project_id": "project_123",
+        },
+        provenance={"remember_kind": "episode"},
+        capture_surface="cli",
+    )
+    assert "Remembered raw memory" in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_from_path")
 @patch("sibyl_cli.main.get_client")
 def test_remember_command_project_option_overrides_path_context(

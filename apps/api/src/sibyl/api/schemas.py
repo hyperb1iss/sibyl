@@ -129,6 +129,68 @@ class RawCaptureReviewUpdate(BaseModel):
     )
 
 
+MemoryScopeLiteral = Literal[
+    "private",
+    "delegated",
+    "project",
+    "team",
+    "organization",
+    "shared",
+    "public",
+]
+
+
+class RawMemoryRememberRequest(BaseModel):
+    """Request to store verbatim memory before extraction."""
+
+    title: str = Field(default="", max_length=300, description="Optional human title")
+    raw_content: str = Field(..., min_length=1, max_length=500000, description="Verbatim memory")
+    source_id: str | None = Field(default=None, description="Stable source/provenance ID")
+    memory_scope: MemoryScopeLiteral = Field(default="private", description="Retrieval scope")
+    scope_key: str | None = Field(default=None, description="Project/team/shared scope key")
+    tags: list[str] = Field(default_factory=list, description="Searchable tags")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Auxiliary metadata")
+    provenance: dict[str, Any] = Field(default_factory=dict, description="Source provenance")
+    capture_surface: str = Field(default="api", description="Capture surface")
+
+
+class RawMemoryRecallRequest(BaseModel):
+    """Request to recall raw memories through a scoped search."""
+
+    query: str = Field(..., min_length=1, description="Full-text recall query")
+    memory_scope: MemoryScopeLiteral = Field(default="private", description="Retrieval scope")
+    scope_key: str | None = Field(default=None, description="Project/team/shared scope key")
+    limit: int = Field(default=10, ge=1, le=50, description="Maximum memories to return")
+
+
+class RawMemoryResponse(BaseModel):
+    """Raw memory response."""
+
+    id: str = Field(..., description="Raw memory ID")
+    organization_id: str = Field(..., description="Organization ID")
+    source_id: str = Field(..., description="Source/provenance ID")
+    principal_id: str = Field(..., description="Principal who captured or owns the memory")
+    memory_scope: MemoryScopeLiteral = Field(..., description="Retrieval scope")
+    scope_key: str | None = Field(default=None, description="Project/team/shared scope key")
+    title: str = Field(default="", description="Human title")
+    raw_content: str = Field(..., description="Verbatim memory")
+    tags: list[str] = Field(default_factory=list, description="Searchable tags")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Auxiliary metadata")
+    provenance: dict[str, Any] = Field(default_factory=dict, description="Source provenance")
+    capture_surface: str | None = Field(default=None, description="Capture surface")
+    captured_at: datetime | None = Field(default=None, description="Capture timestamp")
+    created_at: datetime | None = Field(default=None, description="Creation timestamp")
+    score: float = Field(default=0.0, description="Recall score")
+
+
+class RawMemoryRecallResponse(BaseModel):
+    """Scoped raw memory recall response."""
+
+    query: str = Field(..., description="Recall query")
+    memories: list[RawMemoryResponse]
+    limit: int
+
+
 # =============================================================================
 # Session Bundle Schemas
 # =============================================================================

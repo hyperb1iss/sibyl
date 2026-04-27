@@ -202,6 +202,33 @@ def _print_reflection_persistence_summary(
         console.print(f"  [dim]ID: {persisted_id}[/dim]")
 
 
+def _print_raw_memory_results(memories: list[object]) -> None:
+    if not memories:
+        info("No raw memories found")
+        return
+
+    console.print(f"\n[bold]Found {len(memories)} raw memories:[/bold]\n")
+    for item in memories:
+        if not isinstance(item, dict):
+            continue
+        memory = cast("dict[str, object]", item)
+        title = str(memory.get("title") or "Untitled raw memory")
+        source_id = str(memory.get("source_id") or "")
+        memory_id = str(memory.get("id") or "")
+        content = str(memory.get("raw_content") or "")
+        score = memory.get("score")
+        scope = str(memory.get("memory_scope") or "private")
+
+        source_label = f" [dim]({source_id})[/dim]" if source_id else ""
+        console.print(f"  [{NEON_CYAN}]{title}[/{NEON_CYAN}]{source_label}")
+        if content:
+            console.print(f"    {_format_search_preview(content)}", soft_wrap=True)
+        score_label = f" score={score}" if score else ""
+        console.print(f"    [dim]scope={scope}{score_label}[/dim]")
+        console.print(f"    [{CORAL}]{memory_id}[/{CORAL}]")
+        console.print()
+
+
 def _handle_client_error(e: SibylClientError) -> None:
     """Handle client errors with helpful messages and exit with code 1."""
     if "Cannot connect" in str(e):
@@ -515,6 +542,9 @@ def recall_context(
         help="Include one-hop related graph context",
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output full JSON"),
+    raw: bool = typer.Option(False, "--raw", help="Recall verbatim raw memories"),
+    memory_scope: str = typer.Option("private", "--scope", help="Raw memory scope"),
+    scope_key: str | None = typer.Option(None, "--scope-key", help="Project/team/shared scope key"),
 ) -> None:
     """Recall a compact working context pack for an agent."""
     effective_project = project or (None if all_projects else resolve_project_from_cwd())
@@ -523,6 +553,20 @@ def recall_context(
     async def run_recall() -> None:
         try:
             async with get_client() as client:
+                if raw:
+                    data = await client.recall_raw_memory(
+                        query=goal,
+                        memory_scope=memory_scope,
+                        scope_key=scope_key,
+                        limit=limit,
+                    )
+                    if json_output:
+                        print_json(data)
+                        return
+                    memories = data.get("memories", [])
+                    _print_raw_memory_results(memories if isinstance(memories, list) else [])
+                    return
+
                 pack = await client.context_pack(
                     goal=goal,
                     intent=intent,
@@ -586,6 +630,10 @@ def remember_memory(
         help="Wait until the new memory is persisted and ready for direct retrieval",
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    raw: bool = typer.Option(False, "--raw", help="Store verbatim raw memory only"),
+    source_id: str | None = typer.Option(None, "--source-id", help="Raw memory source ID"),
+    memory_scope: str = typer.Option("private", "--scope", help="Raw memory scope"),
+    scope_key: str | None = typer.Option(None, "--scope-key", help="Project/team/shared scope key"),
 ) -> None:
     """Remember a decision, plan, idea, claim, artifact, session, or learning."""
 
@@ -617,6 +665,28 @@ def remember_memory(
     async def run_remember() -> None:
         try:
             async with get_client() as client:
+                if raw:
+                    data = await client.remember_raw_memory(
+                        title=title,
+                        raw_content=resolved_content,
+                        source_id=source_id,
+                        memory_scope=memory_scope,
+                        scope_key=scope_key,
+                        tags=parsed_tags,
+                        metadata=metadata,
+                        provenance={"remember_kind": kind},
+                        capture_surface=surface,
+                    )
+
+                    memory_id = data.get("id", "unknown")
+                    if json_output:
+                        print_json(data)
+                        return
+
+                    success(f"Remembered raw memory: {title}")
+                    console.print(f"  [dim]ID: {memory_id}[/dim]")
+                    return
+
                 resolved_links = await _resolve_capture_links(
                     client=client,
                     project=effective_project,

@@ -759,6 +759,53 @@ class SibylClient:
 
         return await self._request("POST", "/search", json=data)
 
+    async def remember_raw_memory(
+        self,
+        *,
+        title: str,
+        raw_content: str,
+        source_id: str | None = None,
+        memory_scope: str = "private",
+        scope_key: str | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        provenance: dict[str, Any] | None = None,
+        capture_surface: str = "cli",
+    ) -> dict[str, Any]:
+        """Store verbatim raw memory."""
+        data: dict[str, Any] = {
+            "title": title,
+            "raw_content": raw_content,
+            "memory_scope": memory_scope,
+            "tags": tags or [],
+            "metadata": metadata or {},
+            "provenance": provenance or {},
+            "capture_surface": capture_surface,
+        }
+        if source_id:
+            data["source_id"] = source_id
+        if scope_key:
+            data["scope_key"] = scope_key
+        return await self._request("POST", "/memory/raw", json=data)
+
+    async def recall_raw_memory(
+        self,
+        *,
+        query: str,
+        memory_scope: str = "private",
+        scope_key: str | None = None,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        """Recall verbatim raw memories."""
+        data: dict[str, Any] = {
+            "query": query,
+            "memory_scope": memory_scope,
+            "limit": limit,
+        }
+        if scope_key:
+            data["scope_key"] = scope_key
+        return await self._request("POST", "/memory/raw/recall", json=data)
+
     async def context_pack(
         self,
         goal: str,
