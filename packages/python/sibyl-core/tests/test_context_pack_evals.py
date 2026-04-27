@@ -170,6 +170,7 @@ async def test_context_pack_fixture_passes_coding_handoff_requirements() -> None
     assert result.metrics["required_item_coverage"] == 1.0
     assert result.metrics["items"] == 4
     assert result.metrics["facet_order_matches"] is True
+    assert result.metrics["source_metadata_coverage"] == 1.0
 
 
 @pytest.mark.asyncio
@@ -544,6 +545,7 @@ def test_context_pack_fixture_reports_missing_source_metadata() -> None:
 
     assert not result.passed
     assert result.failures == ["items missing source metadata: unsourced-memory"]
+    assert result.metrics["source_metadata_coverage"] == 0.0
 
 
 def test_context_pack_fixture_reports_facet_order_mismatch() -> None:
@@ -793,6 +795,15 @@ def test_context_pack_eval_report_exposes_pass_rate_metrics() -> None:
 
     assert payload["metrics"]["cases"] == 1
     assert payload["metrics"]["pass_rate"] == 1.0
+    assert payload["metrics"]["avg_items"] == 0.0
+    assert payload["metrics"]["max_items"] == 0.0
+    assert payload["metrics"]["avg_markdown_chars"] > 0
+    assert payload["metrics"]["max_markdown_chars"] == payload["metrics"]["avg_markdown_chars"]
+    assert payload["metrics"]["avg_estimated_tokens"] > 0
+    assert payload["metrics"]["max_estimated_tokens"] == payload["metrics"]["avg_estimated_tokens"]
+    assert payload["metrics"]["source_metadata_coverage"] == 1.0
+    assert payload["metrics"]["facet_order_match_rate"] == 1.0
+    assert payload["metrics"]["forbidden_term_matches"] == 0
     assert payload["per_case"][0]["passed"] is True
     assert payload["per_case"][0]["metrics"]["estimated_tokens"] > 0
     assert payload["per_case"][0]["intent"] == "build"

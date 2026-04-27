@@ -80,6 +80,32 @@ class ContextPackCaseResult:
     error: str | None = None
 
 
+def _numeric_case_values(cases: list[ContextPackCaseResult], key: str) -> list[float]:
+    values: list[float] = []
+    for case in cases:
+        value = case.result.metrics.get(key)
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            values.append(float(value))
+    return values
+
+
+def _average(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _max(values: list[float]) -> float:
+    return max(values) if values else 0.0
+
+
+def _bool_case_rate(cases: list[ContextPackCaseResult], key: str) -> float:
+    values = [
+        case.result.metrics[key]
+        for case in cases
+        if isinstance(case.result.metrics.get(key), bool)
+    ]
+    return sum(1 for value in values if value) / len(values) if values else 0.0
+
+
 @dataclass
 class ContextPackEvalReport:
     """Complete context-pack benchmark report."""
@@ -99,6 +125,11 @@ class ContextPackEvalReport:
         latency_ms = (
             sum(case.latency_ms for case in self.cases) / case_count if case_count else 0.0
         )
+        item_counts = _numeric_case_values(self.cases, "items")
+        markdown_chars = _numeric_case_values(self.cases, "markdown_chars")
+        estimated_tokens = _numeric_case_values(self.cases, "estimated_tokens")
+        source_metadata_coverage = _numeric_case_values(self.cases, "source_metadata_coverage")
+        forbidden_term_matches = _numeric_case_values(self.cases, "forbidden_term_matches")
         return {
             "timestamp": self.timestamp,
             "label": self.label,
@@ -110,6 +141,15 @@ class ContextPackEvalReport:
                 "failed": case_count - passed_cases,
                 "pass_rate": passed_cases / case_count if case_count else 0.0,
                 "latency_ms": latency_ms,
+                "avg_items": _average(item_counts),
+                "max_items": _max(item_counts),
+                "avg_markdown_chars": _average(markdown_chars),
+                "max_markdown_chars": _max(markdown_chars),
+                "avg_estimated_tokens": _average(estimated_tokens),
+                "max_estimated_tokens": _max(estimated_tokens),
+                "source_metadata_coverage": _average(source_metadata_coverage),
+                "facet_order_match_rate": _bool_case_rate(self.cases, "facet_order_matches"),
+                "forbidden_term_matches": sum(forbidden_term_matches),
             },
             "per_case": [
                 {
@@ -268,10 +308,10 @@ def evaluate_context_pack(
     if forbidden_terms:
         failures.append(f"forbidden terms present: {', '.join(forbidden_terms)}")
 
-    if fixture.require_source_metadata:
-        unsourced = sorted(item.id for item in pack.items if not _has_source_metadata(item))
-        if unsourced:
-            failures.append(f"items missing source metadata: {', '.join(unsourced)}")
+    pack_items = pack.items
+    unsourced = sorted(item.id for item in pack_items if not _has_source_metadata(item))
+    if fixture.require_source_metadata and unsourced:
+        failures.append(f"items missing source metadata: {', '.join(unsourced)}")
 
     items_by_id = {item.id: item for item in pack.items}
     metadata_checks = 0
@@ -299,6 +339,9 @@ def evaluate_context_pack(
         "facet_order_matches": facet_order_matches,
         "markdown_chars": len(markdown),
         "estimated_tokens": estimated_tokens,
+        "source_metadata_coverage": (
+            1.0 if not pack_items else (len(pack_items) - len(unsourced)) / len(pack_items)
+        ),
         "required_item_coverage": (
             1.0
             if not fixture.required_item_ids
