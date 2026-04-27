@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
-ProfileName = Literal["smoke", "acceptance"]
+ProfileName = Literal["smoke", "acceptance", "context-pack"]
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,12 @@ PROFILE_THRESHOLDS: dict[ProfileName, dict[str, MetricThreshold]] = {
         "ndcg@10": MetricThreshold(minimum=0.30),
         "mrr": MetricThreshold(minimum=0.25),
         "latency_ms": MetricThreshold(maximum=3000.0),
+    },
+    "context-pack": {
+        "pass_rate": MetricThreshold(minimum=1.0),
+        "source_metadata_coverage": MetricThreshold(minimum=1.0),
+        "facet_order_match_rate": MetricThreshold(minimum=1.0),
+        "forbidden_term_matches": MetricThreshold(maximum=0.0),
     },
 }
 
@@ -157,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("report", type=Path, help="Saved evaluation report JSON.")
     parser.add_argument(
         "--profile",
-        choices=("smoke", "acceptance"),
+        choices=("smoke", "acceptance", "context-pack"),
         default="acceptance",
         help="Named threshold profile to enforce.",
     )

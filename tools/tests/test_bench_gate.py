@@ -65,6 +65,40 @@ def test_evaluate_report_acceptance_profile_passes() -> None:
     assert failures == []
 
 
+def test_evaluate_report_context_pack_profile_passes() -> None:
+    report = {
+        "metrics": {
+            "pass_rate": 1.0,
+            "source_metadata_coverage": 1.0,
+            "facet_order_match_rate": 1.0,
+            "forbidden_term_matches": 0.0,
+        },
+        "metadata": {"store": "surreal"},
+    }
+
+    failures = eval_gate.evaluate_report(report, profile="context-pack")
+
+    assert failures == []
+
+
+def test_evaluate_report_context_pack_profile_blocks_leaks() -> None:
+    report = {
+        "metrics": {
+            "pass_rate": 0.95,
+            "source_metadata_coverage": 0.75,
+            "facet_order_match_rate": 0.50,
+            "forbidden_term_matches": 1.0,
+        },
+    }
+
+    failures = eval_gate.evaluate_report(report, profile="context-pack")
+
+    assert "metric 'pass_rate' below minimum 1.0000: 0.9500" in failures
+    assert "metric 'source_metadata_coverage' below minimum 1.0000: 0.7500" in failures
+    assert "metric 'facet_order_match_rate' below minimum 1.0000: 0.5000" in failures
+    assert "metric 'forbidden_term_matches' above maximum 0.0000: 1.0000" in failures
+
+
 def test_evaluate_report_reports_threshold_and_metadata_failures() -> None:
     report = {
         "metrics": {
