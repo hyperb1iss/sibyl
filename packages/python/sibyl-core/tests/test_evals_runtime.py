@@ -157,6 +157,7 @@ async def test_run_context_pack_case_posts_pack_request() -> None:
             goal="handoff native memory implementation",
             domain="sibyl",
             project="project-sibyl",
+            agent_id="nova",
             limit=8,
             include_related=False,
             fixture=ContextPackFixture(
@@ -181,6 +182,7 @@ async def test_run_context_pack_case_posts_pack_request() -> None:
                 "related_limit": 3,
                 "domain": "sibyl",
                 "project": "project-sibyl",
+                "agent_id": "nova",
             },
         )
     ]

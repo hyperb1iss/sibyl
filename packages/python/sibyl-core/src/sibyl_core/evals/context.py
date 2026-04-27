@@ -58,6 +58,7 @@ class ContextPackEvalCase:
     layer: ContextLayer = ContextLayer.RECALL
     domain: str | None = None
     project: str | None = None
+    agent_id: str | None = None
     limit: int = 24
     include_related: bool = True
     related_limit: int = 3
@@ -108,6 +109,11 @@ class ContextPackEvalReport:
                 {
                     "name": case.case.name,
                     "goal": case.case.goal,
+                    "intent": case.case.intent.value,
+                    "layer": case.case.layer.value,
+                    "domain": case.case.domain,
+                    "project": case.case.project,
+                    "agent_id": case.case.agent_id,
                     "fixture": case.result.fixture,
                     "passed": case.result.passed and case.error is None,
                     "error": case.error,
@@ -344,6 +350,7 @@ def _case_from_dict(data: dict[str, Any]) -> ContextPackEvalCase:
         layer=_layer_from_value(data.get("layer", ContextLayer.RECALL)),
         domain=data.get("domain"),
         project=data.get("project"),
+        agent_id=data.get("agent_id"),
         limit=int(data.get("limit", 24)),
         include_related=bool(data.get("include_related", True)),
         related_limit=int(data.get("related_limit", 3)),

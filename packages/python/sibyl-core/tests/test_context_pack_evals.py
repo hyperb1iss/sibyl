@@ -24,7 +24,11 @@ from sibyl_core.models.context import (
     ContextPack,
     ContextSection,
 )
-from sibyl_core.services.surreal_content import MemoryScope, RawMemory
+from sibyl_core.services.surreal_content import (
+    AGENT_DIARY_CAPTURE_SURFACE,
+    MemoryScope,
+    RawMemory,
+)
 from sibyl_core.tools.context import compile_context
 from sibyl_core.tools.responses import SearchResponse, SearchResult
 
@@ -58,6 +62,8 @@ def _raw_memory(
     memory_scope: MemoryScope = MemoryScope.PRIVATE,
     scope_key: str | None = None,
     score: float = 0.8,
+    metadata: dict[str, Any] | None = None,
+    capture_surface: str = "cli",
 ) -> RawMemory:
     return RawMemory(
         id=memory_id,
@@ -69,9 +75,9 @@ def _raw_memory(
         title=f"Raw {memory_id}",
         raw_content=f"Raw {memory_id} content anchors scoped context recall.",
         tags=["fixture"],
-        metadata={"source_name": "eval-fixture"},
+        metadata={"source_name": "eval-fixture", **(metadata or {})},
         provenance={"message_id": memory_id},
-        capture_surface="cli",
+        capture_surface=capture_surface,
         captured_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
         created_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
         score=score,
@@ -209,6 +215,67 @@ async def test_context_pack_fixture_passes_raw_memory_scope_requirements() -> No
             require_source_metadata=True,
         ),
     )
+
+    assert result.passed, result.failures
+    assert result.metrics["metadata_requirement_coverage"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_context_pack_fixture_passes_agent_diary_requirements() -> None:
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
+        if kwargs.get("agent_id") == "nova":
+            return [
+                _raw_memory(
+                    "nova-diary-1",
+                    score=0.95,
+                    metadata={
+                        "agent_id": "nova",
+                        "memory_kind": "agent_diary",
+                        "project_id": "project_123",
+                    },
+                    capture_surface=AGENT_DIARY_CAPTURE_SURFACE,
+                )
+            ]
+        if kwargs["memory_scope"] == "private":
+            return [_raw_memory("private-1", score=0.8)]
+        return []
+
+    case = ContextPackEvalCase(
+        name="agent-diary-opt-in",
+        goal="handoff the current implementation stance",
+        project="project_123",
+        agent_id="nova",
+        fixture=ContextPackFixture(
+            name="agent-diary-opt-in",
+            required_item_ids={"raw_memory:nova-diary-1", "raw_memory:private-1"},
+            forbidden_item_ids={"raw_memory:other-agent-diary"},
+            required_facets={ContextFacet.RECENT_MEMORY},
+            required_item_metadata={
+                "raw_memory:nova-diary-1": {
+                    "agent_id": "nova",
+                    "memory_kind": "agent_diary",
+                    "project_id": "project_123",
+                }
+            },
+            require_source_metadata=True,
+        ),
+    )
+    pack = await compile_context(
+        case.goal,
+        intent=case.intent,
+        layer=case.layer,
+        project=case.project,
+        principal_id="user-123",
+        agent_id=case.agent_id,
+        organization_id="org-123",
+        search_fn=fake_search,
+        raw_memory_recall_fn=fake_raw_recall,
+    )
+
+    result = evaluate_context_pack(pack, case.fixture)
 
     assert result.passed, result.failures
     assert result.metrics["metadata_requirement_coverage"] == 1.0
@@ -420,6 +487,7 @@ def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
                         "layer": "wake",
                         "domain": "sibyl",
                         "project": "project-sibyl",
+                        "agent_id": "nova",
                         "limit": 12,
                         "include_related": False,
                         "fixture": {
@@ -451,6 +519,7 @@ def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
     assert cases[0].name == "coding-handoff"
     assert cases[0].goal == "handoff native memory implementation"
     assert cases[0].layer == ContextLayer.WAKE
+    assert cases[0].agent_id == "nova"
     assert cases[0].fixture.required_item_ids == {"decision-source-law"}
     assert cases[0].fixture.forbidden_item_ids == {"private-health-note"}
     assert cases[0].fixture.required_layer == ContextLayer.WAKE
@@ -542,3 +611,6 @@ def test_context_pack_eval_report_exposes_pass_rate_metrics() -> None:
     assert payload["metrics"]["cases"] == 1
     assert payload["metrics"]["pass_rate"] == 1.0
     assert payload["per_case"][0]["passed"] is True
+    assert payload["per_case"][0]["intent"] == "build"
+    assert payload["per_case"][0]["layer"] == "recall"
+    assert payload["per_case"][0]["agent_id"] is None

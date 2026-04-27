@@ -312,6 +312,8 @@ class EvalRunner:
             payload["domain"] = case.domain
         if case.project:
             payload["project"] = case.project
+        if case.agent_id:
+            payload["agent_id"] = case.agent_id
         return payload
 
     async def run_context_pack_case(self, case: ContextPackEvalCase) -> ContextPackCaseResult:
