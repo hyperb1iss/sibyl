@@ -22,8 +22,34 @@ DEFAULT_METRICS = (
     "mrr",
     "pass_rate",
     "latency_ms",
+    "avg_estimated_tokens",
+    "max_estimated_tokens",
+    "avg_markdown_chars",
+    "max_markdown_chars",
+    "source_metadata_coverage",
+    "facet_order_match_rate",
+    "forbidden_term_matches",
     "elapsed_seconds",
 )
+
+LOWER_IS_BETTER = {
+    "latency_ms",
+    "elapsed_seconds",
+    "avg_estimated_tokens",
+    "max_estimated_tokens",
+    "avg_markdown_chars",
+    "max_markdown_chars",
+    "forbidden_term_matches",
+}
+
+ONE_DECIMAL_METRICS = {
+    "latency_ms",
+    "elapsed_seconds",
+    "avg_estimated_tokens",
+    "max_estimated_tokens",
+    "avg_markdown_chars",
+    "max_markdown_chars",
+}
 
 
 def _load_report(path: Path) -> dict[str, Any]:
@@ -62,7 +88,7 @@ def _report_name(report: dict[str, Any], fallback: str) -> str:
 def _format_delta(metric: str, delta: float) -> str:
     sign = "+" if delta >= 0 else "-"
     magnitude = abs(delta)
-    if metric in {"latency_ms", "elapsed_seconds"}:
+    if metric in ONE_DECIMAL_METRICS:
         return f"{sign}{magnitude:.1f}"
     return f"{sign}{magnitude:.4f}"
 
@@ -86,12 +112,16 @@ def main() -> None:
 
     baseline_name = _report_name(baseline_report, args.baseline.stem)
     candidate_name = _report_name(candidate_report, args.candidate.stem)
+    metric_width = max(16, *(len(metric) for metric in args.metrics))
 
     print(f"\nComparing {candidate_name} against {baseline_name}\n")
     print(
-        f"{'metric':<16} {'baseline':>12} {'candidate':>12} {'delta':>12} {'winner':>12}"
+        f"{'metric':<{metric_width}} {'baseline':>12} {'candidate':>12} "
+        f"{'delta':>12} {'winner':>12}"
     )
-    print(f"{'-' * 16} {'-' * 12} {'-' * 12} {'-' * 12} {'-' * 12}")
+    print(
+        f"{'-' * metric_width} {'-' * 12} {'-' * 12} {'-' * 12} {'-' * 12}"
+    )
 
     for metric in args.metrics:
         if metric not in baseline_metrics or metric not in candidate_metrics:
@@ -100,7 +130,7 @@ def main() -> None:
         baseline_value = baseline_metrics[metric]
         candidate_value = candidate_metrics[metric]
         delta = candidate_value - baseline_value
-        lower_is_better = metric in {"latency_ms", "elapsed_seconds"}
+        lower_is_better = metric in LOWER_IS_BETTER
 
         if delta == 0:
             winner = "tie"
@@ -109,7 +139,7 @@ def main() -> None:
         else:
             winner = candidate_name if delta > 0 else baseline_name
 
-        if metric in {"latency_ms", "elapsed_seconds"}:
+        if metric in ONE_DECIMAL_METRICS:
             baseline_display = f"{baseline_value:.1f}"
             candidate_display = f"{candidate_value:.1f}"
         else:
@@ -117,7 +147,7 @@ def main() -> None:
             candidate_display = f"{candidate_value:.4f}"
 
         print(
-            f"{metric:<16} {baseline_display:>12} {candidate_display:>12} "
+            f"{metric:<{metric_width}} {baseline_display:>12} {candidate_display:>12} "
             f"{_format_delta(metric, delta):>12} {winner:>12}"
         )
 
