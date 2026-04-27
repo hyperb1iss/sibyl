@@ -35,6 +35,7 @@ class ContextPackFixture:
     required_item_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
     max_items: int | None = None
     max_markdown_chars: int | None = None
+    max_latency_ms: float | None = None
     require_source_metadata: bool = False
 
 
@@ -332,6 +333,7 @@ def _fixture_from_dict(name: str, data: dict[str, Any]) -> ContextPackFixture:
         required_item_metadata=_metadata_requirements(data.get("required_item_metadata")),
         max_items=data.get("max_items"),
         max_markdown_chars=data.get("max_markdown_chars"),
+        max_latency_ms=data.get("max_latency_ms"),
         require_source_metadata=bool(data.get("require_source_metadata", False)),
     )
 

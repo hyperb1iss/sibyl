@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -316,6 +316,21 @@ class EvalRunner:
             payload["agent_id"] = case.agent_id
         return payload
 
+    @staticmethod
+    def _apply_context_pack_latency_guard(
+        result: ContextPackEvalResult,
+        case: ContextPackEvalCase,
+        latency_ms: float,
+    ) -> ContextPackEvalResult:
+        metrics = {**result.metrics, "latency_ms": latency_ms}
+        if case.fixture.max_latency_ms is None or latency_ms <= case.fixture.max_latency_ms:
+            return replace(result, metrics=metrics)
+        failures = [
+            *result.failures,
+            f"latency too high: {latency_ms:.1f} ms > {case.fixture.max_latency_ms:.1f} ms",
+        ]
+        return replace(result, passed=False, failures=failures, metrics=metrics)
+
     async def run_context_pack_case(self, case: ContextPackEvalCase) -> ContextPackCaseResult:
         """Run one context-pack fixture against the live API."""
 
@@ -339,10 +354,12 @@ class EvalRunner:
                 failures=[error],
             )
 
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        result = self._apply_context_pack_latency_guard(result, case, latency_ms)
         return ContextPackCaseResult(
             case=case,
             result=result,
-            latency_ms=(time.perf_counter() - start_time) * 1000,
+            latency_ms=latency_ms,
             error=error,
         )
 

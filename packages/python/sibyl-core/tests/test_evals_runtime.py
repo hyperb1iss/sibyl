@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from sibyl_core.evals import (
@@ -186,6 +188,38 @@ async def test_run_context_pack_case_posts_pack_request() -> None:
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_context_pack_case_enforces_latency_budget() -> None:
+    runner = EvalRunner(EvalConfig(save_results=False))
+    runner._http_client = _MockClient(
+        {
+            "goal": "ship faster",
+            "intent": "build",
+            "query": "ship faster",
+            "total_items": 0,
+            "sections": [],
+        }
+    )
+
+    with patch("sibyl_core.evals.runtime.time.perf_counter", side_effect=[10.0, 10.35]):
+        result = await runner.run_context_pack_case(
+            ContextPackEvalCase(
+                name="latency-budget",
+                goal="ship faster",
+                fixture=ContextPackFixture(
+                    name="latency-budget",
+                    max_latency_ms=250.0,
+                ),
+            )
+        )
+
+    assert result.error is None
+    assert not result.result.passed
+    assert result.latency_ms == pytest.approx(350.0)
+    assert result.result.failures == ["latency too high: 350.0 ms > 250.0 ms"]
+    assert result.result.metrics["latency_ms"] == pytest.approx(350.0)
 
 
 @pytest.mark.asyncio

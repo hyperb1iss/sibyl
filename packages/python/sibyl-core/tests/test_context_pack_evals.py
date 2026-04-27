@@ -570,6 +570,7 @@ def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
                             },
                             "max_items": 12,
                             "max_markdown_chars": 6000,
+                            "max_latency_ms": 250.0,
                             "require_source_metadata": True,
                         },
                     }
@@ -596,6 +597,7 @@ def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
             "project_id": "project-sibyl",
         }
     }
+    assert cases[0].fixture.max_latency_ms == 250.0
     assert cases[0].fixture.required_facets == {
         ContextFacet.DECISIONS,
         ContextFacet.ARTIFACTS,
