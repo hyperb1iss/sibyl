@@ -102,6 +102,7 @@ async def context_pack(
         pack = await compile_context(
             goal=request.goal,
             intent=request.intent,
+            layer=request.layer,
             domain=request.domain,
             project=request.project,
             accessible_projects=None if request.project else accessible_projects,

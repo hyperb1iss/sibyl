@@ -109,6 +109,8 @@ def test_user_prompt_hook_uses_context_pack_before_search(
 
     assert exc.value.code == 0
     assert calls[0][:2] == ("context", "pack")
+    assert "--layer" in calls[0]
+    assert "wake" in calls[0]
     payload = json.loads(capsys.readouterr().out)
     assert "Use context packs" in payload["hookSpecificOutput"]["additionalContext"]
 

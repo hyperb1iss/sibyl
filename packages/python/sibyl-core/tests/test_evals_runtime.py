@@ -175,6 +175,7 @@ async def test_run_context_pack_case_posts_pack_request() -> None:
             {
                 "goal": "handoff native memory implementation",
                 "intent": "build",
+                "layer": "recall",
                 "limit": 8,
                 "include_related": False,
                 "related_limit": 3,

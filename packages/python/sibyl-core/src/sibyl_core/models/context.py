@@ -18,6 +18,12 @@ class ContextIntent(StrEnum):
     GENERAL = "general"
 
 
+class ContextLayer(StrEnum):
+    WAKE = "wake"
+    RECALL = "recall"
+    DEEP_SEARCH = "deep_search"
+
+
 class ContextFacet(StrEnum):
     ACTIVE_WORK = "active_work"
     ARTIFACTS = "artifacts"
@@ -84,6 +90,7 @@ class ContextPack:
     project: str | None
     sections: list[ContextSection]
     total_items: int
+    layer: ContextLayer = ContextLayer.RECALL
     usage_hint: str = (
         "Use this as the working context pack. Capture new decisions, plans, ideas, "
         "claims, procedures, and artifacts back into Sibyl as they emerge."

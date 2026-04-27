@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from sibyl_core.models.context import ContextFacet, ContextIntent
+from sibyl_core.models.context import ContextFacet, ContextIntent, ContextLayer
 from sibyl_core.models.entities import EntityType, RelationshipType
 
 # =============================================================================
@@ -322,6 +322,10 @@ class ContextPackRequest(BaseModel):
 
     goal: str = Field(..., min_length=1, description="Agent goal or user task")
     intent: ContextIntent = Field(default=ContextIntent.BUILD, description="How the agent will act")
+    layer: ContextLayer = Field(
+        default=ContextLayer.RECALL,
+        description="Context depth: wake, recall, or deep_search",
+    )
     domain: str | None = Field(default=None, description="Domain or category to bias retrieval")
     project: str | None = Field(default=None, description="Project ID to scope context")
     limit: int = Field(default=24, ge=1, le=50, description="Maximum total context items")
@@ -381,6 +385,7 @@ class ContextPackResponse(BaseModel):
 
     goal: str
     intent: ContextIntent
+    layer: ContextLayer = ContextLayer.RECALL
     query: str
     domain: str | None = None
     project: str | None = None

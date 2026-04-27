@@ -11,6 +11,7 @@ from sibyl_core.models.context import (
     ContextIntent,
     ContextItem,
     ContextItemQualityMetadata,
+    ContextLayer,
     ContextPack,
     ContextRelatedItem,
     ContextSection,
@@ -115,6 +116,18 @@ INTENT_FACETS = {
     ],
 }
 
+LAYER_LIMITS = {
+    ContextLayer.WAKE: 8,
+    ContextLayer.RECALL: 24,
+    ContextLayer.DEEP_SEARCH: 50,
+}
+
+LAYER_RAW_LIMITS = {
+    ContextLayer.WAKE: 2,
+    ContextLayer.RECALL: 4,
+    ContextLayer.DEEP_SEARCH: 8,
+}
+
 
 def _facet_for_type(entity_type: str, facets: list[ContextFacet]) -> ContextFacet:
     normalized_type = entity_type.lower()
@@ -134,6 +147,31 @@ def _coerce_intent(intent: str | ContextIntent) -> ContextIntent:
         return ContextIntent(intent.lower())
     except ValueError:
         return ContextIntent.GENERAL
+
+
+def _coerce_layer(layer: str | ContextLayer) -> ContextLayer:
+    if isinstance(layer, ContextLayer):
+        return layer
+    try:
+        return ContextLayer(layer.lower())
+    except ValueError:
+        return ContextLayer.RECALL
+
+
+def _facets_for_layer(intent: ContextIntent, layer: ContextLayer) -> list[ContextFacet]:
+    facets = list(INTENT_FACETS[intent])
+    if layer is not ContextLayer.WAKE:
+        return facets
+
+    priority = [
+        ContextFacet.RECENT_MEMORY,
+        ContextFacet.ACTIVE_WORK,
+        ContextFacet.DECISIONS,
+        ContextFacet.GOTCHAS,
+        ContextFacet.PROCEDURES,
+    ]
+    wake_facets = [facet for facet in priority if facet in facets]
+    return wake_facets or facets[:3]
 
 
 def _query_for(goal: str, domain: str | None) -> str:
@@ -446,6 +484,7 @@ def context_pack_to_markdown(
     lines = [
         f"# Sibyl Context Pack: {pack.goal}",
         f"Intent: {pack.intent.value}",
+        f"Layer: {pack.layer.value}",
         f"Query: {pack.query}",
     ]
     if pack.domain:
@@ -557,6 +596,7 @@ async def compile_context(
     goal: str,
     *,
     intent: str | ContextIntent = ContextIntent.BUILD,
+    layer: str | ContextLayer = ContextLayer.RECALL,
     domain: str | None = None,
     project: str | None = None,
     accessible_projects: set[str] | None = None,
@@ -580,9 +620,10 @@ async def compile_context(
         raise ValueError(msg)
 
     normalized_intent = _coerce_intent(intent)
+    normalized_layer = _coerce_layer(layer)
     query = _query_for(goal, domain)
-    limit = max(1, min(limit, 50))
-    facets = INTENT_FACETS[normalized_intent]
+    limit = max(1, min(limit, LAYER_LIMITS[normalized_layer]))
+    facets = _facets_for_layer(normalized_intent, normalized_layer)
     per_facet_limit = max(2, min(8, (limit + len(facets) - 1) // len(facets)))
 
     sections: list[ContextSection] = []
@@ -591,7 +632,7 @@ async def compile_context(
         organization_id=organization_id,
         principal_id=principal_id,
         project=project,
-        limit=min(4, limit),
+        limit=min(LAYER_RAW_LIMITS[normalized_layer], limit),
         recall_fn=raw_memory_recall_fn,
     )
     for facet in facets:
@@ -628,7 +669,7 @@ async def compile_context(
             ),
             limit,
         )
-    if include_related:
+    if include_related and normalized_layer is not ContextLayer.WAKE:
         sections = await _attach_related_items(
             sections,
             organization_id=organization_id,
@@ -639,6 +680,7 @@ async def compile_context(
     return ContextPack(
         goal=goal,
         intent=normalized_intent,
+        layer=normalized_layer,
         query=query,
         domain=domain,
         project=project,

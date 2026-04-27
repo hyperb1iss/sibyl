@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 import pytest
 
-from sibyl_core.models.context import ContextFacet, ContextIntent, ContextRelatedItem
+from sibyl_core.models.context import ContextFacet, ContextIntent, ContextLayer, ContextRelatedItem
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools.context import compile_context, context_pack_to_dict, context_pack_to_markdown
 from sibyl_core.tools.responses import SearchResponse, SearchResult
@@ -155,6 +155,7 @@ async def test_compile_context_includes_private_and_project_raw_memory() -> None
         raw_memory_recall_fn=fake_raw_recall,
     )
 
+    assert pack.layer == ContextLayer.RECALL
     assert pack.total_items == 3
     assert pack.sections[0].facet == ContextFacet.RECENT_MEMORY
     assert [item.id for item in pack.sections[0].items] == [
@@ -170,6 +171,56 @@ async def test_compile_context_includes_private_and_project_raw_memory() -> None
     assert raw_calls[0]["principal_id"] == "user-123"
     assert raw_calls[1]["scope_key"] == "project_123"
     assert ["session", "episode", "note"] in [call["types"] for call in search_calls]
+
+
+@pytest.mark.asyncio
+async def test_compile_context_wake_layer_caps_items_and_skips_related() -> None:
+    related_calls: list[str] = []
+
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(
+            results=[
+                _result(f"{kwargs['types'][0]}-{index}", kwargs["types"][0], f"Memory {index}")
+                for index in range(2)
+            ],
+            total=2,
+            query=kwargs["query"],
+            filters={},
+        )
+
+    async def fake_related(**kwargs: Any) -> list[ContextRelatedItem]:
+        related_calls.append(kwargs["entity_id"])
+        return [
+            ContextRelatedItem(
+                id="related-1",
+                type="decision",
+                name="Related decision",
+                relationship="RELATED_TO",
+                direction="outgoing",
+            )
+        ]
+
+    pack = await compile_context(
+        "wake up the coding session",
+        intent="build",
+        layer="wake",
+        organization_id="org-123",
+        limit=50,
+        include_related=True,
+        search_fn=fake_search,
+        related_fn=fake_related,
+    )
+
+    assert pack.layer == ContextLayer.WAKE
+    assert pack.total_items == 8
+    assert [section.facet for section in pack.sections] == [
+        ContextFacet.RECENT_MEMORY,
+        ContextFacet.ACTIVE_WORK,
+        ContextFacet.DECISIONS,
+        ContextFacet.GOTCHAS,
+    ]
+    assert all(not item.related for item in pack.items)
+    assert related_calls == []
 
 
 @pytest.mark.asyncio
@@ -403,6 +454,7 @@ async def test_context_pack_to_dict_serializes_dataclasses() -> None:
     payload = context_pack_to_dict(pack)
 
     assert payload["goal"] == "ship faster"
+    assert payload["layer"] == ContextLayer.RECALL
     assert payload["sections"][0]["items"][0]["id"] == "task-1"
     assert payload["sections"][0]["items"][0]["quality"]["origin"] == "graph"
 
@@ -413,6 +465,7 @@ async def test_context_pack_to_markdown_renders_injection_shape() -> None:
     markdown = context_pack_to_markdown(pack)
 
     assert "# Sibyl Context Pack: ship faster" in markdown
+    assert "Layer: recall" in markdown
     assert "## Active Work" in markdown
     assert "**Task** (task) `task-1`" in markdown
     assert (

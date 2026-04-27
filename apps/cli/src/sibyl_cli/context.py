@@ -322,6 +322,13 @@ def pack_cmd(
             help="Agent intent: build, plan, ideate, research, debug, decide, learn, general",
         ),
     ] = "build",
+    layer: Annotated[
+        str,
+        typer.Option(
+            "--layer",
+            help="Context depth: wake, recall, deep_search",
+        ),
+    ] = "recall",
     domain: Annotated[
         str | None,
         typer.Option("--domain", "-d", help="Domain/category to bias retrieval"),
@@ -364,6 +371,7 @@ def pack_cmd(
                 pack = await client.context_pack(
                     goal=goal,
                     intent=intent,
+                    layer=layer,
                     domain=domain,
                     project=effective_project,
                     limit=limit,
@@ -385,6 +393,7 @@ def pack_cmd(
         console.print(f"  [{ELECTRIC_PURPLE}]Context Pack[/{ELECTRIC_PURPLE}]")
         console.print(f"  [{NEON_CYAN}]Goal:[/{NEON_CYAN}] {pack.get('goal', goal)}")
         console.print(f"  [{NEON_CYAN}]Intent:[/{NEON_CYAN}] {pack.get('intent', intent)}")
+        console.print(f"  [{NEON_CYAN}]Layer:[/{NEON_CYAN}] {pack.get('layer', layer)}")
         if pack.get("domain"):
             console.print(f"  [{NEON_CYAN}]Domain:[/{NEON_CYAN}] {pack['domain']}")
         if pack.get("project"):

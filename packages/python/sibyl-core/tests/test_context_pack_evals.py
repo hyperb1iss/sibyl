@@ -20,6 +20,7 @@ from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
     ContextItem,
+    ContextLayer,
     ContextPack,
     ContextSection,
 )
@@ -191,6 +192,7 @@ async def test_context_pack_fixture_passes_raw_memory_scope_requirements() -> No
             name="raw-scope-grounding",
             required_item_ids={"raw_memory:project-1", "raw_memory:private-1"},
             required_facets={ContextFacet.RECENT_MEMORY},
+            required_layer=ContextLayer.RECALL,
             required_terms={"verbatim source context", "scoped context recall"},
             required_item_metadata={
                 "raw_memory:project-1": {
@@ -415,6 +417,7 @@ def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
                         "name": "coding-handoff",
                         "goal": "handoff native memory implementation",
                         "intent": "build",
+                        "layer": "wake",
                         "domain": "sibyl",
                         "project": "project-sibyl",
                         "limit": 12,
@@ -423,6 +426,7 @@ def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
                             "required_item_ids": ["decision-source-law"],
                             "forbidden_item_ids": ["private-health-note"],
                             "required_facets": ["decisions", "artifacts"],
+                            "required_layer": "wake",
                             "required_terms": ["raw memory"],
                             "required_item_metadata": {
                                 "decision-source-law": {
@@ -446,8 +450,10 @@ def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
     assert len(cases) == 1
     assert cases[0].name == "coding-handoff"
     assert cases[0].goal == "handoff native memory implementation"
+    assert cases[0].layer == ContextLayer.WAKE
     assert cases[0].fixture.required_item_ids == {"decision-source-law"}
     assert cases[0].fixture.forbidden_item_ids == {"private-health-note"}
+    assert cases[0].fixture.required_layer == ContextLayer.WAKE
     assert cases[0].fixture.required_item_metadata == {
         "decision-source-law": {
             "source_id": "northstar",
@@ -467,6 +473,7 @@ def test_context_pack_from_dict_parses_api_response() -> None:
         {
             "goal": "ship context packs",
             "intent": "build",
+            "layer": "deep_search",
             "query": "ship context packs sibyl",
             "domain": "sibyl",
             "project": "project-sibyl",
@@ -495,6 +502,7 @@ def test_context_pack_from_dict_parses_api_response() -> None:
     )
 
     assert pack.intent == ContextIntent.BUILD
+    assert pack.layer == ContextLayer.DEEP_SEARCH
     assert pack.sections[0].facet == ContextFacet.DECISIONS
     assert pack.items[0].id == "decision-source-law"
     assert pack.items[0].metadata["source_id"] == "northstar"

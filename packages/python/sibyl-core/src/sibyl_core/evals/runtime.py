@@ -303,6 +303,7 @@ class EvalRunner:
         payload: dict[str, Any] = {
             "goal": case.goal,
             "intent": case.intent.value,
+            "layer": case.layer.value,
             "limit": case.limit,
             "include_related": case.include_related,
             "related_limit": case.related_limit,

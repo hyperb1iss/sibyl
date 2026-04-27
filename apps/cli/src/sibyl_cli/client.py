@@ -810,6 +810,7 @@ class SibylClient:
         self,
         goal: str,
         intent: str = "build",
+        layer: str = "recall",
         domain: str | None = None,
         project: str | None = None,
         limit: int = 24,
@@ -820,6 +821,7 @@ class SibylClient:
         data: dict[str, Any] = {
             "goal": goal,
             "intent": intent,
+            "layer": layer,
             "limit": limit,
             "include_related": include_related,
             "related_limit": related_limit,

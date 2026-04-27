@@ -418,6 +418,7 @@ def test_recall_command_outputs_markdown_context(
     mock_client.context_pack.assert_awaited_once_with(
         goal="ship faster",
         intent="plan",
+        layer="recall",
         domain=None,
         project="project_123",
         limit=12,

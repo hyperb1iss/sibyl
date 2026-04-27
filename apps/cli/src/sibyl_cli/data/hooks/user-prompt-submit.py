@@ -441,6 +441,8 @@ def main():
             search_query,
             "--intent",
             intent,
+            "--layer",
+            "wake",
             "--limit",
             "6",
             "-j",

@@ -532,6 +532,11 @@ def recall_context(
         "-i",
         help="Agent intent: build, plan, ideate, research, debug, decide, learn, general",
     ),
+    layer: str = typer.Option(
+        "recall",
+        "--layer",
+        help="Context depth: wake, recall, deep_search",
+    ),
     domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
     project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     all_projects: bool = typer.Option(False, "--all", "-a", help="Use all accessible projects"),
@@ -570,6 +575,7 @@ def recall_context(
                 pack = await client.context_pack(
                     goal=goal,
                     intent=intent,
+                    layer=layer,
                     domain=domain,
                     project=effective_project,
                     limit=limit,

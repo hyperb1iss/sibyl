@@ -14,6 +14,7 @@ from sibyl_core.models.context import (
     ContextIntent,
     ContextItem,
     ContextItemQualityMetadata,
+    ContextLayer,
     ContextPack,
     ContextSection,
 )
@@ -93,9 +94,11 @@ class TestContextPackRoute:
 
         list_projects.assert_awaited_once_with(ctx)
         assert response.goal == "ship faster"
+        assert response.layer == ContextLayer.RECALL
         assert response.markdown is not None
         assert response.markdown.startswith("# Sibyl Context Pack")
         assert compile_context.await_args.kwargs["accessible_projects"] == {"proj_1"}
+        assert compile_context.await_args.kwargs["layer"] == ContextLayer.RECALL
         assert compile_context.await_args.kwargs["principal_id"] == "user-123"
         assert compile_context.await_args.kwargs["project"] is None
         assert compile_context.await_args.kwargs["include_related"] is True
@@ -147,6 +150,27 @@ class TestContextPackRoute:
 
         assert compile_context.await_args.kwargs["project"] == "proj_1"
         assert compile_context.await_args.kwargs["accessible_projects"] is None
+
+    @pytest.mark.asyncio
+    async def test_context_pack_passes_requested_layer(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch(
+                "sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())
+            ) as compile_context,
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal="ship faster", layer=ContextLayer.WAKE),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        assert compile_context.await_args.kwargs["layer"] == ContextLayer.WAKE
 
     @pytest.mark.asyncio
     async def test_context_pack_rejects_inaccessible_project(self) -> None:

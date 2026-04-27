@@ -83,6 +83,7 @@ def test_context_pack_json_uses_detected_project(
     mock_client.context_pack.assert_called_once_with(
         goal="ship faster",
         intent="build",
+        layer="recall",
         domain="agent memory",
         project="project_123",
         limit=24,
@@ -110,6 +111,7 @@ def test_context_pack_all_projects_omits_project_scope(
     mock_client.context_pack.assert_called_once_with(
         goal="ship faster",
         intent="build",
+        layer="recall",
         domain=None,
         project=None,
         limit=24,

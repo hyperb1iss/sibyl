@@ -560,6 +560,7 @@ def _register_tools(mcp: FastMCP) -> None:
         intent: Literal[
             "build", "plan", "ideate", "research", "debug", "decide", "learn", "general"
         ] = "build",
+        layer: Literal["wake", "recall", "deep_search"] = "recall",
         domain: str | None = None,
         project: str | None = None,
         limit: int = 24,
@@ -577,6 +578,8 @@ def _register_tools(mcp: FastMCP) -> None:
             goal: What the agent is trying to accomplish.
             intent: Goal mode - build, plan, ideate, research, debug, decide,
                 learn, or general.
+            layer: Retrieval depth - wake for compact session start, recall for
+                working context, or deep_search for broad research.
             domain: Optional domain/category to scope context. This can be
                 software, creative work, home projects, research, or any other
                 modeled domain.
@@ -595,6 +598,7 @@ def _register_tools(mcp: FastMCP) -> None:
         pack = await _compile_context(
             goal=goal,
             intent=intent,
+            layer=layer,
             domain=domain,
             project=project,
             accessible_projects=await _resolve_mcp_project_scope(ctx, project),

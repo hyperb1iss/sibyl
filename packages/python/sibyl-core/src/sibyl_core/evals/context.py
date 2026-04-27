@@ -14,6 +14,7 @@ from sibyl_core.models.context import (
     ContextIntent,
     ContextItem,
     ContextItemQualityMetadata,
+    ContextLayer,
     ContextPack,
     ContextSection,
 )
@@ -28,6 +29,7 @@ class ContextPackFixture:
     required_item_ids: set[str] = field(default_factory=set)
     forbidden_item_ids: set[str] = field(default_factory=set)
     required_facets: set[ContextFacet] = field(default_factory=set)
+    required_layer: ContextLayer | None = None
     required_terms: set[str] = field(default_factory=set)
     required_item_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
     max_items: int | None = None
@@ -53,6 +55,7 @@ class ContextPackEvalCase:
     goal: str
     fixture: ContextPackFixture
     intent: ContextIntent = ContextIntent.BUILD
+    layer: ContextLayer = ContextLayer.RECALL
     domain: str | None = None
     project: str | None = None
     limit: int = 24
@@ -198,6 +201,11 @@ def evaluate_context_pack(
     if missing_facets:
         failures.append(f"missing required facets: {', '.join(missing_facets)}")
 
+    if fixture.required_layer is not None and pack.layer != fixture.required_layer:
+        failures.append(
+            f"wrong context layer: expected {fixture.required_layer.value} got {pack.layer.value}"
+        )
+
     if fixture.max_items is not None and pack.total_items > fixture.max_items:
         failures.append(f"too many items: {pack.total_items} > {fixture.max_items}")
 
@@ -294,6 +302,9 @@ def _fixture_from_dict(name: str, data: dict[str, Any]) -> ContextPackFixture:
         required_item_ids=_string_set(data.get("required_item_ids")),
         forbidden_item_ids=_string_set(data.get("forbidden_item_ids")),
         required_facets=_facet_set(data.get("required_facets")),
+        required_layer=_layer_from_value(data["required_layer"])
+        if data.get("required_layer")
+        else None,
         required_terms=_string_set(data.get("required_terms")),
         required_item_metadata=_metadata_requirements(data.get("required_item_metadata")),
         max_items=data.get("max_items"),
@@ -311,6 +322,15 @@ def _intent_from_value(value: Any) -> ContextIntent:
         return ContextIntent.GENERAL
 
 
+def _layer_from_value(value: Any) -> ContextLayer:
+    if isinstance(value, ContextLayer):
+        return value
+    try:
+        return ContextLayer(str(value).lower())
+    except ValueError:
+        return ContextLayer.RECALL
+
+
 def _case_from_dict(data: dict[str, Any]) -> ContextPackEvalCase:
     name = str(data["name"])
     fixture_data = data.get("fixture")
@@ -321,6 +341,7 @@ def _case_from_dict(data: dict[str, Any]) -> ContextPackEvalCase:
         name=name,
         goal=str(data["goal"]),
         intent=_intent_from_value(data.get("intent", ContextIntent.BUILD)),
+        layer=_layer_from_value(data.get("layer", ContextLayer.RECALL)),
         domain=data.get("domain"),
         project=data.get("project"),
         limit=int(data.get("limit", 24)),
@@ -401,6 +422,7 @@ def context_pack_from_dict(data: dict[str, Any]) -> ContextPack:
     return ContextPack(
         goal=str(data["goal"]),
         intent=_intent_from_value(data.get("intent", ContextIntent.GENERAL)),
+        layer=_layer_from_value(data.get("layer", ContextLayer.RECALL)),
         query=str(data.get("query") or data["goal"]),
         domain=data.get("domain"),
         project=data.get("project"),
