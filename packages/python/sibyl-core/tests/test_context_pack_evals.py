@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -22,6 +23,7 @@ from sibyl_core.models.context import (
     ContextPack,
     ContextSection,
 )
+from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools.context import compile_context
 from sibyl_core.tools.responses import SearchResponse, SearchResult
 
@@ -46,6 +48,32 @@ def _result(
         source=source,
         result_origin=result_origin,
         metadata={"entity_type": entity_type, "source_id": f"src-{entity_id}", **(metadata or {})},
+    )
+
+
+def _raw_memory(
+    memory_id: str,
+    *,
+    memory_scope: MemoryScope = MemoryScope.PRIVATE,
+    scope_key: str | None = None,
+    score: float = 0.8,
+) -> RawMemory:
+    return RawMemory(
+        id=memory_id,
+        organization_id="org-123",
+        source_id=f"source:{memory_id}",
+        principal_id="user-123",
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        title=f"Raw {memory_id}",
+        raw_content=f"Raw {memory_id} content anchors scoped context recall.",
+        tags=["fixture"],
+        metadata={"source_name": "eval-fixture"},
+        provenance={"message_id": memory_id},
+        capture_surface="cli",
+        captured_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
+        created_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
+        score=score,
     )
 
 
@@ -128,6 +156,113 @@ async def test_context_pack_fixture_passes_coding_handoff_requirements() -> None
     assert result.passed, result.failures
     assert result.metrics["required_item_coverage"] == 1.0
     assert result.metrics["items"] == 4
+
+
+@pytest.mark.asyncio
+async def test_context_pack_fixture_passes_raw_memory_scope_requirements() -> None:
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
+        if kwargs["memory_scope"] == "private":
+            return [_raw_memory("private-1")]
+        return [
+            _raw_memory(
+                "project-1",
+                memory_scope=MemoryScope.PROJECT,
+                scope_key="project_123",
+                score=0.9,
+            )
+        ]
+
+    pack = await compile_context(
+        "raw scoped context",
+        intent="build",
+        project="project_123",
+        principal_id="user-123",
+        organization_id="org-123",
+        search_fn=fake_search,
+        raw_memory_recall_fn=fake_raw_recall,
+    )
+
+    result = evaluate_context_pack(
+        pack,
+        ContextPackFixture(
+            name="raw-scope-grounding",
+            required_item_ids={"raw_memory:project-1", "raw_memory:private-1"},
+            required_facets={ContextFacet.RECENT_MEMORY},
+            required_terms={"verbatim source context", "scoped context recall"},
+            required_item_metadata={
+                "raw_memory:project-1": {
+                    "memory_scope": "project",
+                    "scope_key": "project_123",
+                    "source_id": "source:project-1",
+                },
+                "raw_memory:private-1": {
+                    "memory_scope": "private",
+                    "scope_key": None,
+                    "source_id": "source:private-1",
+                },
+            },
+            require_source_metadata=True,
+        ),
+    )
+
+    assert result.passed, result.failures
+    assert result.metrics["metadata_requirement_coverage"] == 1.0
+
+
+def test_context_pack_fixture_reports_raw_memory_scope_mismatch() -> None:
+    item = ContextItem(
+        id="raw_memory:private-1",
+        type="raw_memory",
+        name="Private raw memory",
+        content="Private memory content.",
+        score=0.9,
+        facet=ContextFacet.RECENT_MEMORY,
+        reason="raw memory matched the goal",
+        source="source:private-1",
+        metadata={
+            "source_id": "source:private-1",
+            "memory_scope": "private",
+            "scope_key": None,
+        },
+    )
+    pack = ContextPack(
+        goal="evaluate scoped memory",
+        intent=ContextIntent.BUILD,
+        query="evaluate scoped memory",
+        domain="sibyl",
+        project="project_123",
+        sections=[
+            ContextSection(
+                facet=ContextFacet.RECENT_MEMORY,
+                title="Recent Memory",
+                items=[item],
+            )
+        ],
+        total_items=1,
+    )
+
+    result = evaluate_context_pack(
+        pack,
+        ContextPackFixture(
+            name="raw-scope-grounding",
+            required_item_metadata={
+                "raw_memory:private-1": {
+                    "memory_scope": "project",
+                    "scope_key": "project_123",
+                }
+            },
+        ),
+    )
+
+    assert not result.passed
+    assert result.failures == [
+        "item raw_memory:private-1 metadata memory_scope expected 'project' got 'private'",
+        "item raw_memory:private-1 metadata scope_key expected 'project_123' got None",
+    ]
+    assert result.metrics["metadata_requirement_coverage"] == 0.0
 
 
 @pytest.mark.asyncio
@@ -289,6 +424,12 @@ def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
                             "forbidden_item_ids": ["private-health-note"],
                             "required_facets": ["decisions", "artifacts"],
                             "required_terms": ["raw memory"],
+                            "required_item_metadata": {
+                                "decision-source-law": {
+                                    "source_id": "northstar",
+                                    "project_id": "project-sibyl",
+                                }
+                            },
                             "max_items": 12,
                             "max_markdown_chars": 6000,
                             "require_source_metadata": True,
@@ -307,6 +448,12 @@ def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
     assert cases[0].goal == "handoff native memory implementation"
     assert cases[0].fixture.required_item_ids == {"decision-source-law"}
     assert cases[0].fixture.forbidden_item_ids == {"private-health-note"}
+    assert cases[0].fixture.required_item_metadata == {
+        "decision-source-law": {
+            "source_id": "northstar",
+            "project_id": "project-sibyl",
+        }
+    }
     assert cases[0].fixture.required_facets == {
         ContextFacet.DECISIONS,
         ContextFacet.ARTIFACTS,

@@ -29,6 +29,7 @@ class ContextPackFixture:
     forbidden_item_ids: set[str] = field(default_factory=set)
     required_facets: set[ContextFacet] = field(default_factory=set)
     required_terms: set[str] = field(default_factory=set)
+    required_item_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
     max_items: int | None = None
     max_markdown_chars: int | None = None
     require_source_metadata: bool = False
@@ -159,6 +160,15 @@ def _has_source_metadata(item: ContextItem) -> bool:
     )
 
 
+def _metadata_value(item: ContextItem, key: str) -> Any:
+    metadata = item.metadata or {}
+    if key in metadata:
+        return metadata[key]
+    if hasattr(item, key):
+        return getattr(item, key)
+    return _quality_value(item, key)
+
+
 def _searchable_text(pack: ContextPack) -> str:
     chunks: list[str] = [pack.goal, pack.query, pack.domain or "", pack.project or ""]
     for item in pack.items:
@@ -209,6 +219,25 @@ def evaluate_context_pack(
         if unsourced:
             failures.append(f"items missing source metadata: {', '.join(unsourced)}")
 
+    items_by_id = {item.id: item for item in pack.items}
+    metadata_checks = 0
+    metadata_matches = 0
+    for item_id, expected_metadata in sorted(fixture.required_item_metadata.items()):
+        item = items_by_id.get(item_id)
+        if item is None:
+            failures.append(f"missing metadata target item: {item_id}")
+            continue
+        for key, expected_value in sorted(expected_metadata.items()):
+            metadata_checks += 1
+            actual_value = _metadata_value(item, key)
+            if actual_value == expected_value:
+                metadata_matches += 1
+                continue
+            failures.append(
+                f"item {item_id} metadata {key} expected {expected_value!r} "
+                f"got {actual_value!r}"
+            )
+
     metrics = {
         "items": pack.total_items,
         "facets": sorted(facet.value for facet in facets),
@@ -218,6 +247,9 @@ def evaluate_context_pack(
             if not fixture.required_item_ids
             else (len(fixture.required_item_ids) - len(missing_ids))
             / len(fixture.required_item_ids)
+        ),
+        "metadata_requirement_coverage": (
+            1.0 if not metadata_checks else metadata_matches / metadata_checks
         ),
     }
     return ContextPackEvalResult(
@@ -241,6 +273,21 @@ def _facet_set(value: Any) -> set[ContextFacet]:
     return {ContextFacet(item) for item in _string_set(value)}
 
 
+def _metadata_requirements(value: Any) -> dict[str, dict[str, Any]]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        msg = "expected a mapping of item IDs to metadata requirements"
+        raise TypeError(msg)
+    requirements: dict[str, dict[str, Any]] = {}
+    for item_id, expected_metadata in value.items():
+        if not isinstance(expected_metadata, dict):
+            msg = f"expected metadata requirements for {item_id!r} to be a mapping"
+            raise TypeError(msg)
+        requirements[str(item_id)] = dict(expected_metadata)
+    return requirements
+
+
 def _fixture_from_dict(name: str, data: dict[str, Any]) -> ContextPackFixture:
     return ContextPackFixture(
         name=str(data.get("name") or name),
@@ -248,6 +295,7 @@ def _fixture_from_dict(name: str, data: dict[str, Any]) -> ContextPackFixture:
         forbidden_item_ids=_string_set(data.get("forbidden_item_ids")),
         required_facets=_facet_set(data.get("required_facets")),
         required_terms=_string_set(data.get("required_terms")),
+        required_item_metadata=_metadata_requirements(data.get("required_item_metadata")),
         max_items=data.get("max_items"),
         max_markdown_chars=data.get("max_markdown_chars"),
         require_source_metadata=bool(data.get("require_source_metadata", False)),
