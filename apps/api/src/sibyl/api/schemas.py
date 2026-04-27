@@ -334,6 +334,7 @@ class ContextPackRequest(BaseModel):
     )
     domain: str | None = Field(default=None, description="Domain or category to bias retrieval")
     project: str | None = Field(default=None, description="Project ID to scope context")
+    agent_id: str | None = Field(default=None, description="Agent diary identity to include")
     limit: int = Field(default=24, ge=1, le=50, description="Maximum total context items")
     include_related: bool = Field(default=True, description="Include one-hop related graph context")
     related_limit: int = Field(default=3, ge=0, le=5, description="Related items per context item")

@@ -100,6 +100,7 @@ class TestContextPackRoute:
         assert compile_context.await_args.kwargs["accessible_projects"] == {"proj_1"}
         assert compile_context.await_args.kwargs["layer"] == ContextLayer.RECALL
         assert compile_context.await_args.kwargs["principal_id"] == "user-123"
+        assert compile_context.await_args.kwargs["agent_id"] is None
         assert compile_context.await_args.kwargs["project"] is None
         assert compile_context.await_args.kwargs["include_related"] is True
         assert compile_context.await_args.kwargs["related_limit"] == 3
@@ -171,6 +172,27 @@ class TestContextPackRoute:
             )
 
         assert compile_context.await_args.kwargs["layer"] == ContextLayer.WAKE
+
+    @pytest.mark.asyncio
+    async def test_context_pack_passes_agent_id(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch(
+                "sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())
+            ) as compile_context,
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal="ship faster", agent_id="nova"),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        assert compile_context.await_args.kwargs["agent_id"] == "nova"
 
     @pytest.mark.asyncio
     async def test_context_pack_rejects_inaccessible_project(self) -> None:

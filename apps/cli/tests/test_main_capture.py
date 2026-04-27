@@ -490,6 +490,35 @@ def test_recall_command_outputs_markdown_context(
         layer="recall",
         domain=None,
         project="project_123",
+        agent_id=None,
+        limit=12,
+        include_related=True,
+        related_limit=3,
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_recall_command_can_request_agent_diary_context(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.context_pack = AsyncMock(return_value={"goal": "ship faster", "markdown": ""})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["recall", "ship faster", "--agent", "nova"])
+
+    assert result.exit_code == 0
+    mock_client.context_pack.assert_awaited_once_with(
+        goal="ship faster",
+        intent="build",
+        layer="recall",
+        domain=None,
+        project="project_123",
+        agent_id="nova",
         limit=12,
         include_related=True,
         related_limit=3,

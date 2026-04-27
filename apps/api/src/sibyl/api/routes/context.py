@@ -107,6 +107,7 @@ async def context_pack(
             project=request.project,
             accessible_projects=None if request.project else accessible_projects,
             principal_id=ctx.user_id,
+            agent_id=request.agent_id,
             organization_id=str(org.id),
             limit=request.limit,
             include_related=request.include_related,

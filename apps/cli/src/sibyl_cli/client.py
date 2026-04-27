@@ -829,6 +829,7 @@ class SibylClient:
         layer: str = "recall",
         domain: str | None = None,
         project: str | None = None,
+        agent_id: str | None = None,
         limit: int = 24,
         include_related: bool = True,
         related_limit: int = 3,
@@ -846,6 +847,8 @@ class SibylClient:
             data["domain"] = domain
         if project:
             data["project"] = project
+        if agent_id:
+            data["agent_id"] = agent_id
         return await self._request("POST", "/context/pack", json=data)
 
     async def reflect(

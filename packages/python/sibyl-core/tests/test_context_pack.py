@@ -41,6 +41,8 @@ def _raw_memory(
     memory_scope: MemoryScope = MemoryScope.PRIVATE,
     scope_key: str | None = None,
     score: float = 0.7,
+    metadata: dict[str, Any] | None = None,
+    capture_surface: str = "cli",
 ) -> RawMemory:
     return RawMemory(
         id=memory_id,
@@ -52,9 +54,9 @@ def _raw_memory(
         title=f"Raw {memory_id}",
         raw_content=f"Raw {memory_id} content",
         tags=["raw"],
-        metadata={"source_name": "session"},
+        metadata={"source_name": "session", **(metadata or {})},
         provenance={"message_id": memory_id},
-        capture_surface="cli",
+        capture_surface=capture_surface,
         captured_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
         created_at=datetime(2026, 4, 27, 12, 0, 0, tzinfo=UTC),
         score=score,
@@ -171,6 +173,53 @@ async def test_compile_context_includes_private_and_project_raw_memory() -> None
     assert raw_calls[0]["principal_id"] == "user-123"
     assert raw_calls[1]["scope_key"] == "project_123"
     assert ["session", "episode", "note"] in [call["types"] for call in search_calls]
+
+
+@pytest.mark.asyncio
+async def test_compile_context_can_include_agent_diary_with_raw_memory() -> None:
+    raw_calls: list[dict[str, Any]] = []
+
+    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
+        raw_calls.append(kwargs)
+        if kwargs.get("agent_id") == "nova":
+            return [
+                _raw_memory(
+                    "diary-1",
+                    score=0.95,
+                    metadata={
+                        "agent_id": "nova",
+                        "memory_kind": "agent_diary",
+                        "project_id": "project_123",
+                    },
+                    capture_surface="agent_diary",
+                )
+            ]
+        if kwargs["memory_scope"] == "private":
+            return [_raw_memory("private-1", score=0.8)]
+        return []
+
+    pack = await compile_context(
+        "implementation stance",
+        intent="build",
+        project="project_123",
+        principal_id="user-123",
+        agent_id="nova",
+        organization_id="org-123",
+        search_fn=_empty_search_response,
+        raw_memory_recall_fn=fake_raw_recall,
+    )
+
+    assert [item.id for item in pack.sections[0].items] == [
+        "raw_memory:diary-1",
+        "raw_memory:private-1",
+    ]
+    assert pack.sections[0].items[0].metadata["agent_id"] == "nova"
+    assert pack.sections[0].items[0].metadata["memory_kind"] == "agent_diary"
+    assert pack.sections[0].items[0].metadata["project_id"] == "project_123"
+    assert "agent diary matched the goal" in pack.sections[0].items[0].reason
+    assert raw_calls[0]["agent_id"] is None
+    assert raw_calls[2]["agent_id"] == "nova"
+    assert raw_calls[2]["project_id"] == "project_123"
 
 
 @pytest.mark.asyncio

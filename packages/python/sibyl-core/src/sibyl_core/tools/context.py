@@ -17,7 +17,11 @@ from sibyl_core.models.context import (
     ContextSection,
 )
 from sibyl_core.services import get_graph_runtime as _service_get_graph_runtime
-from sibyl_core.services.surreal_content import RawMemory, recall_raw_memory
+from sibyl_core.services.surreal_content import (
+    AGENT_DIARY_CAPTURE_SURFACE,
+    RawMemory,
+    recall_raw_memory,
+)
 from sibyl_core.tools.responses import SearchResponse, SearchResult
 from sibyl_core.tools.search import search as default_search
 
@@ -330,7 +334,8 @@ def _item_from_raw_memory(memory: RawMemory) -> ContextItem:
         created_at=created_at,
         updated_at=None,
         valid_at=created_at,
-        project_id=memory.scope_key if memory.memory_scope.value == "project" else None,
+        project_id=memory.metadata.get("project_id")
+        or (memory.scope_key if memory.memory_scope.value == "project" else None),
     )
     quality = ContextItemQualityMetadata(**quality_values)
     metadata = {
@@ -343,6 +348,18 @@ def _item_from_raw_memory(memory: RawMemory) -> ContextItem:
         **memory.metadata,
     }
     title = memory.title or "Untitled raw memory"
+    is_agent_diary = (
+        memory.capture_surface == AGENT_DIARY_CAPTURE_SURFACE
+        or memory.metadata.get("memory_kind") == "agent_diary"
+    )
+    reason = (
+        "agent diary matched the goal and preserves the agent's private working context"
+        if is_agent_diary
+        else (
+            f"raw memory matched the goal in {memory.memory_scope.value} scope "
+            "and preserves verbatim source context"
+        )
+    )
     return ContextItem(
         id=f"raw_memory:{memory.id}",
         type="raw_memory",
@@ -350,10 +367,7 @@ def _item_from_raw_memory(memory: RawMemory) -> ContextItem:
         content=memory.raw_content,
         score=memory.score,
         facet=ContextFacet.RECENT_MEMORY,
-        reason=(
-            f"raw memory matched the goal in {memory.memory_scope.value} scope "
-            "and preserves verbatim source context"
-        ),
+        reason=reason,
         source=source,
         quality=quality,
         metadata=metadata,
@@ -365,6 +379,7 @@ async def _compile_raw_memory_section(
     query: str,
     organization_id: str,
     principal_id: str | None,
+    agent_id: str | None,
     project: str | None,
     limit: int,
     recall_fn: RawMemoryRecallFn,
@@ -373,25 +388,34 @@ async def _compile_raw_memory_section(
         return None
 
     memories: list[RawMemory] = []
-    for memory_scope, scope_key in (("private", None), ("project", project)):
+    seen_memory_ids: set[str] = set()
+    recall_specs: list[tuple[str, str | None, str | None, str | None]] = [
+        ("private", None, None, None),
+        ("project", project, None, None),
+    ]
+    if agent_id:
+        recall_specs.append(("private", None, agent_id, project))
+    for memory_scope, scope_key, spec_agent_id, spec_project_id in recall_specs:
         if memory_scope == "project" and not scope_key:
             continue
-        remaining = limit - len(memories)
-        if remaining <= 0:
-            break
         try:
-            memories.extend(
-                await recall_fn(
-                    organization_id=organization_id,
-                    principal_id=principal_id,
-                    query=query,
-                    memory_scope=memory_scope,
-                    scope_key=scope_key,
-                    limit=remaining,
-                )
+            recalled = await recall_fn(
+                organization_id=organization_id,
+                principal_id=principal_id,
+                query=query,
+                memory_scope=memory_scope,
+                scope_key=scope_key,
+                agent_id=spec_agent_id,
+                project_id=spec_project_id,
+                limit=limit,
             )
         except Exception:
             continue
+        for memory in recalled:
+            if memory.id in seen_memory_ids:
+                continue
+            seen_memory_ids.add(memory.id)
+            memories.append(memory)
 
     if not memories:
         return None
@@ -601,6 +625,7 @@ async def compile_context(
     project: str | None = None,
     accessible_projects: set[str] | None = None,
     principal_id: str | None = None,
+    agent_id: str | None = None,
     organization_id: str | None = None,
     limit: int = 24,
     include_related: bool = False,
@@ -631,6 +656,7 @@ async def compile_context(
         query=query,
         organization_id=organization_id,
         principal_id=principal_id,
+        agent_id=agent_id,
         project=project,
         limit=min(LAYER_RAW_LIMITS[normalized_layer], limit),
         recall_fn=raw_memory_recall_fn,

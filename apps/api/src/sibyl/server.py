@@ -563,6 +563,7 @@ def _register_tools(mcp: FastMCP) -> None:
         layer: Literal["wake", "recall", "deep_search"] = "recall",
         domain: str | None = None,
         project: str | None = None,
+        agent_id: str | None = None,
         limit: int = 24,
         include_related: bool = True,
         related_limit: int = 3,
@@ -584,6 +585,8 @@ def _register_tools(mcp: FastMCP) -> None:
                 software, creative work, home projects, research, or any other
                 modeled domain.
             project: Optional project ID to scope active work.
+            agent_id: Optional agent diary identity to include alongside normal
+                private/project raw memory.
             limit: Maximum total context items, clamped to 1-50.
             include_related: Include one-hop related graph context.
             related_limit: Related items per selected context item.
@@ -603,6 +606,7 @@ def _register_tools(mcp: FastMCP) -> None:
             project=project,
             accessible_projects=await _resolve_mcp_project_scope(ctx, project),
             principal_id=ctx.user_id,
+            agent_id=agent_id,
             limit=limit,
             include_related=include_related,
             related_limit=related_limit,

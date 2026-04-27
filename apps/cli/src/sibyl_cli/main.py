@@ -539,6 +539,7 @@ def recall_context(
     ),
     domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
     project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    agent: str | None = typer.Option(None, "--agent", help="Agent diary identity to include"),
     all_projects: bool = typer.Option(False, "--all", "-a", help="Use all accessible projects"),
     limit: int = typer.Option(12, "--limit", "-l", min=1, max=50, help="Maximum context items"),
     related: bool = typer.Option(
@@ -549,7 +550,6 @@ def recall_context(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output full JSON"),
     raw: bool = typer.Option(False, "--raw", help="Recall verbatim raw memories"),
     diary: bool = typer.Option(False, "--diary", help="Recall a private agent diary"),
-    agent: str | None = typer.Option(None, "--agent", help="Agent identity for diary recall"),
     memory_scope: str = typer.Option("private", "--scope", help="Raw memory scope"),
     scope_key: str | None = typer.Option(None, "--scope-key", help="Project/team/shared scope key"),
 ) -> None:
@@ -569,7 +569,7 @@ def recall_context(
                         memory_scope=memory_scope,
                         scope_key=scope_key,
                         diary=diary,
-                        agent_id=agent,
+                        agent_id=agent if diary else None,
                         project_id=effective_project if diary else None,
                         limit=limit,
                     )
@@ -586,6 +586,7 @@ def recall_context(
                     layer=layer,
                     domain=domain,
                     project=effective_project,
+                    agent_id=agent,
                     limit=limit,
                     include_related=related,
                     related_limit=3,

@@ -337,6 +337,10 @@ def pack_cmd(
         str | None,
         typer.Option("--project", "-p", help="Project ID to scope context"),
     ] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option("--agent", help="Agent diary identity to include"),
+    ] = None,
     all_projects: Annotated[
         bool,
         typer.Option("--all", "-a", help="Use all accessible projects"),
@@ -374,6 +378,7 @@ def pack_cmd(
                     layer=layer,
                     domain=domain,
                     project=effective_project,
+                    agent_id=agent,
                     limit=limit,
                     include_related=related,
                     related_limit=related_limit,
