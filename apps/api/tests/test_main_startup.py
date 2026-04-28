@@ -37,6 +37,15 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     disable_pubsub = MagicMock()
     broker = SimpleNamespace(startup=AsyncMock(), shutdown=AsyncMock())
     scheduler = SimpleNamespace(startup=AsyncMock(), shutdown=AsyncMock())
+    startup_events: list[str] = []
+
+    async def bootstrap_surreal_runtime() -> bool:
+        startup_events.append("surreal")
+        return True
+
+    async def get_graph_client() -> SimpleNamespace:
+        startup_events.append("graph")
+        return SimpleNamespace(is_connected=True)
 
     monkeypatch.setattr(main_module.settings, "store", "surreal")
     monkeypatch.setattr(main_module.settings, "auth_store", "surreal")
@@ -46,6 +55,11 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
         main_module,
         "_bootstrap_relational_sidecar_support",
         bootstrap_relational_sidecar_support,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_bootstrap_surreal_runtime_schemas",
+        bootstrap_surreal_runtime,
     )
     monkeypatch.setattr("sibyl.api.pubsub.init_pubsub", init_pubsub)
     monkeypatch.setattr("sibyl.api.pubsub.shutdown_pubsub", shutdown_pubsub)
@@ -57,7 +71,7 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     monkeypatch.setattr("sibyl.coordination.scheduler.get_scheduler", lambda: scheduler)
     monkeypatch.setattr(
         "sibyl_core.graph.client.get_graph_client",
-        AsyncMock(return_value=SimpleNamespace(is_connected=True)),
+        get_graph_client,
     )
 
     app = main_module.create_combined_app()
@@ -66,6 +80,7 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
         pass
 
     bootstrap_relational_sidecar_support.assert_not_awaited()
+    assert startup_events[:2] == ["surreal", "graph"]
     init_pubsub.assert_awaited_once()
     init_locks.assert_awaited_once()
     shutdown_pubsub.assert_awaited_once()

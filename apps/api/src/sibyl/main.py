@@ -47,6 +47,12 @@ async def _bootstrap_relational_sidecar_support() -> bool:
     return await bootstrap_relational_sidecar_support()
 
 
+async def _bootstrap_surreal_runtime_schemas() -> bool:
+    from sibyl.surreal_runtime_startup import bootstrap_surreal_runtime_schemas
+
+    return await bootstrap_surreal_runtime_schemas()
+
+
 def create_combined_app(  # noqa: PLR0915
     host: str | None = None, port: int | None = None, *, embed_worker: bool = False
 ) -> Starlette:
@@ -122,6 +128,8 @@ def create_combined_app(  # noqa: PLR0915
 
         if settings.requires_relational_support:
             await _bootstrap_relational_sidecar_support()
+
+        await _bootstrap_surreal_runtime_schemas()
 
         try:
             from sibyl_core.graph.client import get_graph_client
