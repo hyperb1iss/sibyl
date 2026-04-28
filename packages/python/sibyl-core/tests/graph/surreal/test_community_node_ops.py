@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from graphiti_core.errors import NodeNotFoundError
@@ -31,8 +32,30 @@ def _make_community(
     )
 
 
+class _RecordingExecutor:
+    def __init__(self) -> None:
+        self.queries: list[tuple[str, dict[str, Any]]] = []
+
+    async def execute_query(self, query: str, **params: Any) -> list[Any]:
+        self.queries.append((query, params))
+        return []
+
+
 @pytest.mark.asyncio
 class TestCommunityNodeOps:
+    async def test_save_uses_single_upsert_statement(self) -> None:
+        ops = SurrealCommunityNodeOperations()
+        executor = _RecordingExecutor()
+
+        await ops.save(executor, _make_community("com-1", "group-1"))
+
+        assert len(executor.queries) == 1
+        query, params = executor.queries[0]
+        assert "UPSERT community SET" in query
+        assert "DELETE FROM community" not in query
+        assert "CREATE community" not in query
+        assert params["uuid"] == "com-1"
+
     async def test_save_and_get_by_uuid(self, surreal_schema: SurrealDriver) -> None:
         ops = SurrealCommunityNodeOperations()
         com = _make_community("com-1", surreal_schema.group_id)

@@ -16,9 +16,26 @@ from graphiti_core.driver.record_parsers import community_node_from_record
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import CommunityNode
 
-from sibyl_core.graph.surreal.ops._common import normalize_records
+from sibyl_core.graph.surreal.ops._common import (
+    build_node_upsert_query,
+    normalize_records,
+    run_query,
+)
 
 logger = logging.getLogger(__name__)
+
+_COMMUNITY_SAVE = build_node_upsert_query(
+    "community",
+    (
+        "uuid",
+        "name",
+        "summary",
+        "labels",
+        "group_id",
+        "created_at",
+        "name_embedding",
+    ),
+)
 
 
 def _ensure_community_fields(record: dict[str, Any]) -> dict[str, Any]:
@@ -44,18 +61,6 @@ def _community_save_payload(node: CommunityNode) -> dict[str, Any]:
     }
 
 
-async def _run(
-    executor: QueryExecutor,
-    tx: Transaction | None,
-    query: str,
-    **params: Any,
-) -> Any:
-    """Execute via transaction when supplied, else the executor."""
-    if tx is not None:
-        return await tx.run(query, **params)
-    return await executor.execute_query(query, **params)
-
-
 class SurrealCommunityNodeOperations(CommunityNodeOperations):
     """SurrealDB implementation of Graphiti's CommunityNodeOperations."""
 
@@ -66,25 +71,10 @@ class SurrealCommunityNodeOperations(CommunityNodeOperations):
         tx: Transaction | None = None,
     ) -> None:
         payload = _community_save_payload(node)
-        await _run(
+        await run_query(
             executor,
             tx,
-            "DELETE FROM community WHERE uuid = $uuid;",
-            uuid=payload["uuid"],
-        )
-        await _run(
-            executor,
-            tx,
-            """
-            CREATE community SET
-                uuid = $uuid,
-                name = $name,
-                summary = $summary,
-                labels = $labels,
-                group_id = $group_id,
-                created_at = $created_at,
-                name_embedding = $name_embedding;
-            """,
+            _COMMUNITY_SAVE,
             **payload,
         )
         logger.debug("Saved community to SurrealDB: %s", node.uuid)
@@ -102,13 +92,13 @@ class SurrealCommunityNodeOperations(CommunityNodeOperations):
             batch = nodes[start : start + batch_size]
             rows = [_community_save_payload(n) for n in batch]
             uuids = [r["uuid"] for r in rows]
-            await _run(
+            await run_query(
                 executor,
                 tx,
                 "DELETE FROM community WHERE uuid IN $uuids;",
                 uuids=uuids,
             )
-            await _run(
+            await run_query(
                 executor,
                 tx,
                 "INSERT INTO community $rows;",
@@ -127,7 +117,7 @@ class SurrealCommunityNodeOperations(CommunityNodeOperations):
         (community -> entity | community), and SurrealDB removes those
         edges automatically when the endpoint disappears.
         """
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM community WHERE uuid = $uuid;",
@@ -143,7 +133,7 @@ class SurrealCommunityNodeOperations(CommunityNodeOperations):
         batch_size: int = 100,
     ) -> None:
         del batch_size
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM community WHERE group_id = $group_id;",
@@ -160,7 +150,7 @@ class SurrealCommunityNodeOperations(CommunityNodeOperations):
         del batch_size
         if not uuids:
             return
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM community WHERE uuid IN $uuids;",

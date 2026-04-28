@@ -17,9 +17,28 @@ from graphiti_core.driver.record_parsers import entity_node_from_record
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import EntityNode
 
-from sibyl_core.graph.surreal.ops._common import normalize_records
+from sibyl_core.graph.surreal.ops._common import (
+    build_node_upsert_query,
+    normalize_records,
+    run_query,
+)
 
 logger = logging.getLogger(__name__)
+
+_ENTITY_SAVE = build_node_upsert_query(
+    "entity",
+    (
+        "uuid",
+        "name",
+        "entity_type",
+        "summary",
+        "labels",
+        "attributes",
+        "group_id",
+        "created_at",
+        "name_embedding",
+    ),
+)
 
 
 def _entity_save_payload(node: EntityNode) -> dict[str, Any]:
@@ -36,18 +55,6 @@ def _entity_save_payload(node: EntityNode) -> dict[str, Any]:
     }
 
 
-async def _run(
-    executor: QueryExecutor,
-    tx: Transaction | None,
-    query: str,
-    **params: Any,
-) -> Any:
-    """Execute via transaction when supplied, else the executor."""
-    if tx is not None:
-        return await tx.run(query, **params)
-    return await executor.execute_query(query, **params)
-
-
 class SurrealEntityNodeOperations(EntityNodeOperations):
     """SurrealDB implementation of Graphiti's EntityNodeOperations."""
 
@@ -58,22 +65,10 @@ class SurrealEntityNodeOperations(EntityNodeOperations):
         tx: Transaction | None = None,
     ) -> None:
         payload = _entity_save_payload(node)
-        await _run(
+        await run_query(
             executor,
             tx,
-            """
-            UPSERT entity SET
-                uuid = $uuid,
-                name = $name,
-                entity_type = $entity_type,
-                summary = $summary,
-                labels = $labels,
-                attributes = $attributes,
-                group_id = $group_id,
-                created_at = $created_at,
-                name_embedding = $name_embedding
-            WHERE uuid = $uuid;
-            """,
+            _ENTITY_SAVE,
             **payload,
         )
         logger.debug("Saved entity to SurrealDB: %s", node.uuid)
@@ -92,13 +87,13 @@ class SurrealEntityNodeOperations(EntityNodeOperations):
             # One payload per row; SurrealDB INSERT accepts a list of objects.
             rows = [_entity_save_payload(n) for n in batch]
             uuids = [r["uuid"] for r in rows]
-            await _run(
+            await run_query(
                 executor,
                 tx,
                 "DELETE FROM entity WHERE uuid IN $uuids;",
                 uuids=uuids,
             )
-            await _run(
+            await run_query(
                 executor,
                 tx,
                 "INSERT INTO entity $rows;",
@@ -116,7 +111,7 @@ class SurrealEntityNodeOperations(EntityNodeOperations):
         SurrealDB RELATION tables cascade when their endpoints are deleted,
         so no explicit edge cleanup is required here.
         """
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM entity WHERE uuid = $uuid;",
@@ -132,7 +127,7 @@ class SurrealEntityNodeOperations(EntityNodeOperations):
         batch_size: int = 100,
     ) -> None:
         del batch_size  # SurrealDB deletes atomically; batch size is advisory
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM entity WHERE group_id = $group_id;",
@@ -149,7 +144,7 @@ class SurrealEntityNodeOperations(EntityNodeOperations):
         del batch_size
         if not uuids:
             return
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM entity WHERE uuid IN $uuids;",

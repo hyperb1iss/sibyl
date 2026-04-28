@@ -17,9 +17,29 @@ from graphiti_core.driver.record_parsers import episodic_node_from_record
 from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import EpisodicNode
 
-from sibyl_core.graph.surreal.ops._common import normalize_records
+from sibyl_core.graph.surreal.ops._common import (
+    build_node_upsert_query,
+    normalize_records,
+    run_query,
+)
 
 logger = logging.getLogger(__name__)
+
+_EPISODE_SAVE = build_node_upsert_query(
+    "episode",
+    (
+        "uuid",
+        "name",
+        "source",
+        "source_description",
+        "content",
+        "labels",
+        "group_id",
+        "created_at",
+        "valid_at",
+        "entity_edges",
+    ),
+)
 
 
 def _ensure_episode_fields(record: dict[str, Any]) -> dict[str, Any]:
@@ -49,18 +69,6 @@ def _episode_save_payload(node: EpisodicNode) -> dict[str, Any]:
     }
 
 
-async def _run(
-    executor: QueryExecutor,
-    tx: Transaction | None,
-    query: str,
-    **params: Any,
-) -> Any:
-    """Execute via transaction when supplied, else the executor."""
-    if tx is not None:
-        return await tx.run(query, **params)
-    return await executor.execute_query(query, **params)
-
-
 class SurrealEpisodeNodeOperations(EpisodeNodeOperations):
     """SurrealDB implementation of Graphiti's EpisodeNodeOperations."""
 
@@ -71,23 +79,10 @@ class SurrealEpisodeNodeOperations(EpisodeNodeOperations):
         tx: Transaction | None = None,
     ) -> None:
         payload = _episode_save_payload(node)
-        await _run(
+        await run_query(
             executor,
             tx,
-            """
-            UPSERT episode SET
-                uuid = $uuid,
-                name = $name,
-                source = $source,
-                source_description = $source_description,
-                content = $content,
-                labels = $labels,
-                group_id = $group_id,
-                created_at = $created_at,
-                valid_at = $valid_at,
-                entity_edges = $entity_edges
-            WHERE uuid = $uuid;
-            """,
+            _EPISODE_SAVE,
             **payload,
         )
         logger.debug("Saved episode to SurrealDB: %s", node.uuid)
@@ -105,13 +100,13 @@ class SurrealEpisodeNodeOperations(EpisodeNodeOperations):
             batch = nodes[start : start + batch_size]
             rows = [_episode_save_payload(n) for n in batch]
             uuids = [r["uuid"] for r in rows]
-            await _run(
+            await run_query(
                 executor,
                 tx,
                 "DELETE FROM episode WHERE uuid IN $uuids;",
                 uuids=uuids,
             )
-            await _run(
+            await run_query(
                 executor,
                 tx,
                 "INSERT INTO episode $rows;",
@@ -130,7 +125,7 @@ class SurrealEpisodeNodeOperations(EpisodeNodeOperations):
         ``next_episode`` RELATION tables, and SurrealDB removes those
         edges automatically when the endpoint is deleted.
         """
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM episode WHERE uuid = $uuid;",
@@ -146,7 +141,7 @@ class SurrealEpisodeNodeOperations(EpisodeNodeOperations):
         batch_size: int = 100,
     ) -> None:
         del batch_size  # SurrealDB deletes atomically; batch size is advisory
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM episode WHERE group_id = $group_id;",
@@ -163,7 +158,7 @@ class SurrealEpisodeNodeOperations(EpisodeNodeOperations):
         del batch_size
         if not uuids:
             return
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM episode WHERE uuid IN $uuids;",

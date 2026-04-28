@@ -18,9 +18,18 @@ from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.helpers import parse_db_date
 from graphiti_core.nodes import SagaNode
 
-from sibyl_core.graph.surreal.ops._common import normalize_records
+from sibyl_core.graph.surreal.ops._common import (
+    build_node_upsert_query,
+    normalize_records,
+    run_query,
+)
 
 logger = logging.getLogger(__name__)
+
+_SAGA_SAVE = build_node_upsert_query(
+    "saga",
+    ("uuid", "name", "labels", "group_id", "created_at"),
+)
 
 
 def _saga_save_payload(node: SagaNode) -> dict[str, Any]:
@@ -42,18 +51,6 @@ def _saga_from_record(record: dict[str, Any]) -> SagaNode:
     )
 
 
-async def _run(
-    executor: QueryExecutor,
-    tx: Transaction | None,
-    query: str,
-    **params: Any,
-) -> Any:
-    """Execute via transaction when supplied, else the executor."""
-    if tx is not None:
-        return await tx.run(query, **params)
-    return await executor.execute_query(query, **params)
-
-
 class SurrealSagaNodeOperations(SagaNodeOperations):
     """SurrealDB implementation of Graphiti's SagaNodeOperations."""
 
@@ -64,23 +61,10 @@ class SurrealSagaNodeOperations(SagaNodeOperations):
         tx: Transaction | None = None,
     ) -> None:
         payload = _saga_save_payload(node)
-        await _run(
+        await run_query(
             executor,
             tx,
-            "DELETE FROM saga WHERE uuid = $uuid;",
-            uuid=payload["uuid"],
-        )
-        await _run(
-            executor,
-            tx,
-            """
-            CREATE saga SET
-                uuid = $uuid,
-                name = $name,
-                labels = $labels,
-                group_id = $group_id,
-                created_at = $created_at;
-            """,
+            _SAGA_SAVE,
             **payload,
         )
         logger.debug("Saved saga to SurrealDB: %s", node.uuid)
@@ -98,13 +82,13 @@ class SurrealSagaNodeOperations(SagaNodeOperations):
             batch = nodes[start : start + batch_size]
             rows = [_saga_save_payload(n) for n in batch]
             uuids = [r["uuid"] for r in rows]
-            await _run(
+            await run_query(
                 executor,
                 tx,
                 "DELETE FROM saga WHERE uuid IN $uuids;",
                 uuids=uuids,
             )
-            await _run(
+            await run_query(
                 executor,
                 tx,
                 "INSERT INTO saga $rows;",
@@ -122,7 +106,7 @@ class SurrealSagaNodeOperations(SagaNodeOperations):
         Sagas anchor ``has_episode`` RELATION rows, and SurrealDB removes
         those edges automatically when the saga endpoint is deleted.
         """
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM saga WHERE uuid = $uuid;",
@@ -138,7 +122,7 @@ class SurrealSagaNodeOperations(SagaNodeOperations):
         batch_size: int = 100,
     ) -> None:
         del batch_size
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM saga WHERE group_id = $group_id;",
@@ -155,7 +139,7 @@ class SurrealSagaNodeOperations(SagaNodeOperations):
         del batch_size
         if not uuids:
             return
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM saga WHERE uuid IN $uuids;",
