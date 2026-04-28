@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -22,10 +21,8 @@ from sibyl.db.models import (
 from sibyl.persistence.content_common import CrawlStats, DocumentEntityRecord
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
-from sibyl_core.retrieval.dedup import cosine_similarity
 from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
 
-_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
 _DEFAULT_BATCH_SIZE = 128
 _DELETE_BY_UUID = {
     "crawl_sources": "DELETE FROM crawl_sources WHERE uuid = $uuid;",
@@ -97,6 +94,12 @@ def _query_error(result: object) -> str | None:
         return result
     if isinstance(result, dict):
         payload = {str(key): value for key, value in result.items()}
+        if (
+            "result" in payload
+            and "status" not in payload
+            and isinstance(payload.get("result"), list)
+        ):
+            return _query_error(payload["result"])
         status = payload.get("status")
         if isinstance(status, str) and status.upper() == "ERR":
             detail = payload.get("detail") or payload.get("result") or payload
@@ -474,31 +477,6 @@ def _page[T](items: Sequence[T], *, limit: int, offset: int) -> tuple[list[T], i
     return list(items[offset : offset + limit]), total
 
 
-def _tokenize(text: str) -> set[str]:
-    return {match.group(0).lower() for match in _TOKEN_PATTERN.finditer(text)}
-
-
-def _tokenize_fields(*fields: str | None) -> set[str]:
-    tokens: set[str] = set()
-    for field in fields:
-        if field:
-            tokens.update(match.group(0).lower() for match in _TOKEN_PATTERN.finditer(field))
-    return tokens
-
-
-def _lexical_score_from_tokens(query_tokens: set[str], *field_token_sets: set[str]) -> float:
-    if not query_tokens:
-        return 0.0
-    matched: set[str] = set()
-    for tokens in field_token_sets:
-        matched.update(query_tokens & tokens)
-    return len(matched) / len(query_tokens)
-
-
-def _lexical_score(query_text: str, *fields: str | None) -> float:
-    return _lexical_score_from_tokens(_tokenize(query_text), _tokenize_fields(*fields))
-
-
 def _rrf_score(rank: int, *, k: float = 60.0) -> float:
     return 1.0 / (k + rank)
 
@@ -510,6 +488,19 @@ def _combined_hybrid_score(vector_rank: int | None, lexical_rank: int | None) ->
     if lexical_rank is not None:
         score += _rrf_score(lexical_rank)
     return score
+
+
+def _search_candidate_limit(limit: int) -> int:
+    return min(max(limit * 5, limit, 1), 100)
+
+
+def _code_chunk_clause(language: str | None) -> tuple[str, dict[str, Any]]:
+    if not language:
+        return " AND chunk_type = 'code' ", {}
+    return (
+        " AND chunk_type = 'code' AND string::lowercase(language ?? '') = $language ",
+        {"language": language.lower()},
+    )
 
 
 def _value_batches(
@@ -540,7 +531,43 @@ def _where_equals(field: str, values: Sequence[str], *, prefix: str) -> tuple[st
 async def _select_many(
     client: SurrealContentClient, query: str, **params: Any
 ) -> list[dict[str, Any]]:
-    return _normalize_records(await client.execute_query(query, **params))
+    result = await client.execute_query(query, **params)
+    error = _query_error(result)
+    if error is not None:
+        raise RuntimeError(error)
+    return _normalize_records(result)
+
+
+def _normalize_raw_statement_records(result: object, *, statement_index: int) -> list[dict[str, Any]]:
+    if isinstance(result, dict):
+        payload = {str(key): value for key, value in result.items()}
+        statements = payload.get("result")
+        if (
+            "status" not in payload
+            and isinstance(statements, list)
+            and statements
+            and all(isinstance(statement, dict) for statement in statements)
+        ):
+            return _normalize_records(statements[statement_index])
+    return _normalize_records(result)
+
+
+async def _select_many_raw(
+    client: SurrealContentClient,
+    query: str,
+    *,
+    statement_index: int = -1,
+    **params: Any,
+) -> list[dict[str, Any]]:
+    execute_query_raw = getattr(client, "execute_query_raw", None)
+    if execute_query_raw is not None:
+        result = await execute_query_raw(query, **params)
+    else:
+        result = await client.execute_query(query, **params)
+    error = _query_error(result)
+    if error is not None:
+        raise RuntimeError(error)
+    return _normalize_raw_statement_records(result, statement_index=statement_index)
 
 
 async def _select_one(
@@ -624,6 +651,26 @@ async def _load_documents_for_source_ids(
     return [_document_from_record(row) for row in rows]
 
 
+async def _load_search_documents_by_ids(
+    client: SurrealContentClient,
+    document_ids: Sequence[str],
+) -> list[CrawledDocument]:
+    if not document_ids:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for batch in _value_batches(document_ids):
+        rows.extend(
+            await _select_many(
+                client,
+                "SELECT uuid, source_id, url, title, has_code "
+                "FROM crawled_documents WHERE uuid INSIDE $document_ids;",
+                document_ids=batch,
+            )
+        )
+    return [_document_from_record(row) for row in rows]
+
+
 async def _load_chunks_for_document_ids(
     client: SurrealContentClient,
     document_ids: Sequence[str],
@@ -668,6 +715,37 @@ def _source_search_scope_clause(
             clauses.append("uuid = $source_name_empty_sentinel")
             params["source_name_empty_sentinel"] = "__sibyl_empty_source_name__"
     return " AND ".join(clauses), params
+
+
+def _document_ids_from_search_rows(
+    *row_groups: Sequence[dict[str, Any]],
+) -> list[str]:
+    document_ids: set[str] = set()
+    for rows in row_groups:
+        for row in rows:
+            document_id = row.get("document_id")
+            if document_id is not None:
+                document_ids.add(str(document_id))
+    return sorted(document_ids)
+
+
+def _hydrate_search_rows(
+    rows: Sequence[dict[str, Any]],
+    *,
+    documents_by_id: dict[str, CrawledDocument],
+    sources_by_id: dict[str, CrawlSource],
+) -> list[tuple[DocumentChunk, CrawledDocument, str, UUID, float]]:
+    hydrated: list[tuple[DocumentChunk, CrawledDocument, str, UUID, float]] = []
+    for row in rows:
+        chunk = _chunk_from_record(row)
+        document = documents_by_id.get(str(chunk.document_id))
+        if document is None:
+            continue
+        source = sources_by_id.get(str(document.source_id))
+        if source is None:
+            continue
+        hydrated.append((chunk, document, source.name, source.id, float(row.get("score") or 0.0)))
+    return hydrated
 
 
 async def _load_sources_for_search_scope(
@@ -1438,30 +1516,50 @@ async def search_rag_chunks(
     source_id: UUID | None = None,
     source_name: str | None = None,
 ) -> list[Any]:
-    _, sources_by_id, documents_by_id, chunks = await _load_search_scope(
-        organization_id=organization_id,
-        source_id=source_id,
-        source_name=source_name,
-    )
+    if match_count <= 0:
+        return []
 
-    rows: list[tuple[DocumentChunk, CrawledDocument, str, UUID, float]] = []
-    for chunk in chunks:
-        embedding = chunk.embedding if isinstance(chunk.embedding, list) else None
-        if not embedding:
-            continue
-        similarity = cosine_similarity(embedding, query_embedding)
-        if similarity < similarity_threshold:
-            continue
-        document = documents_by_id.get(str(chunk.document_id))
-        if document is None:
-            continue
-        source = sources_by_id.get(str(document.source_id))
-        if source is None:
-            continue
-        rows.append((chunk, document, source.name, source.id, similarity))
+    candidate_limit = _search_candidate_limit(match_count)
+    async with surreal_content_client() as client:
+        sources = await _load_sources_for_search_scope(
+            client,
+            organization_id=organization_id,
+            source_id=source_id,
+            source_name=source_name,
+        )
+        if not sources:
+            return []
 
-    rows.sort(key=lambda row: row[-1], reverse=True)
-    return rows[:match_count]
+        source_ids = [str(source.id) for source in sources]
+        sources_by_id = {str(source.id): source for source in sources}
+        rows = await _select_many_raw(
+            client,
+            "LET $document_ids = ("  # noqa: S608
+            "SELECT VALUE uuid FROM crawled_documents WHERE source_id INSIDE $source_ids"
+            ");"
+            "SELECT * FROM ("
+            "SELECT uuid, document_id, chunk_index, chunk_type, content, context, "
+            "heading_path, language, has_entities, entity_ids, "
+            "(1 - vector::distance::knn()) AS score "
+            "FROM document_chunks WHERE document_id INSIDE $document_ids "
+            f"AND embedding <|{candidate_limit}, 40|> $query_embedding"
+            ") WHERE score >= $similarity_threshold "
+            "ORDER BY score DESC LIMIT $candidate_limit;",
+            source_ids=source_ids,
+            query_embedding=query_embedding,
+            similarity_threshold=similarity_threshold,
+            candidate_limit=candidate_limit,
+        )
+        documents = await _load_search_documents_by_ids(
+            client, _document_ids_from_search_rows(rows)
+        )
+        documents_by_id = {str(document.id): document for document in documents}
+
+    return _hydrate_search_rows(
+        rows,
+        documents_by_id=documents_by_id,
+        sources_by_id=sources_by_id,
+    )[:match_count]
 
 
 async def search_code_example_chunks(
@@ -1473,32 +1571,55 @@ async def search_code_example_chunks(
     source_id: UUID | None = None,
     language: str | None = None,
 ) -> list[Any]:
-    _, sources_by_id, documents_by_id, chunks = await _load_search_scope(
-        organization_id=organization_id,
-        source_id=source_id,
-        source_name=None,
-    )
+    if match_count <= 0:
+        return []
 
-    rows: list[tuple[DocumentChunk, CrawledDocument, UUID, str, float]] = []
-    for chunk in chunks:
-        if chunk.chunk_type != ChunkType.CODE:
-            continue
-        if language and (chunk.language or "").lower() != language.lower():
-            continue
-        embedding = chunk.embedding if isinstance(chunk.embedding, list) else None
-        if not embedding:
-            continue
-        similarity = cosine_similarity(embedding, query_embedding)
-        document = documents_by_id.get(str(chunk.document_id))
-        if document is None:
-            continue
-        source = sources_by_id.get(str(document.source_id))
-        if source is None:
-            continue
-        rows.append((chunk, document, source.id, source.name, similarity))
+    candidate_limit = _search_candidate_limit(match_count)
+    language_clause, language_params = _code_chunk_clause(language)
+    async with surreal_content_client() as client:
+        sources = await _load_sources_for_search_scope(
+            client,
+            organization_id=organization_id,
+            source_id=source_id,
+            source_name=None,
+        )
+        if not sources:
+            return []
 
-    rows.sort(key=lambda row: row[-1], reverse=True)
-    return rows[:match_count]
+        source_ids = [str(source.id) for source in sources]
+        sources_by_id = {str(source.id): source for source in sources}
+        rows = await _select_many_raw(
+            client,
+            "LET $document_ids = ("  # noqa: S608
+            "SELECT VALUE uuid FROM crawled_documents WHERE source_id INSIDE $source_ids"
+            ");"
+            "SELECT * FROM ("
+            "SELECT uuid, document_id, chunk_index, chunk_type, content, context, "
+            "heading_path, language, has_entities, entity_ids, "
+            "(1 - vector::distance::knn()) AS score "
+            "FROM document_chunks WHERE document_id INSIDE $document_ids"
+            f"{language_clause} "
+            f"AND embedding <|{candidate_limit}, 40|> $query_embedding "
+            ") "
+            "ORDER BY score DESC LIMIT $candidate_limit;",
+            source_ids=source_ids,
+            query_embedding=query_embedding,
+            candidate_limit=candidate_limit,
+            **language_params,
+        )
+        documents = await _load_search_documents_by_ids(
+            client, _document_ids_from_search_rows(rows)
+        )
+        documents_by_id = {str(document.id): document for document in documents}
+
+    return [
+        (chunk, document, source_id, source_name, score)
+        for chunk, document, source_name, source_id, score in _hydrate_search_rows(
+            rows,
+            documents_by_id=documents_by_id,
+            sources_by_id=sources_by_id,
+        )
+    ][:match_count]
 
 
 async def hybrid_search_chunks(
@@ -1512,65 +1633,82 @@ async def hybrid_search_chunks(
     source_id: UUID | None = None,
     source_name: str | None = None,
 ) -> list[Any]:
-    _, sources_by_id, documents_by_id, chunks = await _load_search_scope(
-        organization_id=organization_id,
-        source_id=source_id,
-        source_name=source_name,
-    )
+    if match_count <= 0:
+        return []
 
-    vector_rows: list[tuple[DocumentChunk, float]] = []
-    lexical_rows: list[tuple[DocumentChunk, float]] = []
-    similarity_by_chunk_id: dict[str, float] = {}
-    lexical_by_chunk_id: dict[str, float] = {}
-    query_tokens = _tokenize(query_text)
-    document_tokens_by_id: dict[str, set[str]] = {}
+    candidate_limit = _search_candidate_limit(match_count)
+    async with surreal_content_client() as client:
+        sources = await _load_sources_for_search_scope(
+            client,
+            organization_id=organization_id,
+            source_id=source_id,
+            source_name=source_name,
+        )
+        if not sources:
+            return []
 
-    for chunk in chunks:
-        document = documents_by_id.get(str(chunk.document_id))
-        if document is None:
-            continue
+        source_ids = [str(source.id) for source in sources]
+        sources_by_id = {str(source.id): source for source in sources}
+        vector_rows = await _select_many_raw(
+            client,
+            "LET $document_ids = ("  # noqa: S608
+            "SELECT VALUE uuid FROM crawled_documents WHERE source_id INSIDE $source_ids"
+            ");"
+            "SELECT * FROM ("
+            "SELECT uuid, document_id, chunk_index, chunk_type, content, context, "
+            "heading_path, language, has_entities, entity_ids, "
+            "(1 - vector::distance::knn()) AS score "
+            "FROM document_chunks WHERE document_id INSIDE $document_ids "
+            f"AND embedding <|{candidate_limit}, 40|> $query_embedding"
+            ") WHERE score >= $similarity_threshold "
+            "ORDER BY score DESC LIMIT $candidate_limit;",
+            source_ids=source_ids,
+            query_embedding=query_embedding,
+            similarity_threshold=similarity_threshold,
+            candidate_limit=candidate_limit,
+        )
+        lexical_rows = await _select_many_raw(
+            client,
+            "LET $document_ids = ("
+            "SELECT VALUE uuid FROM crawled_documents WHERE source_id INSIDE $source_ids"
+            ");"
+            "SELECT uuid, document_id, chunk_index, chunk_type, content, context, "
+            "heading_path, language, has_entities, entity_ids, search::score(0) AS score "
+            "FROM document_chunks WHERE document_id INSIDE $document_ids "
+            "AND content @0@ $search_query "
+            "ORDER BY score DESC LIMIT $candidate_limit;",
+            source_ids=source_ids,
+            search_query=query_text.strip(),
+            candidate_limit=candidate_limit,
+        )
+        document_ids = _document_ids_from_search_rows(vector_rows, lexical_rows)
+        documents = await _load_search_documents_by_ids(client, document_ids)
+        documents_by_id = {str(document.id): document for document in documents}
 
-        embedding = chunk.embedding if isinstance(chunk.embedding, list) else None
-        if embedding:
-            similarity = cosine_similarity(embedding, query_embedding)
-            if similarity >= similarity_threshold:
-                similarity_by_chunk_id[str(chunk.id)] = similarity
-                vector_rows.append((chunk, similarity))
+    vector_ranks = {
+        str(row.get("uuid")): index for index, row in enumerate(vector_rows, start=1)
+    }
+    lexical_ranks = {
+        str(row.get("uuid")): index for index, row in enumerate(lexical_rows, start=1)
+    }
+    vector_by_id = {str(row.get("uuid")): row for row in vector_rows}
+    lexical_by_id = {str(row.get("uuid")): row for row in lexical_rows}
 
-        document_id = str(document.id)
-        document_tokens = document_tokens_by_id.get(document_id)
-        if document_tokens is None:
-            document_tokens = _tokenize_fields(document.title, document.content)
-            document_tokens_by_id[document_id] = document_tokens
-        chunk_tokens = _tokenize_fields(chunk.content, chunk.context)
-        lexical = _lexical_score_from_tokens(query_tokens, chunk_tokens, document_tokens)
-        if lexical > 0:
-            lexical_by_chunk_id[str(chunk.id)] = lexical
-            lexical_rows.append((chunk, lexical))
-
-    vector_rows.sort(key=lambda row: row[1], reverse=True)
-    lexical_rows.sort(key=lambda row: row[1], reverse=True)
-    vector_ranks = {str(chunk.id): index for index, (chunk, _) in enumerate(vector_rows, start=1)}
-    lexical_ranks = {str(chunk.id): index for index, (chunk, _) in enumerate(lexical_rows, start=1)}
-
-    candidate_ids = set(vector_ranks) | set(lexical_ranks)
     combined: list[tuple[DocumentChunk, CrawledDocument, str, UUID, float, float]] = []
-    for chunk_id in candidate_ids:
-        chunk = next((item for item in chunks if str(item.id) == chunk_id), None)
-        if chunk is None:
+    for chunk_id in set(vector_by_id) | set(lexical_by_id):
+        row = vector_by_id.get(chunk_id) or lexical_by_id.get(chunk_id)
+        if row is None:
             continue
+        chunk = _chunk_from_record(row)
         document = documents_by_id.get(str(chunk.document_id))
         if document is None:
             continue
         source = sources_by_id.get(str(document.source_id))
         if source is None:
             continue
-        similarity = similarity_by_chunk_id.get(chunk_id, 0.0)
-        lexical = lexical_by_chunk_id.get(chunk_id, 0.0)
-        score = _combined_hybrid_score(vector_ranks.get(chunk_id), lexical_ranks.get(chunk_id))
-        combined.append(
-            (chunk, document, source.name, source.id, similarity, lexical if score else 0.0)
-        )
+        similarity = float(vector_by_id.get(chunk_id, {}).get("score") or 0.0)
+        lexical = float(lexical_by_id.get(chunk_id, {}).get("score") or 0.0)
+        combined.append((chunk, document, source.name, source.id, similarity, lexical))
 
     combined.sort(
         key=lambda row: (
