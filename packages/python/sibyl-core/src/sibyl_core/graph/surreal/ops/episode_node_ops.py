@@ -71,19 +71,11 @@ class SurrealEpisodeNodeOperations(EpisodeNodeOperations):
         tx: Transaction | None = None,
     ) -> None:
         payload = _episode_save_payload(node)
-        # Mirror entity_node_ops: DELETE + CREATE keeps DEFAULT time::now()
-        # intact for fresh inserts and gives idempotent upsert semantics.
-        await _run(
-            executor,
-            tx,
-            "DELETE FROM episode WHERE uuid = $uuid;",
-            uuid=payload["uuid"],
-        )
         await _run(
             executor,
             tx,
             """
-            CREATE episode SET
+            UPSERT episode SET
                 uuid = $uuid,
                 name = $name,
                 source = $source,
@@ -93,7 +85,8 @@ class SurrealEpisodeNodeOperations(EpisodeNodeOperations):
                 group_id = $group_id,
                 created_at = $created_at,
                 valid_at = $valid_at,
-                entity_edges = $entity_edges;
+                entity_edges = $entity_edges
+            WHERE uuid = $uuid;
             """,
             **payload,
         )

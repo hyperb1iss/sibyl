@@ -58,21 +58,11 @@ class SurrealEntityNodeOperations(EntityNodeOperations):
         tx: Transaction | None = None,
     ) -> None:
         payload = _entity_save_payload(node)
-        # UPSERT semantics: delete-by-uuid + CREATE is simplest and keeps
-        # the DEFAULT time::now() behavior intact for brand-new inserts.
-        # SurrealDB's UPSERT statement would preserve created_at but is
-        # noisier to express here; revisit if save() becomes hot-path.
-        await _run(
-            executor,
-            tx,
-            "DELETE FROM entity WHERE uuid = $uuid;",
-            uuid=payload["uuid"],
-        )
         await _run(
             executor,
             tx,
             """
-            CREATE entity SET
+            UPSERT entity SET
                 uuid = $uuid,
                 name = $name,
                 entity_type = $entity_type,
@@ -81,7 +71,8 @@ class SurrealEntityNodeOperations(EntityNodeOperations):
                 attributes = $attributes,
                 group_id = $group_id,
                 created_at = $created_at,
-                name_embedding = $name_embedding;
+                name_embedding = $name_embedding
+            WHERE uuid = $uuid;
             """,
             **payload,
         )

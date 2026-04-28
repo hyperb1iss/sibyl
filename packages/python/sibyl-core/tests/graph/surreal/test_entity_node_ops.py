@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from graphiti_core.errors import NodeNotFoundError
@@ -35,8 +36,29 @@ def _make_entity(
     )
 
 
+class _RecordingExecutor:
+    def __init__(self) -> None:
+        self.queries: list[tuple[str, dict[str, Any]]] = []
+
+    async def execute_query(self, query: str, **params: Any) -> list[Any]:
+        self.queries.append((query, params))
+        return []
+
+
 @pytest.mark.asyncio
 class TestEntityNodeOps:
+    async def test_save_uses_single_upsert_statement(self) -> None:
+        ops = SurrealEntityNodeOperations()
+        executor = _RecordingExecutor()
+
+        await ops.save(executor, _make_entity("ent-1", "group-1"))
+
+        assert len(executor.queries) == 1
+        query, params = executor.queries[0]
+        assert "UPSERT entity SET" in query
+        assert "DELETE FROM entity" not in query
+        assert params["uuid"] == "ent-1"
+
     async def test_save_and_get_by_uuid(self, surreal_schema: SurrealDriver) -> None:
         ops = SurrealEntityNodeOperations()
         ent = _make_entity("ent-1", surreal_schema.group_id, attributes={"role": "dev"})
