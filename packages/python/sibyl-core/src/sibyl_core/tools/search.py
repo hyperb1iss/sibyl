@@ -275,6 +275,11 @@ async def search(
     doc_results: list[SearchResult] = []
     document_search_task: asyncio.Task[list[SearchResult]] | None = None
     if search_documents and query and organization_id:
+        document_timeout_seconds = (
+            DOCUMENT_SEARCH_GRAPH_JOIN_TIMEOUT_SECONDS
+            if search_graph
+            else DOCUMENT_SEARCH_TIMEOUT_SECONDS
+        )
         document_search_task = asyncio.create_task(
             with_timeout(
                 _search_documents(
@@ -286,7 +291,7 @@ async def search(
                     limit=limit,
                     include_content=include_content,
                 ),
-                timeout_seconds=DOCUMENT_SEARCH_TIMEOUT_SECONDS,
+                timeout_seconds=document_timeout_seconds,
                 operation_name="document_search",
             )
         )
@@ -521,16 +526,7 @@ async def search(
     # =========================================================================
     if document_search_task is not None:
         try:
-            timeout_seconds = (
-                DOCUMENT_SEARCH_GRAPH_JOIN_TIMEOUT_SECONDS
-                if search_graph
-                else DOCUMENT_SEARCH_TIMEOUT_SECONDS
-            )
-            doc_results = await with_timeout(
-                document_search_task,
-                timeout_seconds=timeout_seconds,
-                operation_name="document_search",
-            )
+            doc_results = await document_search_task
             log.debug("document_search_complete", results=len(doc_results))
         except Exception as e:
             log.warning("document_search_failed", error_type=type(e).__name__)

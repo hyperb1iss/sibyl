@@ -984,6 +984,48 @@ class TestSearchTool:
         assert response.document_count == 0
 
     @pytest.mark.asyncio
+    async def test_search_with_graph_uses_short_document_budget(self) -> None:
+        from sibyl_core.retrieval.hybrid import HybridResult
+
+        search_module = import_module("sibyl_core.tools.search")
+        cancelled = asyncio.Event()
+
+        async def slow_document_search(**_: object) -> list[SearchResult]:
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            return []
+
+        async def graph_search(**_: object) -> HybridResult:
+            await asyncio.sleep(0.02)
+            return HybridResult(
+                results=[],
+                metadata={"entity_manager_search_completed": True},
+            )
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=AsyncMock())),
+            ),
+            patch("sibyl_core.tools.search._search_documents", slow_document_search),
+            patch("sibyl_core.tools.search.hybrid_search", graph_search),
+            patch.object(search_module, "DOCUMENT_SEARCH_TIMEOUT_SECONDS", 10.0),
+            patch.object(search_module, "DOCUMENT_SEARCH_GRAPH_JOIN_TIMEOUT_SECONDS", 0.001),
+        ):
+            response = await search_module.search(
+                query="fast graph slow docs",
+                organization_id="org_123",
+                include_documents=True,
+                include_graph=True,
+            )
+
+        assert cancelled.is_set()
+        assert response.document_count == 0
+
+    @pytest.mark.asyncio
     async def test_search_promotes_exact_title_match_over_noisy_hybrid_results(self) -> None:
         """Enhanced search should overlay exact graph title matches ahead of noisy seeds."""
         from sibyl_core.retrieval.hybrid import HybridResult
