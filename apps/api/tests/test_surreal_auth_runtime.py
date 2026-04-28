@@ -36,11 +36,13 @@ def test_surreal_auth_runtime_exports_neutral_surface_only() -> None:
     assert "start_device_authorization" in surreal_auth_runtime.__all__
     assert "exchange_device_code" in surreal_auth_runtime.__all__
     assert "list_accessible_project_graph_ids" in surreal_auth_runtime.__all__
+    assert "resolve_auth_context" in surreal_auth_runtime.__all__
 
     for legacy_name in [
         "start_legacy_device_authorization",
         "exchange_legacy_device_code",
         "list_legacy_accessible_project_graph_ids",
+        "resolve_surreal_auth_context",
     ]:
         assert legacy_name not in surreal_auth_runtime.__all__
         assert not hasattr(surreal_auth_runtime, legacy_name)

@@ -84,7 +84,7 @@ def _issued_session() -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_github_callback_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_github_callback_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     request = FakeRequest(
         query_params={
             "state": "issued-state",
@@ -111,7 +111,7 @@ async def test_github_callback_uses_legacy_helper(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.asyncio
-async def test_local_signup_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_local_signup_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     request = FakeRequest(
         json_data={
             "email": "nova@example.com",
@@ -138,7 +138,7 @@ async def test_local_signup_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
-async def test_local_login_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_local_login_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     request = FakeRequest(
         json_data={
             "email": "nova@example.com",
@@ -182,7 +182,7 @@ async def test_local_login_rejects_invalid_credentials(monkeypatch: pytest.Monke
 
 
 @pytest.mark.asyncio
-async def test_device_start_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_device_start_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     request = FakeRequest(
         json_data={
             "client_name": "sibyl-cli",
@@ -209,7 +209,7 @@ async def test_device_start_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
-async def test_device_token_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_device_token_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     request = FakeRequest(json_data={"device_code": "device-code"})
     exchange = AsyncMock(return_value={"access_token": "access-token"})
 
@@ -224,7 +224,7 @@ async def test_device_token_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
-async def test_device_verify_get_uses_legacy_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_device_verify_get_uses_runtime_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     request = FakeRequest(query_params={"user_code": "ABCD-EFGH"})
     resolve_user = AsyncMock(return_value=SimpleNamespace(email="nova@example.com", name="Nova"))
     get_request = AsyncMock(
@@ -249,7 +249,7 @@ async def test_device_verify_get_uses_legacy_helpers(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_device_verify_post_login_uses_legacy_helper(
+async def test_device_verify_post_login_uses_runtime_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = FakeRequest(
@@ -277,7 +277,7 @@ async def test_device_verify_post_login_uses_legacy_helper(
 
 
 @pytest.mark.asyncio
-async def test_device_verify_post_approve_uses_legacy_helpers(
+async def test_device_verify_post_approve_uses_runtime_helpers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_id = uuid4()
@@ -310,7 +310,7 @@ async def test_device_verify_post_approve_uses_legacy_helpers(
 
 
 @pytest.mark.asyncio
-async def test_refresh_tokens_uses_legacy_rotation(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_refresh_tokens_uses_runtime_rotation(monkeypatch: pytest.MonkeyPatch) -> None:
     user_id = uuid4()
     org_id = uuid4()
     request = FakeRequest(json_data={"refresh_token": "refresh-token"})
@@ -342,7 +342,7 @@ async def test_refresh_tokens_uses_legacy_rotation(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-async def test_logout_uses_legacy_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_logout_uses_runtime_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     user_id = uuid4()
     org_id = uuid4()
     request = FakeRequest(cookies={auth_routes.ACCESS_TOKEN_COOKIE: "access-token"})
@@ -369,7 +369,7 @@ async def test_logout_uses_legacy_helpers(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_list_api_keys_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_list_api_keys_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = _ctx()
     key = SimpleNamespace(
         id=uuid4(),
@@ -394,7 +394,7 @@ async def test_list_api_keys_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_create_api_key_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_create_api_key_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = _ctx()
     request = SimpleNamespace()
     record = SimpleNamespace(
@@ -444,7 +444,7 @@ async def test_me_uses_auth_context_payload() -> None:
 
 
 @pytest.mark.asyncio
-async def test_update_me_uses_legacy_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_update_me_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = _ctx()
     request = SimpleNamespace()
     updated_user = SimpleNamespace(

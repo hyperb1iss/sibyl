@@ -590,7 +590,7 @@ def _scopes_list(value: object | None) -> list[str]:
     return [str(item) for item in value if str(item).strip()]
 
 
-async def resolve_surreal_auth_context(claims: dict[str, Any]) -> Any:
+async def _resolve_auth_context_from_claims(claims: dict[str, Any]) -> Any:
     async with _auth_client_scope() as client:
         resolver = SurrealAuthContextResolver.from_client(client)
         return await resolver.resolve(claims)
@@ -602,7 +602,7 @@ async def resolve_auth_context(
     session: Any | None = None,
 ) -> Any:
     del session
-    return await resolve_surreal_auth_context(claims)
+    return await _resolve_auth_context_from_claims(claims)
 
 
 async def _log_audit_event(
@@ -2279,7 +2279,7 @@ async def resolve_accessible_project_graph_ids(
     api_key_project_ids=None,
 ) -> set[str] | None:
     try:
-        auth_ctx = await resolve_surreal_auth_context(
+        auth_ctx = await _resolve_auth_context_from_claims(
             {"sub": user_id, "org": org_id, "scopes": list(scopes or [])}
         )
     except Exception:
@@ -2460,7 +2460,6 @@ __all__ = [
     "resolve_auth_context",
     "resolve_request_claims",
     "resolve_request_user",
-    "resolve_surreal_auth_context",
     "revoke_access_session",
     "revoke_all_user_sessions",
     "revoke_api_key_for_user",
