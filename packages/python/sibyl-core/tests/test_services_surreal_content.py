@@ -10,6 +10,7 @@ from sibyl_core.services.surreal_content import (
     MemoryScope,
     get_or_create_source,
     list_unlinked_document_chunks,
+    load_search_scope,
     recall_raw_memory,
     remember_raw_memory,
     search_document_chunks,
@@ -395,6 +396,97 @@ class TestSurrealContentHelpers:
         assert "uuid = $source_name_empty_sentinel" in source_query
         assert source_params["source_name_empty_sentinel"] == "__sibyl_empty_source_name__"
         assert len(fake_client.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_load_search_scope_uses_source_name_fulltext_filter(self) -> None:
+        fake_client = FakeClient(
+            [
+                _query_result([]),
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            sources, sources_by_id, documents_by_id, chunks = await load_search_scope(
+                organization_id="org-1",
+                source_id=None,
+                source_name='DOCS "Portal"\x00',
+            )
+
+        assert sources == []
+        assert sources_by_id == {}
+        assert documents_by_id == {}
+        assert chunks == []
+        source_query, source_params = fake_client.calls[0]
+        assert "name @0@ $source_name" in source_query
+        assert "string::contains" not in source_query
+        assert source_params["source_name"] == "docs portal"
+        assert len(fake_client.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_load_search_scope_empty_source_name_does_not_broaden_scope(self) -> None:
+        fake_client = FakeClient(
+            [
+                _query_result([]),
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            sources, sources_by_id, documents_by_id, chunks = await load_search_scope(
+                organization_id="org-1",
+                source_id=None,
+                source_name="",
+            )
+
+        assert sources == []
+        assert sources_by_id == {}
+        assert documents_by_id == {}
+        assert chunks == []
+        source_query, source_params = fake_client.calls[0]
+        assert "uuid = $source_name_empty_sentinel" in source_query
+        assert source_params["source_name_empty_sentinel"] == "__sibyl_empty_source_name__"
+        assert len(fake_client.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_load_search_scope_source_id_takes_precedence_over_source_name(self) -> None:
+        fake_client = FakeClient(
+            [
+                _query_result([]),
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            await load_search_scope(
+                organization_id="org-1",
+                source_id="src-1",
+                source_name="docs",
+            )
+
+        source_query, source_params = fake_client.calls[0]
+        assert "uuid = $source_id" in source_query
+        assert "name @0@ $source_name" not in source_query
+        assert source_params["source_id"] == "src-1"
+        assert "source_name" not in source_params
 
     @pytest.mark.asyncio
     async def test_search_document_chunks_reports_raw_statement_errors(self) -> None:

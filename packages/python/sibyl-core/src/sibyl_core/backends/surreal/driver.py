@@ -40,6 +40,7 @@ from graphiti_core.driver.driver import (
 )
 
 from sibyl_core.backends.surreal.connection import _can_retry_query, _is_connection_closed_error
+from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.backends.surreal.observability import elapsed_ms, log_query, query_start
 
 logger = logging.getLogger(__name__)
@@ -388,12 +389,7 @@ class SurrealDriver(GraphDriver):
         max_query_length: int = 128,
     ) -> str:
         del group_ids
-        sanitized = "".join(c for c in query if c.isprintable() and c not in ('"', "'")).strip()
-        if not sanitized:
-            return ""
-        if len(sanitized) > max_query_length:
-            sanitized = sanitized[:max_query_length]
-        return sanitized
+        return build_fulltext_query(query, max_query_length=max_query_length)
 
 
 __all__ = ["SurrealDriver", "SurrealDriverSession", "_namespace_for_group"]

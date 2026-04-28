@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from uuid import uuid4
 
 import pytest
 
@@ -100,3 +101,106 @@ async def test_content_runtime_dependency_uses_active_session(
 
     with pytest.raises(StopAsyncIteration):
         await anext(dependency)
+
+
+@pytest.mark.asyncio
+async def test_surreal_search_scope_uses_source_name_fulltext_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params: object) -> list[object]:
+            self.calls.append((query, params))
+            return []
+
+    fake_client = FakeClient()
+
+    @asynccontextmanager
+    async def fake_session():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", fake_session)
+
+    sources, sources_by_id, documents_by_id, chunks = await surreal_content._load_search_scope(
+        organization_id=uuid4(),
+        source_id=None,
+        source_name='DOCS "Portal"\x00',
+    )
+
+    assert sources == []
+    assert sources_by_id == {}
+    assert documents_by_id == {}
+    assert chunks == []
+    source_query, source_params = fake_client.calls[0]
+    assert "name @0@ $source_name" in source_query
+    assert "string::contains" not in source_query
+    assert source_params["source_name"] == "docs portal"
+    assert len(fake_client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_surreal_search_scope_empty_source_name_does_not_broaden_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params: object) -> list[object]:
+            self.calls.append((query, params))
+            return []
+
+    fake_client = FakeClient()
+
+    @asynccontextmanager
+    async def fake_session():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", fake_session)
+
+    await surreal_content._load_search_scope(
+        organization_id=uuid4(),
+        source_id=None,
+        source_name="",
+    )
+
+    source_query, source_params = fake_client.calls[0]
+    assert "uuid = $source_name_empty_sentinel" in source_query
+    assert source_params["source_name_empty_sentinel"] == "__sibyl_empty_source_name__"
+    assert len(fake_client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_surreal_search_scope_source_id_takes_precedence_over_source_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params: object) -> list[object]:
+            self.calls.append((query, params))
+            return []
+
+    fake_client = FakeClient()
+    source_id = uuid4()
+
+    @asynccontextmanager
+    async def fake_session():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", fake_session)
+
+    await surreal_content._load_search_scope(
+        organization_id=uuid4(),
+        source_id=source_id,
+        source_name="docs",
+    )
+
+    source_query, source_params = fake_client.calls[0]
+    assert "uuid = $source_id" in source_query
+    assert "name @0@ $source_name" not in source_query
+    assert source_params["source_id"] == str(source_id)
+    assert "source_name" not in source_params

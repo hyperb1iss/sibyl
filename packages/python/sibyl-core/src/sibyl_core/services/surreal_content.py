@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.config import settings
 
 _DEFAULT_BATCH_SIZE = 128
@@ -498,6 +499,27 @@ async def _load_sources_for_org(
     return sorted(sources, key=lambda source: (source.name.lower(), source.id))
 
 
+async def _load_sources_for_search_scope(
+    client: SurrealContentClient,
+    *,
+    organization_id: str,
+    source_id: str | None,
+    source_name: str | None,
+) -> list[ContentSource]:
+    where_clause, params = _source_search_scope_clause(
+        organization_id=organization_id,
+        source_id=source_id,
+        source_name=source_name,
+    )
+    rows = await _select_many(
+        client,
+        f"SELECT * FROM crawl_sources WHERE {where_clause};",
+        **params,
+    )
+    sources = [_source_from_record(row) for row in rows]
+    return sorted(sources, key=lambda source: (source.name.lower(), source.id))
+
+
 async def _load_documents_for_source_ids(
     client: SurrealContentClient,
     source_ids: list[str],
@@ -824,13 +846,12 @@ async def load_search_scope(
     list[ContentSource], dict[str, ContentSource], dict[str, ContentDocument], list[ContentChunk]
 ]:
     async with surreal_content_client() as client:
-        sources = await _load_sources_for_org(client, organization_id=organization_id)
-        if source_id is not None:
-            sources = [source for source in sources if source.id == source_id]
-        elif source_name:
-            needle = source_name.strip().lower()
-            sources = [source for source in sources if needle in source.name.lower()]
-
+        sources = await _load_sources_for_search_scope(
+            client,
+            organization_id=organization_id,
+            source_id=source_id,
+            source_name=source_name,
+        )
         source_ids = [source.id for source in sources]
         documents = await _load_documents_for_source_ids(client, source_ids)
         chunks = await _load_chunks_for_document_ids(
@@ -844,13 +865,6 @@ async def load_search_scope(
 
 def _document_search_candidate_limit(limit: int) -> int:
     return min(max(limit * 5, limit, 1), 100)
-
-
-def _fulltext_query(value: str, *, max_query_length: int = 128) -> str:
-    sanitized = "".join(c for c in value if c.isprintable() and c not in ('"', "'")).strip()
-    if len(sanitized) > max_query_length:
-        return sanitized[:max_query_length]
-    return sanitized
 
 
 def _document_language_clause(language: str | None) -> tuple[str, dict[str, Any]]:
@@ -893,7 +907,7 @@ def _source_search_scope_clause(
         clauses.append("uuid = $source_id")
         params["source_id"] = source_id
     elif source_name is not None:
-        normalized_source_name = _fulltext_query(source_name.lower())
+        normalized_source_name = build_fulltext_query(source_name.lower())
         if normalized_source_name:
             clauses.append("name @0@ $source_name")
             params["source_name"] = normalized_source_name

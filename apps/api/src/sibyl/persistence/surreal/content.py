@@ -21,6 +21,7 @@ from sibyl.db.models import (
 )
 from sibyl.persistence.content_common import CrawlStats, DocumentEntityRecord
 from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.retrieval.dedup import cosine_similarity
 from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
 
@@ -645,6 +646,49 @@ async def _load_chunks_for_document_ids(
             )
         )
     return [_chunk_from_record(row) for row in rows]
+
+
+def _source_search_scope_clause(
+    *,
+    organization_id: UUID | str,
+    source_id: UUID | None,
+    source_name: str | None,
+) -> tuple[str, dict[str, Any]]:
+    clauses = ["organization_id = $organization_id"]
+    params: dict[str, Any] = {"organization_id": str(organization_id)}
+    if source_id is not None:
+        clauses.append("uuid = $source_id")
+        params["source_id"] = str(source_id)
+    elif source_name is not None:
+        normalized_source_name = build_fulltext_query(source_name.lower())
+        if normalized_source_name:
+            clauses.append("name @0@ $source_name")
+            params["source_name"] = normalized_source_name
+        else:
+            clauses.append("uuid = $source_name_empty_sentinel")
+            params["source_name_empty_sentinel"] = "__sibyl_empty_source_name__"
+    return " AND ".join(clauses), params
+
+
+async def _load_sources_for_search_scope(
+    client: SurrealContentClient,
+    *,
+    organization_id: UUID | str,
+    source_id: UUID | None,
+    source_name: str | None,
+) -> list[CrawlSource]:
+    where_clause, params = _source_search_scope_clause(
+        organization_id=organization_id,
+        source_id=source_id,
+        source_name=source_name,
+    )
+    rows = await _select_many(
+        client,
+        f"SELECT * FROM crawl_sources WHERE {where_clause};",  # noqa: S608
+        **params,
+    )
+    sources = [_source_from_record(row) for row in rows]
+    return sorted(sources, key=lambda source: _sort_key(source.created_at), reverse=True)
 
 
 async def list_crawl_sources_for_org(
@@ -1367,14 +1411,12 @@ async def _load_search_scope(
     list[CrawlSource], dict[str, CrawlSource], dict[str, CrawledDocument], list[DocumentChunk]
 ]:
     async with surreal_content_client() as client:
-        sources = await _load_sources_for_org(client, organization_id=organization_id)
-        if source_id is not None:
-            source_id_str = str(source_id)
-            sources = [source for source in sources if str(source.id) == source_id_str]
-        elif source_name:
-            needle = source_name.strip().lower()
-            sources = [source for source in sources if needle in source.name.lower()]
-
+        sources = await _load_sources_for_search_scope(
+            client,
+            organization_id=organization_id,
+            source_id=source_id,
+            source_name=source_name,
+        )
         source_ids = [str(source.id) for source in sources]
         documents = await _load_documents_for_source_ids(client, source_ids)
         chunks = await _load_chunks_for_document_ids(
