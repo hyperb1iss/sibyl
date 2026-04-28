@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     )
 
 _BACKEND_MODULES = {
-    "postgres": "sibyl.persistence.legacy.auth",
+    "postgres": "sibyl.persistence.legacy.auth_runtime",
     "surreal": "sibyl.persistence.surreal.auth_runtime",
 }
 
@@ -147,18 +147,8 @@ def __dir__() -> list[str]:
     return sorted(set(globals()) | set(__all__))
 
 
-def _runtime_helper_module() -> Any:
-    return import_module(
-        {
-            "postgres": "sibyl.persistence.legacy.auth_runtime",
-            "surreal": "sibyl.persistence.surreal.auth_runtime",
-        }[settings.auth_store]
-    )
-
-
 async def _call_runtime_helper(export_name: str, **kwargs: object) -> Any:
-    export = getattr(_runtime_helper_module(), export_name)
-    return await export(**kwargs)
+    return await _call_backend_export(export_name, **kwargs)
 
 
 async def _call_backend_export(export_name: str, *args: object, **kwargs: object) -> Any:

@@ -49,6 +49,18 @@ def test_auth_runtime_maps_auth_exports_for_surreal(
     )
 
 
+def test_auth_runtime_maps_auth_exports_for_postgres(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(auth_runtime.settings, "auth_store", "postgres")
+
+    assert auth_runtime._resolve_backend_export("authenticate_api_key").__module__ == (
+        "sibyl.persistence.legacy.auth"
+    )
+    assert auth_runtime.AuthContextResolver is LegacyAuthContextResolver
+    assert auth_runtime.SessionRepository is LegacySessionRepository
+
+
 def test_auth_runtime_only_exports_neutral_runtime_surface() -> None:
     assert "resolve_auth_context" in auth_runtime.__all__
     assert "patch_auth_user" in auth_runtime.__all__
@@ -84,6 +96,23 @@ def test_auth_runtime_only_exports_neutral_runtime_surface() -> None:
         assert legacy_name not in surreal_auth_runtime.__all__
         assert not hasattr(surreal_auth_runtime, legacy_name)
     assert surreal_auth_runtime.SessionRepository is SurrealSessionRepository
+
+
+def test_auth_runtime_backends_cover_public_exports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    skipped = {"InvalidAuthClaimsError", "UserNotFoundError"}
+
+    for backend, module in (
+        ("postgres", legacy_auth_runtime),
+        ("surreal", surreal_auth_runtime),
+    ):
+        monkeypatch.setattr(auth_runtime.settings, "auth_store", backend)
+        for name in auth_runtime.__all__:
+            if name in skipped:
+                continue
+            assert hasattr(module, name), f"{backend}:{name}"
+            assert auth_runtime._resolve_backend_export(name) is getattr(module, name)
 
 
 def test_auth_runtime_surreal_backend_covers_public_exports(

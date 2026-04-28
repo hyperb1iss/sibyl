@@ -30,7 +30,41 @@ from sibyl.db.project_sync import (
 )
 from sibyl.db.sync import get_graph_projects
 from sibyl.persistence.auth_common import UserNotFoundError
-from sibyl.persistence.legacy.auth import LegacyAuthContextResolver
+from sibyl.persistence.legacy.auth import (
+    AuthContextResolver,
+    OrganizationMembershipRepository,
+    OrganizationRepository,
+    SessionRepository,
+    UserRepository,
+    approve_device_authorization,
+    authenticate_api_key,
+    authenticate_local_user,
+    create_api_key_for_user,
+    create_session_record,
+    deny_device_authorization,
+    ensure_personal_organization,
+    exchange_device_code,
+    get_device_request_by_user_code,
+    get_user_by_id,
+    has_owner_membership,
+    list_api_keys_for_user,
+    list_user_organizations,
+    load_refresh_session_record,
+    log_audit_event,
+    login_device_browser_user,
+    login_github_identity,
+    login_local_user,
+    resolve_request_claims,
+    resolve_request_user,
+    revoke_access_session,
+    revoke_api_key_for_user,
+    revoke_refresh_session_record,
+    rotate_refresh_exchange,
+    rotate_refresh_session_record,
+    signup_local_user,
+    start_device_authorization,
+    update_auth_user,
+)
 from sibyl.persistence.legacy.users import (
     confirm_password_reset as confirm_password_reset_helper,
     list_oauth_connections as list_oauth_connections_helper,
@@ -53,11 +87,11 @@ async def resolve_legacy_auth_context(
     session: Any | None = None,
 ):
     if session is not None:
-        resolver = LegacyAuthContextResolver.from_session(session)
+        resolver = AuthContextResolver.from_session(session)
         return await resolver.resolve(claims)
 
     async with get_session() as db_session:
-        resolver = LegacyAuthContextResolver.from_session(db_session)
+        resolver = AuthContextResolver.from_session(db_session)
         return await resolver.resolve(claims)
 
 
@@ -213,7 +247,7 @@ async def resolve_legacy_accessible_project_graph_ids(
     api_key_project_ids: Sequence[str] | None = None,
 ) -> set[str] | None:
     async with get_session() as session:
-        resolver = LegacyAuthContextResolver.from_session(session)
+        resolver = AuthContextResolver.from_session(session)
         try:
             auth_ctx = await resolver.resolve(
                 {
@@ -516,3 +550,57 @@ get_project_record_by_id = get_legacy_project_record_by_id
 list_user_sessions = list_legacy_user_sessions
 revoke_all_user_sessions = revoke_all_legacy_user_sessions
 revoke_user_session = revoke_legacy_user_session
+
+
+__all__ = [
+    "AuthContextResolver",
+    "OrganizationMembershipRepository",
+    "OrganizationRepository",
+    "SessionRepository",
+    "UserRepository",
+    "approve_device_authorization",
+    "authenticate_api_key",
+    "authenticate_local_user",
+    "confirm_password_reset",
+    "create_api_key_for_user",
+    "create_project_record",
+    "create_session_record",
+    "delete_project_record",
+    "deny_device_authorization",
+    "ensure_personal_organization",
+    "exchange_device_code",
+    "get_device_request_by_user_code",
+    "get_project_record_by_graph_id",
+    "get_project_record_by_id",
+    "get_user_by_id",
+    "has_owner_membership",
+    "list_accessible_project_graph_ids",
+    "list_api_keys_for_user",
+    "list_oauth_connections",
+    "list_user_organizations",
+    "list_user_sessions",
+    "load_refresh_session_record",
+    "log_audit_event",
+    "login_device_browser_user",
+    "login_github_identity",
+    "login_local_user",
+    "patch_auth_user",
+    "remove_oauth_connection",
+    "request_password_reset",
+    "resolve_accessible_project_graph_ids",
+    "resolve_auth_context",
+    "resolve_request_claims",
+    "resolve_request_user",
+    "revoke_access_session",
+    "revoke_all_user_sessions",
+    "revoke_api_key_for_user",
+    "revoke_refresh_session_record",
+    "revoke_user_session",
+    "rotate_refresh_exchange",
+    "rotate_refresh_session_record",
+    "signup_local_user",
+    "start_device_authorization",
+    "update_auth_user",
+    "update_project_record",
+    "verify_entity_project_access",
+]
