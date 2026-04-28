@@ -850,6 +850,15 @@ class EntityManager:
                     entity_types=entity_types,
                     limit=limit,
                 )
+                if len(exact_name_results) >= limit:
+                    log.info(
+                        "Search completed",
+                        **query_log_fields(query),
+                        results_count=len(exact_name_results),
+                        mode="surreal_direct_exact",
+                    )
+                    return exact_name_results[:limit]
+
                 fallback_results = await self._fallback_text_search(
                     query=query,
                     entity_types=entity_types,

@@ -1652,6 +1652,37 @@ class TestEntitySearch:
         assert "string::contains" in fallback_query
 
     @pytest.mark.asyncio
+    async def test_search_skips_surreal_fallback_when_exact_results_fill_limit(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        matching_record = {
+            "uuid": "pattern-001",
+            "name": "Repository Pattern",
+            "group_id": "test-org-123",
+            "entity_type": "pattern",
+            "created_at": datetime.now(UTC),
+            "description": "Repository abstraction",
+            "content": "Use repositories for data access",
+            "metadata": json.dumps({"category": "architecture"}),
+        }
+
+        surreal_entity_manager._driver.execute_query = AsyncMock(return_value=[matching_record])
+
+        results = await surreal_entity_manager.search(
+            "Repository Pattern",
+            entity_types=[EntityType.PATTERN],
+            limit=1,
+        )
+
+        assert len(results) == 1
+        assert results[0][0].id == "pattern-001"
+        assert surreal_entity_manager._driver.execute_query.await_count == 1
+        exact_query = surreal_entity_manager._driver.execute_query.await_args.args[0]
+        assert "FROM entity" in exact_query
+        assert "string::contains" not in exact_query
+
+    @pytest.mark.asyncio
     async def test_search_basic(
         self,
         entity_manager: EntityManager,
