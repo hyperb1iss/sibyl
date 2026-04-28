@@ -18,7 +18,11 @@ from graphiti_core.driver.record_parsers import entity_edge_from_record
 from graphiti_core.edges import EntityEdge
 from graphiti_core.errors import EdgeNotFoundError
 
-from sibyl_core.graph.surreal.ops._common import normalize_records
+from sibyl_core.graph.surreal.ops._common import (
+    build_relation_save_query,
+    normalize_records,
+    run_query,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,41 +41,24 @@ FROM relates_to
 """
 
 
-_ENTITY_EDGE_SAVE = """
-LET $src = (SELECT VALUE id FROM entity WHERE uuid = $src_uuid LIMIT 1)[0];
-LET $tgt = (SELECT VALUE id FROM entity WHERE uuid = $tgt_uuid LIMIT 1)[0];
-LET $rel = type::thing('relates_to', $uuid);
-DELETE FROM relates_to WHERE uuid = $uuid AND (in != $src OR out != $tgt);
-LET $updated = (UPDATE relates_to SET
-    in = $src,
-    out = $tgt,
-    uuid = $uuid,
-    name = $name,
-    fact = $fact,
-    fact_embedding = $fact_embedding,
-    group_id = $group_id,
-    episodes = $episodes,
-    attributes = $attributes,
-    created_at = $created_at,
-    expired_at = $expired_at,
-    valid_at = $valid_at,
-    invalid_at = $invalid_at
-    WHERE uuid = $uuid RETURN id);
-IF array::len($updated) = 0 THEN
-    RELATE $src->$rel->$tgt SET
-        uuid = $uuid,
-        name = $name,
-        fact = $fact,
-        fact_embedding = $fact_embedding,
-        group_id = $group_id,
-        episodes = $episodes,
-        attributes = $attributes,
-        created_at = $created_at,
-        expired_at = $expired_at,
-        valid_at = $valid_at,
-        invalid_at = $invalid_at;
-END;
-"""
+_ENTITY_EDGE_SAVE = build_relation_save_query(
+    "relates_to",
+    (
+        "uuid",
+        "name",
+        "fact",
+        "fact_embedding",
+        "group_id",
+        "episodes",
+        "attributes",
+        "created_at",
+        "expired_at",
+        "valid_at",
+        "invalid_at",
+    ),
+    source_binding="(SELECT VALUE id FROM entity WHERE uuid = $src_uuid LIMIT 1)[0]",
+    target_binding="(SELECT VALUE id FROM entity WHERE uuid = $tgt_uuid LIMIT 1)[0]",
+)
 
 
 def _entity_edge_save_payload(edge: EntityEdge) -> dict[str, Any]:
@@ -90,18 +77,6 @@ def _entity_edge_save_payload(edge: EntityEdge) -> dict[str, Any]:
     }
 
 
-async def _run(
-    executor: QueryExecutor,
-    tx: Transaction | None,
-    query: str,
-    **params: Any,
-) -> Any:
-    """Execute via transaction when supplied, else the executor."""
-    if tx is not None:
-        return await tx.run(query, **params)
-    return await executor.execute_query(query, **params)
-
-
 class SurrealEntityEdgeOperations(EntityEdgeOperations):
     """SurrealDB implementation of Graphiti's EntityEdgeOperations."""
 
@@ -112,7 +87,7 @@ class SurrealEntityEdgeOperations(EntityEdgeOperations):
         tx: Transaction | None = None,
     ) -> None:
         payload = _entity_edge_save_payload(edge)
-        await _run(
+        await run_query(
             executor,
             tx,
             _ENTITY_EDGE_SAVE,
@@ -145,7 +120,7 @@ class SurrealEntityEdgeOperations(EntityEdgeOperations):
         edge: EntityEdge,
         tx: Transaction | None = None,
     ) -> None:
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM relates_to WHERE uuid = $uuid;",
@@ -161,7 +136,7 @@ class SurrealEntityEdgeOperations(EntityEdgeOperations):
     ) -> None:
         if not uuids:
             return
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM relates_to WHERE uuid IN $uuids;",

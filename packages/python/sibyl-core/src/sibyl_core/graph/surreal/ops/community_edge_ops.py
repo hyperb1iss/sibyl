@@ -21,7 +21,11 @@ from graphiti_core.edges import CommunityEdge
 from graphiti_core.errors import EdgeNotFoundError
 from graphiti_core.helpers import parse_db_date
 
-from sibyl_core.graph.surreal.ops._common import normalize_records
+from sibyl_core.graph.surreal.ops._common import (
+    build_relation_save_query,
+    normalize_records,
+    run_query,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,19 @@ FROM has_member
 """
 
 
+_COMMUNITY_EDGE_SAVE = build_relation_save_query(
+    "has_member",
+    ("uuid", "group_id", "created_at"),
+    source_binding="(SELECT VALUE id FROM community WHERE uuid = $src_uuid LIMIT 1)[0]",
+    target_binding=(
+        "array::concat("
+        "(SELECT VALUE id FROM entity WHERE uuid = $tgt_uuid LIMIT 1), "
+        "(SELECT VALUE id FROM community WHERE uuid = $tgt_uuid LIMIT 1)"
+        ")[0]"
+    ),
+)
+
+
 def _community_edge_from_record(record: dict[str, Any]) -> CommunityEdge:
     return CommunityEdge(
         uuid=record["uuid"],
@@ -43,17 +60,6 @@ def _community_edge_from_record(record: dict[str, Any]) -> CommunityEdge:
         target_node_uuid=record["target_node_uuid"],
         created_at=parse_db_date(record["created_at"]),  # type: ignore[arg-type]
     )
-
-
-async def _run(
-    executor: QueryExecutor,
-    tx: Transaction | None,
-    query: str,
-    **params: Any,
-) -> Any:
-    if tx is not None:
-        return await tx.run(query, **params)
-    return await executor.execute_query(query, **params)
 
 
 class SurrealCommunityEdgeOperations(CommunityEdgeOperations):
@@ -65,30 +71,10 @@ class SurrealCommunityEdgeOperations(CommunityEdgeOperations):
         edge: CommunityEdge,
         tx: Transaction | None = None,
     ) -> None:
-        # has_member target may be entity OR community; we probe both tables
-        # and pick the first non-empty result. SDK multi-statement discard
-        # (#232) is fine here since save returns nothing — the final RELATE
-        # still executes server-side.
-        await _run(
+        await run_query(
             executor,
             tx,
-            "DELETE FROM has_member WHERE uuid = $uuid;",
-            uuid=edge.uuid,
-        )
-        await _run(
-            executor,
-            tx,
-            """
-            LET $src = (SELECT VALUE id FROM community WHERE uuid = $src_uuid LIMIT 1)[0];
-            LET $tgt = array::concat(
-                (SELECT VALUE id FROM entity WHERE uuid = $tgt_uuid LIMIT 1),
-                (SELECT VALUE id FROM community WHERE uuid = $tgt_uuid LIMIT 1)
-            )[0];
-            RELATE $src->has_member->$tgt SET
-                uuid = $uuid,
-                group_id = $group_id,
-                created_at = $created_at;
-            """,
+            _COMMUNITY_EDGE_SAVE,
             src_uuid=edge.source_node_uuid,
             tgt_uuid=edge.target_node_uuid,
             uuid=edge.uuid,
@@ -103,7 +89,7 @@ class SurrealCommunityEdgeOperations(CommunityEdgeOperations):
         edge: CommunityEdge,
         tx: Transaction | None = None,
     ) -> None:
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM has_member WHERE uuid = $uuid;",
@@ -119,7 +105,7 @@ class SurrealCommunityEdgeOperations(CommunityEdgeOperations):
     ) -> None:
         if not uuids:
             return
-        await _run(
+        await run_query(
             executor,
             tx,
             "DELETE FROM has_member WHERE uuid IN $uuids;",

@@ -8,7 +8,81 @@ so the call sites in individual ops modules stay short.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
+
+from graphiti_core.driver.query_executor import QueryExecutor, Transaction
+
+
+def _check_identifier(value: str) -> str:
+    if not value or not all(char.isalnum() or char == "_" for char in value):
+        msg = f"invalid SurrealDB identifier: {value!r}"
+        raise ValueError(msg)
+    return value
+
+
+async def run_query(
+    executor: QueryExecutor,
+    tx: Transaction | None,
+    query: str,
+    **params: Any,
+) -> Any:
+    if tx is not None:
+        return await tx.run(query, **params)
+    return await executor.execute_query(query, **params)
+
+
+async def resolve_record_id(
+    executor: QueryExecutor,
+    tx: Transaction | None,
+    table: str,
+    uuid: str,
+) -> Any | None:
+    result = await run_query(
+        executor,
+        tx,
+        f"SELECT id FROM {_check_identifier(table)} WHERE uuid = $uuid LIMIT 1;",
+        uuid=uuid,
+    )
+    if not isinstance(result, list) or not result:
+        return None
+    first = result[0]
+    if not isinstance(first, dict):
+        return None
+    return first.get("id")
+
+
+def build_relation_save_query(
+    edge_table: str,
+    fields: Sequence[str],
+    *,
+    source_binding: str | None = None,
+    target_binding: str | None = None,
+) -> str:
+    table = _check_identifier(edge_table)
+    checked_fields = tuple(_check_identifier(field) for field in fields)
+    update_fields = ",\n    ".join(
+        ("in = $src", "out = $tgt", *(f"{field} = ${field}" for field in checked_fields))
+    )
+    relate_fields = ",\n        ".join(f"{field} = ${field}" for field in checked_fields)
+    bindings = []
+    if source_binding is not None:
+        bindings.append(f"LET $src = {source_binding};")
+    if target_binding is not None:
+        bindings.append(f"LET $tgt = {target_binding};")
+    bindings_text = "\n".join(bindings)
+    if bindings_text:
+        bindings_text += "\n"
+    return f"""{bindings_text}LET $rel = type::thing('{table}', $uuid);
+DELETE FROM {table} WHERE uuid = $uuid AND (in != $src OR out != $tgt);
+LET $updated = (UPDATE {table} SET
+    {update_fields}
+    WHERE uuid = $uuid RETURN id);
+IF array::len($updated) = 0 THEN
+    RELATE $src->$rel->$tgt SET
+        {relate_fields};
+END;
+"""
 
 
 def normalize_record(record: Any) -> dict[str, Any] | None:
@@ -59,4 +133,10 @@ def normalize_records(result: Any) -> list[dict[str, Any]]:
     return []
 
 
-__all__ = ["normalize_record", "normalize_records"]
+__all__ = [
+    "build_relation_save_query",
+    "normalize_record",
+    "normalize_records",
+    "resolve_record_id",
+    "run_query",
+]

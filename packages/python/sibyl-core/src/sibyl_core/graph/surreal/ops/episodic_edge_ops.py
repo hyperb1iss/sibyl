@@ -17,17 +17,19 @@ from graphiti_core.edges import EpisodicEdge
 from graphiti_core.errors import EdgeNotFoundError
 from graphiti_core.helpers import parse_db_date
 
-from sibyl_core.graph.surreal.ops._common import normalize_records
-
-# normalize_records strips the `id` field (RecordID) since Graphiti parsers
-# key off `uuid`. Endpoint resolution needs the RecordID itself, so we read
-# the raw SELECT result directly rather than going through normalize_records.
+from sibyl_core.graph.surreal.ops._common import (
+    build_relation_save_query,
+    normalize_records,
+    resolve_record_id,
+    run_query,
+)
 
 logger = logging.getLogger(__name__)
 
 EDGE_TABLE = "mentions"
 SOURCE_TABLE = "episode"
 TARGET_TABLE = "entity"
+_EDGE_SAVE = build_relation_save_query(EDGE_TABLE, ("uuid", "group_id", "created_at"))
 
 
 def _episodic_edge_from_record(record: dict[str, Any]) -> EpisodicEdge:
@@ -38,39 +40,6 @@ def _episodic_edge_from_record(record: dict[str, Any]) -> EpisodicEdge:
         target_node_uuid=record["target_node_uuid"],
         created_at=parse_db_date(record["created_at"]),  # type: ignore[arg-type]
     )
-
-
-async def _run(
-    executor: QueryExecutor,
-    tx: Transaction | None,
-    query: str,
-    **params: Any,
-) -> Any:
-    """Execute via transaction when supplied, else the executor."""
-    if tx is not None:
-        return await tx.run(query, **params)
-    return await executor.execute_query(query, **params)
-
-
-async def _resolve_record_id(
-    executor: QueryExecutor,
-    tx: Transaction | None,
-    table: str,
-    uuid: str,
-) -> Any | None:
-    """Resolve a node UUID to its SurrealDB RecordID (or None when missing)."""
-    result = await _run(
-        executor,
-        tx,
-        f"SELECT id FROM {table} WHERE uuid = $uuid LIMIT 1;",
-        uuid=uuid,
-    )
-    if not isinstance(result, list) or not result:
-        return None
-    first = result[0]
-    if not isinstance(first, dict):
-        return None
-    return first.get("id")
 
 
 class SurrealEpisodicEdgeOperations(EpisodicEdgeOperations):
@@ -85,8 +54,8 @@ class SurrealEpisodicEdgeOperations(EpisodicEdgeOperations):
         edge: EpisodicEdge,
         tx: Transaction | None = None,
     ) -> None:
-        src_id = await _resolve_record_id(executor, tx, SOURCE_TABLE, edge.source_node_uuid)
-        tgt_id = await _resolve_record_id(executor, tx, TARGET_TABLE, edge.target_node_uuid)
+        src_id = await resolve_record_id(executor, tx, SOURCE_TABLE, edge.source_node_uuid)
+        tgt_id = await resolve_record_id(executor, tx, TARGET_TABLE, edge.target_node_uuid)
         if src_id is None or tgt_id is None:
             msg = (
                 f"Cannot save {EDGE_TABLE} edge {edge.uuid!r}: "
@@ -95,19 +64,10 @@ class SurrealEpisodicEdgeOperations(EpisodicEdgeOperations):
             )
             raise ValueError(msg)
 
-        # Multi-statement queries drop results on SurrealDB's Python SDK
-        # (issue #232), so run delete + relate as separate calls.
-        await _run(
+        await run_query(
             executor,
             tx,
-            f"DELETE FROM {EDGE_TABLE} WHERE uuid = $uuid;",
-            uuid=edge.uuid,
-        )
-        await _run(
-            executor,
-            tx,
-            f"RELATE $src->{EDGE_TABLE}->$tgt SET "
-            "uuid = $uuid, group_id = $group_id, created_at = $created_at;",
+            _EDGE_SAVE,
             src=src_id,
             tgt=tgt_id,
             uuid=edge.uuid,
@@ -133,7 +93,7 @@ class SurrealEpisodicEdgeOperations(EpisodicEdgeOperations):
         edge: EpisodicEdge,
         tx: Transaction | None = None,
     ) -> None:
-        await _run(
+        await run_query(
             executor,
             tx,
             f"DELETE FROM {EDGE_TABLE} WHERE uuid = $uuid;",
@@ -149,7 +109,7 @@ class SurrealEpisodicEdgeOperations(EpisodicEdgeOperations):
     ) -> None:
         if not uuids:
             return
-        await _run(
+        await run_query(
             executor,
             tx,
             f"DELETE FROM {EDGE_TABLE} WHERE uuid IN $uuids;",

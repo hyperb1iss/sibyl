@@ -15,13 +15,19 @@ from graphiti_core.edges import NextEpisodeEdge
 from graphiti_core.errors import EdgeNotFoundError
 from graphiti_core.helpers import parse_db_date
 
-from sibyl_core.graph.surreal.ops._common import normalize_records
+from sibyl_core.graph.surreal.ops._common import (
+    build_relation_save_query,
+    normalize_records,
+    resolve_record_id,
+    run_query,
+)
 
 logger = logging.getLogger(__name__)
 
 EDGE_TABLE = "next_episode"
 SOURCE_TABLE = "episode"
 TARGET_TABLE = "episode"
+_EDGE_SAVE = build_relation_save_query(EDGE_TABLE, ("uuid", "group_id", "created_at"))
 
 
 def _next_episode_edge_from_record(record: dict[str, Any]) -> NextEpisodeEdge:
@@ -34,38 +40,6 @@ def _next_episode_edge_from_record(record: dict[str, Any]) -> NextEpisodeEdge:
     )
 
 
-async def _run(
-    executor: QueryExecutor,
-    tx: Transaction | None,
-    query: str,
-    **params: Any,
-) -> Any:
-    if tx is not None:
-        return await tx.run(query, **params)
-    return await executor.execute_query(query, **params)
-
-
-async def _resolve_record_id(
-    executor: QueryExecutor,
-    tx: Transaction | None,
-    table: str,
-    uuid: str,
-) -> Any | None:
-    # normalize_records strips `id`; read the raw SELECT result instead.
-    result = await _run(
-        executor,
-        tx,
-        f"SELECT id FROM {table} WHERE uuid = $uuid LIMIT 1;",
-        uuid=uuid,
-    )
-    if not isinstance(result, list) or not result:
-        return None
-    first = result[0]
-    if not isinstance(first, dict):
-        return None
-    return first.get("id")
-
-
 class SurrealNextEpisodeEdgeOperations(NextEpisodeEdgeOperations):
     """SurrealDB implementation of Graphiti's NextEpisodeEdgeOperations."""
 
@@ -75,8 +49,8 @@ class SurrealNextEpisodeEdgeOperations(NextEpisodeEdgeOperations):
         edge: NextEpisodeEdge,
         tx: Transaction | None = None,
     ) -> None:
-        src_id = await _resolve_record_id(executor, tx, SOURCE_TABLE, edge.source_node_uuid)
-        tgt_id = await _resolve_record_id(executor, tx, TARGET_TABLE, edge.target_node_uuid)
+        src_id = await resolve_record_id(executor, tx, SOURCE_TABLE, edge.source_node_uuid)
+        tgt_id = await resolve_record_id(executor, tx, TARGET_TABLE, edge.target_node_uuid)
         if src_id is None or tgt_id is None:
             msg = (
                 f"Cannot save {EDGE_TABLE} edge {edge.uuid!r}: "
@@ -85,17 +59,10 @@ class SurrealNextEpisodeEdgeOperations(NextEpisodeEdgeOperations):
             )
             raise ValueError(msg)
 
-        await _run(
+        await run_query(
             executor,
             tx,
-            f"DELETE FROM {EDGE_TABLE} WHERE uuid = $uuid;",
-            uuid=edge.uuid,
-        )
-        await _run(
-            executor,
-            tx,
-            f"RELATE $src->{EDGE_TABLE}->$tgt SET "
-            "uuid = $uuid, group_id = $group_id, created_at = $created_at;",
+            _EDGE_SAVE,
             src=src_id,
             tgt=tgt_id,
             uuid=edge.uuid,
@@ -121,7 +88,7 @@ class SurrealNextEpisodeEdgeOperations(NextEpisodeEdgeOperations):
         edge: NextEpisodeEdge,
         tx: Transaction | None = None,
     ) -> None:
-        await _run(
+        await run_query(
             executor,
             tx,
             f"DELETE FROM {EDGE_TABLE} WHERE uuid = $uuid;",
@@ -137,7 +104,7 @@ class SurrealNextEpisodeEdgeOperations(NextEpisodeEdgeOperations):
     ) -> None:
         if not uuids:
             return
-        await _run(
+        await run_query(
             executor,
             tx,
             f"DELETE FROM {EDGE_TABLE} WHERE uuid IN $uuids;",
