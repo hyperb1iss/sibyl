@@ -102,6 +102,8 @@ class TestProductionPasswordSecurity:
         with pytest.raises(ValueError, match="Default FalkorDB password"):
             Settings(
                 environment="production",
+                store="legacy",
+                auth_store="postgres",
                 falkordb_password="conventions",
                 postgres_password="secure_pw",
             )
@@ -111,9 +113,23 @@ class TestProductionPasswordSecurity:
         with pytest.raises(ValueError, match="Default PostgreSQL password"):
             Settings(
                 environment="production",
+                store="legacy",
+                auth_store="postgres",
                 falkordb_password="secure_pw",
                 postgres_password="sibyl_dev",
             )
+
+    def test_legacy_password_defaults_do_not_block_fully_surreal_production(self) -> None:
+        settings = Settings(
+            environment="production",
+            store="surreal",
+            auth_store="surreal",
+            falkordb_password="conventions",
+            postgres_password="sibyl_dev",
+            surreal_url="ws://surrealdb:8000/rpc",
+        )
+
+        assert settings.fully_surreal is True
 
     def test_default_passwords_allowed_in_development(self) -> None:
         """Default passwords should be allowed in development."""

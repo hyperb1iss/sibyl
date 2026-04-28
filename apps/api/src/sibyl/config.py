@@ -97,12 +97,15 @@ class Settings(BaseSettings):
                     "CRITICAL: disable_auth=True is forbidden in production environment. "
                     "Set SIBYL_ENVIRONMENT=development to use disable_auth for testing."
                 )
-            if self.falkordb_password == "conventions":  # noqa: S105
+            if self.store == "legacy" and self.falkordb_password == "conventions":  # noqa: S105
                 raise ValueError(
                     "CRITICAL: Default FalkorDB password 'conventions' is forbidden in production. "
                     "Set SIBYL_FALKORDB_PASSWORD to a secure value."
                 )
-            if self.postgres_password.get_secret_value() == "sibyl_dev":
+            if (
+                requires_relational_support(store=self.store, auth_store=self.auth_store)
+                and self.postgres_password.get_secret_value() == "sibyl_dev"
+            ):
                 raise ValueError(
                     "CRITICAL: Default PostgreSQL password 'sibyl_dev' is forbidden in production. "
                     "Set SIBYL_POSTGRES_PASSWORD to a secure value."

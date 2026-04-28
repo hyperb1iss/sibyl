@@ -7,13 +7,11 @@
     "ghcr.io/devcontainers/features/node:1": { "version": "24" },
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
   },
-  "forwardPorts": [3334, 3337, 6380, 5433, 3335],
+  "forwardPorts": [3334, 3337, 8000],
   "portsAttributes": {
     "3334": { "label": "Sibyl API" },
     "3337": { "label": "Sibyl Web" },
-    "6380": { "label": "FalkorDB" },
-    "5433": { "label": "PostgreSQL" },
-    "3335": { "label": "FalkorDB Browser" }
+    "8000": { "label": "SurrealDB" }
   },
   "customizations": {
     "vscode": {
@@ -35,10 +33,12 @@
   },
   "postCreateCommand": ".devcontainer/setup.sh",
   "remoteEnv": {
-    "SIBYL_DATABASE_URL": "postgresql://sibyl:sibyl_dev@postgres:5432/sibyl",
-    "SIBYL_FALKORDB_HOST": "falkordb",
-    "SIBYL_FALKORDB_PORT": "6379",
-    "SIBYL_FALKORDB_PASSWORD": "conventions",
+    "SIBYL_STORE": "surreal",
+    "SIBYL_AUTH_STORE": "surreal",
+    "SIBYL_COORDINATION_BACKEND": "auto",
+    "SIBYL_SURREAL_URL": "ws://surrealdb:8000/rpc",
+    "SIBYL_SURREAL_USERNAME": "root",
+    "SIBYL_SURREAL_PASSWORD": "root",
     "SIBYL_SERVER_URL": "http://localhost:3334",
     "SIBYL_SERVER_PORT": "3334",
     "SIBYL_WEB_PORT": "3337"

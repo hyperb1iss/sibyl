@@ -7,42 +7,38 @@ services:
       - ..:/workspace/sibyl:cached
     command: sleep infinity
     depends_on:
-      falkordb:
+      surrealdb:
         condition: service_healthy
-      postgres:
-        condition: service_healthy
-
-  falkordb:
-    image: falkordb/falkordb:latest
-    ports:
-      - "6379"
-      - "3000"
-    volumes:
-      - falkordb-data:/data
     environment:
-      FALKORDB_ARGS: "--requirepass conventions"
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "conventions", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+      SIBYL_STORE: surreal
+      SIBYL_AUTH_STORE: surreal
+      SIBYL_COORDINATION_BACKEND: auto
+      SIBYL_SURREAL_URL: ws://surrealdb:8000/rpc
+      SIBYL_SURREAL_USERNAME: root
+      SIBYL_SURREAL_PASSWORD: root
 
-  postgres:
-    image: pgvector/pgvector:pg18
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    command:
+      [
+        "start",
+        "--log",
+        "info",
+        "--user",
+        "root",
+        "--pass",
+        "root",
+        "rocksdb:///data/sibyl.db",
+      ]
     ports:
-      - "5432"
+      - "8000"
     volumes:
-      - postgres-data:/var/lib/postgresql
-    environment:
-      POSTGRES_USER: sibyl
-      POSTGRES_PASSWORD: sibyl_dev
-      POSTGRES_DB: sibyl
+      - surreal-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sibyl -d sibyl"]
+      test: ["CMD", "/surreal", "is-ready", "--conn", "http://localhost:8000"]
       interval: 5s
       timeout: 3s
       retries: 5
 
 volumes:
-  falkordb-data:
-  postgres-data:
+  surreal-data:

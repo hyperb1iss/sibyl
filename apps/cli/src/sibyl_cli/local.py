@@ -58,18 +58,15 @@ COMPOSE_CONFIG = {
             "container_name": "sibyl-api",
             "ports": ["3334:3334"],
             "depends_on": {
-                "falkordb": {"condition": "service_healthy"},
-                "postgres": {"condition": "service_healthy"},
+                "surrealdb": {"condition": "service_healthy"},
             },
             "environment": {
-                "SIBYL_POSTGRES_HOST": "postgres",
-                "SIBYL_POSTGRES_PORT": "5432",
-                "SIBYL_POSTGRES_USER": "sibyl",
-                "SIBYL_POSTGRES_PASSWORD": "${SIBYL_POSTGRES_PASSWORD:-sibyl_local}",
-                "SIBYL_POSTGRES_DB": "sibyl",
-                "SIBYL_FALKORDB_HOST": "falkordb",
-                "SIBYL_FALKORDB_PORT": "6379",
-                "SIBYL_FALKORDB_PASSWORD": "${SIBYL_FALKORDB_PASSWORD:-sibyl_local}",
+                "SIBYL_STORE": "surreal",
+                "SIBYL_AUTH_STORE": "surreal",
+                "SIBYL_COORDINATION_BACKEND": "auto",
+                "SIBYL_SURREAL_URL": "ws://surrealdb:8000/rpc",
+                "SIBYL_SURREAL_USERNAME": "${SIBYL_SURREAL_USERNAME:-root}",
+                "SIBYL_SURREAL_PASSWORD": "${SIBYL_SURREAL_PASSWORD:-sibyl_local}",
                 "SIBYL_JWT_SECRET": "${SIBYL_JWT_SECRET}",
                 "SIBYL_PUBLIC_URL": "http://localhost:3337",
                 "SIBYL_OPENAI_API_KEY": "${SIBYL_OPENAI_API_KEY}",
@@ -102,14 +99,12 @@ COMPOSE_CONFIG = {
                 "api": {"condition": "service_healthy"},
             },
             "environment": {
-                "SIBYL_POSTGRES_HOST": "postgres",
-                "SIBYL_POSTGRES_PORT": "5432",
-                "SIBYL_POSTGRES_USER": "sibyl",
-                "SIBYL_POSTGRES_PASSWORD": "${SIBYL_POSTGRES_PASSWORD:-sibyl_local}",
-                "SIBYL_POSTGRES_DB": "sibyl",
-                "SIBYL_FALKORDB_HOST": "falkordb",
-                "SIBYL_FALKORDB_PORT": "6379",
-                "SIBYL_FALKORDB_PASSWORD": "${SIBYL_FALKORDB_PASSWORD:-sibyl_local}",
+                "SIBYL_STORE": "surreal",
+                "SIBYL_AUTH_STORE": "surreal",
+                "SIBYL_COORDINATION_BACKEND": "auto",
+                "SIBYL_SURREAL_URL": "ws://surrealdb:8000/rpc",
+                "SIBYL_SURREAL_USERNAME": "${SIBYL_SURREAL_USERNAME:-root}",
+                "SIBYL_SURREAL_PASSWORD": "${SIBYL_SURREAL_PASSWORD:-sibyl_local}",
                 "SIBYL_OPENAI_API_KEY": "${SIBYL_OPENAI_API_KEY}",
                 "SIBYL_ANTHROPIC_API_KEY": "${SIBYL_ANTHROPIC_API_KEY}",
                 "SIBYL_LLM_PROVIDER": "anthropic",
@@ -137,40 +132,23 @@ COMPOSE_CONFIG = {
             },
             "restart": "unless-stopped",
         },
-        "falkordb": {
-            "image": "falkordb/falkordb:latest",
-            "container_name": "sibyl-falkordb",
-            "ports": ["6380:6379", "3335:3000"],
-            "volumes": ["sibyl_falkordb:/var/lib/falkordb/data"],
-            "environment": {
-                "FALKORDB_ARGS": "--requirepass ${SIBYL_FALKORDB_PASSWORD:-sibyl_local}",
-            },
+        "surrealdb": {
+            "image": "surrealdb/surrealdb:latest",
+            "container_name": "sibyl-surrealdb",
+            "command": [
+                "start",
+                "--log",
+                "info",
+                "--user",
+                "${SIBYL_SURREAL_USERNAME:-root}",
+                "--pass",
+                "${SIBYL_SURREAL_PASSWORD:-sibyl_local}",
+                "rocksdb:///data/sibyl.db",
+            ],
+            "ports": ["8000:8000"],
+            "volumes": ["sibyl_surreal:/data"],
             "healthcheck": {
-                "test": [
-                    "CMD",
-                    "redis-cli",
-                    "-a",
-                    "${SIBYL_FALKORDB_PASSWORD:-sibyl_local}",
-                    "ping",
-                ],
-                "interval": "5s",
-                "timeout": "3s",
-                "retries": 5,
-            },
-            "restart": "unless-stopped",
-        },
-        "postgres": {
-            "image": "pgvector/pgvector:pg18",
-            "container_name": "sibyl-postgres",
-            "ports": ["5433:5432"],
-            "volumes": ["sibyl_postgres:/var/lib/postgresql"],
-            "environment": {
-                "POSTGRES_USER": "sibyl",
-                "POSTGRES_PASSWORD": "${SIBYL_POSTGRES_PASSWORD:-sibyl_local}",
-                "POSTGRES_DB": "sibyl",
-            },
-            "healthcheck": {
-                "test": ["CMD-SHELL", "pg_isready -U sibyl -d sibyl"],
+                "test": ["CMD", "/surreal", "is-ready", "--conn", "http://localhost:8000"],
                 "interval": "5s",
                 "timeout": "3s",
                 "retries": 5,
@@ -179,8 +157,7 @@ COMPOSE_CONFIG = {
         },
     },
     "volumes": {
-        "sibyl_falkordb": {"name": "sibyl_falkordb"},
-        "sibyl_postgres": {"name": "sibyl_postgres"},
+        "sibyl_surreal": {"name": "sibyl_surreal"},
     },
     "networks": {
         "default": {"name": "sibyl"},
@@ -271,9 +248,9 @@ SIBYL_ANTHROPIC_API_KEY={anthropic_key}
 # Security
 SIBYL_JWT_SECRET={jwt_secret}
 
-# Database passwords
-SIBYL_POSTGRES_PASSWORD=sibyl_local
-SIBYL_FALKORDB_PASSWORD=sibyl_local
+# SurrealDB
+SIBYL_SURREAL_USERNAME=root
+SIBYL_SURREAL_PASSWORD=sibyl_local
 """
     with open(SIBYL_LOCAL_ENV, "w") as f:
         f.write(env_content)
@@ -407,7 +384,7 @@ def start(
     console.print()
     console.print(f"  [{NEON_CYAN}]Web UI:[/{NEON_CYAN}]    http://localhost:3337")
     console.print(f"  [{NEON_CYAN}]API:[/{NEON_CYAN}]       http://localhost:3334")
-    console.print(f"  [{NEON_CYAN}]Graph UI:[/{NEON_CYAN}]  http://localhost:3335")
+    console.print(f"  [{NEON_CYAN}]SurrealDB:[/{NEON_CYAN}] http://localhost:8000")
     console.print()
 
     # Open browser
@@ -504,7 +481,7 @@ def status() -> None:
 def logs(
     service: Annotated[
         str | None,
-        typer.Argument(help="Service to show logs for (api, web, worker, falkordb, postgres)"),
+        typer.Argument(help="Service to show logs for (api, web, worker, surrealdb)"),
     ] = None,
     follow: Annotated[
         bool,
