@@ -17,11 +17,13 @@ from sibyl_core.services.surreal_content import (
     tokenize_fields,
 )
 from sibyl_core.tools.responses import SearchResult
+from sibyl_core.utils.resilience import with_timeout
 
 log = structlog.get_logger()
 
 DOCUMENT_VECTOR_WEIGHT = 0.7
 DOCUMENT_LEXICAL_WEIGHT = 0.3
+DOCUMENT_EMBEDDING_TIMEOUT_SECONDS = 2.0
 
 
 def _document_result_key(result: SearchResult) -> str:
@@ -255,7 +257,11 @@ async def search_documents(
 
     query_embedding: list[float] | None = None
     try:
-        query_embedding = await embed_text(query)
+        query_embedding = await with_timeout(
+            embed_text(query),
+            timeout_seconds=DOCUMENT_EMBEDDING_TIMEOUT_SECONDS,
+            operation_name="document_embedding",
+        )
     except Exception as exc:
         log.warning("document_vector_embedding_failed", error=str(exc))
 
