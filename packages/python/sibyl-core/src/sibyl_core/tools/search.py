@@ -18,6 +18,7 @@ from sibyl_core.tools.helpers import (
     _serialize_enum,
 )
 from sibyl_core.tools.responses import SearchResponse, SearchResult
+from sibyl_core.utils.log_safety import query_log_fields
 from sibyl_core.utils.resilience import TIMEOUTS, with_timeout
 
 log = structlog.get_logger()
@@ -134,7 +135,7 @@ async def _search_documents(
             include_content=include_content,
         )
     except Exception as e:
-        log.warning("document_search_failed", error=str(e))
+        log.warning("document_search_failed", error_type=type(e).__name__)
         return []
 
 
@@ -216,7 +217,7 @@ async def search(
 
     log.info(
         "unified_search",
-        query=query[:100],
+        **query_log_fields(query),
         types=types,
         language=language,
         category=category,
@@ -359,7 +360,7 @@ async def search(
                     log.debug("graph_search_enhanced", results=len(raw_results))
 
                 except Exception as e:
-                    log.warning("enhanced_search_failed_fallback", error=str(e))
+                    log.warning("enhanced_search_failed_fallback", error_type=type(e).__name__)
 
             # Fall back to Graphiti's node-hybrid search
             if not raw_results and not enhanced_search_exhausted:
@@ -379,7 +380,7 @@ async def search(
                         decay = temporal_decay_days or core_config.temporal_decay_days
                         raw_results = temporal_boost(raw_results, decay_days=decay)
                 except Exception as e:
-                    log.warning("fallback_graph_search_failed", error=str(e))
+                    log.warning("fallback_graph_search_failed", error_type=type(e).__name__)
                     raw_results = []
 
             if (
@@ -403,7 +404,7 @@ async def search(
                             limit=limit * 3,
                         )
                 except Exception as e:
-                    log.warning("graph_exact_name_search_failed", error=str(e))
+                    log.warning("graph_exact_name_search_failed", error_type=type(e).__name__)
 
             if requested_graph_types:
                 typed_results = [
@@ -426,7 +427,7 @@ async def search(
                         operation_name="search_untyped_fallback",
                     )
                 except Exception as e:
-                    log.warning("untyped_graph_search_failed", error=str(e))
+                    log.warning("untyped_graph_search_failed", error_type=type(e).__name__)
                     fallback_results = []
                 typed_results = [
                     (entity, score)
@@ -512,7 +513,7 @@ async def search(
                     break
 
         except Exception as e:
-            log.warning("graph_search_failed", error=str(e))
+            log.warning("graph_search_failed", error_type=type(e).__name__)
 
     # =========================================================================
     # DOCUMENT SEARCH - Search crawled documentation
@@ -522,7 +523,7 @@ async def search(
             doc_results = await document_search_task
             log.debug("document_search_complete", results=len(doc_results))
         except Exception as e:
-            log.warning("document_search_failed", error=str(e))
+            log.warning("document_search_failed", error_type=type(e).__name__)
 
     # =========================================================================
     # MERGE AND RANK RESULTS

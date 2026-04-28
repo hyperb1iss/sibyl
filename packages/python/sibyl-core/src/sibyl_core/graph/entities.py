@@ -35,6 +35,7 @@ from sibyl_core.models.tasks import (
     TaskStatus,
     Team,
 )
+from sibyl_core.utils.log_safety import query_log_fields
 from sibyl_core.utils.resilience import GRAPHITI_RETRY
 
 log = structlog.get_logger()
@@ -838,7 +839,7 @@ class EntityManager:
 
         # Sanitize query to escape RediSearch special characters
         safe_query = sanitize_search_query(query)
-        log.info("Searching entities", query=safe_query, types=entity_types, limit=limit)
+        log.info("Searching entities", **query_log_fields(query), types=entity_types, limit=limit)
 
         try:
             _t0 = _time.perf_counter()
@@ -857,7 +858,7 @@ class EntityManager:
                 results = self._merge_ranked_results(exact_name_results, fallback_results, limit)
                 log.info(
                     "Search completed",
-                    query=query,
+                    **query_log_fields(query),
                     results_count=len(results),
                     mode="surreal_direct",
                 )
@@ -952,12 +953,13 @@ class EntityManager:
                     limit=limit,
                 )
 
-            log.info("Search completed", query=query, results_count=len(results))
+            log.info("Search completed", **query_log_fields(query), results_count=len(results))
             return results
 
         except Exception as e:
-            log.exception("Search failed", query=query, error=str(e))
-            raise SearchError(f"Search failed: {e}") from e
+            error_type = type(e).__name__
+            log.warning("Search failed", **query_log_fields(query), error_type=error_type)
+            raise SearchError("Search failed", details={"error_type": error_type}) from None
 
     def _results_contain_exact_name_match(
         self,
@@ -1076,7 +1078,7 @@ class EntityManager:
         if exact_results:
             log.info(
                 "exact_name_search_used",
-                query=query,
+                **query_log_fields(query),
                 results_count=len(exact_results),
             )
 
@@ -1194,7 +1196,7 @@ class EntityManager:
         if fallback_results:
             log.info(
                 "fallback_text_search_used",
-                query=query,
+                **query_log_fields(query),
                 results_count=len(fallback_results),
             )
 

@@ -17,6 +17,7 @@ import structlog
 from sibyl_core.models.entities import Entity
 from sibyl_core.retrieval.fusion import rrf_merge, rrf_merge_with_metadata
 from sibyl_core.retrieval.temporal import temporal_boost
+from sibyl_core.utils.log_safety import query_log_fields
 
 if TYPE_CHECKING:
     from sibyl_core.graph.client import GraphClient
@@ -115,10 +116,10 @@ async def _vector_search_attempt(
             entity_types=entity_types,
             limit=limit,
         )
-        log.debug("vector_search_complete", query=query[:50], results=len(results))
+        log.debug("vector_search_complete", **query_log_fields(query), results=len(results))
         return _VectorSearchAttempt(results=results, completed=True)
     except Exception as e:
-        log.warning("vector_search_failed", query=query[:50], error=str(e))
+        log.warning("vector_search_failed", **query_log_fields(query), error_type=type(e).__name__)
         return _VectorSearchAttempt(results=[], completed=False)
 
 
@@ -286,7 +287,7 @@ async def hybrid_search(
 
     resolved_group_id = _resolve_group_id(entity_manager, group_id)
 
-    log.info("hybrid_search_start", query=query[:50], limit=limit)
+    log.info("hybrid_search_start", **query_log_fields(query), limit=limit)
 
     # Phase 1: Graphiti node-hybrid seed search
     vector_task = asyncio.create_task(
@@ -411,7 +412,7 @@ async def hybrid_search(
 
     log.info(
         "hybrid_search_complete",
-        query=query[:50],
+        **query_log_fields(query),
         results=len(final_results),
         **{
             f"{n}_count": c

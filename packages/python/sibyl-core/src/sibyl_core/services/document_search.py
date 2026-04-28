@@ -263,7 +263,7 @@ async def search_documents(
             operation_name="document_embedding",
         )
     except Exception as exc:
-        log.warning("document_vector_embedding_failed", error=str(exc))
+        log.warning("document_vector_embedding_failed", error_type=type(exc).__name__)
 
     if settings.store == "surreal":
         try:
@@ -277,7 +277,10 @@ async def search_documents(
                 limit=limit,
             )
         except RuntimeError as exc:
-            log.warning("surreal_document_direct_search_failed", error=str(exc))
+            log.warning(
+                "surreal_document_direct_search_failed",
+                error_type=type(exc).__name__,
+            )
             return await _search_documents_surreal_scan(
                 query=query,
                 organization_id=organization_id,
