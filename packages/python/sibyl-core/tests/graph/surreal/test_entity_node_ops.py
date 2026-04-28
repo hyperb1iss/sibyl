@@ -59,6 +59,22 @@ class TestEntityNodeOps:
         assert "DELETE FROM entity" not in query
         assert params["uuid"] == "ent-1"
 
+    async def test_save_bulk_uses_duplicate_key_upsert_statement(self) -> None:
+        ops = SurrealEntityNodeOperations()
+        executor = _RecordingExecutor()
+
+        await ops.save_bulk(
+            executor,
+            [_make_entity("ent-a", "group-1"), _make_entity("ent-b", "group-1")],
+            batch_size=10,
+        )
+
+        assert len(executor.queries) == 1
+        query, params = executor.queries[0]
+        assert "INSERT INTO entity $rows ON DUPLICATE KEY UPDATE" in query
+        assert "DELETE FROM entity" not in query
+        assert [row["uuid"] for row in params["rows"]] == ["ent-a", "ent-b"]
+
     async def test_save_and_get_by_uuid(self, surreal_schema: SurrealDriver) -> None:
         ops = SurrealEntityNodeOperations()
         ent = _make_entity("ent-1", surreal_schema.group_id, attributes={"role": "dev"})
@@ -100,6 +116,37 @@ class TestEntityNodeOps:
         listed = await ops.get_by_group_ids(surreal_schema, [gid])
         assert len(listed) == 5
         assert {n.uuid for n in listed} == {f"ent-{i}" for i in range(5)}
+
+    async def test_save_bulk_preserves_existing_relation_edges(
+        self, surreal_schema: SurrealDriver
+    ) -> None:
+        ops = SurrealEntityNodeOperations()
+        gid = surreal_schema.group_id
+        await ops.save(surreal_schema, _make_entity("ent-a", gid, name="A"))
+        await ops.save(surreal_schema, _make_entity("ent-b", gid, name="B"))
+        await surreal_schema.execute_query(
+            """
+            LET $src = (SELECT VALUE id FROM entity WHERE uuid = 'ent-a' LIMIT 1)[0];
+            LET $tgt = (SELECT VALUE id FROM entity WHERE uuid = 'ent-b' LIMIT 1)[0];
+            RELATE $src->relates_to->$tgt SET uuid = 'edge-ab', name = 'RELATED_TO',
+                fact = 'A relates to B', group_id = $gid, episodes = [], attributes = {},
+                created_at = time::now();
+            """,
+            gid=gid,
+        )
+
+        await ops.save_bulk(
+            surreal_schema,
+            [
+                _make_entity("ent-a", gid, name="A updated"),
+                _make_entity("ent-b", gid, name="B updated"),
+            ],
+        )
+
+        edges = await surreal_schema.execute_query(
+            "SELECT uuid, in.uuid AS src, out.uuid AS tgt FROM relates_to WHERE uuid = 'edge-ab';"
+        )
+        assert edges == [{"uuid": "edge-ab", "src": "ent-a", "tgt": "ent-b"}]
 
     async def test_save_overwrites_on_same_uuid(self, surreal_schema: SurrealDriver) -> None:
         ops = SurrealEntityNodeOperations()

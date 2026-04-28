@@ -18,6 +18,7 @@ from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import EntityNode
 
 from sibyl_core.graph.surreal.ops._common import (
+    build_node_bulk_upsert_query,
     build_node_upsert_query,
     normalize_records,
     run_query,
@@ -26,6 +27,20 @@ from sibyl_core.graph.surreal.ops._common import (
 logger = logging.getLogger(__name__)
 
 _ENTITY_SAVE = build_node_upsert_query(
+    "entity",
+    (
+        "uuid",
+        "name",
+        "entity_type",
+        "summary",
+        "labels",
+        "attributes",
+        "group_id",
+        "created_at",
+        "name_embedding",
+    ),
+)
+_ENTITY_SAVE_BULK = build_node_bulk_upsert_query(
     "entity",
     (
         "uuid",
@@ -84,19 +99,11 @@ class SurrealEntityNodeOperations(EntityNodeOperations):
             return
         for start in range(0, len(nodes), batch_size):
             batch = nodes[start : start + batch_size]
-            # One payload per row; SurrealDB INSERT accepts a list of objects.
             rows = [_entity_save_payload(n) for n in batch]
-            uuids = [r["uuid"] for r in rows]
             await run_query(
                 executor,
                 tx,
-                "DELETE FROM entity WHERE uuid IN $uuids;",
-                uuids=uuids,
-            )
-            await run_query(
-                executor,
-                tx,
-                "INSERT INTO entity $rows;",
+                _ENTITY_SAVE_BULK,
                 rows=rows,
             )
 

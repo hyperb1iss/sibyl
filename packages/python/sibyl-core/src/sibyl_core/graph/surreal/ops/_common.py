@@ -95,6 +95,15 @@ WHERE uuid = $uuid;
 """
 
 
+def build_node_bulk_upsert_query(table: str, fields: Sequence[str]) -> str:
+    checked_table = _check_identifier(table)
+    checked_fields = tuple(_check_identifier(field) for field in fields)
+    assignments = ",\n    ".join(f"{field} = $input.{field}" for field in checked_fields)
+    return f"""INSERT INTO {checked_table} $rows ON DUPLICATE KEY UPDATE
+    {assignments};
+"""
+
+
 def normalize_record(record: Any) -> dict[str, Any] | None:
     """Coerce a SurrealDB row into the dict shape Graphiti parsers expect.
 
@@ -144,6 +153,7 @@ def normalize_records(result: Any) -> list[dict[str, Any]]:
 
 
 __all__ = [
+    "build_node_bulk_upsert_query",
     "build_node_upsert_query",
     "build_relation_save_query",
     "normalize_record",

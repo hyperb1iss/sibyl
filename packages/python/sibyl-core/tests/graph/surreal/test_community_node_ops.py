@@ -56,6 +56,22 @@ class TestCommunityNodeOps:
         assert "CREATE community" not in query
         assert params["uuid"] == "com-1"
 
+    async def test_save_bulk_uses_duplicate_key_upsert_statement(self) -> None:
+        ops = SurrealCommunityNodeOperations()
+        executor = _RecordingExecutor()
+
+        await ops.save_bulk(
+            executor,
+            [_make_community("com-a", "group-1"), _make_community("com-b", "group-1")],
+            batch_size=10,
+        )
+
+        assert len(executor.queries) == 1
+        query, params = executor.queries[0]
+        assert "INSERT INTO community $rows ON DUPLICATE KEY UPDATE" in query
+        assert "DELETE FROM community" not in query
+        assert [row["uuid"] for row in params["rows"]] == ["com-a", "com-b"]
+
     async def test_save_and_get_by_uuid(self, surreal_schema: SurrealDriver) -> None:
         ops = SurrealCommunityNodeOperations()
         com = _make_community("com-1", surreal_schema.group_id)

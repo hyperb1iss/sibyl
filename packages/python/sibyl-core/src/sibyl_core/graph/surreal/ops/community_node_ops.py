@@ -17,6 +17,7 @@ from graphiti_core.errors import NodeNotFoundError
 from graphiti_core.nodes import CommunityNode
 
 from sibyl_core.graph.surreal.ops._common import (
+    build_node_bulk_upsert_query,
     build_node_upsert_query,
     normalize_records,
     run_query,
@@ -25,6 +26,18 @@ from sibyl_core.graph.surreal.ops._common import (
 logger = logging.getLogger(__name__)
 
 _COMMUNITY_SAVE = build_node_upsert_query(
+    "community",
+    (
+        "uuid",
+        "name",
+        "summary",
+        "labels",
+        "group_id",
+        "created_at",
+        "name_embedding",
+    ),
+)
+_COMMUNITY_SAVE_BULK = build_node_bulk_upsert_query(
     "community",
     (
         "uuid",
@@ -91,17 +104,10 @@ class SurrealCommunityNodeOperations(CommunityNodeOperations):
         for start in range(0, len(nodes), batch_size):
             batch = nodes[start : start + batch_size]
             rows = [_community_save_payload(n) for n in batch]
-            uuids = [r["uuid"] for r in rows]
             await run_query(
                 executor,
                 tx,
-                "DELETE FROM community WHERE uuid IN $uuids;",
-                uuids=uuids,
-            )
-            await run_query(
-                executor,
-                tx,
-                "INSERT INTO community $rows;",
+                _COMMUNITY_SAVE_BULK,
                 rows=rows,
             )
 

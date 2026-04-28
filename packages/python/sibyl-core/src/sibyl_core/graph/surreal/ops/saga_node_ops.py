@@ -19,6 +19,7 @@ from graphiti_core.helpers import parse_db_date
 from graphiti_core.nodes import SagaNode
 
 from sibyl_core.graph.surreal.ops._common import (
+    build_node_bulk_upsert_query,
     build_node_upsert_query,
     normalize_records,
     run_query,
@@ -27,6 +28,10 @@ from sibyl_core.graph.surreal.ops._common import (
 logger = logging.getLogger(__name__)
 
 _SAGA_SAVE = build_node_upsert_query(
+    "saga",
+    ("uuid", "name", "labels", "group_id", "created_at"),
+)
+_SAGA_SAVE_BULK = build_node_bulk_upsert_query(
     "saga",
     ("uuid", "name", "labels", "group_id", "created_at"),
 )
@@ -81,17 +86,10 @@ class SurrealSagaNodeOperations(SagaNodeOperations):
         for start in range(0, len(nodes), batch_size):
             batch = nodes[start : start + batch_size]
             rows = [_saga_save_payload(n) for n in batch]
-            uuids = [r["uuid"] for r in rows]
             await run_query(
                 executor,
                 tx,
-                "DELETE FROM saga WHERE uuid IN $uuids;",
-                uuids=uuids,
-            )
-            await run_query(
-                executor,
-                tx,
-                "INSERT INTO saga $rows;",
+                _SAGA_SAVE_BULK,
                 rows=rows,
             )
 
