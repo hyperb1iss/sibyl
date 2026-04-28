@@ -39,6 +39,8 @@ from graphiti_core.driver.driver import (
     GraphProvider,
 )
 
+from sibyl_core.backends.surreal.connection import _can_retry_query, _is_connection_closed_error
+
 logger = logging.getLogger(__name__)
 
 # See module docstring "Provider tag" for rationale.
@@ -65,24 +67,6 @@ class SurrealQueryError(RuntimeError):
         super().__init__(f"SurrealDB query failed: {message} (query: {snippet!r})")
         self.query = query
         self.surreal_message = message
-
-
-def _is_connection_closed_error(exc: BaseException) -> bool:
-    class_names = {type(exc).__name__, type(exc).__qualname__}
-    module = type(exc).__module__
-    message = str(exc).lower()
-    return (
-        "ConnectionClosed" in "".join(class_names)
-        or (
-            "websockets" in module
-            and ("closed" in message or "keepalive ping timeout" in message)
-        )
-    )
-
-
-def _can_retry_query(query: str) -> bool:
-    first_token = query.lstrip().split(maxsplit=1)[0].upper() if query.strip() else ""
-    return first_token in {"SELECT", "RETURN", "INFO", "SHOW"}
 
 
 def _namespace_for_group(prefix: str, group_id: str) -> str:

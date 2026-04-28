@@ -125,6 +125,7 @@ class TestConnectionRetry:
     def test_retryable_queries_are_read_only(self) -> None:
         assert _can_retry_query("SELECT * FROM entity;")
         assert _can_retry_query(" RETURN true;")
+        assert not _can_retry_query("SELECT * FROM entity; CREATE entity CONTENT $record;")
         assert not _can_retry_query("CREATE entity CONTENT $record;")
         assert not _can_retry_query("DELETE FROM entity;")
 

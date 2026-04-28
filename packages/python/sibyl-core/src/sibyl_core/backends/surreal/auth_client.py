@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
 
 
-class SurrealAuthClient:
+class SurrealAuthClient(DedicatedSurrealClient):
     """Small wrapper around AsyncSurreal for the shared auth namespace."""
 
     def __init__(
@@ -18,46 +18,11 @@ class SurrealAuthClient:
         namespace: str = "sibyl_auth",
         database: str = "auth",
     ) -> None:
-        self._url = url
-        self._username = username
-        self._password = password
-        self._token = token
-        self._namespace = namespace
-        self._database = database
-        self._client: Any | None = None
-
-    @property
-    def namespace(self) -> str:
-        return self._namespace
-
-    @property
-    def database(self) -> str:
-        return self._database
-
-    async def connect(self) -> Any:
-        if self._client is not None:
-            return self._client
-
-        from surrealdb import AsyncSurreal
-
-        client = AsyncSurreal(self._url)
-        if self._requires_auth():
-            if self._token:
-                await client.authenticate(self._token)
-            elif self._username and self._password:
-                await client.signin({"username": self._username, "password": self._password})
-        await client.use(self._namespace, self._database)
-        self._client = client
-        return client
-
-    async def execute_query(self, query: str, **params: Any) -> Any:
-        client = await self.connect()
-        return await client.query(query, params if params else None)
-
-    async def close(self) -> None:
-        if self._client is not None:
-            await self._client.close()
-            self._client = None
-
-    def _requires_auth(self) -> bool:
-        return not self._url.startswith(("memory://", "surrealkv://"))
+        super().__init__(
+            url=url,
+            username=username,
+            password=password,
+            token=token,
+            namespace=namespace,
+            database=database,
+        )
