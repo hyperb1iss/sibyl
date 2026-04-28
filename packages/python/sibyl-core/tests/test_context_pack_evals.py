@@ -59,6 +59,7 @@ def _result(
 def _raw_memory(
     memory_id: str,
     *,
+    principal_id: str = "user-123",
     memory_scope: MemoryScope = MemoryScope.PRIVATE,
     scope_key: str | None = None,
     score: float = 0.8,
@@ -69,7 +70,7 @@ def _raw_memory(
         id=memory_id,
         organization_id="org-123",
         source_id=f"source:{memory_id}",
-        principal_id="user-123",
+        principal_id=principal_id,
         memory_scope=memory_scope,
         scope_key=scope_key,
         title=f"Raw {memory_id}",
@@ -226,6 +227,110 @@ async def test_context_pack_fixture_passes_raw_memory_scope_requirements() -> No
 
     assert result.passed, result.failures
     assert result.metrics["metadata_requirement_coverage"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_context_pack_fixture_passes_multi_user_scope_requirements() -> None:
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
+        assert kwargs["principal_id"] == "user-123"
+        if kwargs["memory_scope"] == "private":
+            return [_raw_memory("user-123-private", principal_id="user-123")]
+        return [
+            _raw_memory(
+                "project-123-shared",
+                principal_id="user-123",
+                memory_scope=MemoryScope.PROJECT,
+                scope_key="project_123",
+                score=0.9,
+            )
+        ]
+
+    pack = await compile_context(
+        "handoff scoped retrieval",
+        intent="build",
+        project="project_123",
+        principal_id="user-123",
+        organization_id="org-123",
+        search_fn=fake_search,
+        raw_memory_recall_fn=fake_raw_recall,
+    )
+
+    result = evaluate_context_pack(
+        pack,
+        ContextPackFixture(
+            name="multi-user-scoped-retrieval",
+            required_item_ids={
+                "raw_memory:user-123-private",
+                "raw_memory:project-123-shared",
+            },
+            required_metadata_by_type={
+                "raw_memory": {
+                    "principal_id": "user-123",
+                }
+            },
+            require_source_metadata=True,
+        ),
+    )
+
+    assert result.passed, result.failures
+    assert result.metrics["metadata_requirement_coverage"] == 1.0
+
+
+def test_context_pack_fixture_reports_multi_user_raw_memory_leak() -> None:
+    pack = ContextPack(
+        goal="handoff scoped retrieval",
+        intent=ContextIntent.BUILD,
+        query="handoff scoped retrieval",
+        domain="sibyl",
+        project="project_123",
+        sections=[
+            ContextSection(
+                facet=ContextFacet.RECENT_MEMORY,
+                title="Recent Memory",
+                items=[
+                    ContextItem(
+                        id="raw_memory:other-user-private",
+                        type="raw_memory",
+                        name="Other user private memory",
+                        content="This private memory belongs to another principal.",
+                        score=0.95,
+                        facet=ContextFacet.RECENT_MEMORY,
+                        reason="raw memory matched the goal",
+                        source="source:other-user-private",
+                        metadata={
+                            "source_id": "source:other-user-private",
+                            "principal_id": "user-456",
+                            "memory_scope": "private",
+                        },
+                    )
+                ],
+            )
+        ],
+        total_items=1,
+    )
+
+    result = evaluate_context_pack(
+        pack,
+        ContextPackFixture(
+            name="multi-user-scoped-retrieval",
+            required_metadata_by_type={
+                "raw_memory": {
+                    "principal_id": "user-123",
+                    "memory_scope": "private",
+                }
+            },
+        ),
+    )
+
+    assert not result.passed
+    assert result.failures == [
+        "raw_memory item raw_memory:other-user-private metadata principal_id "
+        "expected 'user-123' got 'user-456'"
+    ]
+    assert result.metrics["metadata_requirement_coverage"] == 0.5
 
 
 @pytest.mark.asyncio
@@ -678,6 +783,12 @@ def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
                                     "project_id": "project-sibyl",
                                 }
                             },
+                            "required_metadata_by_type": {
+                                "raw_memory": {
+                                    "principal_id": "user-123",
+                                    "memory_scope": "private",
+                                }
+                            },
                             "max_items": 12,
                             "max_markdown_chars": 6000,
                             "max_estimated_tokens": 1200,
@@ -706,6 +817,12 @@ def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
         "decision-source-law": {
             "source_id": "northstar",
             "project_id": "project-sibyl",
+        }
+    }
+    assert cases[0].fixture.required_metadata_by_type == {
+        "raw_memory": {
+            "principal_id": "user-123",
+            "memory_scope": "private",
         }
     }
     assert cases[0].fixture.max_latency_ms == 250.0

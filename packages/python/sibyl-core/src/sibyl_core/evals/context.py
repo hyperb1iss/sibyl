@@ -36,6 +36,7 @@ class ContextPackFixture:
     required_terms: set[str] = field(default_factory=set)
     forbidden_terms: set[str] = field(default_factory=set)
     required_item_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
+    required_metadata_by_type: dict[str, dict[str, Any]] = field(default_factory=dict)
     max_items: int | None = None
     max_markdown_chars: int | None = None
     max_estimated_tokens: int | None = None
@@ -332,6 +333,23 @@ def evaluate_context_pack(
                 f"got {actual_value!r}"
             )
 
+    scoped_metadata_checks = 0
+    scoped_metadata_matches = 0
+    for item in pack.items:
+        expected_metadata = fixture.required_metadata_by_type.get(item.type)
+        if expected_metadata is None:
+            continue
+        for key, expected_value in sorted(expected_metadata.items()):
+            scoped_metadata_checks += 1
+            actual_value = _metadata_value(item, key)
+            if actual_value == expected_value:
+                scoped_metadata_matches += 1
+                continue
+            failures.append(
+                f"{item.type} item {item.id} metadata {key} expected {expected_value!r} "
+                f"got {actual_value!r}"
+            )
+
     metrics = {
         "items": pack.total_items,
         "facets": sorted(facet.value for facet in facets),
@@ -349,7 +367,10 @@ def evaluate_context_pack(
             / len(fixture.required_item_ids)
         ),
         "metadata_requirement_coverage": (
-            1.0 if not metadata_checks else metadata_matches / metadata_checks
+            1.0
+            if not metadata_checks + scoped_metadata_checks
+            else (metadata_matches + scoped_metadata_matches)
+            / (metadata_checks + scoped_metadata_checks)
         ),
         "forbidden_term_matches": len(forbidden_terms),
     }
@@ -398,6 +419,21 @@ def _metadata_requirements(value: Any) -> dict[str, dict[str, Any]]:
     return requirements
 
 
+def _metadata_requirements_by_type(value: Any) -> dict[str, dict[str, Any]]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        msg = "expected a mapping of item types to metadata requirements"
+        raise TypeError(msg)
+    requirements: dict[str, dict[str, Any]] = {}
+    for item_type, expected_metadata in value.items():
+        if not isinstance(expected_metadata, dict):
+            msg = f"expected metadata requirements for {item_type!r} to be a mapping"
+            raise TypeError(msg)
+        requirements[str(item_type)] = dict(expected_metadata)
+    return requirements
+
+
 def _fixture_from_dict(name: str, data: dict[str, Any]) -> ContextPackFixture:
     return ContextPackFixture(
         name=str(data.get("name") or name),
@@ -411,6 +447,9 @@ def _fixture_from_dict(name: str, data: dict[str, Any]) -> ContextPackFixture:
         required_terms=_string_set(data.get("required_terms")),
         forbidden_terms=_string_set(data.get("forbidden_terms")),
         required_item_metadata=_metadata_requirements(data.get("required_item_metadata")),
+        required_metadata_by_type=_metadata_requirements_by_type(
+            data.get("required_metadata_by_type")
+        ),
         max_items=data.get("max_items"),
         max_markdown_chars=data.get("max_markdown_chars"),
         max_estimated_tokens=data.get("max_estimated_tokens"),
