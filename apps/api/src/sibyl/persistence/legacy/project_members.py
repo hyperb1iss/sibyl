@@ -13,10 +13,13 @@ from sibyl.auth.audit import AuditLogger
 from sibyl.db.connection import get_session
 from sibyl.db.models import Project, ProjectMember, ProjectRole, User
 from sibyl.persistence.organization_common import (
-    LegacyProjectMemberChange,
-    LegacyProjectMembersResult,
+    ProjectMemberChange,
+    ProjectMembersResult,
     can_manage_project_members,
 )
+
+LegacyProjectMembersResult = ProjectMembersResult
+LegacyProjectMemberChange = ProjectMemberChange
 
 
 async def _resolve_legacy_project(

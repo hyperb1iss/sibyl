@@ -68,12 +68,8 @@ def test_organization_runtime_only_exports_neutral_runtime_surface() -> None:
         "ProjectMembersResult",
         "can_manage_project_members",
     ]
-    assert "LegacyOrgSummary" not in organization_common.__all__
-    assert "LegacyProjectMembersResult" not in organization_common.__all__
-    assert organization_common.OrgSummary is organization_common.LegacyOrgSummary
-    assert (
-        organization_common.ProjectMembersResult is organization_common.LegacyProjectMembersResult
-    )
+    assert not hasattr(organization_common, "LegacyOrgSummary")
+    assert not hasattr(organization_common, "LegacyProjectMembersResult")
 
 
 def test_organization_runtime_resolves_postgres_neutral_exports(

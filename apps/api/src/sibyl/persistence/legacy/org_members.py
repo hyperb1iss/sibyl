@@ -13,7 +13,9 @@ from sibyl.auth.memberships import OrganizationMembershipManager
 from sibyl.auth.organizations import OrganizationManager
 from sibyl.db.connection import get_session
 from sibyl.db.models import OrganizationMember, OrganizationRole, User
-from sibyl.persistence.organization_common import LegacyOrgMemberChange
+from sibyl.persistence.organization_common import OrgMemberChange
+
+LegacyOrgMemberChange = OrgMemberChange
 
 
 async def _get_org_and_member(

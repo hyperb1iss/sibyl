@@ -19,9 +19,12 @@ from sibyl.auth.sessions import SessionManager
 from sibyl.db.connection import get_session
 from sibyl.db.models import OrganizationRole, User
 from sibyl.persistence.organization_common import (
-    LegacyInvitationAcceptance,
-    LegacyInvitationRecord,
+    InvitationAcceptance,
+    InvitationRecord,
 )
+
+LegacyInvitationRecord = InvitationRecord
+LegacyInvitationAcceptance = InvitationAcceptance
 
 
 async def _require_org_admin(*, slug: str, user_id: UUID) -> UUID:

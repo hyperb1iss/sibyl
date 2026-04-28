@@ -90,16 +90,6 @@ __all__ = [
 ]
 
 
-LegacyOrgSummary = OrgSummary
-LegacyOrgAuthResult = OrgAuthResult
-LegacyOrgRoleResult = OrgRoleResult
-LegacyOrgMemberChange = OrgMemberChange
-LegacyInvitationRecord = InvitationRecord
-LegacyInvitationAcceptance = InvitationAcceptance
-LegacyProjectMembersResult = ProjectMembersResult
-LegacyProjectMemberChange = ProjectMemberChange
-
-
 def can_manage_project_members(
     role: ProjectRole | None,
     project: Any,

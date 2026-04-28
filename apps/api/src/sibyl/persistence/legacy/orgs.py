@@ -21,12 +21,16 @@ from sibyl.db.connection import get_session
 from sibyl.db.models import Organization, OrganizationMember, OrganizationRole
 from sibyl.persistence.legacy.graph import ensure_graph_indexes as _service_ensure_graph_indexes
 from sibyl.persistence.organization_common import (
-    LegacyOrgAuthResult,
-    LegacyOrgRoleResult,
-    LegacyOrgSummary,
+    OrgAuthResult,
+    OrgRoleResult,
+    OrgSummary,
 )
 
 log = structlog.get_logger()
+
+LegacyOrgSummary = OrgSummary
+LegacyOrgAuthResult = OrgAuthResult
+LegacyOrgRoleResult = OrgRoleResult
 
 
 async def ensure_legacy_graph_indexes(group_id: str) -> None:
