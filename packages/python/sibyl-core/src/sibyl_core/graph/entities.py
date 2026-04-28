@@ -337,6 +337,84 @@ class EntityManager:
         """
         return GraphClient.normalize_result(await self._driver.execute_query(search_query, **params))
 
+    def _surreal_should_search_entities(
+        self,
+        entity_types: list[EntityType] | None,
+    ) -> bool:
+        return entity_types is None or any(
+            entity_type != EntityType.EPISODE for entity_type in entity_types
+        )
+
+    def _surreal_should_search_episodes(
+        self,
+        entity_types: list[EntityType] | None,
+    ) -> bool:
+        return entity_types is None or EntityType.EPISODE in entity_types
+
+    async def _surreal_search_episode_records(
+        self,
+        *,
+        query_lower: str,
+        limit: int,
+        exact_name_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0 or not query_lower:
+            return []
+
+        params: dict[str, Any] = {
+            "group_id": self._group_id,
+            "query_lower": query_lower,
+            "prefixed_query_lower": f"{EntityType.EPISODE.value}:{query_lower}",
+            "query_limit": max(limit, 1),
+        }
+        name_expr = "string::lowercase(name ?? '')"
+
+        if exact_name_only:
+            search_query = f"""
+                SELECT uuid,
+                       name,
+                       group_id,
+                       content,
+                       source_description,
+                       created_at,
+                       valid_at,
+                       2.0 AS search_score
+                FROM episode
+                WHERE group_id = $group_id
+                  AND ({name_expr} = $query_lower OR {name_expr} = $prefixed_query_lower)
+                ORDER BY created_at DESC, uuid DESC
+                LIMIT $query_limit;
+            """
+            return GraphClient.normalize_result(
+                await self._driver.execute_query(search_query, **params)
+            )
+
+        fulltext_query = self._driver.build_fulltext_query(query_lower)
+        if not fulltext_query:
+            return []
+
+        params["search_query"] = fulltext_query
+        search_query = f"""
+            SELECT uuid,
+                   name,
+                   group_id,
+                   content,
+                   source_description,
+                   created_at,
+                   valid_at,
+                   search::score(0) AS search_score
+            FROM episode
+            WHERE group_id = $group_id
+              AND (
+                  content @0@ $search_query
+                  OR {name_expr} = $query_lower
+                  OR {name_expr} = $prefixed_query_lower
+              )
+            ORDER BY search_score DESC, created_at DESC, uuid DESC
+            LIMIT $query_limit;
+        """
+        return GraphClient.normalize_result(await self._driver.execute_query(search_query, **params))
+
     async def _surreal_list_entities_direct(
         self,
         *,
@@ -583,7 +661,10 @@ class EntityManager:
         log.info("Creating entity", entity_type=entity.entity_type, name=entity.name)
 
         try:
-            if self._surreal_entity_node_ops() is not None:
+            if (
+                self._surreal_entity_node_ops() is not None
+                and entity.entity_type != EntityType.EPISODE
+            ):
                 return await self.create_direct(entity)
 
             # Use add_episode to store the entity in Graphiti
@@ -614,19 +695,27 @@ class EntityManager:
             created_uuid = result.episode.uuid
             desired_id = entity.id or created_uuid
 
-            # Force deterministic UUID when caller provides one
-            await self._driver.execute_query(
-                """
-                MATCH (n {uuid: $created_uuid})
-                SET n.uuid = $desired_id
-                RETURN n.uuid
-                """,
-                created_uuid=created_uuid,
-                desired_id=desired_id,
-            )
+            if self._surreal_episode_node_ops() is not None:
+                if created_uuid != desired_id:
+                    await self._driver.execute_query(
+                        "UPDATE episode SET uuid = $desired_id WHERE uuid = $created_uuid;",
+                        created_uuid=created_uuid,
+                        desired_id=desired_id,
+                    )
+            else:
+                # Force deterministic UUID when caller provides one
+                await self._driver.execute_query(
+                    """
+                    MATCH (n {uuid: $created_uuid})
+                    SET n.uuid = $desired_id
+                    RETURN n.uuid
+                    """,
+                    created_uuid=created_uuid,
+                    desired_id=desired_id,
+                )
 
-            # Persist attributes and metadata on the created node so downstream filters work
-            await self._persist_entity_attributes(desired_id, entity)
+                # Persist attributes and metadata on the created node so downstream filters work
+                await self._persist_entity_attributes(desired_id, entity)
 
             log.info(
                 "Entity created successfully",
@@ -1041,21 +1130,41 @@ class EntityManager:
             return []
 
         if self._surreal_entity_node_ops() is not None:
-            records = await self._surreal_search_entity_records(
-                query_lower=normalized_query,
-                entity_types=entity_types,
-                limit=limit,
-                exact_name_only=True,
-            )
             exact_results: list[tuple[Entity, float]] = []
-            for record in records:
-                try:
-                    exact_results.append(
-                        (self._coerce_entity(self._record_to_entity(record)), 2.0)
-                    )
-                except Exception as exc:
-                    log.debug("surreal_exact_name_record_failed", error=str(exc))
-            return exact_results
+            if self._surreal_should_search_entities(entity_types):
+                records = await self._surreal_search_entity_records(
+                    query_lower=normalized_query,
+                    entity_types=entity_types,
+                    limit=limit,
+                    exact_name_only=True,
+                )
+                for record in records:
+                    try:
+                        exact_results.append(
+                            (self._coerce_entity(self._record_to_entity(record)), 2.0)
+                        )
+                    except Exception as exc:
+                        log.debug("surreal_exact_name_record_failed", error=str(exc))
+
+            if (
+                len(exact_results) < limit
+                and self._surreal_should_search_episodes(entity_types)
+            ):
+                records = await self._surreal_search_episode_records(
+                    query_lower=normalized_query,
+                    limit=limit - len(exact_results),
+                    exact_name_only=True,
+                )
+                for record in records:
+                    try:
+                        entity = self._coerce_entity(self._record_to_episode_entity(record))
+                        if entity_types and entity.entity_type not in entity_types:
+                            continue
+                        exact_results.append((entity, 2.0))
+                    except Exception as exc:
+                        log.debug("surreal_exact_episode_record_failed", error=str(exc))
+
+            return exact_results[:limit]
 
         params: dict[str, Any] = {
             "group_id": self._group_id,
@@ -1122,15 +1231,33 @@ class EntityManager:
             return []
 
         if self._surreal_entity_node_ops() is not None:
-            records = await self._surreal_search_entity_records(
-                query_lower=normalized_query,
-                entity_types=entity_types,
-                limit=min(max(limit * 4, 20), 200),
-            )
+            records: list[dict[str, Any]] = []
+            candidate_limit = min(max(limit * 4, 20), 200)
+            if self._surreal_should_search_entities(entity_types):
+                records.extend(
+                    await self._surreal_search_entity_records(
+                        query_lower=normalized_query,
+                        entity_types=entity_types,
+                        limit=candidate_limit,
+                    )
+                )
+            if self._surreal_should_search_episodes(entity_types):
+                records.extend(
+                    await self._surreal_search_episode_records(
+                        query_lower=normalized_query,
+                        limit=candidate_limit,
+                    )
+                )
+
             fallback_results: list[tuple[Entity, float]] = []
             for record in records:
                 try:
-                    entity = self._coerce_entity(self._record_to_entity(record))
+                    if "entity_type" in record:
+                        entity = self._coerce_entity(self._record_to_entity(record))
+                    else:
+                        entity = self._coerce_entity(self._record_to_episode_entity(record))
+                    if entity_types and entity.entity_type not in entity_types:
+                        continue
                 except Exception as exc:
                     log.debug("surreal_fallback_text_record_failed", error=str(exc))
                     continue
@@ -2443,6 +2570,30 @@ class EntityManager:
             except ValueError:
                 return None
         return None
+
+    def _record_to_episode_entity(self, node_data: dict[str, Any]) -> Entity:
+        name = str(node_data.get("name") or "")
+        entity_type = EntityType.EPISODE
+        if ":" in name:
+            prefix, suffix = name.split(":", 1)
+            with contextlib.suppress(ValueError):
+                entity_type = EntityType(prefix.strip().lower())
+                name = suffix.strip()
+
+        entity_kwargs: dict[str, Any] = {
+            "id": node_data.get("uuid") or "",
+            "name": name,
+            "entity_type": entity_type,
+            "description": node_data.get("source_description") or "",
+            "content": node_data.get("content") or "",
+            "organization_id": node_data.get("group_id"),
+            "metadata": {},
+        }
+        if created_at := self._parse_datetime(node_data.get("created_at")):
+            entity_kwargs["created_at"] = created_at
+            entity_kwargs["updated_at"] = created_at
+
+        return Entity(**entity_kwargs)
 
     async def _persist_entity_attributes(self, entity_id: str, entity: Entity) -> None:
         """Persist normalized attributes/metadata on a node for reliable querying."""

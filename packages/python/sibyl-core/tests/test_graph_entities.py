@@ -225,6 +225,42 @@ class TestEntityCreate:
         surreal_entity_manager._client.client.add_episode.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_create_surreal_episode_uses_graphiti_add_episode(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        episode = Entity(
+            id="episode-001",
+            entity_type=EntityType.EPISODE,
+            name="Surreal lesson",
+            description="Captured from a session",
+            content="Graphiti should write the raw episode.",
+        )
+        mock_episode = MagicMock()
+        mock_episode.uuid = "generated-episode"
+        mock_result = MagicMock()
+        mock_result.episode = mock_episode
+        surreal_entity_manager._client.client.add_episode.return_value = mock_result
+        surreal_entity_manager._driver.execute_query = AsyncMock()
+
+        with patch.object(
+            surreal_entity_manager,
+            "create_direct",
+            new_callable=AsyncMock,
+        ) as create_direct:
+            result = await surreal_entity_manager.create(episode)
+
+        assert result == "episode-001"
+        create_direct.assert_not_awaited()
+        surreal_entity_manager._client.client.add_episode.assert_awaited_once()
+        query = surreal_entity_manager._driver.execute_query.await_args.args[0]
+        assert "UPDATE episode SET uuid = $desired_id" in query
+        assert surreal_entity_manager._driver.execute_query.await_args.kwargs == {
+            "created_uuid": "generated-episode",
+            "desired_id": "episode-001",
+        }
+
+    @pytest.mark.asyncio
     async def test_create_entity_success(
         self,
         entity_manager: EntityManager,
@@ -1715,6 +1751,130 @@ class TestEntitySearch:
         fallback_params = surreal_entity_manager._driver.execute_query.await_args_list[1].kwargs
         assert fallback_params["query_lower"] == 'repository "pattern"\x00'
         assert fallback_params["search_query"] == "repository pattern"
+
+    @pytest.mark.asyncio
+    async def test_surreal_search_exact_episode_reads_episode_table(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        matching_record = {
+            "uuid": "episode-001",
+            "name": "episode:Surreal lesson",
+            "group_id": "test-org-123",
+            "content": "Graphiti wrote this raw memory.",
+            "source_description": "MCP Entity: episode",
+            "created_at": datetime.now(UTC),
+            "valid_at": datetime.now(UTC),
+        }
+
+        surreal_entity_manager._driver.execute_query = AsyncMock(return_value=[matching_record])
+
+        results = await surreal_entity_manager.search(
+            "Surreal lesson",
+            entity_types=[EntityType.EPISODE],
+            limit=1,
+        )
+
+        assert len(results) == 1
+        entity, score = results[0]
+        assert entity.id == "episode-001"
+        assert entity.name == "Surreal lesson"
+        assert entity.entity_type == EntityType.EPISODE
+        assert score == 2.0
+        query = surreal_entity_manager._driver.execute_query.await_args.args[0]
+        params = surreal_entity_manager._driver.execute_query.await_args.kwargs
+        assert "FROM episode" in query
+        assert "FROM entity" not in query
+        assert "$prefixed_query_lower" in query
+        assert params["prefixed_query_lower"] == "episode:surreal lesson"
+
+    @pytest.mark.asyncio
+    async def test_surreal_episode_search_reapplies_type_filter_after_hydration(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        matching_record = {
+            "uuid": "pattern-episode-001",
+            "name": "pattern:Legacy pattern episode",
+            "group_id": "test-org-123",
+            "content": "A legacy episode named like a pattern.",
+            "source_description": "MCP Entity: pattern",
+            "created_at": datetime.now(UTC),
+            "valid_at": datetime.now(UTC),
+        }
+
+        surreal_entity_manager._driver.execute_query = AsyncMock(
+            side_effect=[[matching_record], [matching_record]]
+        )
+
+        results = await surreal_entity_manager.search(
+            "Legacy pattern episode",
+            entity_types=[EntityType.EPISODE],
+            limit=5,
+        )
+
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_surreal_episode_fallback_reapplies_type_filter_after_hydration(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        matching_record = {
+            "uuid": "pattern-episode-001",
+            "name": "pattern:Legacy pattern episode",
+            "group_id": "test-org-123",
+            "content": "A legacy episode named like a pattern.",
+            "source_description": "MCP Entity: pattern",
+            "created_at": datetime.now(UTC),
+            "search_score": 0.33,
+        }
+
+        surreal_entity_manager._driver.execute_query = AsyncMock(
+            side_effect=[[], [matching_record]]
+        )
+
+        results = await surreal_entity_manager.search(
+            "legacy",
+            entity_types=[EntityType.EPISODE],
+            limit=5,
+        )
+
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_surreal_search_fallback_episode_content(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        matching_record = {
+            "uuid": "episode-001",
+            "name": "episode:Surreal lesson",
+            "group_id": "test-org-123",
+            "content": "Graphiti extraction writes raw memory episodes.",
+            "source_description": "MCP Entity: episode",
+            "created_at": datetime.now(UTC),
+            "search_score": 0.33,
+        }
+
+        surreal_entity_manager._driver.execute_query = AsyncMock(
+            side_effect=[[], [matching_record]]
+        )
+
+        results = await surreal_entity_manager.search(
+            'raw "memory"\x00',
+            entity_types=[EntityType.EPISODE],
+            limit=5,
+        )
+
+        assert len(results) == 1
+        assert results[0][0].id == "episode-001"
+        fallback_query = surreal_entity_manager._driver.execute_query.await_args_list[1].args[0]
+        fallback_params = surreal_entity_manager._driver.execute_query.await_args_list[1].kwargs
+        assert "FROM episode" in fallback_query
+        assert "content @0@ $search_query" in fallback_query
+        assert "FROM entity" not in fallback_query
+        assert fallback_params["search_query"] == "raw memory"
 
     @pytest.mark.asyncio
     async def test_search_skips_surreal_fallback_when_exact_results_fill_limit(
