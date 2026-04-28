@@ -44,6 +44,9 @@ DEFINE INDEX IF NOT EXISTS idx_entity_group ON entity FIELDS group_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_type ON entity FIELDS entity_type;
 DEFINE INDEX IF NOT EXISTS idx_entity_labels ON entity FIELDS labels;
 DEFINE INDEX IF NOT EXISTS idx_entity_name_ft ON entity FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
+DEFINE INDEX IF NOT EXISTS idx_entity_summary_ft ON entity FIELDS summary FULLTEXT ANALYZER content_analyzer BM25;
+DEFINE INDEX IF NOT EXISTS idx_entity_description_ft ON entity FIELDS attributes.description FULLTEXT ANALYZER content_analyzer BM25;
+DEFINE INDEX IF NOT EXISTS idx_entity_content_ft ON entity FIELDS attributes.content FULLTEXT ANALYZER content_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_entity_embedding ON entity FIELDS name_embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
 

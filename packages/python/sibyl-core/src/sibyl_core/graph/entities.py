@@ -281,6 +281,7 @@ class EntityManager:
         params: dict[str, Any] = {
             "group_id": self._group_id,
             "query_lower": query_lower,
+            "search_query": query_lower,
             "query_limit": max(limit, 1),
         }
         where_clauses = ["group_id = $group_id"]
@@ -289,17 +290,25 @@ class EntityManager:
             params["entity_types"] = [entity_type.value for entity_type in entity_types]
 
         name_expr = "string::lowercase(name ?? '')"
-        description_expr = "string::lowercase(attributes.description ?? summary ?? '')"
-        content_expr = "string::lowercase(attributes.content ?? '')"
+        score_expr = ""
+        order_by = "attributes.updated_at DESC, created_at DESC, uuid DESC"
         if exact_name_only:
             where_clauses.append(f"{name_expr} = $query_lower")
         else:
             where_clauses.append(
-                f"""(
-                    string::contains({name_expr}, $query_lower)
-                    OR string::contains({description_expr}, $query_lower)
-                    OR string::contains({content_expr}, $query_lower)
+                """(
+                    name @0@ $search_query
+                    OR summary @1@ $search_query
+                    OR attributes.description @2@ $search_query
+                    OR attributes.content @3@ $search_query
                 )"""
+            )
+            score_expr = (
+                "math::max([search::score(0), search::score(1), "
+                "search::score(2), search::score(3)]) AS search_score,"
+            )
+            order_by = (
+                "search_score DESC, attributes.updated_at DESC, created_at DESC, uuid DESC"
             )
 
         search_query = f"""
@@ -313,10 +322,11 @@ class EntityManager:
                    attributes.content AS content,
                    attributes.source_file AS source_file,
                    attributes.updated_at AS updated_at,
+                   {score_expr}
                    created_at
             FROM entity
             WHERE {" AND ".join(where_clauses)}
-            ORDER BY attributes.updated_at DESC, created_at DESC, uuid DESC
+            ORDER BY {order_by}
             LIMIT $query_limit;
         """
         return GraphClient.normalize_result(await self._driver.execute_query(search_query, **params))
@@ -1123,13 +1133,6 @@ class EntityManager:
                 description = (entity.description or "").lower()
                 content = (entity.content or "").lower()
 
-                if (
-                    normalized_query not in name
-                    and normalized_query not in description
-                    and normalized_query not in content
-                ):
-                    continue
-
                 if name == normalized_query:
                     score = 1.0
                 elif name.startswith(normalized_query):
@@ -1138,8 +1141,12 @@ class EntityManager:
                     score = 0.9
                 elif normalized_query in description:
                     score = 0.75
-                else:
+                elif normalized_query in content:
                     score = 0.6
+                elif "search_score" in record:
+                    score = 0.65
+                else:
+                    continue
                 fallback_results.append((entity, score))
 
             fallback_results.sort(

@@ -271,6 +271,52 @@ class TestSchemaBootstrap:
         assert rows[0]["labels"] == []
         assert rows[0]["attributes"] == {}
 
+    async def test_entity_fulltext_indexes_cover_search_fields(
+        self, surreal_schema: SurrealDriver
+    ) -> None:
+        gid = surreal_schema.group_id
+        await surreal_schema.execute_query(
+            """
+            CREATE entity SET
+                uuid = "ent-fts",
+                name = "namelight",
+                entity_type = "pattern",
+                group_id = $gid,
+                summary = "summaryglow",
+                attributes = {
+                    description: "descriptionglow",
+                    content: "contentglow",
+                    metadata: {}
+                };
+            """,
+            gid=gid,
+        )
+
+        query = """
+            SELECT uuid,
+                   math::max([
+                       search::score(0),
+                       search::score(1),
+                       search::score(2),
+                       search::score(3)
+                   ]) AS search_score
+            FROM entity
+            WHERE group_id = $gid
+              AND (
+                  name @0@ $term
+                  OR summary @1@ $term
+                  OR attributes.description @2@ $term
+                  OR attributes.content @3@ $term
+              )
+            ORDER BY search_score DESC
+            LIMIT 10;
+        """
+        for term in ("namelight", "summaryglow", "descriptionglow", "contentglow"):
+            rows = await surreal_schema.execute_query(query, gid=gid, term=term)
+            assert isinstance(rows, list)
+            assert [row["uuid"] for row in rows] == ["ent-fts"]
+            assert "search_score" in rows[0]
+
     async def test_relates_to_edge_roundtrip(self, surreal_schema: SurrealDriver) -> None:
         gid = surreal_schema.group_id
         # Create two entities

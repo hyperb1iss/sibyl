@@ -1649,7 +1649,40 @@ class TestEntitySearch:
         surreal_entity_manager._driver.entity_node_ops.get_by_group_ids.assert_not_awaited()
         fallback_query = surreal_entity_manager._driver.execute_query.await_args_list[1].args[0]
         assert "FROM entity" in fallback_query
-        assert "string::contains" in fallback_query
+        assert "name @0@ $search_query" in fallback_query
+        assert "summary @1@ $search_query" in fallback_query
+        assert "attributes.description @2@ $search_query" in fallback_query
+        assert "attributes.content @3@ $search_query" in fallback_query
+        assert "string::contains" not in fallback_query
+
+    @pytest.mark.asyncio
+    async def test_surreal_fallback_accepts_fulltext_matches_without_substrings(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        matching_record = {
+            "uuid": "pattern-001",
+            "name": "Data Access Layer",
+            "group_id": "test-org-123",
+            "entity_type": "pattern",
+            "created_at": datetime.now(UTC),
+            "description": "Persistence boundary",
+            "content": "Use repositories for storage concerns",
+            "metadata": json.dumps({"category": "architecture"}),
+            "search_score": 0.42,
+        }
+
+        surreal_entity_manager._driver.execute_query = AsyncMock(
+            side_effect=[[], [matching_record]]
+        )
+
+        results = await surreal_entity_manager.search(
+            "repository", entity_types=[EntityType.PATTERN]
+        )
+
+        assert len(results) == 1
+        assert results[0][0].id == "pattern-001"
+        assert results[0][1] == 0.65
 
     @pytest.mark.asyncio
     async def test_search_skips_surreal_fallback_when_exact_results_fill_limit(
