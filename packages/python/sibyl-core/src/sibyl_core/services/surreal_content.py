@@ -90,6 +90,9 @@ class ContentChunk:
     entity_ids: list[str] = field(default_factory=list)
 
 
+ContentSearchRow = tuple[ContentChunk, ContentDocument, str, str, float]
+
+
 @dataclass(slots=True)
 class RawMemory:
     id: str
@@ -474,6 +477,24 @@ async def _load_documents_for_source_ids(
     return sorted(documents, key=lambda document: (document.source_id, document.id))
 
 
+async def _load_search_documents_for_source_ids(
+    client: SurrealContentClient,
+    source_ids: list[str],
+) -> list[ContentDocument]:
+    rows: list[dict[str, Any]] = []
+    for batch in _value_batches(source_ids):
+        rows.extend(
+            await _select_many(
+                client,
+                "SELECT uuid, source_id, url, title, has_code "
+                "FROM crawled_documents WHERE source_id INSIDE $source_ids;",
+                source_ids=batch,
+            )
+        )
+    documents = [_document_from_record(row) for row in rows]
+    return sorted(documents, key=lambda document: (document.source_id, document.id))
+
+
 async def _load_chunks_for_document_ids(
     client: SurrealContentClient,
     document_ids: list[str],
@@ -783,6 +804,135 @@ async def load_search_scope(
     return sources, sources_by_id, documents_by_id, chunks
 
 
+def _document_search_candidate_limit(limit: int) -> int:
+    return min(max(limit * 5, limit, 1), 100)
+
+
+def _document_language_clause(language: str | None) -> tuple[str, dict[str, Any]]:
+    if not language:
+        return "", {}
+    return (
+        " AND chunk_type = 'code' AND string::lowercase(language ?? '') = $language",
+        {"language": language.lower()},
+    )
+
+
+def _hydrate_document_search_rows(
+    rows: list[dict[str, Any]],
+    *,
+    documents_by_id: dict[str, ContentDocument],
+    sources_by_id: dict[str, ContentSource],
+) -> list[ContentSearchRow]:
+    hydrated: list[ContentSearchRow] = []
+    for row in rows:
+        chunk = _chunk_from_record(row)
+        document = documents_by_id.get(chunk.document_id)
+        if document is None:
+            continue
+        source = sources_by_id.get(document.source_id)
+        if source is None:
+            continue
+        hydrated.append((chunk, document, source.name, source.id, float(row.get("score") or 0.0)))
+    return hydrated
+
+
+async def search_document_chunks(
+    *,
+    organization_id: str,
+    query_text: str,
+    query_embedding: list[float] | None,
+    source_id: str | None = None,
+    source_name: str | None = None,
+    language: str | None = None,
+    limit: int = 10,
+    similarity_threshold: float = 0.5,
+) -> tuple[list[ContentSearchRow], list[ContentSearchRow]]:
+    if limit <= 0:
+        return [], []
+
+    candidate_limit = _document_search_candidate_limit(limit)
+    language_clause, language_params = _document_language_clause(language)
+    errors: list[str] = []
+
+    async with surreal_content_client() as client:
+        sources = await _load_sources_for_org(client, organization_id=organization_id)
+        if source_id is not None:
+            sources = [source for source in sources if source.id == source_id]
+        elif source_name:
+            needle = source_name.strip().lower()
+            sources = [source for source in sources if needle in source.name.lower()]
+        if not sources:
+            return [], []
+
+        documents = await _load_search_documents_for_source_ids(
+            client, [source.id for source in sources]
+        )
+        if not documents:
+            return [], []
+
+        document_ids = [document.id for document in documents]
+        sources_by_id = {source.id: source for source in sources}
+        documents_by_id = {document.id: document for document in documents}
+
+        vector_rows: list[dict[str, Any]] = []
+        if query_embedding is not None:
+            try:
+                vector_rows = await _select_many(
+                    client,
+                    "SELECT * FROM ("
+                    "SELECT uuid, document_id, chunk_index, chunk_type, content, context, "
+                    "heading_path, language, has_entities, entity_ids, "
+                    "(1 - vector::distance::knn()) AS score "
+                    "FROM document_chunks WHERE document_id INSIDE $document_ids"
+                    f"{language_clause} "
+                    f"AND embedding <|{candidate_limit}, 40|> $query_embedding"
+                    ") WHERE score >= $similarity_threshold "
+                    "ORDER BY score DESC LIMIT $candidate_limit;",
+                    document_ids=document_ids,
+                    query_embedding=query_embedding,
+                    similarity_threshold=similarity_threshold,
+                    candidate_limit=candidate_limit,
+                    **language_params,
+                )
+            except RuntimeError as exc:
+                errors.append(str(exc))
+
+        lexical_rows: list[dict[str, Any]] = []
+        if query_text.strip():
+            try:
+                lexical_rows = await _select_many(
+                    client,
+                    "SELECT uuid, document_id, chunk_index, chunk_type, content, context, "
+                    "heading_path, language, has_entities, entity_ids, search::score(0) AS score "
+                    "FROM document_chunks WHERE document_id INSIDE $document_ids"
+                    f"{language_clause} "
+                    "AND content @0@ $search_query "
+                    "ORDER BY score DESC LIMIT $candidate_limit;",
+                    document_ids=document_ids,
+                    search_query=query_text.strip(),
+                    candidate_limit=candidate_limit,
+                    **language_params,
+                )
+            except RuntimeError as exc:
+                errors.append(str(exc))
+
+    if errors and not vector_rows and not lexical_rows:
+        raise RuntimeError("; ".join(errors))
+
+    return (
+        _hydrate_document_search_rows(
+            vector_rows,
+            documents_by_id=documents_by_id,
+            sources_by_id=sources_by_id,
+        ),
+        _hydrate_document_search_rows(
+            lexical_rows,
+            documents_by_id=documents_by_id,
+            sources_by_id=sources_by_id,
+        ),
+    )
+
+
 async def list_unlinked_document_chunks(
     *,
     organization_id: str,
@@ -826,6 +976,7 @@ __all__ = [
     "AGENT_DIARY_CAPTURE_SURFACE",
     "ContentChunk",
     "ContentDocument",
+    "ContentSearchRow",
     "ContentSource",
     "MemoryScope",
     "RawMemory",
@@ -838,6 +989,7 @@ __all__ = [
     "load_search_scope",
     "recall_raw_memory",
     "remember_raw_memory",
+    "search_document_chunks",
     "set_source_job_state",
     "source_exists",
     "surreal_content_client",

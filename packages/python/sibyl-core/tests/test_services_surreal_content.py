@@ -12,6 +12,7 @@ from sibyl_core.services.surreal_content import (
     list_unlinked_document_chunks,
     recall_raw_memory,
     remember_raw_memory,
+    search_document_chunks,
 )
 
 
@@ -141,6 +142,93 @@ class TestSurrealContentHelpers:
             )
 
         assert [chunk.id for chunk in chunks] == ["chunk-1"]
+
+    @pytest.mark.asyncio
+    async def test_search_document_chunks_uses_direct_surreal_queries(self) -> None:
+        fake_client = FakeClient(
+            [
+                _query_result(
+                    [
+                        {
+                            "uuid": "src-1",
+                            "organization_id": "org-1",
+                            "name": "Docs",
+                            "url": "https://docs.example.com",
+                        }
+                    ]
+                ),
+                _query_result(
+                    [
+                        {
+                            "uuid": "doc-1",
+                            "source_id": "src-1",
+                            "url": "https://docs.example.com/guide",
+                            "title": "Guide",
+                            "has_code": True,
+                        }
+                    ]
+                ),
+                _query_result(
+                    [
+                        {
+                            "uuid": "chunk-vector",
+                            "document_id": "doc-1",
+                            "chunk_index": 0,
+                            "chunk_type": "code",
+                            "content": "alpha vector match",
+                            "language": "python",
+                            "score": 0.91,
+                        }
+                    ]
+                ),
+                _query_result(
+                    [
+                        {
+                            "uuid": "chunk-lexical",
+                            "document_id": "doc-1",
+                            "chunk_index": 1,
+                            "chunk_type": "code",
+                            "content": "alpha lexical match",
+                            "language": "python",
+                            "score": 0.42,
+                        }
+                    ]
+                ),
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            vector_rows, lexical_rows = await search_document_chunks(
+                organization_id="org-1",
+                query_text="alpha",
+                query_embedding=[1.0, 0.0],
+                source_id="src-1",
+                language="Python",
+                limit=5,
+            )
+
+        assert [row[0].id for row in vector_rows] == ["chunk-vector"]
+        assert [row[0].id for row in lexical_rows] == ["chunk-lexical"]
+        assert vector_rows[0][1].id == "doc-1"
+        assert vector_rows[0][2] == "Docs"
+
+        document_query, _ = fake_client.calls[1]
+        vector_query, vector_params = fake_client.calls[2]
+        lexical_query, lexical_params = fake_client.calls[3]
+        assert "SELECT uuid, source_id, url, title, has_code" in document_query
+        assert "SELECT * FROM document_chunks" not in vector_query
+        assert "embedding <|25, 40|> $query_embedding" in vector_query
+        assert "content @0@ $search_query" in lexical_query
+        assert vector_params["language"] == "python"
+        assert lexical_params["language"] == "python"
+        assert vector_params["document_ids"] == ["doc-1"]
 
     @pytest.mark.asyncio
     async def test_remember_raw_memory_persists_source_scope_and_provenance(self) -> None:

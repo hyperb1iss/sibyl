@@ -12,6 +12,7 @@ from sibyl_core.retrieval.dedup import cosine_similarity
 from sibyl_core.services.surreal_content import (
     lexical_score_from_tokens,
     load_search_scope,
+    search_document_chunks,
     tokenize,
     tokenize_fields,
 )
@@ -143,6 +144,102 @@ def _merge_document_results(
     ]
 
 
+def _build_document_results_from_rows(
+    rows: Sequence[Any],
+    *,
+    limit: int,
+    include_content: bool,
+) -> list[SearchResult]:
+    return [
+        _build_document_result(
+            chunk=chunk,
+            doc=doc,
+            source_name=src_name,
+            source_id=src_id,
+            score=float(score),
+            include_content=include_content,
+        )
+        for chunk, doc, src_name, src_id, score in _dedupe_document_rows(rows)[:limit]
+    ]
+
+
+async def _search_documents_surreal_scan(
+    *,
+    query: str,
+    organization_id: str,
+    source_id: str | None,
+    source_name: str | None,
+    language: str | None,
+    limit: int,
+    include_content: bool,
+    query_embedding: list[float] | None,
+) -> list[SearchResult]:
+    _, sources_by_id, documents_by_id, chunks = await load_search_scope(
+        organization_id=organization_id,
+        source_id=source_id,
+        source_name=source_name,
+    )
+    query_tokens = tokenize(query)
+    document_tokens_by_id: dict[str, set[str]] = {}
+
+    if language:
+        language_filter = language.lower()
+        chunks = [
+            chunk
+            for chunk in chunks
+            if chunk.chunk_type.lower() == "code"
+            and (chunk.language or "").lower() == language_filter
+        ]
+
+    vector_rows_raw: list[tuple[Any, Any, str, Any, float]] = []
+    if query_embedding is not None:
+        for chunk in chunks:
+            if not chunk.embedding:
+                continue
+            similarity = cosine_similarity(chunk.embedding, query_embedding)
+            if similarity < 0.5:
+                continue
+            document = documents_by_id.get(chunk.document_id)
+            if document is None:
+                continue
+            source = sources_by_id.get(document.source_id)
+            if source is None:
+                continue
+            vector_rows_raw.append((chunk, document, source.name, source.id, similarity))
+
+    vector_results = _build_document_results_from_rows(
+        vector_rows_raw,
+        limit=limit,
+        include_content=include_content,
+    )
+
+    lexical_rows_raw: list[tuple[Any, Any, str, Any, float]] = []
+    for chunk in chunks:
+        document = documents_by_id.get(chunk.document_id)
+        if document is None:
+            continue
+        source = sources_by_id.get(document.source_id)
+        if source is None:
+            continue
+        document_tokens = document_tokens_by_id.get(document.id)
+        if document_tokens is None:
+            document_tokens = tokenize_fields(document.title, document.content)
+            document_tokens_by_id[document.id] = document_tokens
+        chunk_tokens = tokenize_fields(chunk.content, chunk.context)
+        score = lexical_score_from_tokens(query_tokens, chunk_tokens, document_tokens)
+        if score <= 0:
+            continue
+        lexical_rows_raw.append((chunk, document, source.name, source.id, score))
+
+    lexical_results = _build_document_results_from_rows(
+        lexical_rows_raw,
+        limit=limit,
+        include_content=include_content,
+    )
+
+    return _merge_document_results(vector_results, lexical_results, limit)
+
+
 async def search_documents(
     query: str,
     organization_id: str,
@@ -163,84 +260,39 @@ async def search_documents(
         log.warning("document_vector_embedding_failed", error=str(exc))
 
     if settings.store == "surreal":
-        _, sources_by_id, documents_by_id, chunks = await load_search_scope(
-            organization_id=organization_id,
-            source_id=source_id,
-            source_name=source_name,
+        try:
+            vector_rows_raw, lexical_rows_raw = await search_document_chunks(
+                organization_id=organization_id,
+                query_text=query,
+                query_embedding=query_embedding,
+                source_id=source_id,
+                source_name=source_name,
+                language=language,
+                limit=limit,
+            )
+        except RuntimeError as exc:
+            log.warning("surreal_document_direct_search_failed", error=str(exc))
+            return await _search_documents_surreal_scan(
+                query=query,
+                organization_id=organization_id,
+                source_id=source_id,
+                source_name=source_name,
+                language=language,
+                limit=limit,
+                include_content=include_content,
+                query_embedding=query_embedding,
+            )
+
+        vector_results = _build_document_results_from_rows(
+            vector_rows_raw,
+            limit=limit,
+            include_content=include_content,
         )
-        query_tokens = tokenize(query)
-        document_tokens_by_id: dict[str, set[str]] = {}
-
-        if language:
-            language_filter = language.lower()
-            chunks = [
-                chunk
-                for chunk in chunks
-                if chunk.chunk_type.lower() == "code"
-                and (chunk.language or "").lower() == language_filter
-            ]
-
-        vector_rows_raw: list[tuple[Any, Any, str, Any, float]] = []
-        if query_embedding is not None:
-            for chunk in chunks:
-                if not chunk.embedding:
-                    continue
-                similarity = cosine_similarity(chunk.embedding, query_embedding)
-                if similarity < 0.5:
-                    continue
-                document = documents_by_id.get(chunk.document_id)
-                if document is None:
-                    continue
-                source = sources_by_id.get(document.source_id)
-                if source is None:
-                    continue
-                vector_rows_raw.append((chunk, document, source.name, source.id, similarity))
-
-        vector_results = [
-            _build_document_result(
-                chunk=chunk,
-                doc=doc,
-                source_name=src_name,
-                source_id=src_id,
-                score=float(score),
-                include_content=include_content,
-            )
-            for chunk, doc, src_name, src_id, score in _dedupe_document_rows(vector_rows_raw)[
-                :limit
-            ]
-        ]
-
-        lexical_rows_raw: list[tuple[Any, Any, str, Any, float]] = []
-        for chunk in chunks:
-            document = documents_by_id.get(chunk.document_id)
-            if document is None:
-                continue
-            source = sources_by_id.get(document.source_id)
-            if source is None:
-                continue
-            document_tokens = document_tokens_by_id.get(document.id)
-            if document_tokens is None:
-                document_tokens = tokenize_fields(document.title, document.content)
-                document_tokens_by_id[document.id] = document_tokens
-            chunk_tokens = tokenize_fields(chunk.content, chunk.context)
-            score = lexical_score_from_tokens(query_tokens, chunk_tokens, document_tokens)
-            if score <= 0:
-                continue
-            lexical_rows_raw.append((chunk, document, source.name, source.id, score))
-
-        lexical_results = [
-            _build_document_result(
-                chunk=chunk,
-                doc=doc,
-                source_name=src_name,
-                source_id=src_id,
-                score=float(score),
-                include_content=include_content,
-            )
-            for chunk, doc, src_name, src_id, score in _dedupe_document_rows(lexical_rows_raw)[
-                :limit
-            ]
-        ]
+        lexical_results = _build_document_results_from_rows(
+            lexical_rows_raw,
+            limit=limit,
+            include_content=include_content,
+        )
 
         return _merge_document_results(vector_results, lexical_results, limit)
 
