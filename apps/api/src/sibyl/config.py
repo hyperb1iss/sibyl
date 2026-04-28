@@ -259,6 +259,11 @@ class Settings(BaseSettings):
         default="graph",
         description="SurrealDB database name used inside each org namespace",
     )
+    surreal_slow_query_ms: float = Field(
+        default=500.0,
+        ge=0.0,
+        description="Log SurrealDB queries at warning level when elapsed time exceeds this threshold.",
+    )
 
     # PostgreSQL configuration
     postgres_host: str = Field(default="localhost", description="PostgreSQL host")

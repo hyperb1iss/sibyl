@@ -260,6 +260,64 @@ async def test_surreal_content_client_does_not_retry_closed_write(monkeypatch) -
     assert len(clients) == 1
 
 
+@pytest.mark.asyncio
+async def test_surreal_content_client_emits_query_telemetry(monkeypatch) -> None:
+    telemetry: list[dict[str, Any]] = []
+
+    class FakeAsyncSurreal:
+        def __init__(self, url: str) -> None:
+            self.url = url
+
+        async def signin(self, credentials: dict[str, str]) -> None:
+            self.credentials = credentials
+
+        async def use(self, namespace: str, database: str) -> None:
+            self.namespace = namespace
+            self.database = database
+
+        async def query(self, query: str, params: object | None = None) -> list[Any]:
+            return []
+
+        async def close(self) -> None:
+            return None
+
+    def fake_log_query(query: str, **fields: Any) -> None:
+        telemetry.append({"query": query, **fields})
+
+    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr(
+        "sibyl_core.backends.surreal.dedicated_client.query_start",
+        lambda: 10.0,
+    )
+    monkeypatch.setattr(
+        "sibyl_core.backends.surreal.dedicated_client.elapsed_ms",
+        lambda started_at: 12.3,
+    )
+    monkeypatch.setattr(
+        "sibyl_core.backends.surreal.dedicated_client.log_query",
+        fake_log_query,
+    )
+    client = SurrealContentClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+    )
+
+    await client.execute_query("SELECT * FROM crawl_sources;")
+
+    assert telemetry == [
+        {
+            "query": "SELECT * FROM crawl_sources;",
+            "client_kind": "content",
+            "namespace": "sibyl_content",
+            "database": "content",
+            "raw": False,
+            "elapsed": 12.3,
+            "retry_count": 0,
+        }
+    ]
+
+
 def test_surreal_raw_retry_predicate_allows_let_reads() -> None:
     assert _can_retry_raw_query("LET $ids = []; SELECT * FROM document_chunks;")
     assert not _can_retry_raw_query("LET $record = {}; CREATE document_chunks CONTENT $record;")

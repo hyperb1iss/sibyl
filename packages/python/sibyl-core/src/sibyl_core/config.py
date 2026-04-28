@@ -78,6 +78,11 @@ class CoreConfig(BaseSettings):
         default="graph",
         description="SurrealDB database name used inside each org namespace",
     )
+    surreal_slow_query_ms: float = Field(
+        default=500.0,
+        ge=0.0,
+        description="Log SurrealDB queries at warning level when elapsed time exceeds this threshold.",
+    )
 
     # LLM Provider configuration
     llm_provider: Literal["openai", "anthropic"] = Field(

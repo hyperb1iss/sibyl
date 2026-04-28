@@ -40,6 +40,7 @@ from graphiti_core.driver.driver import (
 )
 
 from sibyl_core.backends.surreal.connection import _can_retry_query, _is_connection_closed_error
+from sibyl_core.backends.surreal.observability import elapsed_ms, log_query, query_start
 
 logger = logging.getLogger(__name__)
 
@@ -282,27 +283,66 @@ class SurrealDriver(GraphDriver):
                 logger.debug("SurrealDB client close after connection failure failed: %s", exc)
 
     async def execute_query(self, cypher_query_: str, **kwargs: Any) -> Any:
+        started_at = query_start()
+        retry_count = 0
+        namespace = _namespace_for_group(self._namespace_prefix, self._database)
         async with self._query_lock:
-            client = await self._ensure_client()
             try:
-                result = await client.query(cypher_query_, kwargs if kwargs else None)
-            except Exception as exc:
-                if not _is_connection_closed_error(exc):
-                    raise
-                await self._drop_client()
-                if not _can_retry_query(cypher_query_):
-                    raise
-                logger.warning(
-                    "SurrealDB connection closed during read; reconnecting and retrying: %s",
-                    exc,
-                )
                 client = await self._ensure_client()
-                result = await client.query(cypher_query_, kwargs if kwargs else None)
+                try:
+                    result = await client.query(cypher_query_, kwargs if kwargs else None)
+                except Exception as exc:
+                    if not _is_connection_closed_error(exc):
+                        raise
+                    await self._drop_client()
+                    if not _can_retry_query(cypher_query_):
+                        raise
+                    logger.warning(
+                        "SurrealDB connection closed during read; reconnecting and retrying: %s",
+                        exc,
+                    )
+                    retry_count = 1
+                    client = await self._ensure_client()
+                    result = await client.query(cypher_query_, kwargs if kwargs else None)
+            except Exception as exc:
+                log_query(
+                    cypher_query_,
+                    client_kind="graph",
+                    namespace=namespace,
+                    database=self._default_database,
+                    raw=False,
+                    elapsed=elapsed_ms(started_at),
+                    retry_count=retry_count,
+                    error=exc,
+                )
+                raise
         # The surrealdb SDK does not raise on per-statement errors — it returns
         # the error message as a string (single statement) or as `{"status":
         # "ERR", "result": "..."}` (multi-statement). Detect both and raise so
         # bulk paths can't falsely report success on a rejected insert.
-        _raise_if_surreal_error(cypher_query_, result)
+        try:
+            _raise_if_surreal_error(cypher_query_, result)
+        except Exception as exc:
+            log_query(
+                cypher_query_,
+                client_kind="graph",
+                namespace=namespace,
+                database=self._default_database,
+                raw=False,
+                elapsed=elapsed_ms(started_at),
+                retry_count=retry_count,
+                error=exc,
+            )
+            raise
+        log_query(
+            cypher_query_,
+            client_kind="graph",
+            namespace=namespace,
+            database=self._default_database,
+            raw=False,
+            elapsed=elapsed_ms(started_at),
+            retry_count=retry_count,
+        )
         return result
 
     def session(self, database: str | None = None) -> GraphDriverSession:

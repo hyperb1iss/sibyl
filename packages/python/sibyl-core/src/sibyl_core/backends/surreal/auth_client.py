@@ -25,4 +25,5 @@ class SurrealAuthClient(DedicatedSurrealClient):
             token=token,
             namespace=namespace,
             database=database,
+            client_kind="auth",
         )

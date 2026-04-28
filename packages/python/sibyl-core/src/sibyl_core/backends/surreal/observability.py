@@ -1,0 +1,116 @@
+"""Query telemetry for SurrealDB backends."""
+
+from __future__ import annotations
+
+import hashlib
+import re
+import time
+from typing import Any
+
+import structlog
+
+log = structlog.get_logger()
+
+_TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_QUERY_STATEMENT_TOKENS = {
+    "CREATE",
+    "DELETE",
+    "INFO",
+    "INSERT",
+    "RELATE",
+    "REMOVE",
+    "RETURN",
+    "SELECT",
+    "UPDATE",
+    "UPSERT",
+}
+_TABLE_CONTEXT_TOKENS = {"CREATE", "DELETE", "FROM", "INTO", "RELATE", "UPDATE"}
+_NON_TABLE_TOKENS = {"CONTENT", "MERGE", "ONLY", "OVERWRITE", "SELECT", "SET", "VALUE"}
+
+
+def query_start() -> float:
+    return time.perf_counter()
+
+
+def elapsed_ms(started_at: float) -> float:
+    return round((time.perf_counter() - started_at) * 1000, 2)
+
+
+def _slow_query_threshold_ms() -> float:
+    from sibyl_core.config import core_config
+
+    return core_config.surreal_slow_query_ms
+
+
+def _query_tokens(query: str) -> list[str]:
+    return [match.group(0) for match in _TOKEN_PATTERN.finditer(query)]
+
+
+def _statement_count(query: str) -> int:
+    return len([statement for statement in query.split(";") if statement.strip()])
+
+
+def _primary_statement(query: str) -> str:
+    tokens = _query_tokens(query)
+    if not tokens:
+        return "unknown"
+    if tokens[0].upper() == "LET":
+        for token in tokens[1:]:
+            upper = token.upper()
+            if upper in _QUERY_STATEMENT_TOKENS:
+                return f"let_{upper.lower()}"
+        return "let"
+    return tokens[0].lower()
+
+
+def _query_tables(query: str) -> list[str]:
+    tokens = _query_tokens(query)
+    tables: set[str] = set()
+    for index, token in enumerate(tokens[:-1]):
+        if token.upper() not in _TABLE_CONTEXT_TOKENS:
+            continue
+        table = tokens[index + 1]
+        if table.upper() in _NON_TABLE_TOKENS:
+            continue
+        tables.add(table)
+    return sorted(tables)[:8]
+
+
+def _query_hash(query: str) -> str:
+    normalized = " ".join(query.split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+
+
+def log_query(
+    query: str,
+    *,
+    client_kind: str,
+    namespace: str,
+    database: str,
+    raw: bool,
+    elapsed: float,
+    retry_count: int = 0,
+    error: BaseException | None = None,
+) -> None:
+    fields: dict[str, Any] = {
+        "client": client_kind,
+        "namespace": namespace,
+        "database": database,
+        "raw": raw,
+        "elapsed_ms": elapsed,
+        "retry_count": retry_count,
+        "statement": _primary_statement(query),
+        "statement_count": _statement_count(query),
+        "tables": _query_tables(query),
+        "query_hash": _query_hash(query),
+    }
+    if error is not None:
+        log.warning("surreal_query_failed", error_type=type(error).__name__, **fields)
+        return
+    if elapsed >= _slow_query_threshold_ms():
+        log.warning("surreal_query_slow", **fields)
+        return
+    log.debug("surreal_query_complete", **fields)
+
+
+__all__ = ["elapsed_ms", "log_query", "query_start"]
