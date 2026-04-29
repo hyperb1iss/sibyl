@@ -667,6 +667,66 @@ class TestWorkflowEngine:
         assert result.metadata.get("archive_reason") == "No longer needed"
 
     @pytest.mark.asyncio
+    async def test_complete_task_ignores_project_progress_failures(
+        self,
+        mock_relationship_manager: MockRelationshipManager,
+        mock_graph_client: MockGraphClient,
+    ) -> None:
+        """complete_task should not fail after the task status write lands."""
+
+        class FailingProgressEntityManager(MockEntityManager):
+            async def list_by_type(self, *args: Any, **kwargs: Any) -> list[Entity]:
+                raise RuntimeError("stale project read")
+
+        task = make_task(status=TaskStatus.DOING, project_id="project_abc123")
+        entity_manager = FailingProgressEntityManager(entities={}, search_results=[])
+        entity_manager.entities[task.id] = make_entity(
+            entity_id=task.id,
+            name=task.title,
+            metadata={"status": TaskStatus.DOING, "project_id": "project_abc123"},
+        )
+        engine = TaskWorkflowEngine(
+            entity_manager=entity_manager,  # type: ignore[arg-type]
+            relationship_manager=mock_relationship_manager,  # type: ignore[arg-type]
+            graph_client=mock_graph_client,  # type: ignore[arg-type]
+            organization_id="org_test123",
+        )
+
+        result = await engine.complete_task(task.id, create_episode=False)
+
+        assert result.status == TaskStatus.DONE
+
+    @pytest.mark.asyncio
+    async def test_archive_task_ignores_project_progress_failures(
+        self,
+        mock_relationship_manager: MockRelationshipManager,
+        mock_graph_client: MockGraphClient,
+    ) -> None:
+        """archive_task should not fail after the task status write lands."""
+
+        class FailingProgressEntityManager(MockEntityManager):
+            async def list_by_type(self, *args: Any, **kwargs: Any) -> list[Entity]:
+                raise RuntimeError("stale project read")
+
+        task = make_task(status=TaskStatus.TODO, project_id="project_abc123")
+        entity_manager = FailingProgressEntityManager(entities={}, search_results=[])
+        entity_manager.entities[task.id] = make_entity(
+            entity_id=task.id,
+            name=task.title,
+            metadata={"status": TaskStatus.TODO, "project_id": "project_abc123"},
+        )
+        engine = TaskWorkflowEngine(
+            entity_manager=entity_manager,  # type: ignore[arg-type]
+            relationship_manager=mock_relationship_manager,  # type: ignore[arg-type]
+            graph_client=mock_graph_client,  # type: ignore[arg-type]
+            organization_id="org_test123",
+        )
+
+        result = await engine.archive_task(task.id)
+
+        assert result.status == TaskStatus.ARCHIVED
+
+    @pytest.mark.asyncio
     async def test_update_project_progress_uses_entity_manager_task_metadata(
         self,
         workflow_engine: TaskWorkflowEngine,

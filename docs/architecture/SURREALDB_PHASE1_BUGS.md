@@ -13,8 +13,6 @@ views of the graph and recently written entities start returning 404 or empty sc
 
 The rest of the tail is smaller than the first draft made it look:
 
-- One hardening fix should still happen even after the storage fix: `_update_project_progress`
-  should not be able to turn a successful archive into a 500.
 - A few remaining tools and UX paths still need cleanup.
 - `stats` and missing-entity delete handling are already fixed and should no longer be tracked as
   active blockers.
@@ -114,23 +112,7 @@ This is bigger than an env var flip, but it is still a contained Phase 1 change.
 
 These still matter, but they are not all the same class of blocker.
 
-### 1. `archive_task` can still report failure after a successful archive
-
-**Where:** `apps/api/src/sibyl/api/routes/tasks.py` →
-`packages/python/sibyl-core/src/sibyl_core/tasks/workflow.py` → `_update_project_progress`
-
-The root cause bug made this show up constantly, but the hardening gap is independent: rollup cache
-updates should not be able to turn the primary archive operation into a 500.
-
-What still needs to happen:
-
-1. make `_update_project_progress` best-effort
-2. log failures clearly
-3. preserve success for the underlying archive when the status write already committed
-
-This keeps future regressions from creating the same partial-success lie even after server mode.
-
-### 2. `get_by_uuid` misses are too expensive and too fuzzy
+### 1. `get_by_uuid` misses are too expensive and too fuzzy
 
 **Where:** `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/entity_node_ops.py`
 
@@ -148,7 +130,7 @@ Recommended follow-up:
 - short-circuit obvious non-document IDs like task, project, and epic IDs
 - keep the fallback chain for the cases where it is actually useful
 
-### 3. Bulk archive mode still lacks per-ID failure detail
+### 2. Bulk archive mode still lacks per-ID failure detail
 
 **Where:** CLI archive bulk mode with `--stdin`
 
@@ -199,6 +181,11 @@ skill examples now point agents at read-only SurrealQL.
 The current skill docs point agents at `sibyl logs tail` plus normal shell search instead of the
 nonexistent `sibyl logs search` command.
 
+### Project progress updates are best-effort
+
+`_update_project_progress` now has regression coverage proving that completion and archive flows
+still return the updated task when project rollup reads fail after the primary status write lands.
+
 ---
 
 ## Burn-down Outcome
@@ -229,10 +216,9 @@ The session was messy, but not wasted. The remaining work looks tractable.
 ## Recommended Next Steps
 
 1. Move local SurrealDB to server mode and wire `api` plus `worker` to it.
-2. Make `_update_project_progress` best-effort so cache updates cannot poison primary task writes.
-3. Tighten the `get_by_uuid` miss path so obvious misses do less work.
-4. Add per-ID output for bulk archive results.
-5. Re-run the burn-down after server mode and verify list, explore, graph, and archive behavior in
+2. Tighten the `get_by_uuid` miss path so obvious misses do less work.
+3. Add per-ID output for bulk archive results.
+4. Re-run the burn-down after server mode and verify list, explore, graph, and archive behavior in
    one pass.
 
 If we do that in order, Phase 1 stops looking like "death by a thousand bugs" and starts looking
