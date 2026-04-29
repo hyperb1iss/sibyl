@@ -3,42 +3,29 @@
 from __future__ import annotations
 
 from importlib import import_module
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import UUID
 
 from sibyl.config import settings
 from sibyl.persistence.auth_common import InvalidAuthClaimsError, UserNotFoundError
-
-if TYPE_CHECKING:
-    from sibyl.persistence.legacy.auth import (
-        AuthContextResolver,
-        OrganizationMembershipRepository,
-        OrganizationRepository,
-        SessionRepository,
-        UserRepository,
-    )
 
 _BACKEND_MODULES = {
     "postgres": "sibyl.persistence.legacy.auth_runtime",
     "surreal": "sibyl.persistence.surreal.auth_runtime",
 }
 
-_DYNAMIC_EXPORTS = {
+_DYNAMIC_EXPORTS = (
     "AuthContextResolver",
     "OrganizationMembershipRepository",
     "OrganizationRepository",
     "SessionRepository",
     "UserRepository",
-}
+)
 
-__all__ = [
-    "AuthContextResolver",
+__all__ = list(_DYNAMIC_EXPORTS)
+__all__ += [
     "InvalidAuthClaimsError",
-    "OrganizationMembershipRepository",
-    "OrganizationRepository",
-    "SessionRepository",
     "UserNotFoundError",
-    "UserRepository",
     "approve_device_authorization",
     "authenticate_api_key",
     "authenticate_local_user",
