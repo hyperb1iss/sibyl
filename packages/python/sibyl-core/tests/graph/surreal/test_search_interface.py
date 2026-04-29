@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from graphiti_core.edges import EntityEdge
+from graphiti_core.edges import EntityEdge, EpisodicEdge
 from graphiti_core.nodes import CommunityNode, EntityNode, EpisodeType, EpisodicNode
 from graphiti_core.search.search_filters import ComparisonOperator, DateFilter, SearchFilters
 
@@ -58,6 +58,16 @@ def _episode(uuid: str, group_id: str, *, content: str) -> EpisodicNode:
         created_at=now,
         valid_at=now,
         entity_edges=[],
+    )
+
+
+def _mention(uuid: str, group_id: str, source: str, target: str) -> EpisodicEdge:
+    return EpisodicEdge(
+        uuid=uuid,
+        group_id=group_id,
+        source_node_uuid=source,
+        target_node_uuid=target,
+        created_at=datetime.now(UTC),
     )
 
 
@@ -252,3 +262,109 @@ class TestSurrealSearchInterfaceIntegration:
         assert blank_fulltext == []
         assert blank_similarity == []
         assert wrong_group == []
+
+    @pytest.mark.asyncio
+    async def test_bfs_and_rerankers_use_native_surreal_queries(
+        self, surreal_schema: SurrealDriver
+    ) -> None:
+        gid = surreal_schema.group_id
+        interface = SurrealSearchInterface()
+        for node in (
+            _entity("bfs-origin", gid, name="Origin", summary="origin"),
+            _entity("bfs-mid", gid, name="Middle", summary="middle"),
+            _entity("bfs-target", gid, name="Target", summary="target"),
+            _entity("bfs-cross-group", "other-group", name="Cross", summary="cross"),
+        ):
+            await surreal_schema.entity_node_ops.save(surreal_schema, node)
+        for episode in (
+            _episode("bfs-episode-a", gid, content="mentions middle"),
+            _episode("bfs-episode-b", gid, content="mentions middle again"),
+            _episode("bfs-episode-c", gid, content="mentions target"),
+        ):
+            await surreal_schema.episode_node_ops.save(surreal_schema, episode)
+        for edge in (
+            _edge("bfs-edge-1", gid, "bfs-origin", "bfs-mid", fact="origin to middle"),
+            _edge("bfs-edge-2", gid, "bfs-mid", "bfs-target", fact="middle to target"),
+            _edge(
+                "bfs-cross-edge",
+                gid,
+                "bfs-origin",
+                "bfs-cross-group",
+                fact="cross group leak candidate",
+            ),
+        ):
+            await surreal_schema.entity_edge_ops.save(surreal_schema, edge)
+        for mention in (
+            _mention("mention-a", gid, "bfs-episode-a", "bfs-mid"),
+            _mention("mention-b", gid, "bfs-episode-b", "bfs-mid"),
+            _mention("mention-c", gid, "bfs-episode-c", "bfs-target"),
+            _mention("mention-cross", gid, "bfs-episode-a", "bfs-cross-group"),
+        ):
+            await surreal_schema.episodic_edge_ops.save(surreal_schema, mention)
+
+        nodes_from_entity = await interface.node_bfs_search(
+            surreal_schema,
+            ["bfs-origin"],
+            SearchFilters(node_labels=["Pattern"]),
+            2,
+            [gid],
+            5,
+        )
+        nodes_from_episode = await interface.node_bfs_search(
+            surreal_schema,
+            ["bfs-episode-a"],
+            SearchFilters(node_labels=["Pattern"]),
+            2,
+            [gid],
+            5,
+        )
+        edges_from_entity = await interface.edge_bfs_search(
+            surreal_schema,
+            ["bfs-origin"],
+            2,
+            SearchFilters(),
+            [gid],
+            5,
+        )
+        edges_from_episode = await interface.edge_bfs_search(
+            surreal_schema,
+            ["bfs-episode-a"],
+            2,
+            SearchFilters(),
+            [gid],
+            5,
+        )
+        distance_uuids, distance_scores = await interface.node_distance_reranker(
+            surreal_schema,
+            ["bfs-target", "bfs-mid", "bfs-origin"],
+            "bfs-origin",
+        )
+        mention_uuids, mention_scores = await interface.episode_mentions_reranker(
+            surreal_schema,
+            [["bfs-target", "bfs-mid"], ["bfs-mid"]],
+            1,
+        )
+        scoped_distance_uuids, scoped_distance_scores = await interface.node_distance_reranker(
+            surreal_schema,
+            ["bfs-mid", "bfs-cross-group"],
+            "bfs-origin",
+            1,
+        )
+        scoped_mention_uuids, scoped_mention_scores = await interface.episode_mentions_reranker(
+            surreal_schema,
+            [["bfs-mid", "bfs-cross-group"]],
+            1,
+        )
+
+        assert [node.uuid for node in nodes_from_entity] == ["bfs-mid", "bfs-target"]
+        assert [node.uuid for node in nodes_from_episode] == ["bfs-mid", "bfs-target"]
+        assert [edge.uuid for edge in edges_from_entity] == ["bfs-edge-1", "bfs-edge-2"]
+        assert [edge.uuid for edge in edges_from_episode] == ["bfs-edge-2"]
+        assert distance_uuids == ["bfs-origin", "bfs-mid", "bfs-target"]
+        assert distance_scores == [0.1, 1.0, 0.0]
+        assert mention_uuids == ["bfs-mid", "bfs-target"]
+        assert mention_scores == [2.0, 1.0]
+        assert scoped_distance_uuids == ["bfs-mid"]
+        assert scoped_distance_scores == [1.0]
+        assert scoped_mention_uuids == ["bfs-mid"]
+        assert scoped_mention_scores == [2.0]

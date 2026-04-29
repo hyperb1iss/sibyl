@@ -88,6 +88,32 @@ def _where_clause(clauses: list[str]) -> str:
     return " AND ".join(clauses) if clauses else "true"
 
 
+def _dedupe(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _rrf_uuids(results: list[list[str]], rank_const: int = 1) -> list[str]:
+    scores: dict[str, float] = {}
+    for result in results:
+        for index, uuid in enumerate(result):
+            scores[uuid] = scores.get(uuid, 0.0) + 1 / (index + rank_const)
+    return [
+        uuid
+        for uuid, _score in sorted(
+            scores.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+    ]
+
+
 def _temporal_filter_clause(
     search_filter: Any,
     field: str,
@@ -135,6 +161,81 @@ def _community_from_record(record: dict[str, Any]) -> CommunityNode:
 
 class SurrealSearchInterface(SearchInterface):
     """Native Graphiti search adapter for SurrealDB."""
+
+    async def _mentioned_entity_uuids(
+        self,
+        driver: Any,
+        episode_uuids: list[str],
+        group_ids: list[str] | None,
+    ) -> list[str]:
+        if not episode_uuids:
+            return []
+        group_clause = (
+            "AND group_id IN $group_ids AND out.group_id IN $group_ids" if group_ids else ""
+        )
+        records = normalize_records(
+            await driver.execute_query(
+                """
+                SELECT out.uuid AS uuid
+                FROM mentions
+                WHERE in.uuid IN $episode_uuids """
+                + group_clause
+                + ";",
+                episode_uuids=episode_uuids,
+                group_ids=group_ids,
+            )
+        )
+        return _dedupe([record["uuid"] for record in records if record.get("uuid")])
+
+    async def _relation_target_uuids(
+        self,
+        driver: Any,
+        source_uuids: list[str],
+        group_ids: list[str] | None,
+    ) -> list[str]:
+        if not source_uuids:
+            return []
+        group_clause = (
+            "AND group_id IN $group_ids AND out.group_id IN $group_ids" if group_ids else ""
+        )
+        records = normalize_records(
+            await driver.execute_query(
+                """
+                SELECT out.uuid AS uuid
+                FROM relates_to
+                WHERE in.uuid IN $source_uuids """
+                + group_clause
+                + ";",
+                source_uuids=source_uuids,
+                group_ids=group_ids,
+            )
+        )
+        return _dedupe([record["uuid"] for record in records if record.get("uuid")])
+
+    async def _hydrate_nodes(
+        self,
+        driver: Any,
+        uuids: list[str],
+        search_filter: Any,
+        group_ids: list[str] | None,
+        limit: int,
+    ) -> list[Any]:
+        if not uuids:
+            return []
+        filter_clauses, filter_params = _node_filter_clause(search_filter)
+        records = normalize_records(
+            await driver.execute_query(
+                "SELECT * FROM entity WHERE "
+                + _where_clause(["uuid IN $uuids", _group_filter_clause(group_ids), *filter_clauses])
+                + " LIMIT $limit;",
+                uuids=uuids,
+                group_ids=group_ids,
+                limit=max(int(limit), 1),
+                **filter_params,
+            )
+        )
+        nodes_by_uuid = {record["uuid"]: entity_node_from_record(record) for record in records}
+        return [nodes_by_uuid[uuid] for uuid in uuids if uuid in nodes_by_uuid]
 
     async def node_fulltext_search(
         self,
@@ -323,6 +424,131 @@ class SurrealSearchInterface(SearchInterface):
         )
         return [_episode_from_record(record) for record in records]
 
+    async def edge_bfs_search(
+        self,
+        driver: Any,
+        bfs_origin_node_uuids: list[str] | None,
+        bfs_max_depth: int,
+        search_filter: Any,
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[Any]:
+        if not bfs_origin_node_uuids or bfs_max_depth < 1:
+            return []
+
+        filter_clauses, filter_params = _edge_filter_clause(search_filter)
+        result_records: list[dict[str, Any]] = []
+        seen_edges: set[str] = set()
+        visited_entities = set(bfs_origin_node_uuids)
+        entity_frontier = _dedupe(list(bfs_origin_node_uuids))
+        episode_frontier = _dedupe(list(bfs_origin_node_uuids))
+
+        for depth in range(1, bfs_max_depth + 1):
+            next_entities: list[str] = []
+            if depth == 1:
+                next_entities.extend(
+                    await self._mentioned_entity_uuids(driver, episode_frontier, group_ids)
+                )
+
+            if entity_frontier:
+                traversal_targets = await self._relation_target_uuids(
+                    driver,
+                    entity_frontier,
+                    group_ids,
+                )
+                next_entities.extend(traversal_targets)
+
+                records = normalize_records(
+                    await driver.execute_query(
+                        _ENTITY_EDGE_SELECT
+                        + " WHERE "
+                        + _where_clause(
+                            [
+                                "in.uuid IN $source_uuids",
+                                *(
+                                    ["group_id IN $group_ids", "out.group_id IN $group_ids"]
+                                    if group_ids
+                                    else []
+                                ),
+                                *filter_clauses,
+                            ]
+                        )
+                        + " LIMIT $limit;",
+                        source_uuids=entity_frontier,
+                        group_ids=group_ids,
+                        limit=max(int(limit), 1),
+                        **filter_params,
+                    )
+                )
+                for record in records:
+                    uuid = record.get("uuid")
+                    if not uuid or uuid in seen_edges:
+                        continue
+                    seen_edges.add(uuid)
+                    result_records.append(record)
+                    if len(result_records) >= limit:
+                        return [entity_edge_from_record(r) for r in result_records]
+
+            entity_frontier = [
+                uuid for uuid in _dedupe(next_entities) if uuid not in visited_entities
+            ]
+            visited_entities.update(entity_frontier)
+            if not entity_frontier:
+                break
+
+        return [entity_edge_from_record(record) for record in result_records]
+
+    async def node_bfs_search(
+        self,
+        driver: Any,
+        bfs_origin_node_uuids: list[str] | None,
+        search_filter: Any,
+        bfs_max_depth: int,
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[Any]:
+        if not bfs_origin_node_uuids or bfs_max_depth < 1:
+            return []
+
+        discovered: list[str] = []
+        seen_discovered: set[str] = set()
+        visited_entities = set(bfs_origin_node_uuids)
+        entity_frontier = _dedupe(list(bfs_origin_node_uuids))
+        episode_frontier = _dedupe(list(bfs_origin_node_uuids))
+
+        for depth in range(1, bfs_max_depth + 1):
+            next_entities: list[str] = []
+            if depth == 1:
+                next_entities.extend(
+                    await self._mentioned_entity_uuids(driver, episode_frontier, group_ids)
+                )
+            next_entities.extend(
+                await self._relation_target_uuids(driver, entity_frontier, group_ids)
+            )
+
+            for uuid in _dedupe(next_entities):
+                if uuid in seen_discovered:
+                    continue
+                seen_discovered.add(uuid)
+                discovered.append(uuid)
+                if len(discovered) >= limit:
+                    return await self._hydrate_nodes(
+                        driver,
+                        discovered,
+                        search_filter,
+                        group_ids,
+                        limit,
+                    )
+
+            entity_frontier = [
+                uuid for uuid in _dedupe(next_entities) if uuid not in visited_entities
+            ]
+            visited_entities.update(entity_frontier)
+            if not entity_frontier:
+                break
+
+        return await self._hydrate_nodes(driver, discovered, search_filter, group_ids, limit)
+
     async def community_fulltext_search(
         self,
         driver: Any,
@@ -406,6 +632,81 @@ class SurrealSearchInterface(SearchInterface):
             for record in records
             if record.get("name_embedding") is not None
         }
+
+    async def node_distance_reranker(
+        self,
+        driver: Any,
+        node_uuids: list[str],
+        center_node_uuid: str,
+        min_score: float = 0,
+    ) -> tuple[list[str], list[float]]:
+        filtered_uuids = [uuid for uuid in node_uuids if uuid != center_node_uuid]
+        scores: dict[str, float] = {uuid: 0.0 for uuid in filtered_uuids}
+        if filtered_uuids:
+            records = normalize_records(
+                await driver.execute_query(
+                    """
+                    SELECT
+                        IF in.uuid = $center_uuid THEN out.uuid ELSE in.uuid END AS uuid
+                    FROM relates_to
+                    WHERE ((
+                        in.uuid = $center_uuid AND out.uuid IN $node_uuids
+                    ) OR (
+                        out.uuid = $center_uuid AND in.uuid IN $node_uuids
+                    ))
+                    AND group_id = in.group_id
+                    AND group_id = out.group_id;
+                    """,
+                    center_uuid=center_node_uuid,
+                    node_uuids=filtered_uuids,
+                )
+            )
+            for record in records:
+                uuid = record.get("uuid")
+                if uuid in scores:
+                    scores[uuid] = 1.0
+
+        ordered = sorted(filtered_uuids, key=lambda uuid: scores[uuid], reverse=True)
+        if center_node_uuid in node_uuids:
+            ordered = [center_node_uuid, *ordered]
+            scores[center_node_uuid] = 0.1
+
+        return [uuid for uuid in ordered if scores[uuid] >= min_score], [
+            scores[uuid] for uuid in ordered if scores[uuid] >= min_score
+        ]
+
+    async def episode_mentions_reranker(
+        self,
+        driver: Any,
+        node_uuids: list[list[str]],
+        min_score: float = 0,
+    ) -> tuple[list[str], list[float]]:
+        sorted_uuids = _rrf_uuids(node_uuids)
+        if not sorted_uuids:
+            return [], []
+
+        records = normalize_records(
+            await driver.execute_query(
+                """
+                SELECT out.uuid AS uuid
+                FROM mentions
+                WHERE out.uuid IN $node_uuids
+                  AND group_id = in.group_id
+                  AND group_id = out.group_id;
+                """,
+                node_uuids=sorted_uuids,
+            )
+        )
+        scores = {uuid: 0.0 for uuid in sorted_uuids}
+        for record in records:
+            uuid = record.get("uuid")
+            if uuid in scores:
+                scores[uuid] += 1.0
+
+        sorted_uuids.sort(key=lambda uuid: scores[uuid], reverse=True)
+        return [uuid for uuid in sorted_uuids if scores[uuid] >= min_score], [
+            scores[uuid] for uuid in sorted_uuids if scores[uuid] >= min_score
+        ]
 
 
 class FalkorDBSearchInterface(SearchInterface):
