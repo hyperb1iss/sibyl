@@ -37,6 +37,15 @@ _ENTITY_SAVE = build_node_upsert_query(
         "attributes",
         "group_id",
         "created_at",
+        "updated_at",
+        "project_id",
+        "epic_id",
+        "task_id",
+        "status",
+        "priority",
+        "complexity",
+        "feature",
+        "tags",
         "name_embedding",
     ),
 )
@@ -51,21 +60,52 @@ _ENTITY_SAVE_BULK = build_node_bulk_upsert_query(
         "attributes",
         "group_id",
         "created_at",
+        "updated_at",
+        "project_id",
+        "epic_id",
+        "task_id",
+        "status",
+        "priority",
+        "complexity",
+        "feature",
+        "tags",
         "name_embedding",
     ),
 )
 
 
+def _string_or_none(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    return str(value)
+
+
+def _string_list_or_none(value: Any) -> list[str] | None:
+    if not isinstance(value, list | tuple | set):
+        return None
+    return [str(item) for item in value if item is not None]
+
+
 def _entity_save_payload(node: EntityNode) -> dict[str, Any]:
+    attributes = dict(node.attributes or {})
     return {
         "uuid": node.uuid,
         "name": node.name,
         "entity_type": (node.labels[0] if node.labels else "Entity"),
         "summary": node.summary,
         "labels": list(set([*node.labels, "Entity"])),
-        "attributes": dict(node.attributes or {}),
+        "attributes": attributes,
         "group_id": node.group_id,
         "created_at": node.created_at,
+        "updated_at": _string_or_none(attributes.get("updated_at")),
+        "project_id": _string_or_none(attributes.get("project_id")),
+        "epic_id": _string_or_none(attributes.get("epic_id")),
+        "task_id": _string_or_none(attributes.get("task_id")),
+        "status": _string_or_none(attributes.get("status")),
+        "priority": _string_or_none(attributes.get("priority")),
+        "complexity": _string_or_none(attributes.get("complexity")),
+        "feature": _string_or_none(attributes.get("feature")),
+        "tags": _string_list_or_none(attributes.get("tags")),
         "name_embedding": node.name_embedding,
     }
 

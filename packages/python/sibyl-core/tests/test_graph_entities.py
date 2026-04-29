@@ -14,6 +14,7 @@ from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.tasks import (
     Epic,
     EpicStatus,
+    Note,
     Project,
     ProjectStatus,
     Task,
@@ -398,6 +399,46 @@ class TestEntityCreateDirect:
         saved_node = ops.save.await_args.args[1]
         assert saved_node.name_embedding == [0.1, 0.2, 0.3]
         mock_graph_client.client.embedder.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_direct_persists_surreal_filter_fields(
+        self,
+        surreal_entity_manager: EntityManager,
+        sample_task: Task,
+    ) -> None:
+        ops = surreal_entity_manager._driver.entity_node_ops
+        ops.save = AsyncMock()
+
+        await surreal_entity_manager.create_direct(sample_task, generate_embedding=False)
+
+        saved_node = ops.save.await_args.args[1]
+        assert saved_node.attributes["project_id"] == "project-001"
+        assert saved_node.attributes["status"] == "todo"
+        assert saved_node.attributes["priority"] == "high"
+        assert saved_node.attributes["feature"] == "authentication"
+        assert saved_node.attributes["tags"] == ["backend", "security"]
+
+    @pytest.mark.asyncio
+    async def test_create_direct_persists_note_task_id_for_surreal_filters(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        ops = surreal_entity_manager._driver.entity_node_ops
+        ops.save = AsyncMock()
+        note = Note(
+            id="note-001",
+            name="Progress note",
+            content="Captured the Surreal filter path.",
+            task_id="task-001",
+            author_name="Nova",
+        )
+
+        await surreal_entity_manager.create_direct(note, generate_embedding=False)
+
+        saved_node = ops.save.await_args.args[1]
+        assert saved_node.attributes["task_id"] == "task-001"
+        assert saved_node.attributes["author_type"] == "user"
+        assert saved_node.attributes["author_name"] == "Nova"
 
     @pytest.mark.asyncio
     async def test_create_direct_success(
@@ -998,9 +1039,54 @@ class TestEntityListByType:
         query = surreal_entity_manager._driver.execute_query.await_args.args[0]
         assert "FROM entity" in query
         assert "entity_type = $entity_type" in query
+        assert "project_id = $project_id" in query
+        assert "string::lowercase(status ?? '') IN $status_values" in query
         assert (
             surreal_entity_manager._driver.execute_query.await_args.kwargs["entity_type"] == "task"
         )
+        assert (
+            surreal_entity_manager._driver.execute_query.await_args.kwargs["project_id"]
+            == "project-001"
+        )
+        assert surreal_entity_manager._driver.execute_query.await_args.kwargs["status_values"] == [
+            "doing"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_list_by_type_falls_back_to_legacy_surreal_metadata_rows(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        surreal_entity_manager._driver.execute_query = AsyncMock(
+            side_effect=[
+                [],
+                [
+                    {
+                        "uuid": "task-legacy",
+                        "name": "Legacy Doing Task",
+                        "entity_type": "task",
+                        "group_id": "test-org-123",
+                        "description": "Doing",
+                        "metadata": json.dumps(
+                            {"status": "doing", "project_id": "project-001"}
+                        ),
+                        "created_at": datetime.now(UTC),
+                    }
+                ],
+            ]
+        )
+
+        results = await surreal_entity_manager.list_by_type(
+            EntityType.TASK,
+            project_id="project-001",
+            status="doing",
+        )
+
+        assert [entity.id for entity in results] == ["task-legacy"]
+        first_query = surreal_entity_manager._driver.execute_query.await_args_list[0].args[0]
+        second_query = surreal_entity_manager._driver.execute_query.await_args_list[1].args[0]
+        assert "project_id = $project_id" in first_query
+        assert "project_id = $project_id" not in second_query
 
     @pytest.mark.asyncio
     async def test_list_by_type_basic(
@@ -2492,44 +2578,77 @@ class TestGetNotesForTask:
     """Test retrieving notes for a task."""
 
     @pytest.mark.asyncio
-    async def test_get_notes_for_task_uses_surreal_node_scan(
+    async def test_get_notes_for_task_uses_surreal_task_id_query(
         self,
         surreal_entity_manager: EntityManager,
     ) -> None:
-        matching_note = EntityNode(
-            uuid="note-001",
-            name="First note",
-            group_id="test-org-123",
-            labels=["Entity", "note"],
-            created_at=datetime.now(UTC),
-            summary="",
-            attributes={
-                "entity_type": "note",
-                "content": "Note content",
-                "metadata": json.dumps({"task_id": "task-001"}),
-            },
+        surreal_entity_manager._driver.execute_query = AsyncMock(
+            return_value=[
+                {
+                    "uuid": "note-001",
+                    "name": "First note",
+                    "entity_type": "note",
+                    "group_id": "test-org-123",
+                    "content": "Note content",
+                    "task_id": "task-001",
+                    "metadata": json.dumps({"task_id": "task-001"}),
+                    "created_at": datetime.now(UTC),
+                }
+            ]
         )
-        other_note = EntityNode(
-            uuid="note-002",
-            name="Other note",
-            group_id="test-org-123",
-            labels=["Entity", "note"],
-            created_at=datetime.now(UTC),
-            summary="",
-            attributes={
-                "entity_type": "note",
-                "content": "Other content",
-                "metadata": json.dumps({"task_id": "task-999"}),
-            },
-        )
-
-        ops = surreal_entity_manager._driver.entity_node_ops
-        ops.get_by_group_ids = AsyncMock(return_value=[matching_note, other_note])
 
         results = await surreal_entity_manager.get_notes_for_task("task-001")
 
         assert len(results) == 1
         assert results[0].id == "note-001"
+        query = surreal_entity_manager._driver.execute_query.await_args.args[0]
+        assert "entity_type = $entity_type" in query
+        assert "task_id = $task_id" in query
+        assert surreal_entity_manager._driver.execute_query.await_args.kwargs["entity_type"] == (
+            "note"
+        )
+        assert surreal_entity_manager._driver.execute_query.await_args.kwargs["task_id"] == (
+            "task-001"
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_notes_for_task_falls_back_to_legacy_metadata_rows(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        surreal_entity_manager._driver.execute_query = AsyncMock(
+            side_effect=[
+                [],
+                [
+                    {
+                        "uuid": "note-legacy",
+                        "name": "Legacy note",
+                        "entity_type": "note",
+                        "group_id": "test-org-123",
+                        "content": "Legacy note content",
+                        "metadata": json.dumps({"task_id": "task-001"}),
+                        "created_at": datetime.now(UTC),
+                    },
+                    {
+                        "uuid": "note-other",
+                        "name": "Other note",
+                        "entity_type": "note",
+                        "group_id": "test-org-123",
+                        "content": "Other note content",
+                        "metadata": json.dumps({"task_id": "task-999"}),
+                        "created_at": datetime.now(UTC),
+                    },
+                ],
+            ]
+        )
+
+        results = await surreal_entity_manager.get_notes_for_task("task-001")
+
+        assert [entity.id for entity in results] == ["note-legacy"]
+        first_query = surreal_entity_manager._driver.execute_query.await_args_list[0].args[0]
+        second_query = surreal_entity_manager._driver.execute_query.await_args_list[1].args[0]
+        assert "task_id = $task_id" in first_query
+        assert "task_id = $task_id" not in second_query
 
     @pytest.mark.asyncio
     async def test_get_notes_for_task(
@@ -3049,7 +3168,7 @@ class TestGetProjectSummary:
                 "list_by_type",
                 new_callable=AsyncMock,
                 return_value=tasks,
-            ),
+            ) as list_by_type,
             patch.object(
                 surreal_entity_manager,
                 "list_epics_for_project",
@@ -3065,6 +3184,13 @@ class TestGetProjectSummary:
         assert result["status_counts"]["done"] == 1
         assert result["progress_pct"] == round(1 / 3 * 100, 1)
         assert result["epics"][0]["progress_pct"] == round(1 / 3 * 100, 1)
+        list_by_type.assert_awaited_once_with(
+            EntityType.TASK,
+            project_id="project-001",
+            limit=1000,
+            offset=0,
+            include_archived=True,
+        )
 
     @pytest.mark.asyncio
     async def test_get_project_summary(

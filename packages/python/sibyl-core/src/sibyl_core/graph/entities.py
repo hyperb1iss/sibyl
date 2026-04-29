@@ -211,14 +211,20 @@ class EntityManager:
         marker_key: str,
     ) -> dict[str, Any]:
         metadata = self._entity_to_metadata(entity)
+        attributes = self._collect_properties(entity)
+        attributes.update(
+            {
+                "description": entity.description or "",
+                "content": entity.content or "",
+                "source_file": entity.source_file or "",
+                "updated_at": datetime.now(UTC).isoformat(),
+                marker_key: True,
+                "metadata": json.dumps(metadata),
+            }
+        )
         return {
             "entity_type": entity.entity_type.value,
-            "description": entity.description or "",
-            "content": entity.content or "",
-            "source_file": entity.source_file or "",
-            "updated_at": datetime.now(UTC).isoformat(),
-            marker_key: True,
-            "metadata": json.dumps(metadata),
+            **attributes,
         }
 
     def _build_entity_node(
@@ -298,6 +304,15 @@ class EntityManager:
         entity_type: EntityType | None = None,
         limit: int,
         offset: int,
+        project_id: str | None = None,
+        epic_id: str | None = None,
+        no_epic: bool = False,
+        task_id: str | None = None,
+        status_values: list[str] | None = None,
+        priority_values: list[str] | None = None,
+        complexity_values: list[str] | None = None,
+        feature: str | None = None,
+        include_archived: bool = False,
     ) -> list[dict[str, Any]]:
         if limit <= 0:
             return []
@@ -313,17 +328,51 @@ class EntityManager:
             where_clauses.append("entity_type = $entity_type")
             params["entity_type"] = entity_type.value
 
+        if project_id is not None:
+            where_clauses.append("project_id = $project_id")
+            params["project_id"] = project_id
+        if epic_id is not None:
+            where_clauses.append("epic_id = $epic_id")
+            params["epic_id"] = epic_id
+        if no_epic:
+            where_clauses.append("(epic_id IS NONE OR epic_id = '')")
+        if task_id is not None:
+            where_clauses.append("task_id = $task_id")
+            params["task_id"] = task_id
+        if status_values:
+            where_clauses.append("string::lowercase(status ?? '') IN $status_values")
+            params["status_values"] = status_values
+        if priority_values:
+            where_clauses.append("string::lowercase(priority ?? '') IN $priority_values")
+            params["priority_values"] = priority_values
+        if complexity_values:
+            where_clauses.append("string::lowercase(complexity ?? '') IN $complexity_values")
+            params["complexity_values"] = complexity_values
+        if feature is not None:
+            where_clauses.append("feature = $feature")
+            params["feature"] = feature
+        if not include_archived:
+            where_clauses.append("string::lowercase(status ?? '') != 'archived'")
+
         query = f"""
             SELECT uuid,
                    name,
                    entity_type,
                    group_id,
                    summary,
+                   project_id,
+                   epic_id,
+                   task_id,
+                   status,
+                   priority,
+                   complexity,
+                   feature,
+                   tags,
                    attributes.metadata AS metadata,
                    attributes.description AS description,
                    attributes.content AS content,
                    attributes.source_file AS source_file,
-                   attributes.updated_at AS updated_at,
+                   updated_at ?? attributes.updated_at AS updated_at,
                    created_at
             FROM entity
             WHERE {" AND ".join(where_clauses)}
@@ -389,11 +438,19 @@ class EntityManager:
                    entity_type,
                    group_id,
                    summary,
+                   project_id,
+                   epic_id,
+                   task_id,
+                   status,
+                   priority,
+                   complexity,
+                   feature,
+                   tags,
                    attributes.metadata AS metadata,
                    attributes.description AS description,
                    attributes.content AS content,
                    attributes.source_file AS source_file,
-                   attributes.updated_at AS updated_at,
+                   updated_at ?? attributes.updated_at AS updated_at,
                    {score_expr}
                    created_at
             FROM entity
@@ -607,12 +664,31 @@ class EntityManager:
         entities: list[Entity] = []
         seen_entity_ids: set[str] = set()
         seen_pages: set[tuple[str | None, ...]] = set()
+        pushed_filter_to_surreal = any(
+            [
+                project_id is not None,
+                epic_id is not None,
+                no_epic,
+                bool(status_values),
+                bool(priority_values),
+                bool(complexity_values),
+                feature is not None,
+            ]
+        )
 
         while len(entities) < target_count:
             records = await self._surreal_select_entity_records(
                 entity_type=entity_type,
                 limit=page_size,
                 offset=query_offset,
+                project_id=project_id,
+                epic_id=epic_id,
+                no_epic=no_epic,
+                status_values=status_values,
+                priority_values=priority_values,
+                complexity_values=complexity_values,
+                feature=feature,
+                include_archived=include_archived,
             )
             if not records:
                 break
@@ -662,6 +738,68 @@ class EntityManager:
             query_offset += len(records)
             if len(records) < page_size:
                 break
+
+        if not entities and pushed_filter_to_surreal:
+            legacy_offset = 0
+            legacy_seen_pages: set[tuple[str | None, ...]] = set()
+
+            while len(entities) < target_count:
+                records = await self._surreal_select_entity_records(
+                    entity_type=entity_type,
+                    limit=page_size,
+                    offset=legacy_offset,
+                    include_archived=True,
+                )
+                if not records:
+                    break
+
+                page_signature = tuple(
+                    record_uuid if isinstance(record_uuid := record.get("uuid"), str) else None
+                    for record in records
+                )
+                if page_signature in legacy_seen_pages:
+                    log.warning(
+                        "Surreal legacy entity page repeated, stopping pagination",
+                        entity_type=entity_type,
+                        query_offset=legacy_offset,
+                        query_limit=page_size,
+                    )
+                    break
+                legacy_seen_pages.add(page_signature)
+
+                for record in records:
+                    try:
+                        entity = self._coerce_entity(self._record_to_entity(record))
+                    except Exception as exc:
+                        log.debug("Failed to hydrate Surreal entity record", error=str(exc))
+                        continue
+
+                    if entity.id in seen_entity_ids:
+                        continue
+                    if entity_type is not None and entity.entity_type != entity_type:
+                        continue
+                    if not self._entity_matches_filters(
+                        entity,
+                        project_id=project_id,
+                        epic_id=epic_id,
+                        no_epic=no_epic,
+                        status_values=status_values,
+                        priority_values=priority_values,
+                        complexity_values=complexity_values,
+                        feature=feature,
+                        tags=tags,
+                        include_archived=include_archived,
+                    ):
+                        continue
+
+                    seen_entity_ids.add(entity.id)
+                    entities.append(entity)
+                    if len(entities) >= target_count:
+                        break
+
+                legacy_offset += len(records)
+                if len(records) < page_size:
+                    break
 
         if requires_python_rechecks:
             return entities[offset : offset + limit]
@@ -2271,12 +2409,24 @@ class EntityManager:
 
         try:
             if self._surreal_entity_node_ops() is not None:
-                tasks = await self.list_by_type(
-                    EntityType.TASK,
-                    project_id=project_id,
-                    limit=10_000,
-                    include_archived=True,
-                )
+                tasks: list[Entity] = []
+                task_offset = 0
+                task_page_size = 1000
+                while True:
+                    task_page = await self.list_by_type(
+                        EntityType.TASK,
+                        project_id=project_id,
+                        limit=task_page_size,
+                        offset=task_offset,
+                        include_archived=True,
+                    )
+                    if not task_page:
+                        break
+                    tasks.extend(task_page)
+                    if len(task_page) < task_page_size:
+                        break
+                    task_offset += len(task_page)
+
                 status_counts: dict[str, int] = {}
                 doing_tasks: list[dict[str, Any]] = []
                 blocked_tasks: list[dict[str, Any]] = []
@@ -2634,12 +2784,55 @@ class EntityManager:
 
         try:
             if self._surreal_entity_node_ops() is not None:
-                notes = [
-                    entity
-                    for entity in await self._surreal_entities_for_group(include_archived=True)
-                    if entity.entity_type == EntityType.NOTE
-                    and (entity.metadata or {}).get("task_id") == task_id
-                ]
+                records = await self._surreal_select_entity_records(
+                    entity_type=EntityType.NOTE,
+                    task_id=task_id,
+                    limit=limit,
+                    offset=0,
+                    include_archived=True,
+                )
+                notes: list[Entity] = []
+                for record in records:
+                    try:
+                        notes.append(self._coerce_entity(self._record_to_entity(record)))
+                    except Exception as e:
+                        log.debug("Failed to convert note record", error=str(e))
+
+                legacy_offset = 0
+                page_size = max(limit, 100)
+                seen_note_ids = {note.id for note in notes}
+                if notes:
+                    return notes[:limit]
+
+                while len(notes) < limit:
+                    legacy_records = await self._surreal_select_entity_records(
+                        entity_type=EntityType.NOTE,
+                        limit=page_size,
+                        offset=legacy_offset,
+                        include_archived=True,
+                    )
+                    if not legacy_records:
+                        break
+
+                    for record in legacy_records:
+                        try:
+                            note = self._coerce_entity(self._record_to_entity(record))
+                        except Exception as e:
+                            log.debug("Failed to convert note record", error=str(e))
+                            continue
+                        if note.id in seen_note_ids:
+                            continue
+                        if (note.metadata or {}).get("task_id") != task_id:
+                            continue
+                        seen_note_ids.add(note.id)
+                        notes.append(note)
+                        if len(notes) >= limit:
+                            break
+
+                    legacy_offset += len(legacy_records)
+                    if len(legacy_records) < page_size:
+                        break
+
                 return notes[:limit]
 
             # Use BELONGS_TO relationship to find notes
@@ -2702,6 +2895,22 @@ class EntityManager:
                 metadata = json.loads(metadata)
             except (json.JSONDecodeError, TypeError):
                 metadata = {}
+        elif not isinstance(metadata, dict):
+            metadata = {}
+
+        for field in (
+            "project_id",
+            "epic_id",
+            "task_id",
+            "status",
+            "priority",
+            "complexity",
+            "feature",
+            "tags",
+        ):
+            value = node_data.get(field)
+            if value is not None and field not in metadata:
+                metadata[field] = value
 
         # Get entity type
         entity_type_str = node_data.get("entity_type", "episode")
@@ -2873,6 +3082,13 @@ class EntityManager:
             "automation_level",
         )
         add_fields(procedure_fields)
+
+        note_fields = (
+            "task_id",
+            "author_type",
+            "author_name",
+        )
+        add_fields(note_fields)
 
         return props
 
