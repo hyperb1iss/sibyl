@@ -53,9 +53,28 @@ async def test_stats_uses_graph_stats_payload() -> None:
 
 
 @pytest.mark.asyncio
-async def test_debug_query_uses_debug_runner() -> None:
+async def test_debug_query_uses_debug_runner_for_surrealql() -> None:
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-    request = DebugQueryRequest(cypher="MATCH (n) RETURN n LIMIT 1", params={"limit": 1})
+    request = DebugQueryRequest(cypher="SELECT * FROM entity LIMIT $limit", params={"limit": 1})
+    mock_execute = AsyncMock(return_value=[{"name": "node"}])
+
+    with patch("sibyl.api.routes.admin.execute_debug_query", mock_execute):
+        response = await debug_query(request=request, org=org)
+
+    assert response.rows == [{"name": "node"}]
+    assert response.row_count == 1
+    mock_execute.assert_awaited_once_with(
+        "SELECT * FROM entity LIMIT $limit",
+        group_id=str(org.id),
+        limit=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_debug_query_allows_legacy_cypher_in_legacy_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sibyl.api.routes.admin.settings.store", "legacy")
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    request = DebugQueryRequest(cypher="MATCH (n) RETURN n LIMIT 1")
     mock_execute = AsyncMock(return_value=[{"value": ("node",)}])
 
     with patch("sibyl.api.routes.admin.execute_debug_query", mock_execute):
@@ -66,8 +85,33 @@ async def test_debug_query_uses_debug_runner() -> None:
     mock_execute.assert_awaited_once_with(
         "MATCH (n) RETURN n LIMIT 1",
         group_id=str(org.id),
-        limit=1,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query",
+    [
+        "MATCH (n) RETURN n LIMIT 1",
+        "OPTIONAL MATCH (n) RETURN n LIMIT 1",
+        "WITH 1 AS x MATCH (n) RETURN n LIMIT 1",
+        "// read only\nMATCH (n) RETURN n LIMIT 1",
+        "CALL db.labels()",
+    ],
+)
+async def test_debug_query_blocks_cypher_in_surreal_runtime(query: str) -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    request = DebugQueryRequest(cypher=query)
+
+    with (
+        patch("sibyl.api.routes.admin.execute_debug_query", AsyncMock()) as mock_execute,
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await debug_query(request=request, org=org)
+
+    assert exc_info.value.status_code == 400
+    assert "Surreal runtime" in str(exc_info.value.detail)
+    mock_execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -87,10 +131,27 @@ async def test_debug_query_allows_read_only_names_containing_mutation_words() ->
 
 
 @pytest.mark.asyncio
+async def test_debug_query_allows_keywords_inside_string_literals() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    request = DebugQueryRequest(cypher="SELECT * FROM entity WHERE name = 'MATCH UPDATE'")
+    mock_execute = AsyncMock(return_value=[])
+
+    with patch("sibyl.api.routes.admin.execute_debug_query", mock_execute):
+        response = await debug_query(request=request, org=org)
+
+    assert response.row_count == 0
+    mock_execute.assert_awaited_once_with(
+        "SELECT * FROM entity WHERE name = 'MATCH UPDATE'",
+        group_id=str(org.id),
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "query",
     [
         "UPDATE entity SET name = 'oops'",
+        "SELECT * FROM entity WHERE url = 'https://example.test'; UPDATE entity SET name = 'oops'",
         "DEFINE TABLE temp SCHEMALESS",
         "RELATE entity:one->relates_to->entity:two",
     ],

@@ -400,7 +400,7 @@ sibyl context create staging --server https://staging.example.com --use
 
 ```bash
 sibyl debug schema                                           # Entity types and counts
-sibyl debug query "MATCH (n:Entity) RETURN n.name LIMIT 5"  # Read-only Cypher
+sibyl debug query "SELECT name FROM entity LIMIT 5"         # Read-only SurrealQL
 sibyl debug status                                           # System status
 ```
 

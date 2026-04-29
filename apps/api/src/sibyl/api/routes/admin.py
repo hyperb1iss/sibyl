@@ -20,6 +20,7 @@ from sibyl.api.schemas import (
     StatsResponse,
 )
 from sibyl.auth.dependencies import get_current_organization, require_org_role
+from sibyl.config import settings
 from sibyl.coordination import get_coordination_health
 from sibyl.db.models import CrawlStatus, Organization, OrganizationRole
 from sibyl.persistence.content_runtime import (
@@ -32,6 +33,7 @@ from sibyl.persistence.graph_runtime import (
     execute_debug_query,
     get_graph_stats_payload,
 )
+from sibyl_core.utils import fingerprint_text
 
 log = structlog.get_logger()
 
@@ -252,7 +254,14 @@ async def backfill_task_relationships(
 _OWNER_ONLY = (OrganizationRole.OWNER,)
 
 
-def _is_read_only(cypher: str) -> bool:
+def _query_tokens(query: str) -> set[str]:
+    query = re.sub(r"""(?s)('([^'\\]|\\.)*'|"([^"\\]|\\.)*"|`([^`\\]|\\.)*`)""", " ", query)
+    query = re.sub(r"(?s)/\*.*?\*/", " ", query)
+    query = re.sub(r"(?m)(--|//).*?$", " ", query)
+    return {token.upper() for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", query)}
+
+
+def _is_read_only(query: str) -> bool:
     """Check if a graph query is read-only."""
     dangerous = [
         "ALTER",
@@ -269,8 +278,13 @@ def _is_read_only(cypher: str) -> bool:
         "UPSERT",
         "UPDATE",
     ]
-    tokens = {token.upper() for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", cypher)}
-    return not any(keyword in tokens for keyword in dangerous)
+    return _query_tokens(query).isdisjoint(dangerous)
+
+
+def _is_supported_debug_dialect(query: str) -> bool:
+    if settings.store != "surreal":
+        return True
+    return _query_tokens(query).isdisjoint({"CALL", "MATCH", "UNWIND"})
 
 
 @router.post(
@@ -289,11 +303,15 @@ async def debug_query(
 
     Requires organization OWNER role.
     """
-    # Validate read-only
     if not _is_read_only(request.cypher):
         raise HTTPException(
             status_code=400,
             detail="Only read-only queries allowed",
+        )
+    if not _is_supported_debug_dialect(request.cypher):
+        raise HTTPException(
+            status_code=400,
+            detail="Surreal runtime debug queries must use read-only SurrealQL",
         )
 
     try:
@@ -309,7 +327,11 @@ async def debug_query(
         )
 
     except Exception as e:
-        log.exception("debug_query_failed", error=str(e), cypher=request.cypher[:100])
+        log.exception(
+            "debug_query_failed",
+            error_type=type(e).__name__,
+            query_hash=fingerprint_text(request.cypher),
+        )
         return DebugQueryResponse(
             error=str(e),
             rows=[],

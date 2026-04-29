@@ -148,29 +148,7 @@ Recommended follow-up:
 - short-circuit obvious non-document IDs like task, project, and epic IDs
 - keep the fallback chain for the cases where it is actually useful
 
-### 3. `sibyl debug schema` and `sibyl debug query` still send raw Cypher
-
-**Where:** `packages/python/sibyl-core/src/sibyl_core/graph/client.py` and the Surreal driver path
-
-These debug paths are still forwarding `MATCH ...` queries that SurrealDB rejects at parse time.
-This is now the main remaining raw-Cypher island.
-
-Recommended follow-up:
-
-- port schema/debug helpers to SurrealQL
-- or route them through the graph manager seams instead of raw query passthrough
-
-### 4. Sibyl skill docs still mention `sibyl logs search`
-
-The skill docs reference a command that does not exist. The actual supported commands are
-`sibyl logs tail` and `sibyl logs stats`.
-
-Recommended follow-up:
-
-- remove the bad doc reference
-- or add a real `logs search` command if we want that affordance
-
-### 5. Bulk archive mode still lacks per-ID failure detail
+### 3. Bulk archive mode still lacks per-ID failure detail
 
 **Where:** CLI archive bulk mode with `--stdin`
 
@@ -210,6 +188,17 @@ the active Surreal Phase 1 blocker pile:
 
 Those were important quality fixes, but they are web-layer follow-ups, not Surreal driver blockers.
 
+### Surreal debug queries and Sibyl skill examples now use SurrealQL
+
+The admin debug endpoint now rejects legacy Cypher entrypoints like `MATCH` in Surreal mode before
+they hit the database, while keeping read-only Cypher available for the legacy runtime. The CLI and
+skill examples now point agents at read-only SurrealQL.
+
+### Sibyl skill docs no longer mention `sibyl logs search`
+
+The current skill docs point agents at `sibyl logs tail` plus normal shell search instead of the
+nonexistent `sibyl logs search` command.
+
 ---
 
 ## Burn-down Outcome
@@ -241,11 +230,9 @@ The session was messy, but not wasted. The remaining work looks tractable.
 
 1. Move local SurrealDB to server mode and wire `api` plus `worker` to it.
 2. Make `_update_project_progress` best-effort so cache updates cannot poison primary task writes.
-3. Port the remaining raw-Cypher debug helpers to SurrealQL.
-4. Tighten the `get_by_uuid` miss path so obvious misses do less work.
-5. Fix Sibyl doc drift around `sibyl logs search`.
-6. Add per-ID output for bulk archive results.
-7. Re-run the burn-down after server mode and verify list, explore, graph, and archive behavior in
+3. Tighten the `get_by_uuid` miss path so obvious misses do less work.
+4. Add per-ID output for bulk archive results.
+5. Re-run the burn-down after server mode and verify list, explore, graph, and archive behavior in
    one pass.
 
 If we do that in order, Phase 1 stops looking like "death by a thousand bugs" and starts looking
