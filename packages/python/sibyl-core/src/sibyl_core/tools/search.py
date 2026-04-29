@@ -9,6 +9,7 @@ import structlog
 
 from sibyl_core.models.entities import EntityType
 from sibyl_core.retrieval import HybridConfig, hybrid_search, temporal_boost
+from sibyl_core.retrieval.fusion import rrf_merge
 from sibyl_core.services import document_search as document_search_service
 from sibyl_core.services import get_graph_runtime as _service_get_graph_runtime
 from sibyl_core.tools.helpers import (
@@ -114,6 +115,26 @@ def _merge_document_results(
         lexical_results=lexical_results,
         limit=limit,
     )
+
+
+def _rank_fuse_search_results(
+    graph_results: Sequence[SearchResult],
+    doc_results: Sequence[SearchResult],
+) -> list[SearchResult]:
+    if not graph_results or not doc_results:
+        return sorted([*graph_results, *doc_results], key=lambda r: r.score, reverse=True)
+
+    ranked_sources = [
+        [
+            (result, result.score)
+            for result in sorted(doc_results, key=lambda r: r.score, reverse=True)
+        ],
+        [
+            (result, result.score)
+            for result in sorted(graph_results, key=lambda r: r.score, reverse=True)
+        ],
+    ]
+    return [result for result, _score in rrf_merge(ranked_sources, dedup_key=lambda r: r.id)]
 
 
 async def _search_documents(
@@ -540,10 +561,18 @@ async def search(
         if result.id not in seen_ids or result.score > seen_ids[result.id].score:
             seen_ids[result.id] = result
 
-    all_results = list(seen_ids.values())
+    deduped_graph_results = [
+        result
+        for result in graph_results
+        if seen_ids.get(result.id) is result
+    ]
+    deduped_doc_results = [
+        result
+        for result in doc_results
+        if seen_ids.get(result.id) is result
+    ]
 
-    # Sort by score descending
-    all_results.sort(key=lambda r: r.score, reverse=True)
+    all_results = _rank_fuse_search_results(deduped_graph_results, deduped_doc_results)
 
     # Apply pagination
     total_count = len(all_results)

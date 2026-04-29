@@ -1228,6 +1228,73 @@ class TestSearchTool:
         assert events.index("document_start") < events.index("graph_done")
 
     @pytest.mark.asyncio
+    async def test_search_fuses_graph_and_document_results_by_source_rank(self) -> None:
+        from sibyl_core.retrieval.hybrid import HybridResult
+        from sibyl_core.tools.search import search
+
+        task = MockEntity(
+            id="task_graph",
+            entity_type=EntityType.TASK,
+            name="Graph task",
+            description="Graph result with a low backend score.",
+            content="Graph result with a low backend score.",
+        )
+        pattern = MockEntity(
+            id="pattern_graph",
+            entity_type=EntityType.PATTERN,
+            name="Graph pattern",
+            description="Second graph result.",
+            content="Second graph result.",
+        )
+        doc_results = [
+            SearchResult(
+                id=f"doc_{index}",
+                type="document",
+                name=f"Doc {index}",
+                content="Documentation result with a higher backend score.",
+                score=0.3 - (index * 0.001),
+                result_origin="document",
+            )
+            for index in range(5)
+        ]
+
+        mock_entity_manager = AsyncMock()
+        mock_entity_manager.search_exact_name = AsyncMock(return_value=[])
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=mock_entity_manager)),
+            ),
+            patch("sibyl_core.tools.search._search_documents", AsyncMock(return_value=doc_results)),
+            patch(
+                "sibyl_core.tools.search.hybrid_search",
+                AsyncMock(
+                    return_value=HybridResult(
+                        results=[(task, 0.02), (pattern, 0.01)],
+                        metadata={"entity_manager_search_completed": True},
+                    )
+                ),
+            ),
+        ):
+            response = await search(
+                query="graph",
+                organization_id="org_123",
+                include_documents=True,
+                limit=5,
+            )
+
+        assert response.graph_count == 2
+        assert response.document_count == 3
+        assert [result.result_origin for result in response.results] == [
+            "document",
+            "graph",
+            "document",
+            "graph",
+            "document",
+        ]
+
+    @pytest.mark.asyncio
     async def test_search_uses_exact_title_lookup_when_fallback_search_errors(self) -> None:
         """Exact title lookup should survive fallback graph search failures."""
         from sibyl_core.retrieval.hybrid import HybridResult
