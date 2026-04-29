@@ -116,28 +116,122 @@ async def _list_graph_entities_for_filters(
     limit: int,
     offset: int,
     project: str | None,
+    language: str | None,
+    category: str | None,
     status: str | None,
+    source: str | None,
+    assignee: str | None,
+    since_date: datetime | None,
+    accessible_projects: set[str] | None,
 ) -> list[tuple[Any, float]]:
-    list_limit = max(limit + offset, limit)
-    if entity_types:
-        results: list[tuple[Any, float]] = []
-        remaining = list_limit
-        for entity_type in entity_types:
-            if remaining <= 0:
-                break
-            entities = await entity_manager.list_by_type(
-                entity_type,
-                limit=remaining,
-                offset=0,
-                project_id=project,
-                status=status,
-            )
-            results.extend((entity, 1.0) for entity in entities)
-            remaining = list_limit - len(results)
-        return results
+    target_count = max(limit + offset, limit)
+    page_size = min(max(target_count, 1), 500)
+    matched: list[tuple[Any, float]] = []
 
-    entities = await entity_manager.list_all(limit=list_limit, offset=0)
-    return [(entity, 1.0) for entity in entities]
+    def accepts(entity: Any) -> bool:
+        return _matches_graph_filters(
+            entity,
+            language=language,
+            category=category,
+            status=status,
+            project=project,
+            source=source,
+            assignee=assignee,
+            since_date=since_date,
+            accessible_projects=accessible_projects,
+        )
+
+    if entity_types:
+        for entity_type in entity_types:
+            page_offset = 0
+            while len(matched) < target_count:
+                entities = await entity_manager.list_by_type(
+                    entity_type,
+                    limit=page_size,
+                    offset=page_offset,
+                    project_id=project,
+                    status=status,
+                )
+                if not entities:
+                    break
+                matched.extend((entity, 1.0) for entity in entities if accepts(entity))
+                if len(entities) < page_size:
+                    break
+                page_offset += len(entities)
+        return matched
+
+    page_offset = 0
+    while len(matched) < target_count:
+        entities = await entity_manager.list_all(limit=page_size, offset=page_offset)
+        if not entities:
+            break
+        matched.extend((entity, 1.0) for entity in entities if accepts(entity))
+        if len(entities) < page_size:
+            break
+        page_offset += len(entities)
+    return matched
+
+
+def _matches_graph_filters(
+    entity: Any,
+    *,
+    language: str | None,
+    category: str | None,
+    status: str | None,
+    project: str | None,
+    source: str | None,
+    assignee: str | None,
+    since_date: datetime | None,
+    accessible_projects: set[str] | None,
+) -> bool:
+    if language:
+        entity_langs = _get_field(entity, "languages", [])
+        if language.lower() not in [lang.lower() for lang in entity_langs]:
+            return False
+
+    if category:
+        entity_cat = _get_field(entity, "category", "")
+        if category.lower() not in entity_cat.lower():
+            return False
+
+    if status:
+        entity_status = _get_field(entity, "status")
+        if entity_status is None:
+            return False
+        status_val = str(_serialize_enum(entity_status)).lower()
+        status_list = [s.strip().lower() for s in status.split(",")]
+        if status_val not in status_list:
+            return False
+
+    entity_project = _get_field(entity, "project_id")
+    if project and entity_project is not None and entity_project != project:
+        return False
+
+    if accessible_projects is not None:
+        entity_project = _get_field(entity, "project_id")
+        if entity_project is not None and entity_project not in accessible_projects:
+            return False
+
+    if source and _get_field(entity, "source_id") != source:
+        return False
+
+    if assignee:
+        entity_assignees = _get_field(entity, "assignees", [])
+        if assignee.lower() not in [a.lower() for a in entity_assignees]:
+            return False
+
+    if since_date:
+        entity_created = _get_field(entity, "created_at")
+        if entity_created:
+            try:
+                if isinstance(entity_created, str):
+                    entity_created = datetime.fromisoformat(entity_created)
+                if entity_created < since_date:
+                    return False
+            except (ValueError, TypeError):
+                pass
+
+    return True
 
 
 def _document_language_predicates(
@@ -508,7 +602,13 @@ async def search(
                     limit=limit,
                     offset=offset,
                     project=project,
+                    language=language,
+                    category=category,
                     status=status,
+                    source=source,
+                    assignee=assignee,
+                    since_date=since_date,
+                    accessible_projects=accessible_projects,
                 )
 
             if requested_graph_types:
@@ -544,56 +644,18 @@ async def search(
 
             # Filter and convert to SearchResult
             for entity, score in raw_results:
-                # Apply filters
-                if language:
-                    entity_langs = _get_field(entity, "languages", [])
-                    if language.lower() not in [lang.lower() for lang in entity_langs]:
-                        continue
-
-                if category:
-                    entity_cat = _get_field(entity, "category", "")
-                    if category.lower() not in entity_cat.lower():
-                        continue
-
-                if status:
-                    entity_status = _get_field(entity, "status")
-                    if entity_status is None:
-                        continue
-                    status_val = str(_serialize_enum(entity_status)).lower()
-                    status_list = [s.strip().lower() for s in status.split(",")]
-                    if status_val not in status_list:
-                        continue
-
-                # Filter by specific project - but always include general knowledge (no project)
-                entity_project = _get_field(entity, "project_id")
-                if project and entity_project is not None and entity_project != project:
+                if not _matches_graph_filters(
+                    entity,
+                    language=language,
+                    category=category,
+                    status=status,
+                    project=project,
+                    source=source,
+                    assignee=assignee,
+                    since_date=since_date,
+                    accessible_projects=accessible_projects,
+                ):
                     continue
-
-                # Filter by accessible projects (RBAC)
-                # Include entities that: have no project_id OR project_id is in accessible set
-                if accessible_projects is not None:
-                    entity_project = _get_field(entity, "project_id")
-                    if entity_project is not None and entity_project not in accessible_projects:
-                        continue
-
-                if source and _get_field(entity, "source_id") != source:
-                    continue
-
-                if assignee:
-                    entity_assignees = _get_field(entity, "assignees", [])
-                    if assignee.lower() not in [a.lower() for a in entity_assignees]:
-                        continue
-
-                if since_date:
-                    entity_created = _get_field(entity, "created_at")
-                    if entity_created:
-                        try:
-                            if isinstance(entity_created, str):
-                                entity_created = datetime.fromisoformat(entity_created)
-                            if entity_created < since_date:
-                                continue
-                        except (ValueError, TypeError):
-                            pass
 
                 content = ""
                 if include_content:

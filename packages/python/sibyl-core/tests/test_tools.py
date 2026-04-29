@@ -987,6 +987,62 @@ class TestSearchTool:
         )
 
     @pytest.mark.asyncio
+    async def test_search_empty_query_with_sparse_filters_pages_until_match(self) -> None:
+        """Empty filtered graph search does not drop later matches after a short first page."""
+        from sibyl_core.tools.search import search
+
+        javascript_pattern = MockEntity(
+            id="pattern_js",
+            entity_type=EntityType.PATTERN,
+            name="JavaScript pattern",
+            languages=["javascript"],
+        )
+        python_pattern = MockEntity(
+            id="pattern_python",
+            entity_type=EntityType.PATTERN,
+            name="Python pattern",
+            languages=["python"],
+        )
+
+        async def list_by_type(
+            entity_type: EntityType,
+            *,
+            limit: int,
+            offset: int,
+            project_id: str | None,
+            status: str | None,
+        ) -> list[MockEntity]:
+            assert entity_type is EntityType.PATTERN
+            assert limit == 1
+            assert project_id is None
+            assert status is None
+            if offset == 0:
+                return [javascript_pattern]
+            if offset == 1:
+                return [python_pattern]
+            return []
+
+        mock_entity_manager = AsyncMock()
+        mock_entity_manager.list_by_type = AsyncMock(side_effect=list_by_type)
+
+        with patch(
+            "sibyl_core.tools.search.get_graph_runtime",
+            AsyncMock(return_value=make_graph_runtime(entity_manager=mock_entity_manager)),
+        ):
+            response = await search(
+                query="",
+                types=["pattern"],
+                language="python",
+                organization_id="org_123",
+                include_documents=False,
+                limit=1,
+            )
+
+        assert response.graph_count == 1
+        assert response.results[0].id == "pattern_python"
+        assert mock_entity_manager.list_by_type.await_count == 2
+
+    @pytest.mark.asyncio
     async def test_search_returns_response_structure(self) -> None:
         """Search returns properly structured SearchResponse."""
         from sibyl_core.tools.search import search
