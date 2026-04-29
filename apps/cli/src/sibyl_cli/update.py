@@ -41,7 +41,7 @@ DOCKER_HUB_API = "https://hub.docker.com/v2/repositories"
 
 # Images we manage
 SIBYL_IMAGES = [
-    "falkordb/falkordb",
+    "surrealdb/surrealdb",
     # Add sibyl images when published to Docker Hub
     # "hyperbliss/sibyld",
     # "hyperbliss/sibyl-web",

@@ -154,6 +154,13 @@ class TestVersionChecking:
 class TestContainerUpdates:
     """Tests for container update checking."""
 
+    def test_managed_container_images_match_surreal_runtime(self) -> None:
+        """The updater tracks the default local runtime image."""
+        from sibyl_cli.update import SIBYL_IMAGES
+
+        assert "surrealdb/surrealdb" in SIBYL_IMAGES
+        assert "falkordb/falkordb" not in SIBYL_IMAGES
+
     def test_check_container_updates_no_compose_file(self, tmp_path: Path) -> None:
         """Returns zeros when no compose file exists."""
         from sibyl_cli.update import check_container_updates
@@ -170,10 +177,10 @@ class TestContainerUpdates:
 
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "falkordb/falkordb@sha256:abc123\n"
+        mock_result.stdout = "surrealdb/surrealdb@sha256:abc123\n"
 
         with patch("sibyl_cli.update.subprocess.run", return_value=mock_result):
-            digest = get_local_image_digest("falkordb/falkordb")
+            digest = get_local_image_digest("surrealdb/surrealdb")
             assert digest == "sha256:abc123"
 
     def test_get_local_image_digest_handles_missing_image(self) -> None:
