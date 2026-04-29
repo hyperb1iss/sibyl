@@ -548,7 +548,12 @@ class GraphClient:
         return self.normalize_result(result)
 
     async def execute_read_org(
-        self, query: str, organization_id: str, **params: object
+        self,
+        query: str,
+        organization_id: str,
+        *,
+        allow_surreal: bool = False,
+        **params: object,
     ) -> list[dict]:
         """Execute a read query on an organization's graph.
 
@@ -562,12 +567,19 @@ class GraphClient:
         Returns:
             List of result records as dicts
         """
+        if not allow_surreal:
+            self._assert_default_query_allowed("execute_read_org")
         driver = self.get_org_driver(organization_id)
         result = await driver.execute_query(query, **params)
         return self.normalize_result(result)
 
     async def execute_write_org(
-        self, query: str, organization_id: str, **params: object
+        self,
+        query: str,
+        organization_id: str,
+        *,
+        allow_surreal: bool = False,
+        **params: object,
     ) -> list[dict]:
         """Execute a write query on an organization's graph.
 
@@ -584,6 +596,8 @@ class GraphClient:
         Raises:
             Exception: If query execution fails
         """
+        if not allow_surreal:
+            self._assert_default_query_allowed("execute_write_org")
         driver = self.get_org_driver(organization_id)
         result = await driver.execute_query(query, **params)
         return self.normalize_result(result)

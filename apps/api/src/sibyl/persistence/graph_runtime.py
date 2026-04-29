@@ -1007,6 +1007,7 @@ class GraphQueryAdapter:
         return await self._client.execute_read_org(
             query,
             self._group_id,
+            allow_surreal=False,
             group_id=self._group_id,
             **params,
         )
@@ -1114,7 +1115,7 @@ async def execute_debug_query(
     **params: object,
 ) -> list[dict[str, object]]:
     client = await get_graph_client()
-    result = await client.execute_read_org(cypher, group_id, **params)
+    result = await client.execute_read_org(cypher, group_id, allow_surreal=True, **params)
 
     rows: list[dict[str, object]] = []
     for record in result:

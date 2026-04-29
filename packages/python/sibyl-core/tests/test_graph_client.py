@@ -201,6 +201,49 @@ async def test_default_execute_read_remains_available_for_legacy_store() -> None
 
 
 @pytest.mark.asyncio
+async def test_org_execute_read_refuses_surreal_store_by_default() -> None:
+    client = GraphClient()
+    client._store = "surreal"
+    client._client = SimpleNamespace(driver=MagicMock())
+    client._connected = True
+
+    with pytest.raises(GraphConnectionError, match="org-scoped"):
+        await client.execute_read_org("SELECT * FROM entity", "org-123")
+
+
+@pytest.mark.asyncio
+async def test_org_execute_write_refuses_surreal_store_by_default() -> None:
+    client = GraphClient()
+    client._store = "surreal"
+    client._client = SimpleNamespace(driver=MagicMock())
+    client._connected = True
+
+    with pytest.raises(GraphConnectionError, match="org-scoped"):
+        await client.execute_write_org("DELETE FROM entity", "org-123")
+
+
+@pytest.mark.asyncio
+async def test_org_execute_read_allows_explicit_surreal_debug_escape_hatch() -> None:
+    base_driver = MagicMock()
+    org_driver = MagicMock()
+    org_driver.execute_query = AsyncMock(return_value=[{"ok": True}])
+    base_driver.clone.return_value = org_driver
+    client = GraphClient()
+    client._store = "surreal"
+    client._client = SimpleNamespace(driver=base_driver)
+    client._connected = True
+
+    rows = await client.execute_read_org(
+        "SELECT * FROM entity",
+        "org-123",
+        allow_surreal=True,
+    )
+
+    assert rows == [{"ok": True}]
+    org_driver.execute_query.assert_awaited_once_with("SELECT * FROM entity")
+
+
+@pytest.mark.asyncio
 async def test_disconnect_closes_cached_org_drivers_once() -> None:
     client = GraphClient()
     base_graphiti = SimpleNamespace(close=AsyncMock())
