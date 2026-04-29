@@ -913,6 +913,44 @@ class TestSearchTool:
         assert response.query == ""
 
     @pytest.mark.asyncio
+    async def test_search_empty_query_with_filters_lists_graph_entities(self) -> None:
+        """Empty filtered graph search lists matching entities."""
+        from sibyl_core.tools.search import search
+
+        task = MockEntity(
+            id="task_graph",
+            entity_type=EntityType.TASK,
+            name="Graph task",
+            description="Filtered task",
+            metadata={"project_id": "project_123", "status": "todo"},
+        )
+        mock_entity_manager = AsyncMock()
+        mock_entity_manager.list_by_type = AsyncMock(return_value=[task])
+
+        with patch(
+            "sibyl_core.tools.search.get_graph_runtime",
+            AsyncMock(return_value=make_graph_runtime(entity_manager=mock_entity_manager)),
+        ):
+            response = await search(
+                query="",
+                types=["task"],
+                project="project_123",
+                status="todo",
+                organization_id="org_123",
+                include_documents=False,
+            )
+
+        assert response.graph_count == 1
+        assert response.results[0].id == "task_graph"
+        mock_entity_manager.list_by_type.assert_awaited_once_with(
+            EntityType.TASK,
+            limit=10,
+            offset=0,
+            project_id="project_123",
+            status="todo",
+        )
+
+    @pytest.mark.asyncio
     async def test_search_returns_response_structure(self) -> None:
         """Search returns properly structured SearchResponse."""
         from sibyl_core.tools.search import search

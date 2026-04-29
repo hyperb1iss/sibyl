@@ -84,6 +84,62 @@ def _merge_graph_results(
     return merged
 
 
+def _has_graph_list_filters(
+    *,
+    entity_types: list[EntityType] | None,
+    language: str | None,
+    category: str | None,
+    status: str | None,
+    project: str | None,
+    source: str | None,
+    assignee: str | None,
+    since: str | None,
+) -> bool:
+    return any(
+        (
+            entity_types,
+            language,
+            category,
+            status,
+            project,
+            source,
+            assignee,
+            since,
+        )
+    )
+
+
+async def _list_graph_entities_for_filters(
+    entity_manager: Any,
+    *,
+    entity_types: list[EntityType] | None,
+    limit: int,
+    offset: int,
+    project: str | None,
+    status: str | None,
+) -> list[tuple[Any, float]]:
+    list_limit = max(limit + offset, limit)
+    if entity_types:
+        results: list[tuple[Any, float]] = []
+        remaining = list_limit
+        for entity_type in entity_types:
+            if remaining <= 0:
+                break
+            entities = await entity_manager.list_by_type(
+                entity_type,
+                limit=remaining,
+                offset=0,
+                project_id=project,
+                status=status,
+            )
+            results.extend((entity, 1.0) for entity in entities)
+            remaining = list_limit - len(results)
+        return results
+
+    entities = await entity_manager.list_all(limit=list_limit, offset=0)
+    return [(entity, 1.0) for entity in entities]
+
+
 def _document_language_predicates(
     *,
     language: str | None,
@@ -317,10 +373,30 @@ async def search(
             )
         )
 
+    requested_graph_types: set[str] = set()
+    entity_types = None
+    if types:
+        entity_types = []
+        for t in types:
+            if t.lower() in VALID_ENTITY_TYPES and t.lower() != "document":
+                requested_graph_types.add(t.lower())
+                entity_types.append(EntityType(t.lower()))
+
+    graph_list_filters = _has_graph_list_filters(
+        entity_types=entity_types,
+        language=language,
+        category=category,
+        status=status,
+        project=project,
+        source=source,
+        assignee=assignee,
+        since=since,
+    )
+
     # =========================================================================
     # GRAPH SEARCH - Search knowledge graph entities
     # =========================================================================
-    if search_graph and query:
+    if search_graph and (query or graph_list_filters):
         try:
             if not organization_id:
                 raise ValueError(
@@ -329,16 +405,6 @@ async def search(
             runtime = await get_graph_runtime(organization_id)
             client = runtime.client
             entity_manager = runtime.entity_manager
-
-            # Determine entity types to search (exclude 'document' - that's for doc search)
-            requested_graph_types: set[str] = set()
-            entity_types = None
-            if types:
-                entity_types = []
-                for t in types:
-                    if t.lower() in VALID_ENTITY_TYPES and t.lower() != "document":
-                        requested_graph_types.add(t.lower())
-                        entity_types.append(EntityType(t.lower()))
 
             # Parse since date if provided
             since_date = None
@@ -353,7 +419,7 @@ async def search(
             raw_results: list[tuple[Any, float]] = []
             enhanced_search_exhausted = False
 
-            if use_enhanced:
+            if query and use_enhanced:
                 try:
                     from sibyl_core.config import core_config
 
@@ -390,7 +456,7 @@ async def search(
                     log.warning("enhanced_search_failed_fallback", error_type=type(e).__name__)
 
             # Fall back to Graphiti's node-hybrid search
-            if not raw_results and not enhanced_search_exhausted:
+            if query and not raw_results and not enhanced_search_exhausted:
                 try:
                     raw_results = await with_timeout(
                         entity_manager.search(
@@ -411,6 +477,8 @@ async def search(
                     raw_results = []
 
             if (
+                query
+                and
                 not enhanced_search_exhausted
                 and not _graph_results_contain_exact_name_match(raw_results, query)
             ):
@@ -433,6 +501,16 @@ async def search(
                 except Exception as e:
                     log.warning("graph_exact_name_search_failed", error_type=type(e).__name__)
 
+            if not query and graph_list_filters:
+                raw_results = await _list_graph_entities_for_filters(
+                    entity_manager,
+                    entity_types=entity_types,
+                    limit=limit,
+                    offset=offset,
+                    project=project,
+                    status=status,
+                )
+
             if requested_graph_types:
                 typed_results = [
                     (entity, score)
@@ -442,7 +520,7 @@ async def search(
             else:
                 typed_results = raw_results
 
-            if not typed_results and requested_graph_types:
+            if query and not typed_results and requested_graph_types:
                 try:
                     fallback_results = await with_timeout(
                         entity_manager.search(
@@ -536,7 +614,7 @@ async def search(
                     )
                 )
 
-                if len(graph_results) >= limit:
+                if len(graph_results) >= offset + limit:
                     break
 
         except Exception as e:
