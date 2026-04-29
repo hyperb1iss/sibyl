@@ -101,6 +101,13 @@ async def test_legacy_search_index_aggregates_graph_stats_via_surreal_queries() 
                 {"relationship_type": "RELATED_TO", "cnt": 2},
                 {"relationship_type": "DEPENDS_ON", "cnt": 1},
             ],
+            [{"cnt": 4}],
+            [{"cnt": 0}],
+            [{"cnt": 1}],
+            [{"cnt": 5}],
+            [{"cnt": 0}],
+            [{"cnt": 1}],
+            [{"cnt": 2}],
         ]
     )
     client = MagicMock()
@@ -114,10 +121,16 @@ async def test_legacy_search_index_aggregates_graph_stats_via_surreal_queries() 
     with patch("sibyl.persistence.graph_runtime._surreal_driver_for", return_value=object()):
         stats = await search.stats()
 
-    assert stats.total_entities == 3
-    assert stats.total_relationships == 3
-    assert stats.entities_by_type == {"pattern": 1, "task": 2}
-    assert stats.relationships_by_type == {"RELATED_TO": 2, "DEPENDS_ON": 1}
+    assert stats.total_entities == 8
+    assert stats.total_relationships == 11
+    assert stats.entities_by_type == {"pattern": 1, "task": 2, "episode": 4, "saga": 1}
+    assert stats.relationships_by_type == {
+        "RELATED_TO": 2,
+        "DEPENDS_ON": 1,
+        "MENTIONS": 5,
+        "NEXT_EPISODE": 1,
+        "HAS_MEMBER": 2,
+    }
     driver.execute_query.assert_has_awaits(
         [
             call(

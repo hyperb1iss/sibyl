@@ -99,6 +99,16 @@ def _coerce_relationship(row: dict[str, object]) -> Relationship:
     )
 
 
+async def _surreal_group_count(driver: Any, table: str, group_id: str) -> int:
+    rows = GraphClient.normalize_result(
+        await driver.execute_query(
+            f"SELECT count() AS cnt FROM {table} WHERE group_id = $group_id GROUP ALL;",  # noqa: S608
+            group_id=group_id,
+        )
+    )
+    return int(rows[0].get("cnt", 0)) if rows else 0
+
+
 def _surreal_driver_for(driver: Any) -> Any | None:
     try:
         from sibyl_core.backends.surreal import SurrealDriver
@@ -578,6 +588,8 @@ class GraphSearchIndex(SearchIndex):
     async def stats(self) -> GraphStats:
         driver = self._client.get_org_driver(self._group_id)
         if _surreal_driver_for(driver) is not None:
+            from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
+
             entity_rows = GraphClient.normalize_result(
                 await driver.execute_query(
                     """
@@ -589,7 +601,7 @@ class GraphSearchIndex(SearchIndex):
                     group_id=self._group_id,
                 )
             )
-            relationship_rows = GraphClient.normalize_result(
+            relates_to_rows = GraphClient.normalize_result(
                 await driver.execute_query(
                     """
                     SELECT name AS relationship_type, count() AS cnt
@@ -606,11 +618,25 @@ class GraphSearchIndex(SearchIndex):
                 for row in entity_rows
                 if row.get("entity_type")
             }
+            for table in GRAPH_TABLES:
+                if table == "entity":
+                    continue
+                count = await _surreal_group_count(driver, table, self._group_id)
+                if count:
+                    entities_by_type[table] = count
+
             relationships_by_type = {
                 str(row.get("relationship_type") or "RELATED_TO"): int(row.get("cnt", 0))
-                for row in relationship_rows
+                for row in relates_to_rows
                 if int(row.get("cnt", 0))
             }
+            for table in GRAPH_EDGES:
+                if table == "relates_to":
+                    continue
+                count = await _surreal_group_count(driver, table, self._group_id)
+                if count:
+                    relationships_by_type[table.upper()] = count
+
             return GraphStats(
                 total_entities=sum(entities_by_type.values()),
                 total_relationships=sum(relationships_by_type.values()),
