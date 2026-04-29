@@ -342,12 +342,16 @@ class SibylMcpOAuthProvider(
         sub = claims.get("sub")
         if not isinstance(sub, str) or not sub:
             return None
+        try:
+            user_id = UUID(sub)
+        except ValueError:
+            return None
 
         exp = claims.get("exp")
         expires_at = exp if isinstance(exp, int) else None
         scopes = _parse_scopes_from_claims(claims)
         return AccessToken(
-            token=token, client_id=f"user:{sub}", scopes=scopes, expires_at=expires_at
+            token=token, client_id=f"user:{user_id}", scopes=scopes, expires_at=expires_at
         )
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:

@@ -135,3 +135,15 @@ async def test_mcp_oauth_exchange_refresh_rejects_invalid_org_claim(monkeypatch)
     assert exc_info.value.error == "invalid_grant"
     assert exc_info.value.error_description == "invalid refresh token claims"
     rotate_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_load_access_token_rejects_invalid_sub_claim(monkeypatch) -> None:
+    provider = SibylMcpOAuthProvider()
+
+    monkeypatch.setattr(
+        "sibyl.auth.mcp_oauth.verify_access_token",
+        lambda _: {"sub": "not-a-uuid", "exp": 123, "scope": "mcp"},
+    )
+
+    assert await provider.load_access_token("access-token") is None
