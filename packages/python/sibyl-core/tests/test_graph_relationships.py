@@ -1311,6 +1311,20 @@ class TestEdgeConversion:
         assert relationship.relationship_type == RelationshipType.RELATED_TO
         assert relationship.weight == 1.0
 
+    def test_from_graphiti_edge_preserves_source_attributes(
+        self,
+        relationship_manager: RelationshipManager,
+        sample_entity_edge: EntityEdge,
+    ) -> None:
+        """_from_graphiti_edge() does not mutate the Graphiti edge payload."""
+        sample_entity_edge.attributes["confidence"] = 0.9
+
+        relationship = relationship_manager._from_graphiti_edge(sample_entity_edge)
+
+        assert relationship.weight == 1.0
+        assert relationship.metadata == {"confidence": 0.9}
+        assert sample_entity_edge.attributes == {"weight": 1.0, "confidence": 0.9}
+
     def test_from_graphiti_edge_unknown_type(
         self,
         relationship_manager: RelationshipManager,

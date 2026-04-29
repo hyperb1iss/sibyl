@@ -162,7 +162,7 @@ class RelationshipManager:
             rel_type = RelationshipType.RELATED_TO
 
         # Extract our metadata from attributes
-        attributes = edge.attributes or {}
+        attributes = dict(edge.attributes or {})
         weight = float(attributes.pop("weight", 1.0))
 
         return Relationship(
