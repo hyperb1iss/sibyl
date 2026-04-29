@@ -498,6 +498,7 @@ async def test_surreal_accept_org_invitation_creates_session_and_marks_accepted(
         name="Electric Coven",
     )
     refresh_expires = datetime.now(UTC) + timedelta(days=7)
+    invite_created_at = datetime.now(UTC) - timedelta(days=1)
     invite_record = {
         "uuid": str(UUID("00000000-0000-0000-0000-000000000222")),
         "organization_id": str(organization.id),
@@ -505,11 +506,11 @@ async def test_surreal_accept_org_invitation_creates_session_and_marks_accepted(
         "invited_role": OrganizationRole.ADMIN.value,
         "token": "invite-token",
         "created_by_user_id": str(uuid4()),
-        "expires_at": datetime(2026, 4, 29, 12, 0, tzinfo=UTC),
+        "expires_at": datetime.now(UTC) + timedelta(days=7),
         "accepted_at": None,
         "accepted_by_user_id": None,
-        "created_at": datetime(2026, 4, 20, 12, 0, tzinfo=UTC),
-        "updated_at": datetime(2026, 4, 20, 12, 0, tzinfo=UTC),
+        "created_at": invite_created_at,
+        "updated_at": invite_created_at,
     }
 
     class FakeClient:
