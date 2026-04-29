@@ -83,6 +83,65 @@ def _namespace_for_group(prefix: str, group_id: str) -> str:
     return f"{prefix}{sanitized}"
 
 
+_EPISODE_SELECT_FIELDS = (
+    "uuid, name, group_id, created_at, source, source_description, content, valid_at, entity_edges"
+)
+
+
+def _graphiti_episode_records(result: Any) -> list[dict[str, Any]]:
+    from sibyl_core.graph.surreal.ops._common import normalize_records
+
+    records = normalize_records(result)
+    for record in records:
+        record.setdefault("source_description", None)
+        record.setdefault("entity_edges", [])
+    return records
+
+
+def _graphiti_retrieve_episodes_query(
+    query: str,
+    params: dict[str, Any],
+) -> tuple[str, dict[str, Any]] | None:
+    normalized = " ".join(query.split()).upper()
+    if "RETURN E.UUID AS UUID" not in normalized:
+        return None
+
+    source_clause = "AND source = $source" if params.get("source") is not None else ""
+    if "MATCH (S:SAGA" in normalized and "HAS_EPISODE" in normalized:
+        return (
+            "SELECT "
+            f"{_EPISODE_SELECT_FIELDS} "
+            "FROM episode "
+            "WHERE id IN ("
+            "SELECT VALUE out FROM has_episode "
+            "WHERE in IN ("
+            "SELECT id FROM saga WHERE name = $saga_name AND group_id = $group_id"
+            ")"
+            ") "
+            "AND valid_at <= $reference_time "
+            f"{source_clause} "
+            "ORDER BY valid_at DESC "
+            "LIMIT $num_episodes;",
+            params,
+        )
+
+    if "MATCH (E:EPISODIC)" not in normalized:
+        return None
+
+    group_clause = "AND group_id IN $group_ids" if params.get("group_ids") else ""
+    return (
+        "SELECT "
+        f"{_EPISODE_SELECT_FIELDS} "
+        "FROM episode "
+        "WHERE valid_at <= $reference_time "
+        f"{group_clause} "
+        f"{source_clause} "
+        "ORDER BY valid_at DESC "
+        "LIMIT $num_episodes;",
+        params,
+    )
+
+
 class SurrealDriverSession(GraphDriverSession):
     """GraphDriverSession wrapper for SurrealDB.
 
@@ -294,19 +353,22 @@ class SurrealDriver(GraphDriver):
         started_at = query_start()
         retry_count = 0
         namespace = _namespace_for_group(self._namespace_prefix, self._database)
+        compat_query = _graphiti_retrieve_episodes_query(cypher_query_, kwargs)
+        query = compat_query[0] if compat_query is not None else cypher_query_
+        params = compat_query[1] if compat_query is not None else kwargs
         async with self._query_lock:
             try:
                 while True:
                     try:
                         client = await self._ensure_client()
-                        result = await client.query(cypher_query_, kwargs if kwargs else None)
+                        result = await client.query(query, params if params else None)
                         break
                     except Exception as exc:
                         if not _is_connection_closed_error(exc):
                             raise
                         await self._drop_client()
                         if (
-                            not _can_retry_query(cypher_query_)
+                            not _can_retry_query(query)
                             or retry_count >= _MAX_CLOSED_CONNECTION_RETRIES
                         ):
                             raise
@@ -319,7 +381,7 @@ class SurrealDriver(GraphDriver):
                         )
             except Exception as exc:
                 log_query(
-                    cypher_query_,
+                    query,
                     client_kind="graph",
                     namespace=namespace,
                     database=self._default_database,
@@ -334,10 +396,10 @@ class SurrealDriver(GraphDriver):
         # "ERR", "result": "..."}` (multi-statement). Detect both and raise so
         # bulk paths can't falsely report success on a rejected insert.
         try:
-            _raise_if_surreal_error(cypher_query_, result)
+            _raise_if_surreal_error(query, result)
         except Exception as exc:
             log_query(
-                cypher_query_,
+                query,
                 client_kind="graph",
                 namespace=namespace,
                 database=self._default_database,
@@ -348,7 +410,7 @@ class SurrealDriver(GraphDriver):
             )
             raise
         log_query(
-            cypher_query_,
+            query,
             client_kind="graph",
             namespace=namespace,
             database=self._default_database,
@@ -356,6 +418,8 @@ class SurrealDriver(GraphDriver):
             elapsed=elapsed_ms(started_at),
             retry_count=retry_count,
         )
+        if compat_query is not None:
+            return _graphiti_episode_records(result), None, None
         return result
 
     def session(self, database: str | None = None) -> GraphDriverSession:

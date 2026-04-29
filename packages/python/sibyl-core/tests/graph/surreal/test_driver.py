@@ -231,6 +231,91 @@ class TestDriverConnection:
         assert clients[0].closed is True
         assert clients[1].namespace == "org_orgabc"
 
+    async def test_execute_query_translates_graphiti_episode_retrieval(self, monkeypatch) -> None:
+        driver = SurrealDriver("memory://").clone("org-abc")
+        calls: list[tuple[str, object | None]] = []
+
+        async def fake_query(query: str, params: object | None = None) -> list[dict[str, object]]:
+            calls.append((query, params))
+            return [
+                {
+                    "uuid": "episode-1",
+                    "name": "Episode",
+                    "group_id": "org-abc",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "source": "message",
+                    "content": "hello",
+                    "valid_at": "2026-01-01T00:00:00Z",
+                }
+            ]
+
+        async def fake_ensure_client() -> SimpleNamespace:
+            return SimpleNamespace(query=fake_query)
+
+        monkeypatch.setattr(driver, "_ensure_client", fake_ensure_client)
+
+        records, _, _ = await driver.execute_query(
+            """
+            MATCH (e:Episodic)
+            WHERE e.valid_at <= $reference_time
+            AND e.group_id IN $group_ids
+            AND e.source = $source
+            RETURN
+                e.uuid AS uuid
+            ORDER BY e.valid_at DESC
+            LIMIT $num_episodes
+            """,
+            reference_time="2026-01-01T00:00:00Z",
+            num_episodes=3,
+            group_ids=["org-abc"],
+            source="message",
+        )
+
+        query, params = calls[0]
+        assert "MATCH" not in query
+        assert "FROM episode" in query
+        assert "group_id IN $group_ids" in query
+        assert "source = $source" in query
+        assert params is not None
+        assert records[0]["source_description"] is None
+        assert records[0]["entity_edges"] == []
+
+    async def test_execute_query_translates_graphiti_saga_episode_retrieval(
+        self, monkeypatch
+    ) -> None:
+        driver = SurrealDriver("memory://").clone("org-abc")
+        calls: list[tuple[str, object | None]] = []
+
+        async def fake_query(query: str, params: object | None = None) -> list[dict[str, object]]:
+            calls.append((query, params))
+            return []
+
+        async def fake_ensure_client() -> SimpleNamespace:
+            return SimpleNamespace(query=fake_query)
+
+        monkeypatch.setattr(driver, "_ensure_client", fake_ensure_client)
+
+        records, _, _ = await driver.execute_query(
+            """
+            MATCH (s:Saga {name: $saga_name, group_id: $group_id})-[:HAS_EPISODE]->(e:Episodic)
+            WHERE e.valid_at <= $reference_time
+            RETURN
+                e.uuid AS uuid
+            ORDER BY e.valid_at DESC
+            LIMIT $num_episodes
+            """,
+            saga_name="daily",
+            group_id="org-abc",
+            reference_time="2026-01-01T00:00:00Z",
+            num_episodes=3,
+        )
+
+        query, _params = calls[0]
+        assert records == []
+        assert "MATCH" not in query
+        assert "FROM has_episode" in query
+        assert "FROM saga" in query
+
     async def test_execute_query_does_not_retry_closed_write_socket(self, monkeypatch) -> None:
         class ConnectionClosedError(RuntimeError):
             pass
