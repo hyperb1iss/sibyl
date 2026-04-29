@@ -35,6 +35,18 @@ app = typer.Typer(
 )
 
 
+def _count_result_rows(rows: object) -> int:
+    if not isinstance(rows, list):
+        return 0
+    total = 0
+    for row in rows:
+        if isinstance(row, dict) and "count" in row:
+            value = row["count"]
+            if isinstance(value, int):
+                total += value
+    return total or len(rows)
+
+
 @app.command("realistic")
 def generate_realistic(  # noqa: PLR0915 - complex CLI command
     projects: Annotated[int, typer.Option("--projects", "-p", help="Number of projects")] = 5,
@@ -422,6 +434,10 @@ def clean_generated(
     preserve_real: Annotated[
         bool, typer.Option("--preserve-real", help="Keep non-generated data")
     ] = True,
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID (required for multi-tenant graph)"),
+    ] = "",
 ) -> None:
     """Clean up generated test data.
 
@@ -433,6 +449,10 @@ def clean_generated(
         sibyl generate clean --yes              # Skip confirmation
         sibyl generate clean --no-preserve-real # Remove ALL data (dangerous!)
     """
+    if not org_id:
+        error("--org-id is required for graph operations")
+        raise typer.Exit(code=1)
+
     if not yes:
         if preserve_real:
             console.print(
@@ -448,25 +468,55 @@ def clean_generated(
 
     @run_async
     async def _clean() -> None:
+        from sibyl.config import settings
         from sibyl_core.graph.client import get_graph_client
 
         try:
             client = await get_graph_client()
 
-            if preserve_real:
-                # Delete only generated entities
-                rows = await client.execute_write(
-                    "MATCH (n) WHERE n._generated = true DETACH DELETE n RETURN count(n) as deleted"
+            if settings.store == "surreal":
+                driver = client.get_org_driver(org_id)
+                if preserve_real:
+                    rel_rows = await driver.execute_query(
+                        """
+                        DELETE FROM relates_to
+                        WHERE group_id = $group_id
+                          AND attributes._generated = true
+                        RETURN BEFORE;
+                        """,
+                        group_id=org_id,
+                    )
+                    entity_rows = await driver.execute_query(
+                        """
+                        DELETE FROM entity
+                        WHERE group_id = $group_id
+                          AND attributes._generated = true
+                        RETURN BEFORE;
+                        """,
+                        group_id=org_id,
+                    )
+                    deleted = _count_result_rows(entity_rows) + _count_result_rows(rel_rows)
+                else:
+                    rows = await driver.execute_query(
+                        "SELECT count() AS count FROM entity WHERE group_id = $group_id GROUP ALL;",
+                        group_id=org_id,
+                    )
+                    deleted = _count_result_rows(rows)
+                    await driver.graph_ops.clear_data(driver, group_ids=[org_id])
+            elif preserve_real:
+                rows = await client.execute_write_org(
+                    "MATCH (n) WHERE n._generated = true DETACH DELETE n RETURN count(n) as deleted",
+                    org_id,
                 )
                 deleted = rows[0][0] if rows else 0
             else:
-                # Delete everything
-                rows = await client.execute_write(
-                    "MATCH (n) DETACH DELETE n RETURN count(n) as deleted"
+                rows = await client.execute_write_org(
+                    "MATCH (n) DETACH DELETE n RETURN count(n) as deleted",
+                    org_id,
                 )
                 deleted = rows[0][0] if rows else 0
 
-            success(f"Removed {deleted:,} entities")
+            success(f"Removed {deleted:,} generated records")
 
         except Exception as e:
             error(f"Cleanup failed: {e}")
