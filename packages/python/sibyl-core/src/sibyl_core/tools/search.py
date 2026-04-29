@@ -109,6 +109,18 @@ def _has_graph_list_filters(
     )
 
 
+def _has_graph_only_filters(
+    *,
+    category: str | None,
+    status: str | None,
+    project: str | None,
+    source: str | None,
+    assignee: str | None,
+    since: str | None,
+) -> bool:
+    return any((category, status, project, source, assignee, since))
+
+
 async def _list_graph_entities_for_filters(
     entity_manager: Any,
     *,
@@ -427,11 +439,13 @@ async def search(
     # Determine if we should search documents based on types filter
     search_documents = include_documents
     search_graph = include_graph
+    explicit_document_request = bool(source_id or source_name)
     if types:
         # If 'document' is in types, search documents
         # If only 'document' is in types, skip graph search
         type_set = {t.lower() for t in types}
         if "document" in type_set:
+            explicit_document_request = True
             search_documents = include_documents
             if type_set == {"document"}:
                 search_graph = False
@@ -441,6 +455,21 @@ async def search(
         else:
             # Types specified but document not included - skip document search
             search_documents = False
+
+    if (
+        search_documents
+        and search_graph
+        and not explicit_document_request
+        and _has_graph_only_filters(
+            category=category,
+            status=status,
+            project=project,
+            source=source,
+            assignee=assignee,
+            since=since,
+        )
+    ):
+        search_documents = False
 
     graph_results: list[SearchResult] = []
     doc_results: list[SearchResult] = []

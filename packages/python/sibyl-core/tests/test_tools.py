@@ -936,6 +936,80 @@ class TestSearchTool:
         document_search.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_search_project_filter_skips_implicit_document_search(self) -> None:
+        """Project-scoped searches should not surface unscoped document results by default."""
+        from sibyl_core.retrieval.hybrid import HybridResult
+
+        search_module = import_module("sibyl_core.tools.search")
+        document_search = AsyncMock(return_value=[])
+        mock_entity_manager = AsyncMock()
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=mock_entity_manager)),
+            ),
+            patch("sibyl_core.tools.search._search_documents", document_search),
+            patch(
+                "sibyl_core.tools.search.hybrid_search",
+                AsyncMock(
+                    return_value=HybridResult(
+                        results=[],
+                        metadata={"entity_manager_search_completed": True},
+                    )
+                ),
+            ),
+        ):
+            response = await search_module.search(
+                query="graph",
+                project="project_123",
+                organization_id="org_123",
+                include_documents=True,
+                include_graph=True,
+            )
+
+        assert response.document_count == 0
+        document_search.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_search_explicit_source_name_keeps_document_search_with_project_filter(
+        self,
+    ) -> None:
+        """Explicit document filters keep document search enabled."""
+        from sibyl_core.retrieval.hybrid import HybridResult
+
+        search_module = import_module("sibyl_core.tools.search")
+        document_search = AsyncMock(return_value=[])
+        mock_entity_manager = AsyncMock()
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=mock_entity_manager)),
+            ),
+            patch("sibyl_core.tools.search._search_documents", document_search),
+            patch(
+                "sibyl_core.tools.search.hybrid_search",
+                AsyncMock(
+                    return_value=HybridResult(
+                        results=[],
+                        metadata={"entity_manager_search_completed": True},
+                    )
+                ),
+            ),
+        ):
+            await search_module.search(
+                query="graph",
+                project="project_123",
+                source_name="docs",
+                organization_id="org_123",
+                include_documents=True,
+                include_graph=True,
+            )
+
+        document_search.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_search_empty_query_skips_graph(self) -> None:
         """Empty query skips graph search."""
         from sibyl_core.tools.search import search
