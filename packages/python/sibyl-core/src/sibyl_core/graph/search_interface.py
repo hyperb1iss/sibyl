@@ -17,12 +17,13 @@ from typing import Any
 
 import structlog
 from graphiti_core.driver.record_parsers import (
+    community_node_from_record,
     entity_edge_from_record,
     entity_node_from_record,
     episodic_node_from_record,
 )
 from graphiti_core.driver.search_interface.search_interface import SearchInterface
-from graphiti_core.nodes import EpisodicNode
+from graphiti_core.nodes import CommunityNode, EpisodicNode
 
 from sibyl_core.graph.surreal.ops._common import normalize_records
 from sibyl_core.graph.surreal.ops.entity_edge_ops import _ENTITY_EDGE_SELECT
@@ -124,6 +125,12 @@ def _episode_from_record(record: dict[str, Any]) -> EpisodicNode:
     record["source_description"] = record.get("source_description") or ""
     record.setdefault("entity_edges", [])
     return episodic_node_from_record(record)
+
+
+def _community_from_record(record: dict[str, Any]) -> CommunityNode:
+    record.setdefault("summary", "")
+    record.setdefault("name_embedding", None)
+    return community_node_from_record(record)
 
 
 class SurrealSearchInterface(SearchInterface):
@@ -315,6 +322,90 @@ class SurrealSearchInterface(SearchInterface):
             )
         )
         return [_episode_from_record(record) for record in records]
+
+    async def community_fulltext_search(
+        self,
+        driver: Any,
+        query: str,
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[Any]:
+        search_query = driver.build_fulltext_query(query)
+        if not search_query:
+            return []
+
+        records = normalize_records(
+            await driver.execute_query(
+                """
+                SELECT *,
+                       math::max([search::score(0), search::score(1)]) AS score
+                FROM community
+                WHERE """
+                + _group_filter_clause(group_ids)
+                + """
+                  AND (
+                      name @0@ $query
+                      OR summary @1@ $query
+                  )
+                ORDER BY score DESC, created_at DESC, uuid DESC
+                LIMIT $limit;
+                """,
+                query=search_query,
+                group_ids=group_ids,
+                limit=max(int(limit), 1),
+            )
+        )
+        return [_community_from_record(record) for record in records]
+
+    async def community_similarity_search(
+        self,
+        driver: Any,
+        search_vector: list[float],
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+        min_score: float = 0.6,
+    ) -> list[Any]:
+        if not search_vector:
+            return []
+
+        candidate_limit = max(int(limit) * 4, int(limit), 1)
+        records = normalize_records(
+            await driver.execute_query(
+                "SELECT * FROM ("
+                "SELECT *, (1 - vector::distance::knn()) AS score FROM community "
+                "WHERE "
+                + _group_filter_clause(group_ids)
+                + " AND name_embedding IS NOT NONE "
+                f"AND name_embedding <|{candidate_limit}, 40|> $search_vector"
+                ") WHERE score > $min_score "
+                "ORDER BY score DESC, created_at DESC, uuid DESC LIMIT $limit;",
+                search_vector=search_vector,
+                min_score=min_score,
+                group_ids=group_ids,
+                limit=max(int(limit), 1),
+            )
+        )
+        return [_community_from_record(record) for record in records]
+
+    async def get_embeddings_for_communities(
+        self,
+        driver: Any,
+        communities: list[Any],
+    ) -> dict[str, list[float]]:
+        uuids = [community.uuid for community in communities]
+        if not uuids:
+            return {}
+        records = normalize_records(
+            await driver.execute_query(
+                "SELECT uuid, name_embedding FROM community WHERE uuid IN $uuids;",
+                uuids=uuids,
+            )
+        )
+        return {
+            record["uuid"]: record["name_embedding"]
+            for record in records
+            if record.get("name_embedding") is not None
+        }
 
 
 class FalkorDBSearchInterface(SearchInterface):

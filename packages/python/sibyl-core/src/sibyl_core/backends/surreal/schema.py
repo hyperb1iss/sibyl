@@ -96,6 +96,8 @@ DEFINE FIELD IF NOT EXISTS name_embedding ON community TYPE option<array<float, 
 
 DEFINE INDEX IF NOT EXISTS idx_community_uuid ON community FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_community_group ON community FIELDS group_id;
+DEFINE INDEX IF NOT EXISTS idx_community_name_ft ON community FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
+DEFINE INDEX IF NOT EXISTS idx_community_summary_ft ON community FIELDS summary FULLTEXT ANALYZER content_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_community_embedding ON community FIELDS name_embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32;
 
