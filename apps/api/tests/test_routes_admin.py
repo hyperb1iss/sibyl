@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
+from fastapi import HTTPException
 
 from sibyl.api.routes.admin import DebugQueryRequest, debug_query, dev_status, health, stats
 
@@ -67,6 +68,29 @@ async def test_debug_query_uses_debug_runner() -> None:
         group_id=str(org.id),
         limit=1,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query",
+    [
+        "UPDATE entity SET name = 'oops'",
+        "DEFINE TABLE temp SCHEMALESS",
+        "RELATE entity:one->relates_to->entity:two",
+    ],
+)
+async def test_debug_query_blocks_surreal_mutations(query: str) -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    request = DebugQueryRequest(cypher=query)
+
+    with (
+        patch("sibyl.api.routes.admin.execute_debug_query", AsyncMock()) as mock_execute,
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await debug_query(request=request, org=org)
+
+    assert exc_info.value.status_code == 400
+    mock_execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio

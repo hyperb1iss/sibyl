@@ -252,8 +252,22 @@ _OWNER_ONLY = (OrganizationRole.OWNER,)
 
 
 def _is_read_only(cypher: str) -> bool:
-    """Check if a Cypher query is read-only (no mutations)."""
-    dangerous = ["CREATE", "SET", "DELETE", "REMOVE", "MERGE", "DROP", "DETACH"]
+    """Check if a graph query is read-only."""
+    dangerous = [
+        "ALTER",
+        "CREATE",
+        "DEFINE",
+        "DELETE",
+        "DROP",
+        "INSERT",
+        "MERGE",
+        "REBUILD",
+        "RELATE",
+        "REMOVE",
+        "SET",
+        "UPSERT",
+        "UPDATE",
+    ]
     upper = cypher.upper()
     return not any(d in upper for d in dangerous)
 
@@ -267,10 +281,10 @@ async def debug_query(
     request: DebugQueryRequest,
     org: Organization = Depends(get_current_organization),
 ) -> DebugQueryResponse:
-    """Execute a read-only Cypher query for debugging.
+    """Execute a read-only graph query for debugging.
 
     Allows direct graph inspection for development and troubleshooting.
-    Only read-only queries are permitted (no CREATE, SET, DELETE, etc.).
+    Only read-only queries are permitted.
 
     Requires organization OWNER role.
     """
@@ -278,7 +292,7 @@ async def debug_query(
     if not _is_read_only(request.cypher):
         raise HTTPException(
             status_code=400,
-            detail="Only read-only queries allowed (no CREATE, SET, DELETE, REMOVE, MERGE, DROP)",
+            detail="Only read-only queries allowed",
         )
 
     try:
