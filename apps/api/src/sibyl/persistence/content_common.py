@@ -26,7 +26,3 @@ class DocumentEntityRecord:
 
 
 __all__ = ["CrawlStats", "DocumentEntityRecord"]
-
-
-LegacyCrawlStats = CrawlStats
-LegacyDocumentEntityRecord = DocumentEntityRecord

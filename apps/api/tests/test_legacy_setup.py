@@ -135,6 +135,7 @@ def test_legacy_setup_exposes_neutral_helpers() -> None:
     assert hasattr(legacy_setup, "is_setup_mode")
     assert hasattr(legacy_setup, "get_setup_status")
     assert hasattr(legacy_setup, "require_setup_mode_or_auth")
+    assert legacy_setup.LegacySetupStatus is legacy_setup.SetupStatus
 
 
 def test_surreal_setup_only_exports_neutral_runtime_surface() -> None:

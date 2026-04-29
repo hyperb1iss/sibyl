@@ -15,6 +15,8 @@ from sibyl.db.connection import get_session
 from sibyl.db.models import Organization, User
 from sibyl.persistence.setup_common import SetupStatus
 
+LegacySetupStatus = SetupStatus
+
 
 async def is_setup_mode() -> bool:
     """Return whether the system has no users and is still in setup mode."""
@@ -120,6 +122,7 @@ require_legacy_setup_mode_or_admin = require_setup_mode_or_admin
 require_legacy_settings_admin = require_settings_admin
 
 __all__ = [
+    "LegacySetupStatus",
     "SetupStatus",
     "get_setup_status",
     "get_legacy_setup_status",

@@ -12,6 +12,8 @@ from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk
 from sibyl.db.models import ChunkType, RawCapture
 from sibyl.persistence.content_common import DocumentEntityRecord
 
+LegacyDocumentEntityRecord = DocumentEntityRecord
+
 
 async def list_raw_captures(
     session: Any,

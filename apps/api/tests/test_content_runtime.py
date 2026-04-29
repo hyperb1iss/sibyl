@@ -6,6 +6,10 @@ from uuid import uuid4
 import pytest
 
 from sibyl.persistence import content_common, content_runtime
+from sibyl.persistence.legacy import (
+    crawler as legacy_crawler,
+    entities as legacy_entities,
+)
 from sibyl.persistence.legacy.crawler import (
     get_crawl_stats_payload as legacy_get_crawl_stats_payload,
 )
@@ -58,8 +62,10 @@ def test_content_runtime_only_exports_neutral_runtime_surface() -> None:
     assert content_common.__all__ == ["CrawlStats", "DocumentEntityRecord"]
     assert "LegacyCrawlStats" not in content_common.__all__
     assert "LegacyDocumentEntityRecord" not in content_common.__all__
-    assert content_common.CrawlStats is content_common.LegacyCrawlStats
-    assert content_common.DocumentEntityRecord is content_common.LegacyDocumentEntityRecord
+    assert not hasattr(content_common, "LegacyCrawlStats")
+    assert not hasattr(content_common, "LegacyDocumentEntityRecord")
+    assert legacy_crawler.LegacyCrawlStats is content_common.CrawlStats
+    assert legacy_entities.LegacyDocumentEntityRecord is content_common.DocumentEntityRecord
 
 
 def _query_result(records: list[dict[str, object]]) -> list[dict[str, object]]:

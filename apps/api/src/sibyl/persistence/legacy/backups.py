@@ -14,8 +14,9 @@ from sibyl.db.connection import get_session
 from sibyl.db.models import Backup, BackupSettings, BackupStatus
 from sibyl.persistence.backups_common import (
     BackupListResult,
-    LegacyBackupList,
 )
+
+LegacyBackupList = BackupListResult
 
 
 def _utcnow() -> datetime:

@@ -69,6 +69,3 @@ def resolve_backup_runtime_options(
         database_dump_supported=database_dump_supported,
         archive_contents=tuple(contents),
     )
-
-
-LegacyBackupList = BackupListResult

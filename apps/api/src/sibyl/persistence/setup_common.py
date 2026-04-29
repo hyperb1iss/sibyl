@@ -9,6 +9,4 @@ class SetupStatus:
     has_orgs: bool
 
 
-LegacySetupStatus = SetupStatus
-
 __all__ = ["SetupStatus"]

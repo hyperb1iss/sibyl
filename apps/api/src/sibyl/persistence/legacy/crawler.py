@@ -13,6 +13,8 @@ from sibyl.db.models import SourceType
 from sibyl.persistence.content_common import CrawlStats
 from sibyl_core.services.link_graph_status import get_link_graph_status_data
 
+LegacyCrawlStats = CrawlStats
+
 
 async def check_relational_backend_health() -> dict[str, str | None]:
     from sibyl.db.connection import check_postgres_health
