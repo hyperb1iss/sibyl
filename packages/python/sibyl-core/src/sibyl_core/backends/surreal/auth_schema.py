@@ -38,7 +38,7 @@ DEFINE FIELD IF NOT EXISTS timezone ON users TYPE string DEFAULT 'UTC';
 DEFINE FIELD IF NOT EXISTS avatar_url ON users TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS email_verified_at ON users TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS last_login_at ON users TYPE option<datetime>;
-DEFINE FIELD IF NOT EXISTS preferences ON users FLEXIBLE TYPE object DEFAULT {};
+DEFINE FIELD IF NOT EXISTS preferences ON users TYPE object FLEXIBLE DEFAULT {};
 DEFINE FIELD IF NOT EXISTS password_salt ON users TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS password_hash ON users TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS password_iterations ON users TYPE option<int>;
@@ -55,7 +55,7 @@ DEFINE FIELD IF NOT EXISTS uuid ON organizations TYPE string;
 DEFINE FIELD IF NOT EXISTS name ON organizations TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS slug ON organizations TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS is_personal ON organizations TYPE bool DEFAULT false;
-DEFINE FIELD IF NOT EXISTS settings ON organizations FLEXIBLE TYPE object DEFAULT {};
+DEFINE FIELD IF NOT EXISTS settings ON organizations TYPE object FLEXIBLE DEFAULT {};
 DEFINE FIELD IF NOT EXISTS created_at ON organizations TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS updated_at ON organizations TYPE datetime DEFAULT time::now();
 
