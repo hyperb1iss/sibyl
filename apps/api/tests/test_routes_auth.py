@@ -342,6 +342,56 @@ async def test_refresh_tokens_uses_runtime_rotation(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_refresh_tokens_rejects_invalid_org_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    request = FakeRequest(json_data={"refresh_token": "refresh-token"})
+    rotate = AsyncMock()
+
+    monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "secret")
+    monkeypatch.setattr(
+        auth_routes,
+        "verify_refresh_token",
+        lambda _: {"sub": str(user_id), "org": "not-a-uuid"},
+    )
+    monkeypatch.setattr(auth_routes, "rotate_refresh_exchange", rotate)
+
+    response = await _call_route(auth_routes.refresh_tokens, request=request)
+
+    assert response.status_code == 401
+    assert json.loads(response.body)["detail"] == "Invalid token claims"
+    rotate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refresh_tokens_clears_cookies_for_invalid_cookie_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    request = FakeRequest(cookies={auth_routes.REFRESH_TOKEN_COOKIE: "refresh-token"})
+
+    monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "secret")
+    monkeypatch.setattr(
+        auth_routes,
+        "verify_refresh_token",
+        lambda _: {"sub": str(user_id), "org": "not-a-uuid"},
+    )
+    monkeypatch.setattr(auth_routes, "rotate_refresh_exchange", AsyncMock())
+
+    response = await _call_route(auth_routes.refresh_tokens, request=request)
+    set_cookie_headers = [
+        value.decode()
+        for name, value in response.raw_headers
+        if name.lower() == b"set-cookie"
+    ]
+
+    assert response.status_code == 401
+    assert any(auth_routes.ACCESS_TOKEN_COOKIE in header for header in set_cookie_headers)
+    assert any(auth_routes.REFRESH_TOKEN_COOKIE in header for header in set_cookie_headers)
+
+
+@pytest.mark.asyncio
 async def test_logout_uses_runtime_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     user_id = uuid4()
     org_id = uuid4()

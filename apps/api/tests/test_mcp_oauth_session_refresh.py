@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-from mcp.server.auth.provider import RefreshToken
+from mcp.server.auth.provider import RefreshToken, TokenError
 
 from sibyl.auth.mcp_oauth import SibylMcpOAuthProvider
 
@@ -102,3 +102,36 @@ async def test_mcp_oauth_exchange_refresh_rotates_session(monkeypatch) -> None:
     assert tok.refresh_token == "new_refresh"
     assert tok.access_token == "new_access"
     rotate_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_exchange_refresh_rejects_invalid_org_claim(monkeypatch) -> None:
+    provider = SibylMcpOAuthProvider()
+
+    user_id = uuid4()
+    client = SimpleNamespace(client_id="client1")
+    claims = {
+        "sub": str(user_id),
+        "org": "not-a-uuid",
+        "typ": "refresh",
+        "cid": "client1",
+        "exp": int((datetime.now(UTC) + timedelta(hours=1)).timestamp()),
+        "scope": "mcp",
+    }
+    rotate_refresh = AsyncMock()
+
+    monkeypatch.setattr("sibyl.auth.mcp_oauth._jwt_decode", lambda t: claims)
+    monkeypatch.setattr(provider, "_rotate_refresh_session_record", rotate_refresh)
+
+    incoming = RefreshToken(
+        token="refresh_token",
+        client_id="client1",
+        scopes=["mcp"],
+        expires_at=claims["exp"],
+    )
+    with pytest.raises(TokenError) as exc_info:
+        await provider.exchange_refresh_token(client, incoming, ["mcp"])
+
+    assert exc_info.value.error == "invalid_grant"
+    assert exc_info.value.error_description == "invalid refresh token claims"
+    rotate_refresh.assert_not_awaited()

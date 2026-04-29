@@ -993,11 +993,10 @@ async def refresh_tokens(request: Request):
     # Extract user/org from claims
     try:
         user_id = UUID(str(claims["sub"]))
+        org_raw = claims.get("org")
+        org_id = UUID(str(org_raw)) if org_raw else None
     except (KeyError, ValueError):
         return _unauthorized("Invalid token claims")
-
-    org_raw = claims.get("org")
-    org_id = UUID(str(org_raw)) if org_raw else None
 
     rotation = await rotate_refresh_exchange(
         refresh_token=refresh_token,

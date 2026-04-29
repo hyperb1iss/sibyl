@@ -273,9 +273,14 @@ class SibylMcpOAuthProvider(
         scopes: list[str],
     ) -> OAuthToken:
         claims = _jwt_decode(refresh_token.token)
-        user_id = UUID(str(claims["sub"]))
-        org_raw = claims.get("org")
-        org_id = UUID(str(org_raw)) if org_raw else None
+        try:
+            user_id = UUID(str(claims["sub"]))
+            org_raw = claims.get("org")
+            org_id = UUID(str(org_raw)) if org_raw else None
+        except (KeyError, ValueError) as exc:
+            raise TokenError(
+                error="invalid_grant", error_description="invalid refresh token claims"
+            ) from exc
 
         allowed_scopes = set(refresh_token.scopes or [])
         requested_scopes = set(scopes or [])
