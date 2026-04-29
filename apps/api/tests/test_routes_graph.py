@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
@@ -68,28 +68,20 @@ class TestGraphRoutes:
                     ]
                 )
             ),
-            relationship_manager=SimpleNamespace(
-                list_all=AsyncMock(
-                    side_effect=[
-                        [
-                            SimpleNamespace(
-                                source_id="task-1",
-                                target_id="project-1",
-                            ),
-                            SimpleNamespace(
-                                source_id="project-1",
-                                target_id="task-1",
-                            ),
-                        ],
-                        [],
-                    ]
-                )
-            ),
+        )
+        adapter = SimpleNamespace(
+            get_connection_counts=AsyncMock(return_value={"task-1": 2})
         )
 
-        with patch(
-            "sibyl.api.routes.graph.get_entity_graph_runtime",
-            AsyncMock(return_value=runtime),
+        with (
+            patch(
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch(
+                "sibyl.api.routes.graph.get_graph_query_adapter",
+                AsyncMock(return_value=adapter),
+            ),
         ):
             nodes = await graph_routes.get_all_nodes(
                 org=_org(),
@@ -106,18 +98,7 @@ class TestGraphRoutes:
             offset=0,
             include_archived=True,
         )
-        assert runtime.relationship_manager.list_all.await_args_list == [
-            call(
-                relationship_types=None,
-                limit=1000,
-                offset=0,
-            ),
-            call(
-                relationship_types=None,
-                limit=1000,
-                offset=2,
-            ),
-        ]
+        adapter.get_connection_counts.assert_awaited_once_with(["task-1"])
 
     @pytest.mark.asyncio
     async def test_get_all_edges_uses_entity_graph_runtime(self) -> None:

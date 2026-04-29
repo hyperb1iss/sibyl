@@ -295,9 +295,8 @@ async def get_all_nodes(
             include_archived=True,
         )
 
-        connection_counts = await _get_connection_counts(
-            runtime.relationship_manager, [entity.id for entity in entities]
-        )
+        adapter = await get_graph_query_adapter(group_id)
+        connection_counts = await adapter.get_connection_counts([entity.id for entity in entities])
 
         max_connections = max(connection_counts.values()) if connection_counts else 1
         max_connections = max(max_connections, 1)

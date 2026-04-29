@@ -485,6 +485,50 @@ async def test_legacy_graph_query_adapter_scopes_relationship_reads_to_entity_id
 
 
 @pytest.mark.asyncio
+async def test_graph_query_adapter_counts_connections_with_surreal_query() -> None:
+    driver = MagicMock()
+    driver.execute_query = AsyncMock(
+        return_value=[
+            {"source_id": "task-1", "target_id": "project-1"},
+            {"source_id": "task-1", "target_id": "outside"},
+            {"source_id": "task-2", "target_id": "project-1"},
+            {"source_id": "task-2", "target_id": "task-2"},
+        ]
+    )
+    relationships = AsyncMock()
+    relationships.list_all = AsyncMock()
+    client = MagicMock()
+    client.get_org_driver.return_value = driver
+
+    with (
+        patch("sibyl.persistence.legacy.graph.EntityManager", return_value=AsyncMock()),
+        patch("sibyl.persistence.legacy.graph.RelationshipManager", return_value=relationships),
+        patch("sibyl.persistence.graph_runtime._surreal_driver_for", return_value=driver),
+    ):
+        adapter = LegacyGraphQueryAdapter(client, "org-1")
+        counts = await adapter.get_connection_counts(
+            ["task-1", "project-1", "task-2"],
+            relationship_types=[RelationshipType.BELONGS_TO],
+        )
+
+    assert counts == {
+        "task-1": 2,
+        "project-1": 2,
+        "task-2": 2,
+    }
+    relationships.list_all.assert_not_awaited()
+    query = driver.execute_query.await_args.args[0]
+    assert "FROM relates_to" in query
+    assert "in.uuid IN $entity_ids OR out.uuid IN $entity_ids" in query
+    assert "name IN $relationship_types" in query
+    assert driver.execute_query.await_args.kwargs == {
+        "group_id": "org-1",
+        "entity_ids": ["project-1", "task-1", "task-2"],
+        "relationship_types": ["BELONGS_TO"],
+    }
+
+
+@pytest.mark.asyncio
 async def test_get_legacy_graph_query_adapter_uses_graph_client() -> None:
     client = MagicMock()
 

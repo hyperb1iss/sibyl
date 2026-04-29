@@ -971,6 +971,31 @@ class GraphQueryAdapter:
             return {}
 
         counts = dict.fromkeys(scoped_entity_ids, 0)
+        if _surreal_driver_for(self._driver) is not None:
+            type_clause = "AND name IN $relationship_types" if relationship_types else ""
+            rows = GraphClient.normalize_result(
+                await self._driver.execute_query(
+                    f"""
+                    SELECT in.uuid AS source_id, out.uuid AS target_id
+                    FROM relates_to
+                    WHERE group_id = $group_id
+                      AND (in.uuid IN $entity_ids OR out.uuid IN $entity_ids)
+                      {type_clause};
+                    """,  # noqa: S608
+                    group_id=self._group_id,
+                    entity_ids=sorted(scoped_entity_ids),
+                    relationship_types=[rel.value for rel in relationship_types or []],
+                )
+            )
+            for row in rows:
+                source_id = str(row.get("source_id") or "")
+                target_id = str(row.get("target_id") or "")
+                if source_id in counts:
+                    counts[source_id] += 1
+                if target_id in counts and target_id != source_id:
+                    counts[target_id] += 1
+            return counts
+
         page_offset = 0
         page_size = 1000
 
