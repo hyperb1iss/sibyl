@@ -2,24 +2,31 @@
 
 Captured during the Sibyl task burn-down session on `feat/surrealdb-driver-phase1` on 2026-04-20. We
 pushed the live API through roughly 140 archive and complete operations while SurrealDB was the
-active graph backend. The result is encouraging: there appears to be one real Phase 1 blocker, a
-small follow-up tail, and a couple of items that are already fixed.
+active graph backend.
+
+Updated after the server-mode runtime and follow-up hardening work: the original blocker and the
+known follow-up tail are now resolved. Keep this document as historical context for why the current
+runtime defaults matter, not as the active Surreal roadmap.
 
 ## TL;DR
 
-The primary blocker is still the same: `api` and `worker` are both opening the same embedded
-`surrealkv://` store from separate OS processes. Under concurrent writes, readers drift into stale
-views of the graph and recently written entities start returning 404 or empty scans.
+The original primary blocker was `api` and `worker` sharing an embedded `surrealkv://` store from
+separate OS processes. Local Surreal development now runs through a SurrealDB server at
+`ws://127.0.0.1:8000/rpc`, with local coordination avoiding the old worker split unless Redis
+coordination is explicitly enabled.
 
-The rest of the tail is smaller than the first draft made it look:
+Additional follow-ups from the burn-down have also landed:
 
-- A few remaining tools and UX paths still need cleanup.
-- `stats` and missing-entity delete handling are already fixed and should no longer be tracked as
-  active blockers.
+- bulk archive reports per-ID failures and accepts UUID task IDs from stdin
+- mixed graph/document search uses rank fusion so documents do not starve graph entities
+- Surreal graph runtime adapters fail closed before legacy Cypher fallbacks
+- refresh-token malformed org claims return controlled auth failures
+- `stats`, missing-entity deletes, debug query dialect checks, skill examples, and graph UI
+  stability fixes are no longer active blockers
 
 ---
 
-## Confirmed Active Blocker
+## Resolved Primary Blocker
 
 ### Shared embedded `surrealkv://` store across `api` and `worker`
 
@@ -81,54 +88,55 @@ looks accurate. The current dev runtime intentionally picks the newest rehearsal
 That means the bug is not "the wrong file got picked." The bug is that both `api` and `worker` are
 embedding the same file-backed store at all.
 
-#### Recommended fix
+#### Resolution
 
-Move SurrealDB to server mode and have both `api` and `worker` connect over `ws://` or `http://`.
-This is the highest-leverage remaining change in Phase 1.
+The local development runtime now starts a SurrealDB server and points the API at the WebSocket RPC
+endpoint. The default `moon run dev` flow sets `SIBYL_STORE=surreal`,
+`SIBYL_AUTH_STORE=surreal`, `SIBYL_COORDINATION_BACKEND=local`, and
+`SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc`.
 
-Rough shape:
-
-```yaml
-surrealdb:
-  image: surrealdb/surrealdb:latest
-  command: start --user root --pass root rocksdb:///data/sibyl.db
-  volumes:
-    - surreal-data:/data
-  ports:
-    - "8000:8000"
-```
-
-The driver work is already in good shape for remote mode. What remains is runtime and infra wiring:
-
-- add a SurrealDB service to local orchestration
-- point `api` and `worker` at the server URL
-- update the `moon` and dev-shell entrypoints accordingly
-
-This is bigger than an env var flip, but it is still a contained Phase 1 change.
+Embedded Surreal storage remains useful for tests and single-process tools. It is no longer the
+default multi-process dev runtime.
 
 ---
 
 ## Active Follow-up Bugs
 
-These still matter, but they are not all the same class of blocker.
-
-### 1. Bulk archive mode still lacks per-ID failure detail
-
-**Where:** CLI archive bulk mode with `--stdin`
-
-The archive summary reports success and failure counts, but not which task IDs failed. That makes
-retries and postmortems annoying, especially when the underlying failure mode is partial success.
-
-Recommended follow-up:
-
-- add `--json` output for per-ID results
-- or print the failed IDs inline in human output
+No active bugs remain from the original burn-down list. The next work belongs in the Surreal
+cutover roadmap: seam cleanup, rehearsal, backup/restore confidence, and removing the last Postgres
+safety rails once a fully-Surreal run is proven.
 
 ---
 
 ## Already Fixed During Burn-down
 
 These should move out of the active blocker list.
+
+### Shared embedded Surreal dev runtime replaced with server mode
+
+The old `api` plus worker embedded-store failure is resolved by the current server-mode local
+runtime.
+
+### Bulk archive reports per-ID failures
+
+`sibyl task archive --stdin` now reports full per-ID results in JSON mode, lists failed IDs in human
+output, and accepts UUID task IDs from stdin.
+
+### Mixed search fuses graph and document rankings
+
+`sibyl search` now rank-fuses graph and document results instead of sorting raw scores across stores,
+so graph entities can appear alongside ingested docs.
+
+### Surreal graph adapters fail closed before Cypher fallbacks
+
+Runtime graph relationship adapters now raise controlled errors instead of issuing legacy Cypher
+when a Surreal driver is active but native edge operations are unavailable. Count paths use direct
+SurrealQL `SELECT` statements.
+
+### Refresh-token malformed org claims return controlled auth failures
+
+Malformed `org` claims in browser/API refresh tokens return `401 Invalid token claims`; MCP OAuth
+refresh exchange returns `invalid_grant`.
 
 ### `/api/admin/stats` is no longer the broken zero-everything path
 
@@ -202,13 +210,12 @@ The session was messy, but not wasted. The remaining work looks tractable.
 
 ## Recommended Next Steps
 
-1. Move local SurrealDB to server mode and wire `api` plus `worker` to it.
-2. Add per-ID output for bulk archive results.
-3. Re-run the burn-down after server mode and verify list, explore, graph, and archive behavior in
-   one pass.
-
-If we do that in order, Phase 1 stops looking like "death by a thousand bugs" and starts looking
-like what it probably is: one infra/runtime blocker plus a small cleanup tail.
+1. Run a fully-Surreal rehearsal with Postgres stopped.
+2. Verify login/logout/refresh, API keys, org/project flows, crawler writes, RAG/search, backup, and
+   restore.
+3. Confirm no normal request, startup, health, or worker path opens a SQL session in fully-Surreal
+   mode.
+4. Use the green rehearsal as the deletion gate for remaining legacy auth/content safety rails.
 
 ---
 
