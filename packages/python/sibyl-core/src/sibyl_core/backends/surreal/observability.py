@@ -9,6 +9,8 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.utils.log_safety import fingerprint_text
+
 log = structlog.get_logger()
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -81,6 +83,38 @@ def _query_hash(query: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
 
 
+def _error_message(error: BaseException) -> str:
+    surreal_message = getattr(error, "surreal_message", None)
+    if isinstance(surreal_message, str):
+        return surreal_message
+    return str(error)
+
+
+def _error_category(message: str) -> str:
+    lowered = message.lower()
+    if "parse error" in lowered:
+        return "parse_error"
+    if "no suitable index" in lowered:
+        return "missing_index"
+    if "already contains" in lowered or "unique" in lowered:
+        return "constraint"
+    if "timed out" in lowered or "timeout" in lowered:
+        return "timeout"
+    if "connection" in lowered or "websocket" in lowered:
+        return "connection"
+    return "query_error"
+
+
+def _error_log_fields(error: BaseException) -> dict[str, int | str]:
+    message = _error_message(error)
+    return {
+        "error_type": type(error).__name__,
+        "error_category": _error_category(message),
+        "error_hash": fingerprint_text(message),
+        "error_length": len(message),
+    }
+
+
 def log_query(
     query: str,
     *,
@@ -105,7 +139,7 @@ def log_query(
         "query_hash": _query_hash(query),
     }
     if error is not None:
-        log.warning("surreal_query_failed", error_type=type(error).__name__, **fields)
+        log.warning("surreal_query_failed", **_error_log_fields(error), **fields)
         return
     if elapsed >= _slow_query_threshold_ms():
         log.warning("surreal_query_slow", **fields)

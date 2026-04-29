@@ -97,6 +97,9 @@ def test_failed_query_logs_warning(monkeypatch) -> None:
     assert level == "warning"
     assert event == "surreal_query_failed"
     assert fields["error_type"] == "RuntimeError"
+    assert fields["error_category"] == "query_error"
+    assert len(fields["error_hash"]) == 12
+    assert fields["error_length"] == 4
     assert fields["statement"] == "update"
     assert fields["tables"] == ["system_settings"]
 
@@ -119,6 +122,33 @@ def test_failed_query_log_does_not_include_surreal_query_error_text(monkeypatch)
     _level, event, fields = fake_log.events[0]
     assert event == "surreal_query_failed"
     assert fields["error_type"] == "SurrealQueryError"
+    assert fields["error_category"] == "query_error"
+    assert len(fields["error_hash"]) == 12
+    assert fields["error_length"] == len("bad query")
     assert "error" not in fields
     assert "secret literal token" not in str(fields)
     assert query not in str(fields)
+
+
+def test_failed_query_log_classifies_safe_surreal_errors(monkeypatch) -> None:
+    fake_log = FakeLog()
+    monkeypatch.setattr(observability, "log", fake_log)
+
+    observability.log_query(
+        "DEFINE FIELD attributes ON entity TYPE object FLEXIBLE DEFAULT {};",
+        client_kind="graph",
+        namespace="org_safe",
+        database="graph",
+        raw=False,
+        elapsed=0.4,
+        error=SurrealQueryError(
+            "DEFINE FIELD attributes ON entity TYPE object FLEXIBLE DEFAULT {};",
+            "Parse error: FLEXIBLE must be specified after TYPE",
+        ),
+    )
+
+    _level, event, fields = fake_log.events[0]
+    assert event == "surreal_query_failed"
+    assert fields["error_category"] == "parse_error"
+    assert len(fields["error_hash"]) == 12
+    assert "FLEXIBLE must be specified" not in str(fields)
