@@ -338,12 +338,12 @@ async def search(
         # If only 'document' is in types, skip graph search
         type_set = {t.lower() for t in types}
         if "document" in type_set:
-            search_documents = True
+            search_documents = include_documents
             if type_set == {"document"}:
                 search_graph = False
         elif source_id or source_name:
             # If source filters are set but document not in types, add document search
-            search_documents = True
+            search_documents = include_documents
         else:
             # Types specified but document not included - skip document search
             search_documents = False

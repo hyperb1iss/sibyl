@@ -896,8 +896,44 @@ class TestSearchTool:
             organization_id="org_123",
             include_documents=False,  # Still skip actual doc search
         )
-        # Should not have created EntityManager for graph search
         assert response.graph_count == 0
+        assert response.document_count == 0
+
+    @pytest.mark.asyncio
+    async def test_search_document_type_respects_include_documents_false(self) -> None:
+        """Explicit store toggles win over document type expansion."""
+        search_module = import_module("sibyl_core.tools.search")
+        document_search = AsyncMock(return_value=[])
+
+        with patch("sibyl_core.tools.search._search_documents", document_search):
+            response = await search_module.search(
+                query="test",
+                types=["document"],
+                organization_id="org_123",
+                include_documents=False,
+            )
+
+        assert response.total == 0
+        document_search.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_search_source_filters_respect_include_documents_false(self) -> None:
+        """Graph-only searches stay graph-only even with document source filters."""
+        search_module = import_module("sibyl_core.tools.search")
+        document_search = AsyncMock(return_value=[])
+
+        with patch("sibyl_core.tools.search._search_documents", document_search):
+            response = await search_module.search(
+                query="test",
+                types=["pattern"],
+                source_name="Next.js",
+                organization_id="org_123",
+                include_documents=False,
+                include_graph=False,
+            )
+
+        assert response.total == 0
+        document_search.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_search_empty_query_skips_graph(self) -> None:

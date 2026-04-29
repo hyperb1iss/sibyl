@@ -335,11 +335,27 @@ def search(
     entity_type: str | None = typer.Option(None, "--type", "-t", help="Filter by entity type"),
     limit: int = typer.Option(10, "--limit", "-l", help="Maximum results"),
     all_projects: bool = typer.Option(False, "--all", "-a", help="Search all projects"),
+    graph_only: bool = typer.Option(False, "--graph-only", help="Search graph memory only"),
+    docs_only: bool = typer.Option(False, "--docs-only", help="Search crawled docs only"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ) -> None:
     """Search the knowledge graph."""
+    if graph_only and docs_only:
+        error("--graph-only and --docs-only cannot be combined")
+        raise typer.Exit(1)
+
+    normalized_type = entity_type.lower() if entity_type else None
+    if graph_only and normalized_type == "document":
+        error("--graph-only cannot be combined with --type document")
+        raise typer.Exit(1)
+    if docs_only and normalized_type and normalized_type != "document":
+        error("--docs-only can only be combined with --type document")
+        raise typer.Exit(1)
+
     # Auto-resolve project from context unless --all
     effective_project = None if all_projects else resolve_project_from_cwd()
+    include_documents = not graph_only
+    include_graph = not docs_only
 
     @run_async
     async def run_search() -> None:
@@ -347,7 +363,12 @@ def search(
             async with get_client() as client:
                 types = [entity_type] if entity_type else None
                 data = await client.search(
-                    query, types=types, limit=limit, project=effective_project
+                    query,
+                    types=types,
+                    limit=limit,
+                    project=effective_project,
+                    include_documents=include_documents,
+                    include_graph=include_graph,
                 )
 
                 if json_output:
@@ -367,12 +388,20 @@ def search(
                     content = r.get("content", "")
                     metadata = r.get("metadata", {})
                     heading_path = metadata.get("heading_path", [])
+                    origin = str(
+                        r.get("result_origin")
+                        or ("document" if metadata.get("document_id") else "graph")
+                    ).lower()
+                    origin_label = "docs" if origin == "document" else "graph"
 
                     # Header: Document name (source)
                     # Skip file paths - they're not useful. Show source name only.
                     display_source = source if source and not source.startswith("/") else None
                     source_info = f" ({display_source})" if display_source else ""
-                    console.print(f"  [{NEON_CYAN}]{name}[/{NEON_CYAN}][dim]{source_info}[/dim]")
+                    console.print(
+                        f"  [dim]{origin_label}[/dim] "
+                        f"[{NEON_CYAN}]{name}[/{NEON_CYAN}][dim]{source_info}[/dim]"
+                    )
 
                     # Section path
                     if heading_path:

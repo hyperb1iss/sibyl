@@ -62,8 +62,74 @@ def test_search_command_renders_longer_previews(
         types=None,
         limit=10,
         project="project_123",
+        include_documents=True,
+        include_graph=True,
     )
     mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_search_command_can_search_graph_only(
+    mock_get_client: MagicMock, mock_resolve_project_from_cwd: MagicMock
+) -> None:
+    mock_client = MagicMock()
+    mock_client.search = AsyncMock(return_value={"results": []})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["search", "surreal graph", "--graph-only"])
+
+    assert result.exit_code == 0
+    mock_client.search.assert_called_once_with(
+        "surreal graph",
+        types=None,
+        limit=10,
+        project="project_123",
+        include_documents=False,
+        include_graph=True,
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_search_command_can_search_docs_only(
+    mock_get_client: MagicMock, mock_resolve_project_from_cwd: MagicMock
+) -> None:
+    mock_client = MagicMock()
+    mock_client.search = AsyncMock(return_value={"results": []})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["search", "nextjs", "--docs-only"])
+
+    assert result.exit_code == 0
+    mock_client.search.assert_called_once_with(
+        "nextjs",
+        types=None,
+        limit=10,
+        project="project_123",
+        include_documents=True,
+        include_graph=False,
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+def test_search_command_rejects_conflicting_store_flags() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["search", "surreal", "--graph-only", "--docs-only"])
+
+    assert result.exit_code == 1
+    assert "--graph-only and --docs-only cannot be combined" in result.stdout
+
+
+def test_search_command_rejects_docs_only_graph_type() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["search", "task", "--docs-only", "--type", "task"])
+
+    assert result.exit_code == 1
+    assert "--docs-only can only be combined with --type document" in result.stdout
 
 
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")

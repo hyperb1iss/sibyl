@@ -155,6 +155,12 @@ backlog <-> todo <-> doing <-> blocked <-> review <-> done -> archived
 # Semantic search across all types
 sibyl search "error handling patterns"
 
+# Search only graph memory when you want tasks, decisions, plans, episodes, or other saved context
+sibyl search "surreal graph search" --graph-only
+
+# Search only crawled documentation when you want external/reference docs
+sibyl search "Next.js proxy" --docs-only
+
 # Filter by entity type
 sibyl search "OAuth" --type pattern
 

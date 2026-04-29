@@ -740,6 +740,8 @@ class SibylClient:
         limit: int = 10,
         offset: int = 0,
         include_content: bool = True,
+        include_documents: bool = True,
+        include_graph: bool = True,
     ) -> dict[str, Any]:
         """Semantic search across the knowledge graph."""
         data: dict[str, Any] = {
@@ -747,6 +749,8 @@ class SibylClient:
             "limit": limit,
             "offset": offset,
             "include_content": include_content,
+            "include_documents": include_documents,
+            "include_graph": include_graph,
         }
         if types:
             data["types"] = types
