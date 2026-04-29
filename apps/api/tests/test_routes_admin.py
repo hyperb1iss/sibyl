@@ -71,6 +71,22 @@ async def test_debug_query_uses_debug_runner() -> None:
 
 
 @pytest.mark.asyncio
+async def test_debug_query_allows_read_only_names_containing_mutation_words() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    request = DebugQueryRequest(cypher="SELECT * FROM system_settings LIMIT 1")
+    mock_execute = AsyncMock(return_value=[{"key": "theme"}])
+
+    with patch("sibyl.api.routes.admin.execute_debug_query", mock_execute):
+        response = await debug_query(request=request, org=org)
+
+    assert response.row_count == 1
+    mock_execute.assert_awaited_once_with(
+        "SELECT * FROM system_settings LIMIT 1",
+        group_id=str(org.id),
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "query",
     [

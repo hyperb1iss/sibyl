@@ -1,5 +1,6 @@
 """Admin endpoints for health, stats, backup, and restore."""
 
+import re
 from typing import Any
 
 import structlog
@@ -268,8 +269,8 @@ def _is_read_only(cypher: str) -> bool:
         "UPSERT",
         "UPDATE",
     ]
-    upper = cypher.upper()
-    return not any(d in upper for d in dangerous)
+    tokens = {token.upper() for token in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", cypher)}
+    return not any(keyword in tokens for keyword in dangerous)
 
 
 @router.post(
