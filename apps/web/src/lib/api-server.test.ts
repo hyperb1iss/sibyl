@@ -30,7 +30,7 @@ describe('api-server', () => {
 
     expect(timeoutSpy).toHaveBeenCalledWith(5000);
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:3334/api/admin/stats',
+      'http://127.0.0.1:3334/api/admin/stats',
       expect.objectContaining({
         signal: timeoutSignal,
         headers: expect.objectContaining({

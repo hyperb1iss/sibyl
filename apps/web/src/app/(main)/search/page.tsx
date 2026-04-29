@@ -20,7 +20,14 @@ export default async function SearchPage({ searchParams }: PageProps) {
 
   // Only fetch if there's a query in the URL
   const [initialResults, stats] = await Promise.all([
-    query ? fetchSearchResults({ query, limit: 50 }).catch(() => undefined) : undefined,
+    query
+      ? fetchSearchResults({
+          query,
+          limit: 50,
+          include_documents: false,
+          include_graph: true,
+        }).catch(() => undefined)
+      : undefined,
     fetchStats().catch(() => undefined),
   ]);
 

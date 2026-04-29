@@ -42,6 +42,12 @@ describe('SearchPage', () => {
     );
 
     expect(screen.getByTestId('search-content')).toBeInTheDocument();
+    expect(apiServer.fetchSearchResults).toHaveBeenCalledWith({
+      query: 'retry',
+      limit: 50,
+      include_documents: false,
+      include_graph: true,
+    });
     expect(searchContent).toHaveBeenCalledWith(
       expect.objectContaining({
         initialQuery: 'retry',

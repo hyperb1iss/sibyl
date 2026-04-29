@@ -42,7 +42,6 @@ const SEARCHABLE_TYPES = [
   'task',
   'episode',
   'topic',
-  'document',
 ] as const;
 
 // Common programming languages for code filter
@@ -132,6 +131,7 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
       since: sinceDate || undefined,
       limit: 50,
       include_documents: false, // Knowledge mode searches only the graph
+      include_graph: true,
     },
     {
       enabled: mode === 'knowledge' && submittedQuery.length > 0,

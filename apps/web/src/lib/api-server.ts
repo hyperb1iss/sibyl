@@ -215,6 +215,8 @@ export async function fetchSearchResults(params: {
   category?: string;
   limit?: number;
   include_content?: boolean;
+  include_documents?: boolean;
+  include_graph?: boolean;
 }): Promise<SearchResponse> {
   return serverFetch<SearchResponse>('/search', {
     method: 'POST',
