@@ -127,11 +127,11 @@ def _rank_fuse_search_results(
     ranked_sources = [
         [
             (result, result.score)
-            for result in sorted(doc_results, key=lambda r: r.score, reverse=True)
+            for result in sorted(graph_results, key=lambda r: r.score, reverse=True)
         ],
         [
             (result, result.score)
-            for result in sorted(graph_results, key=lambda r: r.score, reverse=True)
+            for result in sorted(doc_results, key=lambda r: r.score, reverse=True)
         ],
     ]
     return [result for result, _score in rrf_merge(ranked_sources, dedup_key=lambda r: r.id)]

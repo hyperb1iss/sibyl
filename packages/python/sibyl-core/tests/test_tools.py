@@ -1287,10 +1287,10 @@ class TestSearchTool:
         assert response.graph_count == 2
         assert response.document_count == 3
         assert [result.result_origin for result in response.results] == [
-            "document",
             "graph",
             "document",
             "graph",
+            "document",
             "document",
         ]
 
