@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
+from sibyl.auth.passwords import hash_password
 from sibyl.auth.primitives import DeviceTokenError
 from sibyl.db.models import ProjectRole
 from sibyl.persistence.surreal import auth as surreal_auth, auth_runtime as surreal_auth_runtime
@@ -212,6 +213,129 @@ async def test_surreal_repository_replace_record_uses_single_upsert_statement() 
     assert "UPSERT user_sessions CONTENT $record WHERE uuid = $uuid" in query
     assert "DELETE FROM user_sessions" not in query
     assert params == {"uuid": str(session_id), "record": record}
+
+
+@pytest.mark.asyncio
+async def test_update_auth_user_changes_password_without_repository_reload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    password_state = hash_password("old-password")
+    user_record = {
+        "uuid": str(user_id),
+        "email": "bliss@example.com",
+        "name": "Bliss",
+        "password_salt": password_state.salt_hex,
+        "password_hash": password_state.hash_hex,
+        "password_iterations": password_state.iterations,
+    }
+    written_record: dict[str, object] = {}
+    users = SimpleNamespace(
+        get_by_email=AsyncMock(return_value=None),
+        get_by_id=AsyncMock(side_effect=AssertionError("unexpected user reload")),
+        change_password=AsyncMock(side_effect=AssertionError("unexpected password write")),
+    )
+
+    async def replace_record(_self, table, *, uuid, record):
+        written_record.update(record)
+        return record
+
+    select_one = AsyncMock(return_value=user_record)
+    audit = AsyncMock()
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(object()),
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime.SurrealUserRepository,
+        "from_client",
+        lambda client: users,
+    )
+    monkeypatch.setattr(surreal_auth_runtime._SurrealRepository, "select_one", select_one)
+    monkeypatch.setattr(
+        surreal_auth_runtime._SurrealRepository,
+        "replace_record",
+        replace_record,
+    )
+    monkeypatch.setattr(surreal_auth_runtime, "_log_audit_event", audit)
+
+    updated = await surreal_auth_runtime.update_auth_user(
+        user_id=user_id,
+        email=None,
+        name=None,
+        avatar_url=None,
+        current_password="old-password",
+        new_password="new-password",
+        organization_id=None,
+        request=None,
+    )
+
+    assert updated.id == user_id
+    assert select_one.await_count == 1
+    users.get_by_id.assert_not_awaited()
+    users.change_password.assert_not_awaited()
+    assert written_record["password_hash"] != password_state.hash_hex
+    assert written_record["password_salt"] != password_state.salt_hex
+    audit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_auth_user_rejects_invalid_current_password_before_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    password_state = hash_password("old-password")
+    user_record = {
+        "uuid": str(user_id),
+        "email": "bliss@example.com",
+        "name": "Bliss",
+        "password_salt": password_state.salt_hex,
+        "password_hash": password_state.hash_hex,
+        "password_iterations": password_state.iterations,
+    }
+    replace_record = AsyncMock(side_effect=AssertionError("unexpected user write"))
+    audit = AsyncMock(side_effect=AssertionError("unexpected audit log"))
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(object()),
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime.SurrealUserRepository,
+        "from_client",
+        lambda client: SimpleNamespace(get_by_email=AsyncMock(return_value=None)),
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime._SurrealRepository,
+        "select_one",
+        AsyncMock(return_value=user_record),
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime._SurrealRepository,
+        "replace_record",
+        replace_record,
+    )
+    monkeypatch.setattr(surreal_auth_runtime, "_log_audit_event", audit)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_auth_runtime.update_auth_user(
+            user_id=user_id,
+            email=None,
+            name=None,
+            avatar_url=None,
+            current_password="wrong-password",
+            new_password="new-password",
+            organization_id=None,
+            request=None,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Invalid current password"
+    replace_record.assert_not_awaited()
+    audit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

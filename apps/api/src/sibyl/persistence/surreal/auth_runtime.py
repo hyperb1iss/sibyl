@@ -23,7 +23,7 @@ from sibyl.auth.api_key_common import (
 )
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import JwtError, create_access_token, create_refresh_token, verify_access_token
-from sibyl.auth.passwords import hash_password, verify_password
+from sibyl.auth.passwords import PasswordError, hash_password, verify_password
 from sibyl.auth.primitives import (
     DeviceTokenError,
     generate_device_code,
@@ -40,7 +40,7 @@ from sibyl.persistence.surreal.auth import (
     build_surreal_auth_client,
     surreal_auth_client_scope,
 )
-from sibyl_core.auth import AuthSession, OrganizationRole, PasswordChange
+from sibyl_core.auth import AuthSession, OrganizationRole
 
 _ORG_ADMIN_ROLE_VALUES = {"owner", "admin"}
 _PROJECT_ROLE_LEVELS: dict[ProjectRole, int] = {
@@ -278,6 +278,43 @@ def _auth_org_namespace(record: dict[str, Any] | None) -> SimpleNamespace | None
         uuid_fields={"uuid"},
         datetime_fields=_ORG_DATETIME_FIELDS,
     )
+
+
+def _apply_password_change(
+    record: dict[str, Any],
+    *,
+    current_password: str | None,
+    new_password: str,
+) -> dict[str, Any]:
+    updated = dict(record)
+    if (
+        record.get("password_salt")
+        and record.get("password_hash")
+        and record.get("password_iterations")
+    ):
+        if not current_password:
+            raise HTTPException(status_code=400, detail="Current password is required")
+        try:
+            password_matches = verify_password(
+                current_password,
+                salt_hex=str(record["password_salt"]),
+                hash_hex=str(record["password_hash"]),
+                iterations=int(record["password_iterations"]),
+            )
+        except (TypeError, ValueError):
+            password_matches = False
+        if not password_matches:
+            raise HTTPException(status_code=400, detail="Invalid current password")
+
+    try:
+        password_state = hash_password(new_password)
+    except PasswordError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    updated["password_salt"] = password_state.salt_hex
+    updated["password_hash"] = password_state.hash_hex
+    updated["password_iterations"] = password_state.iterations
+    return updated
 
 
 def _session_namespace(record: dict[str, Any] | None) -> SimpleNamespace | None:
@@ -1851,22 +1888,11 @@ async def update_auth_user(
             updated["avatar_url"] = avatar_url.strip() or None
             changes.append("avatar_url")
         if new_password is not None:
-            auth_user = await users.get_by_id(user_id)
-            if auth_user is None:
-                raise HTTPException(status_code=404, detail="User not found")
-            changed_user = await users.change_password(
-                auth_user,
-                PasswordChange(current_password=current_password, new_password=new_password),
+            updated = _apply_password_change(
+                updated,
+                current_password=current_password,
+                new_password=new_password,
             )
-            updated["password_salt"] = user.get("password_salt")
-            updated["password_hash"] = user.get("password_hash")
-            updated["password_iterations"] = user.get("password_iterations")
-            refreshed = await repo.select_one(
-                "SELECT * FROM users WHERE uuid = $uuid LIMIT 1;",
-                uuid=str(changed_user.id),
-            )
-            if refreshed is not None:
-                updated = refreshed
             changes.append("password")
         if not changes:
             raise HTTPException(status_code=400, detail="No fields to update")
