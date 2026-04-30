@@ -19,10 +19,11 @@ from sibyl.api.schemas import (
     TemporalRequest,
     TemporalResponse,
 )
+from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.auth.errors import ProjectAccessDeniedError
-from sibyl.db.models import Organization, OrganizationRole
+from sibyl.db.models import Organization, OrganizationRole, ProjectRole
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 
 log = structlog.get_logger()
@@ -65,16 +66,17 @@ async def search(
 
         group_id = str(org.id)
 
-        # Get accessible project IDs for filtering
-        accessible_projects = await list_accessible_project_graph_ids(ctx)
-
-        # If user specified a project, validate they have access
         project_filter = request.project
-        if project_filter and project_filter not in accessible_projects:
-            raise ProjectAccessDeniedError(
-                project_id=project_filter,
-                required_role="viewer",
+        if project_filter:
+            await verify_entity_project_access(
+                None,
+                ctx,
+                project_filter,
+                required_role=ProjectRole.VIEWER,
             )
+            accessible_projects = None
+        else:
+            accessible_projects = await list_accessible_project_graph_ids(ctx)
 
         # Pass accessible projects to filter results
         # If a specific project is requested, use that; otherwise use accessible set
@@ -85,7 +87,7 @@ async def search(
             category=request.category,
             status=request.status,
             project=project_filter,
-            accessible_projects=accessible_projects if not project_filter else None,
+            accessible_projects=accessible_projects,
             source=request.source,
             source_id=request.source_id,
             source_name=request.source_name,
@@ -126,9 +128,6 @@ async def explore(
 
         group_id = str(org.id)
 
-        # Get accessible project IDs for filtering
-        accessible_projects = await list_accessible_project_graph_ids(ctx)
-
         project_ids = request.project_ids or ([request.project] if request.project else None)
 
         if request.mode == "dependencies" and request.project_ids:
@@ -137,20 +136,32 @@ async def explore(
                 detail="dependencies mode does not support project_ids",
             )
 
-        # If user specified projects, validate they have access
-        invalid_project_id = next(
-            (
-                project_id
-                for project_id in (project_ids or [])
-                if project_id not in accessible_projects
-            ),
-            None,
-        )
-        if invalid_project_id:
-            raise ProjectAccessDeniedError(
-                project_id=invalid_project_id,
-                required_role="viewer",
+        if request.project_ids:
+            accessible_projects = await list_accessible_project_graph_ids(ctx)
+            invalid_project_id = next(
+                (
+                    project_id
+                    for project_id in request.project_ids
+                    if project_id not in accessible_projects
+                ),
+                None,
             )
+            if invalid_project_id:
+                raise ProjectAccessDeniedError(
+                    project_id=invalid_project_id,
+                    required_role="viewer",
+                )
+            accessible_filter = None
+        elif request.project:
+            await verify_entity_project_access(
+                None,
+                ctx,
+                request.project,
+                required_role=ProjectRole.VIEWER,
+            )
+            accessible_filter = None
+        else:
+            accessible_filter = await list_accessible_project_graph_ids(ctx)
 
         result = await core_explore(
             mode=request.mode,
@@ -162,7 +173,7 @@ async def explore(
             category=request.category,
             project=request.project if request.mode == "dependencies" else None,
             project_ids=project_ids if request.mode != "dependencies" else None,
-            accessible_projects=accessible_projects if not project_ids else None,
+            accessible_projects=accessible_filter,
             epic=request.epic,
             no_epic=request.no_epic,
             status=request.status,
