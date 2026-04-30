@@ -229,6 +229,69 @@ class TestDriverConnection:
         assert result == [{"ok": True}]
         assert len(calls) == 1
 
+    async def test_execute_query_allows_cypher_words_inside_comments(
+        self, monkeypatch
+    ) -> None:
+        driver = SurrealDriver("memory://").clone("org-abc")
+        calls: list[str] = []
+
+        async def fake_query(query: str, params: object | None = None) -> list[dict[str, object]]:
+            calls.append(query)
+            return [{"ok": True}]
+
+        async def fake_ensure_client() -> SimpleNamespace:
+            return SimpleNamespace(query=fake_query)
+
+        monkeypatch.setattr(driver, "_ensure_client", fake_ensure_client)
+
+        result = await driver.execute_query(
+            """
+            -- MATCH (n)
+            /* CALL db.index.fulltext.queryNodes */
+            // UNWIND rows AS row
+            SELECT * FROM entity LIMIT 1
+            """
+        )
+
+        assert result == [{"ok": True}]
+        assert len(calls) == 1
+
+    async def test_execute_query_allows_cypher_words_in_params_and_fields(
+        self, monkeypatch
+    ) -> None:
+        driver = SurrealDriver("memory://").clone("org-abc")
+        calls: list[tuple[str, object | None]] = []
+
+        async def fake_query(query: str, params: object | None = None) -> list[dict[str, object]]:
+            calls.append((query, params))
+            return [{"call": "ok"}]
+
+        async def fake_ensure_client() -> SimpleNamespace:
+            return SimpleNamespace(query=fake_query)
+
+        monkeypatch.setattr(driver, "_ensure_client", fake_ensure_client)
+
+        result = await driver.execute_query(
+            "SELECT call FROM entity WHERE summary @0@ $match LIMIT 1",
+            match="memory",
+        )
+
+        assert result == [{"call": "ok"}]
+        assert len(calls) == 1
+
+    async def test_execute_query_rejects_untranslated_call_db_before_client(
+        self, monkeypatch
+    ) -> None:
+        driver = SurrealDriver("memory://").clone("org-abc")
+
+        async def fake_ensure_client() -> SimpleNamespace:
+            raise AssertionError("unsupported CALL db query should not reach Surreal client")
+
+        monkeypatch.setattr(driver, "_ensure_client", fake_ensure_client)
+
+        with pytest.raises(SurrealQueryError, match="Unsupported Graphiti/Cypher query"):
+            await driver.execute_query("CALL db.labels() YIELD label RETURN label")
+
     async def test_execute_query_reconnects_and_retries_closed_read_socket(
         self, monkeypatch
     ) -> None:

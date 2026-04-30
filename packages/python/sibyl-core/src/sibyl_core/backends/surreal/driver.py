@@ -42,14 +42,12 @@ from graphiti_core.driver.driver import (
 from sibyl_core.backends.surreal.connection import _can_retry_query, _is_connection_closed_error
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.backends.surreal.observability import elapsed_ms, log_query, query_start
-from sibyl_core.utils.query import upper_query_tokens
 
 logger = logging.getLogger(__name__)
 
 # See module docstring "Provider tag" for rationale.
 _SURREAL_PROVIDER_TAG: GraphProvider = GraphProvider.NEO4J
 _MAX_CLOSED_CONNECTION_RETRIES = 2
-_UNSUPPORTED_GRAPHITI_TOKENS = frozenset({"CALL", "MATCH", "UNWIND"})
 
 
 def _raise_if_surreal_error(query: str, result: Any) -> None:
@@ -64,8 +62,71 @@ def _raise_if_surreal_error(query: str, result: Any) -> None:
                 raise SurrealQueryError(query, str(entry.get("result", entry)))
 
 
+def _significant_query_tokens(query: str) -> list[str]:
+    tokens: list[str] = []
+    index = 0
+    length = len(query)
+
+    while index < length:
+        char = query[index]
+        next_char = query[index + 1] if index + 1 < length else ""
+
+        if char in {"'", '"', "`"}:
+            quote = char
+            index += 1
+            while index < length:
+                current = query[index]
+                if current == "\\":
+                    index += 2
+                    continue
+                index += 1
+                if current == quote:
+                    break
+            continue
+
+        if char == "/" and next_char == "*":
+            index += 2
+            while index + 1 < length and not (query[index] == "*" and query[index + 1] == "/"):
+                index += 1
+            index = min(index + 2, length)
+            continue
+
+        if (char == "-" and next_char == "-") or (char == "/" and next_char == "/"):
+            index += 2
+            while index < length and query[index] not in "\r\n":
+                index += 1
+            continue
+
+        if char == "$":
+            index += 1
+            while index < length and (query[index].isalnum() or query[index] == "_"):
+                index += 1
+            continue
+
+        if char.isalpha() or char == "_":
+            start = index
+            index += 1
+            while index < length and (query[index].isalnum() or query[index] == "_"):
+                index += 1
+            tokens.append(query[start:index].upper())
+            continue
+
+        index += 1
+
+    return tokens
+
+
+def _unsupported_graphiti_tokens(query: str) -> set[str]:
+    tokens = _significant_query_tokens(query)
+    unsupported = {token for token in tokens if token in {"MATCH", "UNWIND"}}
+    for index, token in enumerate(tokens[:-1]):
+        if token == "CALL" and tokens[index + 1] == "DB":
+            unsupported.add("CALL")
+    return unsupported
+
+
 def _raise_if_unsupported_graphiti_query(query: str) -> None:
-    unsupported_tokens = upper_query_tokens(query) & _UNSUPPORTED_GRAPHITI_TOKENS
+    unsupported_tokens = _unsupported_graphiti_tokens(query)
     if unsupported_tokens:
         tokens = ", ".join(sorted(unsupported_tokens))
         raise SurrealQueryError(
