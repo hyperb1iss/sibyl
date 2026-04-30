@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
+from sibyl.db.models import ProjectRole
 from sibyl.persistence import auth_archive
 from sibyl.persistence.auth_archive import restore_auth_archive_payload
 from sibyl.persistence.surreal import auth as surreal_auth, auth_runtime as surreal_auth_runtime
@@ -359,7 +360,7 @@ async def test_surreal_accessible_projects_batch_query_runs_against_memory_backe
             "organization_id": str(organization_id),
             "project_id": str(direct_project_id),
             "user_id": str(user_id),
-            "role": "viewer",
+            "role": ProjectRole.VIEWER.value,
         },
     )
     await surreal_auth_client.execute_query(
@@ -378,7 +379,7 @@ async def test_surreal_accessible_projects_batch_query_runs_against_memory_backe
             "organization_id": str(organization_id),
             "team_id": str(team_id),
             "project_id": str(team_project_id),
-            "role": "viewer",
+            "role": ProjectRole.MAINTAINER.value,
         },
     )
 
@@ -397,6 +398,17 @@ async def test_surreal_accessible_projects_batch_query_runs_against_memory_backe
     )
 
     assert accessible == {"project_visible", "project_direct", "project_team"}
+    role = await surreal_auth_runtime.verify_entity_project_access(
+        ctx=SimpleNamespace(
+            organization=SimpleNamespace(id=organization_id),
+            user=SimpleNamespace(id=user_id),
+            org_role=OrganizationRole.MEMBER,
+        ),
+        entity_project_id="project_team",
+        required_role=ProjectRole.CONTRIBUTOR,
+    )
+
+    assert role is ProjectRole.MAINTAINER
 
 
 @pytest.mark.asyncio

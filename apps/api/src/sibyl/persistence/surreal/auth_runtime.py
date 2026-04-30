@@ -2333,14 +2333,48 @@ async def verify_entity_project_access(
             actual_role=ProjectRole.VIEWER if ctx.org_role else None,
         )
     async with _auth_client_scope() as client:
-        repo = _SurrealRepository(client)
-        record = await repo.select_one(
-            "SELECT * FROM projects "
-            "WHERE organization_id = $organization_id AND graph_project_id = $graph_project_id "
-            "LIMIT 1;",
+        payload = await client.execute_query(
+            """
+                RETURN {
+                    project: (
+                        SELECT * FROM projects
+                        WHERE organization_id = $organization_id
+                            AND graph_project_id = $graph_project_id
+                        LIMIT 1
+                    )[0],
+                    direct_membership: (
+                        SELECT * FROM project_members
+                        WHERE user_id = $user_id
+                            AND project_id IN (
+                                SELECT VALUE uuid FROM projects
+                                WHERE organization_id = $organization_id
+                                    AND graph_project_id = $graph_project_id
+                                LIMIT 1
+                            )
+                        LIMIT 1
+                    )[0],
+                    team_projects: (
+                        SELECT * FROM team_projects
+                        WHERE project_id IN (
+                                SELECT VALUE uuid FROM projects
+                                WHERE organization_id = $organization_id
+                                    AND graph_project_id = $graph_project_id
+                                LIMIT 1
+                            )
+                            AND team_id IN (
+                                SELECT VALUE team_id FROM team_members WHERE user_id = $user_id
+                            )
+                        LIMIT 10
+                    ),
+                };
+            """,
             organization_id=str(ctx.organization.id),
             graph_project_id=entity_project_id,
+            user_id=str(ctx.user.id),
         )
+        if not isinstance(payload, dict):
+            payload = {}
+        record = _normalize_record(payload.get("project"))
         if record is None:
             if _role_value(ctx.org_role) in _ORG_ADMIN_ROLE_VALUES:
                 return ProjectRole.OWNER
@@ -2353,7 +2387,12 @@ async def verify_entity_project_access(
                 required_role=required_role,
                 actual_role=ProjectRole.VIEWER if ctx.org_role else None,
             )
-        effective_role = await _effective_project_role(repo, ctx, record)
+        effective_role = _effective_project_role_from_records(
+            ctx=ctx,
+            project=record,
+            direct_record=_normalize_record(payload.get("direct_membership")),
+            team_project_records=_normalize_records(payload.get("team_projects")),
+        )
         if effective_role is None:
             from sibyl.auth.authorization import ProjectAuthorizationError
 
@@ -2373,38 +2412,25 @@ async def verify_entity_project_access(
         return effective_role
 
 
-async def _effective_project_role(
-    repo: _SurrealRepository,
+def _effective_project_role_from_records(
+    *,
     ctx,
     project: dict[str, Any],
+    direct_record: dict[str, Any] | None,
+    team_project_records: list[dict[str, Any]],
 ) -> ProjectRole | None:
     if _role_value(ctx.org_role) in _ORG_ADMIN_ROLE_VALUES:
         return ProjectRole.OWNER
     if _coerce_optional_uuid(project.get("owner_user_id")) == ctx.user.id:
         return ProjectRole.OWNER
-    direct_record = await repo.select_one(
-        "SELECT * FROM project_members WHERE project_id = $project_id AND user_id = $user_id LIMIT 1;",
-        project_id=str(project["uuid"]),
-        user_id=str(ctx.user.id),
-    )
     roles: list[ProjectRole] = []
     direct_role = _coerce_project_role(direct_record.get("role")) if direct_record else None
     if direct_role is not None:
         roles.append(direct_role)
-    team_members = await repo.select_many(
-        "SELECT * FROM team_members WHERE user_id = $user_id ORDER BY created_at ASC;",
-        user_id=str(ctx.user.id),
-    )
-    for team_member in team_members:
-        team_projects = await repo.select_many(
-            "SELECT * FROM team_projects WHERE team_id = $team_id AND project_id = $project_id LIMIT 10;",
-            team_id=str(team_member["team_id"]),
-            project_id=str(project["uuid"]),
-        )
-        for team_project in team_projects:
-            team_role = _coerce_project_role(team_project.get("role"))
-            if team_role is not None:
-                roles.append(team_role)
+    for team_project in team_project_records:
+        team_role = _coerce_project_role(team_project.get("role"))
+        if team_role is not None:
+            roles.append(team_role)
     if project.get("visibility") == ProjectVisibility.ORG.value:
         visibility_role = _coerce_project_role(project.get("default_role"))
         if visibility_role is not None:

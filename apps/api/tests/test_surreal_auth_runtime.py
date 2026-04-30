@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from sibyl.auth.primitives import DeviceTokenError
+from sibyl.db.models import ProjectRole
 from sibyl.persistence.surreal import auth as surreal_auth, auth_runtime as surreal_auth_runtime
 
 
@@ -189,6 +190,62 @@ async def test_list_accessible_project_graph_ids_batches_project_grants(
     assert "FROM team_members" in query
     assert "FROM team_projects" in query
     assert params == {"organization_id": str(org_id), "user_id": str(user_id)}
+
+
+@pytest.mark.asyncio
+async def test_verify_entity_project_access_batches_project_grants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    user_id = uuid4()
+    project_id = uuid4()
+    client = _RecordingAuthClient(
+        {
+            "project": {
+                "uuid": str(project_id),
+                "graph_project_id": "project_team",
+                "visibility": "private",
+            },
+            "direct_membership": {
+                "project_id": str(project_id),
+                "role": ProjectRole.VIEWER.value,
+            },
+            "team_projects": [
+                {"project_id": str(project_id), "role": ProjectRole.MAINTAINER.value}
+            ],
+        }
+    )
+    ctx = SimpleNamespace(
+        organization=SimpleNamespace(id=org_id),
+        user=SimpleNamespace(id=user_id),
+        org_role="member",
+    )
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+
+    role = await surreal_auth_runtime.verify_entity_project_access(
+        ctx=ctx,
+        entity_project_id="project_team",
+        required_role=ProjectRole.CONTRIBUTOR,
+    )
+
+    assert role is ProjectRole.MAINTAINER
+    assert len(client.calls) == 1
+    query, params = client.calls[0]
+    assert "RETURN" in query
+    assert "FROM projects" in query
+    assert "FROM project_members" in query
+    assert "FROM team_members" in query
+    assert "FROM team_projects" in query
+    assert params == {
+        "organization_id": str(org_id),
+        "graph_project_id": "project_team",
+        "user_id": str(user_id),
+    }
 
 
 @pytest.mark.asyncio
