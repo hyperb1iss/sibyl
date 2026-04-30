@@ -22,6 +22,7 @@ from sibyl_core.graph.surreal.ops._common import (
     build_relation_save_query,
     normalize_records,
     relation_record_id,
+    resolve_record_id,
     run_query,
 )
 
@@ -57,8 +58,6 @@ _ENTITY_EDGE_SAVE = build_relation_save_query(
         "valid_at",
         "invalid_at",
     ),
-    source_binding="(SELECT VALUE id FROM entity WHERE uuid = $src_uuid LIMIT 1)[0]",
-    target_binding="(SELECT VALUE id FROM entity WHERE uuid = $tgt_uuid LIMIT 1)[0]",
 )
 
 
@@ -87,14 +86,22 @@ class SurrealEntityEdgeOperations(EntityEdgeOperations):
         edge: EntityEdge,
         tx: Transaction | None = None,
     ) -> None:
+        src_id = await resolve_record_id(executor, tx, "entity", edge.source_node_uuid)
+        tgt_id = await resolve_record_id(executor, tx, "entity", edge.target_node_uuid)
+        if src_id is None or tgt_id is None:
+            raise ValueError(
+                "relates_to endpoint not found: "
+                f"{edge.source_node_uuid!r} -> {edge.target_node_uuid!r}"
+            )
+
         payload = _entity_edge_save_payload(edge)
         await run_query(
             executor,
             tx,
             _ENTITY_EDGE_SAVE,
             rel=relation_record_id("relates_to", edge.uuid),
-            src_uuid=edge.source_node_uuid,
-            tgt_uuid=edge.target_node_uuid,
+            src=src_id,
+            tgt=tgt_id,
             **payload,
         )
         logger.debug("Saved entity edge to SurrealDB: %s", edge.uuid)

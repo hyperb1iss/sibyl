@@ -346,6 +346,7 @@ class TestRelationshipBulkCreate:
         surreal_relationship_manager: RelationshipManager,
     ) -> None:
         ops = surreal_relationship_manager._driver.entity_edge_ops
+        ops.get_by_node_uuids = AsyncMock(return_value=[])
         ops.save_bulk = AsyncMock()
         relationships = [
             Relationship(
@@ -384,6 +385,109 @@ class TestRelationshipBulkCreate:
             ("entity-1", "RELATED_TO", "entity-2"),
             ("entity-2", "DEPENDS_ON", "entity-3"),
         }
+
+    @pytest.mark.asyncio
+    async def test_bulk_create_is_idempotent_against_existing_surreal_edges(
+        self,
+        surreal_relationship_manager: RelationshipManager,
+        sample_entity_edge: EntityEdge,
+    ) -> None:
+        ops = surreal_relationship_manager._driver.entity_edge_ops
+        ops.get_by_node_uuids = AsyncMock(return_value=[sample_entity_edge])
+        ops.save_bulk = AsyncMock()
+        relationships = [
+            Relationship(
+                id="rel-existing",
+                relationship_type=RelationshipType.RELATED_TO,
+                source_id="entity-001",
+                target_id="entity-002",
+                weight=1.0,
+            ),
+            Relationship(
+                id="rel-new",
+                relationship_type=RelationshipType.BELONGS_TO,
+                source_id="entity-003",
+                target_id="entity-004",
+                weight=1.0,
+            ),
+        ]
+
+        created, failed = await surreal_relationship_manager.create_bulk(relationships)
+
+        assert created == 2
+        assert failed == 0
+        ops.get_by_node_uuids.assert_awaited_once_with(
+            surreal_relationship_manager._driver,
+            ["entity-001", "entity-002", "entity-003", "entity-004"],
+            group_ids=[surreal_relationship_manager._group_id],
+        )
+        ops.save_bulk.assert_awaited_once()
+        saved_edges = ops.save_bulk.await_args.args[1]
+        assert [(edge.source_node_uuid, edge.name, edge.target_node_uuid) for edge in saved_edges] == [
+            ("entity-003", "BELONGS_TO", "entity-004")
+        ]
+
+    @pytest.mark.asyncio
+    async def test_bulk_create_does_not_duplicate_existing_surreal_triplets_live(
+        self,
+        surreal_relationship_manager: RelationshipManager,
+    ) -> None:
+        driver = surreal_relationship_manager._driver
+        await driver.build_indices_and_constraints()
+        for uuid in ("entity-001", "entity-002", "entity-003", "entity-004"):
+            await driver.entity_node_ops.save(
+                driver,
+                EntityNode(
+                    uuid=uuid,
+                    name=uuid,
+                    group_id=surreal_relationship_manager._group_id,
+                    labels=["Entity"],
+                    summary="",
+                    attributes={},
+                    name_embedding=None,
+                    created_at=datetime.now(UTC),
+                ),
+            )
+
+        await surreal_relationship_manager.create(
+            Relationship(
+                id="rel-existing",
+                relationship_type=RelationshipType.RELATED_TO,
+                source_id="entity-001",
+                target_id="entity-002",
+                weight=1.0,
+            )
+        )
+
+        created, failed = await surreal_relationship_manager.create_bulk(
+            [
+                Relationship(
+                    id="rel-duplicate",
+                    relationship_type=RelationshipType.RELATED_TO,
+                    source_id="entity-001",
+                    target_id="entity-002",
+                    weight=1.0,
+                ),
+                Relationship(
+                    id="rel-new",
+                    relationship_type=RelationshipType.BELONGS_TO,
+                    source_id="entity-003",
+                    target_id="entity-004",
+                    weight=1.0,
+                ),
+            ]
+        )
+
+        rows = await driver.execute_query(
+            "SELECT uuid, name, in.uuid AS source, out.uuid AS target FROM relates_to ORDER BY uuid;"
+        )
+
+        assert created == 2
+        assert failed == 0
+        assert [(row["uuid"], row["name"], row["source"], row["target"]) for row in rows] == [
+            ("rel-existing", "RELATED_TO", "entity-001", "entity-002"),
+            ("rel-new", "BELONGS_TO", "entity-003", "entity-004"),
+        ]
 
     @pytest.mark.asyncio
     async def test_bulk_create_success(

@@ -86,11 +86,16 @@ async def _seed_entities(driver: SurrealDriver, uuids: list[str]) -> None:
 
 
 class _RecordingExecutor:
-    def __init__(self) -> None:
+    def __init__(self, records_by_uuid: dict[str, RecordID] | None = None) -> None:
         self.queries: list[tuple[str, dict[str, Any]]] = []
+        self.records_by_uuid = records_by_uuid or {}
 
     async def execute_query(self, query: str, **params: Any) -> list[Any]:
         self.queries.append((query, params))
+        if "SELECT id FROM entity WHERE uuid = $uuid LIMIT 1" in query:
+            record = self.records_by_uuid.get(params["uuid"])
+            if record is not None:
+                return [{"id": record}]
         return []
 
 
@@ -98,12 +103,17 @@ class _RecordingExecutor:
 class TestEntityEdgeOps:
     async def test_save_uses_single_update_or_relate_statement(self) -> None:
         ops = SurrealEntityEdgeOperations()
-        executor = _RecordingExecutor()
+        executor = _RecordingExecutor(
+            {
+                "ent-a": RecordID("entity", "ent-a"),
+                "ent-b": RecordID("entity", "ent-b"),
+            }
+        )
 
         await ops.save(executor, _make_edge("edge-1", "group-1"))
 
-        assert len(executor.queries) == 1
-        query, params = executor.queries[0]
+        assert len(executor.queries) == 3
+        query, params = executor.queries[-1]
         assert "type::" not in query
         assert "DELETE FROM relates_to WHERE uuid = $uuid AND (in != $src OR out != $tgt)" in query
         assert "LET $updated = (UPDATE relates_to SET" in query
@@ -113,8 +123,12 @@ class TestEntityEdgeOps:
         assert params["rel"].table_name == "relates_to"
         assert params["rel"].id == "edge-1"
         assert params["uuid"] == "edge-1"
-        assert params["src_uuid"] == "ent-a"
-        assert params["tgt_uuid"] == "ent-b"
+        assert isinstance(params["src"], RecordID)
+        assert params["src"].table_name == "entity"
+        assert params["src"].id == "ent-a"
+        assert isinstance(params["tgt"], RecordID)
+        assert params["tgt"].table_name == "entity"
+        assert params["tgt"].id == "ent-b"
 
     async def test_save_full_temporal_payload_round_trips(
         self, surreal_schema: SurrealDriver
@@ -178,6 +192,20 @@ class TestEntityEdgeOps:
         ops = SurrealEntityEdgeOperations()
         with pytest.raises(EdgeNotFoundError):
             await ops.get_by_uuid(surreal_schema, "nope")
+
+    async def test_save_missing_endpoint_raises(self, surreal_schema: SurrealDriver) -> None:
+        ops = SurrealEntityEdgeOperations()
+        gid = surreal_schema.group_id
+        with pytest.raises(ValueError, match="not found"):
+            await ops.save(
+                surreal_schema,
+                _make_edge(
+                    "edge-missing",
+                    gid,
+                    source_uuid="missing-source",
+                    target_uuid="missing-target",
+                ),
+            )
 
     async def test_get_by_uuids_returns_subset(self, surreal_schema: SurrealDriver) -> None:
         ops = SurrealEntityEdgeOperations()
