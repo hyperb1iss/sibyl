@@ -1,12 +1,11 @@
-"""Live retrieval benchmarks against real FalkorDB graph.
+"""Live retrieval benchmarks against a running Sibyl API.
 
 READ-ONLY — never creates, updates, or deletes entities.
-Requires a running Sibyl instance with data. Skipped automatically
-if the API is unreachable.
+Requires explicit opt-in plus a running Sibyl instance with data.
 
 Run:
-    uv run pytest packages/python/sibyl-core/tests/test_retrieval_live.py -v -s
-    moon run core:test -- -k live -v -s
+    SIBYL_LIVE_RETRIEVAL_TESTS=1 uv run pytest packages/python/sibyl-core/tests/test_retrieval_live.py -v -s
+    moon run core:bench-live-smoke
 """
 
 from __future__ import annotations
@@ -20,6 +19,9 @@ import pytest
 
 SIBYL_API = "http://localhost:3334"
 STRICT_LIVE_PERF = os.environ.get("SIBYL_ASSERT_LIVE_LATENCY") == "1"
+LIVE_RETRIEVAL_TESTS = (
+    os.environ.get("SIBYL_LIVE_RETRIEVAL_TESTS") == "1" or STRICT_LIVE_PERF
+)
 
 
 def _get_client_headers() -> dict[str, str]:
@@ -59,8 +61,8 @@ def _live_search_available() -> bool:
 
 
 pytestmark = pytest.mark.skipif(
-    not _live_search_available(),
-    reason="Sibyl live search unavailable or CLI auth missing",
+    not LIVE_RETRIEVAL_TESTS or not _live_search_available(),
+    reason="Sibyl live retrieval tests are disabled or unavailable",
 )
 
 

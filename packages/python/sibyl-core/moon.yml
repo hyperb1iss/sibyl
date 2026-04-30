@@ -54,7 +54,7 @@ tasks:
     - '@group(sources)'
     - '@group(tests)'
   bench-live-smoke:
-    command: uv run pytest tests/test_retrieval_live.py -v -s
+    command: SIBYL_LIVE_RETRIEVAL_TESTS=1 uv run pytest tests/test_retrieval_live.py -v -s
     inputs:
     - '@group(sources)'
     - '@group(tests)'
