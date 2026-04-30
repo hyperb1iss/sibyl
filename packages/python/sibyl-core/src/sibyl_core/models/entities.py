@@ -52,6 +52,12 @@ class EntityType(StrEnum):
     CLAIM = "claim"  # Atomic fact or assertion with provenance/confidence
     SESSION = "session"  # Work session or conversation checkpoint
 
+    @classmethod
+    def _missing_(cls, value: object) -> "EntityType | None":
+        if isinstance(value, str) and value.lower() == "guide":
+            return cls.GUIDE
+        return None
+
 
 class RelationshipType(StrEnum):
     """Types of relationships between entities."""

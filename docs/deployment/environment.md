@@ -147,7 +147,7 @@ Used only when `SIBYL_STORE=legacy`. Retained for users who haven't migrated to 
 | ------------------------- | ------------- | --------------------------------------- |
 | `SIBYL_FALKORDB_HOST`     | `localhost`   | FalkorDB host                           |
 | `SIBYL_FALKORDB_PORT`     | `6380`        | FalkorDB port (6380 for local dev)      |
-| `SIBYL_FALKORDB_PASSWORD` | `conventions` | FalkorDB password                       |
+| `SIBYL_FALKORDB_PASSWORD` | `sibyl_dev`  | FalkorDB password                       |
 | `SIBYL_REDIS_JOBS_DB`     | `1`           | Redis DB for job queue (0 = graph data) |
 
 Note: Port 6380 is the default for local development to avoid conflicts with a local Redis

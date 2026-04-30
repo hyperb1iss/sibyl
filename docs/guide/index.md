@@ -14,7 +14,7 @@ This guide teaches you how to:
 
 1. **Set up your prompts**: Configure CLAUDE.md for effective workflows
 2. **Use skills and hooks**: Automatic context injection
-3. **Build a conventions repo**: Centralize team patterns
+3. **Build a knowledge repository**: Centralize team patterns
 4. **Manage knowledge**: Through the web UI and CLI
 5. **Track execution**: Projects, epics, and tasks across sessions
 6. **Capture durable learnings**: Turn debugging into reusable memory
@@ -74,7 +74,7 @@ priority, assignee, and more.
 
 ![Entity Browser](/screenshots/web-entities.png)
 
-**Entity Browser**: Browse all knowledge types (patterns, episodes, conventions, rules). Search and
+**Entity Browser**: Browse all knowledge types (patterns, episodes, guidance, rules). Search and
 filter to find what you need.
 
 ![Semantic Search](/screenshots/web-search.png)
@@ -181,7 +181,7 @@ tool calls.
 
 3. **[Setting Up Prompts](./setting-up-prompts)**: Configure your CLAUDE.md
 4. **[Skills & Hooks](./skills)**: Automatic context injection
-5. **[Conventions Repository](./conventions-repository)**: Centralize team patterns
+5. **[Knowledge Repository](./knowledge-repository)**: Centralize team patterns
 
 ### Core Concepts
 

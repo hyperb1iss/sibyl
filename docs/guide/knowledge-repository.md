@@ -1,15 +1,15 @@
 ---
-title: Conventions Repository
+title: Knowledge Repository
 description: Maintaining team patterns and feeding them to your knowledge graph
 ---
 
-# Conventions Repository
+# Knowledge Repository
 
-A conventions repository is a centralized collection of your team's patterns, tooling decisions, and
-hard-won wisdom. When connected to Sibyl, these conventions become searchable context that your AI
-agents can access across all projects.
+A knowledge repository is a centralized collection of your team's patterns, tooling decisions, and
+hard-won wisdom. When connected to Sibyl, this guidance becomes searchable context that your AI
+agents can access across projects.
 
-## Why a Conventions Repo?
+## Why a Knowledge Repo?
 
 ### The Problem
 
@@ -27,10 +27,10 @@ This knowledge lives in:
 
 ### The Solution
 
-Centralize conventions in one repository:
+Centralize guidance in one repository:
 
 ```
-conventions/
+knowledge/
 ├── docs/
 │   ├── WISDOM.md           # Hard-won lessons
 │   ├── TOOLING.md          # Required tools
@@ -45,15 +45,15 @@ conventions/
 └── AGENTS.md               # Quick reference for AI agents
 ```
 
-Then crawl it into Sibyl. Now every agent knows your team's conventions.
+Then crawl it into Sibyl. Now every agent can find your team's guidance.
 
-## Setting Up Your Conventions Repo
+## Setting Up Your Knowledge Repo
 
 ### 1. Create the Repository
 
 ```bash
-mkdir -p ~/dev/conventions
-cd ~/dev/conventions
+mkdir -p ~/dev/knowledge
+cd ~/dev/knowledge
 git init
 ```
 
@@ -62,14 +62,14 @@ git init
 **Recommended structure:**
 
 ```
-conventions/
+knowledge/
 ├── AGENTS.md               # AI-focused quick reference
 ├── README.md               # Human-focused overview
 ├── docs/
 │   ├── WISDOM.md           # Index of lessons learned
 │   ├── TOOLING.md          # Required tools per language
 │   ├── LAYOUTS.md          # Directory structures
-│   ├── COMMITS.md          # Commit conventions
+│   ├── COMMITS.md          # Commit guidance
 │   └── wisdom/
 │       ├── architecture.md # Architecture patterns
 │       ├── debugging.md    # Debugging approaches
@@ -91,7 +91,7 @@ conventions/
 └── skills/                 # Claude Code skills
     ├── commit/SKILL.md
     ├── review/SKILL.md
-    └── convention/SKILL.md
+    └── guide/SKILL.md
 ```
 
 ### 3. Write an AGENTS.md
@@ -101,7 +101,7 @@ This is the quick reference your AI agents will read first:
 ```markdown
 # Agent Instructions
 
-This repository contains team conventions. Reference it when setting up new projects or ensuring
+This repository contains team guidance. Reference it when setting up new projects or ensuring
 consistency.
 
 ## How to Use This Repo
@@ -123,7 +123,7 @@ Never copy files verbatim. Templates contain placeholders.
 | CI/CD workflows | `templates/github-actions/` |
 | Hard-won wisdom | `docs/wisdom/`              |
 
-## Key Conventions
+## Key Guidance
 
 ### Tooling - Non-Negotiable
 
@@ -182,18 +182,18 @@ Ask explicitly: "Am I investigating or fixing?"
 - **Fixing:** Requires confirmed root cause
 ```
 
-## Crawling Conventions into Sibyl
+## Crawling Guidance into Sibyl
 
 ### Method 1: File Crawling
 
 Sibyl can crawl local directories:
 
 ```bash
-sibyl crawl add "file:///Users/bliss/dev/conventions" --name "Conventions"
+sibyl crawl add "file:///Users/bliss/dev/knowledge" --name "Guidance"
 sibyl crawl ingest <source_id>
 ```
 
-This creates `CONVENTION` entities in your knowledge graph.
+This creates `guide` entities in your knowledge graph.
 
 ### Method 2: Manual Import
 
@@ -210,37 +210,37 @@ sibyl add "Biome over ESLint" \
 
 ### Method 3: Crawl on Change
 
-Set up a hook to re-crawl when conventions change:
+Set up a hook to re-crawl when guidance changes:
 
 ```bash
-# In conventions repo
+# In knowledge repository
 # .git/hooks/post-commit
 #!/bin/bash
-sibyl crawl add "file:///Users/bliss/dev/conventions" --name "Conventions"
+sibyl crawl add "file:///Users/bliss/dev/knowledge" --name "Guidance"
 sibyl crawl ingest <source_id>
 ```
 
-## Using Conventions in Projects
+## Using Guidance in Projects
 
 ### Reference in CLAUDE.md
 
 ```markdown
-## Conventions
+## Guidance
 
-This project follows conventions from `~/dev/conventions`.
+This project follows guidance from `~/dev/knowledge`.
 
 When starting a new feature:
 
-1. Check `~/dev/conventions/docs/wisdom/` for relevant patterns
-2. Search sibyl for "convention" + your topic
-3. Use templates from `~/dev/conventions/templates/`
+1. Check `~/dev/knowledge/docs/wisdom/` for relevant patterns
+2. Search sibyl for "guide" + your topic
+3. Use templates from `~/dev/knowledge/templates/`
 ```
 
-### Search for Conventions
+### Search for Guidance
 
 ```bash
-# Find conventions about testing
-sibyl search "testing convention" --type convention
+# Find guidance about testing
+sibyl search "testing guide" --type guide
 
 # Find patterns from wisdom docs
 sibyl search "architecture pattern" --type pattern
@@ -248,18 +248,18 @@ sibyl search "architecture pattern" --type pattern
 
 ### Agent Usage
 
-Your agent can query conventions directly:
+Your agent can query guidance directly:
 
 ```
-You: "What's our convention for error handling?"
+You: "What's our guide for error handling?"
 
-Agent: [Searches sibyl for "error handling convention"]
+Agent: [Searches sibyl for "error handling guide"]
        Found: "Use Result types for fallible operations.
               Never throw exceptions in business logic.
               Validate at boundaries only."
 ```
 
-## Example Conventions
+## Example Guidance
 
 ### Architecture Patterns
 
@@ -288,7 +288,7 @@ Database-backed state reconstruction (true isolation) \`\`\`
 ### Language-Specific Patterns
 
 ```markdown
-# Python Conventions
+# Python Guidance
 
 ## Package Management
 
@@ -368,25 +368,25 @@ Wrong environment variables. Print them:
 \`\`\`bash env | grep MYAPP\_ \`\`\`
 ```
 
-## Syncing Conventions Across Projects
+## Syncing Guidance Across Projects
 
 ### Pattern: Shared Skills
 
-Put Claude Code skills in your conventions repo:
+Put Claude Code skills in your knowledge repository:
 
 ```
-conventions/
+knowledge/
 └── skills/
     ├── check/SKILL.md       # Run quality checks
     ├── commit/SKILL.md      # AI-powered commits
-    ├── convention/SKILL.md  # Capture new conventions
+    ├── guide/SKILL.md       # Capture new guidance
     └── review/SKILL.md      # Code review workflow
 ```
 
 Install to any project:
 
 ```bash
-cp ~/dev/conventions/skills/* ~/.claude/skills/
+cp ~/dev/knowledge/skills/* ~/.claude/skills/
 ```
 
 ### Pattern: Template Inheritance
@@ -394,7 +394,7 @@ cp ~/dev/conventions/skills/* ~/.claude/skills/
 Projects can extend base templates:
 
 ```toml
-# conventions/templates/python/pyproject.toml
+# knowledge/templates/python/pyproject.toml
 [project]
 requires-python = ">=3.12"
 
@@ -404,13 +404,13 @@ line-length = 100
 
 ```toml
 # my-project/pyproject.toml
-# Extends conventions, adds project-specific config
+# Extends guidance, adds project-specific config
 [project]
 name = "my-project"
-requires-python = ">=3.12"  # From conventions
+requires-python = ">=3.12"  # From guidance
 
 [tool.ruff]
-line-length = 100  # From conventions
+line-length = 100  # From guidance
 select = ["ALL"]   # Project-specific
 ```
 
@@ -418,14 +418,14 @@ select = ["ALL"]   # Project-specific
 
 ### 1. Keep It Current
 
-Update conventions when you learn something new:
+Update guidance when you learn something new:
 
 ```bash
 # Add to wisdom docs
 echo "## New Lesson\n\n$LESSON" >> docs/wisdom/debugging.md
 
 # Add to sibyl
-sibyl add "New debugging lesson" "$LESSON" --type convention
+sibyl add "New debugging lesson" "$LESSON" --type guide
 
 # Commit
 git commit -am "Add debugging lesson about cache invalidation"
@@ -466,11 +466,11 @@ Use uv for Python package management.
 
 ### 4. Review Periodically
 
-Conventions become stale. Schedule reviews:
+Guidance become stale. Schedule reviews:
 
 ```bash
-# Find old conventions
-sibyl search "" --type convention --before 6m
+# Find old guidance
+sibyl search "" --type guide --before 6m
 
 # Review and update or archive
 ```
@@ -478,5 +478,5 @@ sibyl search "" --type convention --before 6m
 ## Next Steps
 
 - [Capturing Knowledge](./capturing-knowledge.md) - What to save
-- [Semantic Search](./semantic-search.md) - Finding conventions
-- [Skills & Hooks](./skills.md) - Automating convention access
+- [Semantic Search](./semantic-search.md) - Finding guidance
+- [Skills & Hooks](./skills.md) - Automating guide access

@@ -1,6 +1,11 @@
 """Tests for sibyl-core models."""
 
-from sibyl_core.models import Task, TaskComplexity, TaskPriority, TaskStatus
+from sibyl_core.models import EntityType, Task, TaskComplexity, TaskPriority, TaskStatus
+
+
+def test_entity_type_accepts_guide_alias() -> None:
+    assert EntityType("guide") is EntityType.GUIDE
+    assert EntityType("GUIDE") is EntityType.GUIDE
 
 
 class TestTaskModel:

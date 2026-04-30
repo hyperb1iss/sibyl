@@ -46,7 +46,7 @@ FACET_TITLES = {
 FACET_TYPES = {
     ContextFacet.ACTIVE_WORK: ["task", "epic", "project"],
     ContextFacet.ARTIFACTS: ["artifact", "document", "source", "config_file"],
-    ContextFacet.CONSTRAINTS: ["rule", "convention"],
+    ContextFacet.CONSTRAINTS: ["rule", "guide"],
     ContextFacet.DECISIONS: ["decision"],
     ContextFacet.DOMAIN: ["domain", "topic", "claim"],
     ContextFacet.GOTCHAS: ["error_pattern", "pattern"],

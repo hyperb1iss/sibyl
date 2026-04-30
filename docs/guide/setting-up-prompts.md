@@ -87,7 +87,7 @@ Project-level instructions are checked into your repository. They provide:
 - Project-specific context
 - Tech stack details
 - Key patterns and gotchas
-- Team conventions
+- Team guidance
 
 ### Template Structure
 
@@ -233,16 +233,16 @@ needed.
 - **Always query both labels:** `(n:Episodic OR n:Entity)`
 ```
 
-### Conventions Repository Pattern
+### Knowledge Repository Pattern
 
-If you maintain a conventions repo (patterns across projects):
+If you maintain a knowledge repository (patterns across projects):
 
 ```markdown
-## Conventions
+## Guidance
 
-This project follows conventions from `~/dev/conventions`.
+This project follows guidance from `~/dev/knowledge`.
 
-### Key Conventions
+### Key Guidance
 
 | Tool    | Choice   | Why                       |
 | ------- | -------- | ------------------------- |
@@ -252,9 +252,9 @@ This project follows conventions from `~/dev/conventions`.
 
 ### References
 
-- [Tooling Guide](~/dev/conventions/docs/TOOLING.md)
-- [Architecture Patterns](~/dev/conventions/docs/wisdom/architecture.md)
-- [Hard-Won Wisdom](~/dev/conventions/docs/WISDOM.md)
+- [Tooling Guide](~/dev/knowledge/docs/TOOLING.md)
+- [Architecture Patterns](~/dev/knowledge/docs/wisdom/architecture.md)
+- [Hard-Won Wisdom](~/dev/knowledge/docs/WISDOM.md)
 ```
 
 ## Prompt Design Patterns

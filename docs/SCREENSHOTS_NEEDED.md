@@ -3,7 +3,7 @@
 This file tracks all screenshots required for the documentation. Each screenshot should be captured
 and placed in `docs/public/screenshots/`.
 
-## Naming Convention
+## Naming Pattern
 
 `{section}-{description}.png` - e.g., `cli-task-list-output.png`
 

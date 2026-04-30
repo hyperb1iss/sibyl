@@ -168,7 +168,7 @@ sibyl search "OAuth" --type pattern
 sibyl search "debugging redis" --limit 5
 
 # Search across all projects (bypass context)
-sibyl search "python conventions" --all
+sibyl search "python guidance" --all
 ```
 
 **Output includes:**
@@ -183,10 +183,10 @@ sibyl search "python conventions" --all
 ```bash
 # 1. Search to find relevant knowledge
 sibyl search "redis connection pooling"
-# Output shows full IDs like: convention:abe924cb-8cee-4cb5-...
+# Output shows full IDs like: guide:abe924cb-8cee-4cb5-...
 
 # 2. Fetch full content by ID (copy from search output)
-sibyl entity show "convention:abe924cb-8cee-4cb5-9dd1-818201c1c946"
+sibyl entity show "guide:abe924cb-8cee-4cb5-9dd1-818201c1c946"
 ```
 
 **When to use:** Before implementing anything. Find existing patterns, past solutions, gotchas.
@@ -219,7 +219,7 @@ sibyl remember "Worker routing decision" "Verifier agents run after non-trivial 
 
 # Override the linked project explicitly, or opt out of project scoping
 sibyl remember "Venue decision" "Use runway layout..." --kind decision --project project_abc
-sibyl remember "Global convention" "Always cite current docs..." --kind rule --all-projects
+sibyl remember "Global guide" "Always cite current docs..." --kind rule --all-projects
 
 # Read the body from stdin
 echo "Exact session notes..." | sibyl remember "Planning session" --kind session

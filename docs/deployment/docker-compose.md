@@ -255,7 +255,7 @@ docker compose --profile legacy up -d falkordb postgres
 Then you can connect with:
 
 ```bash
-docker exec -it sibyl-falkordb redis-cli -a conventions
+docker exec -it sibyl-falkordb redis-cli -a sibyl_dev
 docker exec -it sibyl-postgres psql -U sibyl sibyl
 ```
 

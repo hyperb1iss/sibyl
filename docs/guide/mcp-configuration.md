@@ -175,7 +175,7 @@ sibyl auth api-key create --name "MCP Client" --scopes mcp
 | ------------------------- | ------------- | ---------------------------- |
 | `SIBYL_FALKORDB_HOST`     | `localhost`   | FalkorDB host                |
 | `SIBYL_FALKORDB_PORT`     | `6380`        | FalkorDB port                |
-| `SIBYL_FALKORDB_PASSWORD` | `conventions` | FalkorDB password            |
+| `SIBYL_FALKORDB_PASSWORD` | `sibyl_dev`  | FalkorDB password            |
 | `SIBYL_DATABASE_URL`      | -             | PostgreSQL connection string |
 
 ### Embedding Settings

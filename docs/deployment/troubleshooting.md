@@ -104,10 +104,10 @@ redis.exceptions.ConnectionError: Connection refused
 
    ```bash
    # Docker Compose
-   docker exec -it sibyl-falkordb redis-cli -a conventions PING
+   docker exec -it sibyl-falkordb redis-cli -a sibyl_dev PING
 
    # From host
-   redis-cli -h localhost -p 6380 -a conventions PING
+   redis-cli -h localhost -p 6380 -a sibyl_dev PING
    ```
 
 ## Graph Corruption
@@ -127,7 +127,7 @@ FalkorDB can occasionally become corrupted, especially after crashes or improper
 
 ```bash
 # Connect to FalkorDB
-redis-cli -h localhost -p 6380 -a conventions
+redis-cli -h localhost -p 6380 -a sibyl_dev
 
 # List all graphs
 GRAPH.LIST
@@ -249,7 +249,7 @@ If graph data is lost but PostgreSQL data exists:
 3. **Check FalkorDB memory:**
 
    ```bash
-   redis-cli -h localhost -p 6380 -a conventions INFO memory
+   redis-cli -h localhost -p 6380 -a sibyl_dev INFO memory
    ```
 
 4. **Increase Graphiti semaphore:**
@@ -312,7 +312,7 @@ If graph data is lost but PostgreSQL data exists:
 
 3. **Check Redis (job queue):**
    ```bash
-   redis-cli -h localhost -p 6380 -a conventions -n 1 KEYS "*"
+   redis-cli -h localhost -p 6380 -a sibyl_dev -n 1 KEYS "*"
    ```
 
 ## Port Conflicts

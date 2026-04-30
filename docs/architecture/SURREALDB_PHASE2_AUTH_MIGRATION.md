@@ -368,7 +368,7 @@ auth flow against either store; cutover is gated on a green run.
   recovery. If cutover fails, the rollback is "restore Postgres from the pre-cutover archive, replay
   Surreal writes manually if any occurred, flip flag back before resuming traffic."
 - Postgres auth/RBAC tables become read-only for one release (trigger-based write rejection, not
-  just convention) so an accidental code path can't double-write.
+  process guidance) so an accidental code path can't double-write.
 
 **Exit:** prod runs `SIBYL_AUTH_STORE=surreal` for one release cycle with Postgres alive but
 read-only on auth tables.
@@ -435,7 +435,7 @@ Phase 3 is out of scope for this plan.
 | Embedded Surreal storage concurrency (Phase 1 blocker)                                | Phase 2 does not start until Phase 1 server-mode landing is confirmed.                                                                                                            |
 | OAuth token encryption keys mis-travel during migration                               | `oauth_connections.access_token_encrypted` uses app-layer crypto; migration copies ciphertext bytes unchanged and re-verifies decryption post-import on a sample.                 |
 | Rollback after partial Surreal writes during cutover                                  | No promise of hot rollback. Rollback is freeze → archive-restore → flag-flip → thaw.                                                                                              |
-| Audit log mutation regression                                                         | Append-only contract enforced at the repo layer in Phase 2.1, not convention.                                                                                                     |
+| Audit log mutation regression                                                         | Append-only contract enforced at the repo layer in Phase 2.1, not process guidance.                                                                                               |
 | Latent bug 1 (access-token revocation no-op) regressing                               | Phase 2.4 harness step 10 (logout → verify access token rejected) is a hard gate.                                                                                                 |
 | Latent bug 2 (mid-request commits dropping RLS context) regressing on non-auth tables | Out of Phase 2 scope, but tracked as a separate task; Phase 2 must not introduce equivalent patterns in the new authorization layer.                                              |
 | Cleanup rewrites migration history in ways old envs cannot reproduce                  | Preserve historical Alembic files and add forward-only cleanup migrations instead of editing old revisions.                                                                       |

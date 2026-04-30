@@ -55,7 +55,7 @@ sibyl search "async await patterns" --type pattern
 sibyl search "connection timeout" --type episode
 
 # Search across all projects
-sibyl search "python conventions" --all
+sibyl search "python guidance" --all
 ```
 
 ---

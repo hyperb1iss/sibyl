@@ -360,9 +360,9 @@ curl -X DELETE "https://api.example.com/api/entities/pattern_abc123" \
 | `episode`    | Temporal learning    | Insights, discoveries, debugging notes |
 | `pattern`    | Coding pattern       | Best practices, design patterns        |
 | `procedure`  | Step-by-step guide   | Runbooks, workflows, how-tos           |
-| `convention` | Convention           | Project-level standards                |
+| `guide`      | Guide                | Project-level standards                |
 | `note`       | Freeform note        | Quick captures, reminders              |
-| `rule`       | Convention           | Guidelines, standards                  |
+| `rule`       | Rule                 | Guidelines, standards                  |
 | `template`   | Code template        | Boilerplate, scaffolding               |
 | `topic`      | Knowledge topic      | Conceptual groupings                   |
 | `task`       | Work item            | See [rest-tasks.md](./rest-tasks.md)   |

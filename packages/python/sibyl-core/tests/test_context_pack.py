@@ -73,7 +73,7 @@ async def test_compile_context_groups_build_context_by_agent_facets() -> None:
     responses = {
         ("task", "epic", "project"): [_result("task-1", "task", "Build capture hook")],
         ("decision",): [_result("decision-1", "decision", "Use context packs")],
-        ("rule", "convention"): [_result("rule-1", "rule", "Keep context precise")],
+        ("rule", "guide"): [_result("rule-1", "rule", "Keep context precise")],
         ("procedure", "template", "tool"): [_result("procedure-1", "procedure", "Verify")],
         ("error_pattern", "pattern"): [_result("pattern-1", "pattern", "Avoid broad search")],
         ("artifact", "document", "source", "config_file"): [

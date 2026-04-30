@@ -33,7 +33,7 @@ sibyl add <title> <content> [options]
 | `episode`       | General knowledge, learnings, notes (default) |
 | `pattern`       | Reusable code patterns, best practices        |
 | `error_pattern` | Error patterns and solutions                  |
-| `convention`    | Team conventions, coding standards            |
+| `guide`         | Team guidance, coding standards            |
 | `rule`          | Rules and constraints                         |
 | `template`      | Code templates                                |
 

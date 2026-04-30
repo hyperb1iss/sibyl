@@ -256,7 +256,7 @@ Grant only required scopes:
 3. Verify new key works
 4. Revoke old key
 
-### Naming Convention
+### Naming Pattern
 
 Use descriptive names:
 

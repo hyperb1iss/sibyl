@@ -724,7 +724,7 @@ class TaskWorkflowEngine:
         return False
 
     def _generate_branch_name(self, task: Task) -> str:
-        """Generate conventional branch name for task.
+        """Generate standard branch name for task.
 
         Args:
             task: Task to generate branch for

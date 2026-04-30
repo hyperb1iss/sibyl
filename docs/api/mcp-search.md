@@ -53,7 +53,7 @@ interface SearchInput {
 | Type       | Description                        |
 | ---------- | ---------------------------------- |
 | `pattern`  | Coding patterns and best practices |
-| `rule`     | Conventions and guidelines         |
+| `rule`     | Rules and guidelines               |
 | `template` | Code templates and boilerplate     |
 | `topic`    | Knowledge topics                   |
 | `episode`  | Temporal learnings and discoveries |

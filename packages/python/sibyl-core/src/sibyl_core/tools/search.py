@@ -61,7 +61,11 @@ def _graph_results_contain_exact_name_match(
 
 def _matches_requested_graph_type(entity: Any, requested_graph_types: set[str]) -> bool:
     entity_type = str(_serialize_enum(_get_field(entity, "entity_type", "")))
-    return entity_type.lower() in requested_graph_types
+    try:
+        entity_type = EntityType(entity_type.lower()).value
+    except ValueError:
+        entity_type = entity_type.lower()
+    return entity_type in requested_graph_types
 
 
 def _merge_graph_results(
@@ -501,9 +505,13 @@ async def search(
     if types:
         entity_types = []
         for t in types:
-            if t.lower() in VALID_ENTITY_TYPES and t.lower() != "document":
-                requested_graph_types.add(t.lower())
-                entity_types.append(EntityType(t.lower()))
+            normalized_type = t.lower()
+            if (
+                normalized_type in VALID_ENTITY_TYPES or normalized_type == "guide"
+            ) and normalized_type != "document":
+                entity_type = EntityType(normalized_type)
+                requested_graph_types.add(entity_type.value)
+                entity_types.append(entity_type)
 
     graph_list_filters = _has_graph_list_filters(
         entity_types=entity_types,

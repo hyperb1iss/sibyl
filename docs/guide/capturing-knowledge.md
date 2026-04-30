@@ -232,7 +232,7 @@ Use consistent categories across your org:
 --category integration
 ```
 
-### Tag Conventions
+### Tag Patterns
 
 Tags enable cross-cutting discovery:
 

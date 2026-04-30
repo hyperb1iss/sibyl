@@ -10,7 +10,6 @@ from sibyl_core.models.entities import EntityType
 
 log = structlog.get_logger()
 
-# Valid entity types for filtering
 VALID_ENTITY_TYPES = {t.value for t in EntityType}
 
 # Validation constants

@@ -1323,6 +1323,46 @@ class TestSearchTool:
         mock_entity_manager.search_exact_name.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_search_accepts_guide_type_alias(self) -> None:
+        """Guide is the public name for existing guide storage rows."""
+        from sibyl_core.retrieval.hybrid import HybridResult
+        from sibyl_core.tools.search import search
+
+        guide = MockEntity(
+            id="guide_error_handling",
+            entity_type=EntityType.GUIDE,
+            name="Error handling guide",
+            description="Boundary validation and Result types.",
+        )
+
+        mock_client = AsyncMock()
+        mock_entity_manager = AsyncMock()
+        mock_entity_manager.search_exact_name = AsyncMock(return_value=[])
+        hybrid_search = AsyncMock(return_value=HybridResult(results=[(guide, 0.95)]))
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(
+                    return_value=make_graph_runtime(
+                        client=mock_client,
+                        entity_manager=mock_entity_manager,
+                    )
+                ),
+            ),
+            patch("sibyl_core.tools.search.hybrid_search", new=hybrid_search),
+        ):
+            response = await search(
+                query="error handling",
+                types=["guide"],
+                organization_id="org_123",
+                include_documents=False,
+            )
+
+        assert [result.id for result in response.results] == ["guide_error_handling"]
+        assert hybrid_search.await_args.kwargs["entity_types"] == [EntityType.GUIDE]
+
+    @pytest.mark.asyncio
     async def test_search_uses_exact_title_lookup_when_fallback_search_is_empty(self) -> None:
         """Exact title lookup should still run when hybrid and fallback search miss."""
         from sibyl_core.retrieval.hybrid import HybridResult

@@ -21,7 +21,7 @@
 # Environment Variables (optional):
 #   SIBYL_SURREAL_PASSWORD    — SurrealDB root password (default: sibyl_dev; CHANGE IN PROD)
 #   SIBYL_POSTGRES_PASSWORD   — PostgreSQL password (legacy mode; default: sibyl_dev)
-#   SIBYL_FALKORDB_PASSWORD   — FalkorDB password (legacy mode; default: conventions)
+#   SIBYL_FALKORDB_PASSWORD   - FalkorDB password (legacy mode; default: sibyl_dev)
 
 services:
   # ==========================================================================
@@ -50,7 +50,7 @@ services:
       SIBYL_DATABASE_URL: postgresql://${SIBYL_POSTGRES_USER:-sibyl}:${SIBYL_POSTGRES_PASSWORD:-sibyl_dev}@postgres:5432/${SIBYL_POSTGRES_DB:-sibyl}
       SIBYL_FALKORDB_HOST: falkordb
       SIBYL_FALKORDB_PORT: 6379
-      SIBYL_FALKORDB_PASSWORD: ${SIBYL_FALKORDB_PASSWORD:-conventions}
+      SIBYL_FALKORDB_PASSWORD: ${SIBYL_FALKORDB_PASSWORD:-sibyl_dev}
       # Auth (REQUIRED)
       SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET:?Set SIBYL_JWT_SECRET in .env}
       SIBYL_SERVER_URL: ${SIBYL_SERVER_URL:-http://localhost:3334}
@@ -117,7 +117,7 @@ services:
       SIBYL_DATABASE_URL: postgresql://${SIBYL_POSTGRES_USER:-sibyl}:${SIBYL_POSTGRES_PASSWORD:-sibyl_dev}@postgres:5432/${SIBYL_POSTGRES_DB:-sibyl}
       SIBYL_FALKORDB_HOST: falkordb
       SIBYL_FALKORDB_PORT: 6379
-      SIBYL_FALKORDB_PASSWORD: ${SIBYL_FALKORDB_PASSWORD:-conventions}
+      SIBYL_FALKORDB_PASSWORD: ${SIBYL_FALKORDB_PASSWORD:-sibyl_dev}
       SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?Set SIBYL_OPENAI_API_KEY in .env}
       SIBYL_ANTHROPIC_API_KEY: ${SIBYL_ANTHROPIC_API_KEY:?Set SIBYL_ANTHROPIC_API_KEY in .env}
       SIBYL_LLM_PROVIDER: anthropic
@@ -166,9 +166,9 @@ services:
     volumes:
       - falkordb_data:/var/lib/falkordb/data
     environment:
-      - FALKORDB_ARGS=--requirepass ${SIBYL_FALKORDB_PASSWORD:-conventions}
+      - FALKORDB_ARGS=--requirepass ${SIBYL_FALKORDB_PASSWORD:-sibyl_dev}
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${SIBYL_FALKORDB_PASSWORD:-conventions}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${SIBYL_FALKORDB_PASSWORD:-sibyl_dev}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5

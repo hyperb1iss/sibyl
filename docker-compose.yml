@@ -49,9 +49,9 @@ services:
     volumes:
       - falkordb_data:/var/lib/falkordb/data
     environment:
-      - FALKORDB_ARGS=--requirepass ${SIBYL_FALKORDB_PASSWORD:-conventions}
+      - FALKORDB_ARGS=--requirepass ${SIBYL_FALKORDB_PASSWORD:-sibyl_dev}
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${SIBYL_FALKORDB_PASSWORD:-conventions}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${SIBYL_FALKORDB_PASSWORD:-sibyl_dev}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
