@@ -390,6 +390,73 @@ async def test_surreal_create_org_rotates_current_session(
 
 
 @pytest.mark.asyncio
+async def test_surreal_update_org_uses_update_result_without_reload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    organization = SimpleNamespace(
+        id=uuid4(),
+        slug="old-name",
+        name="Old Name",
+        is_personal=False,
+    )
+
+    class FakeClient:
+        async def execute_query(self, query: str, **_params):
+            if query.startswith("UPDATE organizations"):
+                return [
+                    {
+                        "uuid": str(organization.id),
+                        "slug": "new-name",
+                        "name": "New Name",
+                        "is_personal": False,
+                    }
+                ]
+            return []
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield FakeClient()
+
+    org_repo = SimpleNamespace(
+        get_by_slug=AsyncMock(side_effect=[organization, None]),
+        get_by_id=AsyncMock(side_effect=AssertionError("unexpected organization reload")),
+    )
+    membership_repo = SimpleNamespace(
+        get_for_user=AsyncMock(return_value=SimpleNamespace(role=OrganizationRole.ADMIN))
+    )
+    audit_log = AsyncMock()
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+    monkeypatch.setattr(
+        surreal_organization_runtime.SurrealOrganizationRepository,
+        "from_client",
+        lambda _client: org_repo,
+    )
+    monkeypatch.setattr(
+        surreal_organization_runtime.SurrealOrganizationMembershipRepository,
+        "from_client",
+        lambda _client: membership_repo,
+    )
+    monkeypatch.setattr(surreal_organization_runtime, "log_audit_event", audit_log)
+
+    result = await surreal_organization_runtime.update_org(
+        request=_request(),
+        slug="old-name",
+        user_id=user_id,
+        name="New Name",
+        new_slug="new-name",
+    )
+
+    assert result.id == organization.id
+    assert result.slug == "new-name"
+    assert result.name == "New Name"
+    assert result.role == OrganizationRole.ADMIN
+    org_repo.get_by_id.assert_not_awaited()
+    audit_log.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_surreal_remove_org_member_allows_self_service(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

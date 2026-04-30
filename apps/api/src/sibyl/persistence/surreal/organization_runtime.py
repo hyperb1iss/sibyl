@@ -506,22 +506,27 @@ async def update_org(
                     detail="Slug already taken",
                 )
             raise RuntimeError(error)
-        refreshed = await orgs.get_by_id(organization.id)
-        if refreshed is None:
+        updated_records = _normalize_records(update_result)
+        updated = updated_records[0] if updated_records else None
+        if updated is None:
             msg = f"Organization disappeared during update: {organization.id}"
             raise RuntimeError(msg)
         await log_audit_event(
             action="org.update",
             user_id=user_id,
-            organization_id=refreshed.id,
+            organization_id=organization.id,
             request=request,
-            details={"slug": slug, "new_slug": refreshed.slug, "name": refreshed.name},
+            details={
+                "slug": slug,
+                "new_slug": str(updated.get("slug") or ""),
+                "name": str(updated.get("name") or ""),
+            },
         )
         return OrgSummary(
-            id=refreshed.id,
-            slug=refreshed.slug,
-            name=refreshed.name,
-            is_personal=refreshed.is_personal,
+            id=_coerce_uuid(updated.get("uuid"), field_name="organization.uuid"),
+            slug=str(updated.get("slug") or ""),
+            name=str(updated.get("name") or ""),
+            is_personal=bool(updated.get("is_personal", False)),
             role=membership.role,
         )
 
