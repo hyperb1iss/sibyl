@@ -700,14 +700,12 @@ async def _list_user_org_records(client: Any, *, user_id: UUID) -> list[dict[str
     org_ids = [
         str(record["organization_id"]) for record in memberships if record.get("organization_id")
     ]
-    organizations: list[dict[str, Any]] = []
-    for org_id in org_ids:
-        record = await repo.select_one(
-            "SELECT * FROM organizations WHERE uuid = $uuid LIMIT 1;",
-            uuid=org_id,
-        )
-        if record is not None:
-            organizations.append(record)
+    if not org_ids:
+        return []
+    organizations = await repo.select_many(
+        "SELECT * FROM organizations WHERE uuid IN $organization_ids;",
+        organization_ids=org_ids,
+    )
     organizations.sort(
         key=lambda record: (
             not bool(record.get("is_personal", False)),
