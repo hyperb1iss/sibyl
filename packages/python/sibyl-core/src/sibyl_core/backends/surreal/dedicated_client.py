@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -40,6 +41,8 @@ class DedicatedSurrealClient:
         self._database = database
         self._client_kind = client_kind
         self._client: Any | None = None
+        self._connect_lock = asyncio.Lock()
+        self._query_lock = asyncio.Lock()
 
     @property
     def namespace(self) -> str:
@@ -53,24 +56,32 @@ class DedicatedSurrealClient:
         if self._client is not None:
             return self._client
 
-        from surrealdb import AsyncSurreal
+        async with self._connect_lock:
+            if self._client is not None:
+                return self._client
 
-        client = AsyncSurreal(self._url)
-        try:
-            if self._requires_auth():
-                if self._token:
-                    await client.authenticate(self._token)
-                elif self._username and self._password:
-                    await client.signin({"username": self._username, "password": self._password})
-            await client.use(self._namespace, self._database)
-        except Exception:
+            from surrealdb import AsyncSurreal
+
+            client = AsyncSurreal(self._url)
             try:
-                await client.close()
-            except Exception as exc:
-                logger.debug("SurrealDB dedicated client close after setup failure failed: %s", exc)
-            raise
-        self._client = client
-        return client
+                if self._requires_auth():
+                    if self._token:
+                        await client.authenticate(self._token)
+                    elif self._username and self._password:
+                        await client.signin(
+                            {"username": self._username, "password": self._password}
+                        )
+                await client.use(self._namespace, self._database)
+            except Exception:
+                try:
+                    await client.close()
+                except Exception as exc:
+                    logger.debug(
+                        "SurrealDB dedicated client close after setup failure failed: %s", exc
+                    )
+                raise
+            self._client = client
+            return client
 
     async def execute_query(self, query: str, **params: Any) -> Any:
         return await self._execute(query, params=params, raw=False)
@@ -79,9 +90,10 @@ class DedicatedSurrealClient:
         return await self._execute(query, params=params, raw=True)
 
     async def close(self) -> None:
-        if self._client is not None:
-            await self._client.close()
-            self._client = None
+        async with self._connect_lock:
+            if self._client is not None:
+                await self._client.close()
+                self._client = None
 
     def _requires_auth(self) -> bool:
         return not self._url.startswith(("memory://", "surrealkv://"))
@@ -99,25 +111,26 @@ class DedicatedSurrealClient:
         started_at = query_start()
         retry_count = 0
         try:
-            while True:
-                try:
-                    client = await self.connect()
-                    result = await self._send_query(client, query, params=params, raw=raw)
-                    break
-                except Exception as exc:
-                    if not _is_connection_closed_error(exc):
-                        raise
-                    await self._drop_client()
-                    can_retry = _can_retry_raw_query(query) if raw else _can_retry_query(query)
-                    if not can_retry or retry_count >= _MAX_CLOSED_CONNECTION_RETRIES:
-                        raise
-                    retry_count += 1
-                    logger.warning(
-                        "SurrealDB dedicated client connection closed during read; retrying "
-                        "attempt=%s error=%s",
-                        retry_count,
-                        exc,
-                    )
+            async with self._query_lock:
+                while True:
+                    try:
+                        client = await self.connect()
+                        result = await self._send_query(client, query, params=params, raw=raw)
+                        break
+                    except Exception as exc:
+                        if not _is_connection_closed_error(exc):
+                            raise
+                        await self._drop_client()
+                        can_retry = _can_retry_raw_query(query) if raw else _can_retry_query(query)
+                        if not can_retry or retry_count >= _MAX_CLOSED_CONNECTION_RETRIES:
+                            raise
+                        retry_count += 1
+                        logger.warning(
+                            "SurrealDB dedicated client connection closed during read; retrying "
+                            "attempt=%s error=%s",
+                            retry_count,
+                            exc,
+                        )
         except Exception as exc:
             log_query(
                 query,

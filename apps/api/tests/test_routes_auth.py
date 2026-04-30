@@ -342,6 +342,28 @@ async def test_refresh_tokens_uses_runtime_rotation(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_refresh_tokens_returns_503_when_auth_storage_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    request = FakeRequest(json_data={"refresh_token": "refresh-token"})
+    rotate = AsyncMock(side_effect=TimeoutError("timed out during opening handshake"))
+
+    monkeypatch.setattr(auth_routes, "_require_jwt_secret", lambda: "secret")
+    monkeypatch.setattr(
+        auth_routes,
+        "verify_refresh_token",
+        lambda _: {"sub": str(user_id)},
+    )
+    monkeypatch.setattr(auth_routes, "rotate_refresh_exchange", rotate)
+
+    response = await _call_route(auth_routes.refresh_tokens, request=request)
+
+    assert response.status_code == 503
+    assert json.loads(response.body)["detail"] == "Authentication storage temporarily unavailable"
+
+
+@pytest.mark.asyncio
 async def test_refresh_tokens_rejects_invalid_org_claim(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

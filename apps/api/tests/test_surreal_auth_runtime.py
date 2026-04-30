@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 
 from sibyl.auth.primitives import DeviceTokenError
-from sibyl.persistence.surreal import auth_runtime as surreal_auth_runtime
+from sibyl.persistence.surreal import auth as surreal_auth, auth_runtime as surreal_auth_runtime
 
 
 class _StaticAuthClientScope:
@@ -30,6 +30,38 @@ class _RecordingAuthClient:
     async def execute_query(self, query: str, **kwargs: object) -> object:
         self.calls.append((query, kwargs))
         return self.response
+
+
+@pytest.mark.asyncio
+async def test_surreal_auth_client_scope_reuses_shared_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clients: list[SimpleNamespace] = []
+
+    async def close_client(client: SimpleNamespace) -> None:
+        client.closed = True
+
+    def build_client() -> SimpleNamespace:
+        client = SimpleNamespace(closed=False)
+        client.close = lambda: close_client(client)
+        clients.append(client)
+        return client
+
+    await surreal_auth.close_shared_surreal_auth_client()
+    monkeypatch.setattr(surreal_auth, "build_surreal_auth_client", build_client)
+
+    try:
+        async with (
+            surreal_auth.surreal_auth_client_scope() as first,
+            surreal_auth.surreal_auth_client_scope() as second,
+        ):
+            assert first is second
+        assert clients == [first]
+        assert clients[0].closed is False
+    finally:
+        await surreal_auth.close_shared_surreal_auth_client()
+
+    assert clients[0].closed is True
 
 
 def test_surreal_auth_runtime_exports_neutral_surface_only() -> None:

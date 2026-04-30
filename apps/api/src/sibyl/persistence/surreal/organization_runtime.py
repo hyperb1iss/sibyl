@@ -34,7 +34,7 @@ from sibyl.persistence.surreal.auth import (
     SurrealOrganizationMembershipRepository,
     SurrealOrganizationRepository,
     SurrealUserRepository,
-    build_surreal_auth_client,
+    surreal_auth_client_scope,
 )
 from sibyl.persistence.surreal.auth_runtime import SurrealSessionRepository
 
@@ -144,11 +144,8 @@ def _invitation_from_record(
 
 @asynccontextmanager
 async def _auth_client_scope():
-    client = build_surreal_auth_client()
-    try:
+    async with surreal_auth_client_scope() as client:
         yield client
-    finally:
-        await client.close()
 
 
 async def _rotate_or_create_org_session(

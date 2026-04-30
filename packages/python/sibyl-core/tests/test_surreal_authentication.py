@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from types import SimpleNamespace
 from typing import Any
@@ -38,7 +39,14 @@ def fake_surreal(monkeypatch) -> list[tuple[str, object]]:
         async def close(self) -> None:
             calls.append(("close", None))
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    class FakeRecordID:
+        pass
+
+    monkeypatch.setitem(
+        sys.modules,
+        "surrealdb",
+        SimpleNamespace(AsyncSurreal=FakeAsyncSurreal, RecordID=FakeRecordID),
+    )
     return calls
 
 
@@ -110,6 +118,57 @@ async def test_surreal_dedicated_clients_prefer_token_auth(
     assert ("authenticate", "token-123") in fake_surreal
     assert not any(call[0] == "signin" for call in fake_surreal)
     assert ("use", (namespace, database)) in fake_surreal
+
+
+@pytest.mark.asyncio
+async def test_surreal_dedicated_client_reuses_one_connection_for_concurrent_queries(
+    monkeypatch,
+) -> None:
+    clients: list[FakeAsyncSurreal] = []
+
+    class FakeAsyncSurreal:
+        def __init__(self, url: str) -> None:
+            self.url = url
+            self.signin_count = 0
+            self.use_count = 0
+            self.query_count = 0
+            clients.append(self)
+
+        async def signin(self, credentials: dict[str, str]) -> None:
+            self.credentials = credentials
+            self.signin_count += 1
+            await asyncio.sleep(0.01)
+
+        async def use(self, namespace: str, database: str) -> None:
+            self.namespace = namespace
+            self.database = database
+            self.use_count += 1
+            await asyncio.sleep(0.01)
+
+        async def query(self, query: str, params: object | None = None) -> list[dict[str, int]]:
+            self.query_count += 1
+            await asyncio.sleep(0)
+            return [{"query_count": self.query_count}]
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    client = SurrealAuthClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+    )
+
+    results = await asyncio.gather(
+        *(client.execute_query("SELECT * FROM user_sessions;") for _ in range(8))
+    )
+
+    assert len(clients) == 1
+    assert clients[0].signin_count == 1
+    assert clients[0].use_count == 1
+    assert clients[0].query_count == 8
+    assert results[-1] == [{"query_count": 8}]
 
 
 @pytest.mark.asyncio

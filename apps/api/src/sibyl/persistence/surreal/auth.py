@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Self
 from uuid import UUID, uuid4
@@ -22,6 +26,15 @@ from sibyl_core.backends.surreal import SurrealAuthClient
 
 AUTH_NAMESPACE = "sibyl_auth"
 AUTH_DATABASE = "auth"
+
+
+@dataclass(slots=True)
+class _SharedAuthClientState:
+    client: SurrealAuthClient | None = None
+
+
+_shared_auth_client_state = _SharedAuthClientState()
+_shared_auth_client_lock = asyncio.Lock()
 _UPSERT_RECORD = {
     "organization_members": "UPSERT organization_members CONTENT $record WHERE uuid = $uuid;",
     "organizations": "UPSERT organizations CONTENT $record WHERE uuid = $uuid;",
@@ -40,6 +53,29 @@ def build_surreal_auth_client() -> SurrealAuthClient:
         namespace=AUTH_NAMESPACE,
         database=AUTH_DATABASE,
     )
+
+
+async def get_shared_surreal_auth_client() -> SurrealAuthClient:
+    if _shared_auth_client_state.client is not None:
+        return _shared_auth_client_state.client
+
+    async with _shared_auth_client_lock:
+        if _shared_auth_client_state.client is None:
+            _shared_auth_client_state.client = build_surreal_auth_client()
+        return _shared_auth_client_state.client
+
+
+async def close_shared_surreal_auth_client() -> None:
+    async with _shared_auth_client_lock:
+        client = _shared_auth_client_state.client
+        _shared_auth_client_state.client = None
+        if client is not None:
+            await client.close()
+
+
+@asynccontextmanager
+async def surreal_auth_client_scope() -> AsyncGenerator[SurrealAuthClient]:
+    yield await get_shared_surreal_auth_client()
 
 
 def _utcnow() -> datetime:

@@ -38,6 +38,7 @@ from sibyl.persistence.surreal.auth import (
     SurrealOrganizationRepository,
     SurrealUserRepository,
     build_surreal_auth_client,
+    surreal_auth_client_scope,
 )
 from sibyl_core.auth import AuthSession, OrganizationRole, PasswordChange
 
@@ -296,11 +297,8 @@ def _password_reset_namespace(record: dict[str, Any] | None) -> SimpleNamespace 
 
 @asynccontextmanager
 async def _auth_client_scope():
-    client = build_surreal_auth_client()
-    try:
+    async with surreal_auth_client_scope() as client:
         yield client
-    finally:
-        await client.close()
 
 
 class _SurrealRepository:

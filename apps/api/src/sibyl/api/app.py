@@ -211,6 +211,13 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:  # noqa: PLR0915
 
     yield
 
+    try:
+        from sibyl.persistence.surreal.auth import close_shared_surreal_auth_client
+
+        await close_shared_surreal_auth_client()
+    except Exception as e:
+        log.debug("Shared Surreal auth client shutdown error", error=str(e))
+
     if pubsub_initialized:
         try:
             from sibyl.api.pubsub import shutdown_pubsub

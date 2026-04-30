@@ -998,12 +998,18 @@ async def refresh_tokens(request: Request):
     except (KeyError, ValueError):
         return _unauthorized("Invalid token claims")
 
-    rotation = await rotate_refresh_exchange(
-        refresh_token=refresh_token,
-        user_id=user_id,
-        organization_id=org_id,
-        request=request,
-    )
+    try:
+        rotation = await rotate_refresh_exchange(
+            refresh_token=refresh_token,
+            user_id=user_id,
+            organization_id=org_id,
+            request=request,
+        )
+    except TimeoutError:
+        return JSONResponse(
+            content={"detail": "Authentication storage temporarily unavailable"},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
     if rotation is None:
         return _unauthorized("Session not found or revoked")
 
