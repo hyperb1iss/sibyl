@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+import asyncio
+from collections.abc import AsyncGenerator, Iterable, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -38,6 +40,15 @@ _UPSERT_RECORD = {
 }
 
 
+@dataclass(slots=True)
+class _SharedContentClientState:
+    client: SurrealContentClient | None = None
+
+
+_shared_content_client_state = _SharedContentClientState()
+_shared_content_client_lock = asyncio.Lock()
+
+
 async def check_relational_backend_health() -> dict[str, str | None]:
     return {"status": "disabled", "postgres_version": None, "pgvector_version": None}
 
@@ -53,13 +64,27 @@ def build_surreal_content_client() -> SurrealContentClient:
     )
 
 
+async def get_shared_surreal_content_client() -> SurrealContentClient:
+    if _shared_content_client_state.client is not None:
+        return _shared_content_client_state.client
+
+    async with _shared_content_client_lock:
+        if _shared_content_client_state.client is None:
+            _shared_content_client_state.client = build_surreal_content_client()
+        return _shared_content_client_state.client
+
+
+async def close_shared_surreal_content_client() -> None:
+    async with _shared_content_client_lock:
+        client = _shared_content_client_state.client
+        _shared_content_client_state.client = None
+        if client is not None:
+            await client.close()
+
+
 @asynccontextmanager
-async def surreal_content_client() -> Any:
-    client = build_surreal_content_client()
-    try:
-        yield client
-    finally:
-        await client.close()
+async def surreal_content_client() -> AsyncGenerator[SurrealContentClient]:
+    yield await get_shared_surreal_content_client()
 
 
 def _normalize_record(record: Any) -> dict[str, Any] | None:

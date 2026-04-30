@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -94,6 +95,38 @@ class FakeSurrealClient:
     async def execute_query_raw(self, query: str, **params: object) -> object:
         self.calls.append((query, params))
         return self._responses.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_surreal_content_client_scope_reuses_shared_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clients: list[object] = []
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.close = AsyncMock()
+
+    def build_client() -> FakeClient:
+        client = FakeClient()
+        clients.append(client)
+        return client
+
+    await surreal_content.close_shared_surreal_content_client()
+    monkeypatch.setattr(surreal_content, "build_surreal_content_client", build_client)
+
+    try:
+        async with (
+            surreal_content.surreal_content_client() as first,
+            surreal_content.surreal_content_client() as second,
+        ):
+            assert first is second
+        assert clients == [first]
+        first.close.assert_not_awaited()
+    finally:
+        await surreal_content.close_shared_surreal_content_client()
+
+    first.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
