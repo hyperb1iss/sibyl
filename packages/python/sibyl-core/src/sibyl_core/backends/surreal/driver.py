@@ -104,6 +104,19 @@ def _graphiti_records(result: Any) -> list[dict[str, Any]]:
     return normalize_records(result)
 
 
+def _graphiti_duplicate_pair_records(
+    result: Any,
+    pairs: list[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    records = _graphiti_records(result)
+    pair_set = set(pairs)
+    return [
+        record
+        for record in records
+        if (str(record.get("source_uuid")), str(record.get("target_uuid"))) in pair_set
+    ]
+
+
 def _graphiti_retrieve_episodes_query(
     query: str,
     params: dict[str, Any],
@@ -219,6 +232,60 @@ def _graphiti_episode_count_query(
         GROUP BY out.uuid;
         """,
         params,
+    )
+
+
+def _graphiti_existing_duplicate_edges_query(
+    query: str,
+    params: dict[str, Any],
+) -> tuple[str, dict[str, Any]] | None:
+    normalized = " ".join(query.split()).upper()
+    if "UNWIND $DUPLICATE_NODE_UUIDS" not in normalized:
+        return None
+    if "IS_DUPLICATE_OF" not in normalized:
+        return None
+    if "RETURN DISTINCT" not in normalized:
+        return None
+
+    pairs = params.get("duplicate_node_uuids") or []
+    source_uuids: list[str] = []
+    target_uuids: list[str] = []
+    for pair in pairs:
+        if isinstance(pair, dict):
+            source = pair.get("source") or pair.get("src")
+            target = pair.get("target") or pair.get("dst")
+        else:
+            source = pair[0] if len(pair) > 0 else None
+            target = pair[1] if len(pair) > 1 else None
+        if source is None or target is None:
+            continue
+        source_uuids.append(str(source))
+        target_uuids.append(str(target))
+
+    next_params = dict(params)
+    next_params["source_uuids"] = source_uuids
+    next_params["target_uuids"] = target_uuids
+    next_params["duplicate_pairs"] = list(zip(source_uuids, target_uuids, strict=True))
+    if not source_uuids or not target_uuids:
+        return "RETURN [];", next_params
+
+    filters = [
+        "name = 'IS_DUPLICATE_OF'",
+        "in.uuid IN $source_uuids",
+        "out.uuid IN $target_uuids",
+    ]
+    if params.get("group_ids"):
+        filters.append("group_id IN $group_ids")
+
+    return (
+        """
+        SELECT in.uuid AS source_uuid, out.uuid AS target_uuid
+        FROM relates_to
+        WHERE """
+        + " AND ".join(filters)
+        + """;
+        """,
+        next_params,
     )
 
 
@@ -353,6 +420,10 @@ def _graphiti_compat_query(
     episode_count_query = _graphiti_episode_count_query(query, params)
     if episode_count_query is not None:
         return episode_count_query[0], episode_count_query[1], "records"
+
+    duplicate_edges_query = _graphiti_existing_duplicate_edges_query(query, params)
+    if duplicate_edges_query is not None:
+        return duplicate_edges_query[0], duplicate_edges_query[1], "duplicate_pair_records"
 
     fulltext_query = _graphiti_fulltext_query(query, params)
     if fulltext_query is not None:
@@ -647,6 +718,11 @@ class SurrealDriver(GraphDriver):
         )
         if compat_kind == "episode_records":
             return _graphiti_episode_records(result), None, None
+        if compat_kind == "duplicate_pair_records":
+            return _graphiti_duplicate_pair_records(
+                result,
+                params.get("duplicate_pairs", []),
+            ), None, None
         if compat_kind == "records":
             return _graphiti_records(result), None, None
         return result

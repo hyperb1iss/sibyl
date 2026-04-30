@@ -588,6 +588,125 @@ class TestDriverConnection:
 
         assert records[0]["episode_count"] == 2
 
+    async def test_execute_query_translates_graphiti_existing_duplicate_edge_lookup(
+        self, monkeypatch
+    ) -> None:
+        driver = SurrealDriver("memory://").clone("org-abc")
+        calls: list[tuple[str, object | None]] = []
+
+        async def fake_query(query: str, params: object | None = None) -> list[dict[str, object]]:
+            calls.append((query, params))
+            return [
+                {"source_uuid": "entity-a", "target_uuid": "entity-b"},
+                {"source_uuid": "entity-a", "target_uuid": "entity-d"},
+            ]
+
+        async def fake_ensure_client() -> SimpleNamespace:
+            return SimpleNamespace(query=fake_query)
+
+        monkeypatch.setattr(driver, "_ensure_client", fake_ensure_client)
+
+        records, _, _ = await driver.execute_query(
+            """
+            UNWIND $duplicate_node_uuids AS duplicate_tuple
+            MATCH (n:Entity {uuid: duplicate_tuple[0]})-[r:RELATES_TO {name: 'IS_DUPLICATE_OF'}]->(m:Entity {uuid: duplicate_tuple[1]})
+            RETURN DISTINCT
+                n.uuid AS source_uuid,
+                m.uuid AS target_uuid
+            """,
+            duplicate_node_uuids=[("entity-a", "entity-b"), ("entity-c", "entity-d")],
+            group_ids=["org-abc"],
+            routing_="r",
+        )
+
+        query, params = calls[0]
+        assert "UNWIND" not in query
+        assert "MATCH" not in query
+        assert "FROM relates_to" in query
+        assert "name = 'IS_DUPLICATE_OF'" in query
+        assert "in.uuid IN $source_uuids" in query
+        assert "out.uuid IN $target_uuids" in query
+        assert "group_id IN $group_ids" in query
+        assert isinstance(params, dict)
+        assert params["source_uuids"] == ["entity-a", "entity-c"]
+        assert params["target_uuids"] == ["entity-b", "entity-d"]
+        assert params["duplicate_pairs"] == [("entity-a", "entity-b"), ("entity-c", "entity-d")]
+        assert len(records) == 1
+        assert records[0]["source_uuid"] == "entity-a"
+        assert records[0]["target_uuid"] == "entity-b"
+
+    async def test_execute_query_graphiti_existing_duplicate_edge_lookup_roundtrips(
+        self, surreal_schema: SurrealDriver
+    ) -> None:
+        created = datetime(2026, 1, 1, tzinfo=UTC)
+
+        await surreal_schema.execute_query(
+            """
+            UPSERT entity:duplicate_source SET
+                uuid = 'duplicate-source',
+                name = 'Duplicate source',
+                entity_type = 'concept',
+                group_id = $group_id,
+                created_at = $created;
+            UPSERT entity:duplicate_target SET
+                uuid = 'duplicate-target',
+                name = 'Duplicate target',
+                entity_type = 'concept',
+                group_id = $group_id,
+                created_at = $created;
+            UPSERT entity:duplicate_missing SET
+                uuid = 'duplicate-missing',
+                name = 'Duplicate missing',
+                entity_type = 'concept',
+                group_id = $group_id,
+                created_at = $created;
+            UPSERT entity:duplicate_cross_target SET
+                uuid = 'duplicate-cross-target',
+                name = 'Duplicate cross target',
+                entity_type = 'concept',
+                group_id = $group_id,
+                created_at = $created;
+            RELATE entity:duplicate_source->relates_to:duplicate_edge->entity:duplicate_target SET
+                uuid = 'duplicate-edge',
+                name = 'IS_DUPLICATE_OF',
+                fact = 'source duplicates target',
+                group_id = $group_id,
+                episodes = [],
+                attributes = {},
+                created_at = $created,
+                valid_at = $created;
+            RELATE entity:duplicate_source->relates_to:duplicate_cross_edge->entity:duplicate_cross_target SET
+                uuid = 'duplicate-cross-edge',
+                name = 'IS_DUPLICATE_OF',
+                fact = 'source duplicates cross target',
+                group_id = $group_id,
+                episodes = [],
+                attributes = {},
+                created_at = $created,
+                valid_at = $created;
+            """,
+            group_id=surreal_schema.group_id,
+            created=created,
+        )
+
+        records, _, _ = await surreal_schema.execute_query(
+            """
+            UNWIND $duplicate_node_uuids AS duplicate_tuple
+            MATCH (n:Entity {uuid: duplicate_tuple[0]})-[r:RELATES_TO {name: 'IS_DUPLICATE_OF'}]->(m:Entity {uuid: duplicate_tuple[1]})
+            RETURN DISTINCT
+                n.uuid AS source_uuid,
+                m.uuid AS target_uuid
+            """,
+            duplicate_node_uuids=[
+                ("duplicate-source", "duplicate-target"),
+                ("duplicate-missing", "duplicate-cross-target"),
+            ],
+        )
+
+        assert len(records) == 1
+        assert records[0]["source_uuid"] == "duplicate-source"
+        assert records[0]["target_uuid"] == "duplicate-target"
+
     async def test_execute_query_translates_graphiti_node_fulltext_call(self, monkeypatch) -> None:
         driver = SurrealDriver("memory://").clone("org-abc")
         calls: list[tuple[str, object | None]] = []
