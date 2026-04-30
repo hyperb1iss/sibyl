@@ -4,6 +4,7 @@ These jobs handle async entity operations via Graphiti, allowing
 the API to return quickly while background processing continues.
 """
 
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -24,14 +25,83 @@ async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | Non
         log.debug("Broadcast failed (Redis unavailable)", event=event)
 
 
-async def _inherit_task_knowledge(
+async def _save_episode_mention(
+    client: Any,
+    *,
+    group_id: str,
+    episode_id: str,
+    target_id: str,
+    link_id: str,
+) -> bool:
+    try:
+        from graphiti_core.edges import EpisodicEdge
+
+        from sibyl_core.backends.surreal import SurrealDriver
+    except ImportError:
+        return False
+
+    driver = client.get_org_driver(group_id)
+    if not isinstance(driver, SurrealDriver):
+        return False
+
+    await driver.episodic_edge_ops.save(
+        driver,
+        EpisodicEdge(
+            uuid=link_id,
+            group_id=group_id,
+            source_node_uuid=episode_id,
+            target_node_uuid=target_id,
+            created_at=datetime.now(UTC),
+        ),
+    )
+    return True
+
+
+async def _create_learning_artifact_link(
+    client: Any,
     relationship_manager: Any,
     *,
+    group_id: str,
+    source_id: str,
+    target_id: str,
+    relationship_type: Any,
+    link_id: str,
+    source_is_episode: bool = False,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    from sibyl_core.models.entities import Relationship
+
+    if source_is_episode and await _save_episode_mention(
+        client,
+        group_id=group_id,
+        episode_id=source_id,
+        target_id=target_id,
+        link_id=link_id,
+    ):
+        return link_id
+
+    return await relationship_manager.create(
+        Relationship(
+            id=link_id,
+            source_id=source_id,
+            target_id=target_id,
+            relationship_type=relationship_type,
+            metadata=metadata or {},
+        )
+    )
+
+
+async def _inherit_task_knowledge(
+    client: Any,
+    relationship_manager: Any,
+    *,
+    group_id: str,
     source_id: str,
     task_id: str,
+    source_is_episode: bool = False,
 ) -> int:
     """Copy task knowledge edges onto a derived learning artifact."""
-    from sibyl_core.models.entities import Relationship, RelationshipType
+    from sibyl_core.models.entities import RelationshipType
 
     task_relationships = await relationship_manager.get_for_entity(
         task_id,
@@ -45,14 +115,16 @@ async def _inherit_task_knowledge(
     inherited_count = 0
     for rel in task_relationships:
         try:
-            await relationship_manager.create(
-                Relationship(
-                    id=f"rel_{source_id}_{rel.target_id}",
-                    source_id=source_id,
-                    target_id=rel.target_id,
-                    relationship_type=RelationshipType.REFERENCES,
-                    metadata={"inherited_from_task": task_id},
-                )
+            await _create_learning_artifact_link(
+                client,
+                relationship_manager,
+                group_id=group_id,
+                source_id=source_id,
+                target_id=rel.target_id,
+                relationship_type=RelationshipType.REFERENCES,
+                link_id=f"rel_{source_id}_{rel.target_id}",
+                source_is_episode=source_is_episode,
+                metadata={"inherited_from_task": task_id},
             )
             inherited_count += 1
         except Exception as e:
@@ -335,10 +407,7 @@ async def create_learning_episode(
     from sibyl_core.graph.client import get_graph_client
     from sibyl_core.graph.entities import EntityManager
     from sibyl_core.graph.relationships import RelationshipManager
-    from sibyl_core.models.entities import (
-        Relationship,
-        RelationshipType,
-    )
+    from sibyl_core.models.entities import RelationshipType
     from sibyl_core.models.tasks import Task
 
     task = Task.model_validate(task_data)
@@ -366,19 +435,24 @@ async def create_learning_episode(
         )
 
         # Link episode back to task
-        await relationship_manager.create(
-            Relationship(
-                id=f"rel_episode_{task.id}",
-                source_id=episode_id,
-                target_id=task.id,
-                relationship_type=RelationshipType.DERIVED_FROM,
-            )
+        await _create_learning_artifact_link(
+            client,
+            relationship_manager,
+            group_id=group_id,
+            source_id=episode_id,
+            target_id=task.id,
+            relationship_type=RelationshipType.DERIVED_FROM,
+            link_id=f"rel_episode_{task.id}",
+            source_is_episode=True,
         )
 
         inherited_count = await _inherit_task_knowledge(
+            client,
             relationship_manager,
+            group_id=group_id,
             source_id=episode_id,
             task_id=task.id,
+            source_is_episode=True,
         )
 
         result = {
@@ -482,7 +556,9 @@ async def create_learning_procedure(
         )
 
         inherited_count = await _inherit_task_knowledge(
+            client,
             relationship_manager,
+            group_id=group_id,
             source_id=procedure_id,
             task_id=task.id,
         )

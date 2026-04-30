@@ -7,9 +7,71 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sibyl.jobs.entities import create_learning_procedure
-from sibyl_core.models.entities import Procedure
+from sibyl.jobs.entities import create_learning_episode, create_learning_procedure
+from sibyl_core.models.entities import Episode, Procedure
 from sibyl_core.models.tasks import Task, TaskStatus
+
+
+class TestCreateLearningEpisodeJob:
+    @pytest.mark.asyncio
+    async def test_uses_episode_mentions_for_surreal_learning_links(self) -> None:
+        task = Task(
+            id="task-123",
+            title="Ship the thing",
+            description="Complete the feature",
+            project_id="proj-1",
+            status=TaskStatus.DONE,
+            learnings="The useful bit",
+        )
+        task_data = task.model_dump(mode="json")
+
+        entity_manager = MagicMock()
+        entity_manager.create = AsyncMock(return_value="episode_task-123")
+        relationship_manager = MagicMock()
+        relationship_manager.create = AsyncMock()
+        relationship_manager.get_for_entity = AsyncMock(
+            return_value=[
+                SimpleNamespace(target_id="pattern-1"),
+            ]
+        )
+        save_episode_mention = AsyncMock(return_value=True)
+        client = SimpleNamespace()
+
+        with (
+            patch("sibyl_core.graph.client.get_graph_client", AsyncMock(return_value=client)),
+            patch("sibyl_core.graph.entities.EntityManager", return_value=entity_manager),
+            patch(
+                "sibyl_core.graph.relationships.RelationshipManager",
+                return_value=relationship_manager,
+            ),
+            patch("sibyl.jobs.entities._save_episode_mention", save_episode_mention),
+            patch("sibyl.jobs.entities._safe_broadcast", AsyncMock()),
+        ):
+            result = await create_learning_episode({}, task_data, "org-1")
+
+        assert result["episode_id"] == "episode_task-123"
+        assert result["task_id"] == "task-123"
+        assert result["inherited_relationships"] == 1
+        entity_manager.create.assert_awaited_once()
+        created_episode = entity_manager.create.await_args.args[0]
+        assert isinstance(created_episode, Episode)
+        assert created_episode.metadata["task_id"] == "task-123"
+        relationship_manager.create.assert_not_awaited()
+        assert save_episode_mention.await_count == 2
+        save_episode_mention.assert_any_await(
+            client,
+            group_id="org-1",
+            episode_id="episode_task-123",
+            target_id="task-123",
+            link_id="rel_episode_task-123",
+        )
+        save_episode_mention.assert_any_await(
+            client,
+            group_id="org-1",
+            episode_id="episode_task-123",
+            target_id="pattern-1",
+            link_id="rel_episode_task-123_pattern-1",
+        )
 
 
 class TestCreateLearningProcedureJob:
