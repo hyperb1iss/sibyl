@@ -7,7 +7,7 @@ export const ENTITY_TYPES = [
   'pattern',
   'rule',
   'template',
-  'convention',
+  'guide',
   'tool',
   'language',
   'topic',
@@ -38,7 +38,7 @@ export const ENTITY_COLORS: Record<EntityType, string> = {
   pattern: '#e135ff', // Electric Purple
   rule: '#ff6363', // Error Red
   template: '#80ffea', // Neon Cyan
-  convention: '#ffb86c', // Orange
+  guide: '#ffb86c', // Orange
   tool: '#f1fa8c', // Electric Yellow
   language: '#ff6ac1', // Coral
   topic: '#ff00ff', // Magenta
@@ -69,7 +69,7 @@ export const ENTITY_ICONS: Record<EntityType, string> = {
   pattern: '◈',
   rule: '⚡',
   template: '◇',
-  convention: '§',
+  guide: '§',
   tool: '⚙',
   language: '⟨⟩',
   topic: '●',
@@ -132,7 +132,7 @@ export const ENTITY_STYLES: Record<EntityType, EntityStyle> = {
     border: 'border-[#80ffea]/30',
     glow: 'shadow-[#80ffea]/20',
   },
-  convention: {
+  guide: {
     badge: 'bg-[#ffb86c]/20 text-[#ffb86c] border-[#ffb86c]/30',
     card: 'hover:border-[#ffb86c]/50 hover:shadow-[#ffb86c]/20',
     dot: 'bg-[#ffb86c]',
@@ -325,10 +325,12 @@ export const ENTITY_STYLES: Record<EntityType, EntityStyle> = {
 
 // Get color for any entity type (with fallback)
 export function getEntityColor(type: string): string {
-  return ENTITY_COLORS[type as EntityType] ?? DEFAULT_ENTITY_COLOR;
+  const normalizedType = type === 'convention' ? 'guide' : type;
+  return ENTITY_COLORS[normalizedType as EntityType] ?? DEFAULT_ENTITY_COLOR;
 }
 
 // Get style classes for any entity type (with fallback)
 export function getEntityStyles(type: string) {
-  return ENTITY_STYLES[type as EntityType] ?? ENTITY_STYLES.knowledge_source;
+  const normalizedType = type === 'convention' ? 'guide' : type;
+  return ENTITY_STYLES[normalizedType as EntityType] ?? ENTITY_STYLES.knowledge_source;
 }

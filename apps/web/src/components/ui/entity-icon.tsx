@@ -33,7 +33,7 @@ const ENTITY_ICON_MAP: Record<EntityType, IconComponent> = {
   pattern: Combine,
   rule: Flash,
   template: EditPencil,
-  convention: Label,
+  guide: Label,
   tool: Settings,
   language: Code,
   topic: Hashtag,
@@ -66,7 +66,8 @@ interface EntityIconProps {
 }
 
 export function EntityIcon({ type, size = 14, className = '' }: EntityIconProps) {
-  const Icon = ENTITY_ICON_MAP[type as EntityType] ?? DEFAULT_ICON;
+  const normalizedType = type === 'convention' ? 'guide' : type;
+  const Icon = ENTITY_ICON_MAP[normalizedType as EntityType] ?? DEFAULT_ICON;
   return <Icon width={size} height={size} className={className} />;
 }
 

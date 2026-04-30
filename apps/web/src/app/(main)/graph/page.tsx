@@ -249,7 +249,7 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   concept: 'Concepts',
   rule: 'Rules',
   template: 'Templates',
-  convention: 'Guides',
+  guide: 'Guides',
   tool: 'Tools',
   language: 'Languages',
   source: 'Sources',

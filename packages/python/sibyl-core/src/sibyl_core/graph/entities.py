@@ -41,6 +41,8 @@ from sibyl_core.utils.resilience import GRAPHITI_RETRY
 
 log = structlog.get_logger()
 
+_LEGACY_GUIDE_ENTITY_TYPE = "convention"
+
 # Generic enum type for coercion
 TEnum = TypeVar("TEnum", bound=Enum)
 # RediSearch special characters that need escaping in fulltext queries
@@ -69,6 +71,16 @@ _SEARCH_STOP_WORDS = {
     "to",
     "with",
 }
+
+
+def _entity_type_filter_values(entity_types: list[EntityType]) -> list[str]:
+    values: list[str] = []
+    for entity_type in entity_types:
+        if entity_type.value not in values:
+            values.append(entity_type.value)
+        if entity_type == EntityType.GUIDE and _LEGACY_GUIDE_ENTITY_TYPE not in values:
+            values.append(_LEGACY_GUIDE_ENTITY_TYPE)
+    return values
 
 
 def sanitize_search_query(query: str) -> str:
@@ -346,8 +358,13 @@ class EntityManager:
         }
 
         if entity_type is not None:
-            where_clauses.append("entity_type = $entity_type")
-            params["entity_type"] = entity_type.value
+            entity_type_values = _entity_type_filter_values([entity_type])
+            if len(entity_type_values) == 1:
+                where_clauses.append("entity_type = $entity_type")
+                params["entity_type"] = entity_type_values[0]
+            else:
+                where_clauses.append("entity_type IN $entity_types")
+                params["entity_types"] = entity_type_values
 
         if project_id is not None:
             where_clauses.append("project_id = $project_id")
@@ -429,7 +446,7 @@ class EntityManager:
         where_clauses = ["group_id = $group_id"]
         if entity_types:
             where_clauses.append("entity_type IN $entity_types")
-            params["entity_types"] = [entity_type.value for entity_type in entity_types]
+            params["entity_types"] = _entity_type_filter_values(entity_types)
 
         name_expr = "string::lowercase(name ?? '')"
         score_expr = ""
@@ -1521,7 +1538,7 @@ class EntityManager:
         ]
 
         if entity_types:
-            params["entity_types"] = [entity_type.value for entity_type in entity_types]
+            params["entity_types"] = _entity_type_filter_values(entity_types)
             where_clauses.append("n.entity_type IN $entity_types")
 
         query_text = f"""
@@ -1670,7 +1687,7 @@ class EntityManager:
         ]
 
         if entity_types:
-            params["entity_types"] = [entity_type.value for entity_type in entity_types]
+            params["entity_types"] = _entity_type_filter_values(entity_types)
             where_clauses.append("n.entity_type IN $entity_types")
 
         query_text = f"""

@@ -13,7 +13,7 @@ class EntityType(StrEnum):
     PATTERN = "pattern"
     RULE = "rule"
     TEMPLATE = "template"
-    GUIDE = "convention"
+    GUIDE = "guide"
     TOOL = "tool"
     LANGUAGE = "language"
     TOPIC = "topic"
@@ -54,7 +54,7 @@ class EntityType(StrEnum):
 
     @classmethod
     def _missing_(cls, value: object) -> "EntityType | None":
-        if isinstance(value, str) and value.lower() == "guide":
+        if isinstance(value, str) and value.lower() in {"guide", "convention"}:
             return cls.GUIDE
         return None
 

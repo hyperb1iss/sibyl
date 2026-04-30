@@ -3,6 +3,7 @@ import {
   ENTITY_COLORS,
   formatDateTime,
   formatUptime,
+  getEntityColor,
   TASK_PRIORITIES,
   TASK_PRIORITY_CONFIG,
   TASK_STATUS_CONFIG,
@@ -49,6 +50,7 @@ describe('ENTITY_COLORS', () => {
     expect(ENTITY_COLORS.task).toBeDefined();
     expect(ENTITY_COLORS.project).toBeDefined();
     expect(ENTITY_COLORS.episode).toBeDefined();
+    expect(ENTITY_COLORS.guide).toBeDefined();
   });
 
   it('returns valid hex colors', () => {
@@ -56,6 +58,10 @@ describe('ENTITY_COLORS', () => {
     for (const color of Object.values(ENTITY_COLORS)) {
       expect(color).toMatch(hexColorRegex);
     }
+  });
+
+  it('maps old guide rows to the guide color', () => {
+    expect(getEntityColor('convention')).toBe(ENTITY_COLORS.guide);
   });
 });
 
