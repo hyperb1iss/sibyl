@@ -17,6 +17,85 @@ from graphiti_core.nodes import CommunityNode, EntityNode, EpisodeType, Episodic
 
 from sibyl_core.graph.surreal.ops._common import normalize_records
 
+_ENTITY_NODE_FIELDS = {
+    "uuid",
+    "name",
+    "group_id",
+    "labels",
+    "created_at",
+    "summary",
+    "name_embedding",
+    "attributes",
+}
+_ENTITY_EDGE_FIELDS = {
+    "uuid",
+    "group_id",
+    "source_node_uuid",
+    "target_node_uuid",
+    "created_at",
+    "name",
+    "fact",
+    "fact_embedding",
+    "episodes",
+    "expired_at",
+    "valid_at",
+    "invalid_at",
+    "attributes",
+}
+
+
+def _episodic_node_from_bulk_payload(item: EpisodicNode | dict[str, Any]) -> EpisodicNode:
+    if isinstance(item, EpisodicNode):
+        return item
+    payload = dict(item)
+    if isinstance(payload.get("source"), str):
+        payload["source"] = EpisodeType.from_str(payload["source"])
+    payload.setdefault("labels", [])
+    payload.setdefault("entity_edges", [])
+    return EpisodicNode.model_validate(payload)
+
+
+def _entity_node_from_bulk_payload(item: EntityNode | dict[str, Any]) -> EntityNode:
+    if isinstance(item, EntityNode):
+        return item
+    payload = dict(item)
+    attributes = dict(payload.get("attributes") or {})
+    attributes.update(
+        {
+            key: value
+            for key, value in payload.items()
+            if key not in _ENTITY_NODE_FIELDS and value is not None
+        }
+    )
+    payload["attributes"] = attributes
+    return EntityNode.model_validate(
+        {key: value for key, value in payload.items() if key in _ENTITY_NODE_FIELDS}
+    )
+
+
+def _episodic_edge_from_bulk_payload(item: EpisodicEdge | dict[str, Any]) -> EpisodicEdge:
+    if isinstance(item, EpisodicEdge):
+        return item
+    return EpisodicEdge.model_validate(item)
+
+
+def _entity_edge_from_bulk_payload(item: EntityEdge | dict[str, Any]) -> EntityEdge:
+    if isinstance(item, EntityEdge):
+        return item
+    payload = dict(item)
+    attributes = dict(payload.get("attributes") or {})
+    attributes.update(
+        {
+            key: value
+            for key, value in payload.items()
+            if key not in _ENTITY_EDGE_FIELDS and value is not None
+        }
+    )
+    payload["attributes"] = attributes
+    return EntityEdge.model_validate(
+        {key: value for key, value in payload.items() if key in _ENTITY_EDGE_FIELDS}
+    )
+
 
 class SurrealGraphOperationsInterface(GraphOperationsInterface):
     async def node_save(self, node: EntityNode, driver: Any) -> None:
@@ -30,10 +109,15 @@ class SurrealGraphOperationsInterface(GraphOperationsInterface):
         _cls: Any,
         driver: Any,
         transaction: Any,
-        nodes: list[EntityNode],
+        nodes: list[EntityNode] | list[dict[str, Any]],
         batch_size: int = 100,
     ) -> None:
-        await driver.entity_node_ops.save_bulk(driver, nodes, tx=transaction, batch_size=batch_size)
+        await driver.entity_node_ops.save_bulk(
+            driver,
+            [_entity_node_from_bulk_payload(node) for node in nodes],
+            tx=transaction,
+            batch_size=batch_size,
+        )
 
     async def node_delete_by_group_id(
         self,
@@ -100,21 +184,29 @@ class SurrealGraphOperationsInterface(GraphOperationsInterface):
         _cls: Any,
         driver: Any,
         transaction: Any,
-        nodes: list[EpisodicNode],
+        nodes: list[EpisodicNode] | list[dict[str, Any]],
         batch_size: int = 100,
     ) -> None:
-        await driver.episode_node_ops.save_bulk(driver, nodes, tx=transaction, batch_size=batch_size)
+        await driver.episode_node_ops.save_bulk(
+            driver,
+            [_episodic_node_from_bulk_payload(node) for node in nodes],
+            tx=transaction,
+            batch_size=batch_size,
+        )
 
     async def episodic_edge_save_bulk(
         self,
         _cls: Any,
         driver: Any,
         transaction: Any,
-        episodic_edges: list[EpisodicEdge],
+        episodic_edges: list[EpisodicEdge] | list[dict[str, Any]],
         batch_size: int = 100,
     ) -> None:
         await driver.episodic_edge_ops.save_bulk(
-            driver, episodic_edges, tx=transaction, batch_size=batch_size
+            driver,
+            [_episodic_edge_from_bulk_payload(edge) for edge in episodic_edges],
+            tx=transaction,
+            batch_size=batch_size,
         )
 
     async def episodic_node_delete_by_group_id(
@@ -315,10 +407,15 @@ class SurrealGraphOperationsInterface(GraphOperationsInterface):
         _cls: Any,
         driver: Any,
         transaction: Any,
-        edges: list[EntityEdge],
+        edges: list[EntityEdge] | list[dict[str, Any]],
         batch_size: int = 100,
     ) -> None:
-        await driver.entity_edge_ops.save_bulk(driver, edges, tx=transaction, batch_size=batch_size)
+        await driver.entity_edge_ops.save_bulk(
+            driver,
+            [_entity_edge_from_bulk_payload(edge) for edge in edges],
+            tx=transaction,
+            batch_size=batch_size,
+        )
 
     async def edge_delete_by_uuids(
         self,

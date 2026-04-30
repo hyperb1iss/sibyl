@@ -5,14 +5,31 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from graphiti_core import Graphiti
+from graphiti_core.cross_encoder.client import CrossEncoderClient
 from graphiti_core.edges import EntityEdge, EpisodicEdge
+from graphiti_core.embedder.client import EmbedderClient
 from graphiti_core.nodes import CommunityNode, EntityNode, EpisodeType, EpisodicNode
 from graphiti_core.search.search_filters import ComparisonOperator, DateFilter, SearchFilters
 from graphiti_core.search.search_utils import get_embeddings_for_edges, get_embeddings_for_nodes
 
 from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
+from sibyl_core.graph.mock_llm import MockLLMClient
 from sibyl_core.graph.search_interface import SurrealSearchInterface
+
+
+class _FakeEmbedder(EmbedderClient):
+    async def create(self, input_data: object) -> list[float]:
+        return [0.0] * EMBEDDING_DIM
+
+    async def create_batch(self, input_data_list: list[str]) -> list[list[float]]:
+        return [[0.0] * EMBEDDING_DIM for _ in input_data_list]
+
+
+class _FakeCrossEncoder(CrossEncoderClient):
+    async def rank(self, query: str, passages: list[str]) -> list[tuple[str, float]]:
+        return [(passage, 0.0) for passage in passages]
 
 
 def _entity(uuid: str, group_id: str, *, name: str, summary: str) -> EntityNode:
@@ -305,6 +322,99 @@ class TestSurrealSearchInterfaceIntegration:
         assert [episode.uuid for episode in recent_episodes] == ["graphiti-episode"]
         assert node_embeddings["graphiti-source"] == [0.1] * EMBEDDING_DIM
         assert edge_embeddings["graphiti-edge"] == [0.1] * EMBEDDING_DIM
+
+    @pytest.mark.asyncio
+    async def test_graphiti_bulk_dict_payloads_use_surreal_graph_operations_interface(
+        self, surreal_schema: SurrealDriver
+    ) -> None:
+        gid = surreal_schema.group_id
+        now = datetime.now(UTC)
+        interface = surreal_schema.graph_operations_interface
+
+        await interface.node_save_bulk(
+            None,
+            surreal_schema,
+            None,
+            [
+                {
+                    "uuid": "bulk-source",
+                    "name": "Bulk Source",
+                    "group_id": gid,
+                    "labels": ["Entity", "Tool"],
+                    "summary": "source",
+                    "created_at": now,
+                    "name_embedding": [0.1] * EMBEDDING_DIM,
+                    "project_id": "project-bulk",
+                },
+                {
+                    "uuid": "bulk-target",
+                    "name": "Bulk Target",
+                    "group_id": gid,
+                    "labels": ["Entity", "Tool"],
+                    "summary": "target",
+                    "created_at": now,
+                    "name_embedding": [0.1] * EMBEDDING_DIM,
+                },
+            ],
+        )
+        await interface.edge_save_bulk(
+            None,
+            surreal_schema,
+            None,
+            [
+                {
+                    "uuid": "bulk-edge",
+                    "source_node_uuid": "bulk-source",
+                    "target_node_uuid": "bulk-target",
+                    "name": "RELATES_TO",
+                    "fact": "Bulk source relates to bulk target",
+                    "fact_embedding": [0.1] * EMBEDDING_DIM,
+                    "group_id": gid,
+                    "episodes": [],
+                    "created_at": now,
+                    "expired_at": None,
+                    "valid_at": now,
+                    "invalid_at": None,
+                    "confidence": 0.9,
+                }
+            ],
+        )
+
+        source = await EntityNode.get_by_uuid(surreal_schema, "bulk-source")
+        edge = await EntityEdge.get_by_uuid(surreal_schema, "bulk-edge")
+
+        assert source.attributes["project_id"] == "project-bulk"
+        assert edge.attributes["confidence"] == 0.9
+
+    @pytest.mark.asyncio
+    async def test_graphiti_add_episode_with_saga_uses_surreal_bulk_adapter(
+        self, surreal_schema: SurrealDriver
+    ) -> None:
+        graph = Graphiti(
+            graph_driver=surreal_schema,
+            llm_client=MockLLMClient(),
+            embedder=_FakeEmbedder(),
+            cross_encoder=_FakeCrossEncoder(),
+        )
+
+        result = await graph.add_episode(
+            name="Graphiti add episode",
+            episode_body="Bliss is testing Surreal add_episode compatibility.",
+            source_description="test",
+            reference_time=datetime(2026, 1, 1, tzinfo=UTC),
+            source=EpisodeType.message,
+            group_id=surreal_schema.group_id,
+            saga="daily",
+        )
+
+        episodes = await surreal_schema.execute_query("SELECT uuid, name FROM episode;")
+        sagas = await surreal_schema.execute_query("SELECT uuid, name FROM saga;")
+        saga_edges = await surreal_schema.execute_query("SELECT uuid FROM has_episode;")
+
+        assert result.episode.name == "Graphiti add episode"
+        assert [episode["uuid"] for episode in episodes] == [result.episode.uuid]
+        assert [saga["name"] for saga in sagas] == ["daily"]
+        assert len(saga_edges) == 1
 
     @pytest.mark.asyncio
     async def test_bfs_and_rerankers_use_native_surreal_queries(
