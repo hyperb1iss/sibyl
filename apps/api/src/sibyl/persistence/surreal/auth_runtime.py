@@ -2081,20 +2081,12 @@ async def request_password_reset(email: str) -> None:
                     email_attempted=normalized_email,
                 )
                 return
-        for token_record in existing_tokens:
-            token_row = _password_reset_namespace(token_record)
-            if (
-                token_row is None
-                or token_row.used_at is not None
-                or token_row.revoked_at is not None
-            ):
-                continue
-            updated_token = {**token_record, "revoked_at": now}
-            await repo.replace_record(
-                "password_reset_tokens",
-                uuid=token_row.id,
-                record=updated_token,
-            )
+        await client.execute_query(
+            "UPDATE password_reset_tokens SET revoked_at = $revoked_at "
+            "WHERE user_id = $user_id AND used_at = NONE AND revoked_at = NONE;",
+            user_id=str(user["uuid"]),
+            revoked_at=now,
+        )
 
         raw_token = _generate_reset_token()
         expires_at = now + timedelta(minutes=60)

@@ -339,6 +339,72 @@ async def test_update_auth_user_rejects_invalid_current_password_before_write(
 
 
 @pytest.mark.asyncio
+async def test_request_password_reset_revokes_existing_tokens_in_one_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    now = datetime.now(UTC).replace(tzinfo=None)
+    client = _RecordingAuthClient([])
+    user_record = {
+        "uuid": str(user_id),
+        "email": "bliss@example.com",
+        "name": "Bliss",
+    }
+    existing_tokens = [
+        {
+            "uuid": str(uuid4()),
+            "user_id": str(user_id),
+            "created_at": now - timedelta(minutes=10),
+            "used_at": None,
+            "revoked_at": None,
+        },
+        {
+            "uuid": str(uuid4()),
+            "user_id": str(user_id),
+            "created_at": now - timedelta(minutes=20),
+            "used_at": now - timedelta(minutes=19),
+            "revoked_at": None,
+        },
+    ]
+    replace_record = AsyncMock(side_effect=AssertionError("unexpected per-token write"))
+    email_client = SimpleNamespace(send_template=AsyncMock())
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime._SurrealRepository,
+        "select_one",
+        AsyncMock(return_value=user_record),
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime._SurrealRepository,
+        "select_many",
+        AsyncMock(return_value=existing_tokens),
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime._SurrealRepository,
+        "replace_record",
+        replace_record,
+    )
+    monkeypatch.setattr(surreal_auth_runtime, "_log_login_history", AsyncMock())
+    monkeypatch.setattr(surreal_auth_runtime, "get_email_client", lambda: email_client)
+
+    await surreal_auth_runtime.request_password_reset("Bliss@Example.com")
+
+    queries = [query for query, _params in client.calls]
+    assert any(
+        "UPDATE password_reset_tokens SET revoked_at = $revoked_at" in query
+        for query in queries
+    )
+    assert any("CREATE password_reset_tokens CONTENT $record" in query for query in queries)
+    replace_record.assert_not_awaited()
+    email_client.send_template.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_list_user_org_records_batches_organization_reads() -> None:
     user_id = uuid4()
     personal_org_id = uuid4()
