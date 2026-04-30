@@ -1076,11 +1076,17 @@ async def _delete_project_member_records(
     *,
     membership_records: list[dict[str, Any]],
 ) -> None:
-    for membership_record in membership_records:
-        await client.execute_query(
-            "DELETE FROM project_members WHERE uuid = $uuid;",
-            uuid=str(membership_record["uuid"]),
-        )
+    membership_ids = [
+        str(membership_record["uuid"])
+        for membership_record in membership_records
+        if membership_record.get("uuid")
+    ]
+    if not membership_ids:
+        return
+    await client.execute_query(
+        "DELETE FROM project_members WHERE uuid IN $membership_ids;",
+        membership_ids=membership_ids,
+    )
 
 
 async def list_project_members(

@@ -781,6 +781,36 @@ async def test_surreal_list_project_members_batches_user_reads(
 
 
 @pytest.mark.asyncio
+async def test_surreal_delete_project_member_records_batches_deletes() -> None:
+    membership_a = uuid4()
+    membership_b = uuid4()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            return []
+
+    fake_client = FakeClient()
+
+    await surreal_organization_runtime._delete_project_member_records(
+        fake_client,
+        membership_records=[
+            {"uuid": str(membership_a)},
+            {"uuid": str(membership_b)},
+        ],
+    )
+
+    assert len(fake_client.calls) == 1
+    assert fake_client.calls[0][0] == "DELETE FROM project_members WHERE uuid IN $membership_ids;"
+    assert fake_client.calls[0][1] == {
+        "membership_ids": [str(membership_a), str(membership_b)]
+    }
+
+
+@pytest.mark.asyncio
 async def test_surreal_add_project_member_rejects_existing_membership(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
