@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -518,12 +519,13 @@ async def test_surreal_content_write_helpers_round_trip(
 async def test_surreal_system_setting_helpers_round_trip(
     surreal_content_client: SurrealContentClient,
 ) -> None:
-    with (
-        patch.object(surreal_content_client, "close", AsyncMock()),
-        patch(
-            "sibyl.persistence.surreal.system_settings.build_surreal_content_client",
-            return_value=surreal_content_client,
-        ),
+    @asynccontextmanager
+    async def fake_content_client():
+        yield surreal_content_client
+
+    with patch(
+        "sibyl.persistence.surreal.system_settings.surreal_content_client",
+        fake_content_client,
     ):
         saved = await save_system_setting(
             None,
@@ -615,12 +617,13 @@ async def test_surreal_backup_helpers_round_trip(
 ) -> None:
     org_id = uuid4()
 
-    with (
-        patch.object(surreal_content_client, "close", AsyncMock()),
-        patch(
-            "sibyl.persistence.surreal.backups.build_surreal_content_client",
-            return_value=surreal_content_client,
-        ),
+    @asynccontextmanager
+    async def fake_content_client():
+        yield surreal_content_client
+
+    with patch(
+        "sibyl.persistence.surreal.backups.surreal_content_client",
+        fake_content_client,
     ):
         settings = await get_backup_settings(org_id)
         updated_settings = await update_backup_settings(

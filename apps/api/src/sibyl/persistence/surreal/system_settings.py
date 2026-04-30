@@ -13,7 +13,7 @@ from sibyl.persistence.surreal.content import (
     _coerce_str,
     _normalize_records,
     _query_error,
-    build_surreal_content_client,
+    surreal_content_client,
 )
 
 
@@ -45,11 +45,8 @@ def _setting_record(setting: SystemSetting) -> dict[str, Any]:
 
 
 async def _select_many(query: str, **params: Any) -> list[dict[str, Any]]:
-    client = build_surreal_content_client()
-    try:
+    async with surreal_content_client() as client:
         result = await client.execute_query(query, **params)
-    finally:
-        await client.close()
 
     error = _query_error(result)
     if error is not None:
