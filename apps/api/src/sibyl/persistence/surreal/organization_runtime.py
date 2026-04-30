@@ -531,6 +531,37 @@ async def update_org(
         )
 
 
+async def _delete_org_auth_child_records(client, *, organization_id: UUID) -> None:
+    team_rows = _normalize_records(
+        await client.execute_query(
+            "SELECT * FROM teams WHERE organization_id = $organization_id;",
+            organization_id=str(organization_id),
+        )
+    )
+    api_key_rows = _normalize_records(
+        await client.execute_query(
+            "SELECT * FROM api_keys WHERE organization_id = $organization_id;",
+            organization_id=str(organization_id),
+        )
+    )
+
+    team_ids = [str(team["uuid"]) for team in team_rows if team.get("uuid") is not None]
+    if team_ids:
+        await client.execute_query(
+            "DELETE FROM team_members WHERE team_id IN $team_ids;",
+            team_ids=team_ids,
+        )
+
+    api_key_ids = [
+        str(api_key["uuid"]) for api_key in api_key_rows if api_key.get("uuid") is not None
+    ]
+    if api_key_ids:
+        await client.execute_query(
+            "DELETE FROM api_key_project_scopes WHERE api_key_id IN $api_key_ids;",
+            api_key_ids=api_key_ids,
+        )
+
+
 async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
     async with _auth_client_scope() as client:
         orgs = SurrealOrganizationRepository.from_client(client)
@@ -556,29 +587,7 @@ async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
             details={"slug": organization.slug, "name": organization.name},
         )
 
-        team_rows = _normalize_records(
-            await client.execute_query(
-                "SELECT * FROM teams WHERE organization_id = $organization_id;",
-                organization_id=str(organization.id),
-            )
-        )
-        api_key_rows = _normalize_records(
-            await client.execute_query(
-                "SELECT * FROM api_keys WHERE organization_id = $organization_id;",
-                organization_id=str(organization.id),
-            )
-        )
-
-        for team in team_rows:
-            await client.execute_query(
-                "DELETE FROM team_members WHERE team_id = $team_id;",
-                team_id=str(team["uuid"]),
-            )
-        for api_key in api_key_rows:
-            await client.execute_query(
-                "DELETE FROM api_key_project_scopes WHERE api_key_id = $api_key_id;",
-                api_key_id=str(api_key["uuid"]),
-            )
+        await _delete_org_auth_child_records(client, organization_id=organization.id)
 
         for query in (
             "DELETE FROM team_projects WHERE organization_id = $organization_id;",

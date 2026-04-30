@@ -155,6 +155,42 @@ async def test_organization_runtime_dispatches_neutral_org_delete_to_surreal(
 
 
 @pytest.mark.asyncio
+async def test_surreal_delete_org_auth_children_batches_dependent_deletes() -> None:
+    org_id = uuid4()
+    team_ids = [uuid4(), uuid4()]
+    api_key_ids = [uuid4(), uuid4()]
+    responses = [
+        [{"uuid": str(team_id)} for team_id in team_ids],
+        [{"uuid": str(api_key_id)} for api_key_id in api_key_ids],
+        [],
+        [],
+    ]
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class Client:
+        async def execute_query(self, query: str, **kwargs: object) -> object:
+            calls.append((query, kwargs))
+            return responses.pop(0)
+
+    await surreal_organization_runtime._delete_org_auth_child_records(
+        Client(),
+        organization_id=org_id,
+    )
+
+    delete_calls = [(query, params) for query, params in calls if query.startswith("DELETE")]
+    assert delete_calls == [
+        (
+            "DELETE FROM team_members WHERE team_id IN $team_ids;",
+            {"team_ids": [str(team_id) for team_id in team_ids]},
+        ),
+        (
+            "DELETE FROM api_key_project_scopes WHERE api_key_id IN $api_key_ids;",
+            {"api_key_ids": [str(api_key_id) for api_key_id in api_key_ids]},
+        ),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_organization_runtime_dispatches_neutral_project_member_reads_to_surreal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
