@@ -1855,6 +1855,8 @@ class TestEntitySearch:
         assert "summary @1@ $search_query" in fallback_query
         assert "attributes.description @2@ $search_query" in fallback_query
         assert "attributes.content @3@ $search_query" in fallback_query
+        assert "ORDER BY search_score DESC, updated_at DESC" in fallback_query
+        assert "attributes.updated_at DESC" not in fallback_query
         assert "string::contains" not in fallback_query
 
     @pytest.mark.asyncio
@@ -2211,6 +2213,8 @@ class TestEntitySearch:
         assert surreal_entity_manager._driver.execute_query.await_count == 1
         exact_query = surreal_entity_manager._driver.execute_query.await_args.args[0]
         assert "FROM entity" in exact_query
+        assert "ORDER BY updated_at DESC, created_at DESC, uuid DESC" in exact_query
+        assert "attributes.updated_at DESC" not in exact_query
         assert "string::contains" not in exact_query
 
     @pytest.mark.asyncio

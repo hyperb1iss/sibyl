@@ -433,7 +433,7 @@ class EntityManager:
 
         name_expr = "string::lowercase(name ?? '')"
         score_expr = ""
-        order_by = "attributes.updated_at DESC, created_at DESC, uuid DESC"
+        order_by = "updated_at DESC, created_at DESC, uuid DESC"
         if exact_name_only:
             where_clauses.append(f"{name_expr} = $query_lower")
         else:
@@ -450,7 +450,7 @@ class EntityManager:
                 "search::score(2), search::score(3)]) AS search_score,"
             )
             order_by = (
-                "search_score DESC, attributes.updated_at DESC, created_at DESC, uuid DESC"
+                "search_score DESC, updated_at DESC, created_at DESC, uuid DESC"
             )
 
         search_query = f"""
