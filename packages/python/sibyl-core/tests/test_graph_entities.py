@@ -258,6 +258,24 @@ class TestEntityCreate:
         assert saved_episode.source.value == "text"
 
     @pytest.mark.asyncio
+    async def test_create_refuses_surreal_legacy_fallback(
+        self,
+        surreal_entity_manager: EntityManager,
+        sample_entity: Entity,
+    ) -> None:
+        surreal_entity_manager._driver.execute_query = AsyncMock()
+
+        with (
+            patch.object(surreal_entity_manager, "_surreal_entity_node_ops", return_value=None),
+            patch.object(surreal_entity_manager, "_surreal_episode_node_ops", return_value=None),
+            pytest.raises(RuntimeError, match="native node operations"),
+        ):
+            await surreal_entity_manager.create(sample_entity)
+
+        surreal_entity_manager._client.client.add_episode.assert_not_awaited()
+        surreal_entity_manager._driver.execute_query.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_create_entity_success(
         self,
         entity_manager: EntityManager,
@@ -1083,6 +1101,21 @@ class TestEntityListByType:
         second_query = surreal_entity_manager._driver.execute_query.await_args_list[1].args[0]
         assert "project_id = $project_id" in first_query
         assert "project_id = $project_id" not in second_query
+
+    @pytest.mark.asyncio
+    async def test_list_by_type_refuses_surreal_legacy_fallback(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        surreal_entity_manager._driver.execute_query = AsyncMock()
+
+        with (
+            patch.object(surreal_entity_manager, "_surreal_entity_node_ops", return_value=None),
+            pytest.raises(RuntimeError, match="native node operations"),
+        ):
+            await surreal_entity_manager.list_by_type(EntityType.TASK)
+
+        surreal_entity_manager._driver.execute_query.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_list_by_type_basic(
@@ -2645,6 +2678,21 @@ class TestGetNotesForTask:
         second_query = surreal_entity_manager._driver.execute_query.await_args_list[1].args[0]
         assert "task_id = $task_id" in first_query
         assert "task_id = $task_id" not in second_query
+
+    @pytest.mark.asyncio
+    async def test_get_notes_for_task_refuses_surreal_legacy_fallback(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        surreal_entity_manager._driver.execute_query = AsyncMock()
+
+        with (
+            patch.object(surreal_entity_manager, "_surreal_entity_node_ops", return_value=None),
+            pytest.raises(RuntimeError, match="native node operations"),
+        ):
+            await surreal_entity_manager.get_notes_for_task("task-001")
+
+        surreal_entity_manager._driver.execute_query.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_get_notes_for_task(

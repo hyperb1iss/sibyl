@@ -7,7 +7,11 @@ import pytest
 
 from sibyl.api.dependencies import get_graph_store, get_knowledge_read_service
 from sibyl.api.routes.graph import get_graph_stats
-from sibyl.persistence.graph_runtime import GraphEntityStore, GraphRelationshipStore
+from sibyl.persistence.graph_runtime import (
+    GraphEntityStore,
+    GraphQueryAdapter,
+    GraphRelationshipStore,
+)
 from sibyl.persistence.legacy.graph import (
     LegacyEntityStore,
     LegacyGraphQueryAdapter,
@@ -20,6 +24,7 @@ from sibyl.persistence.legacy.graph import (
     get_legacy_task_runtime,
     graph_stats_payload,
 )
+from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.storage import GraphStats, SearchFilters
 
@@ -386,6 +391,21 @@ async def test_legacy_graph_query_adapter_proxies_scoped_reads() -> None:
         now_iso="2026-04-17T00:00:00+00:00",
     )
     assert rows == [{"value": 1}]
+
+
+@pytest.mark.asyncio
+async def test_graph_query_adapter_refuses_raw_queries_on_surreal_driver() -> None:
+    driver = SurrealDriver("memory://").clone("org-1")
+    driver.execute_query = AsyncMock()
+    client = MagicMock()
+    client.get_org_driver.return_value = driver
+
+    adapter = GraphQueryAdapter(client, "org-1")
+
+    with pytest.raises(RuntimeError, match="native graph operations"):
+        await adapter.execute_query("MATCH (n) RETURN n")
+
+    driver.execute_query.assert_not_awaited()
 
 
 @pytest.mark.asyncio

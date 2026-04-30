@@ -829,6 +829,7 @@ class GraphQueryAdapter:
         self._relationships = RelationshipManager(client, group_id=group_id)
 
     async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        _assert_legacy_graph_query_allowed(self._driver, "raw query")
         result = await self._driver.execute_query(query, group_id=self._group_id, **params)
         return GraphClient.normalize_result(result)
 

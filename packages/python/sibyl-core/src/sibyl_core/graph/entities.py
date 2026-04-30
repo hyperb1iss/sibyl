@@ -205,6 +205,18 @@ class EntityManager:
             return self._driver.episode_node_ops
         return None
 
+    def _is_surreal_driver(self) -> bool:
+        try:
+            from sibyl_core.backends.surreal import SurrealDriver
+        except ImportError:
+            return False
+
+        return isinstance(self._driver, SurrealDriver)
+
+    def _assert_legacy_fallback_allowed(self, operation: str) -> None:
+        if self._is_surreal_driver():
+            raise RuntimeError(f"SurrealDB entity {operation} requires native node operations")
+
     def _build_entity_node_attributes(
         self,
         entity: Entity,
@@ -983,6 +995,8 @@ class EntityManager:
             ):
                 return await self.create_direct(entity)
 
+            self._assert_legacy_fallback_allowed("create")
+
             # Use add_episode to store the entity in Graphiti
             # Graphiti extracts entities from episode content, so we format it as natural language
             episode_body = self._format_entity_as_episode(entity)
@@ -1086,6 +1100,7 @@ class EntityManager:
             if surreal_entity_ops is not None:
                 await surreal_entity_ops.save(self._driver, node)
             else:
+                self._assert_legacy_fallback_allowed("create_direct")
                 await node.save(self._driver)
 
             _t2 = _time.perf_counter()
@@ -1485,6 +1500,8 @@ class EntityManager:
 
             return exact_results[:limit]
 
+        self._assert_legacy_fallback_allowed("search_exact_name")
+
         params: dict[str, Any] = {
             "group_id": self._group_id,
             "query_lower": normalized_query,
@@ -1628,6 +1645,8 @@ class EntityManager:
             )
             return fallback_results[:limit]
 
+        self._assert_legacy_fallback_allowed("text_search")
+
         params: dict[str, Any] = {
             "group_id": self._group_id,
             "query_lower": normalized_query,
@@ -1716,6 +1735,7 @@ class EntityManager:
                     raise EntityNotFoundError("Entity", entity_id)
                 existing = self.node_to_entity(surreal_node)
             else:
+                self._assert_legacy_fallback_allowed("update")
                 # Retrieve the existing entity
                 existing = await self.get(entity_id)
                 if not existing:
@@ -1776,6 +1796,7 @@ class EntityManager:
 
                 await surreal_entity_ops.save(self._driver, surreal_node)
             else:
+                self._assert_legacy_fallback_allowed("update")
                 # Persist updates in-place to avoid changing UUIDs
                 await self._persist_entity_attributes(entity_id, updated_entity)
 
@@ -1830,6 +1851,7 @@ class EntityManager:
                 if surreal_entity_ops is not None:
                     node = await surreal_entity_ops.get_by_uuid(self._driver, entity_id)
                 else:
+                    self._assert_legacy_fallback_allowed("delete")
                     node = await EntityNode.get_by_uuid(self._driver, entity_id)
                 if node and node.group_id == self._group_id:
                     if surreal_entity_ops is not None:
@@ -1850,6 +1872,7 @@ class EntityManager:
                 if surreal_episode_ops is not None:
                     episodic = await surreal_episode_ops.get_by_uuid(self._driver, entity_id)
                 else:
+                    self._assert_legacy_fallback_allowed("delete")
                     episodic = await EpisodicNode.get_by_uuid(self._driver, entity_id)
                 if episodic and episodic.group_id == self._group_id:
                     if surreal_episode_ops is not None:
@@ -1952,6 +1975,8 @@ class EntityManager:
             except Exception as e:
                 log.exception("Failed to list entities", entity_type=entity_type, error=str(e))
                 return []
+
+        self._assert_legacy_fallback_allowed("list_by_type")
 
         # Use BELONGS_TO relationship for epic filtering (most reliable)
         if epic_id:
@@ -2220,6 +2245,7 @@ class EntityManager:
                     offset=offset,
                     include_archived=include_archived,
                 )
+            self._assert_legacy_fallback_allowed("list_all")
             entities = await self._list_all_via_type_scans(
                 include_archived=include_archived,
             )
@@ -2863,6 +2889,8 @@ class EntityManager:
 
                 return notes[:limit]
 
+            self._assert_legacy_fallback_allowed("get_notes_for_task")
+
             # Use BELONGS_TO relationship to find notes
             query = """
                 MATCH (n)-[:BELONGS_TO]->(t)
@@ -2901,6 +2929,8 @@ class EntityManager:
             log.debug("Fetched notes for task", task_id=task_id, count=len(entities))
             return entities
 
+        except RuntimeError:
+            raise
         except Exception as e:
             log.exception("Failed to get notes for task", task_id=task_id, error=str(e))
             return []
@@ -3420,6 +3450,8 @@ class EntityManager:
             log.info("Bulk create complete", created=created, failed=failed)
             return created, failed
 
+        self._assert_legacy_fallback_allowed("bulk_create_direct")
+
         for i in range(0, len(entities), batch_size):
             batch = entities[i : i + batch_size]
             batch_groups: dict[str, list[Entity]] = defaultdict(list)
@@ -3697,6 +3729,7 @@ class EntityManager:
             EntityType if found and valid, None otherwise.
         """
         try:
+            self._assert_legacy_fallback_allowed("entity_type_lookup")
             result = await self._driver.execute_query(
                 "MATCH (n {uuid: $id}) RETURN n.entity_type AS entity_type",
                 id=entity_id,
