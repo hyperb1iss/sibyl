@@ -1446,8 +1446,13 @@ async def delete_crawled_document_record(
         )
         chunks_deleted = len(chunk_rows)
 
-        for chunk_row in chunk_rows:
-            await _delete_record(client, "document_chunks", uuid=chunk_row["uuid"])
+        chunk_delete_result = await client.execute_query(
+            "DELETE FROM document_chunks WHERE document_id = $document_id;",
+            document_id=str(document_id),
+        )
+        chunk_delete_error = _query_error(chunk_delete_result)
+        if chunk_delete_error is not None:
+            raise RuntimeError(chunk_delete_error)
         await _delete_record(client, "crawled_documents", uuid=document.id)
 
         source.document_count = max(0, source.document_count - 1)
@@ -1486,15 +1491,27 @@ async def delete_crawl_source_record(
             "SELECT * FROM crawled_documents WHERE source_id = $source_id;",
             source_id=str(source_id),
         )
-        for document_row in document_rows:
-            chunk_rows = await _select_many(
-                client,
-                "SELECT * FROM document_chunks WHERE document_id = $document_id;",
-                document_id=str(document_row["uuid"]),
+        document_ids = [
+            str(document_row["uuid"])
+            for document_row in document_rows
+            if document_row.get("uuid") is not None
+        ]
+        if document_ids:
+            chunk_delete_result = await client.execute_query(
+                "DELETE FROM document_chunks WHERE document_id IN $document_ids;",
+                document_ids=document_ids,
             )
-            for chunk_row in chunk_rows:
-                await _delete_record(client, "document_chunks", uuid=chunk_row["uuid"])
-            await _delete_record(client, "crawled_documents", uuid=document_row["uuid"])
+            chunk_delete_error = _query_error(chunk_delete_result)
+            if chunk_delete_error is not None:
+                raise RuntimeError(chunk_delete_error)
+
+            document_delete_result = await client.execute_query(
+                "DELETE FROM crawled_documents WHERE source_id = $source_id;",
+                source_id=str(source_id),
+            )
+            document_delete_error = _query_error(document_delete_result)
+            if document_delete_error is not None:
+                raise RuntimeError(document_delete_error)
 
         await _delete_record(client, "crawl_sources", uuid=source.id)
 

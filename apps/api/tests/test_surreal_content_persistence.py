@@ -83,6 +83,18 @@ class _RecordingContentClient:
         return self.response
 
 
+class _SequencedContentClient:
+    def __init__(self, responses: list[object]) -> None:
+        self.responses = responses
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **kwargs: object) -> object:
+        self.calls.append((query, kwargs))
+        if "UPSERT crawl_sources CONTENT $record" in query:
+            return [kwargs["record"]]
+        return self.responses.pop(0)
+
+
 @pytest_asyncio.fixture
 async def surreal_content_client() -> SurrealContentClient:
     client = SurrealContentClient(url="memory://")
@@ -116,6 +128,57 @@ async def test_surreal_content_replace_record_uses_single_upsert_statement() -> 
     assert "UPSERT crawl_sources CONTENT $record WHERE uuid = $uuid" in query
     assert "DELETE FROM crawl_sources" not in query
     assert params == {"uuid": str(source_id), "record": record}
+
+
+@pytest.mark.asyncio
+async def test_surreal_delete_document_batches_chunk_delete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    source_id = uuid4()
+    document_id = uuid4()
+    client = _SequencedContentClient(
+        [
+            {
+                "uuid": str(document_id),
+                "source_id": str(source_id),
+                "url": "https://example.test/page",
+                "title": "Page",
+                "raw_content": "body",
+                "content": "body",
+                "content_hash": "hash",
+            },
+            {
+                "uuid": str(source_id),
+                "organization_id": str(org_id),
+                "name": "Docs",
+                "url": "https://example.test",
+                "source_type": SourceType.WEBSITE.value,
+                "document_count": 1,
+                "chunk_count": 2,
+            },
+            [{"uuid": str(uuid4())}, {"uuid": str(uuid4())}],
+            [],
+            [],
+        ]
+    )
+
+    @asynccontextmanager
+    async def client_scope():
+        yield client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", client_scope)
+
+    deleted = await delete_crawled_document_record(
+        None,
+        document_id=document_id,
+        organization_id=org_id,
+    )
+
+    assert deleted is not None
+    queries = [query for query, _params in client.calls]
+    assert "DELETE FROM document_chunks WHERE document_id = $document_id;" in queries
+    assert "DELETE FROM document_chunks WHERE uuid = $uuid;" not in queries
 
 
 @pytest.mark.asyncio
