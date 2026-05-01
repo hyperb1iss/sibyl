@@ -972,6 +972,72 @@ async def test_surreal_delete_project_member_records_batches_deletes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_surreal_update_project_member_role_uses_batch_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = SimpleNamespace(id=uuid4())
+    org_id = uuid4()
+    target_user_id = uuid4()
+    project = SimpleNamespace(id=uuid4(), owner_user_id=uuid4())
+    membership_id = uuid4()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            if "SELECT * FROM project_members" in query:
+                return [
+                    {
+                        "uuid": str(membership_id),
+                        "project_id": str(project.id),
+                        "user_id": str(target_user_id),
+                        "role": ProjectRole.CONTRIBUTOR.value,
+                    }
+                ]
+            if "UPDATE project_members SET role" in query:
+                return [
+                    {
+                        "uuid": str(membership_id),
+                        "project_id": str(project.id),
+                        "user_id": str(target_user_id),
+                        "role": ProjectRole.MAINTAINER.value,
+                    }
+                ]
+            return []
+
+    fake_client = FakeClient()
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+    monkeypatch.setattr(
+        surreal_organization_runtime,
+        "_get_project_and_user_role",
+        AsyncMock(return_value=(project, ProjectRole.OWNER)),
+    )
+    monkeypatch.setattr(surreal_organization_runtime, "log_audit_event", AsyncMock())
+
+    result = await surreal_organization_runtime.update_project_member_role(
+        request=_request(),
+        project_id="project_123",
+        actor=actor,
+        org_id=org_id,
+        target_user_id=target_user_id,
+        role=ProjectRole.MAINTAINER,
+    )
+
+    assert result.role is ProjectRole.MAINTAINER
+    queries = [query for query, _params in fake_client.calls]
+    assert any("UPDATE project_members SET role" in query for query in queries)
+    assert all("DELETE FROM project_members" not in query for query in queries)
+    assert all("CREATE project_members CONTENT $record" not in query for query in queries)
+
+
+@pytest.mark.asyncio
 async def test_surreal_add_project_member_rejects_existing_membership(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

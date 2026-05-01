@@ -1347,13 +1347,15 @@ async def update_project_member_role(
         )
         if not membership_records:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
-        membership = membership_records[0]
-        updated = {**membership, "role": role.value, "updated_at": _utcnow()}
-        await _delete_project_member_records(client, membership_records=membership_records)
-        create_result = await client.execute_query(
-            "CREATE project_members CONTENT $record;", record=updated
+        update_result = await client.execute_query(
+            "UPDATE project_members SET role = $role, updated_at = $updated_at "
+            "WHERE project_id = $project_id AND user_id = $user_id;",
+            project_id=str(project.id),
+            user_id=str(target_user_id),
+            role=role.value,
+            updated_at=_utcnow(),
         )
-        error = _query_error(create_result)
+        error = _query_error(update_result)
         if error is not None:
             raise RuntimeError(error)
 
