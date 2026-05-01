@@ -1052,7 +1052,66 @@ async def _get_project_and_user_role(
     user_id: UUID,
     org_id: UUID,
 ) -> tuple[Any, ProjectRole | None]:
-    project_record = await _resolve_project_record(client, project_id=project_id, org_id=org_id)
+    params: dict[str, str] = {
+        "organization_id": str(org_id),
+        "user_id": str(user_id),
+    }
+    if project_id.startswith("project_"):
+        params["graph_project_id"] = project_id
+        query = """
+            RETURN {
+                project: (
+                    SELECT * FROM projects
+                    WHERE organization_id = $organization_id
+                        AND graph_project_id = $graph_project_id
+                    LIMIT 1
+                )[0],
+                membership: (
+                    SELECT * FROM project_members
+                    WHERE user_id = $user_id
+                        AND project_id IN (
+                            SELECT VALUE uuid FROM projects
+                            WHERE organization_id = $organization_id
+                                AND graph_project_id = $graph_project_id
+                            LIMIT 1
+                        )
+                    LIMIT 1
+                )[0],
+            };
+        """
+    else:
+        try:
+            uuid_id = UUID(project_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+            ) from exc
+        params["uuid"] = str(uuid_id)
+        query = """
+            RETURN {
+                project: (
+                    SELECT * FROM projects
+                    WHERE organization_id = $organization_id AND uuid = $uuid
+                    LIMIT 1
+                )[0],
+                membership: (
+                    SELECT * FROM project_members
+                    WHERE user_id = $user_id
+                        AND project_id IN (
+                            SELECT VALUE uuid FROM projects
+                            WHERE organization_id = $organization_id AND uuid = $uuid
+                            LIMIT 1
+                        )
+                    LIMIT 1
+                )[0],
+            };
+        """
+    payload = await client.execute_query(query, **params)
+    if not isinstance(payload, dict):
+        payload = {}
+    project_record = _normalize_record(payload.get("project"))
+    if project_record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     project = SimpleNamespace(**project_record)
     project.id = _coerce_uuid(project_record.get("uuid"), field_name="project.uuid")
     project.owner_user_id = _coerce_uuid(
@@ -1062,15 +1121,9 @@ async def _get_project_and_user_role(
     if project.owner_user_id == user_id:
         return project, ProjectRole.OWNER
 
-    memberships = _normalize_records(
-        await client.execute_query(
-            "SELECT * FROM project_members WHERE project_id = $project_id AND user_id = $user_id LIMIT 1;",
-            project_id=str(project.id),
-            user_id=str(user_id),
-        )
-    )
-    if memberships:
-        return project, ProjectRole(memberships[0]["role"])
+    membership = _normalize_record(payload.get("membership"))
+    if membership is not None:
+        return project, ProjectRole(membership["role"])
     return project, None
 
 

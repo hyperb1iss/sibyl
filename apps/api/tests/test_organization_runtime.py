@@ -891,6 +891,57 @@ async def test_surreal_list_project_members_batches_user_reads(
 
 
 @pytest.mark.asyncio
+async def test_surreal_project_role_lookup_batches_project_and_membership() -> None:
+    org_id = uuid4()
+    user_id = uuid4()
+    owner_id = uuid4()
+    project_db_id = uuid4()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            return {
+                "project": {
+                    "uuid": str(project_db_id),
+                    "organization_id": str(org_id),
+                    "graph_project_id": "project_123",
+                    "owner_user_id": str(owner_id),
+                },
+                "membership": {
+                    "uuid": str(uuid4()),
+                    "project_id": str(project_db_id),
+                    "user_id": str(user_id),
+                    "role": ProjectRole.MAINTAINER.value,
+                },
+            }
+
+    fake_client = FakeClient()
+
+    project, role = await surreal_organization_runtime._get_project_and_user_role(
+        client=fake_client,
+        project_id="project_123",
+        user_id=user_id,
+        org_id=org_id,
+    )
+
+    assert project.id == project_db_id
+    assert role is ProjectRole.MAINTAINER
+    assert len(fake_client.calls) == 1
+    query, params = fake_client.calls[0]
+    assert "RETURN" in query
+    assert "FROM projects" in query
+    assert "FROM project_members" in query
+    assert params == {
+        "organization_id": str(org_id),
+        "user_id": str(user_id),
+        "graph_project_id": "project_123",
+    }
+
+
+@pytest.mark.asyncio
 async def test_surreal_delete_project_member_records_batches_deletes() -> None:
     membership_a = uuid4()
     membership_b = uuid4()
