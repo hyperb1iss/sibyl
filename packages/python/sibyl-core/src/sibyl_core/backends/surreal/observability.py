@@ -28,6 +28,7 @@ _QUERY_STATEMENT_TOKENS = {
 }
 _TABLE_CONTEXT_TOKENS = {"CREATE", "DELETE", "FROM", "INTO", "RELATE", "UPDATE"}
 _NON_TABLE_TOKENS = {"CONTENT", "MERGE", "ONLY", "OVERWRITE", "SELECT", "SET", "VALUE"}
+_QUIET_SUCCESS_STATEMENTS = {"define"}
 
 
 def query_start() -> float:
@@ -143,6 +144,8 @@ def log_query(
         return
     if elapsed >= _slow_query_threshold_ms():
         log.warning("surreal_query_slow", **fields)
+        return
+    if fields["statement"] in _QUIET_SUCCESS_STATEMENTS:
         return
     log.debug("surreal_query_complete", **fields)
 

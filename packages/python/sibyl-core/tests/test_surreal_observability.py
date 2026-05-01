@@ -79,6 +79,43 @@ def test_fast_query_logs_at_debug(monkeypatch) -> None:
     assert fields["tables"] == ["crawl_sources"]
 
 
+def test_fast_schema_define_query_is_quiet(monkeypatch) -> None:
+    fake_log = FakeLog()
+    monkeypatch.setattr(observability, "log", fake_log)
+    monkeypatch.setattr(observability, "_slow_query_threshold_ms", lambda: 500.0)
+
+    observability.log_query(
+        "DEFINE TABLE IF NOT EXISTS users SCHEMAFULL;",
+        client_kind="auth",
+        namespace="sibyl_auth",
+        database="auth",
+        raw=False,
+        elapsed=0.7,
+    )
+
+    assert fake_log.events == []
+
+
+def test_slow_schema_define_query_still_warns(monkeypatch) -> None:
+    fake_log = FakeLog()
+    monkeypatch.setattr(observability, "log", fake_log)
+    monkeypatch.setattr(observability, "_slow_query_threshold_ms", lambda: 500.0)
+
+    observability.log_query(
+        "DEFINE TABLE IF NOT EXISTS users SCHEMAFULL;",
+        client_kind="auth",
+        namespace="sibyl_auth",
+        database="auth",
+        raw=False,
+        elapsed=1200.0,
+    )
+
+    level, event, fields = fake_log.events[0]
+    assert level == "warning"
+    assert event == "surreal_query_slow"
+    assert fields["statement"] == "define"
+
+
 def test_failed_query_logs_warning(monkeypatch) -> None:
     fake_log = FakeLog()
     monkeypatch.setattr(observability, "log", fake_log)
