@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
@@ -106,6 +106,11 @@ async def get_current_user(
         user_id = UUID(str(claims.get("sub", "")))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from e
+
+    cached_ctx = getattr(request.state, "auth_context", None)
+    cached_user = getattr(cached_ctx, "user", None)
+    if getattr(cached_user, "id", None) == user_id:
+        return cast("User", cached_user)
 
     user = await get_user_by_id(user_id)
     if user is None:

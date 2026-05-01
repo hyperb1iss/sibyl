@@ -131,6 +131,46 @@ async def test_get_current_user_uses_surreal_lookup_without_postgres(
 
 
 @pytest.mark.asyncio
+async def test_get_current_user_reuses_cached_auth_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    org_id = uuid4()
+    request = _make_request(user_id=str(user_id), org_id=str(org_id))
+    expected_user = SimpleNamespace(id=user_id, email="nova@example.com")
+    request.state.auth_context = SimpleNamespace(user=expected_user)
+    get_user_by_id = AsyncMock()
+
+    monkeypatch.setattr(dependencies.settings, "auth_store", "surreal")
+    monkeypatch.setattr(dependencies, "get_user_by_id", get_user_by_id)
+
+    result = await dependencies.get_current_user(request)
+
+    assert result is expected_user
+    get_user_by_id.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_ignores_cached_auth_context_for_other_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    org_id = uuid4()
+    request = _make_request(user_id=str(user_id), org_id=str(org_id))
+    request.state.auth_context = SimpleNamespace(user=SimpleNamespace(id=uuid4()))
+    expected_user = SimpleNamespace(id=user_id, email="nova@example.com")
+    get_user_by_id = AsyncMock(return_value=expected_user)
+
+    monkeypatch.setattr(dependencies.settings, "auth_store", "surreal")
+    monkeypatch.setattr(dependencies, "get_user_by_id", get_user_by_id)
+
+    result = await dependencies.get_current_user(request)
+
+    assert result is expected_user
+    get_user_by_id.assert_awaited_once_with(user_id)
+
+
+@pytest.mark.asyncio
 async def test_get_auth_session_uses_surreal_context_without_postgres(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
