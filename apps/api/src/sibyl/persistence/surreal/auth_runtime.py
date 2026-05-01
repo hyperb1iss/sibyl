@@ -1021,6 +1021,92 @@ async def list_user_organizations(*, user_id: UUID) -> list[SimpleNamespace]:
         return [org for record in records if (org := _auth_org_namespace(record)) is not None]
 
 
+async def _ensure_personal_org_membership_record(client: Any, user: AuthUser) -> dict[str, Any]:
+    suffix = str(user.github_id) if user.github_id is not None else str(user.id)
+    slug = f"u-{suffix}"
+    now = _utcnow()
+    payload = await client.execute_query(
+        """
+            RETURN {
+                organization: (SELECT * FROM organizations WHERE slug = $slug LIMIT 1)[0],
+                membership: (
+                    SELECT * FROM organization_members
+                    WHERE organization_id IN (
+                        SELECT VALUE uuid FROM organizations WHERE slug = $slug LIMIT 1
+                    )
+                        AND user_id = $user_id
+                    LIMIT 1
+                )[0],
+            };
+        """,
+        slug=slug,
+        user_id=str(user.id),
+    )
+    if not isinstance(payload, dict):
+        payload = {}
+    organization = _normalize_record(payload.get("organization"))
+    membership = _normalize_record(payload.get("membership"))
+
+    if organization is None:
+        create_result = await client.execute_query(
+            "CREATE organizations CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "name": user.name or f"User {suffix}",
+                "slug": slug,
+                "is_personal": True,
+                "settings": {},
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        error = _query_error(create_result)
+        if error is not None:
+            raise RuntimeError(error)
+        records = _normalize_records(create_result)
+        if not records:
+            msg = "Failed to create personal organization"
+            raise RuntimeError(msg)
+        organization = records[0]
+
+    organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
+    if membership is None:
+        membership_result = await client.execute_query(
+            "CREATE organization_members CONTENT $record;",
+            record={
+                "uuid": str(uuid4()),
+                "organization_id": str(organization_id),
+                "user_id": str(user.id),
+                "role": OrganizationRole.OWNER.value,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+    elif str(membership.get("role") or "") != OrganizationRole.OWNER.value:
+        membership_result = await client.execute_query(
+            """
+                UPDATE organization_members
+                SET role = $role,
+                    updated_at = $updated_at
+                WHERE uuid = $uuid;
+            """,
+            uuid=str(_coerce_uuid(membership.get("uuid"), field_name="membership.uuid")),
+            role=OrganizationRole.OWNER.value,
+            updated_at=now,
+        )
+    else:
+        membership_result = None
+    if membership_result is not None:
+        error = _query_error(membership_result)
+        if error is not None:
+            raise RuntimeError(error)
+        if not _normalize_records(membership_result):
+            msg = "Failed to write personal organization membership"
+            raise RuntimeError(msg)
+
+    return organization
+
+
 async def ensure_personal_organization(*, user_id: UUID):
     async with _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
@@ -1542,8 +1628,6 @@ async def deny_device_authorization(*, user_id: UUID, user_code: str, request):
 
 async def approve_device_authorization(*, user_id: UUID, user_code: str, request):
     async with _auth_client_scope() as client:
-        orgs = SurrealOrganizationRepository.from_client(client)
-        memberships = SurrealOrganizationMembershipRepository.from_client(client)
         repo = _SurrealRepository(client)
         user, record, request_row = await _load_device_authorization_user_and_request(
             client, user_id=user_id, user_code=user_code
@@ -1558,12 +1642,8 @@ async def approve_device_authorization(*, user_id: UUID, user_code: str, request
             or request_row.status != "pending"
         ):
             return None
-        organization = await orgs.create_personal_for_user(user)
-        await memberships.add_member(
-            organization_id=organization.id,
-            user_id=user.id,
-            role=OrganizationRole.OWNER,
-        )
+        organization_record = await _ensure_personal_org_membership_record(client, user)
+        organization = _require_namespace(_auth_org_namespace(organization_record), label="org")
         updated = {
             **record,
             "status": "approved",

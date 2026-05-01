@@ -1291,18 +1291,29 @@ async def test_approve_device_authorization_batches_user_and_request_lookup(
         "organization_id": str(organization_id),
         "updated_at": now,
     }
+    organization_record = {
+        "uuid": str(organization_id),
+        "name": "Nova",
+        "slug": f"u-{user_id}",
+        "is_personal": True,
+        "settings": {},
+    }
+    membership_record = {
+        "uuid": str(uuid4()),
+        "organization_id": str(organization_id),
+        "user_id": str(user_id),
+        "role": "owner",
+        "created_at": now,
+        "updated_at": now,
+    }
     client = _SequenceAuthClient(
-        [{"user": user_record, "device_request": request_record}, [written_record]]
+        [
+            {"user": user_record, "device_request": request_record},
+            {"organization": organization_record, "membership": None},
+            [membership_record],
+            [written_record],
+        ]
     )
-    organization = SimpleNamespace(
-        id=organization_id,
-        name="Nova",
-        slug="u-nova",
-        is_personal=True,
-        settings={},
-    )
-    orgs = SimpleNamespace(create_personal_for_user=AsyncMock(return_value=organization))
-    memberships = SimpleNamespace(add_member=AsyncMock())
     audit = AsyncMock()
 
     monkeypatch.setattr(
@@ -1314,12 +1325,12 @@ async def test_approve_device_authorization_batches_user_and_request_lookup(
     monkeypatch.setattr(
         surreal_auth_runtime.SurrealOrganizationRepository,
         "from_client",
-        lambda _client: orgs,
+        lambda _client: (_ for _ in ()).throw(AssertionError("unexpected org repository")),
     )
     monkeypatch.setattr(
         surreal_auth_runtime.SurrealOrganizationMembershipRepository,
         "from_client",
-        lambda _client: memberships,
+        lambda _client: (_ for _ in ()).throw(AssertionError("unexpected membership repo")),
     )
     monkeypatch.setattr(surreal_auth_runtime, "_log_audit_event", audit)
 
@@ -1333,14 +1344,23 @@ async def test_approve_device_authorization_batches_user_and_request_lookup(
     approved_org, approved_request = approved
     assert approved_org.id == organization_id
     assert approved_request.status == "approved"
-    assert len(client.calls) == 2
+    assert len(client.calls) == 4
     query, params = client.calls[0]
     assert "RETURN" in query
     assert "FROM users" in query
     assert "FROM device_authorization_requests" in query
     assert "SELECT * FROM users" in query
     assert params == {"user_id": str(user_id), "user_code": "ABCD-EFGH"}
-    memberships.add_member.assert_awaited_once()
+    org_query, org_params = client.calls[1]
+    assert "RETURN" in org_query
+    assert "FROM organizations" in org_query
+    assert "FROM organization_members" in org_query
+    assert org_params == {"slug": f"u-{user_id}", "user_id": str(user_id)}
+    member_query, member_params = client.calls[2]
+    assert "CREATE organization_members CONTENT $record" in member_query
+    assert member_params["record"]["organization_id"] == str(organization_id)
+    assert member_params["record"]["user_id"] == str(user_id)
+    assert member_params["record"]["role"] == "owner"
     audit.assert_awaited_once()
 
 
