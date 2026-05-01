@@ -19,7 +19,11 @@ from sibyl.db.models import (
 )
 from sibyl.persistence import content_archive
 from sibyl.persistence.content_archive import restore_content_archive_payload
-from sibyl.persistence.surreal import backups as surreal_backups, content as surreal_content
+from sibyl.persistence.surreal import (
+    backups as surreal_backups,
+    content as surreal_content,
+    system_settings as surreal_system_settings,
+)
 from sibyl.persistence.surreal.backups import (
     attach_backup_job,
     create_backup_record,
@@ -199,6 +203,40 @@ async def test_surreal_backup_record_save_uses_upsert_statement(
     assert saved.backup_id == "backup_upsert"
     assert any("UPSERT backups CONTENT $record WHERE uuid = $uuid" in query for query in queries)
     assert not any("DELETE FROM backups" in query for query in queries)
+
+
+@pytest.mark.asyncio
+async def test_surreal_system_setting_save_uses_upsert_statement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = {
+        "key": "openai_api_key",
+        "value": "encrypted",
+        "is_secret": True,
+        "description": "OpenAI",
+    }
+    client = _SequencedContentClient([[], [record]])
+
+    @asynccontextmanager
+    async def client_scope():
+        yield client
+
+    monkeypatch.setattr(surreal_system_settings, "surreal_content_client", client_scope)
+
+    saved = await surreal_system_settings.save_system_setting(
+        None,
+        setting=SystemSetting(
+            key="openai_api_key",
+            value="encrypted",
+            is_secret=True,
+            description="OpenAI",
+        ),
+    )
+
+    queries = [query for query, _params in client.calls]
+    assert saved.key == "openai_api_key"
+    assert any("UPSERT system_settings CONTENT $record WHERE key = $key" in query for query in queries)
+    assert not any("DELETE FROM system_settings" in query for query in queries)
 
 
 @pytest.mark.asyncio

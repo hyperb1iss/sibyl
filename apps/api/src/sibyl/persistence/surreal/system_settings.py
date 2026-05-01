@@ -87,9 +87,9 @@ async def save_system_setting(
         setting.created_at = now
     setting.updated_at = now
 
-    await _execute_write("DELETE FROM system_settings WHERE key = $key;", key=setting.key)
     rows = await _execute_write(
-        "CREATE system_settings CONTENT $record;",
+        "UPSERT system_settings CONTENT $record WHERE key = $key;",
+        key=setting.key,
         record=_setting_record(setting),
     )
     if not rows:
