@@ -111,6 +111,24 @@ async def test_build_auth_context_does_not_reuse_cache_for_explicit_session(
 
 
 @pytest.mark.asyncio
+async def test_build_auth_context_returns_503_when_auth_store_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    org_id = uuid4()
+    request = _make_request(user_id=str(user_id), org_id=str(org_id))
+    resolve_auth_context = AsyncMock(side_effect=TimeoutError("timed out"))
+
+    monkeypatch.setattr(dependencies, "resolve_auth_context", resolve_auth_context)
+
+    with pytest.raises(dependencies.HTTPException) as exc:
+        await dependencies.build_auth_context(request)
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "Authentication storage temporarily unavailable"
+
+
+@pytest.mark.asyncio
 async def test_get_current_user_uses_surreal_lookup_without_postgres(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -128,6 +146,24 @@ async def test_get_current_user_uses_surreal_lookup_without_postgres(
 
     assert result is expected_user
     get_user_by_id.assert_awaited_once_with(user_id)
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_returns_503_when_auth_store_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    org_id = uuid4()
+    request = _make_request(user_id=str(user_id), org_id=str(org_id))
+    get_user_by_id = AsyncMock(side_effect=TimeoutError("timed out"))
+
+    monkeypatch.setattr(dependencies, "get_user_by_id", get_user_by_id)
+
+    with pytest.raises(dependencies.HTTPException) as exc:
+        await dependencies.get_current_user(request)
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "Authentication storage temporarily unavailable"
 
 
 @pytest.mark.asyncio

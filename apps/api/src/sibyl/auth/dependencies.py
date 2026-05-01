@@ -112,7 +112,13 @@ async def get_current_user(
     if getattr(cached_user, "id", None) == user_id:
         return cast("User", cached_user)
 
-    user = await get_user_by_id(user_id)
+    try:
+        user = await get_user_by_id(user_id)
+    except TimeoutError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication storage temporarily unavailable",
+        ) from e
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
@@ -168,6 +174,11 @@ async def build_auth_context(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
         ctx = await resolve_auth_context(claims=claims, session=session)
+    except TimeoutError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication storage temporarily unavailable",
+        ) from e
     except InvalidAuthClaimsError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from e
     except UserNotFoundError as e:
