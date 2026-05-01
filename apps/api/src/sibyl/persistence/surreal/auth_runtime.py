@@ -631,17 +631,19 @@ class SurrealSessionRepository(_SurrealRepository):
         return True
 
     async def revoke_session(self, session_id: UUID, user_id: UUID) -> bool:
-        record = await self.select_one(
-            "SELECT * FROM user_sessions WHERE uuid = $uuid LIMIT 1;",
+        now = _utcnow()
+        result = await self._client.execute_query(
+            "UPDATE user_sessions SET revoked_at = $revoked_at, updated_at = $updated_at "
+            "WHERE uuid = $uuid AND user_id = $user_id AND revoked_at = NONE;",
             uuid=str(session_id),
+            user_id=str(user_id),
+            revoked_at=now,
+            updated_at=now,
         )
-        if record is None or _coerce_optional_uuid(record.get("user_id")) != user_id:
-            return False
-        if not self._is_session_active(record, include_expired=True):
-            return False
-        updated = {**record, "revoked_at": _utcnow(), "updated_at": _utcnow()}
-        await self.replace_record("user_sessions", uuid=session_id, record=updated)
-        return True
+        error = _query_error(result)
+        if error is not None:
+            raise RuntimeError(error)
+        return bool(_normalize_records(result))
 
     async def revoke_loaded_session(self, session: AuthSession) -> bool:
         if session.revoked_at is not None:

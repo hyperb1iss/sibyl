@@ -366,6 +366,32 @@ async def test_update_activity_uses_single_conditional_update() -> None:
 
 
 @pytest.mark.asyncio
+async def test_revoke_session_uses_single_conditional_update() -> None:
+    user_id = uuid4()
+    session_id = uuid4()
+    session_record = {
+        "uuid": str(session_id),
+        "user_id": str(user_id),
+        "revoked_at": datetime.now(UTC).replace(tzinfo=None),
+    }
+    client = _RecordingAuthClient([session_record])
+    repo = surreal_auth_runtime.SurrealSessionRepository(client)
+
+    result = await repo.revoke_session(session_id, user_id)
+
+    assert result is True
+    assert len(client.calls) == 1
+    query, params = client.calls[0]
+    assert query.startswith("UPDATE user_sessions SET revoked_at")
+    assert "SELECT * FROM user_sessions" not in query
+    assert "UPSERT user_sessions" not in query
+    assert "revoked_at = NONE" in query
+    assert params["uuid"] == str(session_id)
+    assert params["user_id"] == str(user_id)
+    assert params["revoked_at"] == params["updated_at"]
+
+
+@pytest.mark.asyncio
 async def test_revoke_all_sessions_uses_batch_update() -> None:
     user_id = uuid4()
     revoked = [{"uuid": str(uuid4())}, {"uuid": str(uuid4())}]
