@@ -235,17 +235,34 @@ async def _require_org_admin(
     user_id: UUID,
 ) -> tuple[Any, Any]:
     async with _auth_client_scope() as client:
-        orgs = SurrealOrganizationRepository.from_client(client)
-        memberships = SurrealOrganizationMembershipRepository.from_client(client)
-        organization = await orgs.get_by_slug(slug)
+        organization, membership = await _load_org_role_records(
+            client,
+            slug=slug,
+            user_id=user_id,
+        )
         if organization is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-        membership = await memberships.get_for_user(organization.id, user_id)
         if membership is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-        if membership.role not in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
+        role = OrganizationRole(str(membership.get("role") or OrganizationRole.MEMBER.value))
+        if role not in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-        return organization, membership
+        organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
+        membership_id = _coerce_uuid(membership.get("uuid"), field_name="membership.uuid")
+        return (
+            SimpleNamespace(
+                id=organization_id,
+                slug=str(organization.get("slug") or ""),
+                name=str(organization.get("name") or ""),
+                is_personal=bool(organization.get("is_personal", False)),
+            ),
+            SimpleNamespace(
+                id=membership_id,
+                organization_id=organization_id,
+                user_id=user_id,
+                role=role,
+            ),
+        )
 
 
 async def _replace_org_invitation_record(

@@ -455,6 +455,71 @@ async def test_surreal_switch_org_batches_org_and_membership(
 
 
 @pytest.mark.asyncio
+async def test_surreal_require_org_admin_batches_org_and_membership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    org_id = uuid4()
+    membership_id = uuid4()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            if "RETURN" in query:
+                return {
+                    "organization": {
+                        "uuid": str(org_id),
+                        "slug": "electric-coven",
+                        "name": "Electric Coven",
+                    },
+                    "membership": {
+                        "uuid": str(membership_id),
+                        "organization_id": str(org_id),
+                        "user_id": str(user_id),
+                        "role": OrganizationRole.OWNER.value,
+                    },
+                }
+            raise AssertionError(query)
+
+    fake_client = FakeClient()
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+    monkeypatch.setattr(
+        surreal_organization_runtime.SurrealOrganizationRepository,
+        "from_client",
+        lambda _client: (_ for _ in ()).throw(AssertionError("unexpected org repository")),
+    )
+    monkeypatch.setattr(
+        surreal_organization_runtime.SurrealOrganizationMembershipRepository,
+        "from_client",
+        lambda _client: (_ for _ in ()).throw(AssertionError("unexpected membership repo")),
+    )
+
+    organization, membership = await surreal_organization_runtime._require_org_admin(
+        slug="electric-coven",
+        user_id=user_id,
+    )
+
+    assert organization.id == org_id
+    assert organization.slug == "electric-coven"
+    assert membership.id == membership_id
+    assert membership.role is OrganizationRole.OWNER
+    assert len(fake_client.calls) == 1
+    query, params = fake_client.calls[0]
+    assert "RETURN" in query
+    assert "FROM organizations" in query
+    assert "FROM organization_members" in query
+    assert params == {"slug": "electric-coven", "user_id": str(user_id)}
+
+
+@pytest.mark.asyncio
 async def test_surreal_list_org_ids_uses_repository_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
