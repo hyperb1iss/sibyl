@@ -64,7 +64,7 @@ export default defineConfig({
                         { text: 'Human Workflow', link: '/guide/working-with-agents' },
                         { text: 'Setting Up Prompts', link: '/guide/setting-up-prompts' },
                         { text: 'Skills & Hooks', link: '/guide/skills' },
-                        { text: 'Conventions Repository', link: '/guide/conventions-repository' },
+                        { text: 'Knowledge Repository', link: '/guide/knowledge-repository' },
                     ],
                 },
                 {

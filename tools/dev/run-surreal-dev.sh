@@ -242,7 +242,7 @@ main() {
     if [[ "$SIBYL_STORE" == "legacy" ]]; then
       export SIBYL_REDIS_HOST="${redis_host:-127.0.0.1}"
       export SIBYL_REDIS_PORT="${SIBYL_REDIS_PORT:-6380}"
-      export SIBYL_REDIS_PASSWORD="${SIBYL_REDIS_PASSWORD:-conventions}"
+      export SIBYL_REDIS_PASSWORD="${SIBYL_REDIS_PASSWORD:-${SIBYL_FALKORDB_PASSWORD:-sibyl_dev}}"
     elif is_local_service "$redis_host"; then
       export SIBYL_REDIS_HOST="127.0.0.1"
       export SIBYL_REDIS_PORT="${SIBYL_REDIS_PORT:-6381}"

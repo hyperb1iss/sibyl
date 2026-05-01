@@ -84,5 +84,5 @@ kubectl create secret generic sibyl-postgres-secret -n sibyl \
   --from-literal=SIBYL_POSTGRES_PASSWORD=sibyl_dev
 
 kubectl create secret generic sibyl-falkordb-secret -n sibyl \
-  --from-literal=SIBYL_FALKORDB_PASSWORD=conventions
+  --from-literal=SIBYL_FALKORDB_PASSWORD=sibyl_dev
 ```
