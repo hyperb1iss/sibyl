@@ -182,14 +182,12 @@ async def _get_backup_settings_for_org(org_id: UUID) -> BackupSettings | None:
 async def _save_backup_settings(settings: BackupSettings) -> BackupSettings:
     existing = await _get_backup_settings_for_org(settings.organization_id)
     if existing is not None:
-        await _execute_query(
-            "DELETE FROM backup_settings WHERE uuid = $uuid;", uuid=str(existing.id)
-        )
         settings.id = existing.id
         settings.created_at = existing.created_at
     settings.updated_at = _utcnow()
     rows = await _execute_query(
-        "CREATE backup_settings CONTENT $record;",
+        "UPSERT backup_settings CONTENT $record WHERE uuid = $uuid;",
+        uuid=str(settings.id),
         record=_backup_settings_record(settings),
     )
     if not rows:
@@ -221,11 +219,14 @@ async def _get_backup_by_backup_id(backup_id: str) -> Backup | None:
 async def _save_backup(backup: Backup) -> Backup:
     existing = await _get_backup_by_backup_id(backup.backup_id)
     if existing is not None:
-        await _execute_query("DELETE FROM backups WHERE uuid = $uuid;", uuid=str(existing.id))
         backup.id = existing.id
         backup.created_at = existing.created_at
     backup.updated_at = _utcnow()
-    rows = await _execute_query("CREATE backups CONTENT $record;", record=_backup_record(backup))
+    rows = await _execute_query(
+        "UPSERT backups CONTENT $record WHERE uuid = $uuid;",
+        uuid=str(backup.id),
+        record=_backup_record(backup),
+    )
     if not rows:
         msg = f"Failed to write backup record {backup.backup_id}"
         raise RuntimeError(msg)

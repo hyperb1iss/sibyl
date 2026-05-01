@@ -19,7 +19,7 @@ from sibyl.db.models import (
 )
 from sibyl.persistence import content_archive
 from sibyl.persistence.content_archive import restore_content_archive_payload
-from sibyl.persistence.surreal import content as surreal_content
+from sibyl.persistence.surreal import backups as surreal_backups, content as surreal_content
 from sibyl.persistence.surreal.backups import (
     attach_backup_job,
     create_backup_record,
@@ -90,7 +90,7 @@ class _SequencedContentClient:
 
     async def execute_query(self, query: str, **kwargs: object) -> object:
         self.calls.append((query, kwargs))
-        if "UPSERT crawl_sources CONTENT $record" in query:
+        if query.strip().startswith("UPSERT ") and "CONTENT $record" in query:
             return [kwargs["record"]]
         return self.responses.pop(0)
 
@@ -128,6 +128,77 @@ async def test_surreal_content_replace_record_uses_single_upsert_statement() -> 
     assert "UPSERT crawl_sources CONTENT $record WHERE uuid = $uuid" in query
     assert "DELETE FROM crawl_sources" not in query
     assert params == {"uuid": str(source_id), "record": record}
+
+
+@pytest.mark.asyncio
+async def test_surreal_backup_settings_save_uses_upsert_statement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    settings_id = uuid4()
+    existing = {"uuid": str(settings_id), "organization_id": str(org_id)}
+    updated = {
+        **existing,
+        "enabled": True,
+        "schedule": "0 3 * * *",
+        "retention_days": 14,
+        "include_database_dump": False,
+        "include_graph": True,
+    }
+    client = _SequencedContentClient([[existing], [existing], [updated]])
+
+    @asynccontextmanager
+    async def client_scope():
+        yield client
+
+    monkeypatch.setattr(surreal_backups, "surreal_content_client", client_scope)
+
+    saved = await surreal_backups.update_backup_settings(
+        org_id,
+        schedule="0 3 * * *",
+        retention_days=14,
+        include_database_dump=False,
+    )
+
+    queries = [query for query, _params in client.calls]
+    assert saved.schedule == "0 3 * * *"
+    assert any("UPSERT backup_settings CONTENT $record WHERE uuid = $uuid" in query for query in queries)
+    assert not any("DELETE FROM backup_settings" in query for query in queries)
+
+
+@pytest.mark.asyncio
+async def test_surreal_backup_record_save_uses_upsert_statement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    record = {
+        "uuid": str(uuid4()),
+        "organization_id": str(org_id),
+        "backup_id": "backup_upsert",
+        "status": "pending",
+        "include_database_dump": False,
+        "include_graph": True,
+    }
+    client = _SequencedContentClient([[], [record]])
+
+    @asynccontextmanager
+    async def client_scope():
+        yield client
+
+    monkeypatch.setattr(surreal_backups, "surreal_content_client", client_scope)
+
+    saved = await surreal_backups.create_backup_record(
+        org_id=org_id,
+        backup_id="backup_upsert",
+        include_database_dump=False,
+        include_graph=True,
+        created_by_user_id=None,
+    )
+
+    queries = [query for query, _params in client.calls]
+    assert saved.backup_id == "backup_upsert"
+    assert any("UPSERT backups CONTENT $record WHERE uuid = $uuid" in query for query in queries)
+    assert not any("DELETE FROM backups" in query for query in queries)
 
 
 @pytest.mark.asyncio
