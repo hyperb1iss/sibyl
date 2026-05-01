@@ -1110,26 +1110,10 @@ async def _ensure_personal_org_membership_record(client: Any, user: AuthUser) ->
 async def ensure_personal_organization(*, user_id: UUID):
     async with _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
-        orgs = SurrealOrganizationRepository.from_client(client)
-        memberships = SurrealOrganizationMembershipRepository.from_client(client)
         user = await users.get_by_id(user_id)
         if user is None:
             return None
-        organization = await orgs.create_personal_for_user(user)
-        await memberships.add_member(
-            organization_id=organization.id,
-            user_id=user.id,
-            role=OrganizationRole.OWNER,
-        )
-        return _auth_org_namespace(
-            {
-                "uuid": str(organization.id),
-                "name": organization.name,
-                "slug": organization.slug,
-                "is_personal": organization.is_personal,
-                "settings": dict(organization.settings),
-            }
-        )
+        return _auth_org_namespace(await _ensure_personal_org_membership_record(client, user))
 
 
 async def create_session_record(
@@ -1210,15 +1194,11 @@ async def revoke_refresh_session_record(refresh_token: str) -> None:
 async def login_github_identity(*, identity, request) -> IssuedAuthSession:
     async with _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
-        orgs = SurrealOrganizationRepository.from_client(client)
-        memberships = SurrealOrganizationMembershipRepository.from_client(client)
         is_first_user = not await users.has_any_users()
         user = await users.upsert_from_github(identity, is_admin=is_first_user)
-        organization = await orgs.create_personal_for_user(user)
-        await memberships.add_member(
-            organization_id=organization.id,
-            user_id=user.id,
-            role=OrganizationRole.OWNER,
+        organization = _require_namespace(
+            _auth_org_namespace(await _ensure_personal_org_membership_record(client, user)),
+            label="organization",
         )
         return await _issue_auth_session(
             client,
@@ -1238,18 +1218,7 @@ async def login_github_identity(*, identity, request) -> IssuedAuthSession:
                 ),
                 label="user",
             ),
-            organization=_require_namespace(
-                _auth_org_namespace(
-                    {
-                        "uuid": str(organization.id),
-                        "name": organization.name,
-                        "slug": organization.slug,
-                        "is_personal": organization.is_personal,
-                        "settings": dict(organization.settings),
-                    }
-                ),
-                label="organization",
-            ),
+            organization=organization,
             request=request,
             action="auth.github.login",
             details={"github_id": user.github_id, "email": user.email},
@@ -1259,8 +1228,6 @@ async def login_github_identity(*, identity, request) -> IssuedAuthSession:
 async def signup_local_user(*, email: str, password: str, name: str, request):
     async with _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
-        orgs = SurrealOrganizationRepository.from_client(client)
-        memberships = SurrealOrganizationMembershipRepository.from_client(client)
         is_first_user = not await users.has_any_users()
         user = await users.create_local_user(
             email=email,
@@ -1268,11 +1235,9 @@ async def signup_local_user(*, email: str, password: str, name: str, request):
             name=name,
             is_admin=is_first_user,
         )
-        organization = await orgs.create_personal_for_user(user)
-        await memberships.add_member(
-            organization_id=organization.id,
-            user_id=user.id,
-            role=OrganizationRole.OWNER,
+        organization = _require_namespace(
+            _auth_org_namespace(await _ensure_personal_org_membership_record(client, user)),
+            label="organization",
         )
         return await _issue_auth_session(
             client,
@@ -1292,18 +1257,7 @@ async def signup_local_user(*, email: str, password: str, name: str, request):
                 ),
                 label="user",
             ),
-            organization=_require_namespace(
-                _auth_org_namespace(
-                    {
-                        "uuid": str(organization.id),
-                        "name": organization.name,
-                        "slug": organization.slug,
-                        "is_personal": organization.is_personal,
-                        "settings": dict(organization.settings),
-                    }
-                ),
-                label="organization",
-            ),
+            organization=organization,
             request=request,
             action="auth.local.signup",
             details={"email": user.email},
@@ -1313,16 +1267,12 @@ async def signup_local_user(*, email: str, password: str, name: str, request):
 async def login_local_user(*, email: str, password: str, request):
     async with _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
-        orgs = SurrealOrganizationRepository.from_client(client)
-        memberships = SurrealOrganizationMembershipRepository.from_client(client)
         user = await users.authenticate_local(email=email, password=password)
         if user is None:
             return None
-        organization = await orgs.create_personal_for_user(user)
-        await memberships.add_member(
-            organization_id=organization.id,
-            user_id=user.id,
-            role=OrganizationRole.OWNER,
+        organization = _require_namespace(
+            _auth_org_namespace(await _ensure_personal_org_membership_record(client, user)),
+            label="organization",
         )
         return await _issue_auth_session(
             client,
@@ -1342,18 +1292,7 @@ async def login_local_user(*, email: str, password: str, request):
                 ),
                 label="user",
             ),
-            organization=_require_namespace(
-                _auth_org_namespace(
-                    {
-                        "uuid": str(organization.id),
-                        "name": organization.name,
-                        "slug": organization.slug,
-                        "is_personal": organization.is_personal,
-                        "settings": dict(organization.settings),
-                    }
-                ),
-                label="organization",
-            ),
+            organization=organization,
             request=request,
             action="auth.local.login",
             details={"email": user.email},
