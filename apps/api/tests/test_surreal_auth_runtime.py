@@ -1365,6 +1365,37 @@ async def test_approve_device_authorization_batches_user_and_request_lookup(
 
 
 @pytest.mark.asyncio
+async def test_has_owner_membership_uses_direct_membership_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    user_id = uuid4()
+    client = _RecordingAuthClient([{"role": "owner"}])
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime.SurrealOrganizationMembershipRepository,
+        "from_client",
+        lambda _client: (_ for _ in ()).throw(AssertionError("unexpected membership repo")),
+    )
+
+    result = await surreal_auth_runtime.has_owner_membership(
+        org_id=str(org_id),
+        user_id=str(user_id),
+    )
+
+    assert result is True
+    assert len(client.calls) == 1
+    query, params = client.calls[0]
+    assert "FROM organization_members" in query
+    assert params == {"organization_id": str(org_id), "user_id": str(user_id)}
+
+
+@pytest.mark.asyncio
 async def test_exchange_device_code_accepts_aware_datetime_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

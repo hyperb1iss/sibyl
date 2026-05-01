@@ -2427,9 +2427,18 @@ async def has_owner_membership(*, org_id: str, user_id: str | None) -> bool:
     if user_id is None:
         return False
     async with _auth_client_scope() as client:
-        memberships = SurrealOrganizationMembershipRepository.from_client(client)
-        membership = await memberships.get_for_user(UUID(org_id), UUID(user_id))
-        return _role_value(membership.role if membership is not None else None) == "owner"
+        records = _normalize_records(
+            await client.execute_query(
+                """
+                    SELECT role FROM organization_members
+                    WHERE organization_id = $organization_id AND user_id = $user_id
+                    LIMIT 1;
+                """,
+                organization_id=str(UUID(org_id)),
+                user_id=str(UUID(user_id)),
+            )
+        )
+        return bool(records) and _role_value(records[0].get("role")) == "owner"
 
 
 async def list_accessible_project_graph_ids(ctx) -> set[str]:
