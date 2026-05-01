@@ -191,6 +191,122 @@ async def test_surreal_delete_org_auth_children_batches_dependent_deletes() -> N
 
 
 @pytest.mark.asyncio
+async def test_surreal_delete_org_batches_authorization_and_deletes_directly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    user_id = uuid4()
+    source_id = uuid4()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            if "RETURN" in query:
+                return {
+                    "organization": {
+                        "uuid": str(org_id),
+                        "slug": "electric-coven",
+                        "name": "Electric Coven",
+                        "is_personal": False,
+                    },
+                    "membership": {
+                        "uuid": str(uuid4()),
+                        "organization_id": str(org_id),
+                        "user_id": str(user_id),
+                        "role": OrganizationRole.OWNER.value,
+                    },
+                }
+            return []
+
+    class FakeContentClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            if "SELECT * FROM crawl_sources" in query:
+                return [{"uuid": str(source_id)}]
+            return []
+
+    fake_client = FakeClient()
+    fake_content_client = FakeContentClient()
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield fake_client
+
+    @asynccontextmanager
+    async def fake_content_scope():
+        yield fake_content_client
+
+    delete_auth_children = AsyncMock()
+    delete_crawl_source = AsyncMock()
+    graph_client = SimpleNamespace(execute_write_org=AsyncMock())
+    audit_log = AsyncMock()
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+    monkeypatch.setattr(
+        surreal_organization_runtime,
+        "_delete_org_auth_child_records",
+        delete_auth_children,
+    )
+    monkeypatch.setattr(surreal_organization_runtime, "log_audit_event", audit_log)
+    monkeypatch.setattr(surreal_organization_runtime.config_module.settings, "store", "legacy")
+    monkeypatch.setattr(
+        "sibyl.persistence.surreal.content.surreal_content_client",
+        fake_content_scope,
+    )
+    monkeypatch.setattr(
+        "sibyl.persistence.surreal.content.delete_crawl_source_record",
+        delete_crawl_source,
+    )
+    monkeypatch.setattr(
+        "sibyl_core.graph.client.get_graph_client",
+        AsyncMock(return_value=graph_client),
+    )
+    monkeypatch.setattr(
+        surreal_organization_runtime.SurrealOrganizationRepository,
+        "from_client",
+        lambda _client: (_ for _ in ()).throw(AssertionError("unexpected org repository")),
+    )
+    monkeypatch.setattr(
+        surreal_organization_runtime.SurrealOrganizationMembershipRepository,
+        "from_client",
+        lambda _client: (_ for _ in ()).throw(AssertionError("unexpected membership repo")),
+    )
+
+    await surreal_organization_runtime.delete_org(
+        request=_request(),
+        slug="electric-coven",
+        user_id=user_id,
+    )
+
+    lookup_query, lookup_params = fake_client.calls[0]
+    assert "RETURN" in lookup_query
+    assert "FROM organizations" in lookup_query
+    assert "FROM organization_members" in lookup_query
+    assert lookup_params == {"slug": "electric-coven", "user_id": str(user_id)}
+    assert fake_client.calls[-1] == (
+        "DELETE FROM organizations WHERE uuid = $organization_id;",
+        {"organization_id": str(org_id)},
+    )
+    delete_auth_children.assert_awaited_once_with(fake_client, organization_id=org_id)
+    delete_crawl_source.assert_awaited_once_with(
+        None,
+        source_id=source_id,
+        organization_id=org_id,
+    )
+    graph_client.execute_write_org.assert_awaited_once_with(
+        "MATCH (n) DETACH DELETE n RETURN count(n) AS deleted",
+        str(org_id),
+    )
+    audit_log.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_organization_runtime_dispatches_neutral_project_member_reads_to_surreal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

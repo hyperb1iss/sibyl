@@ -733,30 +733,37 @@ async def _delete_org_auth_child_records(client, *, organization_id: UUID) -> No
 
 async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
     async with _auth_client_scope() as client:
-        orgs = SurrealOrganizationRepository.from_client(client)
-        memberships = SurrealOrganizationMembershipRepository.from_client(client)
-        organization = await orgs.get_by_slug(slug)
+        organization, membership = await _load_org_role_records(
+            client,
+            slug=slug,
+            user_id=user_id,
+        )
         if organization is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-        if organization.is_personal:
+        organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
+        organization_slug = str(organization.get("slug") or "")
+        organization_name = str(organization.get("name") or "")
+        if bool(organization.get("is_personal", False)):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Cannot delete personal organization",
             )
 
-        membership = await memberships.get_for_user(organization.id, user_id)
-        if membership is None or membership.role is not OrganizationRole.OWNER:
+        if membership is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        role = OrganizationRole(str(membership.get("role") or OrganizationRole.MEMBER.value))
+        if role is not OrganizationRole.OWNER:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
         await log_audit_event(
             action="org.delete",
             user_id=user_id,
-            organization_id=organization.id,
+            organization_id=organization_id,
             request=request,
-            details={"slug": organization.slug, "name": organization.name},
+            details={"slug": organization_slug, "name": organization_name},
         )
 
-        await _delete_org_auth_child_records(client, organization_id=organization.id)
+        await _delete_org_auth_child_records(client, organization_id=organization_id)
 
         for query in (
             "DELETE FROM team_projects WHERE organization_id = $organization_id;",
@@ -769,7 +776,7 @@ async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
             "DELETE FROM user_sessions WHERE organization_id = $organization_id;",
             "DELETE FROM device_authorization_requests WHERE organization_id = $organization_id;",
         ):
-            await client.execute_query(query, organization_id=str(organization.id))
+            await client.execute_query(query, organization_id=str(organization_id))
 
         from sibyl.persistence.surreal.content import (
             delete_crawl_source_record,
@@ -780,14 +787,14 @@ async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
             source_rows = _normalize_records(
                 await content_client.execute_query(
                     "SELECT * FROM crawl_sources WHERE organization_id = $organization_id;",
-                    organization_id=str(organization.id),
+                    organization_id=str(organization_id),
                 )
             )
             for source_row in source_rows:
                 await delete_crawl_source_record(
                     None,
                     source_id=_coerce_uuid(source_row.get("uuid"), field_name="crawl_sources.uuid"),
-                    organization_id=organization.id,
+                    organization_id=organization_id,
                 )
 
             for query in (
@@ -795,7 +802,7 @@ async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
                 "DELETE FROM backups WHERE organization_id = $organization_id;",
                 "DELETE FROM backup_settings WHERE organization_id = $organization_id;",
             ):
-                await content_client.execute_query(query, organization_id=str(organization.id))
+                await content_client.execute_query(query, organization_id=str(organization_id))
 
         from sibyl_core.graph.client import get_graph_client
 
@@ -803,32 +810,35 @@ async def delete_org(*, request: Request, slug: str, user_id: UUID) -> None:
         if config_module.settings.store == "surreal":
             from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
 
-            driver = graph_client.get_org_driver(str(organization.id))
+            driver = graph_client.get_org_driver(str(organization_id))
             graph_ops = getattr(driver, "graph_ops", None)
             if graph_ops is not None:
                 try:
-                    await graph_ops.clear_data(driver, group_ids=[str(organization.id)])
+                    await graph_ops.clear_data(driver, group_ids=[str(organization_id)])
                 except Exception:
                     for table in (*GRAPH_EDGES, *GRAPH_TABLES):
                         query = f"DELETE FROM {table} WHERE group_id = $group_id;"  # noqa: S608
                         await driver.execute_query(
                             query,
-                            group_id=str(organization.id),
+                            group_id=str(organization_id),
                         )
             else:
                 for table in (*GRAPH_EDGES, *GRAPH_TABLES):
                     query = f"DELETE FROM {table} WHERE group_id = $group_id;"  # noqa: S608
                     await driver.execute_query(
                         query,
-                        group_id=str(organization.id),
+                        group_id=str(organization_id),
                     )
         else:
             await graph_client.execute_write_org(
                 "MATCH (n) DETACH DELETE n RETURN count(n) AS deleted",
-                str(organization.id),
+                str(organization_id),
             )
 
-        await orgs.delete(organization)
+        await client.execute_query(
+            "DELETE FROM organizations WHERE uuid = $organization_id;",
+            organization_id=str(organization_id),
+        )
 
 
 async def list_org_members(*, slug: str, actor_id: UUID) -> list[dict[str, object]]:
