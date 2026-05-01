@@ -1351,7 +1351,7 @@ async def test_exchange_device_code_accepts_aware_datetime_rows(
     device_request_id = uuid4()
     user_id = uuid4()
     organization_id = uuid4()
-    fake_client = object()
+    fake_client = _RecordingAuthClient([{"uuid": str(device_request_id)}])
     create_session = AsyncMock()
     replace_record = AsyncMock()
     select_one = AsyncMock(
@@ -1399,7 +1399,13 @@ async def test_exchange_device_code_accepts_aware_datetime_rows(
     assert token["access_token"] == "access-token"
     assert token["refresh_token"] == "refresh-token"
     create_session.assert_awaited_once()
-    replace_record.assert_awaited_once()
+    replace_record.assert_not_awaited()
+    assert len(fake_client.calls) == 1
+    query, params = fake_client.calls[0]
+    assert query.lstrip().startswith("UPDATE device_authorization_requests")
+    assert "UPSERT device_authorization_requests" not in query
+    assert params["uuid"] == str(device_request_id)
+    assert params["status"] == "consumed"
 
 
 @pytest.mark.asyncio
@@ -1407,7 +1413,7 @@ async def test_exchange_device_code_handles_missing_last_polled_at(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     device_request_id = uuid4()
-    fake_client = object()
+    fake_client = _RecordingAuthClient([{"uuid": str(device_request_id)}])
     replace_record = AsyncMock()
     select_one = AsyncMock(
         return_value={
@@ -1436,4 +1442,10 @@ async def test_exchange_device_code_handles_missing_last_polled_at(
         await surreal_auth_runtime.exchange_device_code(device_code="device-code")
 
     assert exc_info.value.error == "authorization_pending"
-    replace_record.assert_awaited_once()
+    replace_record.assert_not_awaited()
+    assert len(fake_client.calls) == 1
+    query, params = fake_client.calls[0]
+    assert query.lstrip().startswith("UPDATE device_authorization_requests")
+    assert "UPSERT device_authorization_requests" not in query
+    assert params["uuid"] == str(device_request_id)
+    assert params["last_polled_at"] == params["updated_at"]

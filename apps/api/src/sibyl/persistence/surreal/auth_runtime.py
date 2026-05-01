@@ -1355,15 +1355,16 @@ async def exchange_device_code(*, device_code: str) -> dict[str, object]:
                 delta = (now - request_row.last_polled_at).total_seconds()
                 if delta < interval:
                     raise DeviceTokenError("slow_down", "Polling too frequently")
-            updated = {
-                **record,
-                "last_polled_at": now,
-                "updated_at": now,
-            }
-            await repo.replace_record(
-                "device_authorization_requests",
-                uuid=request_row.id,
-                record=updated,
+            await client.execute_query(
+                """
+                    UPDATE device_authorization_requests
+                    SET last_polled_at = $last_polled_at,
+                        updated_at = $updated_at
+                    WHERE uuid = $uuid;
+                """,
+                uuid=str(request_row.id),
+                last_polled_at=now,
+                updated_at=now,
             )
             raise DeviceTokenError("authorization_pending", "Authorization pending")
 
@@ -1389,16 +1390,18 @@ async def exchange_device_code(*, device_code: str) -> dict[str, object]:
             device_name=request_row.client_name,
             device_type="device",
         )
-        updated = {
-            **record,
-            "status": "consumed",
-            "consumed_at": now,
-            "updated_at": now,
-        }
-        await repo.replace_record(
-            "device_authorization_requests",
-            uuid=request_row.id,
-            record=updated,
+        await client.execute_query(
+            """
+                UPDATE device_authorization_requests
+                SET status = $status,
+                    consumed_at = $consumed_at,
+                    updated_at = $updated_at
+                WHERE uuid = $uuid;
+            """,
+            uuid=str(request_row.id),
+            status="consumed",
+            consumed_at=now,
+            updated_at=now,
         )
         return {
             "access_token": access_token,
