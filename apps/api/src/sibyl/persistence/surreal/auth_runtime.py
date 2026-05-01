@@ -749,18 +749,15 @@ async def _log_audit_event(
 
 async def _list_user_org_records(client: Any, *, user_id: UUID) -> list[dict[str, Any]]:
     repo = _SurrealRepository(client)
-    memberships = await repo.select_many(
-        "SELECT * FROM organization_members WHERE user_id = $user_id ORDER BY created_at ASC;",
-        user_id=str(user_id),
-    )
-    org_ids = [
-        str(record["organization_id"]) for record in memberships if record.get("organization_id")
-    ]
-    if not org_ids:
-        return []
     organizations = await repo.select_many(
-        "SELECT * FROM organizations WHERE uuid IN $organization_ids;",
-        organization_ids=org_ids,
+        """
+            SELECT * FROM organizations
+            WHERE uuid IN (
+                SELECT VALUE organization_id FROM organization_members
+                WHERE user_id = $user_id
+            );
+        """,
+        user_id=str(user_id),
     )
     organizations.sort(
         key=lambda record: (

@@ -490,50 +490,30 @@ async def test_list_user_org_records_batches_organization_reads() -> None:
 
         async def execute_query(self, query: str, **kwargs: object) -> object:
             self.calls.append((query, kwargs))
-            if "FROM organization_members" in query:
-                return [
-                    {
-                        "uuid": str(uuid4()),
-                        "organization_id": str(team_org_id),
-                        "user_id": str(user_id),
-                        "role": "admin",
-                    },
-                    {
-                        "uuid": str(uuid4()),
-                        "organization_id": str(personal_org_id),
-                        "user_id": str(user_id),
-                        "role": "owner",
-                    },
-                ]
-            if "FROM organizations" in query:
-                return [
-                    {
-                        "uuid": str(team_org_id),
-                        "name": "Team Org",
-                        "slug": "team-org",
-                        "is_personal": False,
-                    },
-                    {
-                        "uuid": str(personal_org_id),
-                        "name": "Personal Org",
-                        "slug": "personal-org",
-                        "is_personal": True,
-                    },
-                ]
-            raise AssertionError(query)
+            return [
+                {
+                    "uuid": str(team_org_id),
+                    "name": "Team Org",
+                    "slug": "team-org",
+                    "is_personal": False,
+                },
+                {
+                    "uuid": str(personal_org_id),
+                    "name": "Personal Org",
+                    "slug": "personal-org",
+                    "is_personal": True,
+                },
+            ]
 
     client = FakeClient()
 
     records = await surreal_auth_runtime._list_user_org_records(client, user_id=user_id)
 
     assert [record["slug"] for record in records] == ["personal-org", "team-org"]
-    assert len(client.calls) == 2
+    assert len(client.calls) == 1
+    assert "FROM organizations" in client.calls[0][0]
     assert "FROM organization_members" in client.calls[0][0]
     assert client.calls[0][1] == {"user_id": str(user_id)}
-    assert "FROM organizations" in client.calls[1][0]
-    assert client.calls[1][1] == {
-        "organization_ids": [str(team_org_id), str(personal_org_id)]
-    }
 
 
 @pytest.mark.asyncio
