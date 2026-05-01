@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
+from sibyl.auth.api_key_common import api_key_prefix, hash_api_key
 from sibyl.auth.passwords import hash_password
 from sibyl.auth.primitives import DeviceTokenError
 from sibyl.db.models import ProjectRole
@@ -42,6 +43,12 @@ class _SequenceAuthClient:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     async def execute_query(self, query: str, **kwargs: object) -> object:
+        self.calls.append((query, kwargs))
+        if not self.responses:
+            raise AssertionError("unexpected query")
+        return self.responses.pop(0)
+
+    async def execute_query_raw(self, query: str, **kwargs: object) -> object:
         self.calls.append((query, kwargs))
         if not self.responses:
             raise AssertionError("unexpected query")
@@ -225,6 +232,72 @@ async def test_surreal_repository_replace_record_uses_single_upsert_statement() 
     assert "UPSERT user_sessions CONTENT $record WHERE uuid = $uuid" in query
     assert "DELETE FROM user_sessions" not in query
     assert params == {"uuid": str(session_id), "record": record}
+
+
+@pytest.mark.asyncio
+async def test_authenticate_api_key_batches_last_used_and_project_scopes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_key = "sk_live_test-key"
+    salt_hex, hash_hex = hash_api_key(raw_key)
+    api_key_id = uuid4()
+    user_id = uuid4()
+    organization_id = uuid4()
+    project_id = uuid4()
+    client = _SequenceAuthClient(
+        [
+            [
+                {
+                    "uuid": str(api_key_id),
+                    "user_id": str(user_id),
+                    "organization_id": str(organization_id),
+                    "key_prefix": api_key_prefix(raw_key),
+                    "key_salt": salt_hex,
+                    "key_hash": hash_hex,
+                    "scopes": ["api:read"],
+                    "revoked_at": None,
+                    "expires_at": None,
+                }
+            ],
+            {
+                "result": [
+                    {"status": "OK", "result": []},
+                    {
+                        "status": "OK",
+                        "result": [
+                            {
+                                "uuid": str(uuid4()),
+                                "api_key_id": str(api_key_id),
+                                "project_id": str(project_id),
+                            }
+                        ],
+                    },
+                ]
+            },
+        ]
+    )
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+
+    auth = await surreal_auth_runtime.authenticate_api_key(raw_key)
+
+    assert auth is not None
+    assert auth.api_key_id == api_key_id
+    assert auth.user_id == user_id
+    assert auth.organization_id == organization_id
+    assert auth.scopes == ["api:read"]
+    assert auth.project_ids == [project_id]
+    assert len(client.calls) == 2
+    scope_query, scope_params = client.calls[1]
+    assert "UPDATE api_keys" in scope_query
+    assert "SELECT * FROM api_key_project_scopes" in scope_query
+    assert "UPSERT api_keys" not in scope_query
+    assert scope_params["api_key_id"] == str(api_key_id)
+    assert scope_params["last_used_at"] == scope_params["updated_at"]
 
 
 @pytest.mark.asyncio

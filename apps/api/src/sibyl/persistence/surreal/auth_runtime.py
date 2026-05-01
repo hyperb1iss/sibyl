@@ -160,6 +160,25 @@ def _normalize_records(result: Any) -> list[dict[str, Any]]:
     return records
 
 
+def _normalize_raw_statement_records(
+    result: Any, *, statement_index: int
+) -> list[dict[str, Any]]:
+    if isinstance(result, dict):
+        payload = {str(key): value for key, value in result.items()}
+        statements = payload.get("result")
+        if (
+            "status" not in payload
+            and isinstance(statements, list)
+            and statements
+            and all(isinstance(statement, dict) for statement in statements)
+        ):
+            statement = statements[statement_index]
+            if "result" in statement:
+                return _normalize_records(statement.get("result"))
+            return _normalize_records(statement)
+    return _normalize_records(result)
+
+
 def _query_error(result: object) -> str | None:
     if isinstance(result, str):
         return result
@@ -428,6 +447,24 @@ class _SurrealRepository:
             msg = f"Failed to write {table} record {uuid}"
             raise RuntimeError(msg)
         return created[0]
+
+
+async def _execute_raw_statement_records(
+    client: Any,
+    query: str,
+    *,
+    statement_index: int = -1,
+    **params: Any,
+) -> list[dict[str, Any]]:
+    execute_query_raw = getattr(client, "execute_query_raw", None)
+    if callable(execute_query_raw):
+        result = await execute_query_raw(query, **params)
+    else:
+        result = await client.execute_query(query, **params)
+    error = _query_error(result)
+    if error is not None:
+        raise RuntimeError(error)
+    return _normalize_raw_statement_records(result, statement_index=statement_index)
 
 
 class SurrealSessionRepository(_SurrealRepository):
@@ -869,15 +906,20 @@ async def authenticate_api_key(raw_key: str):
                 hash_hex=str(candidate.get("key_hash") or ""),
             ):
                 continue
-            updated = {**candidate, "last_used_at": now, "updated_at": now}
-            await repo.replace_record(
-                "api_keys",
-                uuid=_coerce_uuid(updated.get("uuid"), field_name="api_key.uuid"),
-                record=updated,
-            )
-            project_scope_records = await repo.select_many(
-                "SELECT * FROM api_key_project_scopes WHERE api_key_id = $api_key_id ORDER BY created_at ASC;",
-                api_key_id=str(updated["uuid"]),
+            api_key_id = _coerce_uuid(candidate.get("uuid"), field_name="api_key.uuid")
+            project_scope_records = await _execute_raw_statement_records(
+                client,
+                """
+                    UPDATE api_keys
+                    SET last_used_at = $last_used_at, updated_at = $updated_at
+                    WHERE uuid = $api_key_id;
+                    SELECT * FROM api_key_project_scopes
+                    WHERE api_key_id = $api_key_id
+                    ORDER BY created_at ASC;
+                """,
+                api_key_id=str(api_key_id),
+                last_used_at=now,
+                updated_at=now,
             )
             project_ids = [
                 _coerce_uuid(
@@ -887,12 +929,12 @@ async def authenticate_api_key(raw_key: str):
                 if record.get("project_id") is not None
             ]
             return ApiKeyAuth(
-                api_key_id=_coerce_uuid(updated.get("uuid"), field_name="api_key.uuid"),
-                user_id=_coerce_uuid(updated.get("user_id"), field_name="api_key.user_id"),
+                api_key_id=api_key_id,
+                user_id=_coerce_uuid(candidate.get("user_id"), field_name="api_key.user_id"),
                 organization_id=_coerce_uuid(
-                    updated.get("organization_id"), field_name="api_key.organization_id"
+                    candidate.get("organization_id"), field_name="api_key.organization_id"
                 ),
-                scopes=_scopes_list(updated.get("scopes")),
+                scopes=_scopes_list(candidate.get("scopes")),
                 project_ids=project_ids if project_ids else None,
             )
     return None
