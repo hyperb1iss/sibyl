@@ -369,6 +369,36 @@ async def _load_org_member_mutation_records(
     )
 
 
+async def _load_org_role_records(
+    client: Any,
+    *,
+    slug: str,
+    user_id: UUID,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    payload = await client.execute_query(
+        """
+            RETURN {
+                organization: (SELECT * FROM organizations WHERE slug = $slug LIMIT 1)[0],
+                membership: (
+                    SELECT * FROM organization_members
+                    WHERE organization_id IN (
+                        SELECT VALUE uuid FROM organizations WHERE slug = $slug LIMIT 1
+                    )
+                        AND user_id = $user_id
+                    LIMIT 1
+                )[0],
+            };
+        """,
+        slug=slug,
+        user_id=str(user_id),
+    )
+    if not isinstance(payload, dict):
+        payload = {}
+    return _normalize_record(payload.get("organization")), _normalize_record(
+        payload.get("membership")
+    )
+
+
 async def list_orgs(*, user_id: UUID) -> list[OrgSummary]:
     async with _auth_client_scope() as client:
         payload = await client.execute_query(
@@ -485,19 +515,20 @@ async def create_org(
 
 async def get_org(*, slug: str, user_id: UUID) -> OrgRoleResult:
     async with _auth_client_scope() as client:
-        orgs = SurrealOrganizationRepository.from_client(client)
-        memberships = SurrealOrganizationMembershipRepository.from_client(client)
-        organization = await orgs.get_by_slug(slug)
+        organization, membership = await _load_org_role_records(
+            client,
+            slug=slug,
+            user_id=user_id,
+        )
         if organization is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-        membership = await memberships.get_for_user(organization.id, user_id)
         if membership is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
         return OrgRoleResult(
-            id=organization.id,
-            slug=organization.slug,
-            name=organization.name,
-            role=membership.role,
+            id=_coerce_uuid(organization.get("uuid"), field_name="organization.uuid"),
+            slug=str(organization.get("slug") or ""),
+            name=str(organization.get("name") or ""),
+            role=OrganizationRole(str(membership.get("role") or OrganizationRole.MEMBER.value)),
         )
 
 
@@ -508,25 +539,27 @@ async def switch_org(
     user_id: UUID,
 ) -> OrgAuthResult:
     async with _auth_client_scope() as client:
-        orgs = SurrealOrganizationRepository.from_client(client)
-        memberships = SurrealOrganizationMembershipRepository.from_client(client)
-        organization = await orgs.get_by_slug(slug)
+        organization, membership = await _load_org_role_records(
+            client,
+            slug=slug,
+            user_id=user_id,
+        )
         if organization is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-        membership = await memberships.get_for_user(organization.id, user_id)
         if membership is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-        access_token = create_access_token(user_id=user_id, organization_id=organization.id)
+        organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
+        access_token = create_access_token(user_id=user_id, organization_id=organization_id)
         refresh_token, refresh_expires = create_refresh_token(
             user_id=user_id,
-            organization_id=organization.id,
+            organization_id=organization_id,
         )
         await _rotate_or_create_org_session(
             client=client,
             request=request,
             user_id=user_id,
-            organization_id=organization.id,
+            organization_id=organization_id,
             access_token=access_token,
             refresh_token=refresh_token,
             refresh_expires=refresh_expires,
@@ -534,14 +567,17 @@ async def switch_org(
         await log_audit_event(
             action="org.switch",
             user_id=user_id,
-            organization_id=organization.id,
+            organization_id=organization_id,
             request=request,
-            details={"slug": organization.slug, "name": organization.name},
+            details={
+                "slug": str(organization.get("slug") or ""),
+                "name": str(organization.get("name") or ""),
+            },
         )
         return OrgAuthResult(
-            id=organization.id,
-            slug=organization.slug,
-            name=organization.name,
+            id=organization_id,
+            slug=str(organization.get("slug") or ""),
+            name=str(organization.get("name") or ""),
             access_token=access_token,
             refresh_token=refresh_token,
             refresh_expires=refresh_expires,
