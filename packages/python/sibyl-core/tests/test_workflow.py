@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -641,6 +641,44 @@ class TestWorkflowEngine:
         assert RelationshipType.USES_PROCEDURE in relationship_types
         assert RelationshipType.DERIVED_FROM in relationship_types
         assert RelationshipType.REFERENCES in relationship_types
+
+    @pytest.mark.asyncio
+    async def test_create_learning_episode_uses_episode_mentions(
+        self,
+        workflow_engine: TaskWorkflowEngine,
+        mock_relationship_manager: MockRelationshipManager,
+    ) -> None:
+        task = make_task(
+            task_id="task_episode",
+            title="Capture learning",
+            status=TaskStatus.DONE,
+            learnings="Use episode mentions for Surreal links.",
+        )
+        mock_relationship_manager.relationships.extend(
+            [
+                MagicMock(
+                    target_id="pattern_surreal",
+                    relationship_type=RelationshipType.REFERENCES,
+                )
+            ]
+        )
+        save_episode_mention = AsyncMock(return_value=True)
+        workflow_engine._save_episode_mention = save_episode_mention  # type: ignore[method-assign]
+
+        episode_id = await workflow_engine._create_learning_episode(task)
+
+        assert episode_id == "episode_task_episode"
+        assert len(mock_relationship_manager.relationships) == 1
+        save_episode_mention.assert_any_await(
+            episode_id="episode_task_episode",
+            target_id="task_episode",
+            link_id="rel_episode_task_episode",
+        )
+        save_episode_mention.assert_any_await(
+            episode_id="episode_task_episode",
+            target_id="pattern_surreal",
+            link_id="rel_inherit_episode_task_episode_pattern_surreal",
+        )
 
     @pytest.mark.asyncio
     async def test_archive_task_sets_archived_status(

@@ -2,7 +2,7 @@
 
 import re
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -80,6 +80,70 @@ class TaskWorkflowEngine:
         self._relationship_manager = relationship_manager
         self._graph_client = graph_client
         self._organization_id = organization_id
+
+    def _surreal_driver(self) -> Any | None:
+        get_org_driver = getattr(self._graph_client, "get_org_driver", None)
+        if not callable(get_org_driver):
+            return None
+        try:
+            from sibyl_core.backends.surreal import SurrealDriver
+        except ImportError:
+            return None
+
+        driver = get_org_driver(self._organization_id)
+        return driver if isinstance(driver, SurrealDriver) else None
+
+    async def _save_episode_mention(
+        self,
+        *,
+        episode_id: str,
+        target_id: str,
+        link_id: str,
+    ) -> bool:
+        driver = self._surreal_driver()
+        if driver is None:
+            return False
+
+        from graphiti_core.edges import EpisodicEdge
+
+        await driver.episodic_edge_ops.save(
+            driver,
+            EpisodicEdge(
+                uuid=link_id,
+                group_id=self._organization_id,
+                source_node_uuid=episode_id,
+                target_node_uuid=target_id,
+                created_at=datetime.now(UTC),
+            ),
+        )
+        return True
+
+    async def _create_learning_artifact_link(
+        self,
+        *,
+        source_id: str,
+        target_id: str,
+        relationship_type: RelationshipType,
+        link_id: str,
+        source_is_episode: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        if source_is_episode and await self._save_episode_mention(
+            episode_id=source_id,
+            target_id=target_id,
+            link_id=link_id,
+        ):
+            return link_id
+
+        return await self._relationship_manager.create(
+            Relationship(
+                id=link_id,
+                source_id=source_id,
+                target_id=target_id,
+                relationship_type=relationship_type,
+                metadata=metadata or {},
+            )
+        )
 
     def _validate_transition(
         self,
@@ -456,17 +520,15 @@ class TaskWorkflowEngine:
         # Use Graphiti create for proper relationship discovery from learnings
         episode_id = await self._entity_manager.create(episode)
 
-        # Link episode back to task
-        await self._relationship_manager.create(
-            Relationship(
-                id=f"rel_episode_{task.id}",
-                source_id=episode_id,
-                target_id=task.id,
-                relationship_type=RelationshipType.DERIVED_FROM,
-            )
+        await self._create_learning_artifact_link(
+            source_id=episode_id,
+            target_id=task.id,
+            relationship_type=RelationshipType.DERIVED_FROM,
+            link_id=f"rel_episode_{task.id}",
+            source_is_episode=True,
         )
 
-        await self._inherit_task_knowledge(episode_id, task.id)
+        await self._inherit_task_knowledge(episode_id, task.id, source_is_episode=True)
 
         log.info("Learning episode created", episode_id=episode_id, task_id=task.id)
         return episode_id
@@ -522,7 +584,13 @@ class TaskWorkflowEngine:
 
         return [note.content for note in notes if getattr(note, "content", "").strip()]
 
-    async def _inherit_task_knowledge(self, source_id: str, task_id: str) -> None:
+    async def _inherit_task_knowledge(
+        self,
+        source_id: str,
+        task_id: str,
+        *,
+        source_is_episode: bool = False,
+    ) -> None:
         task_relationships = await self._relationship_manager.get_for_entity(
             task_id,
             relationship_types=[
@@ -533,14 +601,13 @@ class TaskWorkflowEngine:
         )
 
         for rel in task_relationships:
-            await self._relationship_manager.create(
-                Relationship(
-                    id=f"rel_inherit_{source_id}_{rel.target_id}",
-                    source_id=source_id,
-                    target_id=rel.target_id,
-                    relationship_type=RelationshipType.REFERENCES,
-                    metadata={"inherited_from_task": task_id},
-                )
+            await self._create_learning_artifact_link(
+                source_id=source_id,
+                target_id=rel.target_id,
+                relationship_type=RelationshipType.REFERENCES,
+                link_id=f"rel_inherit_{source_id}_{rel.target_id}",
+                source_is_episode=source_is_episode,
+                metadata={"inherited_from_task": task_id},
             )
 
     async def update_project_activity(self, project_id: str) -> None:
