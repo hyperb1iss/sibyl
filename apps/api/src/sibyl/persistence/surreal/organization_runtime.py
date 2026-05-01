@@ -610,29 +610,37 @@ async def update_org(
     new_slug: str | None = None,
 ) -> OrgSummary:
     async with _auth_client_scope() as client:
-        orgs = SurrealOrganizationRepository.from_client(client)
-        memberships = SurrealOrganizationMembershipRepository.from_client(client)
-        organization = await orgs.get_by_slug(slug)
+        organization, membership = await _load_org_role_records(
+            client,
+            slug=slug,
+            user_id=user_id,
+        )
         if organization is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-        membership = await memberships.get_for_user(organization.id, user_id)
-        if membership is None or membership.role not in {
-            OrganizationRole.OWNER,
-            OrganizationRole.ADMIN,
-        }:
+        if membership is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        role = OrganizationRole(str(membership.get("role") or OrganizationRole.MEMBER.value))
+        if role not in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
+        organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
+        organization_slug = str(organization.get("slug") or "")
         resolved_slug = slugify(new_slug) if new_slug else None
-        if resolved_slug and resolved_slug != organization.slug:
-            existing = await orgs.get_by_slug(resolved_slug)
-            if existing is not None:
+        if resolved_slug and resolved_slug != organization_slug:
+            existing = _normalize_records(
+                await client.execute_query(
+                    "SELECT * FROM organizations WHERE slug = $slug LIMIT 1;",
+                    slug=resolved_slug,
+                )
+            )
+            if existing:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Slug already taken",
                 )
 
         update_params: dict[str, object] = {
-            "uuid": str(organization.id),
+            "uuid": str(organization_id),
             "updated_at": _utcnow(),
         }
         if name is not None and resolved_slug is not None:
@@ -670,12 +678,12 @@ async def update_org(
         updated_records = _normalize_records(update_result)
         updated = updated_records[0] if updated_records else None
         if updated is None:
-            msg = f"Organization disappeared during update: {organization.id}"
+            msg = f"Organization disappeared during update: {organization_id}"
             raise RuntimeError(msg)
         await log_audit_event(
             action="org.update",
             user_id=user_id,
-            organization_id=organization.id,
+            organization_id=organization_id,
             request=request,
             details={
                 "slug": slug,
@@ -688,7 +696,7 @@ async def update_org(
             slug=str(updated.get("slug") or ""),
             name=str(updated.get("name") or ""),
             is_personal=bool(updated.get("is_personal", False)),
-            role=membership.role,
+            role=role,
         )
 
 

@@ -650,49 +650,60 @@ async def test_surreal_update_org_uses_update_result_without_reload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_id = uuid4()
-    organization = SimpleNamespace(
-        id=uuid4(),
-        slug="old-name",
-        name="Old Name",
-        is_personal=False,
-    )
+    org_id = uuid4()
 
     class FakeClient:
-        async def execute_query(self, query: str, **_params):
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            if "RETURN" in query:
+                return {
+                    "organization": {
+                        "uuid": str(org_id),
+                        "slug": "old-name",
+                        "name": "Old Name",
+                        "is_personal": False,
+                    },
+                    "membership": {
+                        "uuid": str(uuid4()),
+                        "organization_id": str(org_id),
+                        "user_id": str(user_id),
+                        "role": OrganizationRole.ADMIN.value,
+                    },
+                }
+            if "SELECT * FROM organizations WHERE slug" in query:
+                return []
             if query.startswith("UPDATE organizations"):
                 return [
                     {
-                        "uuid": str(organization.id),
+                        "uuid": str(org_id),
                         "slug": "new-name",
                         "name": "New Name",
                         "is_personal": False,
                     }
                 ]
-            return []
+            raise AssertionError(query)
+
+    fake_client = FakeClient()
 
     @asynccontextmanager
     async def fake_scope():
-        yield FakeClient()
+        yield fake_client
 
-    org_repo = SimpleNamespace(
-        get_by_slug=AsyncMock(side_effect=[organization, None]),
-        get_by_id=AsyncMock(side_effect=AssertionError("unexpected organization reload")),
-    )
-    membership_repo = SimpleNamespace(
-        get_for_user=AsyncMock(return_value=SimpleNamespace(role=OrganizationRole.ADMIN))
-    )
     audit_log = AsyncMock()
 
     monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
     monkeypatch.setattr(
         surreal_organization_runtime.SurrealOrganizationRepository,
         "from_client",
-        lambda _client: org_repo,
+        lambda _client: (_ for _ in ()).throw(AssertionError("unexpected org repository")),
     )
     monkeypatch.setattr(
         surreal_organization_runtime.SurrealOrganizationMembershipRepository,
         "from_client",
-        lambda _client: membership_repo,
+        lambda _client: (_ for _ in ()).throw(AssertionError("unexpected membership repo")),
     )
     monkeypatch.setattr(surreal_organization_runtime, "log_audit_event", audit_log)
 
@@ -704,11 +715,22 @@ async def test_surreal_update_org_uses_update_result_without_reload(
         new_slug="new-name",
     )
 
-    assert result.id == organization.id
+    assert result.id == org_id
     assert result.slug == "new-name"
     assert result.name == "New Name"
     assert result.role == OrganizationRole.ADMIN
-    org_repo.get_by_id.assert_not_awaited()
+    assert len(fake_client.calls) == 3
+    lookup_query, lookup_params = fake_client.calls[0]
+    assert "RETURN" in lookup_query
+    assert "FROM organizations" in lookup_query
+    assert "FROM organization_members" in lookup_query
+    assert lookup_params == {"slug": "old-name", "user_id": str(user_id)}
+    conflict_query, conflict_params = fake_client.calls[1]
+    assert "SELECT * FROM organizations WHERE slug" in conflict_query
+    assert conflict_params == {"slug": "new-name"}
+    update_query, update_params = fake_client.calls[2]
+    assert update_query.startswith("UPDATE organizations")
+    assert update_params["uuid"] == str(org_id)
     audit_log.assert_awaited_once()
 
 
