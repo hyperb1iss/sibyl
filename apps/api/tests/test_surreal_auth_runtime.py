@@ -340,6 +340,32 @@ async def test_mark_current_updates_session_flags_without_loading_all_sessions()
 
 
 @pytest.mark.asyncio
+async def test_update_activity_uses_single_conditional_update() -> None:
+    token = "access-token"
+    repo = surreal_auth_runtime.SurrealSessionRepository(object())
+    session_record = {
+        "uuid": str(uuid4()),
+        "token_hash": repo.hash_token(token),
+        "expires_at": datetime.now(UTC) + timedelta(minutes=5),
+        "revoked_at": None,
+    }
+    client = _RecordingAuthClient([session_record])
+    repo = surreal_auth_runtime.SurrealSessionRepository(client)
+
+    result = await repo.update_activity(token)
+
+    assert result is True
+    assert len(client.calls) == 1
+    query, params = client.calls[0]
+    assert query.startswith("UPDATE user_sessions SET last_active_at")
+    assert "SELECT * FROM user_sessions" not in query
+    assert "UPSERT user_sessions" not in query
+    assert "expires_at > $now" in query
+    assert params["token_hash"] == repo.hash_token(token)
+    assert params["last_active_at"] == params["updated_at"] == params["now"]
+
+
+@pytest.mark.asyncio
 async def test_revoke_all_sessions_uses_batch_update() -> None:
     user_id = uuid4()
     revoked = [{"uuid": str(uuid4())}, {"uuid": str(uuid4())}]

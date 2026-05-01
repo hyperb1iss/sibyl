@@ -588,19 +588,19 @@ class SurrealSessionRepository(_SurrealRepository):
         ]
 
     async def update_activity(self, token: str) -> bool:
-        record = await self.select_one(
-            "SELECT * FROM user_sessions WHERE token_hash = $token_hash LIMIT 1;",
+        now = _utcnow()
+        result = await self._client.execute_query(
+            "UPDATE user_sessions SET last_active_at = $last_active_at, updated_at = $updated_at "
+            "WHERE token_hash = $token_hash AND revoked_at = NONE AND expires_at > $now;",
             token_hash=self.hash_token(token),
+            last_active_at=now,
+            updated_at=now,
+            now=now,
         )
-        if not self._is_session_active(record):
-            return False
-        updated = {**record, "last_active_at": _utcnow(), "updated_at": _utcnow()}
-        await self.replace_record(
-            "user_sessions",
-            uuid=_coerce_uuid(updated.get("uuid"), field_name="session.uuid"),
-            record=updated,
-        )
-        return True
+        error = _query_error(result)
+        if error is not None:
+            raise RuntimeError(error)
+        return bool(_normalize_records(result))
 
     async def mark_current(self, token: str) -> bool:
         record = await self.select_one(
