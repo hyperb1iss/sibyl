@@ -218,6 +218,43 @@ async def test_token_revoke_helpers_revoke_loaded_session_without_reload(
 
 
 @pytest.mark.asyncio
+async def test_rotate_tokens_updates_loaded_session_without_reload() -> None:
+    session = _auth_session(organization_id=uuid4())
+    new_access_expires_at = datetime.now(UTC) + timedelta(minutes=10)
+    new_refresh_expires_at = datetime.now(UTC) + timedelta(days=30)
+    updated_record = {
+        "uuid": str(session.id),
+        "user_id": str(session.user_id),
+        "organization_id": str(session.organization_id),
+        "expires_at": new_access_expires_at,
+        "refresh_token_expires_at": new_refresh_expires_at,
+        "revoked_at": None,
+    }
+    client = _RecordingAuthClient([updated_record])
+    repo = surreal_auth_runtime.SurrealSessionRepository(client)
+
+    rotated = await repo.rotate_tokens(
+        session,
+        new_access_token="new-access",
+        new_access_expires_at=new_access_expires_at,
+        new_refresh_token="new-refresh",
+        new_refresh_expires_at=new_refresh_expires_at,
+    )
+
+    assert rotated.id == session.id
+    assert rotated.user_id == session.user_id
+    assert len(client.calls) == 1
+    query, params = client.calls[0]
+    assert query.lstrip().startswith("UPDATE user_sessions")
+    assert "SELECT * FROM user_sessions" not in query
+    assert "UPSERT user_sessions" not in query
+    assert params["uuid"] == str(session.id)
+    assert params["token_hash"] == repo.hash_token("new-access")
+    assert params["refresh_token_hash"] == repo.hash_token("new-refresh")
+    assert params["last_active_at"] == params["updated_at"]
+
+
+@pytest.mark.asyncio
 async def test_surreal_repository_replace_record_uses_single_upsert_statement() -> None:
     session_id = uuid4()
     record = {"uuid": str(session_id), "token_hash": "token"}

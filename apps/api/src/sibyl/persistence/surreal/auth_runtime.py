@@ -554,25 +554,35 @@ class SurrealSessionRepository(_SurrealRepository):
         new_refresh_token: str,
         new_refresh_expires_at: datetime,
     ) -> AuthSession:
-        record = await self.select_one(
-            "SELECT * FROM user_sessions WHERE uuid = $uuid LIMIT 1;",
+        now = _utcnow()
+        result = await self._client.execute_query(
+            """
+                UPDATE user_sessions
+                SET token_hash = $token_hash,
+                    expires_at = $expires_at,
+                    refresh_token_hash = $refresh_token_hash,
+                    refresh_token_expires_at = $refresh_token_expires_at,
+                    last_active_at = $last_active_at,
+                    updated_at = $updated_at
+                WHERE uuid = $uuid;
+            """,
             uuid=str(session.id),
+            token_hash=self.hash_token(new_access_token),
+            expires_at=_coerce_datetime(new_access_expires_at) or new_access_expires_at,
+            refresh_token_hash=self.hash_token(new_refresh_token),
+            refresh_token_expires_at=_coerce_datetime(new_refresh_expires_at)
+            or new_refresh_expires_at,
+            last_active_at=now,
+            updated_at=now,
         )
-        if record is None:
+        error = _query_error(result)
+        if error is not None:
+            raise RuntimeError(error)
+        updated_records = _normalize_records(result)
+        if not updated_records:
             msg = f"Session not found: {session.id}"
             raise LookupError(msg)
-        updated = {
-            **record,
-            "token_hash": self.hash_token(new_access_token),
-            "expires_at": _coerce_datetime(new_access_expires_at) or new_access_expires_at,
-            "refresh_token_hash": self.hash_token(new_refresh_token),
-            "refresh_token_expires_at": _coerce_datetime(new_refresh_expires_at)
-            or new_refresh_expires_at,
-            "last_active_at": _utcnow(),
-            "updated_at": _utcnow(),
-        }
-        written = await self.replace_record("user_sessions", uuid=session.id, record=updated)
-        return self._auth_session_from_record(written)
+        return self._auth_session_from_record(updated_records[0])
 
     async def list_user_sessions(
         self, user_id: UUID, *, include_expired: bool = False
