@@ -2,11 +2,46 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock
 
 import pytest
 
+from sibyl.coordination._local import scheduler as local_scheduler
 from sibyl.coordination._local.scheduler import LocalScheduler
+from sibyl.jobs import worker as worker_module
 from sibyl.jobs.worker import ScheduleSpec
+
+
+def test_get_schedule_specs_does_not_log_registered_jobs(monkeypatch) -> None:
+    info = MagicMock()
+    monkeypatch.setattr(worker_module.log, "info", info)
+
+    worker_module.get_schedule_specs()
+
+    assert all(call.args[:1] != ("cron_job_registered",) for call in info.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_local_scheduler_logs_registered_jobs_on_startup(monkeypatch) -> None:
+    log_schedule_specs = MagicMock()
+    monkeypatch.setattr(local_scheduler, "log_schedule_specs", log_schedule_specs)
+
+    async def scheduled_job(ctx: dict[str, str]) -> None:
+        del ctx
+
+    schedule_specs = [
+        ScheduleSpec(
+            name="every_minute",
+            function=scheduled_job,
+            schedule_label="* * * * *",
+        )
+    ]
+    scheduler = LocalScheduler(schedule_specs=schedule_specs)
+
+    await scheduler.startup()
+    await scheduler.shutdown()
+
+    log_schedule_specs.assert_called_once_with(schedule_specs)
 
 
 @pytest.mark.asyncio

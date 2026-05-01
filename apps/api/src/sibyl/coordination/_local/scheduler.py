@@ -9,7 +9,7 @@ from typing import Any
 
 import structlog
 
-from sibyl.jobs.worker import ScheduleSpec, get_schedule_specs
+from sibyl.jobs.worker import ScheduleSpec, get_schedule_specs, log_schedule_specs
 
 log = structlog.get_logger()
 
@@ -42,6 +42,7 @@ class LocalScheduler:
                 self._run_loop(),
                 name="sibyl-local-scheduler",
             )
+            log_schedule_specs(self._schedule_specs)
             log.info("Local scheduler ready", jobs=len(self._schedule_specs))
 
     async def shutdown(self) -> None:

@@ -128,11 +128,6 @@ def get_schedule_specs() -> list[ScheduleSpec]:
                     **schedule_kwargs,
                 )
             )
-            log.info(
-                "cron_job_registered",
-                job="run_scheduled_backups",
-                schedule=settings.backup_schedule,
-            )
 
             cleanup_hour = schedule_kwargs.get("hour")
             if cleanup_hour is not None and isinstance(cleanup_hour, int):
@@ -148,11 +143,6 @@ def get_schedule_specs() -> list[ScheduleSpec]:
                     **cleanup_schedule,
                 )
             )
-            log.info(
-                "cron_job_registered",
-                job="cleanup_old_backups",
-                schedule="1 hour after backup schedule",
-            )
         except Exception as e:
             log.warning(
                 "cron_schedule_parse_failed", schedule=settings.backup_schedule, error=str(e)
@@ -167,9 +157,14 @@ def get_schedule_specs() -> list[ScheduleSpec]:
             minute=0,
         )
     )
-    log.info("cron_job_registered", job="consolidate_all_orgs", schedule="0 3 * * *")
 
     return schedule_specs
+
+
+def log_schedule_specs(schedule_specs: list[ScheduleSpec]) -> None:
+    """Log the schedule definitions registered by the active scheduler runtime."""
+    for spec in schedule_specs:
+        log.info("cron_job_registered", job=spec.name, schedule=spec.schedule_label)
 
 
 class WorkerSettings:
