@@ -517,6 +517,67 @@ async def test_list_user_org_records_batches_organization_reads() -> None:
 
 
 @pytest.mark.asyncio
+async def test_remove_oauth_connection_batches_safety_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    connection_id = uuid4()
+    other_connection_id = uuid4()
+    now = datetime.now(UTC).replace(tzinfo=None)
+    connection_record = {
+        "uuid": str(connection_id),
+        "user_id": str(user_id),
+        "provider": "github",
+        "provider_user_id": "123",
+        "created_at": now,
+    }
+    client = _SequenceAuthClient(
+        [
+            {
+                "connection": connection_record,
+                "user": {"uuid": str(user_id), "password_hash": None},
+                "connections": [
+                    connection_record,
+                    {
+                        "uuid": str(other_connection_id),
+                        "user_id": str(user_id),
+                        "provider": "google",
+                        "provider_user_id": "456",
+                        "created_at": now,
+                    },
+                ],
+            },
+            [],
+        ]
+    )
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+
+    removed = await surreal_auth_runtime.remove_oauth_connection(
+        user_id=user_id,
+        connection_id=connection_id,
+    )
+
+    assert removed.id == connection_id
+    assert len(client.calls) == 2
+    read_query, read_params = client.calls[0]
+    assert "RETURN" in read_query
+    assert "FROM oauth_connections" in read_query
+    assert "FROM users" in read_query
+    assert read_params == {
+        "connection_id": str(connection_id),
+        "user_id": str(user_id),
+    }
+    delete_query, delete_params = client.calls[1]
+    assert delete_query == "DELETE FROM oauth_connections WHERE uuid = $uuid;"
+    assert delete_params == {"uuid": str(connection_id)}
+
+
+@pytest.mark.asyncio
 async def test_surreal_repository_replace_record_rejects_unsupported_tables() -> None:
     repo = surreal_auth_runtime._SurrealRepository(_RecordingAuthClient([]))
 

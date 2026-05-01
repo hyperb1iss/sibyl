@@ -2240,23 +2240,33 @@ async def remove_oauth_connection(
     connection_id: UUID,
 ):
     async with _auth_client_scope() as client:
-        repo = _SurrealRepository(client)
-        record = await repo.select_one(
-            "SELECT * FROM oauth_connections WHERE uuid = $uuid AND user_id = $user_id LIMIT 1;",
-            uuid=str(connection_id),
+        payload = await client.execute_query(
+            """
+                RETURN {
+                    connection: (
+                        SELECT * FROM oauth_connections
+                        WHERE uuid = $connection_id AND user_id = $user_id
+                        LIMIT 1
+                    )[0],
+                    user: (SELECT * FROM users WHERE uuid = $user_id LIMIT 1)[0],
+                    connections: (
+                        SELECT * FROM oauth_connections
+                        WHERE user_id = $user_id
+                        ORDER BY created_at ASC
+                    ),
+                };
+            """,
+            connection_id=str(connection_id),
             user_id=str(user_id),
         )
-        connection = _oauth_connection_namespace(record)
+        if not isinstance(payload, dict):
+            payload = {}
+        connection = _oauth_connection_namespace(_normalize_record(payload.get("connection")))
         if connection is None:
             raise HTTPException(status_code=404, detail="Connection not found")
 
-        user = await repo.select_one(
-            "SELECT * FROM users WHERE uuid = $uuid LIMIT 1;", uuid=str(user_id)
-        )
-        remaining_connections = await repo.select_many(
-            "SELECT * FROM oauth_connections WHERE user_id = $user_id ORDER BY created_at ASC;",
-            user_id=str(user_id),
-        )
+        user = _normalize_record(payload.get("user"))
+        remaining_connections = _normalize_records(payload.get("connections"))
         has_other_connections = any(
             str(row.get("uuid")) != str(connection_id) for row in remaining_connections
         )
