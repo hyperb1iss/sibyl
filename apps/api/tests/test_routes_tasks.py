@@ -16,7 +16,7 @@ class TestCompleteTaskRoute:
     @pytest.mark.asyncio
     async def test_complete_task_enqueues_episode_and_procedure_jobs(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        auth = SimpleNamespace(ctx=SimpleNamespace(), session=AsyncMock())
+        auth = SimpleNamespace()
         request = CompleteTaskRequest(actual_hours=2.5, learnings="Capture the pattern")
         completed_task = SimpleNamespace(
             id="task-123",
@@ -74,7 +74,7 @@ class TestListNotesRoute:
     @pytest.mark.asyncio
     async def test_list_notes_reuses_access_guard_instead_of_reloading_task(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        auth = SimpleNamespace(ctx=SimpleNamespace(), session=AsyncMock())
+        auth = SimpleNamespace()
         manager = MagicMock()
         manager.get = AsyncMock()
         manager.get_notes_for_task = AsyncMock(return_value=[])

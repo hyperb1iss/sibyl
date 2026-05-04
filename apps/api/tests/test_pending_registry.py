@@ -337,8 +337,6 @@ class TestCreateNoteChecksPending:
         mock_user.id = "user_789"
 
         mock_auth = MagicMock()
-        mock_auth.ctx = MagicMock()
-        mock_auth.session = AsyncMock()
 
         with (
             patch("sibyl.jobs.pending.get_pending", return_value=mock_registry),
