@@ -148,10 +148,9 @@ transactions in the same request run without RLS context, which on SELECT means 
 rather than erroring. Data-leak risk is low because `current_setting(..., true)` returns NULL on
 mismatch, but availability is broken.
 
-**Fix strategy:** either move away from ambient RLS entirely (which Phase 2.2 does), or wrap
-`get_auth_session` in a per-request scope that reapplies `set_config` after each commit. Phase 2.2's
-migration makes this moot for auth tables, but the non-auth tables using RLS need the same treatment
-eventually.
+**Status:** auth-only user routes no longer depend on `get_auth_session`; they resolve
+`AuthContext` directly and call runtime-backed repositories. The non-auth tables using RLS still
+need a separate Phase 3 decision if they keep relational storage.
 
 ---
 
@@ -247,14 +246,14 @@ Work:
 - Rewrite `apps/api/src/sibyl/auth/dependencies.py` and related consumers so request auth resolution
   comes from the runtime-backed repositories rather than direct SQLModel auth rows.
 - Split today's `AuthSession` usage into "auth context" and "plain storage session" where
-  appropriate. Auth-only routes should stop opening a Postgres session just to set RLS vars.
+  appropriate. Auth-only user/task routes now depend on `AuthContext` directly.
 - Delete auth-specific `set_config` usage and `get_rls_session` / `apply_rls_from_auth_context` /
   `require_rls_session` wiring once no auth/RBAC route depends on them. Any remaining non-auth RLS
   usage becomes an explicit Phase 3 follow-up, not a hidden Phase 2 dependency.
-- Rewrite the current ambient-RLS call sites in `apps/api/src/sibyl/api/routes/tasks.py` and
-  `apps/api/src/sibyl/api/routes/users.py`.
-- Simultaneously fix **latent bug 2** by removing the dependency on transaction-local RLS state
-  across mid-request commits in `routes/users.py`.
+- Keep `apps/api/src/sibyl/api/routes/tasks.py` and `apps/api/src/sibyl/api/routes/users.py`
+  on `AuthContext`, with the direct-storage guard blocking route imports of `sibyl.auth.rls`.
+- Treat **latent bug 2** as resolved for auth-only user routes; any remaining transaction-local
+  RLS behavior belongs to non-auth relational surfaces.
 - Add negative-case tests per policy shape: impersonate Org A, assert no Org B rows visible on
   reads/lists/joins.
 - Add one integration test that exercises the full matrix (every route, two orgs, cross-org attempt)
@@ -461,9 +460,8 @@ Phase 3 is out of scope for this plan.
 
 - Sibyl task: fix latent bug 1 — access-token revocation must consult session state (can be fixed
   standalone before Phase 2.3 if timing allows).
-- Sibyl task: fix latent bug 2 — mid-request commits in `routes/users.py` drop RLS context on
-  subsequent transactions. Narrow fix for non-auth tables; auth tables get fixed via the Phase 2.2
-  rewrite.
+- Sibyl task: decide the non-auth RLS posture for any relational tables that survive the Surreal
+  cutover. Auth-only user/task routes no longer depend on transaction-local RLS state.
 - Sibyl task (informational): document in `docs/architecture/` that audit-log immutability is a
   repo-layer contract, not a DB-layer guarantee, and the invariant must be preserved in Phase 3 for
   any audit table that moves later.
