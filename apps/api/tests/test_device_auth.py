@@ -1,8 +1,10 @@
 """Tests for device authorization security (code enumeration prevention)."""
 
-from sibyl.auth.device_authorization import (
+from sibyl.auth.primitives import (
+    DeviceTokenError,
     generate_device_code,
     generate_user_code,
+    hash_device_code,
     normalize_user_code,
 )
 
@@ -115,8 +117,6 @@ class TestDeviceAuthorizationManagerSecurity:
 
     def test_device_token_error_traceback_can_be_assigned(self) -> None:
         """DeviceTokenError must behave like a normal Exception during async unwinding."""
-        from sibyl.auth.device_authorization import DeviceTokenError
-
         error = DeviceTokenError("authorization_pending", "Authorization pending")
 
         error.__traceback__ = None
@@ -125,17 +125,15 @@ class TestDeviceAuthorizationManagerSecurity:
 
     def test_device_code_is_hashed(self) -> None:
         """Device codes should be stored as hashes, not plaintext."""
-        from sibyl.auth.device_authorization import _hash_device_code
-
         device_code = "test-device-code-12345"
-        hashed = _hash_device_code(device_code)
+        hashed = hash_device_code(device_code)
 
         # Hash should be different from original
         assert hashed != device_code
         # Hash should be consistent (SHA-256 produces 64 hex chars)
         assert len(hashed) == 64
         # Same input produces same hash
-        assert _hash_device_code(device_code) == hashed
+        assert hash_device_code(device_code) == hashed
 
     def test_exchange_returns_same_error_for_all_invalid_states(self) -> None:
         """Token exchange should return same error type for all invalid states.
@@ -145,8 +143,6 @@ class TestDeviceAuthorizationManagerSecurity:
         - Expired device codes
         - Already consumed codes
         """
-        from sibyl.auth.device_authorization import DeviceTokenError
-
         # All these should produce "invalid_grant" error
         error_types = {
             "invalid": DeviceTokenError("invalid_grant", "Invalid device_code"),

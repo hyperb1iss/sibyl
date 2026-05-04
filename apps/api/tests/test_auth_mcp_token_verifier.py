@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from sibyl.auth.api_keys import ApiKeyAuth
+from sibyl.auth.api_key_common import ApiKeyAuth
 from sibyl.auth.jwt import create_access_token
 from sibyl.auth.mcp_auth import SibylMcpTokenVerifier
 from sibyl.config import Settings

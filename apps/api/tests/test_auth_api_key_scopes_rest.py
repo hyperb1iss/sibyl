@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from sibyl.auth.api_keys import ApiKeyAuth
+from sibyl.auth.api_key_common import ApiKeyAuth
 from sibyl.auth.dependencies import resolve_claims
 
 

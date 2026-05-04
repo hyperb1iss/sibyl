@@ -1,4 +1,4 @@
-from sibyl.auth.api_keys import api_key_prefix, hash_api_key, verify_api_key
+from sibyl.auth.api_key_common import api_key_prefix, hash_api_key, verify_api_key
 
 
 def test_api_key_hash_roundtrip() -> None:
