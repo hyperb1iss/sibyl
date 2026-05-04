@@ -27,10 +27,8 @@ async def test_list_sessions_marks_current_from_sibyl_access_token_cookie() -> N
     request.headers = {}
     request.cookies = {"sibyl_access_token": token}
 
-    # AuthSession contains both ctx and session
     auth = MagicMock()
-    auth.ctx.user.id = session_row.user_id
-    auth.session = AsyncMock()
+    auth.user.id = session_row.user_id
 
     with patch.object(
         users_routes,

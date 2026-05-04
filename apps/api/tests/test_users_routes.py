@@ -10,8 +10,8 @@ from sibyl.api.routes import users as user_routes
 
 def _auth() -> SimpleNamespace:
     return SimpleNamespace(
-        session=AsyncMock(),
-        ctx=SimpleNamespace(user=SimpleNamespace(id=uuid4())),
+        user=SimpleNamespace(id=uuid4()),
+        organization=None,
     )
 
 
@@ -84,7 +84,7 @@ async def test_remove_connection_uses_runtime_helper(monkeypatch: pytest.MonkeyP
     await user_routes.remove_connection(connection_id=connection_id, auth=auth)
 
     remove_connection.assert_awaited_once_with(
-        user_id=auth.ctx.user.id,
+        user_id=auth.user.id,
         connection_id=connection_id,
     )
 
@@ -96,7 +96,7 @@ async def test_get_profile_uses_runtime_user_lookup(monkeypatch: pytest.MonkeyPa
     email_verified_at = datetime.now(UTC).replace(tzinfo=None)
     get_user = AsyncMock(
         return_value=SimpleNamespace(
-            id=auth.ctx.user.id,
+            id=auth.user.id,
             email="nova@example.com",
             name="Nova",
             bio="hello",
@@ -110,8 +110,8 @@ async def test_get_profile_uses_runtime_user_lookup(monkeypatch: pytest.MonkeyPa
 
     response = await user_routes.get_profile(auth=auth)
 
-    get_user.assert_awaited_once_with(auth.ctx.user.id)
-    assert response.id == auth.ctx.user.id
+    get_user.assert_awaited_once_with(auth.user.id)
+    assert response.id == auth.user.id
     assert response.email == "nova@example.com"
     assert response.created_at is created_at
 
@@ -121,16 +121,16 @@ async def test_update_preferences_merges_and_uses_runtime_patch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     auth = _auth()
-    auth.ctx.organization = SimpleNamespace(id=uuid4())
+    auth.organization = SimpleNamespace(id=uuid4())
     get_user = AsyncMock(
         return_value=SimpleNamespace(
-            id=auth.ctx.user.id,
+            id=auth.user.id,
             preferences={"theme": "light"},
         )
     )
     patch_user = AsyncMock(
         return_value=SimpleNamespace(
-            id=auth.ctx.user.id,
+            id=auth.user.id,
             preferences={"theme": "light", "compact": True},
         )
     )
@@ -143,9 +143,9 @@ async def test_update_preferences_merges_and_uses_runtime_patch(
     )
 
     patch_user.assert_awaited_once_with(
-        user_id=auth.ctx.user.id,
+        user_id=auth.user.id,
         updates={"preferences": {"theme": "light", "compact": True}},
-        organization_id=auth.ctx.organization.id,
+        organization_id=auth.organization.id,
         request=None,
     )
     assert response.preferences == {"theme": "light", "compact": True}
@@ -154,8 +154,8 @@ async def test_update_preferences_merges_and_uses_runtime_patch(
 @pytest.mark.asyncio
 async def test_change_password_uses_auth_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     auth = _auth()
-    auth.ctx.organization = SimpleNamespace(id=uuid4())
-    update_user = AsyncMock(return_value=SimpleNamespace(id=auth.ctx.user.id))
+    auth.organization = SimpleNamespace(id=uuid4())
+    update_user = AsyncMock(return_value=SimpleNamespace(id=auth.user.id))
     monkeypatch.setattr(user_routes, "update_auth_user", update_user)
 
     await user_routes.change_password(
@@ -167,13 +167,13 @@ async def test_change_password_uses_auth_runtime_helper(monkeypatch: pytest.Monk
     )
 
     update_user.assert_awaited_once_with(
-        user_id=auth.ctx.user.id,
+        user_id=auth.user.id,
         email=None,
         name=None,
         avatar_url=None,
         current_password="old-password",
         new_password="new-password-123",
-        organization_id=auth.ctx.organization.id,
+        organization_id=auth.organization.id,
         request=None,
     )
 
@@ -196,6 +196,6 @@ async def test_list_sessions_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch
 
     response = await user_routes.list_sessions(request=request, auth=auth)
 
-    list_sessions.assert_awaited_once_with(user_id=auth.ctx.user.id)
+    list_sessions.assert_awaited_once_with(user_id=auth.user.id)
     assert len(response) == 1
     assert response[0].is_current is False
