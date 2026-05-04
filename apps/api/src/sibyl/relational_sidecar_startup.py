@@ -42,6 +42,14 @@ async def bootstrap_relational_sidecar_support() -> bool:
         )
         return False
 
+    log.warning(
+        "Legacy relational runtime is deprecated; migrate this install to SurrealDB",
+        store=settings.store,
+        auth_store=settings.auth_store,
+        suggested_store="surreal",
+        suggested_auth_store="surreal",
+    )
+
     try:
         await check_relational_sidecar_connection()
     except Exception as exc:

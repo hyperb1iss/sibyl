@@ -171,6 +171,16 @@ def _compose_services_for_env(env: dict[str, str]) -> list[str]:
     return services
 
 
+def _warn_if_relational_runtime(env: dict[str, str]) -> None:
+    store = env.get("SIBYL_STORE", "surreal")
+    auth_store = env.get("SIBYL_AUTH_STORE", default_auth_store(store=store))
+    if not requires_relational_support(store=store, auth_store=auth_store):
+        return
+
+    warn("Legacy relational runtime is deprecated; migrate this install to SurrealDB.")
+    info("Recommended settings: SIBYL_STORE=surreal and SIBYL_AUTH_STORE=surreal")
+
+
 def _configure_requested_worker_mode(env: dict[str, str], *, with_worker: bool) -> None:
     if not with_worker:
         return
@@ -219,6 +229,7 @@ def up(
     )
 
     env = _load_runtime_env(project_root)
+    _warn_if_relational_runtime(env)
 
     # Check Docker
     if not skip_docker:

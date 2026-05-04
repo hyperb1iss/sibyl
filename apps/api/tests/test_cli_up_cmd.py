@@ -110,6 +110,36 @@ def test_up_starts_legacy_stack_when_store_is_legacy(tmp_path: Path, monkeypatch
     assert env["SIBYL_REDIS_HOST"] == "127.0.0.1"
 
 
+def test_warn_if_relational_runtime_is_quiet_for_fully_surreal(monkeypatch) -> None:
+    warn = MagicMock()
+    info = MagicMock()
+
+    monkeypatch.setattr(up_cmd, "warn", warn)
+    monkeypatch.setattr(up_cmd, "info", info)
+
+    up_cmd._warn_if_relational_runtime({"SIBYL_STORE": "surreal", "SIBYL_AUTH_STORE": "surreal"})
+
+    warn.assert_not_called()
+    info.assert_not_called()
+
+
+def test_warn_if_relational_runtime_recommends_surreal(monkeypatch) -> None:
+    warn = MagicMock()
+    info = MagicMock()
+
+    monkeypatch.setattr(up_cmd, "warn", warn)
+    monkeypatch.setattr(up_cmd, "info", info)
+
+    up_cmd._warn_if_relational_runtime({"SIBYL_STORE": "surreal", "SIBYL_AUTH_STORE": "postgres"})
+
+    warn.assert_called_once_with(
+        "Legacy relational runtime is deprecated; migrate this install to SurrealDB."
+    )
+    info.assert_called_once_with(
+        "Recommended settings: SIBYL_STORE=surreal and SIBYL_AUTH_STORE=surreal"
+    )
+
+
 def test_configure_requested_worker_mode_skips_extra_worker_for_local_runtime(
     monkeypatch,
 ) -> None:
