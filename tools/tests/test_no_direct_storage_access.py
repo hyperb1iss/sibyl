@@ -18,6 +18,8 @@ def test_collect_direct_storage_imports_flags_unallowlisted_modules(tmp_path: Pa
     path.write_text(
         "from sibyl_core.graph.client import get_graph_client\n"
         "from sibyl.auth.rls import get_auth_session\n"
+        "from sibyl.auth.sessions import SessionManager\n"
+        "from sibyl.persistence.legacy.auth_runtime import get_user_by_id\n"
         "from sqlmodel import select\n",
         encoding="utf-8",
     )
@@ -27,6 +29,8 @@ def test_collect_direct_storage_imports_flags_unallowlisted_modules(tmp_path: Pa
     assert [(violation.module, violation.allowlisted) for violation in violations] == [
         ("sibyl_core.graph.client", False),
         ("sibyl.auth.rls", False),
+        ("sibyl.auth.sessions", False),
+        ("sibyl.persistence.legacy.auth_runtime", False),
         ("sqlmodel", False),
     ]
 
