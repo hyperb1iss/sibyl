@@ -39,7 +39,7 @@ from graphiti_core.driver.driver import (
     GraphProvider,
 )
 
-from sibyl_core.backends.surreal.connection import _can_retry_query, _is_connection_closed_error
+from sibyl_core.backends.surreal.connection import _can_retry_query, _is_transient_connection_error
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.backends.surreal.observability import elapsed_ms, log_query, query_start
 
@@ -750,7 +750,7 @@ class SurrealDriver(GraphDriver):
                         result = await client.query(query, params if params else None)
                         break
                     except Exception as exc:
-                        if not _is_connection_closed_error(exc):
+                        if not _is_transient_connection_error(exc):
                             raise
                         await self._drop_client()
                         if (
@@ -760,7 +760,7 @@ class SurrealDriver(GraphDriver):
                             raise
                         retry_count += 1
                         logger.warning(
-                            "SurrealDB connection closed during read; reconnecting and retrying "
+                            "SurrealDB connection failed during read; reconnecting and retrying "
                             "attempt=%s error=%s",
                             retry_count,
                             exc,

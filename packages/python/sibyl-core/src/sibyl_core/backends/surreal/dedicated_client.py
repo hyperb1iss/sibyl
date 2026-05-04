@@ -9,7 +9,7 @@ from typing import Any
 from sibyl_core.backends.surreal.connection import (
     _can_retry_query,
     _can_retry_raw_query,
-    _is_connection_closed_error,
+    _is_transient_connection_error,
 )
 from sibyl_core.backends.surreal.observability import (
     elapsed_ms,
@@ -118,7 +118,7 @@ class DedicatedSurrealClient:
                         result = await self._send_query(client, query, params=params, raw=raw)
                         break
                     except Exception as exc:
-                        if not _is_connection_closed_error(exc):
+                        if not _is_transient_connection_error(exc):
                             raise
                         await self._drop_client()
                         can_retry = _can_retry_raw_query(query) if raw else _can_retry_query(query)
@@ -126,7 +126,7 @@ class DedicatedSurrealClient:
                             raise
                         retry_count += 1
                         logger.warning(
-                            "SurrealDB dedicated client connection closed during read; retrying "
+                            "SurrealDB dedicated client connection failed during read; retrying "
                             "attempt=%s error=%s",
                             retry_count,
                             exc,

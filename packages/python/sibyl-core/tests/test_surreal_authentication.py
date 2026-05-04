@@ -327,6 +327,46 @@ async def test_surreal_content_client_retries_closed_socket_during_connect(monke
 
 
 @pytest.mark.asyncio
+async def test_surreal_content_client_retries_opening_handshake_timeout(monkeypatch) -> None:
+    clients: list[FakeAsyncSurreal] = []
+
+    class FakeAsyncSurreal:
+        def __init__(self, url: str) -> None:
+            clients.append(self)
+
+        async def signin(self, credentials: dict[str, str]) -> None:
+            self.credentials = credentials
+            if len(clients) == 1:
+                raise TimeoutError("timed out during opening handshake")
+
+        async def use(self, namespace: str, database: str) -> None:
+            self.namespace = namespace
+            self.database = database
+
+        async def query_raw(self, query: str, params: object | None = None) -> dict[str, Any]:
+            return {"result": [{"status": "OK", "result": None}, {"status": "OK", "result": []}]}
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    client = SurrealContentClient(
+        url="ws://localhost:8000/rpc",
+        username="root",
+        password="root",
+    )
+
+    result = await client.execute_query_raw(
+        "LET $document_ids = []; SELECT * FROM document_chunks;",
+    )
+
+    assert result == {"result": [{"status": "OK", "result": None}, {"status": "OK", "result": []}]}
+    assert len(clients) == 2
+    assert clients[0].closed is True
+    assert clients[1].namespace == "sibyl_content"
+
+
+@pytest.mark.asyncio
 async def test_surreal_content_client_allows_two_closed_raw_read_retries(monkeypatch) -> None:
     class ConnectionClosedError(RuntimeError):
         pass

@@ -10,12 +10,12 @@ from types import SimpleNamespace
 import pytest
 
 from sibyl_core.backends.surreal import SurrealDriver, SurrealDriverSession
-from sibyl_core.backends.surreal.driver import (
-    SurrealQueryError,
+from sibyl_core.backends.surreal.connection import (
     _can_retry_query,
     _is_connection_closed_error,
-    _namespace_for_group,
+    _is_transient_connection_error,
 )
+from sibyl_core.backends.surreal.driver import SurrealQueryError, _namespace_for_group
 from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES, bootstrap_schema
 from sibyl_core.graph.surreal.ops.community_edge_ops import SurrealCommunityEdgeOperations
 from sibyl_core.graph.surreal.ops.community_node_ops import SurrealCommunityNodeOperations
@@ -125,6 +125,11 @@ class TestConnectionRetry:
 
         assert _is_connection_closed_error(
             ConnectionClosedError("sent 1011 keepalive ping timeout")
+        )
+
+    def test_detects_opening_handshake_timeout_as_transient(self) -> None:
+        assert _is_transient_connection_error(
+            TimeoutError("timed out during opening handshake")
         )
 
     def test_retryable_queries_are_read_only(self) -> None:
@@ -1013,6 +1018,42 @@ class TestDriverConnection:
                 self.database = database
                 if len(clients) == 1:
                     raise ConnectionClosedError("sent 1011 keepalive ping timeout")
+
+            async def query(self, query: str, params: object | None = None) -> list[dict[str, str]]:
+                return [{"ok": "yes"}]
+
+            async def close(self) -> None:
+                self.closed = True
+
+        monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+        driver = SurrealDriver("ws://localhost:8000/rpc", username="root", password="root").clone(
+            "org-abc"
+        )
+
+        result = await driver.execute_query("SELECT * FROM entity;")
+
+        assert result == [{"ok": "yes"}]
+        assert len(clients) == 2
+        assert clients[0].closed is True
+        assert clients[1].namespace == "org_orgabc"
+
+    async def test_execute_query_retries_opening_handshake_timeout(self, monkeypatch) -> None:
+        clients: list[FakeAsyncSurreal] = []
+
+        class FakeAsyncSurreal:
+            def __init__(self, url: str) -> None:
+                self.url = url
+                self.closed = False
+                clients.append(self)
+
+            async def signin(self, credentials: dict[str, str]) -> None:
+                self.credentials = credentials
+                if len(clients) == 1:
+                    raise TimeoutError("timed out during opening handshake")
+
+            async def use(self, namespace: str, database: str) -> None:
+                self.namespace = namespace
+                self.database = database
 
             async def query(self, query: str, params: object | None = None) -> list[dict[str, str]]:
                 return [{"ok": "yes"}]

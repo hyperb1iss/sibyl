@@ -48,6 +48,12 @@ def _is_connection_closed_error(exc: BaseException) -> bool:
     )
 
 
+def _is_transient_connection_error(exc: BaseException) -> bool:
+    if _is_connection_closed_error(exc):
+        return True
+    return isinstance(exc, TimeoutError) and "opening handshake" in str(exc).lower()
+
+
 def _can_retry_query(query: str) -> bool:
     statements = [statement.strip() for statement in query.split(";") if statement.strip()]
     if not statements:
@@ -68,4 +74,9 @@ def _can_retry_raw_query(query: str) -> bool:
     )
 
 
-__all__ = ["_can_retry_query", "_can_retry_raw_query", "_is_connection_closed_error"]
+__all__ = [
+    "_can_retry_query",
+    "_can_retry_raw_query",
+    "_is_connection_closed_error",
+    "_is_transient_connection_error",
+]
