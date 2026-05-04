@@ -112,7 +112,10 @@ async def get_current_user(
     if getattr(cached_user, "id", None) == user_id:
         return cast("User", cached_user)
 
-    if claims.get("org") and cached_ctx is None:
+    if cached_ctx is not None:
+        request.state.auth_context = None
+
+    if claims.get("org"):
         return cast("User", (await build_auth_context(request)).user)
 
     try:

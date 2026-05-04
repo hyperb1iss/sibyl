@@ -163,6 +163,7 @@ async def test_get_current_user_uses_user_lookup_without_org_claim(
     user_id = uuid4()
     request = _make_request(user_id=str(user_id), org_id=str(uuid4()))
     request.state.jwt_claims = {"sub": str(user_id)}
+    request.state.auth_context = SimpleNamespace(user=SimpleNamespace(id=uuid4()))
     expected_user = SimpleNamespace(id=user_id, email="nova@example.com")
 
     resolve_auth_context = AsyncMock()
@@ -175,6 +176,7 @@ async def test_get_current_user_uses_user_lookup_without_org_claim(
     result = await dependencies.get_current_user(request)
 
     assert result is expected_user
+    assert request.state.auth_context is None
     resolve_auth_context.assert_not_awaited()
     get_user_by_id.assert_awaited_once_with(user_id)
 
@@ -226,15 +228,23 @@ async def test_get_current_user_ignores_cached_auth_context_for_other_user(
     request = _make_request(user_id=str(user_id), org_id=str(org_id))
     request.state.auth_context = SimpleNamespace(user=SimpleNamespace(id=uuid4()))
     expected_user = SimpleNamespace(id=user_id, email="nova@example.com")
-    get_user_by_id = AsyncMock(return_value=expected_user)
+    expected_ctx = SimpleNamespace(user=expected_user, organization=SimpleNamespace(id=org_id))
+    resolve_auth_context = AsyncMock(return_value=expected_ctx)
+    get_user_by_id = AsyncMock()
 
     monkeypatch.setattr(dependencies.settings, "auth_store", "surreal")
+    monkeypatch.setattr(dependencies, "resolve_auth_context", resolve_auth_context)
     monkeypatch.setattr(dependencies, "get_user_by_id", get_user_by_id)
 
     result = await dependencies.get_current_user(request)
 
     assert result is expected_user
-    get_user_by_id.assert_awaited_once_with(user_id)
+    assert request.state.auth_context is expected_ctx
+    resolve_auth_context.assert_awaited_once_with(
+        claims={"sub": str(user_id), "org": str(org_id)},
+        session=None,
+    )
+    get_user_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
