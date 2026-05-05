@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from sibyl_core.errors import InvalidTransitionError
+from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
 from sibyl_core.models.entities import EntityType, Relationship, RelationshipType
 from sibyl_core.models.tasks import EpicStatus, Task, TaskStatus
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
@@ -726,8 +726,15 @@ class TaskWorkflowEngine:
 
         log.debug("Checking epic auto-start", epic_id=epic_id, task_id=task.id)
 
-        # Get epic's current status
-        epic = await self._entity_manager.get(epic_id)
+        try:
+            epic = await self._entity_manager.get(epic_id)
+        except EntityNotFoundError:
+            log.warning(
+                "Epic referenced by task no longer exists; skipping auto-start",
+                epic_id=epic_id,
+                task_id=task.id,
+            )
+            return False
         current_status = epic.metadata.get("status", "planning")
 
         # Only auto-start if epic is in planning
@@ -768,7 +775,15 @@ class TaskWorkflowEngine:
 
         log.debug("Checking epic auto-completion", epic_id=epic_id, task_id=task.id)
 
-        epic = await self._entity_manager.get(epic_id)
+        try:
+            epic = await self._entity_manager.get(epic_id)
+        except EntityNotFoundError:
+            log.warning(
+                "Epic referenced by task no longer exists; skipping auto-completion",
+                epic_id=epic_id,
+                task_id=task.id,
+            )
+            return False
         current_status = str((epic.metadata or {}).get("status") or "planning")
         tasks = await self._entity_manager.list_by_type(
             EntityType.TASK,

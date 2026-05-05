@@ -1976,3 +1976,159 @@ async def backfill_shared_project(
             errors=[str(e), *errors[:49]],
             duration_seconds=time.time() - start_time,
         )
+
+
+@dataclass
+class DenormalizedFieldsBackfillResult:
+    """Result of denormalizing metadata fields onto the entity row."""
+
+    success: bool
+    entities_scanned: int
+    entities_updated: int
+    entities_already_set: int
+    errors: list[str]
+    duration_seconds: float
+
+
+# Fields that filtered list queries expect at the top level of the entity row.
+# When metadata has them but the row doesn't, the optimized SurrealDB filter
+# misses the entity (issue surfaced during the 2026-05-05 task audit).
+_DENORMALIZED_FIELDS = (
+    "project_id",
+    "epic_id",
+    "task_id",
+    "status",
+    "priority",
+    "complexity",
+    "feature",
+    "tags",
+)
+
+
+async def backfill_denormalized_fields(
+    *,
+    organization_id: str,
+    dry_run: bool = False,
+) -> DenormalizedFieldsBackfillResult:
+    """Re-write entity rows so denormalized fields match metadata.
+
+    Older task/epic rows store filter fields only inside ``attributes.metadata``.
+    The optimized SurrealDB list query filters on top-level columns and skips
+    them, leaving rows invisible to ``sibyl task list`` until they get touched
+    by an update. This walks every entity, finds rows where any field in
+    ``_DENORMALIZED_FIELDS`` is present in metadata but not at the top level,
+    and re-saves them so ``_collect_properties`` repopulates the columns.
+
+    Detection compares the raw SurrealDB row columns against the parsed
+    ``attributes.metadata`` JSON — not the hydrated Entity model, which
+    auto-populates ``project_id``/``epic_id``/etc. from metadata even when the
+    row column is empty.
+    """
+    import json
+
+    log.info(
+        "backfill_denormalized_fields_start",
+        organization_id=organization_id,
+        dry_run=dry_run,
+    )
+    start_time = time.time()
+
+    errors: list[str] = []
+    entities_scanned = 0
+    entities_updated = 0
+    entities_already_set = 0
+
+    def _row_value_missing(value: Any) -> bool:
+        return value is None or value == "" or value == []
+
+    try:
+        runtime = await get_graph_runtime(organization_id)
+        entity_manager = runtime.entity_manager
+
+        offset = 0
+        while True:
+            rows = await entity_manager._surreal_select_entity_records(
+                limit=BACKFILL_PAGE_SIZE,
+                offset=offset,
+                include_archived=True,
+            )
+            if not rows:
+                break
+            offset += len(rows)
+            entities_scanned += len(rows)
+
+            for row in rows:
+                entity_id = row.get("uuid")
+                if not entity_id:
+                    continue
+
+                raw_metadata = row.get("metadata")
+                if isinstance(raw_metadata, str):
+                    try:
+                        metadata = json.loads(raw_metadata)
+                    except json.JSONDecodeError:
+                        metadata = {}
+                elif isinstance(raw_metadata, dict):
+                    metadata = raw_metadata
+                else:
+                    metadata = {}
+
+                missing = {
+                    field_name: metadata[field_name]
+                    for field_name in _DENORMALIZED_FIELDS
+                    if metadata.get(field_name) is not None
+                    and _row_value_missing(row.get(field_name))
+                }
+                if not missing:
+                    entities_already_set += 1
+                    continue
+
+                if dry_run:
+                    entities_updated += 1
+                    log.info(
+                        "backfill_would_denormalize",
+                        entity_id=entity_id,
+                        missing=list(missing.keys()),
+                    )
+                    continue
+
+                try:
+                    await entity_manager.update(entity_id, missing)
+                    entities_updated += 1
+                except Exception as exc:
+                    errors.append(f"{entity_id}: {exc}")
+                    log.warning(
+                        "backfill_denormalize_failed",
+                        entity_id=entity_id,
+                        error=str(exc),
+                    )
+
+        duration = time.time() - start_time
+        log.info(
+            "backfill_denormalized_fields_complete",
+            entities_scanned=entities_scanned,
+            entities_updated=entities_updated,
+            entities_already_set=entities_already_set,
+            errors=len(errors),
+            duration=duration,
+            dry_run=dry_run,
+        )
+
+        return DenormalizedFieldsBackfillResult(
+            success=not errors,
+            entities_scanned=entities_scanned,
+            entities_updated=entities_updated,
+            entities_already_set=entities_already_set,
+            errors=errors[:50],
+            duration_seconds=duration,
+        )
+    except Exception as exc:
+        log.exception("backfill_denormalized_fields_failed", error=str(exc))
+        return DenormalizedFieldsBackfillResult(
+            success=False,
+            entities_scanned=entities_scanned,
+            entities_updated=entities_updated,
+            entities_already_set=entities_already_set,
+            errors=[str(exc), *errors[:49]],
+            duration_seconds=time.time() - start_time,
+        )

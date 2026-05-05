@@ -179,6 +179,9 @@ async def create_task(
     try:
         runtime = await get_task_graph_runtime(str(org.id))
 
+        if request.epic_id:
+            await _verify_epic_exists(runtime.entity_manager, request.epic_id)
+
         # Create task entity with actor attribution
         task = Task(
             id=str(uuid.uuid4()),
@@ -277,6 +280,28 @@ async def _broadcast_task_update(
     )
 
 
+async def _verify_epic_exists(entity_manager: Any, epic_id: str) -> None:
+    """Confirm an epic exists before linking a task to it.
+
+    Prevents creating ghost-epic references. Raises HTTPException 404 if missing.
+    """
+    from sibyl_core.errors import EntityNotFoundError
+    from sibyl_core.models.entities import EntityType
+
+    try:
+        epic = await entity_manager.get(epic_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Epic not found: {epic_id}",
+        ) from exc
+    if not epic or epic.entity_type != EntityType.EPIC:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Entity {epic_id} is not an epic",
+        )
+
+
 async def _maybe_start_epic(
     entity_manager: Any,
     task_id: str,
@@ -296,13 +321,22 @@ async def _maybe_start_epic(
     """
     from datetime import UTC, datetime
 
+    from sibyl_core.errors import EntityNotFoundError
     from sibyl_core.models.tasks import EpicStatus
 
     forward_progress_states = {"doing", "review", "blocked"}
     if task_status not in forward_progress_states or not epic_id:
         return False
 
-    epic = await entity_manager.get(epic_id)
+    try:
+        epic = await entity_manager.get(epic_id)
+    except EntityNotFoundError:
+        log.warning(
+            "Epic referenced by task no longer exists; skipping auto-start",
+            epic_id=epic_id,
+            task_id=task_id,
+        )
+        return False
     if not epic or epic.metadata.get("status") != "planning":
         return False
 
@@ -617,6 +651,10 @@ async def update_task(
     has_dep_changes = bool(request.add_depends_on or request.remove_depends_on)
     if len(update_data) <= 1 and not has_dep_changes:  # only modified_by
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    if request.epic_id:
+        runtime = await get_task_graph_runtime(group_id)
+        await _verify_epic_exists(runtime.entity_manager, request.epic_id)
 
     # --- Async fast path (default) ---
     if not sync:

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from sibyl_core.errors import InvalidTransitionError
+from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
 from sibyl_core.models.tasks import (
     Task,
@@ -812,6 +812,46 @@ class TestWorkflowEngine:
         )
 
         result = await engine.archive_task(task.id)
+
+        assert result.status == TaskStatus.ARCHIVED
+
+    @pytest.mark.asyncio
+    async def test_archive_task_with_missing_epic_does_not_fail(
+        self,
+        mock_relationship_manager: MockRelationshipManager,
+        mock_graph_client: MockGraphClient,
+    ) -> None:
+        """archive_task succeeds when the linked epic was already deleted."""
+
+        class GhostEpicEntityManager(MockEntityManager):
+            async def get(self, entity_id: str) -> Entity:
+                if entity_id == "epic_ghost":
+                    raise EntityNotFoundError("Entity", entity_id)
+                return await super().get(entity_id)
+
+        task = make_task(
+            status=TaskStatus.TODO,
+            project_id="project_abc123",
+            epic_id="epic_ghost",
+        )
+        entity_manager = GhostEpicEntityManager(entities={}, search_results=[])
+        entity_manager.entities[task.id] = make_entity(
+            entity_id=task.id,
+            name=task.title,
+            metadata={
+                "status": TaskStatus.TODO,
+                "project_id": "project_abc123",
+                "epic_id": "epic_ghost",
+            },
+        )
+        engine = TaskWorkflowEngine(
+            entity_manager=entity_manager,  # type: ignore[arg-type]
+            relationship_manager=mock_relationship_manager,  # type: ignore[arg-type]
+            graph_client=mock_graph_client,  # type: ignore[arg-type]
+            organization_id="org_test123",
+        )
+
+        result = await engine.archive_task(task.id, reason="ghost epic")
 
         assert result.status == TaskStatus.ARCHIVED
 
