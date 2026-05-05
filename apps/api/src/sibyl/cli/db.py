@@ -1311,26 +1311,14 @@ def backfill_shared_projects(
     async def _backfill() -> None:
         from uuid import UUID
 
-        from sqlalchemy import select
-
-        from sibyl.db.connection import get_session
-        from sibyl.db.models import Project
+        from sibyl.persistence.legacy.project_sync import get_shared_project_reference
         from sibyl_core.tools.admin import backfill_shared_project
 
         try:
             if dry_run:
                 warn("DRY RUN - no changes will be made")
 
-            # Look up the shared project from Postgres to get its graph_project_id
-            async with get_session() as session:
-                result = await session.execute(
-                    select(Project).where(
-                        Project.organization_id == UUID(org_id),
-                        Project.is_shared == True,  # noqa: E712
-                    )
-                )
-                shared_project = result.scalar_one_or_none()
-
+            shared_project = await get_shared_project_reference(UUID(org_id))
             if not shared_project:
                 error("No shared project found in Postgres. Run `sibyld db migrate` first.")
                 raise typer.Exit(code=1)
@@ -1377,7 +1365,7 @@ def backfill_shared_projects(
 
 
 @app.command("sync-projects")
-def sync_projects(  # noqa: PLR0915
+def sync_projects(
     org_id: Annotated[
         str,
         typer.Option("--org-id", help="Organization UUID (required)"),
@@ -1427,83 +1415,61 @@ def sync_projects(  # noqa: PLR0915
 
     @run_async
     async def _sync() -> None:
-        from sqlalchemy import select
-
-        from sibyl.db.connection import get_session
-        from sibyl.db.models import OrganizationMember
-        from sibyl.db.sync import get_graph_projects, sync_projects_from_graph
-        from sibyl_core.auth import OrganizationRole
+        from sibyl.persistence.legacy.project_sync import (
+            MissingProjectOwnerError,
+            sync_graph_projects_to_relational,
+        )
 
         try:
-            # Fetch projects from graph
             info("Fetching projects from graph...")
-            graph_projects = await get_graph_projects(org_id)
+            sync_result = await sync_graph_projects_to_relational(
+                organization_id=org_uuid,
+                owner_user_id=owner_uuid,
+                dry_run=dry_run,
+            )
+            graph_projects = sync_result.graph_projects
             info(f"Found {len(graph_projects)} project(s) in graph")
 
             if not graph_projects:
                 warn("No projects found in graph")
                 return
 
-            # Sync to Postgres
-            async with get_session() as session:
-                # Resolve owner: use provided UUID or find first org admin
-                nonlocal owner_uuid
-                if owner_uuid is None:
-                    admin_result = await session.execute(
-                        select(OrganizationMember.user_id)
-                        .where(
-                            OrganizationMember.organization_id == org_uuid,
-                            OrganizationMember.role.in_(
-                                [OrganizationRole.OWNER, OrganizationRole.ADMIN]
-                            ),
-                        )
-                        .limit(1)
-                    )
-                    row = admin_result.first()
-                    if row is None:
-                        error("No org admin found to set as project owner")
-                        raise typer.Exit(code=1)
-                    owner_uuid = row[0]
-                    info(f"Using org admin as owner: {owner_uuid}")
+            if owner_uuid is None:
+                info(f"Using org admin as owner: {sync_result.owner_user_id}")
 
-                result = await sync_projects_from_graph(
-                    session,
-                    org_uuid,
-                    owner_uuid,
-                    graph_projects,
-                    dry_run=dry_run,
-                )
+            result = sync_result.result
+            if result is None:
+                return
 
-                if not dry_run:
-                    await session.commit()
+            console.print()
+            if dry_run:
+                info("[bold]DRY RUN[/bold] - no changes made")
 
-                # Report results
+            if result["created"] > 0:
+                success(f"Created: {result['created']} project(s)")
+            if result["skipped"] > 0:
+                info(f"Skipped: {result['skipped']} (already exist)")
+            if result["errors"] > 0:
+                warn(f"Errors: {result['errors']}")
+
+            if verbose and result["details"]:
                 console.print()
-                if dry_run:
-                    info("[bold]DRY RUN[/bold] - no changes made")
+                for detail in result["details"]:
+                    status = detail.get("status", "unknown")
+                    name = detail.get("name", "?")
+                    graph_id = detail.get("graph_id", "?")
 
-                if result["created"] > 0:
-                    success(f"Created: {result['created']} project(s)")
-                if result["skipped"] > 0:
-                    info(f"Skipped: {result['skipped']} (already exist)")
-                if result["errors"] > 0:
-                    warn(f"Errors: {result['errors']}")
+                    if status in {"created", "would_create"}:
+                        console.print(f"  [green]+[/green] {name} ({graph_id})")
+                    elif status == "exists":
+                        console.print(f"  [dim]=[/dim] {name} ({graph_id})")
+                    else:
+                        err = detail.get("error", "unknown error")
+                        console.print(f"  [{ERROR_RED}]![/{ERROR_RED}] {name}: {err}")
 
-                if verbose and result["details"]:
-                    console.print()
-                    for detail in result["details"]:
-                        status = detail.get("status", "unknown")
-                        name = detail.get("name", "?")
-                        graph_id = detail.get("graph_id", "?")
-
-                        if status in {"created", "would_create"}:
-                            console.print(f"  [green]+[/green] {name} ({graph_id})")
-                        elif status == "exists":
-                            console.print(f"  [dim]=[/dim] {name} ({graph_id})")
-                        else:
-                            err = detail.get("error", "unknown error")
-                            console.print(f"  [{ERROR_RED}]![/{ERROR_RED}] {name}: {err}")
-
+        except MissingProjectOwnerError as e:
+            error(str(e))
+            raise typer.Exit(code=1) from None
         except Exception as e:
             error(f"Sync failed: {e}")
             print_db_hint()

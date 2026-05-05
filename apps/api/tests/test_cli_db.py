@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 from typer.testing import CliRunner
 
@@ -269,3 +270,71 @@ def test_backup_create_uses_database_dump_request_field() -> None:
         "include_database_dump": False,
         "include_graph": True,
     }
+
+
+def test_backfill_shared_projects_uses_legacy_project_reference() -> None:
+    org_id = uuid4()
+    shared_project = SimpleNamespace(
+        id=uuid4(),
+        name="Shared",
+        graph_project_id="project_shared",
+    )
+    backfill_result = SimpleNamespace(
+        success=True,
+        graph_entity_created=False,
+        entities_updated=2,
+        entities_already_set=1,
+        duration_seconds=0.1,
+        errors=[],
+    )
+
+    with (
+        patch(
+            "sibyl.persistence.legacy.project_sync.get_shared_project_reference",
+            AsyncMock(return_value=shared_project),
+        ) as get_shared_project,
+        patch(
+            "sibyl_core.tools.admin.backfill_shared_project",
+            AsyncMock(return_value=backfill_result),
+        ) as backfill_shared_project,
+    ):
+        result = runner.invoke(
+            db_cli.app,
+            ["backfill-shared-projects", "--org-id", str(org_id)],
+        )
+
+    assert result.exit_code == 0
+    get_shared_project.assert_awaited_once_with(org_id)
+    backfill_shared_project.assert_awaited_once_with(
+        organization_id=str(org_id),
+        shared_project_graph_id="project_shared",
+        dry_run=False,
+    )
+
+
+def test_sync_projects_uses_legacy_project_sync_helper() -> None:
+    org_id = uuid4()
+    owner_id = uuid4()
+    sync_payload = SimpleNamespace(
+        graph_projects=[{"id": "project_1", "name": "Project"}],
+        owner_user_id=owner_id,
+        result={
+            "created": 1,
+            "skipped": 0,
+            "errors": 0,
+            "details": [{"status": "created", "name": "Project", "graph_id": "project_1"}],
+        },
+    )
+
+    with patch(
+        "sibyl.persistence.legacy.project_sync.sync_graph_projects_to_relational",
+        AsyncMock(return_value=sync_payload),
+    ) as sync_graph_projects:
+        result = runner.invoke(db_cli.app, ["sync-projects", "--org-id", str(org_id)])
+
+    assert result.exit_code == 0
+    sync_graph_projects.assert_awaited_once_with(
+        organization_id=org_id,
+        owner_user_id=None,
+        dry_run=False,
+    )
