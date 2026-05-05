@@ -128,18 +128,38 @@ moon run migrate-local-surreal -- --org-id <org-uuid>
 
 ## Cutover
 
-1. Stop writes to the legacy API (drain requests, flip the ingress).
-2. Run export → import → verify against the current data.
-3. Point clients at the new Surreal-backed API (`SIBYL_STORE=surreal`, new `SIBYL_SURREAL_URL`).
+1. Export the current archive from legacy.
+2. Stop writes to the legacy API (drain requests, flip the ingress).
+3. Run the Surreal cutover acceptance gate while writes are frozen:
+
+```bash
+moon run migrate-cutover -- \
+  /tmp/sibyl-migration.tar.gz \
+  --write-freeze-confirmed \
+  --yes
+```
+
 4. Freeze the legacy auth/RBAC tables so stale code paths cannot accept new writes:
 
 ```bash
 moon run auth-readonly -- --mode freeze --apply --yes
 ```
 
-5. Keep legacy containers up for a few days as a rollback option. They hold read-only history until
+5. Reopen writes on Surreal only after final operator sign-off:
+
+```bash
+moon run migrate-cutover -- \
+  /tmp/sibyl-migration.tar.gz \
+  --write-freeze-confirmed \
+  --reopen-writes \
+  --acknowledge-no-instant-rollback \
+  --yes
+```
+
+6. Point clients at the new Surreal-backed API (`SIBYL_STORE=surreal`, new `SIBYL_SURREAL_URL`).
+7. Keep legacy containers up for a few days as a rollback option. They hold read-only history until
    you're confident.
-6. Decommission FalkorDB + PostgreSQL once traffic has run cleanly on Surreal and your rollback
+8. Decommission FalkorDB + PostgreSQL once traffic has run cleanly on Surreal and your rollback
    window has closed.
 
 ## Rollback
