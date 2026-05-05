@@ -26,7 +26,11 @@ def _get_surreal_driver(client: Any, group_id: str) -> Any | None:
         return None
 
     driver = get_org_driver(group_id)
-    return driver if isinstance(driver, SurrealDriver) else None
+    if isinstance(driver, SurrealDriver):
+        return driver
+    if getattr(driver, "episodic_edge_ops", None) is not None:
+        return driver
+    return None
 
 
 async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | None) -> None:

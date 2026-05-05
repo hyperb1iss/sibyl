@@ -7,12 +7,36 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sibyl.jobs.entities import create_learning_episode, create_learning_procedure
+from sibyl.jobs.entities import (
+    _save_episode_mention,
+    create_learning_episode,
+    create_learning_procedure,
+)
 from sibyl_core.models.entities import Episode, Procedure
 from sibyl_core.models.tasks import Task, TaskStatus
 
 
 class TestCreateLearningEpisodeJob:
+    @pytest.mark.asyncio
+    async def test_surreal_like_driver_saves_episode_mentions(self) -> None:
+        edge_ops = SimpleNamespace(save=AsyncMock())
+        driver = SimpleNamespace(episodic_edge_ops=edge_ops)
+        client = SimpleNamespace(get_org_driver=lambda group_id: driver)
+
+        assert await _save_episode_mention(
+            client,
+            group_id="org-1",
+            episode_id="episode-task-123",
+            target_id="task-123",
+            link_id="mention-1",
+        )
+
+        edge_ops.save.assert_awaited_once()
+        saved_edge = edge_ops.save.await_args.args[1]
+        assert saved_edge.uuid == "mention-1"
+        assert saved_edge.source_node_uuid == "episode-task-123"
+        assert saved_edge.target_node_uuid == "task-123"
+
     @pytest.mark.asyncio
     async def test_uses_episode_mentions_for_surreal_learning_links(self) -> None:
         task = Task(
