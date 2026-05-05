@@ -61,6 +61,9 @@ Use the full migration playbook, not the local shortcut:
 
 Start with [Migrating from FalkorDB](./migrating-from-falkor.md).
 
+Release owners should execute the live gate checklist in
+`docs/architecture/SURREALDB_PHASE2_LIVE_GATES.md` before tagging the SurrealDB-first release.
+
 `sibyld migrate auth-flow-compare` refuses to compare one API to itself by default. Start one
 legacy-auth API and one Surreal-auth API, then pass distinct `--postgres-base-url` and
 `--surreal-base-url` values. Use `--allow-same-base-url` only when debugging the harness itself.

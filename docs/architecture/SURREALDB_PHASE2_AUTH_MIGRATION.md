@@ -177,6 +177,9 @@ Phase 3 decision if they keep relational storage.
 - Keep the Phase 3 relational burn-down plan current as the generated inventory shrinks:
   `docs/architecture/SURREALDB_PHASE3_BURNDOWN.md`.
 
+Use `docs/architecture/SURREALDB_PHASE2_LIVE_GATES.md` as the approval-window runbook for the live
+rehearsal, auth-flow compare, and local migration evidence.
+
 ---
 
 ## Phased plan

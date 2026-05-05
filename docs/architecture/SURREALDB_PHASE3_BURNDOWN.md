@@ -54,6 +54,9 @@ Do before any deletion:
 - Validate local migration from a real multi-org legacy install.
 - Keep release notes current with the results and any deviations.
 
+Use `docs/architecture/SURREALDB_PHASE2_LIVE_GATES.md` to execute and capture evidence for these
+gates.
+
 ### Lane 1 - Delete Legacy Auth/RBAC
 
 Start after one compatibility release on `SIBYL_AUTH_STORE=surreal`.
