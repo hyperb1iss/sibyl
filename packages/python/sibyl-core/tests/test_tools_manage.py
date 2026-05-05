@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-import sibyl_core.tools.manage as manage_tool
 from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError
 from sibyl_core.models.entities import EntityType
 from sibyl_core.models.tasks import TaskStatus
@@ -1042,10 +1041,8 @@ class TestSourceActions:
     @pytest.mark.asyncio
     async def test_link_graph_scopes_chunks_by_org_and_forwards_create_new(
         self,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """link_graph should only inspect org-owned chunks and pass create-new through."""
-        monkeypatch.setattr(manage_tool.settings, "store", "legacy")
         org_id = "00000000-0000-0000-0000-000000000111"
         source_id = "00000000-0000-0000-0000-000000000222"
         chunk = MagicMock()
@@ -1133,10 +1130,8 @@ class TestSourceActions:
     @pytest.mark.asyncio
     async def test_link_graph_status_is_org_scoped_and_keeps_sources_distinct(
         self,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """link_graph_status should scope counts by org and avoid merging same-name sources."""
-        monkeypatch.setattr(manage_tool.settings, "store", "legacy")
         org_id = "00000000-0000-0000-0000-000000000111"
         session = AsyncMock()
         status = LinkGraphStatusData(
@@ -1162,7 +1157,7 @@ class TestSourceActions:
 
         helper = AsyncMock(return_value=status)
         with (
-            patch("sibyl.db.get_session", mock_session),
+            patch("sibyl.persistence.content_runtime.get_content_read_session", mock_session),
             patch("sibyl_core.tools.manage.get_link_graph_status_data", helper),
         ):
             response = await manage(
@@ -1192,7 +1187,6 @@ class TestSourceActions:
     @pytest.mark.asyncio
     async def test_link_graph_status_skips_sql_session_in_surreal_mode(
         self,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """link_graph_status should call the shared helper directly in surreal mode."""
         org_id = "00000000-0000-0000-0000-000000000111"
@@ -1209,9 +1203,15 @@ class TestSourceActions:
         )
 
         helper = AsyncMock(return_value=status)
-        monkeypatch.setattr(manage_tool.settings, "store", "surreal")
 
-        with patch("sibyl_core.tools.manage.get_link_graph_status_data", helper):
+        @asynccontextmanager
+        async def mock_session():
+            yield None
+
+        with (
+            patch("sibyl.persistence.content_runtime.get_content_read_session", mock_session),
+            patch("sibyl_core.tools.manage.get_link_graph_status_data", helper),
+        ):
             response = await manage(
                 action="link_graph_status",
                 organization_id=org_id,
