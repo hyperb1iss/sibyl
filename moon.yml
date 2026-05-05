@@ -236,6 +236,7 @@ tasks:
       - ~:inventory-lint
       - ~:inventory-typecheck
       - ~:inventory-test
+      - ~:dev-script-test
       - ~:bench-gate-test
       - ~:chaos-test
       - ~:storage-access-check
@@ -253,6 +254,7 @@ tasks:
   test:
     deps:
       - ~:inventory-test
+      - ~:dev-script-test
       - ~:bench-gate-test
       - ~:chaos-test
       - ~:storage-access-test
@@ -310,6 +312,14 @@ tasks:
       - apps/api/pyproject.toml
       - apps/cli/pyproject.toml
       - packages/python/sibyl-core/pyproject.toml
+
+  dev-script-test:
+    command: uv run pytest tools/tests/test_dev_scripts.py -v
+    inputs:
+      - tools/dev/*.sh
+      - tools/tests/conftest.py
+      - tools/tests/test_dev_scripts.py
+      - pyproject.toml
 
   bench-gate:
     command: uv run python -m tools.bench.eval_gate
