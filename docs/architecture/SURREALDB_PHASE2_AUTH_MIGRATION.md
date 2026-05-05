@@ -174,7 +174,8 @@ Phase 3 decision if they keep relational storage.
 - Validate the local migration path from a real single-org legacy install and a multi-org install.
 - Keep the SurrealDB migration release notes current as live rehearsal results land.
 - Keep `SIBYL_AUTH_STORE=postgres` for one compatibility release, then remove legacy auth/RBAC code.
-- Turn the Phase 3 inventory into a burn-down plan for the remaining relational sidecar consumers.
+- Keep the Phase 3 relational burn-down plan current as the generated inventory shrinks:
+  `docs/architecture/SURREALDB_PHASE3_BURNDOWN.md`.
 
 ---
 
@@ -448,7 +449,8 @@ untouched.
 
 A follow-up phase must migrate or remove the remaining Postgres consumers before `asyncpg` /
 `sqlalchemy` / `alembic` / the `postgres` compose service can be removed. Use
-`docs/research/rust-port/INVENTORY.md` as the source of truth rather than the old ORM model list.
+`docs/research/rust-port/INVENTORY.md` as the source of truth and
+`docs/architecture/SURREALDB_PHASE3_BURNDOWN.md` as the execution plan.
 
 Current status:
 
