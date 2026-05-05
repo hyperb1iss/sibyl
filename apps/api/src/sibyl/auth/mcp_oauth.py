@@ -20,7 +20,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Protocol, cast
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
@@ -38,6 +38,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from sibyl import config as config_module
+from sibyl.auth.api_key_common import ApiKeyAuth
 from sibyl.auth.jwt import JwtError, create_access_token, verify_access_token
 from sibyl.persistence.auth_runtime import (
     authenticate_api_key,
@@ -52,6 +53,8 @@ from sibyl.persistence.auth_runtime import (
     validate_access_session,
 )
 
+type JwtClaims = dict[str, object]
+
 OAUTH_SCOPE = "mcp"
 
 
@@ -62,25 +65,30 @@ def _require_jwt_secret() -> str:
     return secret
 
 
-def _jwt_encode(payload: dict[str, Any]) -> str:
+def _jwt_encode(payload: JwtClaims) -> str:
     secret = _require_jwt_secret()
     return jwt.encode(payload, secret, algorithm=config_module.settings.jwt_algorithm)
 
 
-def _jwt_decode(token: str) -> dict[str, Any]:
+def _jwt_decode(token: str) -> JwtClaims:
     secret = _require_jwt_secret()
-    return jwt.decode(
-        token,
-        secret,
-        algorithms=[config_module.settings.jwt_algorithm],
-        options={"require": ["sub", "iat", "exp"]},
+    return cast(
+        "JwtClaims",
+        jwt.decode(
+            token,
+            secret,
+            algorithms=[config_module.settings.jwt_algorithm],
+            options={"require": ["sub", "iat", "exp"]},
+        ),
     )
 
 
-def _parse_scopes_from_claims(claims: dict[str, Any]) -> list[str]:
+def _parse_scopes_from_claims(claims: JwtClaims) -> list[str]:
     scopes = claims.get("scopes")
-    if isinstance(scopes, list) and all(isinstance(item, str) for item in scopes):
-        return scopes
+    if isinstance(scopes, list):
+        parsed_scopes = [item for item in scopes if isinstance(item, str)]
+        if len(parsed_scopes) == len(scopes):
+            return parsed_scopes
     scope = claims.get("scope")
     if isinstance(scope, str) and scope.strip():
         return scope.split()
@@ -103,7 +111,7 @@ def _create_refresh_token(
 ) -> tuple[str, datetime]:
     now = datetime.now(UTC)
     expires_at = now + expires_in
-    payload: dict[str, Any] = {
+    payload: JwtClaims = {
         "sub": str(user_id),
         "typ": "refresh",
         "cid": client_id,
@@ -134,6 +142,22 @@ class _PendingAuth:
 class _AuthedUser:
     user_id: UUID
     expires_at: float
+
+
+class _OAuthUser(Protocol):
+    id: UUID
+
+
+class _OAuthOrg(Protocol):
+    id: UUID
+    name: str
+    is_personal: bool
+
+
+class _RefreshSessionRecord(Protocol):
+    id: UUID
+    user_id: UUID
+    organization_id: UUID | None
 
 
 class SibylMcpOAuthProvider(
@@ -402,32 +426,44 @@ class SibylMcpOAuthProvider(
             return None
         return authed
 
-    async def _create_session_record(self, **kwargs) -> object:
+    async def _create_session_record(self, **kwargs: object) -> object:
         return await create_session_record(**kwargs)
 
-    async def _load_refresh_session_record(self, refresh_token: str):
-        return await load_refresh_session_record(refresh_token)
+    async def _load_refresh_session_record(
+        self, refresh_token: str
+    ) -> _RefreshSessionRecord | None:
+        return cast(
+            "_RefreshSessionRecord | None", await load_refresh_session_record(refresh_token)
+        )
 
-    async def _rotate_refresh_session_record(self, refresh_token: str, **kwargs):
-        return await rotate_refresh_session_record(refresh_token, **kwargs)
+    async def _rotate_refresh_session_record(
+        self, refresh_token: str, **kwargs: object
+    ) -> _RefreshSessionRecord | None:
+        return cast(
+            "_RefreshSessionRecord | None",
+            await rotate_refresh_session_record(refresh_token, **kwargs),
+        )
 
     async def _revoke_refresh_session_record(self, refresh_token: str) -> None:
         await revoke_refresh_session_record(refresh_token)
 
-    async def _authenticate_api_key(self, raw_key: str):
-        return await authenticate_api_key(raw_key)
+    async def _authenticate_api_key(self, raw_key: str) -> ApiKeyAuth | None:
+        return cast("ApiKeyAuth | None", await authenticate_api_key(raw_key))
 
-    async def _authenticate_local_user(self, *, email: str, password: str):
-        return await authenticate_local_user(email=email, password=password)
+    async def _authenticate_local_user(self, *, email: str, password: str) -> _OAuthUser | None:
+        return cast(
+            "_OAuthUser | None",
+            await authenticate_local_user(email=email, password=password),
+        )
 
-    async def _list_user_orgs(self, *, user_id: UUID) -> list[Any]:
-        return await list_user_organizations(user_id=user_id)
+    async def _list_user_orgs(self, *, user_id: UUID) -> list[_OAuthOrg]:
+        return cast("list[_OAuthOrg]", await list_user_organizations(user_id=user_id))
 
-    async def _ensure_personal_org(self, *, user_id: UUID) -> Any | None:
-        return await ensure_personal_organization(user_id=user_id)
+    async def _ensure_personal_org(self, *, user_id: UUID) -> _OAuthOrg | None:
+        return cast("_OAuthOrg | None", await ensure_personal_organization(user_id=user_id))
 
-    async def _get_user(self, user_id: UUID):
-        return await get_user_by_id(user_id)
+    async def _get_user(self, user_id: UUID) -> _OAuthUser | None:
+        return cast("_OAuthUser | None", await get_user_by_id(user_id))
 
     async def ui_login_get(self, request: Request) -> Response:
         request_id = (request.query_params.get("req") or "").strip()

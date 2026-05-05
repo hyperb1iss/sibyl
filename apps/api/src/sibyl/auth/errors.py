@@ -4,7 +4,6 @@ All 403 errors should use these classes for frontend-parseable responses.
 """
 
 from enum import StrEnum
-from typing import Any
 
 from fastapi import HTTPException, status
 
@@ -44,9 +43,9 @@ class AuthorizationError(HTTPException):
         code: AuthErrorCode,
         message: str,
         *,
-        details: dict[str, Any] | None = None,
+        details: dict[str, object] | None = None,
     ):
-        detail = {
+        detail: dict[str, object] = {
             "error": code.value,
             "message": message,
         }
@@ -75,7 +74,7 @@ class OrgAccessDeniedError(AuthorizationError):
         actual_role: str | None = None,
         org_id: str | None = None,
     ):
-        details: dict[str, Any] = {"required_role": required_role}
+        details: dict[str, object] = {"required_role": required_role}
         if actual_role:
             details["actual_role"] = actual_role
         if org_id:
@@ -97,7 +96,7 @@ class ProjectAccessDeniedError(AuthorizationError):
         required_role: str,
         actual_role: str | None = None,
     ):
-        details: dict[str, Any] = {
+        details: dict[str, object] = {
             "project_id": project_id,
             "required_role": required_role,
         }
@@ -120,7 +119,7 @@ class ResourceAccessDeniedError(AuthorizationError):
         resource_id: str,
         reason: str | None = None,
     ):
-        details: dict[str, Any] = {
+        details: dict[str, object] = {
             "resource_type": resource_type,
             "resource_id": resource_id,
         }

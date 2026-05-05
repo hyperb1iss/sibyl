@@ -11,7 +11,6 @@ Accepted tokens:
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID
 
 from mcp.server.auth.provider import AccessToken
@@ -20,10 +19,12 @@ from sibyl.auth.jwt import JwtError, verify_access_token
 from sibyl.persistence.auth_runtime import authenticate_api_key, validate_access_session
 
 
-def _parse_scopes(claims: dict[str, Any]) -> list[str]:
+def _parse_scopes(claims: dict[str, object]) -> list[str]:
     scopes = claims.get("scopes")
-    if isinstance(scopes, list) and all(isinstance(item, str) for item in scopes):
-        return scopes
+    if isinstance(scopes, list):
+        parsed_scopes = [item for item in scopes if isinstance(item, str)]
+        if len(parsed_scopes) == len(scopes):
+            return parsed_scopes
     scope = claims.get("scope")
     if isinstance(scope, str) and scope.strip():
         return scope.split()
