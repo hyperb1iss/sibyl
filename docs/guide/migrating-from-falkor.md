@@ -102,7 +102,8 @@ If post-cutover verification reveals a problem:
 
 ## FAQ
 
-**Do I need to migrate?** No. Legacy mode is fully supported. Migrate when it's convenient for you.
+**Do I need to migrate?** Not immediately, but yes, you should plan it. Legacy mode remains available
+for existing installs during the transition; SurrealDB is the default runtime and the path forward.
 
 **Can I migrate org-by-org?** Yes. Each export is scoped to a single `--org-id`. Run them in
 whatever order suits your tenant sizing.
