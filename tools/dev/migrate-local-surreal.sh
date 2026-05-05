@@ -62,7 +62,7 @@ main() {
   local surreal_url="ws://127.0.0.1:${SIBYL_SURREAL_PORT:-8000}/rpc"
   local redis_host="${SIBYL_REDIS_HOST:-127.0.0.1}"
   local redis_port="${SIBYL_REDIS_PORT:-6381}"
-  local export_args=(migrate export --output "$archive")
+  local export_args=(migrate export --output "$archive" --include-content)
   if [[ -n "$org_id" ]]; then
     export_args+=(--org-id "$org_id")
   fi
