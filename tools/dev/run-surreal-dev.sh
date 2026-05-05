@@ -63,15 +63,19 @@ docker_legacy_setup_detected() {
 }
 
 surreal_runtime_data_detected() {
-  local surreal_data_dir="${SURREAL_DATA_DIR:-}"
+  local surreal_data_dir="${1:-}"
 
   if [[ -z "$surreal_data_dir" ]]; then
-    return 1
+    surreal_data_dir="$(resolve_surreal_volume_dir)"
+  elif [[ "$surreal_data_dir" != /* ]]; then
+    surreal_data_dir="$repo_root/${surreal_data_dir#./}"
   fi
 
-  [[ -s "$surreal_data_dir/.sibyl-migrated" ]] && return 0
-  [[ -s "$surreal_data_dir/sibyl.db/CURRENT" ]] && return 0
-  [[ -s "$surreal_data_dir/sibyl.db/IDENTITY" ]] && return 0
+  [[ -d "$surreal_data_dir" ]] || return 1
+  [[ -e "$surreal_data_dir/.sibyl-migrated" ]] && return 0
+  [[ -e "$surreal_data_dir/sibyl.db/CURRENT" ]] && return 0
+  [[ -e "$surreal_data_dir/sibyl.db/IDENTITY" ]] && return 0
+  [[ -d "$surreal_data_dir/sibyl.db" ]] || return 1
   find "$surreal_data_dir/sibyl.db" -mindepth 1 -maxdepth 1 -type f -print -quit 2>/dev/null | grep -q .
 }
 
