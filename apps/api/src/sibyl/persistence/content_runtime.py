@@ -18,8 +18,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Sequence
     from uuid import UUID
 
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     from sibyl.persistence.content_common import (
         CodeExampleSearchRow,
         ContentSession,
@@ -413,7 +411,7 @@ def _resolve_backend_export(name: str) -> RuntimeExport:
 
 
 @asynccontextmanager
-async def get_session() -> AsyncGenerator[AsyncSession]:
+async def get_session() -> AsyncGenerator[object]:
     from sibyl.db.connection import get_session as _get_session
 
     async with _get_session() as session:
@@ -421,7 +419,7 @@ async def get_session() -> AsyncGenerator[AsyncSession]:
 
 
 @asynccontextmanager
-async def get_content_read_session() -> AsyncGenerator[AsyncSession | None]:
+async def get_content_read_session() -> AsyncGenerator[object | None]:
     """Yield a relational session only when the active content runtime needs one."""
     if settings.store == "surreal":
         yield None
@@ -430,7 +428,7 @@ async def get_content_read_session() -> AsyncGenerator[AsyncSession | None]:
         yield session
 
 
-async def get_content_read_session_dependency() -> AsyncGenerator[AsyncSession | None]:
+async def get_content_read_session_dependency() -> AsyncGenerator[object | None]:
     """FastAPI dependency wrapper for content reads across runtimes."""
     async with get_content_read_session() as session:
         yield session

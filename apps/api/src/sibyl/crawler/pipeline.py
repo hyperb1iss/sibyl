@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
 import structlog
 from sqlalchemy.exc import IntegrityError
@@ -50,6 +50,11 @@ from sibyl_core.models.sources import SourceType
 
 if TYPE_CHECKING:
     from uuid import UUID
+
+
+class _RollbackSession(Protocol):
+    async def rollback(self) -> object: ...
+
 
 log = structlog.get_logger()
 
@@ -407,7 +412,7 @@ class IngestionPipeline:
                 stored_document = await save_crawled_document_record(session, document=document)
             except (IntegrityError, RuntimeError) as exc:
                 if session is not None and hasattr(session, "rollback"):
-                    await session.rollback()
+                    await cast("_RollbackSession", session).rollback()
                 existing = await get_document_by_url_for_org(
                     session,
                     url=document.url,

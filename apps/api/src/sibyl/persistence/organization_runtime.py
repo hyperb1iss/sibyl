@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
     from starlette.requests import Request
 
-    from sibyl.db.models import User
     from sibyl.persistence.organization_common import (
         InvitationAcceptance,
         InvitationRecord,
@@ -32,14 +31,18 @@ if TYPE_CHECKING:
         ProjectMemberChange,
         ProjectMembersResult,
     )
-    from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole
+    from sibyl_core.auth import OrganizationRole, ProjectRole
 
     class ActorWithId(Protocol):
         id: UUID
 
+    class InvitationUser(Protocol):
+        id: UUID
+        email: str | None
+
     class AcceptOrgInvitation(Protocol):
         def __call__(
-            self, *, token: str, user: User | AuthUser, request: Request
+            self, *, token: str, user: InvitationUser, request: Request
         ) -> Awaitable[InvitationAcceptance]: ...
 
     class AddOrgMember(Protocol):

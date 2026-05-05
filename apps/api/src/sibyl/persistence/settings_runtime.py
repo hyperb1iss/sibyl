@@ -18,8 +18,6 @@ class RuntimeExport(Protocol):
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     from sibyl.persistence.settings_types import SystemSettingRecord
 
     class GetSystemSetting(Protocol):
@@ -64,7 +62,7 @@ def _backend_module() -> ModuleType:
 
 
 @asynccontextmanager
-async def get_session() -> AsyncGenerator[AsyncSession]:
+async def get_session() -> AsyncGenerator[object]:
     from sibyl.db.connection import get_session as _get_session
 
     async with _get_session() as session:
@@ -72,7 +70,7 @@ async def get_session() -> AsyncGenerator[AsyncSession]:
 
 
 @asynccontextmanager
-async def get_settings_session() -> AsyncGenerator[AsyncSession | None]:
+async def get_settings_session() -> AsyncGenerator[object | None]:
     if settings.store == "surreal":
         yield None
         return

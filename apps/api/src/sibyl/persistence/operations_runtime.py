@@ -33,9 +33,7 @@ class RuntimeExport(Protocol):
 if TYPE_CHECKING:
     from starlette.requests import Request
 
-    from sibyl.db.models import User
     from sibyl.persistence.setup_common import SetupStatus
-    from sibyl_core.auth import AuthUser
 
     class GetSetupStatus(Protocol):
         def __call__(self) -> Awaitable[SetupStatus]: ...
@@ -47,7 +45,7 @@ if TYPE_CHECKING:
         def __call__(self, request: Request) -> Awaitable[None]: ...
 
     class RequireSetupModeOrAdmin(Protocol):
-        def __call__(self, request: Request) -> Awaitable[User | AuthUser | None]: ...
+        def __call__(self, request: Request) -> Awaitable[object | None]: ...
 
     class RequireSetupModeOrAuth(Protocol):
         def __call__(self, request: Request) -> Awaitable[None]: ...
