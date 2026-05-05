@@ -2,12 +2,28 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from importlib import import_module
-from typing import Any
+from typing import Protocol, TypeVar, cast
 from uuid import UUID
 
+from starlette.requests import Request
+
+from sibyl.auth.context import AuthContext
 from sibyl.config import settings
 from sibyl.persistence.auth_common import InvalidAuthClaimsError, UserNotFoundError
+from sibyl_core.auth import ProjectRole
+
+T = TypeVar("T")
+
+
+class RuntimeExport(Protocol[T]):
+    def __call__(self, *args: object, **kwargs: object) -> Awaitable[T]: ...
+
+
+class ProjectRecord(Protocol):
+    graph_project_id: str
+
 
 _BACKEND_MODULES = {
     "postgres": "sibyl.persistence.legacy.auth_runtime",
@@ -78,7 +94,7 @@ def _active_backend_name() -> str:
     return settings.auth_store
 
 
-def _resolve_backend_export(name: str) -> Any:
+def _resolve_backend_export(name: str) -> object:
     backend = _active_backend_name()
     module = import_module(_BACKEND_MODULES[backend])
     if hasattr(module, name):
@@ -86,7 +102,7 @@ def _resolve_backend_export(name: str) -> Any:
     return _unsupported_export(name=name, backend=backend)
 
 
-def _unsupported_export(*, name: str, backend: str) -> Any:
+def _unsupported_export(*, name: str, backend: str) -> object:
     message = (
         f"{name} is not implemented for SIBYL_AUTH_STORE={backend!r}. "
         "Add the backend adapter or route the export through the runtime helper "
@@ -119,7 +135,7 @@ def _unsupported_export(*, name: str, backend: str) -> Any:
     return _unsupported
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> object:
     if name == "InvalidAuthClaimsError":
         return InvalidAuthClaimsError
     if name == "UserNotFoundError":
@@ -134,12 +150,12 @@ def __dir__() -> list[str]:
     return sorted(set(globals()) | set(__all__))
 
 
-async def _call_runtime_helper(export_name: str, **kwargs: object) -> Any:
+async def _call_runtime_helper(export_name: str, **kwargs: object) -> T:
     return await _call_backend_export(export_name, **kwargs)
 
 
-async def _call_backend_export(export_name: str, *args: object, **kwargs: object) -> Any:
-    export = _resolve_backend_export(export_name)
+async def _call_backend_export(export_name: str, *args: object, **kwargs: object) -> T:
+    export = cast("RuntimeExport[T]", _resolve_backend_export(export_name))
     return await export(*args, **kwargs)
 
 
@@ -179,11 +195,11 @@ async def get_device_request_by_user_code(user_code: str):
     return await _call_backend_export("get_device_request_by_user_code", user_code)
 
 
-async def resolve_request_claims(request: Any) -> dict[str, Any] | None:
+async def resolve_request_claims(request: Request) -> dict[str, object] | None:
     return await _call_backend_export("resolve_request_claims", request)
 
 
-async def resolve_request_user(request: Any):
+async def resolve_request_user(request: Request):
     return await _call_backend_export("resolve_request_user", request)
 
 
@@ -253,9 +269,9 @@ async def get_user_by_id(user_id: UUID):
 
 async def resolve_auth_context(
     *,
-    claims: dict[str, Any],
-    session: Any | None = None,
-) -> Any:
+    claims: dict[str, object],
+    session: object | None = None,
+) -> AuthContext:
     return await _call_runtime_helper(
         "resolve_auth_context",
         claims=claims,
@@ -270,9 +286,9 @@ async def list_user_organizations(*, user_id: UUID):
 async def patch_auth_user(
     *,
     user_id: UUID,
-    updates: dict[str, Any],
+    updates: dict[str, object],
     organization_id: UUID | None,
-    request: Any,
+    request: Request,
 ):
     return await _call_runtime_helper(
         "patch_auth_user",
@@ -291,7 +307,7 @@ async def get_project_record_by_graph_id(
     *,
     organization_id: UUID,
     graph_project_id: str,
-) -> Any:
+) -> ProjectRecord:
     return await _call_runtime_helper(
         "get_project_record_by_graph_id",
         organization_id=organization_id,
@@ -306,7 +322,7 @@ async def create_project_record(
     graph_project_id: str,
     name: str,
     description: str | None = None,
-) -> Any:
+) -> ProjectRecord:
     return await _call_runtime_helper(
         "create_project_record",
         organization_id=organization_id,
@@ -349,7 +365,7 @@ async def get_project_record_by_id(
     *,
     organization_id: UUID,
     project_id: UUID,
-) -> Any:
+) -> ProjectRecord:
     return await _call_runtime_helper(
         "get_project_record_by_id",
         organization_id=organization_id,
@@ -357,7 +373,7 @@ async def get_project_record_by_id(
     )
 
 
-async def list_accessible_project_graph_ids(ctx: Any) -> set[str] | None:
+async def list_accessible_project_graph_ids(ctx: object) -> set[str] | None:
     return await _call_runtime_helper(
         "list_accessible_project_graph_ids",
         ctx=ctx,
@@ -368,8 +384,8 @@ async def resolve_accessible_project_graph_ids(
     *,
     user_id: str,
     org_id: str,
-    scopes: Any | None = None,
-    api_key_project_ids: Any | None = None,
+    scopes: object | None = None,
+    api_key_project_ids: object | None = None,
 ) -> set[str] | None:
     return await _call_runtime_helper(
         "resolve_accessible_project_graph_ids",
@@ -382,11 +398,11 @@ async def resolve_accessible_project_graph_ids(
 
 async def verify_entity_project_access(
     *,
-    ctx: Any,
+    ctx: object,
     entity_project_id: str | None,
-    required_role: Any,
+    required_role: ProjectRole,
     require_existing_project: bool = False,
-) -> Any:
+) -> ProjectRole | None:
     return await _call_runtime_helper(
         "verify_entity_project_access",
         ctx=ctx,
