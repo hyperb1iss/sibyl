@@ -8,9 +8,11 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 
 from sibyl.config import settings as app_settings
-from sibyl.db.models import Backup, BackupSettings, BackupStatus
 from sibyl.persistence.backups_common import (
     BackupListResult,
+    BackupRecord,
+    BackupSettingsRecord,
+    BackupStatus,
     resolve_backup_runtime_options,
     resolve_mapping_database_dump,
 )
@@ -78,10 +80,10 @@ def _record_include_database_dump(record: dict[str, object]) -> bool:
     return _effective_include_database_dump(requested_database_dump)
 
 
-def _backup_settings_from_record(record: dict[str, object]) -> BackupSettings:
+def _backup_settings_from_record(record: dict[str, object]) -> BackupSettingsRecord:
     now = _utcnow()
     include_database_dump = _record_include_database_dump(record)
-    return BackupSettings(
+    return BackupSettingsRecord(
         id=_coerce_uuid(record.get("uuid"), field_name="backup_settings.uuid"),
         organization_id=_coerce_uuid(
             record.get("organization_id"),
@@ -99,7 +101,7 @@ def _backup_settings_from_record(record: dict[str, object]) -> BackupSettings:
     )
 
 
-def _backup_settings_record(settings: BackupSettings) -> dict[str, object]:
+def _backup_settings_record(settings: BackupSettingsRecord) -> dict[str, object]:
     include_database_dump = _effective_include_database_dump(settings.include_database_dump)
     return {
         "uuid": str(settings.id),
@@ -116,10 +118,10 @@ def _backup_settings_record(settings: BackupSettings) -> dict[str, object]:
     }
 
 
-def _backup_from_record(record: dict[str, object]) -> Backup:
+def _backup_from_record(record: dict[str, object]) -> BackupRecord:
     now = _utcnow()
     include_database_dump = _record_include_database_dump(record)
-    return Backup(
+    return BackupRecord(
         id=_coerce_uuid(record.get("uuid"), field_name="backups.uuid"),
         organization_id=_coerce_uuid(
             record.get("organization_id"), field_name="backups.organization_id"
@@ -145,7 +147,7 @@ def _backup_from_record(record: dict[str, object]) -> Backup:
     )
 
 
-def _backup_record(backup: Backup) -> dict[str, object]:
+def _backup_record(backup: BackupRecord) -> dict[str, object]:
     include_database_dump = _effective_include_database_dump(backup.include_database_dump)
     return {
         "uuid": str(backup.id),
@@ -171,7 +173,7 @@ def _backup_record(backup: Backup) -> dict[str, object]:
     }
 
 
-async def _get_backup_settings_for_org(org_id: UUID) -> BackupSettings | None:
+async def _get_backup_settings_for_org(org_id: UUID) -> BackupSettingsRecord | None:
     rows = await _execute_query(
         "SELECT * FROM backup_settings WHERE organization_id = $organization_id LIMIT 1;",
         organization_id=str(org_id),
@@ -179,7 +181,7 @@ async def _get_backup_settings_for_org(org_id: UUID) -> BackupSettings | None:
     return _backup_settings_from_record(rows[0]) if rows else None
 
 
-async def _save_backup_settings(settings: BackupSettings) -> BackupSettings:
+async def _save_backup_settings(settings: BackupSettingsRecord) -> BackupSettingsRecord:
     existing = await _get_backup_settings_for_org(settings.organization_id)
     if existing is not None:
         settings.id = existing.id
@@ -200,7 +202,7 @@ async def _save_backup_settings(settings: BackupSettings) -> BackupSettings:
     return persisted
 
 
-async def _get_backup_by_record_id(record_id: UUID) -> Backup | None:
+async def _get_backup_by_record_id(record_id: UUID) -> BackupRecord | None:
     rows = await _execute_query(
         "SELECT * FROM backups WHERE uuid = $record_id LIMIT 1;",
         record_id=str(record_id),
@@ -208,7 +210,7 @@ async def _get_backup_by_record_id(record_id: UUID) -> Backup | None:
     return _backup_from_record(rows[0]) if rows else None
 
 
-async def _get_backup_by_backup_id(backup_id: str) -> Backup | None:
+async def _get_backup_by_backup_id(backup_id: str) -> BackupRecord | None:
     rows = await _execute_query(
         "SELECT * FROM backups WHERE backup_id = $backup_id LIMIT 1;",
         backup_id=backup_id,
@@ -216,7 +218,7 @@ async def _get_backup_by_backup_id(backup_id: str) -> Backup | None:
     return _backup_from_record(rows[0]) if rows else None
 
 
-async def _save_backup(backup: Backup) -> Backup:
+async def _save_backup(backup: BackupRecord) -> BackupRecord:
     existing = await _get_backup_by_backup_id(backup.backup_id)
     if existing is not None:
         backup.id = existing.id
@@ -237,12 +239,12 @@ async def _save_backup(backup: Backup) -> Backup:
     return persisted
 
 
-async def get_backup_settings(org_id: UUID) -> BackupSettings:
+async def get_backup_settings(org_id: UUID) -> BackupSettingsRecord:
     settings = await _get_backup_settings_for_org(org_id)
     if settings is not None:
         return settings
     return await _save_backup_settings(
-        BackupSettings(
+        BackupSettingsRecord(
             organization_id=org_id,
             include_database_dump=_database_dump_supported(),
         )
@@ -257,7 +259,7 @@ async def update_backup_settings(
     retention_days: int | None = None,
     include_database_dump: bool | None = None,
     include_graph: bool | None = None,
-) -> BackupSettings:
+) -> BackupSettingsRecord:
     settings = await get_backup_settings(org_id)
     if enabled is not None:
         settings.enabled = enabled
@@ -280,9 +282,9 @@ async def create_backup_record(
     include_graph: bool,
     created_by_user_id: UUID | None,
     triggered_by: str = "manual",
-) -> Backup:
+) -> BackupRecord:
     return await _save_backup(
-        Backup(
+        BackupRecord(
             id=uuid4(),
             organization_id=org_id,
             backup_id=backup_id,
@@ -295,7 +297,7 @@ async def create_backup_record(
     )
 
 
-async def attach_backup_job(record_id: UUID, job_id: str) -> Backup:
+async def attach_backup_job(record_id: UUID, job_id: str) -> BackupRecord:
     backup = await _get_backup_by_record_id(record_id)
     if backup is None:
         raise HTTPException(status_code=404, detail="Backup record not found")
@@ -313,7 +315,7 @@ async def list_backups(org_id: UUID, *, limit: int, offset: int) -> BackupListRe
     return BackupListResult(backups=backups[offset : offset + limit], total=len(backups))
 
 
-async def get_backup(org_id: UUID, backup_id: str) -> Backup:
+async def get_backup(org_id: UUID, backup_id: str) -> BackupRecord:
     rows = await _execute_query(
         "SELECT * FROM backups WHERE organization_id = $organization_id AND backup_id = $backup_id LIMIT 1;",
         organization_id=str(org_id),
@@ -331,7 +333,7 @@ async def get_backup_retention(org_id: UUID, requested_retention: int | None) ->
     return settings.retention_days
 
 
-async def delete_backup_record(org_id: UUID, backup_id: str) -> Backup:
+async def delete_backup_record(org_id: UUID, backup_id: str) -> BackupRecord:
     backup = await get_backup(org_id, backup_id)
     await _execute_query("DELETE FROM backups WHERE uuid = $uuid;", uuid=str(backup.id))
     return backup
@@ -350,7 +352,7 @@ async def update_backup_record(
     completed_at: datetime | None = None,
     duration_seconds: float | None = None,
     error: str | None = None,
-) -> Backup | None:
+) -> BackupRecord | None:
     backup = await _get_backup_by_backup_id(backup_id)
     if backup is None:
         return None
@@ -387,7 +389,7 @@ async def update_backup_record(
     return backup
 
 
-async def list_enabled_backup_settings() -> list[BackupSettings]:
+async def list_enabled_backup_settings() -> list[BackupSettingsRecord]:
     rows = await _execute_query("SELECT * FROM backup_settings WHERE enabled = true;")
     settings = [_backup_settings_from_record(row) for row in rows]
     settings.sort(key=lambda item: str(item.organization_id))

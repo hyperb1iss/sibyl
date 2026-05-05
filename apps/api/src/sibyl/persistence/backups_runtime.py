@@ -18,11 +18,14 @@ if TYPE_CHECKING:
     from datetime import datetime
     from uuid import UUID
 
-    from sibyl.db.models import Backup, BackupSettings
-    from sibyl.persistence.backups_common import BackupListResult
+    from sibyl.persistence.backups_common import (
+        BackupListResult,
+        BackupRecord,
+        BackupSettingsRecord,
+    )
 
     class AttachBackupJob(Protocol):
-        def __call__(self, record_id: UUID, job_id: str) -> Awaitable[Backup]: ...
+        def __call__(self, record_id: UUID, job_id: str) -> Awaitable[BackupRecord]: ...
 
     class CreateBackupRecord(Protocol):
         def __call__(
@@ -34,13 +37,13 @@ if TYPE_CHECKING:
             include_graph: bool,
             created_by_user_id: UUID | None,
             triggered_by: str = "manual",
-        ) -> Awaitable[Backup]: ...
+        ) -> Awaitable[BackupRecord]: ...
 
     class DeleteBackupRecord(Protocol):
-        def __call__(self, org_id: UUID, backup_id: str) -> Awaitable[Backup]: ...
+        def __call__(self, org_id: UUID, backup_id: str) -> Awaitable[BackupRecord]: ...
 
     class GetBackup(Protocol):
-        def __call__(self, org_id: UUID, backup_id: str) -> Awaitable[Backup]: ...
+        def __call__(self, org_id: UUID, backup_id: str) -> Awaitable[BackupRecord]: ...
 
     class GetBackupRetention(Protocol):
         def __call__(
@@ -48,7 +51,7 @@ if TYPE_CHECKING:
         ) -> Awaitable[int]: ...
 
     class GetBackupSettings(Protocol):
-        def __call__(self, org_id: UUID) -> Awaitable[BackupSettings]: ...
+        def __call__(self, org_id: UUID) -> Awaitable[BackupSettingsRecord]: ...
 
     class ListBackups(Protocol):
         def __call__(
@@ -56,7 +59,7 @@ if TYPE_CHECKING:
         ) -> Awaitable[BackupListResult]: ...
 
     class ListEnabledBackupSettings(Protocol):
-        def __call__(self) -> Awaitable[list[BackupSettings]]: ...
+        def __call__(self) -> Awaitable[list[BackupSettingsRecord]]: ...
 
     class UpdateBackupRecord(Protocol):
         def __call__(
@@ -73,7 +76,7 @@ if TYPE_CHECKING:
             completed_at: datetime | None = None,
             duration_seconds: float | None = None,
             error: str | None = None,
-        ) -> Awaitable[Backup | None]: ...
+        ) -> Awaitable[BackupRecord | None]: ...
 
     class UpdateBackupSettings(Protocol):
         def __call__(
@@ -85,7 +88,7 @@ if TYPE_CHECKING:
             retention_days: int | None = None,
             include_database_dump: bool | None = None,
             include_graph: bool | None = None,
-        ) -> Awaitable[BackupSettings]: ...
+        ) -> Awaitable[BackupSettingsRecord]: ...
 
     attach_backup_job: AttachBackupJob
     create_backup_record: CreateBackupRecord

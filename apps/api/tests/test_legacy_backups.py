@@ -76,7 +76,8 @@ async def test_delete_legacy_backup_record_deletes_match(
 
     removed = await legacy_backups.delete_legacy_backup_record(uuid4(), "backup_test")
 
-    assert removed is backup
+    assert removed.id == backup.id
+    assert removed.backup_id == "backup_test"
     session.delete.assert_awaited_once_with(backup)
     session.commit.assert_awaited_once()
 
