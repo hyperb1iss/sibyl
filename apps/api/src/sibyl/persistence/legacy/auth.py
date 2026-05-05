@@ -12,14 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from sibyl import config as config_module
-from sibyl.auth.audit import AuditLogger
-from sibyl.auth.device_authorization import DeviceAuthorizationManager
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import JwtError, create_access_token, create_refresh_token, verify_access_token
-from sibyl.auth.memberships import OrganizationMembershipManager
-from sibyl.auth.organizations import OrganizationManager
-from sibyl.auth.sessions import SessionManager
-from sibyl.auth.users import UserManager
 from sibyl.db.models import (
     DeviceAuthorizationRequest,
     Organization,
@@ -32,6 +26,14 @@ from sibyl.persistence.auth_common import (
     RepositoryAuthContextResolver,
     UserNotFoundError,
 )
+from sibyl.persistence.legacy.auth_managers.audit import AuditLogger
+from sibyl.persistence.legacy.auth_managers.device_authorization import (
+    DeviceAuthorizationManager,
+)
+from sibyl.persistence.legacy.auth_managers.memberships import OrganizationMembershipManager
+from sibyl.persistence.legacy.auth_managers.organizations import OrganizationManager
+from sibyl.persistence.legacy.auth_managers.sessions import SessionManager
+from sibyl.persistence.legacy.auth_managers.users import UserManager
 from sibyl_core.auth import (
     AuthContext,
     AuthMembership,
@@ -87,8 +89,8 @@ class RefreshRotation:
 
 async def authenticate_legacy_api_key(raw_key: str):
     """Authenticate an API key via the current relational auth runtime."""
-    from sibyl.auth.api_keys import ApiKeyManager
     from sibyl.db.connection import get_session
+    from sibyl.persistence.legacy.auth_managers.api_keys import ApiKeyManager
 
     async with get_session() as session:
         return await ApiKeyManager.from_session(session).authenticate(raw_key)
@@ -673,8 +675,8 @@ async def list_legacy_api_keys_for_user(
     user_id: UUID,
 ):
     """List API keys visible to the user in an organization."""
-    from sibyl.auth.api_keys import ApiKeyManager
     from sibyl.db.connection import get_session
+    from sibyl.persistence.legacy.auth_managers.api_keys import ApiKeyManager
 
     async with get_session() as session:
         return await ApiKeyManager(session).list_for_user(
@@ -694,9 +696,9 @@ async def create_legacy_api_key_for_user(
     request,
 ):
     """Create and audit a legacy API key."""
-    from sibyl.auth.api_keys import ApiKeyManager
-    from sibyl.auth.audit import AuditLogger
     from sibyl.db.connection import get_session
+    from sibyl.persistence.legacy.auth_managers.api_keys import ApiKeyManager
+    from sibyl.persistence.legacy.auth_managers.audit import AuditLogger
 
     async with get_session() as session:
         record, raw = await ApiKeyManager(session).create(
@@ -730,10 +732,10 @@ async def revoke_legacy_api_key_for_user(
     request,
 ) -> None:
     """Revoke and audit a legacy API key when the actor is authorized."""
-    from sibyl.auth.api_keys import ApiKeyManager
-    from sibyl.auth.audit import AuditLogger
     from sibyl.db.connection import get_session
     from sibyl.db.models import ApiKey
+    from sibyl.persistence.legacy.auth_managers.api_keys import ApiKeyManager
+    from sibyl.persistence.legacy.auth_managers.audit import AuditLogger
 
     async with get_session() as session:
         key = await session.get(ApiKey, api_key_id)
@@ -774,9 +776,9 @@ async def update_legacy_auth_user(
     """Update a legacy auth user profile and audit the changes."""
     from fastapi import HTTPException
 
-    from sibyl.auth.audit import AuditLogger
-    from sibyl.auth.users import PasswordChange
     from sibyl.db.connection import get_session
+    from sibyl.persistence.legacy.auth_managers.audit import AuditLogger
+    from sibyl_core.auth import PasswordChange
 
     changes: list[str] = []
     if email is not None:

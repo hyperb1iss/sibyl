@@ -9,9 +9,6 @@ from uuid import UUID
 from fastapi import HTTPException
 from sqlmodel import col, select
 
-from sibyl.auth.audit import AuditLogger
-from sibyl.auth.sessions import SessionManager
-from sibyl.auth.users import UserManager
 from sibyl.db.connection import get_session
 from sibyl.db.models import (
     Project,
@@ -62,6 +59,9 @@ from sibyl.persistence.legacy.auth import (
     start_device_authorization,
     update_auth_user,
 )
+from sibyl.persistence.legacy.auth_managers.audit import AuditLogger
+from sibyl.persistence.legacy.auth_managers.sessions import SessionManager
+from sibyl.persistence.legacy.auth_managers.users import UserManager
 from sibyl.persistence.legacy.users import (
     confirm_password_reset as confirm_password_reset_helper,
     list_oauth_connections as list_oauth_connections_helper,

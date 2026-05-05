@@ -8,10 +8,13 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from sibyl.auth.password_reset import PasswordResetError, PasswordResetManager
 from sibyl.db.connection import get_session
 from sibyl.db.models import OAuthConnection, User
 from sibyl.email import get_email_client
+from sibyl.persistence.legacy.auth_managers.password_reset import (
+    PasswordResetError,
+    PasswordResetManager,
+)
 
 
 async def request_password_reset(email: str) -> None:

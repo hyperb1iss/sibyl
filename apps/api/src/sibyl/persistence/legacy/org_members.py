@@ -8,11 +8,11 @@ from fastapi import HTTPException, status
 from sqlmodel import col, select
 from starlette.requests import Request
 
-from sibyl.auth.audit import AuditLogger
-from sibyl.auth.memberships import OrganizationMembershipManager
-from sibyl.auth.organizations import OrganizationManager
 from sibyl.db.connection import get_session
 from sibyl.db.models import OrganizationMember, User
+from sibyl.persistence.legacy.auth_managers.audit import AuditLogger
+from sibyl.persistence.legacy.auth_managers.memberships import OrganizationMembershipManager
+from sibyl.persistence.legacy.auth_managers.organizations import OrganizationManager
 from sibyl.persistence.organization_common import OrgMemberChange
 from sibyl_core.auth import OrganizationRole
 

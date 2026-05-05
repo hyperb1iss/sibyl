@@ -11,14 +11,15 @@ from sqlmodel import col, select
 from starlette.requests import Request
 
 from sibyl import config as config_module
-from sibyl.auth.audit import AuditLogger
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import create_access_token, create_refresh_token
-from sibyl.auth.memberships import OrganizationMembershipManager
-from sibyl.auth.organizations import OrganizationManager, slugify
-from sibyl.auth.sessions import SessionManager
+from sibyl.auth.primitives import slugify
 from sibyl.db.connection import get_session
 from sibyl.db.models import Organization, OrganizationMember
+from sibyl.persistence.legacy.auth_managers.audit import AuditLogger
+from sibyl.persistence.legacy.auth_managers.memberships import OrganizationMembershipManager
+from sibyl.persistence.legacy.auth_managers.organizations import OrganizationManager
+from sibyl.persistence.legacy.auth_managers.sessions import SessionManager
 from sibyl.persistence.legacy.graph import ensure_graph_indexes as _service_ensure_graph_indexes
 from sibyl.persistence.organization_common import (
     OrgAuthResult,

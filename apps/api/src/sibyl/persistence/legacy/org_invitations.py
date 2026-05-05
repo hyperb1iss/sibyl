@@ -9,15 +9,18 @@ from fastapi import HTTPException, status
 from starlette.requests import Request
 
 from sibyl import config as config_module
-from sibyl.auth.audit import AuditLogger
 from sibyl.auth.http import select_access_token
-from sibyl.auth.invitations import InvitationError, InvitationManager
 from sibyl.auth.jwt import create_access_token, create_refresh_token
-from sibyl.auth.memberships import OrganizationMembershipManager
-from sibyl.auth.organizations import OrganizationManager
-from sibyl.auth.sessions import SessionManager
 from sibyl.db.connection import get_session
 from sibyl.db.models import User
+from sibyl.persistence.legacy.auth_managers.audit import AuditLogger
+from sibyl.persistence.legacy.auth_managers.invitations import (
+    InvitationError,
+    InvitationManager,
+)
+from sibyl.persistence.legacy.auth_managers.memberships import OrganizationMembershipManager
+from sibyl.persistence.legacy.auth_managers.organizations import OrganizationManager
+from sibyl.persistence.legacy.auth_managers.sessions import SessionManager
 from sibyl.persistence.organization_common import (
     InvitationAcceptance,
     InvitationRecord,
