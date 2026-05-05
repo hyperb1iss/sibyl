@@ -65,7 +65,7 @@ confirms relationship integrity. Non-zero exit on mismatch.
 For production migrations, rehearse against a disposable SurrealDB first:
 
 ```bash
-moon run migrate-rehearse
+moon run migrate-rehearse -- /tmp/sibyl-migration.tar.gz --yes
 ```
 
 This runs the full export → import → verify cycle without touching your production target. It's the
