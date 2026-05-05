@@ -20,6 +20,7 @@ from sibyl.auth.jwt import (
     decode_token_unverified,
     verify_access_token,
 )
+from sibyl.auth.locks import first_user_admin_lock, oauth_identity_lock, signup_email_lock
 from sibyl.db.models import (
     DeviceAuthorizationRequest,
     Organization,
@@ -347,7 +348,11 @@ async def login_legacy_github_identity(
     """Upsert a GitHub user, ensure personal org membership, and issue tokens."""
     from sibyl.db.connection import get_session
 
-    async with get_session() as session:
+    async with (
+        oauth_identity_lock("github", identity.github_id),
+        first_user_admin_lock(),
+        get_session() as session,
+    ):
         user_manager = UserManager(session)
         is_first_user = not await user_manager.has_any_users()
         user = await user_manager.upsert_from_github(identity, is_admin=is_first_user)
@@ -372,7 +377,7 @@ async def signup_legacy_local_user(
     """Create a local user, ensure a personal org, and issue tokens."""
     from sibyl.db.connection import get_session
 
-    async with get_session() as session:
+    async with signup_email_lock(email), first_user_admin_lock(), get_session() as session:
         user_manager = UserManager(session)
         is_first_user = not await user_manager.has_any_users()
         user = await user_manager.create_local_user(

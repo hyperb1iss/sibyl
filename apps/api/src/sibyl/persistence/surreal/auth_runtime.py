@@ -31,6 +31,7 @@ from sibyl.auth.jwt import (
     decode_token_unverified,
     verify_access_token,
 )
+from sibyl.auth.locks import first_user_admin_lock, oauth_identity_lock, signup_email_lock
 from sibyl.auth.passwords import PasswordError, hash_password, verify_password
 from sibyl.auth.primitives import (
     DeviceTokenError,
@@ -1299,7 +1300,11 @@ async def revoke_refresh_session_record(refresh_token: str) -> None:
 
 
 async def login_github_identity(*, identity, request) -> IssuedAuthSession:
-    async with _auth_client_scope() as client:
+    async with (
+        oauth_identity_lock("github", identity.github_id),
+        first_user_admin_lock(),
+        _auth_client_scope() as client,
+    ):
         users = SurrealUserRepository.from_client(client)
         is_first_user = not await users.has_any_users()
         user = await users.upsert_from_github(identity, is_admin=is_first_user)
@@ -1333,7 +1338,7 @@ async def login_github_identity(*, identity, request) -> IssuedAuthSession:
 
 
 async def signup_local_user(*, email: str, password: str, name: str, request):
-    async with _auth_client_scope() as client:
+    async with signup_email_lock(email), first_user_admin_lock(), _auth_client_scope() as client:
         users = SurrealUserRepository.from_client(client)
         is_first_user = not await users.has_any_users()
         user = await users.create_local_user(
