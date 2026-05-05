@@ -1,0 +1,82 @@
+---
+title: SurrealDB Migration Release Notes
+description: Release guidance for the SurrealDB-first storage cutover
+---
+
+# SurrealDB Migration Release Notes
+
+Sibyl now starts the SurrealDB runtime by default. New installs should use SurrealDB for graph,
+content, and auth. Do not start new deployments on FalkorDB or PostgreSQL auth.
+
+Legacy FalkorDB + PostgreSQL support remains available for existing installs during the migration
+window. It is a compatibility bridge, not the long-term runtime. Plan your migration now; the
+PostgreSQL auth store is scheduled for removal after one compatibility release once the live
+migration gates are green.
+
+## What changed
+
+- `moon run dev` starts the SurrealDB runtime.
+- `SIBYL_STORE=surreal` and `SIBYL_AUTH_STORE=surreal` are the default settings.
+- `moon run dev-legacy` is the explicit FalkorDB + PostgreSQL fallback.
+- `moon run dev` detects local legacy data before creating a fresh Surreal dev runtime.
+- `moon run dev -- --migrate-legacy` migrates the common single-org local setup automatically.
+
+## Existing local installs
+
+If you have an old local FalkorDB + PostgreSQL install, run:
+
+```bash
+moon run dev -- --migrate-legacy
+```
+
+For the common single-org setup, Sibyl selects the only organization automatically. You do not need
+to know the org ID.
+
+If multiple organizations exist, Sibyl prints the available org IDs and asks you to rerun with:
+
+```bash
+moon run migrate-local-surreal -- --org-id <org-uuid>
+```
+
+To keep using the old stack for debugging or migration work:
+
+```bash
+moon run dev-legacy
+```
+
+## Existing production installs
+
+Use the full migration playbook, not the local shortcut:
+
+1. Back up the legacy install.
+2. Rehearse against a disposable SurrealDB target.
+3. Export the legacy archive.
+4. Import into SurrealDB.
+5. Run archive verification.
+6. Run the auth-flow replay against the Surreal-backed API.
+7. Compare live PostgreSQL-auth and Surreal-auth stacks before cutover.
+8. Freeze legacy auth/RBAC writes during the rollback window.
+
+Start with [Migrating from FalkorDB](./migrating-from-falkor.md).
+
+## Compatibility window
+
+These paths stay available for one release cycle:
+
+- `moon run dev-legacy`
+- `SIBYL_STORE=legacy`
+- `SIBYL_AUTH_STORE=postgres`
+- PostgreSQL auth/RBAC archive export
+- FalkorDB graph archive export
+
+After that compatibility window, Sibyl will remove the old auth/RBAC runtime first. Remaining
+non-auth PostgreSQL consumers will be removed in the Phase 3 storage cleanup.
+
+## Rollback posture
+
+The migration is explicit and archive-backed. Upgrading does not destructively rewrite your legacy
+data. If a cutover fails before Surreal accepts new writes, point traffic back to the legacy API and
+unfreeze auth/RBAC writes.
+
+Once Surreal accepts new production writes, treating PostgreSQL as an instant read-write rollback is
+unsafe. Restore from the pre-cutover archive and replay any Surreal-only writes deliberately.

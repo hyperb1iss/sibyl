@@ -17,6 +17,9 @@ Mixed and legacy modes are compatibility paths for existing installs. Fully Surr
 recommended target for new deployments, and the PostgreSQL auth store is planned for removal after
 one compatibility release once the migration gates are green.
 
+Existing installs should read the
+[SurrealDB migration release notes](./surrealdb-migration-release-notes.md) before upgrading.
+
 Set `SIBYL_COORDINATION_BACKEND=auto` (the default) and sibyld picks the right coordination backend
 for each mode. Override it only when you need Redis-backed coordination for multi-process Surreal
 dev.

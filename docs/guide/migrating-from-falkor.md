@@ -13,6 +13,9 @@ SurrealDB is the default runtime now. Legacy and mixed modes remain as compatibi
 existing installs during the migration window, but new deployments should not start on FalkorDB or
 PostgreSQL auth.
 
+Read the [SurrealDB migration release notes](./surrealdb-migration-release-notes.md) first if you
+are upgrading an existing install.
+
 ## Before you start
 
 - **Both stacks online.** Keep FalkorDB + PostgreSQL running during migration. You'll only stop them
