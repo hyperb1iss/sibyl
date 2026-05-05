@@ -12,7 +12,6 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import JwtError, verify_access_token
 from sibyl.config import settings
-from sibyl.db.models import OrganizationRole
 from sibyl.persistence.auth_runtime import (
     InvalidAuthClaimsError,
     UserNotFoundError,
@@ -20,6 +19,7 @@ from sibyl.persistence.auth_runtime import (
     get_user_by_id,
     resolve_auth_context,
 )
+from sibyl_core.auth import OrganizationRole
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
