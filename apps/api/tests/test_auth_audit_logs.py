@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from starlette.requests import Request
 
-from sibyl.auth.audit import AuditLogger
+from sibyl.persistence.legacy.auth_managers.audit import AuditLogger
 
 
 @pytest.mark.asyncio

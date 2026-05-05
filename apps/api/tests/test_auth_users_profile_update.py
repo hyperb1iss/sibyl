@@ -4,9 +4,9 @@ from uuid import uuid4
 import pytest
 
 from sibyl.auth.passwords import hash_password, verify_password
-from sibyl.auth.users import PasswordChange, UserManager
 from sibyl.config import Settings
 from sibyl.db.models import User
+from sibyl.persistence.legacy.auth_managers.users import PasswordChange, UserManager
 
 
 @pytest.mark.asyncio

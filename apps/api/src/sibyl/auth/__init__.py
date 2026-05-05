@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from sibyl.auth.context import AuthContext
 from sibyl.auth.errors import (
@@ -15,13 +15,10 @@ from sibyl.auth.errors import (
     ResourceAccessDeniedError,
 )
 from sibyl.auth.jwt import JwtError, create_access_token, verify_access_token
+from sibyl_core.auth import GitHubUserIdentity
 
 if TYPE_CHECKING:
     from sibyl.auth.dependencies import get_auth_context, require_org_admin
-    from sibyl.auth.memberships import OrganizationMembershipManager
-    from sibyl.auth.organizations import OrganizationManager
-    from sibyl.auth.users import UserManager
-    from sibyl_core.auth import GitHubUserIdentity
 
 __all__ = [
     # Context
@@ -39,17 +36,14 @@ __all__ = [
     "JwtError",
     "create_access_token",
     "verify_access_token",
-    # Managers
+    # Shared auth contracts
     "GitHubUserIdentity",
-    "OrganizationManager",
-    "OrganizationMembershipManager",
-    "UserManager",
     # Dependencies
     "require_org_admin",
 ]
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> object:
     if name in {"get_auth_context", "require_org_admin"}:
         from sibyl.auth.dependencies import get_auth_context, require_org_admin
 
@@ -58,21 +52,5 @@ def __getattr__(name: str) -> Any:
             "require_org_admin": require_org_admin,
         }
         return exports[name]
-    if name == "OrganizationMembershipManager":
-        from sibyl.auth.memberships import OrganizationMembershipManager
-
-        return OrganizationMembershipManager
-    if name == "OrganizationManager":
-        from sibyl.auth.organizations import OrganizationManager
-
-        return OrganizationManager
-    if name == "GitHubUserIdentity":
-        from sibyl_core.auth import GitHubUserIdentity
-
-        return GitHubUserIdentity
-    if name == "UserManager":
-        from sibyl.auth.users import UserManager
-
-        return UserManager
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)

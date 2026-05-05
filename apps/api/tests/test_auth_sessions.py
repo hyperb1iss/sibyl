@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import pytest
 
-from sibyl.auth.sessions import SessionManager
 from sibyl.db.models import UserSession
+from sibyl.persistence.legacy.auth_managers.sessions import SessionManager
 
 
 def make_session_record(
