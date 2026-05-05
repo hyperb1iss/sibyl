@@ -71,6 +71,30 @@ moon run migrate-rehearse -- /tmp/sibyl-migration.tar.gz --yes
 This runs the full export → import → verify cycle without touching your production target. It's the
 safest pre-cutover check — the rehearsal must pass green before the real run.
 
+The rehearsal runs the deterministic auth-flow replay by default. It signs up users, rotates
+tokens, exercises API keys, invitations, org switching, device auth, logout revocation, session
+listing, and password reset consumption through the configured email outbox.
+
+## Auth flow gates
+
+Run the live auth replay directly when you want a focused check:
+
+```bash
+moon run auth-flow-replay -- --base-url http://localhost:3334
+```
+
+For final auth cutover confidence, compare a Postgres-backed API and a Surreal-backed API:
+
+```bash
+moon run auth-flow-compare -- \
+  --postgres-base-url http://localhost:3334 \
+  --surreal-base-url http://localhost:3335
+```
+
+The comparison ignores generated IDs, raw tokens, and timestamps. It compares the replayed step
+sequence and normalized JWT claim shape, including `sub`, `org`, `typ`, `sid`, and refresh-token
+`jti` presence.
+
 ## Local shortcut
 
 For single-org local dev moves:

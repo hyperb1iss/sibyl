@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import re
 from dataclasses import dataclass
@@ -22,6 +24,18 @@ class AuthFlowResult:
     secondary_email: str
     organization_slug: str
     steps: tuple[str, ...]
+    token_claims: tuple[AuthFlowTokenClaims, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AuthFlowTokenClaims:
+    step: str
+    field_name: str
+    typ: str
+    has_sub: bool
+    has_org: bool
+    has_sid: bool
+    has_jti: bool
 
 
 JsonObject = dict[str, object]
@@ -52,6 +66,7 @@ async def replay_auth_flow(
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> AuthFlowResult:
     steps: list[str] = []
+    token_claims: list[AuthFlowTokenClaims] = []
     secondary_email = _secondary_email(email)
 
     async with httpx.AsyncClient(
@@ -66,6 +81,7 @@ async def replay_auth_flow(
             password=password,
             name=name,
             steps=steps,
+            token_claims=token_claims,
         )
         await _exercise_api_key(client=client, primary=primary, steps=steps)
         secondary = await _signup_secondary_user(
@@ -74,6 +90,7 @@ async def replay_auth_flow(
             password=password,
             name=f"{name} Member",
             steps=steps,
+            token_claims=token_claims,
         )
         await _invite_accept_and_switch_org(
             client=client,
@@ -81,8 +98,14 @@ async def replay_auth_flow(
             secondary=secondary,
             secondary_email=secondary_email,
             steps=steps,
+            token_claims=token_claims,
         )
-        await _exercise_device_auth(client=client, primary=primary, steps=steps)
+        await _exercise_device_auth(
+            client=client,
+            primary=primary,
+            steps=steps,
+            token_claims=token_claims,
+        )
         primary = await _exercise_password_paths(
             client=client,
             primary=primary,
@@ -90,6 +113,7 @@ async def replay_auth_flow(
             password=password,
             email_outbox_path=email_outbox_path,
             steps=steps,
+            token_claims=token_claims,
         )
         await _list_sessions_and_logout(client=client, primary=primary, steps=steps)
 
@@ -98,7 +122,32 @@ async def replay_auth_flow(
         secondary_email=secondary_email,
         organization_slug=primary.organization_slug,
         steps=tuple(steps),
+        token_claims=tuple(token_claims),
     )
+
+
+def compare_auth_flow_results(
+    *,
+    left_label: str,
+    left: AuthFlowResult,
+    right_label: str,
+    right: AuthFlowResult,
+) -> None:
+    mismatches: list[str] = []
+    if left.steps != right.steps:
+        mismatches.append(
+            f"step sequence differed: {left_label}={left.steps!r} {right_label}={right.steps!r}"
+        )
+
+    left_claims = tuple(_claim_fingerprint(claims) for claims in left.token_claims)
+    right_claims = tuple(_claim_fingerprint(claims) for claims in right.token_claims)
+    if left_claims != right_claims:
+        mismatches.append(
+            f"JWT claim shape differed: {left_label}={left_claims!r} {right_label}={right_claims!r}"
+        )
+
+    if mismatches:
+        raise AuthFlowError("; ".join(mismatches))
 
 
 async def _signup_login_refresh_primary(
@@ -108,6 +157,7 @@ async def _signup_login_refresh_primary(
     password: str,
     name: str,
     steps: list[str],
+    token_claims: list[AuthFlowTokenClaims],
 ) -> _PrimarySession:
     signup = await _post_json(
         client,
@@ -117,8 +167,7 @@ async def _signup_login_refresh_primary(
         step="signup primary user",
     )
     steps.append("signup_primary_user")
-    _required_string(signup, "access_token", "signup primary user")
-    refresh_token = _required_string(signup, "refresh_token", "signup primary user")
+    _, refresh_token = _record_response_tokens(token_claims, signup, step="signup primary user")
     primary_org = _required_object(signup, "organization", "signup primary user")
     primary_slug = _required_string(primary_org, "slug", "signup primary user")
 
@@ -130,8 +179,7 @@ async def _signup_login_refresh_primary(
         step="login primary user",
     )
     steps.append("login_primary_user")
-    _required_string(login, "access_token", "login primary user")
-    refresh_token = _required_string(login, "refresh_token", "login primary user")
+    _, refresh_token = _record_response_tokens(token_claims, login, step="login primary user")
 
     refresh = await _post_json(
         client,
@@ -141,9 +189,12 @@ async def _signup_login_refresh_primary(
         step="refresh tokens",
     )
     steps.append("refresh_tokens")
+    refresh_access, refresh_token = _record_response_tokens(
+        token_claims, refresh, step="refresh tokens"
+    )
     return _PrimarySession(
-        access_token=_required_string(refresh, "access_token", "refresh tokens"),
-        refresh_token=_required_string(refresh, "refresh_token", "refresh tokens"),
+        access_token=refresh_access,
+        refresh_token=refresh_token,
         organization_slug=primary_slug,
     )
 
@@ -201,6 +252,7 @@ async def _signup_secondary_user(
     password: str,
     name: str,
     steps: list[str],
+    token_claims: list[AuthFlowTokenClaims],
 ) -> _SecondarySession:
     signup = await _post_json(
         client,
@@ -211,8 +263,9 @@ async def _signup_secondary_user(
     )
     steps.append("signup_invited_user")
     secondary_org = _required_object(signup, "organization", "signup invited user")
+    access_token, _ = _record_response_tokens(token_claims, signup, step="signup invited user")
     return _SecondarySession(
-        access_token=_required_string(signup, "access_token", "signup invited user"),
+        access_token=access_token,
         organization_slug=_required_string(secondary_org, "slug", "signup invited user"),
     )
 
@@ -224,6 +277,7 @@ async def _invite_accept_and_switch_org(
     secondary: _SecondarySession,
     secondary_email: str,
     steps: list[str],
+    token_claims: list[AuthFlowTokenClaims],
 ) -> None:
     invitation = await _post_json(
         client,
@@ -245,7 +299,9 @@ async def _invite_accept_and_switch_org(
         step="accept org invitation",
     )
     steps.append("invite_and_accept_user")
-    secondary_access = _required_string(accepted, "access_token", "accept org invitation")
+    secondary_access, _ = _record_response_tokens(
+        token_claims, accepted, step="accept org invitation"
+    )
 
     switched = await _post_json(
         client,
@@ -255,8 +311,10 @@ async def _invite_accept_and_switch_org(
         expected_status=200,
         step="switch invited user org",
     )
-    secondary_access = _required_string(switched, "access_token", "switch invited user org")
-    await _post_json(
+    secondary_access, _ = _record_response_tokens(
+        token_claims, switched, step="switch invited user org"
+    )
+    switched_back = await _post_json(
         client,
         f"/api/orgs/{primary.organization_slug}/switch",
         {},
@@ -264,6 +322,7 @@ async def _invite_accept_and_switch_org(
         expected_status=200,
         step="switch invited user back",
     )
+    _record_response_tokens(token_claims, switched_back, step="switch invited user back")
     steps.append("switch_active_org")
 
 
@@ -272,6 +331,7 @@ async def _exercise_device_auth(
     client: httpx.AsyncClient,
     primary: _PrimarySession,
     steps: list[str],
+    token_claims: list[AuthFlowTokenClaims],
 ) -> None:
     device_start = await _post_json(
         client,
@@ -306,7 +366,7 @@ async def _exercise_device_auth(
         expected_status=200,
         step="exchange device auth",
     )
-    _required_string(device_token, "access_token", "exchange device auth")
+    _record_response_tokens(token_claims, device_token, step="exchange device auth")
     steps.append("device_auth_flow")
 
 
@@ -318,6 +378,7 @@ async def _exercise_password_paths(
     password: str,
     email_outbox_path: Path | None,
     steps: list[str],
+    token_claims: list[AuthFlowTokenClaims],
 ) -> _PrimarySession:
     new_password = f"{password}-rotated"
     reset_password = f"{password}-reset"
@@ -328,13 +389,14 @@ async def _exercise_password_paths(
         headers=_bearer_headers(primary.access_token),
         step="change password",
     )
-    await _post_json(
+    changed_login = await _post_json(
         client,
         "/api/auth/local/login",
         {"email": email, "password": new_password},
         expected_status=200,
         step="login after password change",
     )
+    _record_response_tokens(token_claims, changed_login, step="login after password change")
     steps.append("change_password")
 
     outbox_offset = _outbox_offset(email_outbox_path)
@@ -363,10 +425,13 @@ async def _exercise_password_paths(
         expected_status=200,
         step="login after password reset",
     )
+    reset_access, reset_refresh = _record_response_tokens(
+        token_claims, reset_login, step="login after password reset"
+    )
     steps.append("password_reset_request_and_consume")
     return _PrimarySession(
-        access_token=_required_string(reset_login, "access_token", "login after password reset"),
-        refresh_token=_required_string(reset_login, "refresh_token", "login after password reset"),
+        access_token=reset_access,
+        refresh_token=reset_refresh,
         organization_slug=primary.organization_slug,
     )
 
@@ -430,6 +495,113 @@ async def _get_json(
 
 def _bearer_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _record_token_claims(
+    token_claims: list[AuthFlowTokenClaims],
+    *,
+    step: str,
+    field_name: str,
+    token: str,
+    expected_type: str,
+) -> None:
+    claims = _decode_jwt_payload(token, step=step, field_name=field_name)
+    typ = _required_claim(claims, "typ", step=step, field_name=field_name)
+    if typ != expected_type:
+        raise AuthFlowError(f"{step} {field_name} had typ={typ!r}, expected {expected_type!r}")
+    has_sub = _has_claim(claims, "sub")
+    has_org = _has_claim(claims, "org")
+    has_sid = _has_claim(claims, "sid")
+    has_jti = _has_claim(claims, "jti")
+    missing = [
+        claim
+        for claim, present in (
+            ("sub", has_sub),
+            ("org", has_org),
+            ("sid", has_sid),
+            ("jti", has_jti or expected_type != "refresh"),
+        )
+        if not present
+    ]
+    if missing:
+        joined = ", ".join(missing)
+        raise AuthFlowError(f"{step} {field_name} missing required JWT claims: {joined}")
+    token_claims.append(
+        AuthFlowTokenClaims(
+            step=step,
+            field_name=field_name,
+            typ=typ,
+            has_sub=has_sub,
+            has_org=has_org,
+            has_sid=has_sid,
+            has_jti=has_jti,
+        )
+    )
+
+
+def _record_response_tokens(
+    token_claims: list[AuthFlowTokenClaims],
+    payload: JsonObject,
+    *,
+    step: str,
+) -> tuple[str, str]:
+    access_token = _required_string(payload, "access_token", step)
+    refresh_token = _required_string(payload, "refresh_token", step)
+    _record_token_claims(
+        token_claims,
+        step=step,
+        field_name="access_token",
+        token=access_token,
+        expected_type="access",
+    )
+    _record_token_claims(
+        token_claims,
+        step=step,
+        field_name="refresh_token",
+        token=refresh_token,
+        expected_type="refresh",
+    )
+    return access_token, refresh_token
+
+
+def _claim_fingerprint(claims: AuthFlowTokenClaims) -> tuple[str, str, str, bool, bool, bool, bool]:
+    return (
+        claims.step,
+        claims.field_name,
+        claims.typ,
+        claims.has_sub,
+        claims.has_org,
+        claims.has_sid,
+        claims.has_jti,
+    )
+
+
+def _decode_jwt_payload(token: str, *, step: str, field_name: str) -> JsonObject:
+    parts = token.split(".")
+    if len(parts) < 2:
+        raise AuthFlowError(f"{step} {field_name} was not a JWT")
+    payload_segment = parts[1]
+    padded = payload_segment + ("=" * (-len(payload_segment) % 4))
+    try:
+        decoded = base64.urlsafe_b64decode(padded.encode("ascii"))
+        payload: object = json.loads(decoded.decode("utf-8"))
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AuthFlowError(f"{step} {field_name} had an invalid JWT payload") from exc
+    if not isinstance(payload, dict):
+        raise AuthFlowError(f"{step} {field_name} JWT payload was not an object")
+    return {str(key): value for key, value in payload.items()}
+
+
+def _required_claim(claims: JsonObject, key: str, *, step: str, field_name: str) -> str:
+    value = claims.get(key)
+    if not isinstance(value, str) or not value:
+        raise AuthFlowError(f"{step} {field_name} missing required JWT claim: {key}")
+    return value
+
+
+def _has_claim(claims: JsonObject, key: str) -> bool:
+    value = claims.get(key)
+    return isinstance(value, str) and bool(value)
 
 
 def _expect_status(response: httpx.Response, expected: int, step: str) -> None:

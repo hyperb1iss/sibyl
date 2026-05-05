@@ -730,6 +730,46 @@ def test_migrate_auth_flow_runs_standalone_gate() -> None:
     )
 
 
+def test_migrate_auth_flow_compare_runs_dual_store_gate(tmp_path: Path) -> None:
+    auth_flow_compare = AsyncMock(return_value=None)
+    postgres_outbox = tmp_path / "postgres-outbox.jsonl"
+    surreal_outbox = tmp_path / "surreal-outbox.jsonl"
+
+    with patch("sibyl.cli.migrate._run_auth_flow_compare", auth_flow_compare):
+        result = runner.invoke(
+            migrate_cli.app,
+            [
+                "auth-flow-compare",
+                "--postgres-base-url",
+                "http://postgres.test",
+                "--surreal-base-url",
+                "http://surreal.test",
+                "--postgres-auth-flow-email",
+                "postgres-auth-flow@example.com",
+                "--surreal-auth-flow-email",
+                "surreal-auth-flow@example.com",
+                "--auth-flow-password",
+                "auth-flow-password-secure-123!",
+                "--postgres-email-outbox-path",
+                str(postgres_outbox),
+                "--surreal-email-outbox-path",
+                str(surreal_outbox),
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert "Auth flow semantic comparison passed" in result.output
+    auth_flow_compare.assert_awaited_once_with(
+        postgres_base_url="http://postgres.test",
+        surreal_base_url="http://surreal.test",
+        postgres_auth_flow_email="postgres-auth-flow@example.com",
+        surreal_auth_flow_email="surreal-auth-flow@example.com",
+        auth_flow_password="auth-flow-password-secure-123!",
+        postgres_email_outbox_path=postgres_outbox,
+        surreal_email_outbox_path=surreal_outbox,
+    )
+
+
 def test_migrate_rehearse_runs_verify_and_baseline(tmp_path: Path) -> None:
     archive_path = tmp_path / "migration.tar.gz"
     manifest_path = tmp_path / "runtime-manifest.json"

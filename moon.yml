@@ -442,6 +442,13 @@ tasks:
       - pyproject.toml
       - apps/api/pyproject.toml
 
+  auth-flow-compare:
+    command: uv run sibyld migrate auth-flow-compare
+    inputs:
+      - apps/api/src/**/*.py
+      - pyproject.toml
+      - apps/api/pyproject.toml
+
   # ==========================================================================
   # Coverage
   # ==========================================================================

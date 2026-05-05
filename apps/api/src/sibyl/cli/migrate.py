@@ -230,6 +230,44 @@ async def _run_auth_flow_gate(
     info(f"Auth flow exercised {len(result.steps)} steps for {result.primary_email}")
 
 
+async def _run_auth_flow_compare(
+    *,
+    postgres_base_url: str,
+    surreal_base_url: str,
+    postgres_auth_flow_email: str,
+    surreal_auth_flow_email: str,
+    auth_flow_password: str,
+    postgres_email_outbox_path: Path,
+    surreal_email_outbox_path: Path,
+) -> None:
+    from sibyl.cli.auth_flow import compare_auth_flow_results, replay_auth_flow
+
+    postgres_email = _resolve_auth_flow_email(postgres_auth_flow_email)
+    surreal_email = _resolve_auth_flow_email(surreal_auth_flow_email)
+    postgres_result = await replay_auth_flow(
+        base_url=postgres_base_url,
+        email=postgres_email,
+        password=auth_flow_password,
+        email_outbox_path=postgres_email_outbox_path,
+    )
+    surreal_result = await replay_auth_flow(
+        base_url=surreal_base_url,
+        email=surreal_email,
+        password=auth_flow_password,
+        email_outbox_path=surreal_email_outbox_path,
+    )
+    compare_auth_flow_results(
+        left_label="postgres",
+        left=postgres_result,
+        right_label="surreal",
+        right=surreal_result,
+    )
+    info(
+        "Auth flow semantic equivalence passed "
+        f"postgres_steps={len(postgres_result.steps)} surreal_steps={len(surreal_result.steps)}"
+    )
+
+
 def _run_moon_task(task: list[str], *, label: str) -> None:
     moon = shutil.which("moon")
     if moon is None:
@@ -973,6 +1011,68 @@ def auth_flow(
         success("Auth flow harness passed")
 
     _auth_flow()
+
+
+@app.command("auth-flow-compare")
+def auth_flow_compare(
+    postgres_base_url: Annotated[
+        str,
+        typer.Option("--postgres-base-url", help="Base URL for the Postgres auth runtime"),
+    ] = DEFAULT_REHEARSAL_BASE_URL,
+    surreal_base_url: Annotated[
+        str,
+        typer.Option("--surreal-base-url", help="Base URL for the Surreal auth runtime"),
+    ] = DEFAULT_REHEARSAL_BASE_URL,
+    postgres_auth_flow_email: Annotated[
+        str,
+        typer.Option(
+            "--postgres-auth-flow-email",
+            help="Postgres replay user email; generated when omitted",
+        ),
+    ] = "",
+    surreal_auth_flow_email: Annotated[
+        str,
+        typer.Option(
+            "--surreal-auth-flow-email",
+            help="Surreal replay user email; generated when omitted",
+        ),
+    ] = "",
+    auth_flow_password: Annotated[
+        str,
+        typer.Option("--auth-flow-password", help="Auth-flow user password"),
+    ] = DEFAULT_AUTH_FLOW_PASSWORD,
+    postgres_email_outbox_path: Annotated[
+        Path,
+        typer.Option(
+            "--postgres-email-outbox-path",
+            help="JSONL outbox path for the Postgres replay reset token",
+        ),
+    ] = DEFAULT_AUTH_FLOW_EMAIL_OUTBOX,
+    surreal_email_outbox_path: Annotated[
+        Path,
+        typer.Option(
+            "--surreal-email-outbox-path",
+            help="JSONL outbox path for the Surreal replay reset token",
+        ),
+    ] = DEFAULT_AUTH_FLOW_EMAIL_OUTBOX,
+) -> None:
+    """Compare normalized auth-flow semantics across Postgres and Surreal runtimes."""
+
+    @run_async
+    async def _auth_flow_compare() -> None:
+        info("Running auth flow semantic comparison...")
+        await _run_auth_flow_compare(
+            postgres_base_url=postgres_base_url,
+            surreal_base_url=surreal_base_url,
+            postgres_auth_flow_email=postgres_auth_flow_email,
+            surreal_auth_flow_email=surreal_auth_flow_email,
+            auth_flow_password=auth_flow_password,
+            postgres_email_outbox_path=postgres_email_outbox_path,
+            surreal_email_outbox_path=surreal_email_outbox_path,
+        )
+        success("Auth flow semantic comparison passed")
+
+    _auth_flow_compare()
 
 
 @app.command("rehearse")
