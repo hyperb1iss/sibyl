@@ -1077,3 +1077,40 @@ def test_migrate_cutover_requires_ack_before_reopen(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "--acknowledge-no-instant-rollback" in result.output
+
+
+def test_migrate_cutover_reopen_prints_rollback_boundary(tmp_path: Path) -> None:
+    archive_path = tmp_path / "migration.tar.gz"
+    manifest_path = tmp_path / "runtime-manifest.json"
+    _write_graph_archive(archive_path)
+    manifest_path.write_text('{"graph_fixture": {}}\n', encoding="utf-8")
+
+    verify_graph_archive = AsyncMock(return_value=_verify_result())
+    replay_all = AsyncMock(return_value=None)
+    auth_flow = AsyncMock(return_value=None)
+
+    with (
+        patch.object(migrate_cli.settings, "store", "surreal"),
+        patch.object(migrate_cli.settings, "auth_store", "surreal"),
+        patch("sibyl.cli.migrate._restore_graph_payload", return_value=True),
+        patch("sibyl.cli.migrate.verify_graph_archive", verify_graph_archive),
+        patch("sibyl.cli.migrate._replay_baseline", replay_all),
+        patch("sibyl.cli.migrate._run_auth_flow_gate", auth_flow),
+    ):
+        result = runner.invoke(
+            migrate_cli.app,
+            [
+                "cutover",
+                str(archive_path),
+                "--yes",
+                "--write-freeze-confirmed",
+                "--manifest-path",
+                str(manifest_path),
+                "--reopen-writes",
+                "--acknowledge-no-instant-rollback",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert "Rollback is no longer promised once writes reopen on SurrealDB" in result.output
+    assert "Writes may now be reopened on the Surreal runtime" in result.output
