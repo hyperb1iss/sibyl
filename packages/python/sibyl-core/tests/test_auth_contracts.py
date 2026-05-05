@@ -227,6 +227,9 @@ class FakeSessionRepository:
         del token
         return self.session
 
+    async def get_session_by_id(self, session_id):
+        return self.session if self.session.id == session_id else None
+
     async def get_session_by_refresh_token(self, refresh_token: str) -> AuthSession | None:
         del refresh_token
         return self.session
