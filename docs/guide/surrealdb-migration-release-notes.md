@@ -52,11 +52,12 @@ Use the full migration playbook, not the local shortcut:
 2. Export the legacy archive.
 3. Rehearse the archive against a disposable SurrealDB target.
 4. Import into SurrealDB.
-5. Run archive verification.
-6. Run the auth-flow replay against the Surreal-backed API.
-7. Compare live PostgreSQL-auth and Surreal-auth stacks before cutover.
-8. Run the Surreal cutover gate while writes are frozen.
-9. Freeze legacy auth/RBAC writes during the rollback window.
+5. Start a Surreal-backed API on a private cutover endpoint.
+6. Run archive verification.
+7. Run the auth-flow replay against the Surreal-backed API.
+8. Compare live PostgreSQL-auth and Surreal-auth stacks before cutover.
+9. Run the Surreal cutover gate while writes are frozen.
+10. Freeze legacy auth/RBAC writes during the rollback window.
 
 Start with [Migrating from FalkorDB](./migrating-from-falkor.md).
 
