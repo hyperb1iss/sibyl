@@ -30,7 +30,6 @@ from sibyl.db.models import (
     CrawledDocument,
     CrawlSource,
     DocumentChunk,
-    SourceType,
 )
 from sibyl.persistence.content_runtime import (
     get_content_read_session,
@@ -43,6 +42,7 @@ from sibyl.persistence.content_runtime import (
 )
 from sibyl_core.graph.entities import EntityManager
 from sibyl_core.models.entities import Entity, EntityType
+from sibyl_core.models.sources import SourceType
 
 if TYPE_CHECKING:
     from uuid import UUID

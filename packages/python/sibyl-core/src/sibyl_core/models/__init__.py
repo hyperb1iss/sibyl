@@ -42,6 +42,7 @@ from sibyl_core.models.responses import (
     SearchResultItem,
 )
 from sibyl_core.models.sources import (
+    ChunkType,
     Community,
     CrawlStatus,
     Document,
@@ -83,6 +84,7 @@ __all__ = [
     "SHARED_PROJECT_SLUG",
     "AddLearningInput",
     "AuthorType",
+    "ChunkType",
     "Community",
     "ConfigFile",
     "ContextFacet",

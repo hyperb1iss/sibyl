@@ -28,6 +28,16 @@ class CrawlStatus(StrEnum):
     PARTIAL = "partial"  # Some pages succeeded, some failed
 
 
+class ChunkType(StrEnum):
+    """Type of content chunk."""
+
+    TEXT = "text"
+    CODE = "code"
+    HEADING = "heading"
+    LIST = "list"
+    TABLE = "table"
+
+
 class Source(Entity):
     """A crawlable documentation source (URL, repo, local path)."""
 

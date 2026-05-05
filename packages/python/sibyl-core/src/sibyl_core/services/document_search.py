@@ -306,9 +306,10 @@ async def search_documents(
         return _merge_document_results(vector_results, lexical_results, limit)
 
     from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk, get_session
-    from sibyl.db.models import ChunkType
     from sqlalchemy import func, select
     from sqlmodel import col
+
+    from sibyl_core.models import ChunkType
 
     async with get_session() as session:
         base_query = (

@@ -12,17 +12,15 @@ from uuid import UUID, uuid4
 
 from sibyl import config as config_module
 from sibyl.db.models import (
-    ChunkType,
     CrawledDocument,
     CrawlSource,
-    CrawlStatus,
     DocumentChunk,
     RawCapture,
-    SourceType,
 )
 from sibyl.persistence.content_common import CrawlStats, DocumentEntityRecord
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
+from sibyl_core.models import ChunkType, CrawlStatus, SourceType
 from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
 
 _DEFAULT_BATCH_SIZE = 128

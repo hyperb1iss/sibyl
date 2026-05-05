@@ -41,8 +41,6 @@ from sibyl.crawler.service import SourceAlreadyExistsError
 from sibyl.db.models import (
     CrawledDocument,
     CrawlSource,
-    CrawlStatus,
-    SourceType,
     utcnow_naive,
 )
 from sibyl.persistence.content_runtime import (
@@ -66,6 +64,7 @@ from sibyl.persistence.content_runtime import (
     save_crawl_source_record,
 )
 from sibyl_core.auth import AuthOrganization, OrganizationRole
+from sibyl_core.models import CrawlStatus, SourceType
 
 log = structlog.get_logger()
 

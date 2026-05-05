@@ -23,45 +23,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
 from sibyl_core.auth.models import OrganizationRole, ProjectRole, ProjectVisibility
+from sibyl_core.models.sources import ChunkType, CrawlStatus, SourceType
 
 
 def utcnow_naive() -> datetime:
     """Get current UTC time as naive datetime (for TIMESTAMP WITHOUT TIME ZONE)."""
     return datetime.now(UTC).replace(tzinfo=None)
-
-
-# =============================================================================
-# Enums
-# =============================================================================
-
-
-class SourceType(StrEnum):
-    """Types of documentation sources."""
-
-    WEBSITE = "website"
-    GITHUB = "github"
-    LOCAL = "local"
-    API_DOCS = "api_docs"
-
-
-class CrawlStatus(StrEnum):
-    """Status of a crawl operation."""
-
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    PARTIAL = "partial"
-
-
-class ChunkType(StrEnum):
-    """Type of content chunk."""
-
-    TEXT = "text"
-    CODE = "code"
-    HEADING = "heading"
-    LIST = "list"
-    TABLE = "table"
 
 
 # =============================================================================

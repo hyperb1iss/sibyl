@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from sibyl.config import settings
-from sibyl.db.models import ChunkType
+from sibyl_core.models import ChunkType
 
 if TYPE_CHECKING:
     from sibyl.db.models import CrawledDocument

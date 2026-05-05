@@ -21,7 +21,6 @@ from sibyl.api.schemas import (
 from sibyl.auth.dependencies import get_current_organization, require_org_role
 from sibyl.config import settings
 from sibyl.coordination import get_coordination_health
-from sibyl.db.models import CrawlStatus
 from sibyl.persistence.content_runtime import (
     get_content_read_session,
     get_source_sync_counts,
@@ -33,6 +32,7 @@ from sibyl.persistence.graph_runtime import (
     get_graph_stats_payload,
 )
 from sibyl_core.auth import AuthOrganization, OrganizationRole
+from sibyl_core.models import CrawlStatus
 from sibyl_core.utils import fingerprint_text
 from sibyl_core.utils.query import upper_query_tokens
 

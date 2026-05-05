@@ -4,6 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from sibyl_core.config import settings
+from sibyl_core.models import CrawlStatus, SourceType
 from sibyl_core.services import surreal_content
 
 
@@ -35,7 +36,7 @@ async def _create_or_get_crawl_source(
         )
         return source.id, created
 
-    from sibyl.db import CrawlSource, SourceType, get_session
+    from sibyl.db import CrawlSource, get_session
     from sqlalchemy import select
     from sqlmodel import col
 
@@ -147,7 +148,7 @@ async def _enqueue_source_crawl(
         )
         return job_id
 
-    from sibyl.db import CrawlSource, CrawlStatus, get_session
+    from sibyl.db import CrawlSource, get_session
     from sqlalchemy import select
     from sqlmodel import col
 
