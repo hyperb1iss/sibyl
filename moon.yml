@@ -315,12 +315,16 @@ tasks:
       - packages/python/sibyl-core/pyproject.toml
 
   dev-script-test:
-    command: uv run pytest tools/tests/test_dev_scripts.py -v
+    command:
+      uv run pytest tools/tests/test_dev_scripts.py tools/tests/test_surreal_migration_moon_tasks.py
+      -v
     inputs:
       - tools/dev/*.sh
       - tools/tests/conftest.py
       - tools/tests/test_dev_scripts.py
+      - tools/tests/test_surreal_migration_moon_tasks.py
       - pyproject.toml
+      - moon.yml
 
   bench-gate:
     command: uv run python -m tools.bench.eval_gate
