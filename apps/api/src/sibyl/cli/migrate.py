@@ -653,7 +653,7 @@ def export_archive(
         typer.Option(
             "--include-content/--skip-content", help="Include content/operations snapshot"
         ),
-    ] = False,
+    ] = True,
 ) -> None:
     """Export a manifest-driven migration archive from the active store."""
     runtime_options = resolve_backup_runtime_options(

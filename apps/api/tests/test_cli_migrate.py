@@ -257,6 +257,7 @@ def test_migrate_export_graph_only_writes_archive(tmp_path: Path) -> None:
                 str(archive_path),
                 "--no-include-database-dump",
                 "--skip-auth",
+                "--skip-content",
             ],
         )
 
@@ -284,8 +285,11 @@ def test_migrate_export_writes_graph_and_postgres_archive(tmp_path: Path) -> Non
             return_value=(graph_payload, json.dumps(graph_payload).encode("utf-8")),
         ),
         patch(
-            "sibyl.cli.migrate._load_auth_export",
-            return_value=(_auth_payload(), json.dumps(_auth_payload()).encode("utf-8")),
+            "sibyl.cli.migrate._load_runtime_exports",
+            return_value=(
+                (_auth_payload(), json.dumps(_auth_payload()).encode("utf-8")),
+                (_content_payload(), json.dumps(_content_payload()).encode("utf-8")),
+            ),
         ),
         patch("sibyl.cli.migrate._run_pg_dump", return_value=b"select 1;\n"),
     ):
@@ -303,6 +307,7 @@ def test_migrate_export_writes_graph_and_postgres_archive(tmp_path: Path) -> Non
     assert result.exit_code == 0
     loaded = load_archive(archive_path)
     assert AUTH_FILENAME in loaded.files
+    assert CONTENT_FILENAME in loaded.files
     assert POSTGRES_FILENAME in loaded.files
     assert GRAPH_FILENAME in loaded.files
 
@@ -329,8 +334,11 @@ def test_migrate_export_auto_selects_single_org(tmp_path: Path) -> None:
             return_value=(graph_payload, json.dumps(graph_payload).encode("utf-8")),
         ) as load_graph_export,
         patch(
-            "sibyl.cli.migrate._load_auth_export",
-            return_value=(_auth_payload(), json.dumps(_auth_payload()).encode("utf-8")),
+            "sibyl.cli.migrate._load_runtime_exports",
+            return_value=(
+                (_auth_payload(), json.dumps(_auth_payload()).encode("utf-8")),
+                (_content_payload(), json.dumps(_content_payload()).encode("utf-8")),
+            ),
         ),
         patch("sibyl.cli.migrate._run_pg_dump", return_value=b"select 1;\n"),
     ):
@@ -393,8 +401,11 @@ def test_migrate_export_suppresses_postgres_dump_in_fully_surreal_mode(
             return_value=(graph_payload, json.dumps(graph_payload).encode("utf-8")),
         ),
         patch(
-            "sibyl.cli.migrate._load_auth_export",
-            return_value=(_auth_payload(), json.dumps(_auth_payload()).encode("utf-8")),
+            "sibyl.cli.migrate._load_runtime_exports",
+            return_value=(
+                (_auth_payload(), json.dumps(_auth_payload()).encode("utf-8")),
+                (_content_payload(), json.dumps(_content_payload()).encode("utf-8")),
+            ),
         ),
         patch("sibyl.cli.migrate._run_pg_dump", side_effect=AssertionError("pg_dump disabled")),
     ):
@@ -413,6 +424,7 @@ def test_migrate_export_suppresses_postgres_dump_in_fully_surreal_mode(
     loaded = load_archive(archive_path)
     assert POSTGRES_FILENAME not in loaded.files
     assert AUTH_FILENAME in loaded.files
+    assert CONTENT_FILENAME in loaded.files
     assert GRAPH_FILENAME in loaded.files
 
 
@@ -487,7 +499,9 @@ def test_migrate_export_writes_content_archive_when_requested(tmp_path: Path) ->
     assert CONTENT_FILENAME in loaded.files
 
 
-def test_migrate_export_loads_auth_and_content_in_one_runtime_pass(tmp_path: Path) -> None:
+def test_migrate_export_loads_auth_and_content_by_default_in_one_runtime_pass(
+    tmp_path: Path,
+) -> None:
     archive_path = tmp_path / "migration.tar.gz"
     graph_payload = {
         "version": "2.0",
@@ -521,7 +535,6 @@ def test_migrate_export_loads_auth_and_content_in_one_runtime_pass(tmp_path: Pat
                 "org-123",
                 "--output",
                 str(archive_path),
-                "--include-content",
             ],
         )
 
