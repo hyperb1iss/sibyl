@@ -1040,7 +1040,7 @@ async def authenticate_api_key(raw_key: str):
                 """
                     UPDATE api_keys
                     SET last_used_at = $last_used_at, updated_at = $updated_at
-                    WHERE uuid = $api_key_id;
+                    WHERE uuid = $api_key_id AND revoked_at = NONE;
                     SELECT * FROM api_key_project_scopes
                     WHERE api_key_id = $api_key_id
                     ORDER BY created_at ASC;

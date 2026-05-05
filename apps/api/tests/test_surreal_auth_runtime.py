@@ -527,6 +527,7 @@ async def test_authenticate_api_key_batches_last_used_and_project_scopes(
     assert len(client.calls) == 2
     scope_query, scope_params = client.calls[1]
     assert "UPDATE api_keys" in scope_query
+    assert "revoked_at = NONE" in scope_query
     assert "SELECT * FROM api_key_project_scopes" in scope_query
     assert "UPSERT api_keys" not in scope_query
     assert scope_params["api_key_id"] == str(api_key_id)
