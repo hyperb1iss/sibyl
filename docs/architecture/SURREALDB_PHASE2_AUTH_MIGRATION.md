@@ -3,39 +3,33 @@
 Branch: `feat/surrealdb-driver-phase1` (assumes Phase 1 server-mode work has landed before Phase 2
 begins).
 
-Revision 3 — incorporates a repo-grounded review of the draft. Key corrections from Revision 2:
-Phase 2 moves 14 auth/auth-adjacent tables plus 3 RBAC tables, not "13 auth tables"; RLS translation
-must mirror the _actual_ five policy shapes in Alembic; the session-revocation design requires an
-explicit `sid` rollout because access tokens do not carry `sid` today; the auth migration should sit
-behind the existing `sibyl_core.auth` contracts instead of forking legacy-shaped logic; the auth
-harness must compare normalized semantics rather than byte-equal responses; cleanup should preserve
-historical Alembic revisions instead of rewriting them.
+Revision 4 — current implementation status after the Surreal-first dev cutover. The original
+Revision 3 plan is preserved below where it still describes rollout mechanics, but several sections
+now read as a roadmap ledger rather than future design.
 
 ---
 
 ## TL;DR
 
-Move Sibyl's 14 auth/auth-adjacent tables plus 3 RBAC tables off Postgres and onto SurrealDB in a
-strict cutover, behind a flag. Keep Postgres alive and unchanged for non-auth consumers (crawler,
-backups, raw captures, RAG, settings) — removing Postgres entirely is Phase 3, out of scope here.
+Sibyl now defaults to the Surreal runtime for graph, content, and auth in local development.
+`SIBYL_STORE=surreal` and `SIBYL_AUTH_STORE=surreal` are the default settings, `moon run dev` starts
+the Surreal path, and `moon run dev-legacy` is the explicit FalkorDB + PostgreSQL escape hatch.
+
+The remaining Phase 2 work is no longer "make auth run without Postgres." That is working. The
+remaining work is release hardening: live cutover rehearsal, migration docs, noisy release guidance,
+and one-release support for the legacy auth escape hatch before the old auth/RBAC code is removed.
 
 ---
 
 ## Context
 
-Sibyl is a graph-backed knowledge + task system. Data layer has been moving off FalkorDB → SurrealDB
-on `feat/surrealdb-driver-phase1`. Phase 1 migrated graph/entity storage to Surreal and introduced
-Redis for jobs, locks, and pubsub. Postgres + FalkorDB are currently gated behind a `legacy`
-docker-compose profile.
+Sibyl is a graph-backed knowledge + task system. The data layer has moved from FalkorDB/PostgreSQL
+toward SurrealDB on `feat/surrealdb-driver-phase1`. The current branch runs for extended periods
+with PostgreSQL off in fully Surreal mode.
 
-The immediate gap: `apps/api/src/sibyl/auth/*` still reads and writes Postgres via
-SQLAlchemy/asyncpg. All authed API endpoints fail when running surreal-mode dev without the legacy
-profile because the auth path still opens Postgres sessions against `localhost:5433`, and
-surreal-mode startup currently skips the legacy Postgres initialization that those paths still
-depend on.
-
-The deeper gap: auth is just one of several Postgres-dependent subsystems. Phase 2 narrows its scope
-to auth; Phase 3 (separate plan, not written yet) will handle the rest.
+Legacy PostgreSQL and FalkorDB support still exists intentionally. It is there for migration,
+rollback, and one release of compatibility, not because the new default runtime needs it. Startup
+helpers now only bootstrap the relational sidecar when the configured runtime still requires it.
 
 ---
 
@@ -55,19 +49,17 @@ together with auth.
 
 **Access layer:** the existing backend-agnostic contracts in
 `packages/python/sibyl-core/src/sibyl_core/auth/contracts.py`, the legacy adapters in
-`apps/api/src/sibyl/persistence/legacy/*`, `apps/api/src/sibyl/persistence/auth_runtime.py`
-(currently a pure re-export), and the request-time consumers in
-`apps/api/src/sibyl/auth/dependencies.py`, `rls.py`, `authorization.py`, `middleware.py`,
-`api_keys.py`.
+`apps/api/src/sibyl/persistence/legacy/*`, `apps/api/src/sibyl/persistence/auth_runtime.py` (now a
+backend dispatcher), and the request-time consumers in `apps/api/src/sibyl/auth/dependencies.py`,
+`rls.py`, `authorization.py`, `middleware.py`, `api_keys.py`.
 
 **Tooling:** extend `packages/python/sibyl-core/src/sibyl_core/migrate/archive.py` and
 `apps/api/src/sibyl/cli/migrate.py` with an auth payload and a scripted replay harness.
 
 ### Explicit non-goals (Phase 3 or later)
 
-- `services/settings.py`, `routes/crawler.py` stats/health, `jobs/backup.py`, `routes/entities.py`
-  raw captures, `services/document_search.py`, `persistence/legacy/rag.py` — these still need
-  Postgres/SQLAlchemy/Alembic at the end of Phase 2.
+- Any remaining relational sidecar consumers outside auth/RBAC. Treat these as Phase 3 cleanup items
+  and verify each one against the current code before claiming it still needs PostgreSQL.
 - Removing asyncpg, SQLAlchemy, or Alembic.
 - Removing the `postgres` service from `docker-compose.yml`.
 - Migrating `DocumentChunk` + pgvector embeddings.
@@ -78,15 +70,15 @@ together with auth.
 
 ## Target architecture
 
-| Concern                           | Today                                                                                               | Target (end of Phase 2)                                                                                                             |
-| --------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Auth records                      | Postgres via SQLAlchemy                                                                             | SurrealDB SCHEMAFULL in a dedicated top-level namespace/database                                                                    |
-| Authorization (per-row)           | Postgres RLS via `current_setting('app.user_id'/'app.org_id')`                                      | Application-layer authorization driven by `AuthContext`, modeling all five policy shapes explicitly                                 |
-| Password / token / API-key hashes | PBKDF2 in-app, hash stored in Postgres                                                              | Unchanged algorithm, hash stored in Surreal                                                                                         |
-| Session revocation lookup         | No access-token session-state lookup today; logout only flips `user_sessions.revoked_at` in storage | Redis cache keyed by session ID, TTL matches `refresh_token_expires_at`, revocation writes both stores                              |
-| `api_keys.last_used_at`           | SQL UPDATE per authenticated call                                                                   | Redis counter flushed periodically with field-scoped UPDATE (never full-record upsert)                                              |
-| Schema migrations (auth)          | Alembic (18 revisions total, auth subset)                                                           | Idempotent Surreal bootstrap plus an explicit auth schema metadata record (new; the current graph bootstrap has no version counter) |
-| Non-auth Postgres consumers       | Postgres                                                                                            | Still Postgres, untouched                                                                                                           |
+| Concern                           | Current state                                                                                     | Release target                                                                                                      |
+| --------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Auth records                      | SurrealDB SCHEMAFULL in `sibyl_auth/auth`; PostgreSQL retained behind `SIBYL_AUTH_STORE=postgres` | SurrealDB default for release; PostgreSQL auth escape hatch kept for one release                                    |
+| Authorization (per-row)           | Application-layer authorization driven by `AuthContext`; legacy RLS isolated to legacy surfaces   | No auth/RBAC route depends on transaction-local PostgreSQL RLS                                                      |
+| Password / token / API-key hashes | PBKDF2 in-app, hash stored in the active auth store                                               | Algorithm unchanged, Surreal remains default                                                                        |
+| Session revocation lookup         | New access and refresh tokens carry `sid`; session cache and backend session checks exist         | Rehearsal must prove logout rejects `sid`-bearing access tokens immediately                                         |
+| `api_keys.last_used_at`           | Surreal auth path performs field-scoped `UPDATE api_keys SET last_used_at ...`                    | Keep field-scoped updates; optional batched flusher can be a follow-up if auth hot-path profiling proves it matters |
+| Schema migrations (auth)          | Idempotent Surreal bootstrap defines all 17 auth/RBAC tables as SCHEMAFULL                        | Bootstrap remains parser-tested and archive restore-safe                                                            |
+| Relational sidecar                | Disabled in fully Surreal mode; enabled only for legacy store or PostgreSQL auth mode             | Warn loudly, document migration, then remove legacy auth mode after the compatibility release                       |
 
 ### Auth namespace layout
 
@@ -109,14 +101,11 @@ authorization layer, not by namespace isolation.
    `apps/api/src/sibyl/auth/authorization.py:69-291` and synced via
    `apps/api/src/sibyl/db/sync.py:42-164`; making the graph the source of truth is a separate
    redesign, not a store migration.
-3. **DocumentChunk + embeddings**: parked for Phase 3. The Surreal driver schema at
-   `packages/python/sibyl-core/src/sibyl_core/backends/surreal/schema.py:24-143` currently
-   bootstraps graph tables/edges only; there is no Surreal document schema, and RAG depends on
-   pgvector + Postgres full-text over `DocumentChunk` (`apps/api/src/sibyl/db/models.py:1073-1129`,
-   `packages/python/sibyl-core/src/sibyl_core/services/document_search.py:161-233`).
+3. **Document/content storage**: content now has a Surreal runtime and archive path. Any remaining
+   relational sidecar surfaces belong to Phase 3 cleanup and should be tracked as concrete code
+   references rather than assumed from the old PostgreSQL model.
 4. **Cutover style**: strict archive-backed cutover with a brief write-freeze. **No production
-   dual-write.** `apps/api/src/sibyl/persistence/auth_runtime.py:1-38` is a pure legacy re-export;
-   auth flows already span writes across users/orgs/memberships/sessions/audit
+   dual-write.** Auth flows already span writes across users/orgs/memberships/sessions/audit
    (`apps/api/src/sibyl/persistence/legacy/auth.py:309-347,606-683`) with no cross-store transaction
    boundary. Dual-write would manufacture divergence, not safety.
 
@@ -127,7 +116,7 @@ authorization layer, not by namespace isolation.
 These are real bugs Codex surfaced while auditing the current auth code. They are not caused by
 Phase 2, but Phase 2 must not make them worse and should ideally fix them in the process.
 
-### Bug 1 — access-token revocation is a no-op
+### Bug 1 — access-token revocation was a no-op
 
 HTTP auth decodes JWTs without consulting session state
 (`apps/api/src/sibyl/auth/dependencies.py:56-91`, `apps/api/src/sibyl/auth/middleware.py:22-35`),
@@ -135,9 +124,9 @@ and WebSocket auth does the same (`apps/api/src/sibyl/api/websocket.py:309-320`)
 `UserSession.revoked_at` is written on logout but never checked on subsequent access-token use. A
 "revoked" user continues to authenticate until the JWT expires.
 
-**Fix strategy:** add `sid` to newly issued access tokens, cache revoked sessions in Redis with TTL
-tied to `refresh_token_expires_at`, and keep a temporary token-hash fallback for pre-`sid` access
-tokens during rollout. Ties directly into Phase 2.3's session hot-path work.
+**Status:** new token issuance includes `sid`, and auth-flow replay asserts the `sid` claim. Keep
+logout/revocation behavior in the cutover acceptance gate until it has passed against a live
+production-like dataset.
 
 ### Bug 2 — RLS context gets silently dropped mid-request
 
@@ -148,9 +137,40 @@ transactions in the same request run without RLS context, which on SELECT means 
 rather than erroring. Data-leak risk is low because `current_setting(..., true)` returns NULL on
 mismatch, but availability is broken.
 
-**Status:** auth-only user routes no longer depend on `get_auth_session`; they resolve
-`AuthContext` directly and call runtime-backed repositories. The non-auth tables using RLS still
-need a separate Phase 3 decision if they keep relational storage.
+**Status:** auth-only user routes no longer depend on `get_auth_session`; they resolve `AuthContext`
+directly and call runtime-backed repositories. The non-auth tables using RLS still need a separate
+Phase 3 decision if they keep relational storage.
+
+---
+
+## Implementation status
+
+### Done on this branch
+
+- `moon run dev` prefers the fully Surreal runtime and detects local legacy data before starting.
+- `moon run dev -- --migrate-legacy` handles the common single-org local migration path without
+  requiring users to know their org ID.
+- `moon run dev-legacy` remains the explicit FalkorDB + PostgreSQL fallback.
+- `SIBYL_STORE=surreal` and `SIBYL_AUTH_STORE=surreal` are the default runtime shape.
+- `apps/api/src/sibyl/persistence/auth_runtime.py` dispatches by auth backend instead of
+  re-exporting the legacy PostgreSQL implementation.
+- `packages/python/sibyl-core/src/sibyl_core/backends/surreal/auth_schema.py` defines all 17
+  auth/RBAC tables as SCHEMAFULL, including the formerly archive-only tables.
+- Auth archive export/restore writes `auth.json`; backup archives include `auth.json` when auth runs
+  on Surreal.
+- `sibyld migrate auth-flow`, `auth-flow-compare`, `rehearse`, `cutover`, and `auth-readonly` exist
+  and have unit coverage.
+- Legacy auth/RBAC write-freeze SQL is generated by the migration CLI rather than hand-written
+  during cutover.
+
+### Remaining before release
+
+- Run a live rehearsal against a production-like legacy archive and a fresh Surreal runtime.
+- Run `auth-flow-compare` against live PostgreSQL-auth and Surreal-auth stacks, not only unit fakes.
+- Validate the local migration path from a real single-org legacy install and a multi-org install.
+- Publish release notes that strongly recommend migration to Surreal and explain `dev-legacy`.
+- Keep `SIBYL_AUTH_STORE=postgres` for one compatibility release, then remove legacy auth/RBAC code.
+- Start the Phase 3 inventory for any remaining relational sidecar consumers that are not auth/RBAC.
 
 ---
 
@@ -158,8 +178,10 @@ need a separate Phase 3 decision if they keep relational storage.
 
 ### Phase 2.0 — Unblock surreal-mode dev (half-day)
 
-**Goal:** `moon run dev` boots a working stack while Phase 2 is in flight, without
-pretending Postgres has been removed.
+**Status:** done, superseded by the fully Surreal local default.
+
+**Goal:** `moon run dev` boots a working stack while Phase 2 is in flight, without pretending
+Postgres has been removed.
 
 - Drop the `legacy` profile gate on `postgres` in `docker-compose.yml:56-74`. FalkorDB stays gated.
 - Add `postgres` to the services list in `tools/dev/run-surreal-dev.sh:31-53`.
@@ -175,6 +197,9 @@ endpoints without manual compose juggling.
 
 ### Phase 2.1 — Surreal auth schema + repo layer, parallel (week 1)
 
+**Status:** done. The Surreal auth client, repositories, dispatcher, schema bootstrap, and table
+contracts are implemented and covered by parser/bootstrap tests.
+
 **Goal:** a complete Surreal-backed implementation of the auth data layer, flagged off.
 
 - Add a dedicated Surreal auth client/session helper. Do **not** overload
@@ -188,12 +213,13 @@ endpoints without manual compose juggling.
     `organization_invitations.token`, `password_reset_tokens.token_hash`,
     `device_authorization_requests.device_code_hash`, `device_authorization_requests.user_code`.
   - UNIQUE composite on `oauth_connections(provider, provider_user_id)`,
-    `teams(organization_id, slug)`, `projects(organization_id, slug)`,
-    `projects(organization_id, graph_project_id)`, `organization_members(organization_id, user_id)`,
-    `team_members(team_id, user_id)`, `project_members(project_id, user_id)`,
-    `team_projects(team_id, project_id)`, `api_key_project_scopes(api_key_id, project_id)`.
-  - NON-UNIQUE on `api_keys.key_prefix` (auth intentionally queries all prefix matches then verifies
-    hashes — `apps/api/src/sibyl/auth/api_keys.py:106-130`).
+    `teams(organization_id, slug)`, `projects(organization_id, graph_project_id)`,
+    `organization_members(organization_id, user_id)`, `team_members(team_id, user_id)`,
+    `project_members(project_id, user_id)`, `team_projects(team_id, project_id)`, and
+    `api_key_project_scopes(api_key_id, project_id)`.
+  - NON-UNIQUE on `api_keys.key_prefix` and `projects(organization_id, slug)`. API key auth
+    intentionally queries all prefix matches then verifies hashes; project slug lookup must tolerate
+    sparse restored rows with empty or missing slugs.
   - Keep denormalized `organization_id` on `project_members` and `team_projects` for parity with the
     current schema and cheaper policy filters.
 - Add `updated_at` to mutable records. Add `version` only where compare-and-swap semantics are
@@ -220,6 +246,9 @@ endpoints without manual compose juggling.
 battery of contract/repository tests.
 
 ### Phase 2.2 — RLS → application-layer authorization (week 1)
+
+**Status:** substantially done for auth/RBAC routes. Legacy RLS remains available for legacy
+relational surfaces and should not be imported by newly migrated route code.
 
 **Goal:** replace five distinct Postgres RLS policy shapes with explicit, testable application
 checks.
@@ -250,10 +279,10 @@ Work:
 - Delete auth-specific `set_config` usage and `get_rls_session` / `apply_rls_from_auth_context` /
   `require_rls_session` wiring once no auth/RBAC route depends on them. Any remaining non-auth RLS
   usage becomes an explicit Phase 3 follow-up, not a hidden Phase 2 dependency.
-- Keep `apps/api/src/sibyl/api/routes/tasks.py` and `apps/api/src/sibyl/api/routes/users.py`
-  on `AuthContext`, with the direct-storage guard blocking route imports of `sibyl.auth.rls`.
-- Treat **latent bug 2** as resolved for auth-only user routes; any remaining transaction-local
-  RLS behavior belongs to non-auth relational surfaces.
+- Keep `apps/api/src/sibyl/api/routes/tasks.py` and `apps/api/src/sibyl/api/routes/users.py` on
+  `AuthContext`, with the direct-storage guard blocking route imports of `sibyl.auth.rls`.
+- Treat **latent bug 2** as resolved for auth-only user routes; any remaining transaction-local RLS
+  behavior belongs to non-auth relational surfaces.
 - Add negative-case tests per policy shape: impersonate Org A, assert no Org B rows visible on
   reads/lists/joins.
 - Add one integration test that exercises the full matrix (every route, two orgs, cross-org attempt)
@@ -263,6 +292,10 @@ Work:
 `current_setting('app.org_id')` for an auth-migrated table. Policies are enforced at the repo layer.
 
 ### Phase 2.3 — Concurrency + session hot path (week 2)
+
+**Status:** partially done. `sid` issuance, session cache plumbing, and optimistic refresh-token
+rotation exist. The Redis-batched `api_keys.last_used_at` flusher was replaced by direct
+field-scoped Surreal updates unless profiling shows the extra queue is worth it.
 
 **Goal:** handle the hot path and concurrent-mutation cases that Postgres RLS + MVCC were implicitly
 covering.
@@ -309,6 +342,9 @@ immediately and still catches pre-`sid` tokens during the compatibility window.
 
 ### Phase 2.4 — Auth archive + snapshot replay harness (week 2)
 
+**Status:** implemented in CLI and tests. The remaining release gate is a live rehearsal with real
+legacy data and a fresh Surreal target.
+
 **Goal:** end-to-end export/import/verify tooling for auth, plus a scripted auth flow that must pass
 against both stores before cutover.
 
@@ -350,6 +386,8 @@ auth flow against either store; cutover is gated on a green run.
 
 ### Phase 2.5 — Cutover (week 3, single PR per environment)
 
+**Status:** tooling exists; release execution remains.
+
 **Goal:** flip the production flag with a defensible rollback story.
 
 - `SIBYL_AUTH_STORE=surreal` becomes the deployment default. `postgres` retained as an escape hatch
@@ -373,6 +411,8 @@ auth flow against either store; cutover is gated on a green run.
 read-only on auth tables.
 
 ### Phase 2.6 — Auth-only cleanup (week 3-4)
+
+**Status:** not started. Do this after one compatibility release on Surreal auth.
 
 **Goal:** remove the auth slice of Postgres. Nothing more.
 
