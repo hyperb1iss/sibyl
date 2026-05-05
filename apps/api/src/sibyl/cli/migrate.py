@@ -437,6 +437,16 @@ def _print_writes_remain_frozen_notice() -> None:
     )
 
 
+def _require_cutover_surreal_runtime() -> None:
+    if settings.store != "surreal":
+        error("Cutover must run with SIBYL_STORE=surreal on the target runtime")
+        raise typer.Exit(code=1)
+    if settings.uses_relational_auth:
+        error("Cutover must run with SIBYL_AUTH_STORE=surreal on the target runtime")
+        info("Use import or rehearse for mixed-mode debugging before the cutover gate")
+        raise typer.Exit(code=1)
+
+
 async def _run_cutover_acceptance(
     *,
     archive: object,
@@ -1555,9 +1565,7 @@ def cutover_archive(
     ] = False,
 ) -> None:
     """Run the explicit Surreal cutover acceptance gate on a validated archive."""
-    if settings.store != "surreal":
-        error("Cutover must run with SIBYL_STORE=surreal on the target runtime")
-        raise typer.Exit(code=1)
+    _require_cutover_surreal_runtime()
 
     archive = _load_valid_archive(source)
     effective_org_id = _resolve_org_id(org_id, archive.manifest.organization_id)

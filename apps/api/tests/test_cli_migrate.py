@@ -945,6 +945,23 @@ def test_migrate_cutover_requires_surreal_store(tmp_path: Path) -> None:
     assert "SIBYL_STORE=surreal" in result.output
 
 
+def test_migrate_cutover_requires_surreal_auth_store(tmp_path: Path) -> None:
+    archive_path = tmp_path / "migration.tar.gz"
+    _write_full_archive(archive_path, include_auth=True)
+
+    with (
+        patch.object(migrate_cli.settings, "store", "surreal"),
+        patch.object(migrate_cli.settings, "auth_store", "postgres"),
+    ):
+        result = runner.invoke(
+            migrate_cli.app,
+            ["cutover", str(archive_path), "--dry-run", "--skip-baseline"],
+        )
+
+    assert result.exit_code == 1
+    assert "SIBYL_AUTH_STORE=surreal" in result.output
+
+
 def test_migrate_cutover_dry_run_prints_plan(tmp_path: Path) -> None:
     archive_path = tmp_path / "migration.tar.gz"
     _write_graph_archive(archive_path)
