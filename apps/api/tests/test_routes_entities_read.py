@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
@@ -8,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from sibyl.api.routes.entities import _should_fallback_to_document_entity, get_entity
+from sibyl.persistence.content_common import DocumentEntityRecord
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.storage import EntityBundle
 
@@ -188,29 +190,21 @@ async def test_get_entity_keeps_document_fallback_for_uuid_shaped_ids() -> None:
     source_id = UUID("33333333-3333-3333-3333-333333333333")
     service = AsyncMock()
     service.get_entity_bundle.return_value = None
-    record = SimpleNamespace(
-        chunk=SimpleNamespace(
-            id=chunk_id,
-            document_id=document_id,
-            heading_path=["Guide", "Install"],
-            chunk_type=None,
-            language="python",
-            chunk_index=2,
-            created_at=None,
-            updated_at=None,
-        ),
-        document=SimpleNamespace(
-            id=document_id,
-            source_id=source_id,
-            title="Install Guide",
-            url="https://example.test/install",
-        ),
-        source=SimpleNamespace(
-            id=source_id,
-            name="Docs",
-            url="https://example.test",
-        ),
+    record = DocumentEntityRecord(
+        chunk_id=chunk_id,
+        document_id=document_id,
+        source_id=source_id,
+        source_name="Docs",
+        source_url="https://example.test",
+        document_title="Install Guide",
+        document_url="https://example.test/install",
+        chunk_index=2,
+        chunk_type=None,
+        heading_path=("Guide", "Install"),
+        language="python",
         content="Use the Surreal runtime.",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        updated_at=datetime(2026, 1, 2, tzinfo=UTC),
     )
     session = object()
 

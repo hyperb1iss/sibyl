@@ -13,12 +13,12 @@ from sibyl.db.models import (
     BackupSettings,
     ChunkType,
     CrawledDocument,
-    RawCapture,
     SourceType,
     SystemSetting,
 )
 from sibyl.persistence import content_archive
 from sibyl.persistence.content_archive import restore_content_archive_payload
+from sibyl.persistence.content_common import RawCaptureRecord
 from sibyl.persistence.surreal import (
     backups as surreal_backups,
     content as surreal_content,
@@ -635,14 +635,14 @@ async def test_surreal_content_write_helpers_round_trip(
 
         capture = await save_raw_capture_record(
             None,
-            capture=RawCapture(
+            capture=RawCaptureRecord(
                 organization_id=org_id,
                 entity_id="episode_123",
                 title="Quick note",
                 raw_content="captured",
                 entity_type="episode",
                 tags=["alpha"],
-                metadata_={"review_state": "pending"},
+                metadata={"review_state": "pending"},
             ),
         )
 

@@ -14,6 +14,7 @@ from sibyl.api.routes.entities import (
 )
 from sibyl.api.schemas import RawCaptureReviewUpdate
 from sibyl.db.models import RawCapture
+from sibyl.persistence.content_common import RawCaptureRecord
 
 
 def _org() -> MagicMock:
@@ -152,7 +153,19 @@ async def test_get_raw_capture_raises_not_found_for_other_org() -> None:
 @pytest.mark.asyncio
 async def test_update_raw_capture_review_state_updates_metadata() -> None:
     org = _org()
-    capture = _capture(org_id=org.id, title="Quick memory", surface="dashboard")
+    capture = RawCaptureRecord(
+        id=uuid4(),
+        organization_id=org.id,
+        entity_id="episode_123",
+        title="Quick memory",
+        raw_content="raw::Quick memory",
+        entity_type="episode",
+        tags=["alpha"],
+        metadata={"capture_mode": "quick", "capture_surface": "dashboard"},
+        capture_surface="dashboard",
+        created_by_user_id=uuid4(),
+        created_at=datetime(2026, 4, 14, 16, 0, tzinfo=UTC),
+    )
     session = MagicMock()
 
     with (
@@ -162,7 +175,7 @@ async def test_update_raw_capture_review_state_updates_metadata() -> None:
         ),
         patch(
             "sibyl.api.routes.entities.save_raw_capture_record",
-            AsyncMock(return_value=capture),
+            AsyncMock(side_effect=lambda _session, *, capture: capture),
         ) as save_capture,
     ):
         response = await update_raw_capture_review_state(
@@ -173,7 +186,8 @@ async def test_update_raw_capture_review_state_updates_metadata() -> None:
         )
 
     assert response.review_state == "deferred"
-    assert capture.metadata_["review_state"] == "deferred"
-    assert "reviewed_at" in capture.metadata_
-    assert "deferred_at" in capture.metadata_
-    save_capture.assert_awaited_once_with(session, capture=capture)
+    saved = save_capture.await_args.kwargs["capture"]
+    assert saved.metadata["review_state"] == "deferred"
+    assert "reviewed_at" in saved.metadata
+    assert "deferred_at" in saved.metadata
+    save_capture.assert_awaited_once()

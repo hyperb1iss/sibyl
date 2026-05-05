@@ -2,21 +2,54 @@
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy import String, cast
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
 from sibyl.db import CrawledDocument, CrawlSource, DocumentChunk
-from sibyl.db.models import ChunkType, RawCapture
-from sibyl.persistence.content_common import DocumentEntityRecord
+from sibyl.db.models import RawCapture
+from sibyl.persistence.content_common import DocumentEntityRecord, RawCaptureRecord
+from sibyl_core.models import ChunkType
 
 LegacyDocumentEntityRecord = DocumentEntityRecord
 
 
+def _raw_capture_record_from_model(capture: RawCapture) -> RawCaptureRecord:
+    return RawCaptureRecord(
+        id=capture.id,
+        organization_id=capture.organization_id,
+        entity_id=capture.entity_id,
+        title=capture.title,
+        raw_content=capture.raw_content,
+        entity_type=capture.entity_type,
+        tags=list(capture.tags or []),
+        metadata=dict(capture.metadata_ or {}),
+        capture_surface=capture.capture_surface,
+        created_by_user_id=capture.created_by_user_id,
+        created_at=capture.created_at,
+    )
+
+
+def _raw_capture_model_from_record(capture: RawCaptureRecord) -> RawCapture:
+    return RawCapture(
+        id=capture.id,
+        organization_id=capture.organization_id,
+        entity_id=capture.entity_id,
+        title=capture.title,
+        raw_content=capture.raw_content,
+        entity_type=capture.entity_type,
+        tags=list(capture.tags or []),
+        metadata_=dict(capture.metadata or {}),
+        capture_surface=capture.capture_surface,
+        created_by_user_id=capture.created_by_user_id,
+        created_at=capture.created_at,
+    )
+
+
 async def list_raw_captures(
-    session: Any,
+    session: AsyncSession,
     *,
     organization_id: UUID,
     entity_type: str | None,
@@ -24,7 +57,7 @@ async def list_raw_captures(
     review_state: str | None,
     limit: int,
     offset: int,
-) -> tuple[list[RawCapture], bool]:
+) -> tuple[list[RawCaptureRecord], bool]:
     """List raw captures for an organization with route-compatible filters."""
 
     stmt = (
@@ -49,15 +82,16 @@ async def list_raw_captures(
 
     result = await session.execute(stmt)
     rows = result.scalars().all()
-    return rows[:limit], len(rows) > limit
+    captures = [_raw_capture_record_from_model(row) for row in rows[:limit]]
+    return captures, len(rows) > limit
 
 
 async def get_raw_capture(
-    session: Any,
+    session: AsyncSession,
     *,
     organization_id: UUID,
     capture_id: UUID,
-) -> RawCapture | None:
+) -> RawCaptureRecord | None:
     """Fetch a single raw capture scoped to the organization."""
 
     result = await session.execute(
@@ -66,24 +100,25 @@ async def get_raw_capture(
             col(RawCapture.organization_id) == organization_id,
         )
     )
-    return result.scalar_one_or_none()
+    capture = result.scalar_one_or_none()
+    return _raw_capture_record_from_model(capture) if capture is not None else None
 
 
 async def save_raw_capture_record(
-    session: Any,
+    session: AsyncSession,
     *,
-    capture: RawCapture,
-) -> RawCapture:
+    capture: RawCaptureRecord,
+) -> RawCaptureRecord:
     """Persist a raw-capture mutation."""
 
-    session.add(capture)
+    persisted = await session.merge(_raw_capture_model_from_record(capture))
     await session.flush()
-    await session.refresh(capture)
-    return capture
+    await session.refresh(persisted)
+    return _raw_capture_record_from_model(persisted)
 
 
 async def resolve_document_entity(
-    session: Any,
+    session: AsyncSession,
     *,
     organization_id: UUID,
     entity_id: str,
@@ -144,10 +179,20 @@ async def resolve_document_entity(
         content = "\n\n".join(section_parts)
 
     return DocumentEntityRecord(
-        chunk=chunk,
-        document=document,
-        source=source,
+        chunk_id=chunk.id,
+        document_id=document.id,
+        source_id=source.id,
+        source_name=source.name,
+        source_url=source.url,
+        document_title=document.title,
+        document_url=document.url,
+        chunk_index=chunk.chunk_index,
+        chunk_type=chunk.chunk_type,
+        heading_path=tuple(chunk.heading_path or ()),
+        language=chunk.language,
         content=content,
+        created_at=chunk.created_at,
+        updated_at=chunk.updated_at,
     )
 
 

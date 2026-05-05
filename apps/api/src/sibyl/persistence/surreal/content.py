@@ -15,9 +15,8 @@ from sibyl.db.models import (
     CrawledDocument,
     CrawlSource,
     DocumentChunk,
-    RawCapture,
 )
-from sibyl.persistence.content_common import CrawlStats, DocumentEntityRecord
+from sibyl.persistence.content_common import CrawlStats, DocumentEntityRecord, RawCaptureRecord
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.models import ChunkType, CrawlStatus, SourceType
@@ -266,7 +265,7 @@ def _coerce_float_list(value: object | None) -> list[float] | None:
     return out
 
 
-def _coerce_dict(value: object | None) -> dict[str, Any]:
+def _coerce_dict(value: object | None) -> dict[str, object]:
     if isinstance(value, dict):
         return {str(key): item for key, item in value.items()}
     return {}
@@ -457,9 +456,9 @@ def _chunk_record(chunk: DocumentChunk) -> dict[str, Any]:
     }
 
 
-def _raw_capture_from_record(record: dict[str, Any]) -> RawCapture:
+def _raw_capture_from_record(record: dict[str, Any]) -> RawCaptureRecord:
     now = datetime.now(UTC).replace(tzinfo=None)
-    return RawCapture(
+    return RawCaptureRecord(
         id=_coerce_uuid(record.get("uuid"), field_name="raw_captures.uuid"),
         organization_id=_coerce_uuid(
             record.get("organization_id"),
@@ -470,14 +469,14 @@ def _raw_capture_from_record(record: dict[str, Any]) -> RawCapture:
         raw_content=_coerce_str(record.get("raw_content")),
         entity_type=_coerce_str(record.get("entity_type")),
         tags=_coerce_str_list(record.get("tags")),
-        metadata_=_coerce_dict(record.get("metadata") or record.get("metadata_")),
+        metadata=_coerce_dict(record.get("metadata") or record.get("metadata_")),
         capture_surface=_coerce_optional_str(record.get("capture_surface")),
         created_by_user_id=_coerce_optional_uuid(record.get("created_by_user_id")),
         created_at=_coerce_datetime(record.get("created_at")) or now,
     )
 
 
-def _raw_capture_record(capture: RawCapture) -> dict[str, Any]:
+def _raw_capture_record(capture: RawCaptureRecord) -> dict[str, Any]:
     return {
         "uuid": str(capture.id),
         "organization_id": str(capture.organization_id),
@@ -486,7 +485,7 @@ def _raw_capture_record(capture: RawCapture) -> dict[str, Any]:
         "raw_content": capture.raw_content,
         "entity_type": capture.entity_type,
         "tags": list(capture.tags or []),
-        "metadata": dict(capture.metadata_ or {}),
+        "metadata": dict(capture.metadata or {}),
         "capture_surface": capture.capture_surface,
         "created_by_user_id": str(capture.created_by_user_id)
         if capture.created_by_user_id
@@ -1218,7 +1217,7 @@ async def list_raw_captures(
     review_state: str | None,
     limit: int,
     offset: int,
-) -> tuple[list[RawCapture], bool]:
+) -> tuple[list[RawCaptureRecord], bool]:
     async with surreal_content_client() as client:
         rows = await _select_many(
             client,
@@ -1238,13 +1237,13 @@ async def list_raw_captures(
             captures = [
                 capture
                 for capture in captures
-                if str((capture.metadata_ or {}).get("review_state") or "pending") == "pending"
+                if str(capture.metadata.get("review_state") or "pending") == "pending"
             ]
         else:
             captures = [
                 capture
                 for capture in captures
-                if str((capture.metadata_ or {}).get("review_state") or "") == review_state
+                if str(capture.metadata.get("review_state") or "") == review_state
             ]
     captures = sorted(captures, key=lambda capture: _sort_key(capture.created_at), reverse=True)
     paged = captures[offset : offset + limit + 1]
@@ -1256,7 +1255,7 @@ async def get_raw_capture(
     *,
     organization_id: UUID,
     capture_id: UUID,
-) -> RawCapture | None:
+) -> RawCaptureRecord | None:
     async with surreal_content_client() as client:
         record = await _select_one(
             client,
@@ -1271,8 +1270,8 @@ async def get_raw_capture(
 async def save_raw_capture_record(
     _session: Any,
     *,
-    capture: RawCapture,
-) -> RawCapture:
+    capture: RawCaptureRecord,
+) -> RawCaptureRecord:
     async with surreal_content_client() as client:
         record = await _replace_record(
             client,
@@ -1343,10 +1342,20 @@ async def resolve_document_entity(
         content = "\n\n".join(section_parts)
 
     return DocumentEntityRecord(
-        chunk=chunk,
-        document=document,
-        source=source,
+        chunk_id=chunk.id,
+        document_id=document.id,
+        source_id=source.id,
+        source_name=source.name,
+        source_url=source.url,
+        document_title=document.title,
+        document_url=document.url,
+        chunk_index=chunk.chunk_index,
+        chunk_type=chunk.chunk_type,
+        heading_path=tuple(chunk.heading_path or ()),
+        language=chunk.language,
         content=content,
+        created_at=chunk.created_at,
+        updated_at=chunk.updated_at,
     )
 
 

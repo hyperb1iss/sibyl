@@ -1,9 +1,10 @@
 """Entity CRUD endpoints.
 
 Full create, read, update, delete operations for all entity types.
-Transparently handles both graph entities (FalkorDB) and relational document chunks.
+Transparently handles both graph entities and document chunks.
 """
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Annotated, Any
@@ -33,7 +34,6 @@ from sibyl.auth.dependencies import (
     get_current_organization,
     require_org_role,
 )
-from sibyl.db.models import RawCapture
 from sibyl.persistence import content_runtime
 from sibyl.persistence.auth_runtime import (
     create_project_record,
@@ -41,6 +41,7 @@ from sibyl.persistence.auth_runtime import (
     log_audit_event,
     update_project_record,
 )
+from sibyl.persistence.content_common import RawCaptureRecord
 from sibyl.persistence.content_runtime import (
     get_content_read_session,
     get_content_read_session_dependency,
@@ -132,39 +133,38 @@ async def _archive_raw_capture(
     entity_content: str,
     entity_type: str,
     tags: list[str],
-    metadata: dict[str, Any],
+    metadata: dict[str, object],
 ) -> None:
     """Persist the write-once capture sidecar."""
+    capture_surface_value = metadata.get("capture_surface")
     await save_raw_capture_record(
         session,
-        capture=RawCapture(
+        capture=RawCaptureRecord(
             organization_id=organization_id,
             entity_id=entity_id,
             title=entity_name,
             raw_content=entity_content,
             entity_type=entity_type,
             tags=tags,
-            metadata_=metadata,
-            capture_surface=str(metadata.get("capture_surface"))
-            if metadata.get("capture_surface")
-            else None,
+            metadata=metadata,
+            capture_surface=str(capture_surface_value) if capture_surface_value else None,
             created_by_user_id=user_id,
         ),
     )
 
 
-def _raw_capture_review_state(capture: RawCapture) -> str:
-    return str((capture.metadata_ or {}).get("review_state") or "pending")
+def _raw_capture_review_state(capture: RawCaptureRecord) -> str:
+    return str(capture.metadata.get("review_state") or "pending")
 
 
-def _serialize_raw_capture_summary(capture: RawCapture) -> RawCaptureSummary:
+def _serialize_raw_capture_summary(capture: RawCaptureRecord) -> RawCaptureSummary:
     return RawCaptureSummary(
         id=str(capture.id),
         entity_id=capture.entity_id,
         title=capture.title,
         entity_type=capture.entity_type,
         tags=list(capture.tags or []),
-        metadata=dict(capture.metadata_ or {}),
+        metadata=dict(capture.metadata or {}),
         capture_surface=capture.capture_surface,
         review_state=_raw_capture_review_state(capture),
         created_by_user_id=str(capture.created_by_user_id) if capture.created_by_user_id else None,
@@ -172,7 +172,7 @@ def _serialize_raw_capture_summary(capture: RawCapture) -> RawCaptureSummary:
     )
 
 
-def _serialize_raw_capture(capture: RawCapture) -> RawCaptureResponse:
+def _serialize_raw_capture(capture: RawCaptureRecord) -> RawCaptureResponse:
     return RawCaptureResponse(
         **_serialize_raw_capture_summary(capture).model_dump(),
         raw_content=capture.raw_content,
@@ -622,7 +622,7 @@ async def update_raw_capture_review_state(
         if not capture:
             raise HTTPException(status_code=404, detail=f"Raw capture not found: {capture_id}")
 
-        metadata = dict(capture.metadata_ or {})
+        metadata = dict(capture.metadata or {})
         metadata["review_state"] = update.review_state
         metadata["reviewed_at"] = datetime.now(UTC).isoformat()
         if update.review_state == "pending":
@@ -635,7 +635,7 @@ async def update_raw_capture_review_state(
             metadata["archived_at"] = metadata["reviewed_at"]
             metadata.pop("deferred_at", None)
 
-        capture.metadata_ = metadata
+        capture = replace(capture, metadata=metadata)
         capture = await save_raw_capture_record(session, capture=capture)
         return _serialize_raw_capture(capture)
     except HTTPException:
@@ -809,8 +809,8 @@ async def get_entity(
     """Get a single entity by ID with related context.
 
     Transparently handles both:
-    - Graph entities (stored in FalkorDB)
-    - Document chunks (stored in the content runtime via crawler)
+    - Graph entities
+    - Document chunks from crawler content
 
     Always includes up to 5 related entities from the knowledge graph.
     """
@@ -904,34 +904,31 @@ async def get_entity(
             if not record:
                 raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
 
-            chunk = record.chunk
-            doc = record.document
-            source = record.source
-            heading_desc = " > ".join(chunk.heading_path) if chunk.heading_path else ""
+            heading_desc = " > ".join(record.heading_path) if record.heading_path else ""
 
             return EntityResponse(
-                id=str(chunk.id),
+                id=str(record.chunk_id),
                 entity_type=EntityType.DOCUMENT,
-                name=doc.title or source.name,
+                name=record.document_title or record.source_name,
                 description=heading_desc,
                 content=record.content[:50000],
-                category=chunk.chunk_type.value if chunk.chunk_type else None,
-                languages=[chunk.language] if chunk.language else [],
+                category=record.chunk_type.value if record.chunk_type else None,
+                languages=[record.language] if record.language else [],
                 tags=[],
                 metadata={
-                    "source_id": str(source.id),
-                    "source_name": source.name,
-                    "source_url": source.url,
-                    "document_id": str(doc.id),
-                    "document_url": doc.url,
-                    "chunk_index": chunk.chunk_index,
-                    "chunk_type": chunk.chunk_type.value if chunk.chunk_type else None,
-                    "heading_path": chunk.heading_path or [],
+                    "source_id": str(record.source_id),
+                    "source_name": record.source_name,
+                    "source_url": record.source_url,
+                    "document_id": str(record.document_id),
+                    "document_url": record.document_url,
+                    "chunk_index": record.chunk_index,
+                    "chunk_type": record.chunk_type.value if record.chunk_type else None,
+                    "heading_path": list(record.heading_path),
                     "result_origin": "document",
                 },
-                source_file=doc.url,
-                created_at=chunk.created_at,
-                updated_at=chunk.updated_at,
+                source_file=record.document_url,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
             )
 
     except HTTPException:
@@ -993,7 +990,7 @@ async def create_entity(
 
         # Use description as content fallback (frontend sends description, add() needs content)
         content = entity.content or entity.description or entity.name
-        request_metadata = dict(entity.metadata or {})
+        request_metadata: dict[str, object] = dict(entity.metadata or {})
 
         merged_metadata: dict[str, Any] = {**request_metadata, "organization_id": group_id}
 
