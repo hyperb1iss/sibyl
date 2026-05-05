@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Self
+from typing import Self
 from uuid import UUID, uuid4
 
 from sibyl import config as config_module
@@ -45,6 +45,7 @@ _UPSERT_RECORD = {
     "organizations": "UPSERT organizations CONTENT $record WHERE uuid = $uuid;",
     "users": "UPSERT users CONTENT $record WHERE uuid = $uuid;",
 }
+type SurrealRecord = dict[str, object]
 
 
 def build_surreal_auth_client() -> SurrealAuthClient:
@@ -87,15 +88,15 @@ def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _normalize_record(record: Any) -> dict[str, Any] | None:
+def _normalize_record(record: object) -> SurrealRecord | None:
     if record is None or not isinstance(record, dict):
         return None
-    out = dict(record)
+    out = {str(key): value for key, value in record.items()}
     out.pop("id", None)
     return out
 
 
-def _normalize_records(result: Any) -> list[dict[str, Any]]:
+def _normalize_records(result: object) -> list[SurrealRecord]:
     if result is None:
         return []
     if isinstance(result, dict):
@@ -104,7 +105,7 @@ def _normalize_records(result: Any) -> list[dict[str, Any]]:
     if not isinstance(result, list):
         return []
 
-    records: list[dict[str, Any]] = []
+    records: list[SurrealRecord] = []
     for item in result:
         if isinstance(item, list):
             for nested in item:
@@ -143,31 +144,59 @@ def _coerce_datetime(value: object | None) -> datetime | None:
     return None
 
 
-def _user_from_record(record: dict[str, Any]) -> AuthUser:
+def _coerce_optional_str(value: object | None) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _coerce_optional_int(value: object | None) -> int | None:
+    if isinstance(value, bool):
+        return None
+    return value if isinstance(value, int) else None
+
+
+def _coerce_int(value: object | None, *, field_name: str) -> int:
+    if isinstance(value, bool):
+        msg = f"{field_name} must be an integer"
+        raise TypeError(msg)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value:
+        return int(value)
+    msg = f"{field_name} is required"
+    raise TypeError(msg)
+
+
+def _coerce_dict(value: object | None) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): item for key, item in value.items()}
+
+
+def _user_from_record(record: Mapping[str, object]) -> AuthUser:
     return AuthUser(
         id=_coerce_uuid(record.get("uuid"), field_name="user.uuid"),
-        email=record.get("email"),
+        email=_coerce_optional_str(record.get("email")),
         name=str(record.get("name") or ""),
-        avatar_url=record.get("avatar_url"),
-        github_id=record.get("github_id"),
+        avatar_url=_coerce_optional_str(record.get("avatar_url")),
+        github_id=_coerce_optional_int(record.get("github_id")),
         is_admin=bool(record.get("is_admin", False)),
-        bio=record.get("bio"),
+        bio=_coerce_optional_str(record.get("bio")),
         timezone=str(record.get("timezone") or "UTC"),
-        preferences=dict(record.get("preferences") or {}),
+        preferences=_coerce_dict(record.get("preferences")),
     )
 
 
-def _organization_from_record(record: dict[str, Any]) -> AuthOrganization:
+def _organization_from_record(record: Mapping[str, object]) -> AuthOrganization:
     return AuthOrganization(
         id=_coerce_uuid(record.get("uuid"), field_name="organization.uuid"),
         name=str(record.get("name") or ""),
         slug=str(record.get("slug") or ""),
         is_personal=bool(record.get("is_personal", False)),
-        settings=dict(record.get("settings") or {}),
+        settings=_coerce_dict(record.get("settings")),
     )
 
 
-def _membership_from_record(record: dict[str, Any]) -> AuthMembership:
+def _membership_from_record(record: Mapping[str, object]) -> AuthMembership:
     return AuthMembership(
         id=_coerce_uuid(record.get("uuid"), field_name="membership.uuid"),
         organization_id=_coerce_uuid(
@@ -184,14 +213,14 @@ class _SurrealAuthRepository:
     def __init__(self, client: SurrealAuthClient) -> None:
         self._client = client
 
-    async def _select_one(self, query: str, **params: Any) -> dict[str, Any] | None:
+    async def _select_one(self, query: str, **params: object) -> SurrealRecord | None:
         records = _normalize_records(await self._client.execute_query(query, **params))
         return records[0] if records else None
 
-    async def _select_many(self, query: str, **params: Any) -> list[dict[str, Any]]:
+    async def _select_many(self, query: str, **params: object) -> list[SurrealRecord]:
         return _normalize_records(await self._client.execute_query(query, **params))
 
-    async def _replace(self, table: str, *, uuid: UUID, record: dict[str, Any]) -> dict[str, Any]:
+    async def _replace(self, table: str, *, uuid: UUID, record: SurrealRecord) -> SurrealRecord:
         created = _normalize_records(
             await self._client.execute_query(
                 _UPSERT_RECORD[table],
@@ -335,7 +364,10 @@ class SurrealUserRepository(_SurrealAuthRepository):
                 password,
                 salt_hex=str(record["password_salt"]),
                 hash_hex=str(record["password_hash"]),
-                iterations=int(record["password_iterations"]),
+                iterations=_coerce_int(
+                    record.get("password_iterations"),
+                    field_name="user.password_iterations",
+                ),
             )
         except PasswordError:
             return None
@@ -397,7 +429,10 @@ class SurrealUserRepository(_SurrealAuthRepository):
                     change.current_password,
                     salt_hex=str(record["password_salt"]),
                     hash_hex=str(record["password_hash"]),
-                    iterations=int(record["password_iterations"]),
+                    iterations=_coerce_int(
+                        record.get("password_iterations"),
+                        field_name="user.password_iterations",
+                    ),
                 )
             except PasswordError as e:
                 raise ValueError("Invalid current password") from e
@@ -672,7 +707,7 @@ class SurrealAuthContextResolver(RepositoryAuthContextResolver):
             memberships=SurrealOrganizationMembershipRepository.from_client(client),
         )
 
-    async def resolve(self, claims: Mapping[str, Any]) -> AuthContext:
+    async def resolve(self, claims: Mapping[str, object]) -> AuthContext:
         try:
             user_id = UUID(str(claims.get("sub", "")))
         except ValueError as e:
@@ -716,7 +751,12 @@ class SurrealAuthContextResolver(RepositoryAuthContextResolver):
 
         organization_record = _normalize_record(payload.get("organization"))
         membership_record = _normalize_record(payload.get("membership"))
-        scopes = frozenset(str(scope) for scope in claims.get("scopes", []))
+        scope_values = claims.get("scopes", [])
+        scopes = (
+            frozenset(str(scope) for scope in scope_values)
+            if isinstance(scope_values, list | tuple | set | frozenset)
+            else frozenset()
+        )
 
         return AuthContext(
             user=_user_from_record(user_record),
