@@ -399,12 +399,15 @@ auth flow against either store; cutover is gated on a green run.
   for exactly one release.
 - Per environment:
   1. Announce write-freeze window (~5 minutes).
-  2. Drain in-flight auth writes.
-  3. Run the extended `sibyl migrate cutover` auth gate: archive auth from Postgres, verify row
-     counts match (`users`, `organizations`, `organization_members`, `api_keys`, active
-     `user_sessions`, RBAC tables), import to Surreal, run the Phase 2.4 harness, then flip the env
-     flag.
-  4. Unfreeze.
+  2. Export the current legacy archive and start a Surreal-backed API on a private cutover endpoint.
+  3. Drain in-flight auth writes.
+  4. Run
+     `moon run migrate-cutover -- <archive> --write-freeze-confirmed --base-url <surreal-api> --yes`.
+     The gate imports the archive into Surreal, verifies imported counts and samples, then runs the
+     Phase 2.4 auth-flow and baseline harnesses against the Surreal API.
+  5. Freeze legacy auth/RBAC writes with `moon run auth-readonly -- --mode freeze --apply --yes`.
+  6. Reopen writes only after rerunning cutover with `--reopen-writes` and
+     `--acknowledge-no-instant-rollback`, then flip public traffic to the Surreal-backed API.
 - **Explicit non-promise:** once Surreal accepts new auth writes, "flip reads back to Postgres" is
   not a real rollback. Doing so after N new signups have landed on Surreal produces divergence, not
   recovery. If cutover fails, the rollback is "restore Postgres from the pre-cutover archive, replay
