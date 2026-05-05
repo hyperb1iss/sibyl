@@ -30,8 +30,9 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from functools import cached_property
-from typing import Any
+from typing import Concatenate, Literal, ParamSpec, TypeVar, cast
 
 from graphiti_core.driver.driver import (
     GraphDriver,
@@ -42,15 +43,28 @@ from graphiti_core.driver.driver import (
 from sibyl_core.backends.surreal.connection import _can_retry_query, _is_transient_connection_error
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.backends.surreal.observability import elapsed_ms, log_query, query_start
+from sibyl_core.backends.surreal.protocols import QueryParams, SurrealClient
 
 logger = logging.getLogger(__name__)
 
 # See module docstring "Provider tag" for rationale.
 _SURREAL_PROVIDER_TAG: GraphProvider = GraphProvider.NEO4J
 _MAX_CLOSED_CONNECTION_RETRIES = 2
+type CompatibilityResultKind = Literal["duplicate_pair_records", "episode_records", "records"]
+type GraphitiCompatQuery = tuple[str, QueryParams]
+type GraphitiCompatQueryWithKind = tuple[str, QueryParams, CompatibilityResultKind]
+type SurrealRecord = dict[str, object]
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
-def _raise_if_surreal_error(query: str, result: Any) -> None:
+def _object_mapping(value: object) -> Mapping[object, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return cast(Mapping[object, object], value)
+
+
+def _raise_if_surreal_error(query: str, result: object) -> None:
     """Raise a SurrealQueryError when the SDK returned an error envelope."""
     if isinstance(result, str):
         if query.lstrip().upper().startswith("RETURN "):
@@ -58,8 +72,9 @@ def _raise_if_surreal_error(query: str, result: Any) -> None:
         raise SurrealQueryError(query, result)
     if isinstance(result, list):
         for entry in result:
-            if isinstance(entry, dict) and entry.get("status") == "ERR":
-                raise SurrealQueryError(query, str(entry.get("result", entry)))
+            entry_map = _object_mapping(entry)
+            if entry_map is not None and entry_map.get("status") == "ERR":
+                raise SurrealQueryError(query, str(entry_map.get("result", entry)))
 
 
 def _significant_query_tokens(query: str) -> list[str]:
@@ -161,7 +176,7 @@ _EPISODE_SELECT_FIELDS = (
 )
 
 
-def _graphiti_episode_records(result: Any) -> list[dict[str, Any]]:
+def _graphiti_episode_records(result: object) -> list[SurrealRecord]:
     from sibyl_core.graph.surreal.ops._common import normalize_records
 
     records = normalize_records(result)
@@ -171,16 +186,16 @@ def _graphiti_episode_records(result: Any) -> list[dict[str, Any]]:
     return records
 
 
-def _graphiti_records(result: Any) -> list[dict[str, Any]]:
+def _graphiti_records(result: object) -> list[SurrealRecord]:
     from sibyl_core.graph.surreal.ops._common import normalize_records
 
     return normalize_records(result)
 
 
 def _graphiti_duplicate_pair_records(
-    result: Any,
+    result: object,
     pairs: list[tuple[str, str]],
-) -> list[dict[str, Any]]:
+) -> list[SurrealRecord]:
     records = _graphiti_records(result)
     pair_set = set(pairs)
     return [
@@ -190,10 +205,38 @@ def _graphiti_duplicate_pair_records(
     ]
 
 
+def _duplicate_pairs_from_param(value: object) -> list[tuple[str, str]]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+        return []
+    pairs: list[tuple[str, str]] = []
+    for item in value:
+        source: object | None = None
+        target: object | None = None
+        item_map = _object_mapping(item)
+        if item_map is not None:
+            source = item_map.get("source") or item_map.get("src")
+            target = item_map.get("target") or item_map.get("dst")
+        elif isinstance(item, Sequence) and not isinstance(item, str | bytes) and len(item) >= 2:
+            source = item[0]
+            target = item[1]
+        if source is None or target is None:
+            continue
+        pairs.append((str(source), str(target)))
+    return pairs
+
+
+def _limit_from_param(value: object, default: int = 100) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int | float | str):
+        return max(int(value), 1)
+    return default
+
+
 def _graphiti_retrieve_episodes_query(
     query: str,
-    params: dict[str, Any],
-) -> tuple[str, dict[str, Any]] | None:
+    params: QueryParams,
+) -> GraphitiCompatQuery | None:
     normalized = " ".join(query.split()).upper()
     if "RETURN E.UUID AS UUID" not in normalized:
         return None
@@ -238,8 +281,8 @@ def _graphiti_retrieve_episodes_query(
 
 def _graphiti_saga_query(
     query: str,
-    params: dict[str, Any],
-) -> tuple[str, dict[str, Any]] | None:
+    params: QueryParams,
+) -> GraphitiCompatQuery | None:
     normalized = " ".join(query.split()).upper()
     if (
         "MATCH (S:SAGA {NAME: $NAME, GROUP_ID: $GROUP_ID})" in normalized
@@ -288,8 +331,8 @@ def _graphiti_saga_query(
 
 def _graphiti_episode_count_query(
     query: str,
-    params: dict[str, Any],
-) -> tuple[str, dict[str, Any]] | None:
+    params: QueryParams,
+) -> GraphitiCompatQuery | None:
     normalized = " ".join(query.split()).upper()
     if (
         "MATCH (E:EPISODIC)-[:MENTIONS]->(N:ENTITY {UUID: $UUID})" not in normalized
@@ -310,8 +353,8 @@ def _graphiti_episode_count_query(
 
 def _graphiti_existing_duplicate_edges_query(
     query: str,
-    params: dict[str, Any],
-) -> tuple[str, dict[str, Any]] | None:
+    params: QueryParams,
+) -> GraphitiCompatQuery | None:
     normalized = " ".join(query.split()).upper()
     if "UNWIND $DUPLICATE_NODE_UUIDS" not in normalized:
         return None
@@ -320,25 +363,14 @@ def _graphiti_existing_duplicate_edges_query(
     if "RETURN DISTINCT" not in normalized:
         return None
 
-    pairs = params.get("duplicate_node_uuids") or []
-    source_uuids: list[str] = []
-    target_uuids: list[str] = []
-    for pair in pairs:
-        if isinstance(pair, dict):
-            source = pair.get("source") or pair.get("src")
-            target = pair.get("target") or pair.get("dst")
-        else:
-            source = pair[0] if len(pair) > 0 else None
-            target = pair[1] if len(pair) > 1 else None
-        if source is None or target is None:
-            continue
-        source_uuids.append(str(source))
-        target_uuids.append(str(target))
+    duplicate_pairs = _duplicate_pairs_from_param(params.get("duplicate_node_uuids"))
+    source_uuids = [source for source, _ in duplicate_pairs]
+    target_uuids = [target for _, target in duplicate_pairs]
 
     next_params = dict(params)
     next_params["source_uuids"] = source_uuids
     next_params["target_uuids"] = target_uuids
-    next_params["duplicate_pairs"] = list(zip(source_uuids, target_uuids, strict=True))
+    next_params["duplicate_pairs"] = duplicate_pairs
     if not source_uuids or not target_uuids:
         return "RETURN [];", next_params
 
@@ -362,14 +394,14 @@ def _graphiti_existing_duplicate_edges_query(
     )
 
 
-def _group_filter_clause(params: dict[str, Any]) -> str:
+def _group_filter_clause(params: QueryParams) -> str:
     return "group_id IN $group_ids" if params.get("group_ids") else "true"
 
 
 def _graphiti_fulltext_query(
     query: str,
-    params: dict[str, Any],
-) -> tuple[str, dict[str, Any]] | None:
+    params: QueryParams,
+) -> GraphitiCompatQuery | None:
     normalized = " ".join(query.split())
     upper = normalized.upper()
     fulltext_kind: str | None = None
@@ -387,8 +419,7 @@ def _graphiti_fulltext_query(
     search_query = build_fulltext_query(str(params.get("query") or ""))
     next_params = dict(params)
     next_params["query"] = search_query
-    raw_limit = params.get("limit")
-    next_params["limit"] = max(int(raw_limit if raw_limit is not None else 100), 1)
+    next_params["limit"] = _limit_from_param(params.get("limit"))
 
     if not search_query:
         return "RETURN [];", next_params
@@ -480,8 +511,8 @@ def _graphiti_fulltext_query(
 
 def _graphiti_compat_query(
     query: str,
-    params: dict[str, Any],
-) -> tuple[str, dict[str, Any], str] | None:
+    params: QueryParams,
+) -> GraphitiCompatQueryWithKind | None:
     episode_query = _graphiti_retrieve_episodes_query(query, params)
     if episode_query is not None:
         return episode_query[0], episode_query[1], "episode_records"
@@ -522,13 +553,18 @@ class SurrealDriverSession(GraphDriverSession):
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
         await self.close()
 
-    async def run(self, query: str, **kwargs: Any) -> Any:
+    async def run(self, query: str, **kwargs: object) -> object:
         return await self._driver.execute_query(query, **kwargs)
 
     async def close(self) -> None:
         return None
 
-    async def execute_write(self, func: Any, *args: Any, **kwargs: Any) -> Any:
+    async def execute_write(
+        self,
+        func: Callable[Concatenate[SurrealDriverSession, _P], Awaitable[_R]],
+        *args: _P.args,
+        **kwargs: _P.kwargs,
+    ) -> _R:
         return await func(self, *args, **kwargs)
 
 
@@ -555,7 +591,7 @@ class SurrealDriver(GraphDriver):
         self._namespace_prefix = namespace_prefix
         self._default_database = default_database
         self._database: str = ""
-        self._client: Any | None = None
+        self._client: SurrealClient | None = None
         self._query_lock = asyncio.Lock()
         from sibyl_core.graph.search_interface import SurrealSearchInterface
         from sibyl_core.graph.surreal.ops.graph_operations_interface import (
@@ -681,13 +717,13 @@ class SurrealDriver(GraphDriver):
     def graph_ops(self):
         return self._graph_ops
 
-    async def _ensure_client(self) -> Any:
+    async def _ensure_client(self) -> SurrealClient:
         if self._client is not None:
             return self._client
 
         from surrealdb import AsyncSurreal
 
-        client = AsyncSurreal(self._url)
+        client = cast(SurrealClient, AsyncSurreal(self._url))
         try:
             if self._requires_auth():
                 if self._token:
@@ -719,7 +755,7 @@ class SurrealDriver(GraphDriver):
             except Exception as exc:
                 logger.debug("SurrealDB client close after connection failure failed: %s", exc)
 
-    async def execute_query(self, cypher_query_: str, **kwargs: Any) -> Any:
+    async def execute_query(self, cypher_query_: str, **kwargs: object) -> object:
         started_at = query_start()
         retry_count = 0
         namespace = _namespace_for_group(self._namespace_prefix, self._database)
@@ -742,6 +778,7 @@ class SurrealDriver(GraphDriver):
         query = compat_query[0] if compat_query is not None else cypher_query_
         params = compat_query[1] if compat_query is not None else kwargs
         compat_kind = compat_query[2] if compat_query is not None else None
+        result: object = None
         async with self._query_lock:
             try:
                 while True:
@@ -809,7 +846,7 @@ class SurrealDriver(GraphDriver):
         if compat_kind == "duplicate_pair_records":
             return _graphiti_duplicate_pair_records(
                 result,
-                params.get("duplicate_pairs", []),
+                _duplicate_pairs_from_param(params.get("duplicate_pairs")),
             ), None, None
         if compat_kind == "records":
             return _graphiti_records(result), None, None

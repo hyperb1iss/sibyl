@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import re
 import time
-from typing import Any
 
 import structlog
 
@@ -127,14 +126,15 @@ def log_query(
     retry_count: int = 0,
     error: BaseException | None = None,
 ) -> None:
-    fields: dict[str, Any] = {
+    statement = _primary_statement(query)
+    fields: dict[str, object] = {
         "client": client_kind,
         "namespace": namespace,
         "database": database,
         "raw": raw,
         "elapsed_ms": elapsed,
         "retry_count": retry_count,
-        "statement": _primary_statement(query),
+        "statement": statement,
         "statement_count": _statement_count(query),
         "tables": _query_tables(query),
         "query_hash": _query_hash(query),
@@ -145,7 +145,7 @@ def log_query(
     if elapsed >= _slow_query_threshold_ms():
         log.warning("surreal_query_slow", **fields)
         return
-    if fields["statement"] in _QUIET_SUCCESS_STATEMENTS:
+    if statement in _QUIET_SUCCESS_STATEMENTS:
         return
     log.debug("surreal_query_complete", **fields)
 

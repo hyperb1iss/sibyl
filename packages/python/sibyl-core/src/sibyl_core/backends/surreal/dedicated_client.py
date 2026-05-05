@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import cast
 
 from sibyl_core.backends.surreal.connection import (
     _can_retry_query,
@@ -16,6 +16,7 @@ from sibyl_core.backends.surreal.observability import (
     log_query,
     query_start,
 )
+from sibyl_core.backends.surreal.protocols import QueryParams, SurrealClient
 
 logger = logging.getLogger(__name__)
 _MAX_CLOSED_CONNECTION_RETRIES = 2
@@ -40,7 +41,7 @@ class DedicatedSurrealClient:
         self._namespace = namespace
         self._database = database
         self._client_kind = client_kind
-        self._client: Any | None = None
+        self._client: SurrealClient | None = None
         self._connect_lock = asyncio.Lock()
         self._query_lock = asyncio.Lock()
 
@@ -52,7 +53,7 @@ class DedicatedSurrealClient:
     def database(self) -> str:
         return self._database
 
-    async def connect(self) -> Any:
+    async def connect(self) -> SurrealClient:
         if self._client is not None:
             return self._client
 
@@ -62,7 +63,7 @@ class DedicatedSurrealClient:
 
             from surrealdb import AsyncSurreal
 
-            client = AsyncSurreal(self._url)
+            client = cast(SurrealClient, AsyncSurreal(self._url))
             try:
                 if self._requires_auth():
                     if self._token:
@@ -83,10 +84,10 @@ class DedicatedSurrealClient:
             self._client = client
             return client
 
-    async def execute_query(self, query: str, **params: Any) -> Any:
+    async def execute_query(self, query: str, **params: object) -> object:
         return await self._execute(query, params=params, raw=False)
 
-    async def execute_query_raw(self, query: str, **params: Any) -> Any:
+    async def execute_query_raw(self, query: str, **params: object) -> object:
         return await self._execute(query, params=params, raw=True)
 
     async def close(self) -> None:
@@ -107,9 +108,10 @@ class DedicatedSurrealClient:
             except Exception as exc:
                 logger.debug("SurrealDB dedicated client close after connection failure failed: %s", exc)
 
-    async def _execute(self, query: str, *, params: dict[str, Any], raw: bool) -> Any:
+    async def _execute(self, query: str, *, params: QueryParams, raw: bool) -> object:
         started_at = query_start()
         retry_count = 0
+        result: object = None
         try:
             async with self._query_lock:
                 while True:
@@ -156,12 +158,12 @@ class DedicatedSurrealClient:
 
     async def _send_query(
         self,
-        client: Any,
+        client: SurrealClient,
         query: str,
         *,
-        params: dict[str, Any],
+        params: QueryParams,
         raw: bool,
-    ) -> Any:
+    ) -> object:
         bound_params = params if params else None
         if raw:
             return await client.query_raw(query, bound_params)

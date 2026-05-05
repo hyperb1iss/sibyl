@@ -2,13 +2,30 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, cast
 
 from sibyl_core.backends.surreal.schema_helpers import execute_schema_statement, split_statements
 from sibyl_core.config import core_config
 
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.driver import SurrealDriver
+
+
+def _object_mapping(value: object) -> Mapping[object, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return cast(Mapping[object, object], value)
+
+
+def _index_names_from_info(value: object) -> list[str]:
+    info_map = _object_mapping(value)
+    if info_map is None:
+        return []
+    indexes = _object_mapping(info_map.get("indexes"))
+    if indexes is None:
+        return []
+    return [str(index_name) for index_name in indexes]
 
 
 # Graph node embeddings (entity/community/relationship facts) come from Graphiti's
@@ -209,13 +226,11 @@ async def drop_all_indexes(driver: SurrealDriver) -> None:
 
     for table in (*GRAPH_TABLES, *GRAPH_EDGES):
         info = await driver.execute_query(f"INFO FOR TABLE {table};")
-        indexes: dict[str, object] = {}
-        if isinstance(info, dict):
-            indexes = info.get("indexes", {}) or {}
-        elif isinstance(info, list) and info and isinstance(info[0], dict):
-            indexes = info[0].get("indexes", {}) or {}
+        index_names = _index_names_from_info(info)
+        if not index_names and isinstance(info, list) and info:
+            index_names = _index_names_from_info(info[0])
 
-        for index_name in indexes:
+        for index_name in index_names:
             await driver.execute_query(f"REMOVE INDEX IF EXISTS {index_name} ON TABLE {table};")
 
 
