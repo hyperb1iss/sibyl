@@ -114,6 +114,9 @@ main() {
     SIBYL_REDIS_PASSWORD="${SIBYL_REDIS_PASSWORD:-}" \
     uv run --directory apps/api sibyld migrate verify "$archive"
 
+  printf 'archive=%s\nmigrated_at=%s\n' "$archive" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    >"$SURREAL_DATA_DIR/.sibyl-migrated"
+
   echo "✓ Local Surreal migration complete"
 }
 

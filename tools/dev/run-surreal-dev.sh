@@ -62,11 +62,27 @@ docker_legacy_setup_detected() {
   return 1
 }
 
+surreal_runtime_data_detected() {
+  local surreal_data_dir="${SURREAL_DATA_DIR:-}"
+
+  if [[ -z "$surreal_data_dir" ]]; then
+    return 1
+  fi
+
+  [[ -s "$surreal_data_dir/.sibyl-migrated" ]] && return 0
+  [[ -s "$surreal_data_dir/sibyl.db/CURRENT" ]] && return 0
+  [[ -s "$surreal_data_dir/sibyl.db/IDENTITY" ]] && return 0
+  find "$surreal_data_dir/sibyl.db" -mindepth 1 -maxdepth 1 -type f -print -quit 2>/dev/null | grep -q .
+}
+
 warn_if_legacy_setup_detected() {
   if [[ "$SIBYL_STORE" != "surreal" || "${SIBYL_DEV_SKIP_LEGACY_CHECK:-}" == "1" ]]; then
     return 0
   fi
   if ! docker_legacy_setup_detected; then
+    return 0
+  fi
+  if surreal_runtime_data_detected; then
     return 0
   fi
 

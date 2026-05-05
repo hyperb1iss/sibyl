@@ -486,12 +486,13 @@ haven't migrated yet. See
 [`docs/guide/migrating-from-falkor.md`](docs/guide/migrating-from-falkor.md) for the migration
 playbook.
 
-If local legacy data exists, `moon run dev` prints the migration path instead of starting SurrealDB.
-`moon run dev -- --migrate-legacy` runs the local migration first, then starts the Surreal dev
-runtime. `moon run migrate-local-surreal` is the same data move as a standalone command: it exports
-the only local org from legacy storage, imports it into the local Surreal server, and verifies the
-result. If there are multiple orgs, the command lists them and asks for `--org-id`. Use
-`--restore-database-dump` only if you also want to replay the database dump sidecar.
+If local legacy data exists and no local Surreal data has been created yet, `moon run dev` prints the
+migration path instead of starting SurrealDB. `moon run dev -- --migrate-legacy` runs the local
+migration first, then starts the Surreal dev runtime. `moon run migrate-local-surreal` is the same
+data move as a standalone command: it exports the only local org from legacy storage, imports it
+into the local Surreal server, and verifies the result. If there are multiple orgs, the command
+lists them and asks for `--org-id`. Use `--restore-database-dump` only if you also want to replay
+the database dump sidecar.
 
 ## Entity Types
 
