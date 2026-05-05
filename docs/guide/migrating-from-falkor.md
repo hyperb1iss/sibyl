@@ -102,6 +102,9 @@ The comparison ignores generated IDs, raw tokens, and timestamps. It compares th
 sequence and normalized JWT claim shape, including `sub`, `org`, `typ`, `sid`, and refresh-token
 `jti` presence.
 
+The compare command rejects identical base URLs by default so it cannot accidentally compare one API
+to itself. `--allow-same-base-url` is only for debugging the harness.
+
 ## Local shortcut
 
 For single-org local dev moves:

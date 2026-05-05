@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import typer
@@ -280,6 +281,37 @@ def _resolve_auth_flow_email(auth_flow_email: str) -> str:
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     suffix = uuid4().hex[:8]
     return f"auth-flow-{timestamp}-{suffix}@sibyl.dev"
+
+
+def _normalized_auth_flow_base_url(value: str) -> str:
+    parsed = urlsplit(value.rstrip("/"))
+    scheme = parsed.scheme.lower()
+    hostname = (parsed.hostname or "").lower()
+    netloc = hostname
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+    elif parsed.netloc and "@" in parsed.netloc:
+        netloc = parsed.netloc.lower()
+    return urlunsplit((scheme, netloc, parsed.path.rstrip("/"), "", ""))
+
+
+def _reject_same_auth_flow_compare_target(
+    *,
+    postgres_base_url: str,
+    surreal_base_url: str,
+    allow_same_base_url: bool,
+) -> None:
+    if allow_same_base_url:
+        return
+    if _normalized_auth_flow_base_url(postgres_base_url) != _normalized_auth_flow_base_url(
+        surreal_base_url
+    ):
+        return
+
+    error("auth-flow-compare requires distinct Postgres and Surreal base URLs")
+    info("Start both runtimes and pass --postgres-base-url and --surreal-base-url")
+    info("Use --allow-same-base-url only for local harness debugging")
+    raise typer.Exit(code=1)
 
 
 async def _run_auth_flow_gate(
@@ -1137,11 +1169,23 @@ def auth_flow_compare(
             help="JSONL outbox path for the Surreal replay reset token",
         ),
     ] = DEFAULT_AUTH_FLOW_EMAIL_OUTBOX,
+    allow_same_base_url: Annotated[
+        bool,
+        typer.Option(
+            "--allow-same-base-url",
+            help="Allow comparing one API to itself for local harness debugging",
+        ),
+    ] = False,
 ) -> None:
     """Compare normalized auth-flow semantics across Postgres and Surreal runtimes."""
 
     @run_async
     async def _auth_flow_compare() -> None:
+        _reject_same_auth_flow_compare_target(
+            postgres_base_url=postgres_base_url,
+            surreal_base_url=surreal_base_url,
+            allow_same_base_url=allow_same_base_url,
+        )
         info("Running auth flow semantic comparison...")
         await _run_auth_flow_compare(
             postgres_base_url=postgres_base_url,

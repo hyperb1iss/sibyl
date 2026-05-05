@@ -59,6 +59,10 @@ Use the full migration playbook, not the local shortcut:
 
 Start with [Migrating from FalkorDB](./migrating-from-falkor.md).
 
+`sibyld migrate auth-flow-compare` refuses to compare one API to itself by default. Start one
+legacy-auth API and one Surreal-auth API, then pass distinct `--postgres-base-url` and
+`--surreal-base-url` values. Use `--allow-same-base-url` only when debugging the harness itself.
+
 ## Compatibility window
 
 These paths stay available for one release cycle:

@@ -770,6 +770,47 @@ def test_migrate_auth_flow_compare_runs_dual_store_gate(tmp_path: Path) -> None:
     )
 
 
+def test_migrate_auth_flow_compare_rejects_same_base_url() -> None:
+    auth_flow_compare = AsyncMock(return_value=None)
+
+    with patch("sibyl.cli.migrate._run_auth_flow_compare", auth_flow_compare):
+        result = runner.invoke(
+            migrate_cli.app,
+            [
+                "auth-flow-compare",
+                "--postgres-base-url",
+                "http://LOCALHOST:3334/",
+                "--surreal-base-url",
+                "http://localhost:3334",
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert "auth-flow-compare requires distinct Postgres and Surreal base URLs" in result.output
+    auth_flow_compare.assert_not_awaited()
+
+
+def test_migrate_auth_flow_compare_allows_same_base_url_for_debug() -> None:
+    auth_flow_compare = AsyncMock(return_value=None)
+
+    with patch("sibyl.cli.migrate._run_auth_flow_compare", auth_flow_compare):
+        result = runner.invoke(
+            migrate_cli.app,
+            [
+                "auth-flow-compare",
+                "--postgres-base-url",
+                "http://localhost:3334",
+                "--surreal-base-url",
+                "http://localhost:3334/",
+                "--allow-same-base-url",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert "Auth flow semantic comparison passed" in result.output
+    auth_flow_compare.assert_awaited_once()
+
+
 def test_migrate_auth_readonly_prints_freeze_sql() -> None:
     result = runner.invoke(migrate_cli.app, ["auth-readonly"])
 
