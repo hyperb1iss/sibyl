@@ -309,7 +309,7 @@ async def get_link_graph_status_payload(
     pending_query = (
         select(  # type: ignore[call-overload]
             col(CrawlSource.id).label("source_id"),
-            CrawlSource.name,
+            col(CrawlSource.name),
             func.count(DocumentChunk.id).label("pending"),
         )
         .join(CrawledDocument, col(CrawledDocument.source_id) == col(CrawlSource.id))

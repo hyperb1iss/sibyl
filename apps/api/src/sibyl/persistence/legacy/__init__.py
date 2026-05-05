@@ -94,7 +94,7 @@ def __getattr__(name: str) -> Any:
             UserNotFoundError,
         )
 
-        exports = {
+        exports: dict[str, object] = {
             "InvalidAuthClaimsError": InvalidAuthClaimsError,
             "LegacyAuthContextResolver": LegacyAuthContextResolver,
             "LegacyOrganizationMembershipRepository": LegacyOrganizationMembershipRepository,

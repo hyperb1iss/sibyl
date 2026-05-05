@@ -234,7 +234,7 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock',
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
             'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
             moon-${{ runner.os }}-
@@ -336,7 +336,7 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock',
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
             'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
             moon-${{ runner.os }}-
@@ -422,7 +422,7 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock',
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
             'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
             moon-${{ runner.os }}-
@@ -510,7 +510,7 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock',
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
             'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
             moon-${{ runner.os }}-
@@ -633,7 +633,7 @@ jobs:
             .moon/cache
             apps/web/.next/cache
           key:
-            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock',
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
             'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
             moon-${{ runner.os }}-

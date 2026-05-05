@@ -78,7 +78,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .moon/cache
-          key: moon-nightly-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock') }}
+          key: moon-nightly-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
           restore-keys: |
             moon-nightly-${{ runner.os }}-
 
@@ -202,7 +202,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .moon/cache
-          key: moon-live-${{ runner.os }}-${{ hashFiles('.prototools', 'apps/api/uv.lock') }}
+          key: moon-live-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
           restore-keys: |
             moon-live-${{ runner.os }}-
 

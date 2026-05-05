@@ -77,6 +77,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+class _Unset:
+    pass
+
+
+_UNSET = _Unset()
+
+
 def config_dir() -> Path:
     """Get the Sibyl config directory (~/.sibyl)."""
     return Path.home() / ".sibyl"
@@ -537,8 +544,8 @@ def create_context(
 def update_context(
     name: str,
     server_url: str | None = None,
-    org_slug: str | None = ...,  # type: ignore[assignment]
-    default_project: str | None = ...,  # type: ignore[assignment]
+    org_slug: str | None | _Unset = _UNSET,
+    default_project: str | None | _Unset = _UNSET,
     insecure: bool | None = None,
 ) -> Context:
     """Update an existing context.
@@ -546,8 +553,8 @@ def update_context(
     Args:
         name: Context name to update.
         server_url: New server URL (None = keep existing).
-        org_slug: New org slug (... = keep existing, None = clear).
-        default_project: New default project (... = keep existing, None = clear).
+        org_slug: New org slug (_UNSET = keep existing, None = clear).
+        default_project: New default project (_UNSET = keep existing, None = clear).
         insecure: SSL verification setting (None = keep existing).
 
     Returns:
@@ -566,9 +573,9 @@ def update_context(
 
     if server_url is not None:
         ctx_data["server_url"] = server_url
-    if org_slug is not ...:
+    if not isinstance(org_slug, _Unset):
         ctx_data["org_slug"] = org_slug or ""
-    if default_project is not ...:
+    if not isinstance(default_project, _Unset):
         ctx_data["default_project"] = default_project or ""
     if insecure is not None:
         ctx_data["insecure"] = insecure

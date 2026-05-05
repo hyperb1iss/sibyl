@@ -51,7 +51,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pyright",
     "pytest",
     "pytest-asyncio",
     "ruff",
@@ -85,12 +84,6 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["sibyl_cli", "sibyl_core"]
-
-[tool.pyright]
-include = ["src"]
-exclude = ["src/sibyl_cli/data"]
-pythonVersion = "3.13"
-typeCheckingMode = "standard"
 
 # =============================================================================
 # uv - Package Sources

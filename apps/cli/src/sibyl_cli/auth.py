@@ -740,7 +740,11 @@ def api_key_create(
 
     @run_async
     async def _run() -> dict:
-        scope_list = [s.strip() for s in (scopes or "").split(",") if s.strip()]
+        scope_list: list[str] = []
+        for raw_scope in (scopes or "").split(","):
+            scope = str(raw_scope.strip())
+            if scope:
+                scope_list.append(scope)
         return await client.create_api_key(
             name=name,
             live=live,

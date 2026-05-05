@@ -551,8 +551,9 @@ async def _add_note(
     note_id = f"note_{uuid.uuid4()}"
     created_at = datetime.now(UTC)
 
-    note = Note(  # type: ignore[call-arg]  # model_validator sets name from content
+    note = Note(
         id=note_id,
+        name=content[:50] + ("..." if len(content) > 50 else ""),
         task_id=task_id,
         content=content,
         author_type=author_type,

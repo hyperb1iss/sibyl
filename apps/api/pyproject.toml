@@ -104,7 +104,6 @@ include = ["/src", "/tests", "/README.md", "/LICENSE"]
 [dependency-groups]
 dev = [
     "pre-commit",
-    "pyright",
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
@@ -265,28 +264,6 @@ max-args = 8
 max-branches = 15
 max-returns = 8
 max-statements = 60
-
-# =============================================================================
-# Pyright - Type Checking
-# =============================================================================
-
-[tool.pyright]
-include = ["src"]
-exclude = ["**/__pycache__", "tests"]
-pythonVersion = "3.13"
-typeCheckingMode = "standard"
-
-# External libs aren't fully typed
-reportArgumentType = false
-reportAttributeAccessIssue = false
-reportCallIssue = "warning"
-reportDeprecated = "warning"
-reportMissingImports = false
-reportMissingTypeStubs = false
-reportUnknownArgumentType = false
-reportUnknownMemberType = false
-reportUnknownParameterType = false
-reportUnknownVariableType = false
 
 # =============================================================================
 # Pytest

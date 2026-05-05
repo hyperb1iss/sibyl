@@ -11,7 +11,7 @@ uv add sibyl-core
 
 # Development
 moon run core:lint        # Ruff check
-moon run core:typecheck   # Pyright
+moon run core:typecheck   # ty
 moon run core:test        # Pytest
 ```
 

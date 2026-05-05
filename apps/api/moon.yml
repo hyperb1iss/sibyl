@@ -120,7 +120,7 @@ tasks:
     command: uv sync
     inputs:
       - pyproject.toml
-      - uv.lock
+      - /uv.lock
 
   # Build
   build:

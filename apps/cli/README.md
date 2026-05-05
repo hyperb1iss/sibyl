@@ -126,7 +126,7 @@ SIBYL_CONTEXT=myproject sibyl task list
 
 ```bash
 moon run cli:lint         # Ruff check
-moon run cli:typecheck    # Pyright
+moon run cli:typecheck    # ty
 moon run cli:test         # Tests
 ```
 

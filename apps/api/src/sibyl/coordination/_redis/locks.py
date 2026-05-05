@@ -6,7 +6,8 @@ import asyncio
 import contextlib
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable
+from typing import cast
 
 import structlog
 from redis.asyncio import Redis
@@ -137,7 +138,7 @@ class EntityLockManager:
         end
         """
 
-        released = await self._redis.eval(lua_script, 1, key, token)  # type: ignore[union-attr]
+        released = await cast("Awaitable[object]", self._redis.eval(lua_script, 1, key, token))
 
         if released:
             log.debug("entity_lock_released", entity_id=entity_id, org_id=org_id)
@@ -165,8 +166,9 @@ class EntityLockManager:
         end
         """
 
-        extended = await self._redis.eval(  # type: ignore[union-attr]
-            lua_script, 1, key, token, LOCK_TTL_SECONDS
+        extended = await cast(
+            "Awaitable[object]",
+            self._redis.eval(lua_script, 1, key, token, LOCK_TTL_SECONDS),
         )
 
         if extended:

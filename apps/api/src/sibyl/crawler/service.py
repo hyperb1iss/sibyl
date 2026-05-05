@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import AsyncIterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from urllib.parse import urljoin, urlparse
 from uuid import UUID
 
@@ -298,40 +299,51 @@ class CrawlerService:
         crawled_count = 0
         error_count = 0
 
+        async def process_result(result: CrawlResult) -> CrawledDocumentRecord | None:
+            nonlocal crawled_count, error_count
+
+            if not result.success:
+                error_count += 1
+                log.warning("Failed to crawl page", url=result.url, error=result.error_message)
+                return None
+
+            doc = self.result_to_document(result, source)
+            crawled_count += 1
+
+            log.debug(
+                "Crawled document",
+                url=result.url,
+                title=doc.title,
+                words=doc.word_count,
+            )
+
+            await broadcast_event(
+                WSEvent.CRAWL_PROGRESS,
+                {
+                    "source_id": str(source_id),
+                    "pages_crawled": crawled_count,
+                    "max_pages": max_pages,
+                    "current_url": result.url,
+                    "percentage": min(100, int((crawled_count / max_pages) * 100)),
+                },
+            )
+
+            return doc
+
         try:
-            async for result in await self._crawler.arun(  # type: ignore[union-attr]
+            crawl_results = await self._crawler.arun(
                 url=source.url,
                 config=config,
-            ):
-                if not result.success:
-                    error_count += 1
-                    log.warning("Failed to crawl page", url=result.url, error=result.error_message)
-                    continue
-
-                # Create document from result
-                doc = self.result_to_document(result, source)
-                crawled_count += 1
-
-                log.debug(
-                    "Crawled document",
-                    url=result.url,
-                    title=doc.title,
-                    words=doc.word_count,
-                )
-
-                # Broadcast progress every page
-                await broadcast_event(
-                    WSEvent.CRAWL_PROGRESS,
-                    {
-                        "source_id": str(source_id),
-                        "pages_crawled": crawled_count,
-                        "max_pages": max_pages,
-                        "current_url": result.url,
-                        "percentage": min(100, int((crawled_count / max_pages) * 100)),
-                    },
-                )
-
-                yield doc
+            )
+            if isinstance(crawl_results, AsyncIterable):
+                async for raw_result in crawl_results:
+                    doc = await process_result(cast("CrawlResult", raw_result))
+                    if doc is not None:
+                        yield doc
+            else:
+                doc = await process_result(cast("CrawlResult", crawl_results))
+                if doc is not None:
+                    yield doc
 
         except Exception as e:
             # Check if this is a browser death - handle gracefully

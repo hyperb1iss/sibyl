@@ -248,8 +248,8 @@ async def run_worker_async() -> None:
             functions=WorkerSettings.functions,
             cron_jobs=WorkerSettings.cron_jobs,
             redis_settings=worker_settings,
-            on_startup=WorkerSettings.on_startup,  # pyright: ignore[reportAttributeAccessIssue]
-            on_shutdown=WorkerSettings.on_shutdown,  # pyright: ignore[reportAttributeAccessIssue]
+            on_startup=WorkerSettings.on_startup,
+            on_shutdown=WorkerSettings.on_shutdown,
             max_jobs=WorkerSettings.max_jobs,
             job_timeout=WorkerSettings.job_timeout,
             keep_result=WorkerSettings.keep_result,

@@ -180,8 +180,9 @@ async def create_task(
         runtime = await get_task_graph_runtime(str(org.id))
 
         # Create task entity with actor attribution
-        task = Task(  # type: ignore[call-arg]  # model_validator sets name from title
+        task = Task(
             id=str(uuid.uuid4()),
+            name=request.title,
             title=request.title,
             description=request.description or "",
             status=TaskStatus(request.status),
@@ -822,8 +823,9 @@ async def create_note(
         if not task:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
 
-        note = Note(  # type: ignore[call-arg]  # model_validator sets name from content
+        note = Note(
             id=note_id,
+            name=request.content[:50] + ("..." if len(request.content) > 50 else ""),
             task_id=task_id,
             content=request.content,
             author_type=request.author_type,

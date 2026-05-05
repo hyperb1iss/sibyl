@@ -228,20 +228,20 @@ def _show_path_context(project_id: str, json_out: bool) -> None:
     server_url = get_effective_server_url()
 
     # Fetch project details
-    project_data: dict | None = None
+    project_data: dict[str, object] | None = None
 
     @run_async
-    async def _fetch_project() -> dict | None:
+    async def _fetch_project() -> dict[str, object] | None:
         try:
             client = get_client()
-            return await client.get_entity(project_id)
+            return dict(await client.get_entity(project_id))
         except SibylClientError:
             return None
 
     project_data = _fetch_project()
 
     if json_out:
-        result = {
+        result: dict[str, object] = {
             "project_id": project_id,
             "matched_path": matched_path,
             "server_url": server_url,
@@ -264,10 +264,20 @@ def _show_path_context(project_id: str, json_out: bool) -> None:
 
     # Show project summary if we have data
     if project_data:
-        meta = project_data.get("metadata", {})
-        status_counts = meta.get("status_counts", {})
-        total = meta.get("total_tasks", 0)
-        pct = meta.get("progress_pct", 0.0)
+        meta_obj = project_data.get("metadata")
+        meta: dict[str, object] = {}
+        if isinstance(meta_obj, dict):
+            meta = {key: value for key, value in meta_obj.items() if isinstance(key, str)}
+        status_counts_obj = meta.get("status_counts", {})
+        status_counts: dict[str, object] = {}
+        if isinstance(status_counts_obj, dict):
+            status_counts = {
+                key: value for key, value in status_counts_obj.items() if isinstance(key, str)
+            }
+        total_obj = meta.get("total_tasks", 0)
+        total = total_obj if isinstance(total_obj, int) else 0
+        pct_obj = meta.get("progress_pct", 0.0)
+        pct = float(pct_obj) if isinstance(pct_obj, int | float) else 0.0
 
         if project_data.get("description"):
             console.print(f"  [dim]{project_data['description']}[/dim]")
@@ -280,10 +290,14 @@ def _show_path_context(project_id: str, json_out: bool) -> None:
             console.print(f"  {bar} {pct:.0f}%")
 
             # Brief status summary
-            doing = status_counts.get("doing", 0)
-            blocked = status_counts.get("blocked", 0)
-            review = status_counts.get("review", 0)
-            todo = status_counts.get("todo", 0)
+            doing_obj = status_counts.get("doing", 0)
+            blocked_obj = status_counts.get("blocked", 0)
+            review_obj = status_counts.get("review", 0)
+            todo_obj = status_counts.get("todo", 0)
+            doing = doing_obj if isinstance(doing_obj, int) else 0
+            blocked = blocked_obj if isinstance(blocked_obj, int) else 0
+            review = review_obj if isinstance(review_obj, int) else 0
+            todo = todo_obj if isinstance(todo_obj, int) else 0
 
             status_parts = []
             if doing:

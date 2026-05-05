@@ -321,8 +321,9 @@ async def add(
                 project_tags_used=len(project_tags),
             )
 
-            entity = Task(  # type: ignore[call-arg]  # model_validator sets name from title
+            entity = Task(
                 id=entity_id,
+                name=title,
                 title=title,
                 description=content,
                 status=TaskStatus.TODO,
@@ -338,8 +339,9 @@ async def add(
             )
 
         elif entity_type == "project":
-            entity = Project(  # type: ignore[call-arg]  # model_validator sets name from title
+            entity = Project(
                 id=entity_id,
+                name=title,
                 title=title,
                 description=content,
                 status=ProjectStatus.ACTIVE,
@@ -375,8 +377,9 @@ async def add(
                 except ValueError:
                     log.warning("invalid_target_date", due_date=due_date)
 
-            entity = Epic(  # type: ignore[call-arg]  # model_validator sets name from title
+            entity = Epic(
                 id=entity_id,
+                name=title,
                 title=title,
                 description=content,
                 status=EpicStatus.PLANNING,
