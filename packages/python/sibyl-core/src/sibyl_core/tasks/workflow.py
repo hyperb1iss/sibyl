@@ -17,6 +17,17 @@ if TYPE_CHECKING:
     from sibyl_core.graph.relationships import RelationshipManager
 
 log = structlog.get_logger()
+_MISSING = object()
+
+
+def _declared_driver_attr(driver: object, attr: str) -> object | None:
+    try:
+        attrs = vars(driver)
+    except TypeError:
+        return None
+
+    value = attrs.get(attr, _MISSING)
+    return None if value is _MISSING else value
 
 
 # =============================================================================
@@ -85,12 +96,15 @@ class TaskWorkflowEngine:
         get_org_driver = getattr(self._graph_client, "get_org_driver", None)
         if not callable(get_org_driver):
             return None
+        driver = get_org_driver(self._organization_id)
+        if _declared_driver_attr(driver, "episodic_edge_ops") is not None:
+            return driver
+
         try:
             from sibyl_core.backends.surreal import SurrealDriver
         except ImportError:
             return None
 
-        driver = get_org_driver(self._organization_id)
         return driver if isinstance(driver, SurrealDriver) else None
 
     async def _save_episode_mention(

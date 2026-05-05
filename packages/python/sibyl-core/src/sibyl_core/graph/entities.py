@@ -40,6 +40,7 @@ from sibyl_core.utils.log_safety import query_log_fields
 from sibyl_core.utils.resilience import GRAPHITI_RETRY
 
 log = structlog.get_logger()
+_MISSING = object()
 
 # Generic enum type for coercion
 TEnum = TypeVar("TEnum", bound=Enum)
@@ -47,9 +48,7 @@ TEnum = TypeVar("TEnum", bound=Enum)
 # Includes / which appears in paths like "create/cleanup" or local file paths
 _REDISEARCH_SPECIAL_CHARS = re.compile(r"[|&\-@()~$:*\\/]")
 _NON_EPISODIC_ID_PREFIXES = tuple(
-    f"{entity_type.value}_"
-    for entity_type in EntityType
-    if entity_type not in {EntityType.EPISODE}
+    f"{entity_type.value}_" for entity_type in EntityType if entity_type not in {EntityType.EPISODE}
 )
 _SEARCH_TERM_RE = re.compile(r"[a-z0-9_]{2,}")
 _SEARCH_STOP_WORDS = {
@@ -90,6 +89,16 @@ def sanitize_search_query(query: str) -> str:
 
 def _should_try_episodic_lookup(entity_id: str) -> bool:
     return not entity_id.startswith(_NON_EPISODIC_ID_PREFIXES)
+
+
+def _declared_driver_attr(driver: object, attr: str) -> object | None:
+    try:
+        attrs = vars(driver)
+    except TypeError:
+        return None
+
+    value = attrs.get(attr, _MISSING)
+    return None if value is _MISSING else value
 
 
 def _search_terms(query: str) -> list[str]:
@@ -194,6 +203,10 @@ class EntityManager:
         self._driver = client.get_org_driver(group_id)
 
     def _surreal_entity_node_ops(self):
+        ops = _declared_driver_attr(self._driver, "entity_node_ops")
+        if ops is not None:
+            return ops
+
         try:
             from sibyl_core.backends.surreal import SurrealDriver
         except ImportError:
@@ -204,6 +217,10 @@ class EntityManager:
         return None
 
     def _surreal_episode_node_ops(self):
+        ops = _declared_driver_attr(self._driver, "episode_node_ops")
+        if ops is not None:
+            return ops
+
         try:
             from sibyl_core.backends.surreal import SurrealDriver
         except ImportError:
@@ -469,9 +486,7 @@ class EntityManager:
                 "math::max([search::score(0), search::score(1), "
                 "search::score(2), search::score(3)]) END AS search_score,"
             )
-            order_by = (
-                "search_score DESC, updated_at DESC, created_at DESC, uuid DESC"
-            )
+            order_by = "search_score DESC, updated_at DESC, created_at DESC, uuid DESC"
 
         search_query = f"""
             SELECT uuid,
@@ -1497,10 +1512,7 @@ class EntityManager:
                     except Exception as exc:
                         log.debug("surreal_exact_name_record_failed", error=str(exc))
 
-            if (
-                len(exact_results) < limit
-                and self._surreal_should_search_episodes(entity_types)
-            ):
+            if len(exact_results) < limit and self._surreal_should_search_episodes(entity_types):
                 records = await self._surreal_search_episode_records(
                     query_lower=normalized_query,
                     limit=limit - len(exact_results),

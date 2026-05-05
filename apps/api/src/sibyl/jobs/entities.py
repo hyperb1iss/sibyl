@@ -13,6 +13,17 @@ from sibyl.api.event_types import WSEvent
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
 
 log = structlog.get_logger()
+_MISSING = object()
+
+
+def _declared_driver_attr(driver: object, attr: str) -> object | None:
+    try:
+        attrs = vars(driver)
+    except TypeError:
+        return None
+
+    value = attrs.get(attr, _MISSING)
+    return None if value is _MISSING else value
 
 
 def _get_surreal_driver(client: Any, group_id: str) -> Any | None:
@@ -28,7 +39,7 @@ def _get_surreal_driver(client: Any, group_id: str) -> Any | None:
     driver = get_org_driver(group_id)
     if isinstance(driver, SurrealDriver):
         return driver
-    if getattr(driver, "episodic_edge_ops", None) is not None:
+    if _declared_driver_attr(driver, "episodic_edge_ops") is not None:
         return driver
     return None
 

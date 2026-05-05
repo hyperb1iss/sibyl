@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ from sibyl.persistence.graph_runtime import (
     GraphEntityStore,
     GraphQueryAdapter,
     GraphRelationshipStore,
+    _surreal_driver_for,
     delete_graph_data,
 )
 from sibyl.persistence.legacy.graph import (
@@ -28,6 +30,13 @@ from sibyl.persistence.legacy.graph import (
 from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.storage import GraphStats, SearchFilters
+
+
+def test_surreal_driver_detection_uses_declared_ops_only() -> None:
+    declared_driver = SimpleNamespace(entity_edge_ops=object())
+
+    assert _surreal_driver_for(declared_driver) is declared_driver
+    assert _surreal_driver_for(MagicMock()) is None
 
 
 @pytest.mark.asyncio
@@ -75,7 +84,9 @@ async def test_delete_graph_data_falls_back_to_surreal_table_deletes() -> None:
         query.removeprefix("DELETE FROM ").removesuffix(" WHERE group_id = $group_id;")
         for query in queries
     ] == [*GRAPH_EDGES, *GRAPH_TABLES]
-    assert all(call.kwargs == {"group_id": "org-1"} for call in driver.execute_query.await_args_list)
+    assert all(
+        call.kwargs == {"group_id": "org-1"} for call in driver.execute_query.await_args_list
+    )
 
 
 @pytest.mark.asyncio

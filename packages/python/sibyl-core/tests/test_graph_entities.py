@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -197,6 +198,17 @@ class TestEntityManagerInit:
         """EntityManager scopes itself through the graph runtime helper."""
         EntityManager(mock_graph_client, group_id="my-org")
         mock_graph_client.get_org_driver.assert_called_once_with("my-org")
+
+    def test_surreal_like_driver_exposes_declared_node_ops(self) -> None:
+        entity_ops = object()
+        episode_ops = object()
+        driver = SimpleNamespace(entity_node_ops=entity_ops, episode_node_ops=episode_ops)
+        graph_client = MagicMock()
+        graph_client.get_org_driver.return_value = driver
+        manager = EntityManager(graph_client, group_id="org-123")
+
+        assert manager._surreal_entity_node_ops() is entity_ops
+        assert manager._surreal_episode_node_ops() is episode_ops
 
 
 # =============================================================================
@@ -1097,9 +1109,7 @@ class TestEntityListByType:
                         "entity_type": "task",
                         "group_id": "test-org-123",
                         "description": "Doing",
-                        "metadata": json.dumps(
-                            {"status": "doing", "project_id": "project-001"}
-                        ),
+                        "metadata": json.dumps({"status": "doing", "project_id": "project-001"}),
                         "created_at": datetime.now(UTC),
                     }
                 ],
@@ -1979,9 +1989,7 @@ class TestEntitySearch:
             "metadata": json.dumps({"category": "search"}),
         }
 
-        surreal_entity_manager._driver.execute_query = AsyncMock(
-            side_effect=[[], [partial_record]]
-        )
+        surreal_entity_manager._driver.execute_query = AsyncMock(side_effect=[[], [partial_record]])
 
         results = await surreal_entity_manager.search(
             "graph search",
@@ -2202,7 +2210,9 @@ class TestEntitySearch:
         assert surreal_entity_manager._driver.execute_query.await_count == 1
         exact_query = surreal_entity_manager._driver.execute_query.await_args.args[0]
         assert "FROM entity" in exact_query
-        assert "ORDER BY search_score DESC, updated_at DESC, created_at DESC, uuid DESC" in exact_query
+        assert (
+            "ORDER BY search_score DESC, updated_at DESC, created_at DESC, uuid DESC" in exact_query
+        )
         assert "attributes.updated_at DESC" not in exact_query
         assert "string::contains" not in exact_query
 

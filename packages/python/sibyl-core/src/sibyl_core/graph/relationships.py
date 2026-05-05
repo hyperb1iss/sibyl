@@ -20,6 +20,7 @@ from sibyl_core.graph.client import GraphClient
 from sibyl_core.models.entities import Entity, Relationship, RelationshipType
 
 log = structlog.get_logger()
+_MISSING = object()
 
 # Whitelist of valid relationship types for Cypher queries
 # Cypher doesn't support parameterized relationship types, so we validate against this
@@ -28,6 +29,16 @@ VALID_RELATIONSHIP_TYPES = frozenset(rt.value for rt in RelationshipType)
 
 def _is_episode_id(node_id: str) -> bool:
     return node_id.startswith("episode")
+
+
+def _declared_driver_attr(driver: object, attr: str) -> object | None:
+    try:
+        attrs = vars(driver)
+    except TypeError:
+        return None
+
+    value = attrs.get(attr, _MISSING)
+    return None if value is _MISSING else value
 
 
 def _validate_relationship_type(rel_type: str) -> str:
@@ -90,6 +101,10 @@ class RelationshipManager:
         self._driver = client.get_org_driver(group_id)
 
     def _surreal_entity_edge_ops(self):
+        ops = _declared_driver_attr(self._driver, "entity_edge_ops")
+        if ops is not None:
+            return ops
+
         try:
             from sibyl_core.backends.surreal import SurrealDriver
         except ImportError:
@@ -100,6 +115,10 @@ class RelationshipManager:
         return None
 
     def _surreal_episodic_edge_ops(self):
+        ops = _declared_driver_attr(self._driver, "episodic_edge_ops")
+        if ops is not None:
+            return ops
+
         try:
             from sibyl_core.backends.surreal import SurrealDriver
         except ImportError:
@@ -110,6 +129,10 @@ class RelationshipManager:
         return None
 
     def _surreal_entity_node_ops(self):
+        ops = _declared_driver_attr(self._driver, "entity_node_ops")
+        if ops is not None:
+            return ops
+
         try:
             from sibyl_core.backends.surreal import SurrealDriver
         except ImportError:
@@ -582,7 +605,9 @@ class RelationshipManager:
                         group_ids=[self._group_id],
                         limit=1000,
                     )
-                    include_mentions = not type_values or RelationshipType.RELATED_TO.value in type_values
+                    include_mentions = (
+                        not type_values or RelationshipType.RELATED_TO.value in type_values
+                    )
                     if direction != "incoming" and include_mentions:
                         for edge in mention_edges:
                             if edge.group_id == self._group_id:

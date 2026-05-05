@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -193,6 +194,38 @@ class TestRelationshipCreate:
         assert edge.target_node_uuid == "task-123"
 
     @pytest.mark.asyncio
+    async def test_surreal_like_driver_routes_episode_sources_to_mentions(self) -> None:
+        relationship = Relationship(
+            id="rel-episode-task",
+            relationship_type=RelationshipType.DERIVED_FROM,
+            source_id="episode_task-123",
+            target_id="task-123",
+        )
+        entity_ops = SimpleNamespace(get_between_nodes=AsyncMock(), save=AsyncMock())
+        episodic_ops = SimpleNamespace(
+            get_between_nodes=AsyncMock(return_value=[]),
+            save=AsyncMock(),
+        )
+        driver = SimpleNamespace(
+            entity_edge_ops=entity_ops,
+            episodic_edge_ops=episodic_ops,
+        )
+        graph_client = MagicMock()
+        graph_client.get_org_driver.return_value = driver
+        manager = RelationshipManager(graph_client, group_id="org-123")
+
+        result = await manager.create(relationship)
+
+        assert result == relationship.id
+        entity_ops.get_between_nodes.assert_not_awaited()
+        entity_ops.save.assert_not_awaited()
+        episodic_ops.save.assert_awaited_once()
+        edge = episodic_ops.save.await_args.args[1]
+        assert edge.uuid == "rel-episode-task"
+        assert edge.source_node_uuid == "episode_task-123"
+        assert edge.target_node_uuid == "task-123"
+
+    @pytest.mark.asyncio
     async def test_create_relationship_reuses_existing_episode_mentions(
         self,
         surreal_relationship_manager: RelationshipManager,
@@ -231,7 +264,9 @@ class TestRelationshipCreate:
         surreal_relationship_manager._driver.execute_query = AsyncMock()
 
         with (
-            patch.object(surreal_relationship_manager, "_surreal_entity_edge_ops", return_value=None),
+            patch.object(
+                surreal_relationship_manager, "_surreal_entity_edge_ops", return_value=None
+            ),
             pytest.raises(GraphError, match="native edge operations"),
         ):
             await surreal_relationship_manager.create(sample_relationship)
@@ -482,9 +517,9 @@ class TestRelationshipBulkCreate:
         )
         ops.save_bulk.assert_awaited_once()
         saved_edges = ops.save_bulk.await_args.args[1]
-        assert [(edge.source_node_uuid, edge.name, edge.target_node_uuid) for edge in saved_edges] == [
-            ("entity-003", "BELONGS_TO", "entity-004")
-        ]
+        assert [
+            (edge.source_node_uuid, edge.name, edge.target_node_uuid) for edge in saved_edges
+        ] == [("entity-003", "BELONGS_TO", "entity-004")]
 
     @pytest.mark.asyncio
     async def test_bulk_create_does_not_duplicate_existing_surreal_triplets_live(
@@ -682,7 +717,9 @@ class TestGetForEntity:
         surreal_relationship_manager._driver.execute_query = AsyncMock()
 
         with (
-            patch.object(surreal_relationship_manager, "_surreal_entity_edge_ops", return_value=None),
+            patch.object(
+                surreal_relationship_manager, "_surreal_entity_edge_ops", return_value=None
+            ),
             pytest.raises(RuntimeError, match="native edge operations"),
         ):
             await surreal_relationship_manager.get_for_entity("entity-001")
@@ -1177,7 +1214,9 @@ class TestDeleteForEntity:
         surreal_relationship_manager._driver.execute_query = AsyncMock()
 
         with (
-            patch.object(surreal_relationship_manager, "_surreal_entity_edge_ops", return_value=None),
+            patch.object(
+                surreal_relationship_manager, "_surreal_entity_edge_ops", return_value=None
+            ),
             pytest.raises(RuntimeError, match="native edge operations"),
         ):
             await surreal_relationship_manager.delete_for_entity("entity-001")
@@ -1285,7 +1324,9 @@ class TestListAll:
         surreal_relationship_manager._driver.execute_query = AsyncMock()
 
         with (
-            patch.object(surreal_relationship_manager, "_surreal_entity_edge_ops", return_value=None),
+            patch.object(
+                surreal_relationship_manager, "_surreal_entity_edge_ops", return_value=None
+            ),
             pytest.raises(RuntimeError, match="native edge operations"),
         ):
             await surreal_relationship_manager.list_all()

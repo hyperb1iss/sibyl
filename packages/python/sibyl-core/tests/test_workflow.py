@@ -1,6 +1,7 @@
 """Tests for task workflow state machine and estimation."""
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -679,6 +680,34 @@ class TestWorkflowEngine:
             target_id="pattern_surreal",
             link_id="rel_inherit_episode_task_episode_pattern_surreal",
         )
+
+    @pytest.mark.asyncio
+    async def test_surreal_like_driver_saves_episode_mentions(
+        self,
+        mock_entity_manager: MockEntityManager,
+        mock_relationship_manager: MockRelationshipManager,
+    ) -> None:
+        edge_ops = SimpleNamespace(save=AsyncMock())
+        driver = SimpleNamespace(episodic_edge_ops=edge_ops)
+        graph_client = SimpleNamespace(get_org_driver=lambda group_id: driver)
+        workflow_engine = TaskWorkflowEngine(
+            entity_manager=mock_entity_manager,  # type: ignore[arg-type]
+            relationship_manager=mock_relationship_manager,  # type: ignore[arg-type]
+            graph_client=graph_client,  # type: ignore[arg-type]
+            organization_id="org_test123",
+        )
+
+        assert await workflow_engine._save_episode_mention(
+            episode_id="episode_task_episode",
+            target_id="task_episode",
+            link_id="rel_episode_task_episode",
+        )
+
+        edge_ops.save.assert_awaited_once()
+        saved_edge = edge_ops.save.await_args.args[1]
+        assert saved_edge.group_id == "org_test123"
+        assert saved_edge.source_node_uuid == "episode_task_episode"
+        assert saved_edge.target_node_uuid == "task_episode"
 
     @pytest.mark.asyncio
     async def test_create_learning_episode_skips_missing_surreal_mention_endpoint(

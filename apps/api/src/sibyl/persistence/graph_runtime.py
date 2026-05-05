@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from sibyl_core.graph.communities import ClusterSummary, HierarchicalGraphData
 
 log = structlog.get_logger()
+_MISSING = object()
 
 
 def _decode_cursor(cursor: str | None) -> int:
@@ -113,22 +114,67 @@ async def _surreal_group_count(driver: Any, table: str, group_id: str) -> int:
 
 
 def _surreal_driver_for(driver: Any) -> Any | None:
+    if _has_declared_surreal_ops(driver):
+        return driver
+
+    if _is_surreal_driver_instance(driver):
+        return driver
+
+    return None
+
+
+def _is_surreal_driver_instance(driver: object) -> bool:
     try:
         from sibyl_core.backends.surreal import SurrealDriver
     except ImportError:
+        return False
+
+    return isinstance(driver, SurrealDriver)
+
+
+def _declared_driver_attr(driver: object, attr: str) -> object | None:
+    try:
+        attrs = vars(driver)
+    except TypeError:
         return None
 
-    return driver if isinstance(driver, SurrealDriver) else None
+    value = attrs.get(attr, _MISSING)
+    return None if value is _MISSING else value
+
+
+def _has_declared_surreal_ops(driver: object) -> bool:
+    return any(
+        _declared_driver_attr(driver, attr) is not None
+        for attr in ("graph_ops", "entity_node_ops", "entity_edge_ops", "episodic_edge_ops")
+    )
 
 
 def _surreal_entity_node_ops_for(driver: Any) -> Any | None:
     surreal_driver = _surreal_driver_for(driver)
-    return getattr(surreal_driver, "entity_node_ops", None) if surreal_driver is not None else None
+    if surreal_driver is None:
+        return None
+    declared = _declared_driver_attr(surreal_driver, "entity_node_ops")
+    if declared is not None:
+        return declared
+    return (
+        getattr(surreal_driver, "entity_node_ops", None)
+        if _is_surreal_driver_instance(surreal_driver)
+        else None
+    )
 
 
 def _surreal_entity_edge_ops_for(driver: Any) -> Any | None:
     surreal_driver = _surreal_driver_for(driver)
-    return getattr(surreal_driver, "entity_edge_ops", None) if surreal_driver is not None else None
+    if surreal_driver is None:
+        return None
+    declared = _declared_driver_attr(surreal_driver, "entity_edge_ops")
+    if declared is not None:
+        return declared
+    return (
+        getattr(surreal_driver, "entity_edge_ops", None)
+        if _is_surreal_driver_instance(surreal_driver)
+        else None
+    )
 
 
 def _assert_legacy_graph_query_allowed(driver: Any, operation: str) -> None:
