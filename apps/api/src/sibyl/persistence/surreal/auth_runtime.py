@@ -1624,13 +1624,15 @@ async def resolve_request_user(request):
 
 
 async def validate_access_session(token: str) -> bool:
+    session_id = _session_id_from_access_token(token)
+    if session_id is not None:
+        cached = access_session_cache.get(session_id)
+        if cached is not None:
+            return cached
+
     async with _auth_client_scope() as client:
         sessions = SurrealSessionRepository.from_client(client)
-        session_id = _session_id_from_access_token(token)
         if session_id is not None:
-            cached = access_session_cache.get(session_id)
-            if cached is not None:
-                return cached
             session = await sessions.get_session_by_id(session_id)
             if session is None:
                 access_session_cache.mark_revoked(session_id)

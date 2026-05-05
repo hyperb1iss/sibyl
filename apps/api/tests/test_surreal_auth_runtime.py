@@ -339,6 +339,27 @@ async def test_validate_access_session_reuses_sid_cache(
 
 
 @pytest.mark.asyncio
+async def test_validate_access_session_skips_auth_scope_on_cache_hit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _auth_session()
+    access_session_cache.store_session(session)
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: (_ for _ in ()).throw(AssertionError("unexpected auth scope")),
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "decode_token_unverified",
+        lambda token: {"sid": str(session.id)},
+    )
+
+    assert await surreal_auth_runtime.validate_access_session("access-token") is True
+
+
+@pytest.mark.asyncio
 async def test_validate_access_session_rejects_cached_revocation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
