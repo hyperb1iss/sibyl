@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Protocol, cast
 from uuid import uuid4
 
 from sibyl_core.backends.surreal import SurrealContentClient
@@ -31,6 +31,11 @@ _UPSERT_RECORD = {
     "raw_captures": "UPSERT raw_captures CONTENT $record WHERE uuid = $uuid;",
 }
 AGENT_DIARY_CAPTURE_SURFACE = "agent_diary"
+type SurrealRecord = dict[str, object]
+
+
+class RawExecuteQuery(Protocol):
+    async def __call__(self, query: str, **params: object) -> object: ...
 
 
 class MemoryScope(StrEnum):
@@ -117,8 +122,8 @@ class RawMemory:
     title: str = ""
     raw_content: str = ""
     tags: list[str] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
-    provenance: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
+    provenance: dict[str, object] = field(default_factory=dict)
     capture_surface: str | None = None
     captured_at: datetime | None = None
     created_at: datetime | None = None
@@ -153,32 +158,33 @@ async def close_shared_surreal_content_client() -> None:
 
 
 @asynccontextmanager
-async def surreal_content_client() -> Any:
+async def surreal_content_client() -> AsyncIterator[SurrealContentClient]:
     yield await get_shared_surreal_content_client()
 
 
-def _normalize_record(record: Any) -> dict[str, Any] | None:
+def _normalize_record(record: object) -> SurrealRecord | None:
     if not isinstance(record, dict):
         return None
-    if "result" in record and ("status" in record or "time" in record):
+    out = {str(key): value for key, value in record.items()}
+    if "result" in out and ("status" in out or "time" in out):
         return None
-    out = dict(record)
     out.pop("id", None)
     return out
 
 
-def _normalize_records(result: Any) -> list[dict[str, Any]]:
+def _normalize_records(result: object) -> list[SurrealRecord]:
     if result is None:
         return []
     if isinstance(result, dict):
-        if "result" in result and ("status" in result or "time" in result):
-            return _normalize_records(result.get("result"))
-        record = _normalize_record(result)
+        payload = {str(key): value for key, value in result.items()}
+        if "result" in payload and ("status" in payload or "time" in payload):
+            return _normalize_records(payload.get("result"))
+        record = _normalize_record(payload)
         return [record] if record is not None else []
     if not isinstance(result, list):
         return []
 
-    records: list[dict[str, Any]] = []
+    records: list[SurrealRecord] = []
     for item in result:
         records.extend(_normalize_records(item))
     return records
@@ -261,10 +267,23 @@ def _coerce_datetime(value: object | None) -> datetime | None:
     return None
 
 
-def _coerce_dict(value: object | None) -> dict[str, Any]:
+def _coerce_dict(value: object | None) -> dict[str, object]:
     if not isinstance(value, dict):
         return {}
     return {str(key): item for key, item in value.items()}
+
+
+def _coerce_float(value: object | None, *, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str) and value:
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
 
 
 def _coerce_str_list(value: object | None) -> list[str]:
@@ -315,7 +334,7 @@ def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _source_from_record(record: dict[str, Any]) -> ContentSource:
+def _source_from_record(record: Mapping[str, object]) -> ContentSource:
     return ContentSource(
         id=_coerce_str(record.get("uuid")),
         organization_id=_coerce_str(record.get("organization_id")),
@@ -334,7 +353,7 @@ def _source_from_record(record: dict[str, Any]) -> ContentSource:
     )
 
 
-def _document_from_record(record: dict[str, Any]) -> ContentDocument:
+def _document_from_record(record: Mapping[str, object]) -> ContentDocument:
     return ContentDocument(
         id=_coerce_str(record.get("uuid")),
         source_id=_coerce_str(record.get("source_id")),
@@ -345,7 +364,7 @@ def _document_from_record(record: dict[str, Any]) -> ContentDocument:
     )
 
 
-def _chunk_from_record(record: dict[str, Any]) -> ContentChunk:
+def _chunk_from_record(record: Mapping[str, object]) -> ContentChunk:
     return ContentChunk(
         id=_coerce_str(record.get("uuid")),
         document_id=_coerce_str(record.get("document_id")),
@@ -361,7 +380,7 @@ def _chunk_from_record(record: dict[str, Any]) -> ContentChunk:
     )
 
 
-def _raw_memory_from_record(record: dict[str, Any]) -> RawMemory:
+def _raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
     return RawMemory(
         id=_coerce_str(record.get("uuid")),
         organization_id=_coerce_str(record.get("organization_id")),
@@ -377,11 +396,11 @@ def _raw_memory_from_record(record: dict[str, Any]) -> RawMemory:
         capture_surface=_coerce_optional_str(record.get("capture_surface")),
         captured_at=_coerce_datetime(record.get("captured_at")),
         created_at=_coerce_datetime(record.get("created_at")),
-        score=float(record.get("score") or 0.0),
+        score=_coerce_float(record.get("score")),
     )
 
 
-def _source_record(source: ContentSource) -> dict[str, Any]:
+def _source_record(source: ContentSource) -> SurrealRecord:
     return {
         "uuid": source.id,
         "organization_id": source.organization_id,
@@ -400,7 +419,7 @@ def _source_record(source: ContentSource) -> dict[str, Any]:
     }
 
 
-def _raw_memory_record(memory: RawMemory) -> dict[str, Any]:
+def _raw_memory_record(memory: RawMemory) -> SurrealRecord:
     return {
         "uuid": memory.id,
         "organization_id": memory.organization_id,
@@ -422,8 +441,8 @@ def _raw_memory_record(memory: RawMemory) -> dict[str, Any]:
 
 
 async def _select_many(
-    client: SurrealContentClient, query: str, **params: Any
-) -> list[dict[str, Any]]:
+    client: SurrealContentClient, query: str, **params: object
+) -> list[SurrealRecord]:
     result = await client.execute_query(query, **params)
     error = _query_error(result)
     if error is not None:
@@ -431,7 +450,7 @@ async def _select_many(
     return _normalize_records(result)
 
 
-def _normalize_raw_statement_records(result: object, *, statement_index: int) -> list[dict[str, Any]]:
+def _normalize_raw_statement_records(result: object, *, statement_index: int) -> list[SurrealRecord]:
     if isinstance(result, dict):
         payload = {str(key): value for key, value in result.items()}
         statements = payload.get("result")
@@ -448,24 +467,22 @@ def _normalize_raw_statement_records(result: object, *, statement_index: int) ->
 async def _select_many_raw(
     client: SurrealContentClient,
     query: str,
-    *,
-    statement_index: int = -1,
-    **params: Any,
-) -> list[dict[str, Any]]:
+    **params: object,
+) -> list[SurrealRecord]:
     execute_query_raw = getattr(client, "execute_query_raw", None)
-    if execute_query_raw is not None:
-        result = await execute_query_raw(query, **params)
+    if callable(execute_query_raw):
+        result = await cast("RawExecuteQuery", execute_query_raw)(query, **params)
     else:
         result = await client.execute_query(query, **params)
     error = _query_error(result)
     if error is not None:
         raise RuntimeError(error)
-    return _normalize_raw_statement_records(result, statement_index=statement_index)
+    return _normalize_raw_statement_records(result, statement_index=-1)
 
 
 async def _select_one(
-    client: SurrealContentClient, query: str, **params: Any
-) -> dict[str, Any] | None:
+    client: SurrealContentClient, query: str, **params: object
+) -> SurrealRecord | None:
     rows = await _select_many(client, query, **params)
     return rows[0] if rows else None
 
@@ -482,8 +499,8 @@ async def _replace_record(
     table: str,
     *,
     uuid: str,
-    record: dict[str, Any],
-) -> dict[str, Any]:
+    record: SurrealRecord,
+) -> SurrealRecord:
     rows = await _select_many(client, _UPSERT_RECORD[table], uuid=uuid, record=record)
     if rows:
         return rows[0]
@@ -549,7 +566,7 @@ async def _load_documents_for_source_ids(
     client: SurrealContentClient,
     source_ids: list[str],
 ) -> list[ContentDocument]:
-    rows: list[dict[str, Any]] = []
+    rows: list[SurrealRecord] = []
     for batch in _value_batches(source_ids):
         rows.extend(
             await _select_many(
@@ -566,7 +583,7 @@ async def _load_search_documents_by_ids(
     client: SurrealContentClient,
     document_ids: list[str],
 ) -> list[ContentDocument]:
-    rows: list[dict[str, Any]] = []
+    rows: list[SurrealRecord] = []
     for batch in _value_batches(document_ids):
         rows.extend(
             await _select_many(
@@ -584,7 +601,7 @@ async def _load_chunks_for_document_ids(
     client: SurrealContentClient,
     document_ids: list[str],
 ) -> list[ContentChunk]:
-    rows: list[dict[str, Any]] = []
+    rows: list[SurrealRecord] = []
     for batch in _value_batches(document_ids):
         rows.extend(
             await _select_many(
@@ -605,13 +622,13 @@ def _memory_scope_where(
     scope_key: str | None,
     agent_id: str | None = None,
     project_id: str | None = None,
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, object]]:
     _validate_raw_memory_scope(memory_scope, scope_key)
     clauses = [
         "organization_id = $organization_id",
         "memory_scope = $memory_scope",
     ]
-    params: dict[str, Any] = {
+    params: dict[str, object] = {
         "organization_id": organization_id,
         "memory_scope": memory_scope.value,
     }
@@ -680,8 +697,8 @@ async def remember_raw_memory(
     memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
     scope_key: str | None = None,
     tags: list[str] | None = None,
-    metadata: dict[str, Any] | None = None,
-    provenance: dict[str, Any] | None = None,
+    metadata: dict[str, object] | None = None,
+    provenance: dict[str, object] | None = None,
     capture_surface: str | None = None,
 ) -> RawMemory:
     now = _utcnow()
@@ -767,7 +784,7 @@ async def recall_raw_memory(
 async def get_or_create_source(
     url: str,
     depth: int,
-    data: dict[str, Any],
+    data: dict[str, object],
     *,
     organization_id: str,
 ) -> tuple[ContentSource, bool]:
@@ -892,7 +909,7 @@ def _document_search_candidate_limit(limit: int) -> int:
     return min(max(limit * 5, limit, 1), 100)
 
 
-def _document_language_clause(language: str | None) -> tuple[str, dict[str, Any]]:
+def _document_language_clause(language: str | None) -> tuple[str, dict[str, object]]:
     if not language:
         return "", {}
     return (
@@ -902,7 +919,7 @@ def _document_language_clause(language: str | None) -> tuple[str, dict[str, Any]
 
 
 def _hydrate_document_search_rows(
-    rows: list[dict[str, Any]],
+    rows: list[SurrealRecord],
     *,
     documents_by_id: dict[str, ContentDocument],
     sources_by_id: dict[str, ContentSource],
@@ -916,7 +933,7 @@ def _hydrate_document_search_rows(
         source = sources_by_id.get(document.source_id)
         if source is None:
             continue
-        hydrated.append((chunk, document, source.name, source.id, float(row.get("score") or 0.0)))
+        hydrated.append((chunk, document, source.name, source.id, _coerce_float(row.get("score"))))
     return hydrated
 
 
@@ -925,9 +942,9 @@ def _source_search_scope_clause(
     organization_id: str,
     source_id: str | None,
     source_name: str | None,
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, object]]:
     clauses = ["organization_id = $organization_id"]
-    params: dict[str, Any] = {"organization_id": organization_id}
+    params: dict[str, object] = {"organization_id": organization_id}
     if source_id is not None:
         clauses.append("uuid = $source_id")
         params["source_id"] = source_id
@@ -964,7 +981,7 @@ async def _load_search_sources(
 
 
 def _document_ids_from_search_rows(
-    *row_groups: list[dict[str, Any]],
+    *row_groups: list[SurrealRecord],
 ) -> list[str]:
     document_ids: set[str] = set()
     for rows in row_groups:
@@ -1007,8 +1024,15 @@ async def search_document_chunks(
         source_ids = [source.id for source in sources]
         sources_by_id = {source.id: source for source in sources}
 
-        vector_rows: list[dict[str, Any]] = []
+        vector_rows: list[SurrealRecord] = []
         if query_embedding is not None:
+            vector_params: dict[str, object] = {
+                "source_ids": source_ids,
+                "query_embedding": query_embedding,
+                "similarity_threshold": similarity_threshold,
+                "candidate_limit": candidate_limit,
+                **language_params,
+            }
             try:
                 vector_rows = await with_timeout(
                     _select_many_raw(
@@ -1026,11 +1050,7 @@ async def search_document_chunks(
                         f"AND embedding <|{candidate_limit}, 40|> $query_embedding"
                         ") WHERE score >= $similarity_threshold "
                         "ORDER BY score DESC LIMIT $candidate_limit;",
-                        source_ids=source_ids,
-                        query_embedding=query_embedding,
-                        similarity_threshold=similarity_threshold,
-                        candidate_limit=candidate_limit,
-                        **language_params,
+                        **vector_params,
                     ),
                     timeout_seconds=_DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
                     operation_name="surreal_document_vector_search",
@@ -1038,8 +1058,14 @@ async def search_document_chunks(
             except (RuntimeError, TimeoutError) as exc:
                 errors.append(str(exc))
 
-        lexical_rows: list[dict[str, Any]] = []
+        lexical_rows: list[SurrealRecord] = []
         if lexical_query_text:
+            lexical_params: dict[str, object] = {
+                "source_ids": source_ids,
+                "search_query": lexical_query_text,
+                "candidate_limit": candidate_limit,
+                **language_params,
+            }
             try:
                 lexical_rows = await with_timeout(
                     _select_many_raw(
@@ -1055,10 +1081,7 @@ async def search_document_chunks(
                         f"{language_clause} "
                         "AND content @0@ $search_query "
                         "ORDER BY score DESC LIMIT $candidate_limit;",
-                        source_ids=source_ids,
-                        search_query=lexical_query_text,
-                        candidate_limit=candidate_limit,
-                        **language_params,
+                        **lexical_params,
                     ),
                     timeout_seconds=_DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,
                     operation_name="surreal_document_lexical_search",

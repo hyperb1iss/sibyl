@@ -328,16 +328,17 @@ def _item_from_result(result: SearchResult, facet: ContextFacet) -> ContextItem:
 def _item_from_raw_memory(memory: RawMemory) -> ContextItem:
     created_at = memory.captured_at.isoformat() if memory.captured_at else None
     source = memory.source_id or memory.capture_surface
-    quality_values = dict(
+    project_id = memory.metadata.get("project_id") or (
+        memory.scope_key if memory.memory_scope.value == "project" else None
+    )
+    quality = ContextItemQualityMetadata(
         origin="raw_memory",
         source=source,
         created_at=created_at,
         updated_at=None,
         valid_at=created_at,
-        project_id=memory.metadata.get("project_id")
-        or (memory.scope_key if memory.memory_scope.value == "project" else None),
+        project_id=project_id if isinstance(project_id, str) else None,
     )
-    quality = ContextItemQualityMetadata(**quality_values)
     metadata = {
         "source_id": memory.source_id,
         "principal_id": memory.principal_id,
