@@ -10,7 +10,17 @@ from sibyl.api.routes import users as user_routes
 
 def _auth() -> SimpleNamespace:
     return SimpleNamespace(
-        user=SimpleNamespace(id=uuid4()),
+        user=SimpleNamespace(
+            id=uuid4(),
+            email="nova@example.com",
+            name="Nova",
+            bio="hello",
+            timezone="UTC",
+            avatar_url="https://example.com/avatar.png",
+            email_verified_at=datetime.now(UTC).replace(tzinfo=None),
+            created_at=datetime.now(UTC).replace(tzinfo=None),
+            preferences={},
+        ),
         organization=None,
     )
 
@@ -90,30 +100,24 @@ async def test_remove_connection_uses_runtime_helper(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_get_profile_uses_runtime_user_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_get_profile_uses_auth_context_user() -> None:
     auth = _auth()
-    created_at = datetime.now(UTC).replace(tzinfo=None)
-    email_verified_at = datetime.now(UTC).replace(tzinfo=None)
-    get_user = AsyncMock(
-        return_value=SimpleNamespace(
-            id=auth.user.id,
-            email="nova@example.com",
-            name="Nova",
-            bio="hello",
-            timezone="UTC",
-            avatar_url="https://example.com/avatar.png",
-            email_verified_at=email_verified_at,
-            created_at=created_at,
-        )
-    )
-    monkeypatch.setattr(user_routes, "get_user_by_id", get_user)
 
     response = await user_routes.get_profile(auth=auth)
 
-    get_user.assert_awaited_once_with(auth.user.id)
     assert response.id == auth.user.id
     assert response.email == "nova@example.com"
-    assert response.created_at is created_at
+    assert response.created_at is auth.user.created_at
+
+
+@pytest.mark.asyncio
+async def test_get_preferences_uses_auth_context_user() -> None:
+    auth = _auth()
+    auth.user.preferences = {"theme": "dark"}
+
+    response = await user_routes.get_preferences(auth=auth)
+
+    assert response.preferences == {"theme": "dark"}
 
 
 @pytest.mark.asyncio
@@ -122,19 +126,13 @@ async def test_update_preferences_merges_and_uses_runtime_patch(
 ) -> None:
     auth = _auth()
     auth.organization = SimpleNamespace(id=uuid4())
-    get_user = AsyncMock(
-        return_value=SimpleNamespace(
-            id=auth.user.id,
-            preferences={"theme": "light"},
-        )
-    )
+    auth.user.preferences = {"theme": "light"}
     patch_user = AsyncMock(
         return_value=SimpleNamespace(
             id=auth.user.id,
             preferences={"theme": "light", "compact": True},
         )
     )
-    monkeypatch.setattr(user_routes, "get_user_by_id", get_user)
     monkeypatch.setattr(user_routes, "patch_auth_user", patch_user)
 
     response = await user_routes.update_preferences(

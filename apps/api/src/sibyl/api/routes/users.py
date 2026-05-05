@@ -15,7 +15,6 @@ from sibyl.auth.dependencies import get_auth_context
 from sibyl.auth.http import select_access_token
 from sibyl.persistence.auth_runtime import (
     confirm_password_reset as confirm_password_reset_token,
-    get_user_by_id,
     list_oauth_connections,
     list_user_sessions,
     patch_auth_user,
@@ -124,9 +123,7 @@ async def get_profile(
     auth: AuthContext = Depends(get_auth_context),
 ) -> UserProfileResponse:
     """Get current user's profile."""
-    user = await get_user_by_id(auth.user.id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = auth.user
 
     return UserProfileResponse(
         id=user.id,
@@ -178,11 +175,7 @@ async def get_preferences(
     auth: AuthContext = Depends(get_auth_context),
 ) -> PreferencesResponse:
     """Get current user's preferences."""
-    user = await get_user_by_id(auth.user.id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    return PreferencesResponse(preferences=user.preferences or {})
+    return PreferencesResponse(preferences=auth.user.preferences or {})
 
 
 @router.patch("/me/preferences", response_model=PreferencesResponse)
@@ -191,11 +184,7 @@ async def update_preferences(
     auth: AuthContext = Depends(get_auth_context),
 ) -> PreferencesResponse:
     """Update current user's preferences (merge)."""
-    user = await get_user_by_id(auth.user.id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    current = user.preferences or {}
+    current = dict(auth.user.preferences or {})
     current.update(data.preferences)
     user = await patch_auth_user(
         user_id=auth.user.id,
