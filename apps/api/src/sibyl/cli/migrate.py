@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
+from uuid import uuid4
 
 import typer
 
@@ -55,6 +57,7 @@ DEFAULT_REHEARSAL_BASELINES_DIR = Path("baselines")
 DEFAULT_REHEARSAL_MANIFEST = Path(".moon/cache/baseline-runtime-manifest.json")
 DEFAULT_REHEARSAL_EMAIL = "baseline-corpus@sibyl.dev"
 DEFAULT_REHEARSAL_PASSWORD = "baseline-corpus-password-secure-123!"  # noqa: S105
+DEFAULT_AUTH_FLOW_PASSWORD = "auth-flow-password-secure-123!"  # noqa: S105
 DEFAULT_CUTOVER_BENCH_LABEL = "cutover-acceptance"
 
 
@@ -199,6 +202,31 @@ async def _replay_baseline(
     )
 
 
+def _resolve_auth_flow_email(auth_flow_email: str) -> str:
+    if auth_flow_email.strip():
+        return auth_flow_email.strip()
+    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    suffix = uuid4().hex[:8]
+    return f"auth-flow-{timestamp}-{suffix}@sibyl.dev"
+
+
+async def _run_auth_flow_gate(
+    *,
+    base_url: str,
+    auth_flow_email: str,
+    auth_flow_password: str,
+) -> None:
+    from sibyl.cli.auth_flow import replay_auth_flow
+
+    resolved_email = _resolve_auth_flow_email(auth_flow_email)
+    result = await replay_auth_flow(
+        base_url=base_url,
+        email=resolved_email,
+        password=auth_flow_password,
+    )
+    info(f"Auth flow exercised {len(result.steps)} steps for {result.primary_email}")
+
+
 def _run_moon_task(task: list[str], *, label: str) -> None:
     moon = shutil.which("moon")
     if moon is None:
@@ -224,6 +252,7 @@ def _run_moon_task(task: list[str], *, label: str) -> None:
 
 def _print_cutover_plan(
     *,
+    run_auth_flow: bool,
     run_baseline: bool,
     run_bench_live_smoke: bool,
     run_bench_live: bool,
@@ -231,17 +260,23 @@ def _print_cutover_plan(
     manifest_path: Path,
 ) -> None:
     info("Cutover plan:")
-    info("  1. Confirm legacy writes are frozen")
-    info("  2. Import archive into the Surreal runtime")
-    info("  3. Verify imported counts and sample entities")
+    steps = [
+        "Confirm legacy writes are frozen",
+        "Import archive into the Surreal runtime",
+        "Verify imported counts and sample entities",
+    ]
+    if run_auth_flow:
+        steps.append("Run auth-flow acceptance harness")
     if run_baseline:
-        info("  4. Replay deterministic runtime baseline")
+        steps.append("Replay deterministic runtime baseline")
     if run_bench_live_smoke:
-        info("  5. Run bench-live-smoke acceptance check")
+        steps.append("Run bench-live-smoke acceptance check")
     if run_bench_live:
-        info("  6. Run bench-live artifact capture")
+        steps.append("Run bench-live artifact capture")
     if reopen_writes:
-        info("  7. Reopen writes on SurrealDB after operator acknowledgment")
+        steps.append("Reopen writes on SurrealDB after operator acknowledgment")
+    for index, step in enumerate(steps, start=1):
+        info(f"  {index}. {step}")
     if run_baseline and not manifest_path.exists():
         warn(f"Baseline manifest not found yet: {manifest_path}")
 
@@ -251,6 +286,9 @@ async def _run_cutover_acceptance(
     archive: object,
     organization_id: str,
     sample_size: int,
+    run_auth_flow: bool,
+    auth_flow_email: str,
+    auth_flow_password: str,
     run_baseline: bool,
     base_url: str,
     baselines_dir: Path,
@@ -268,6 +306,15 @@ async def _run_cutover_acceptance(
     )
     _print_verify_summary(result)
     success("Archive verification passed")
+
+    if run_auth_flow:
+        info(f"Running auth flow harness against {base_url}...")
+        await _run_auth_flow_gate(
+            base_url=base_url,
+            auth_flow_email=auth_flow_email,
+            auth_flow_password=auth_flow_password,
+        )
+        success("Auth flow harness passed")
 
     if run_baseline:
         info(f"Replaying deterministic baseline against {base_url}...")
@@ -921,10 +968,27 @@ def rehearse_archive(
             "--run-baseline/--skip-baseline", help="Replay the deterministic runtime baseline"
         ),
     ] = True,
+    run_auth_flow: Annotated[
+        bool,
+        typer.Option(
+            "--run-auth-flow/--skip-auth-flow", help="Run the auth-flow acceptance harness"
+        ),
+    ] = True,
     base_url: Annotated[
         str,
-        typer.Option("--base-url", help="Base URL for baseline replay"),
+        typer.Option("--base-url", help="Base URL for auth-flow and baseline replay"),
     ] = DEFAULT_REHEARSAL_BASE_URL,
+    auth_flow_email: Annotated[
+        str,
+        typer.Option(
+            "--auth-flow-email",
+            help="Auth-flow user email; generated when omitted",
+        ),
+    ] = "",
+    auth_flow_password: Annotated[
+        str,
+        typer.Option("--auth-flow-password", help="Auth-flow user password"),
+    ] = DEFAULT_AUTH_FLOW_PASSWORD,
     baselines_dir: Annotated[
         Path,
         typer.Option("--baselines-dir", help="Directory containing baseline case files"),
@@ -1010,6 +1074,15 @@ def rehearse_archive(
         _print_verify_summary(result)
         success("Archive verification passed")
 
+        if run_auth_flow:
+            info(f"Running auth flow harness against {base_url}...")
+            await _run_auth_flow_gate(
+                base_url=base_url,
+                auth_flow_email=auth_flow_email,
+                auth_flow_password=auth_flow_password,
+            )
+            success("Auth flow harness passed")
+
         if run_baseline:
             info(f"Replaying deterministic baseline against {base_url}...")
             await _replay_baseline(
@@ -1076,6 +1149,12 @@ def cutover_archive(
             "--run-baseline/--skip-baseline", help="Replay the deterministic runtime baseline"
         ),
     ] = True,
+    run_auth_flow: Annotated[
+        bool,
+        typer.Option(
+            "--run-auth-flow/--skip-auth-flow", help="Run the auth-flow acceptance harness"
+        ),
+    ] = True,
     run_bench_live_smoke: Annotated[
         bool,
         typer.Option(
@@ -1094,8 +1173,19 @@ def cutover_archive(
     ] = DEFAULT_CUTOVER_BENCH_LABEL,
     base_url: Annotated[
         str,
-        typer.Option("--base-url", help="Base URL for baseline replay"),
+        typer.Option("--base-url", help="Base URL for auth-flow and baseline replay"),
     ] = DEFAULT_REHEARSAL_BASE_URL,
+    auth_flow_email: Annotated[
+        str,
+        typer.Option(
+            "--auth-flow-email",
+            help="Auth-flow user email; generated when omitted",
+        ),
+    ] = "",
+    auth_flow_password: Annotated[
+        str,
+        typer.Option("--auth-flow-password", help="Auth-flow user password"),
+    ] = DEFAULT_AUTH_FLOW_PASSWORD,
     baselines_dir: Annotated[
         Path,
         typer.Option("--baselines-dir", help="Directory containing baseline case files"),
@@ -1159,6 +1249,7 @@ def cutover_archive(
 
     if dry_run:
         _print_cutover_plan(
+            run_auth_flow=run_auth_flow,
             run_baseline=run_baseline,
             run_bench_live_smoke=run_bench_live_smoke,
             run_bench_live=run_bench_live,
@@ -1210,6 +1301,9 @@ def cutover_archive(
         archive=archive,
         organization_id=effective_org_id,
         sample_size=sample_size,
+        run_auth_flow=run_auth_flow,
+        auth_flow_email=auth_flow_email,
+        auth_flow_password=auth_flow_password,
         run_baseline=run_baseline,
         base_url=base_url,
         baselines_dir=baselines_dir,

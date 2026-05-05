@@ -721,11 +721,13 @@ def test_migrate_rehearse_runs_verify_and_baseline(tmp_path: Path) -> None:
         )
     )
     replay_all = AsyncMock(return_value=None)
+    auth_flow = AsyncMock(return_value=None)
 
     with (
         patch("sibyl.cli.migrate._restore_graph_payload", return_value=True),
         patch("sibyl.cli.migrate.verify_graph_archive", verify_graph_archive),
         patch("sibyl.cli.migrate._replay_baseline", replay_all),
+        patch("sibyl.cli.migrate._run_auth_flow_gate", auth_flow),
     ):
         result = runner.invoke(
             migrate_cli.app,
@@ -740,6 +742,47 @@ def test_migrate_rehearse_runs_verify_and_baseline(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "Migration rehearsal passed" in result.output
+    auth_flow.assert_awaited_once_with(
+        base_url=migrate_cli.DEFAULT_REHEARSAL_BASE_URL,
+        auth_flow_email="",
+        auth_flow_password=migrate_cli.DEFAULT_AUTH_FLOW_PASSWORD,
+    )
+
+
+def test_migrate_rehearse_passes_auth_flow_options(tmp_path: Path) -> None:
+    archive_path = tmp_path / "migration.tar.gz"
+    _write_graph_archive(archive_path)
+
+    verify_graph_archive = AsyncMock(return_value=_verify_result())
+    auth_flow = AsyncMock(return_value=None)
+
+    with (
+        patch("sibyl.cli.migrate._restore_graph_payload", return_value=True),
+        patch("sibyl.cli.migrate.verify_graph_archive", verify_graph_archive),
+        patch("sibyl.cli.migrate._run_auth_flow_gate", auth_flow),
+    ):
+        result = runner.invoke(
+            migrate_cli.app,
+            [
+                "rehearse",
+                str(archive_path),
+                "--yes",
+                "--skip-baseline",
+                "--base-url",
+                "http://sibyl.test",
+                "--auth-flow-email",
+                "auth-flow@example.com",
+                "--auth-flow-password",
+                "auth-flow-password-secure-123!",
+            ],
+        )
+
+    assert result.exit_code == 0
+    auth_flow.assert_awaited_once_with(
+        base_url="http://sibyl.test",
+        auth_flow_email="auth-flow@example.com",
+        auth_flow_password="auth-flow-password-secure-123!",
+    )
 
 
 def test_migrate_cutover_requires_surreal_store(tmp_path: Path) -> None:
@@ -777,6 +820,7 @@ def test_migrate_cutover_dry_run_prints_plan(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "Cutover plan:" in result.output
     assert "Import archive into the Surreal runtime" in result.output
+    assert "Run auth-flow acceptance harness" in result.output
     assert "Run bench-live artifact capture" in result.output
     assert "Reopen writes on SurrealDB" in result.output
     assert "Cutover dry run complete" in result.output
@@ -804,12 +848,14 @@ def test_migrate_cutover_leaves_writes_frozen_until_explicit_reopen(tmp_path: Pa
 
     verify_graph_archive = AsyncMock(return_value=_verify_result())
     replay_all = AsyncMock(return_value=None)
+    auth_flow = AsyncMock(return_value=None)
 
     with (
         patch.object(migrate_cli.settings, "store", "surreal"),
         patch("sibyl.cli.migrate._restore_graph_payload", return_value=True),
         patch("sibyl.cli.migrate.verify_graph_archive", verify_graph_archive),
         patch("sibyl.cli.migrate._replay_baseline", replay_all),
+        patch("sibyl.cli.migrate._run_auth_flow_gate", auth_flow),
     ):
         result = runner.invoke(
             migrate_cli.app,
@@ -826,6 +872,11 @@ def test_migrate_cutover_leaves_writes_frozen_until_explicit_reopen(tmp_path: Pa
     assert result.exit_code == 0
     assert "Acceptance suite passed while writes remain frozen" in result.output
     assert "Rollback is still supported at this point" in result.output
+    auth_flow.assert_awaited_once_with(
+        base_url=migrate_cli.DEFAULT_REHEARSAL_BASE_URL,
+        auth_flow_email="",
+        auth_flow_password=migrate_cli.DEFAULT_AUTH_FLOW_PASSWORD,
+    )
 
 
 def test_migrate_cutover_requires_ack_before_reopen(tmp_path: Path) -> None:
@@ -836,12 +887,14 @@ def test_migrate_cutover_requires_ack_before_reopen(tmp_path: Path) -> None:
 
     verify_graph_archive = AsyncMock(return_value=_verify_result())
     replay_all = AsyncMock(return_value=None)
+    auth_flow = AsyncMock(return_value=None)
 
     with (
         patch.object(migrate_cli.settings, "store", "surreal"),
         patch("sibyl.cli.migrate._restore_graph_payload", return_value=True),
         patch("sibyl.cli.migrate.verify_graph_archive", verify_graph_archive),
         patch("sibyl.cli.migrate._replay_baseline", replay_all),
+        patch("sibyl.cli.migrate._run_auth_flow_gate", auth_flow),
     ):
         result = runner.invoke(
             migrate_cli.app,
