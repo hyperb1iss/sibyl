@@ -22,7 +22,7 @@ from sqlalchemy import ARRAY, Boolean, Column, DateTime, Enum, Index, String, Te
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
-from sibyl_core.auth.models import OrganizationRole
+from sibyl_core.auth.models import OrganizationRole, ProjectRole, ProjectVisibility
 
 
 def utcnow_naive() -> datetime:
@@ -691,23 +691,6 @@ class TeamMember(TimestampMixin, table=True):
 # =============================================================================
 # Projects - Project-level RBAC
 # =============================================================================
-
-
-class ProjectRole(StrEnum):
-    """Role of a user within a project."""
-
-    OWNER = "project_owner"
-    MAINTAINER = "project_maintainer"
-    CONTRIBUTOR = "project_contributor"
-    VIEWER = "project_viewer"
-
-
-class ProjectVisibility(StrEnum):
-    """Visibility level for a project."""
-
-    PRIVATE = "private"  # Only explicit grants (plus org owner/admin override)
-    PROJECT = "project"  # Explicit grants via direct membership or teams
-    ORG = "org"  # All org members get default role
 
 
 class Project(TimestampMixin, table=True):

@@ -17,11 +17,12 @@ from sibyl.auth.memberships import OrganizationMembershipManager
 from sibyl.auth.organizations import OrganizationManager
 from sibyl.auth.sessions import SessionManager
 from sibyl.db.connection import get_session
-from sibyl.db.models import OrganizationRole, User
+from sibyl.db.models import User
 from sibyl.persistence.organization_common import (
     InvitationAcceptance,
     InvitationRecord,
 )
+from sibyl_core.auth import OrganizationRole
 
 LegacyInvitationRecord = InvitationRecord
 LegacyInvitationAcceptance = InvitationAcceptance

@@ -42,8 +42,6 @@ from sibyl.db.models import (
     CrawledDocument,
     CrawlSource,
     CrawlStatus,
-    Organization,
-    OrganizationRole,
     SourceType,
     utcnow_naive,
 )
@@ -67,11 +65,12 @@ from sibyl.persistence.content_runtime import (
     list_unlinked_source_chunks,
     save_crawl_source_record,
 )
+from sibyl_core.auth import AuthOrganization, OrganizationRole
 
 log = structlog.get_logger()
 
 
-async def _get_org_source(session: Any, source_id: str, org: Organization) -> CrawlSource:
+async def _get_org_source(session: Any, source_id: str, org: AuthOrganization) -> CrawlSource:
     """Get a source and verify it belongs to the organization.
 
     Args:
@@ -158,7 +157,7 @@ def _document_to_response(doc: CrawledDocument) -> CrawlDocumentResponse:
 
 @router.get("/stats", response_model=CrawlStatsResponse)
 async def get_stats(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> CrawlStatsResponse:
     """Get crawler statistics for the current organization."""
     async with get_content_read_session() as session:
@@ -215,7 +214,7 @@ async def get_health() -> CrawlHealthResponse:
 async def list_documents(
     limit: int = 50,
     offset: int = 0,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> CrawlDocumentListResponse:
     """List crawled documents for the current organization."""
     async with get_content_read_session() as session:
@@ -235,7 +234,7 @@ async def list_documents(
 @router.get("/documents/{document_id}", response_model=CrawlDocumentResponse)
 async def get_document(
     document_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> CrawlDocumentResponse:
     """Get a crawled document by ID with full content (org-scoped)."""
     # Strip 'doc:' prefix if present
@@ -264,7 +263,7 @@ async def get_document(
 @router.delete("/documents/{document_id}")
 async def delete_document(
     document_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """Delete a crawled document and its chunks (org-scoped)."""
     async with get_content_read_session() as session:
@@ -364,7 +363,7 @@ async def preview_url(url: str) -> dict[str, str | None]:
 @router.post("", response_model=CrawlSourceResponse)
 async def create_source(
     request: CrawlSourceCreate,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> CrawlSourceResponse:
     """Create a new crawl source."""
     try:
@@ -399,7 +398,7 @@ async def create_source(
 async def list_sources(
     status: str | None = None,
     limit: int = 50,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> CrawlSourceListResponse:
     """List crawl sources for the current organization."""
     async with get_content_read_session() as session:
@@ -418,7 +417,7 @@ async def list_sources(
 
 @router.get("/link-graph/status", response_model=LinkGraphStatusResponse)
 async def get_link_graph_status(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> LinkGraphStatusResponse:
     """Get status of pending graph linking work (org-scoped).
 
@@ -438,7 +437,7 @@ async def get_link_graph_status(
 @router.post("/link-graph", response_model=LinkGraphResponse)
 async def link_all_sources_to_graph(
     request: LinkGraphRequest,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> LinkGraphResponse:
     """Extract entities from all source chunks and link to knowledge graph.
 
@@ -453,7 +452,7 @@ async def link_all_sources_to_graph(
 @router.get("/{source_id}", response_model=CrawlSourceResponse)
 async def get_source(
     source_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> CrawlSourceResponse:
     """Get a crawl source by ID (org-scoped)."""
     async with get_content_read_session() as session:
@@ -465,7 +464,7 @@ async def get_source(
 async def update_source(
     source_id: str,
     request: CrawlSourceUpdate,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> CrawlSourceResponse:
     """Update a crawl source (org-scoped)."""
     async with get_content_read_session() as session:
@@ -493,7 +492,7 @@ async def update_source(
 @router.delete("/{source_id}")
 async def delete_source(
     source_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """Delete a crawl source and all its documents (org-scoped)."""
     async with get_content_read_session() as session:
@@ -524,7 +523,7 @@ async def delete_source(
 async def ingest_source(
     source_id: str,
     request: CrawlIngestRequest,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> CrawlIngestResponse:
     """Start crawling a source via job queue (org-scoped).
 
@@ -594,7 +593,7 @@ async def ingest_source(
 @router.get("/{source_id}/status")
 async def get_ingestion_status(
     source_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """Get crawl status for a source (org-scoped).
 
@@ -620,7 +619,7 @@ async def get_ingestion_status(
 @router.post("/{source_id}/cancel", response_model=CrawlIngestResponse)
 async def cancel_crawl(
     source_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> CrawlIngestResponse:
     """Cancel an in-progress crawl for a source (org-scoped).
 
@@ -676,7 +675,7 @@ async def cancel_crawl(
 @router.post("/{source_id}/sync")
 async def sync_source(
     source_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """Sync source stats from actual document/chunk counts (org-scoped).
 
@@ -759,7 +758,7 @@ async def sync_source(
 async def link_source_to_graph(
     source_id: str,
     request: LinkGraphRequest,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> LinkGraphResponse:
     """Extract entities from source chunks and link to knowledge graph.
 
@@ -904,7 +903,7 @@ async def list_source_documents(
     source_id: str,
     limit: int = 50,
     offset: int = 0,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> CrawlDocumentListResponse:
     """List documents for a source."""
     async with get_content_read_session() as session:

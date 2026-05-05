@@ -18,12 +18,8 @@ from sibyl.auth.authorization import (
     require_project_role,
     require_project_write,
 )
-from sibyl.db.models import (
-    OrganizationRole,
-    ProjectRole,
-    ProjectVisibility,
-)
 from sibyl.persistence.legacy import auth_runtime as legacy_auth_runtime
+from sibyl_core.auth import OrganizationRole, ProjectRole, ProjectVisibility
 
 
 class TestRoleHierarchy:

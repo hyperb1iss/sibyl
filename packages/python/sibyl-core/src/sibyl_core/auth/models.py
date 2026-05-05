@@ -19,6 +19,23 @@ class OrganizationRole(StrEnum):
     VIEWER = "viewer"
 
 
+class ProjectRole(StrEnum):
+    """Role of a user within a project."""
+
+    OWNER = "project_owner"
+    MAINTAINER = "project_maintainer"
+    CONTRIBUTOR = "project_contributor"
+    VIEWER = "project_viewer"
+
+
+class ProjectVisibility(StrEnum):
+    """Visibility level for a project."""
+
+    PRIVATE = "private"
+    PROJECT = "project"
+    ORG = "org"
+
+
 class AuthUser(BaseModel):
     """Normalized user identity independent of any persistence model."""
 

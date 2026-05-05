@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sibyl.db.models import OrganizationRole, ProjectRole
+from sibyl_core.auth import OrganizationRole, ProjectRole
 
 
 @dataclass

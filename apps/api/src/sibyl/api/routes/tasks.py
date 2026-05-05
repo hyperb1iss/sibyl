@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.event_types import WSEvent
 from sibyl.api.websocket import broadcast_event
-from sibyl.auth.authorization import ProjectRole, verify_entity_project_access
+from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import (
     get_auth_context,
@@ -22,12 +22,12 @@ from sibyl.auth.dependencies import (
     get_current_user,
     require_org_role,
 )
-from sibyl.db.models import Organization, OrganizationRole, User
 from sibyl.locks import entity_lock
 from sibyl.persistence.graph_runtime import (
     get_knowledge_read_adapter as _service_get_knowledge_read_adapter,
     get_task_graph_runtime as _service_get_task_graph_runtime,
 )
+from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole, ProjectRole
 from sibyl_core.models.tasks import AuthorType, Note, TaskComplexity, TaskPriority, TaskStatus
 from sibyl_core.tasks.workflow import TaskWorkflowEngine
 
@@ -49,7 +49,7 @@ async def get_task_graph_runtime(group_id: str):
 
 async def _verify_task_access(
     task_id: str,
-    org: Organization,
+    org: AuthOrganization,
     ctx: AuthContext,
     required_role: ProjectRole = ProjectRole.CONTRIBUTOR,
 ) -> Any:
@@ -164,8 +164,8 @@ class CreateTaskRequest(BaseModel):
 @router.post("", response_model=TaskActionResponse)
 async def create_task(
     request: CreateTaskRequest,
-    org: Organization = Depends(get_current_organization),
-    user: User = Depends(get_current_user),
+    org: AuthOrganization = Depends(get_current_organization),
+    user: AuthUser = Depends(get_current_user),
     auth: AuthContext = Depends(get_auth_context),
 ) -> TaskActionResponse:
     """Create a new task."""
@@ -328,7 +328,7 @@ async def _get_task_workflow_runtime(group_id: str) -> tuple[Any, TaskWorkflowEn
 @handle_workflow_errors("start_task")
 async def start_task(
     task_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
     request: StartTaskRequest | None = None,
 ) -> TaskActionResponse:
@@ -367,7 +367,7 @@ async def start_task(
 async def block_task(
     task_id: str,
     request: BlockTaskRequest,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
 ) -> TaskActionResponse:
     """Mark a task as blocked with a reason."""
@@ -403,7 +403,7 @@ async def block_task(
 @handle_workflow_errors("unblock_task")
 async def unblock_task(
     task_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
 ) -> TaskActionResponse:
     """Resume a blocked task (moves back to 'doing')."""
@@ -439,7 +439,7 @@ async def unblock_task(
 @handle_workflow_errors("submit_review")
 async def submit_review(
     task_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
     request: ReviewTaskRequest | None = None,
 ) -> TaskActionResponse:
@@ -478,7 +478,7 @@ async def submit_review(
 @handle_workflow_errors("complete_task")
 async def complete_task(
     task_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
     request: CompleteTaskRequest | None = None,
 ) -> TaskActionResponse:
@@ -534,7 +534,7 @@ async def complete_task(
 @handle_workflow_errors("archive_task")
 async def archive_task(
     task_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
     request: ArchiveTaskRequest | None = None,
 ) -> TaskActionResponse:
@@ -596,8 +596,8 @@ async def update_task(
     task_id: str,
     request: UpdateTaskRequest,
     sync: bool = Query(False, description="Wait for update to complete synchronously"),
-    org: Organization = Depends(get_current_organization),
-    user: User = Depends(get_current_user),
+    org: AuthOrganization = Depends(get_current_organization),
+    user: AuthUser = Depends(get_current_user),
     auth: AuthContext = Depends(get_auth_context),
 ) -> TaskActionResponse:
     """Update task fields.
@@ -752,8 +752,8 @@ class NotesListResponse(BaseModel):
 async def create_note(
     task_id: str,
     request: CreateNoteRequest,
-    org: Organization = Depends(get_current_organization),
-    user: User = Depends(get_current_user),
+    org: AuthOrganization = Depends(get_current_organization),
+    user: AuthUser = Depends(get_current_user),
     auth: AuthContext = Depends(get_auth_context),
 ) -> NoteResponse:
     """Create a note on a task.
@@ -879,7 +879,7 @@ async def create_note(
 async def list_notes(
     task_id: str,
     limit: int = 50,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
 ) -> NotesListResponse:
     """List all notes for a task."""

@@ -24,7 +24,6 @@ from sibyl.db.models import (
     DeviceAuthorizationRequest,
     Organization,
     OrganizationMember,
-    OrganizationRole as LegacyOrgRole,
     User,
     UserSession,
 )
@@ -55,7 +54,7 @@ from sibyl_core.auth.models import (
 )
 
 if TYPE_CHECKING:
-    from sibyl.auth.authorization import ProjectRole
+    from sibyl_core.auth import ProjectRole
 
 __all__ = ["InvalidAuthClaimsError", "UserNotFoundError"]
 
@@ -278,7 +277,7 @@ async def ensure_legacy_personal_organization(*, user_id: UUID) -> Organization 
         await OrganizationMembershipManager(session).add_member(
             organization_id=organization.id,
             user_id=user.id,
-            role=LegacyOrgRole.OWNER,
+            role=OrganizationRole.OWNER,
         )
         return organization
 
@@ -339,7 +338,7 @@ async def login_legacy_github_identity(
         await OrganizationMembershipManager(session).add_member(
             organization_id=organization.id,
             user_id=user.id,
-            role=LegacyOrgRole.OWNER,
+            role=OrganizationRole.OWNER,
         )
     return await _issue_auth_session(
         user=user,
@@ -369,7 +368,7 @@ async def signup_legacy_local_user(
         await OrganizationMembershipManager(session).add_member(
             organization_id=organization.id,
             user_id=user.id,
-            role=LegacyOrgRole.OWNER,
+            role=OrganizationRole.OWNER,
         )
     return await _issue_auth_session(
         user=user,
@@ -394,7 +393,7 @@ async def login_legacy_local_user(
         await OrganizationMembershipManager(session).add_member(
             organization_id=organization.id,
             user_id=user.id,
-            role=LegacyOrgRole.OWNER,
+            role=OrganizationRole.OWNER,
         )
     return await _issue_auth_session(
         user=user,
@@ -506,7 +505,7 @@ async def login_legacy_device_browser_user(
         await OrganizationMembershipManager(session).add_member(
             organization_id=organization.id,
             user_id=user.id,
-            role=LegacyOrgRole.OWNER,
+            role=OrganizationRole.OWNER,
         )
         access_token = create_access_token(user_id=user.id, organization_id=organization.id)
         await AuditLogger(session).log(
@@ -575,7 +574,7 @@ async def approve_legacy_device_authorization(
         await OrganizationMembershipManager(session).add_member(
             organization_id=organization.id,
             user_id=user.id,
-            role=LegacyOrgRole.OWNER,
+            role=OrganizationRole.OWNER,
         )
         await manager.approve(req, user_id=user.id, organization_id=organization.id)
         await AuditLogger(session).log(

@@ -22,7 +22,6 @@ from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import JwtError, verify_refresh_token
 from sibyl.auth.oauth_state import OAuthStateError, issue_state, verify_state
 from sibyl.auth.primitives import DeviceTokenError, normalize_user_code
-from sibyl.db.models import User
 from sibyl.persistence.auth_runtime import (
     approve_device_authorization,
     create_api_key_for_user,
@@ -44,7 +43,7 @@ from sibyl.persistence.auth_runtime import (
     start_device_authorization,
     update_auth_user,
 )
-from sibyl_core.auth import GitHubUserIdentity
+from sibyl_core.auth import AuthUser, GitHubUserIdentity
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -586,7 +585,7 @@ def _render_device_verify_page(
     *,
     user_code: str | None,
     error_code: str | None = None,
-    authed_user: User | None = None,
+    authed_user: AuthUser | None = None,
     pending: dict[str, object] | None = None,
 ) -> HTMLResponse:
     """Render the device verification page with SilkCircuit styling."""

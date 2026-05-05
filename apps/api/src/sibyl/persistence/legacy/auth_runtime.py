@@ -14,11 +14,8 @@ from sibyl.auth.sessions import SessionManager
 from sibyl.auth.users import UserManager
 from sibyl.db.connection import get_session
 from sibyl.db.models import (
-    OrganizationRole,
     Project,
     ProjectMember,
-    ProjectRole,
-    ProjectVisibility,
     TeamMember,
     TeamProject,
 )
@@ -71,6 +68,7 @@ from sibyl.persistence.legacy.users import (
     remove_oauth_connection as remove_oauth_connection_helper,
     request_password_reset as request_password_reset_helper,
 )
+from sibyl_core.auth import OrganizationRole, ProjectRole, ProjectVisibility
 
 _PROJECT_ROLE_LEVELS: dict[ProjectRole, int] = {
     ProjectRole.VIEWER: 10,

@@ -12,8 +12,9 @@ from sibyl.auth.audit import AuditLogger
 from sibyl.auth.memberships import OrganizationMembershipManager
 from sibyl.auth.organizations import OrganizationManager
 from sibyl.db.connection import get_session
-from sibyl.db.models import OrganizationMember, OrganizationRole, User
+from sibyl.db.models import OrganizationMember, User
 from sibyl.persistence.organization_common import OrgMemberChange
+from sibyl_core.auth import OrganizationRole
 
 LegacyOrgMemberChange = OrgMemberChange
 

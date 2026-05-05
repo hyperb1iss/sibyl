@@ -19,12 +19,12 @@ from fastapi import Depends
 
 from sibyl.auth.dependencies import get_current_organization
 from sibyl.persistence.graph_runtime import ActiveGraphStore, GraphReadServiceAdapter
+from sibyl_core.auth import AuthOrganization
 from sibyl_core.graph import EntityManager, RelationshipManager
 from sibyl_core.graph.client import get_graph_client
 from sibyl_core.services import KnowledgeReadService
 
 if TYPE_CHECKING:
-    from sibyl.db.models import Organization
     from sibyl_core.graph.client import GraphClient
 
 
@@ -45,7 +45,7 @@ async def get_graph() -> GraphClient:
 
 
 async def get_entity_manager(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> EntityManager:
     """Get an EntityManager scoped to the current organization.
 
@@ -73,7 +73,7 @@ async def get_entity_manager(
 
 
 async def get_relationship_manager(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> RelationshipManager:
     """Get a RelationshipManager scoped to the current organization.
 
@@ -90,7 +90,7 @@ async def get_relationship_manager(
 
 
 async def get_graph_store(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> ActiveGraphStore:
     """Get the backend-agnostic graph store on top of the current runtime."""
     client = await get_graph_client()
@@ -105,7 +105,7 @@ async def get_knowledge_read_service(
 
 
 async def get_group_id(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> str:
     """Get the graph group_id (org ID as string) for the current organization.
 

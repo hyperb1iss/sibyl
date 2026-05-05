@@ -8,7 +8,8 @@ from starlette.requests import Request
 
 from sibyl.auth.dependencies import build_auth_context
 from sibyl.db.connection import get_session
-from sibyl.db.models import OrganizationRole, User
+from sibyl.db.models import User
+from sibyl_core.auth import OrganizationRole
 
 _ADMIN_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN)
 

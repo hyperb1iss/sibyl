@@ -21,7 +21,7 @@ from sibyl.api.schemas import (
 from sibyl.auth.dependencies import get_current_organization, require_org_role
 from sibyl.config import settings
 from sibyl.coordination import get_coordination_health
-from sibyl.db.models import CrawlStatus, Organization, OrganizationRole
+from sibyl.db.models import CrawlStatus
 from sibyl.persistence.content_runtime import (
     get_content_read_session,
     get_source_sync_counts,
@@ -32,6 +32,7 @@ from sibyl.persistence.graph_runtime import (
     execute_debug_query,
     get_graph_stats_payload,
 )
+from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.utils import fingerprint_text
 from sibyl_core.utils.query import upper_query_tokens
 
@@ -54,7 +55,7 @@ _ADMIN_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN)
     dependencies=[Depends(require_org_role(*_READ_ROLES))],
 )
 async def health(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> HealthResponse:
     """Get server health status."""
     try:
@@ -89,7 +90,7 @@ async def health(
     dependencies=[Depends(require_org_role(*_READ_ROLES))],
 )
 async def stats(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> StatsResponse:
     """Get knowledge graph statistics."""
     try:
@@ -116,7 +117,7 @@ async def stats(
     dependencies=[Depends(require_org_role(*_ADMIN_ROLES))],
 )
 async def create_backup(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> BackupResponse:
     """Create a backup of all graph data for the organization.
 
@@ -164,7 +165,7 @@ async def create_backup(
 )
 async def restore_backup_endpoint(
     request: RestoreRequest,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> RestoreResponse:
     """Restore graph data from a backup.
 
@@ -216,7 +217,7 @@ async def restore_backup_endpoint(
 )
 async def backfill_task_relationships(
     request: BackfillRequest,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> BackfillResponse:
     """Backfill missing BELONGS_TO relationships between tasks and projects.
 
@@ -291,7 +292,7 @@ def _is_supported_debug_dialect(query: str) -> bool:
 )
 async def debug_query(
     request: DebugQueryRequest,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> DebugQueryResponse:
     """Execute a read-only graph query for debugging.
 
@@ -345,7 +346,7 @@ async def debug_query(
     dependencies=[Depends(require_org_role(*_OWNER_ONLY))],
 )
 async def dev_status(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> DevStatusResponse:
     """Get comprehensive developer status dashboard.
 

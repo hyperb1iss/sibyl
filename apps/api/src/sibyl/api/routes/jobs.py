@@ -13,11 +13,11 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
 from sibyl.auth.dependencies import get_current_organization, require_org_admin
-from sibyl.db.models import Organization
 from sibyl.persistence.content_runtime import (
     get_content_read_session,
     get_crawl_source_by_id,
 )
+from sibyl_core.auth import AuthOrganization
 
 log = structlog.get_logger()
 
@@ -35,7 +35,7 @@ async def _source_visible_to_org(
 async def _job_visible_to_org(
     job: Any,
     *,
-    org: Organization,
+    org: AuthOrganization,
     session: Any | None = None,
     visible_source_ids: set[UUID] | None = None,
 ) -> bool:
@@ -82,7 +82,7 @@ async def _job_visible_to_org(
 async def _resolve_visible_source_ids(
     jobs: list[Any],
     *,
-    org: Organization,
+    org: AuthOrganization,
     session: Any | None = None,
 ) -> set[UUID]:
     source_ids: set[UUID] = set()
@@ -153,7 +153,7 @@ async def jobs_health() -> dict[str, Any]:
 async def list_jobs(
     function: str | None = None,
     limit: int = 50,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """List recent jobs."""
     from sibyl.jobs.queue import list_jobs as _list_jobs
@@ -192,7 +192,7 @@ async def list_jobs(
 
 @router.post("/consolidation")
 async def trigger_consolidation(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """Trigger an org-scoped consolidation run."""
     from sibyl.jobs.queue import enqueue_consolidation
@@ -216,7 +216,7 @@ async def trigger_consolidation(
 
 @router.post("/forgetting")
 async def trigger_priority_decay(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """Trigger an org-scoped forgetting sweep."""
     from sibyl.jobs.queue import enqueue_priority_decay
@@ -241,7 +241,7 @@ async def trigger_priority_decay(
 @router.get("/{job_id}")
 async def get_job(
     job_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """Get status of a specific job."""
     from sibyl.jobs import JobStatus, get_job_status
@@ -277,7 +277,7 @@ async def get_job(
 @router.delete("/{job_id}")
 async def cancel_job(
     job_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """Cancel a queued job."""
     from sibyl.jobs.queue import cancel_job as _cancel_job, get_job_status

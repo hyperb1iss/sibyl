@@ -18,13 +18,14 @@ from sibyl.auth.memberships import OrganizationMembershipManager
 from sibyl.auth.organizations import OrganizationManager, slugify
 from sibyl.auth.sessions import SessionManager
 from sibyl.db.connection import get_session
-from sibyl.db.models import Organization, OrganizationMember, OrganizationRole
+from sibyl.db.models import Organization, OrganizationMember
 from sibyl.persistence.legacy.graph import ensure_graph_indexes as _service_ensure_graph_indexes
 from sibyl.persistence.organization_common import (
     OrgAuthResult,
     OrgRoleResult,
     OrgSummary,
 )
+from sibyl_core.auth import OrganizationRole
 
 log = structlog.get_logger()
 

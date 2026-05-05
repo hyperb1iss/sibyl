@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.dependencies import get_current_user
-from sibyl.db.models import OrganizationRole, User
 from sibyl.persistence import organization_runtime
+from sibyl_core.auth import AuthUser, OrganizationRole
 
 router = APIRouter(prefix="/orgs/{slug}/members", tags=["org-members"])
 
@@ -27,7 +27,7 @@ class MemberRoleUpdateRequest(BaseModel):
 @router.get("")
 async def list_members(
     slug: str,
-    user: User = Depends(get_current_user),
+    user: AuthUser = Depends(get_current_user),
 ):
     return {"members": await organization_runtime.list_org_members(slug=slug, actor_id=user.id)}
 
@@ -38,7 +38,7 @@ async def add_member(
     slug: str,
     body: MemberAddRequest,
     background_tasks: BackgroundTasks,
-    user: User = Depends(get_current_user),
+    user: AuthUser = Depends(get_current_user),
 ):
     membership = await organization_runtime.add_org_member(
         slug=slug,
@@ -69,7 +69,7 @@ async def update_member_role(
     user_id: UUID,
     body: MemberRoleUpdateRequest,
     background_tasks: BackgroundTasks,
-    user: User = Depends(get_current_user),
+    user: AuthUser = Depends(get_current_user),
 ):
     membership = await organization_runtime.update_org_member_role(
         slug=slug,
@@ -99,7 +99,7 @@ async def remove_member(
     slug: str,
     user_id: UUID,
     background_tasks: BackgroundTasks,
-    user: User = Depends(get_current_user),
+    user: AuthUser = Depends(get_current_user),
 ):
     membership = await organization_runtime.remove_org_member(
         slug=slug,

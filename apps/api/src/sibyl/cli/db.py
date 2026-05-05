@@ -1430,8 +1430,9 @@ def sync_projects(  # noqa: PLR0915
         from sqlalchemy import select
 
         from sibyl.db.connection import get_session
-        from sibyl.db.models import OrganizationMember, OrganizationRole
+        from sibyl.db.models import OrganizationMember
         from sibyl.db.sync import get_graph_projects, sync_projects_from_graph
+        from sibyl_core.auth import OrganizationRole
 
         try:
             # Fetch projects from graph

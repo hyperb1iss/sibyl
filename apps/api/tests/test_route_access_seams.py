@@ -8,7 +8,7 @@ import pytest
 
 from sibyl.api.routes.epics import _verify_epic_access
 from sibyl.api.routes.tasks import _verify_task_access
-from sibyl.auth.authorization import ProjectRole
+from sibyl_core.auth import ProjectRole
 from sibyl_core.models.entities import EntityType
 
 

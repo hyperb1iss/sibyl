@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
 from sqlmodel import select
 
-from sibyl.db.models import OrganizationMember, OrganizationRole
+from sibyl.db.models import OrganizationMember
+from sibyl_core.auth import OrganizationRole
 
 if TYPE_CHECKING:
     from uuid import UUID

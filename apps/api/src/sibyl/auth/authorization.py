@@ -12,7 +12,7 @@ Inheritance rules:
 """
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 import structlog
@@ -20,15 +20,19 @@ from fastapi import Depends, HTTPException, Request, status
 
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context
-from sibyl.db.models import Project, ProjectRole
 from sibyl.persistence.auth_runtime import (
     get_project_record_by_graph_id,
     get_project_record_by_id,
     list_accessible_project_graph_ids as list_runtime_accessible_project_graph_ids,
     verify_entity_project_access as verify_runtime_entity_project_access,
 )
+from sibyl_core.auth import ProjectRole
 
 log = structlog.get_logger()
+
+
+class ProjectRecord(Protocol):
+    graph_project_id: str
 
 
 # =============================================================================
@@ -128,7 +132,7 @@ def require_project_role(
     async def dependency(
         request: Request,
         ctx: AuthContext = Depends(get_auth_context),
-    ) -> Project:
+    ) -> ProjectRecord:
         if ctx.organization is None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

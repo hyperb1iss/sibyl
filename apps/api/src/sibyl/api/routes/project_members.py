@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Protocol
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
@@ -9,8 +10,8 @@ from pydantic import BaseModel, Field
 
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.dependencies import get_current_org_role, get_current_organization, get_current_user
-from sibyl.db.models import Organization, Project, ProjectRole, User
 from sibyl.persistence import organization_runtime
+from sibyl_core.auth import AuthOrganization, AuthUser, ProjectRole
 
 router = APIRouter(prefix="/projects/{project_id}/members", tags=["project-members"])
 
@@ -24,15 +25,31 @@ class MemberRoleUpdateRequest(BaseModel):
     role: ProjectRole
 
 
-def _can_manage_members(role: ProjectRole | None, project: Project, user: User) -> bool:
+class ProjectMembershipSubject(Protocol):
+    @property
+    def owner_user_id(self) -> UUID | None:
+        ...
+
+
+class ProjectMembershipActor(Protocol):
+    @property
+    def id(self) -> UUID:
+        ...
+
+
+def _can_manage_members(
+    role: ProjectRole | None,
+    project: ProjectMembershipSubject,
+    user: ProjectMembershipActor,
+) -> bool:
     return organization_runtime.can_manage_project_members(role, project, user)
 
 
 @router.get("")
 async def list_members(
     project_id: str,
-    user: User = Depends(get_current_user),
-    org: Organization = Depends(get_current_organization),
+    user: AuthUser = Depends(get_current_user),
+    org: AuthOrganization = Depends(get_current_organization),
     _org_role=Depends(get_current_org_role),
 ):
     result = await organization_runtime.list_project_members(
@@ -49,8 +66,8 @@ async def add_member(
     project_id: str,
     body: MemberAddRequest,
     background_tasks: BackgroundTasks,
-    user: User = Depends(get_current_user),
-    org: Organization = Depends(get_current_organization),
+    user: AuthUser = Depends(get_current_user),
+    org: AuthOrganization = Depends(get_current_organization),
     _org_role=Depends(get_current_org_role),
 ):
     membership = await organization_runtime.add_project_member(
@@ -84,8 +101,8 @@ async def update_member_role(
     user_id: UUID,
     body: MemberRoleUpdateRequest,
     background_tasks: BackgroundTasks,
-    user: User = Depends(get_current_user),
-    org: Organization = Depends(get_current_organization),
+    user: AuthUser = Depends(get_current_user),
+    org: AuthOrganization = Depends(get_current_organization),
     _org_role=Depends(get_current_org_role),
 ):
     membership = await organization_runtime.update_project_member_role(
@@ -118,8 +135,8 @@ async def remove_member(
     project_id: str,
     user_id: UUID,
     background_tasks: BackgroundTasks,
-    user: User = Depends(get_current_user),
-    org: Organization = Depends(get_current_organization),
+    user: AuthUser = Depends(get_current_user),
+    org: AuthOrganization = Depends(get_current_organization),
     _org_role=Depends(get_current_org_role),
 ):
     await organization_runtime.remove_project_member(

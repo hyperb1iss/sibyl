@@ -14,7 +14,7 @@ from sibyl.api.schemas import (
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
-from sibyl.db.models import Organization, OrganizationRole, ProjectRole
+from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.services.surreal_content import (
     AGENT_DIARY_CAPTURE_SURFACE,
     RawMemory,
@@ -142,7 +142,7 @@ def _raw_memory_response(memory: RawMemory) -> RawMemoryResponse:
 )
 async def remember_raw(
     request: RawMemoryRememberRequest,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
 ) -> RawMemoryResponse:
     """Store verbatim memory before extraction or graph reflection."""
@@ -207,7 +207,7 @@ async def remember_raw(
 )
 async def recall_raw(
     request: RawMemoryRecallRequest,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
 ) -> RawMemoryRecallResponse:
     """Recall verbatim memories through scoped retrieval."""

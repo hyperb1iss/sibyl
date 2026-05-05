@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field
 
 from sibyl import config as config_module
 from sibyl.auth.dependencies import get_current_user
-from sibyl.db.models import OrganizationRole, User
 from sibyl.persistence import organization_runtime
+from sibyl_core.auth import AuthUser, OrganizationRole
 
 router = APIRouter(prefix="/orgs/{slug}/invitations", tags=["org-invitations"])
 invitations_router = APIRouter(prefix="/invitations", tags=["invitations"])
@@ -68,7 +68,7 @@ def _set_auth_cookies(
 @router.get("")
 async def list_invitations(
     slug: str,
-    user: User = Depends(get_current_user),
+    user: AuthUser = Depends(get_current_user),
 ):
     invites = await organization_runtime.list_org_invitations(slug=slug, actor_id=user.id)
     return {
@@ -90,7 +90,7 @@ async def create_invitation(
     request: Request,
     slug: str,
     body: InvitationCreateRequest,
-    user: User = Depends(get_current_user),
+    user: AuthUser = Depends(get_current_user),
 ):
     invite = await organization_runtime.create_org_invitation(
         slug=slug,
@@ -116,7 +116,7 @@ async def delete_invitation(
     request: Request,
     slug: str,
     invitation_id: UUID,
-    user: User = Depends(get_current_user),
+    user: AuthUser = Depends(get_current_user),
 ):
     await organization_runtime.delete_org_invitation(
         slug=slug,
@@ -132,7 +132,7 @@ async def accept_invitation(
     request: Request,
     token: str,
     response: Response,
-    user: User = Depends(get_current_user),
+    user: AuthUser = Depends(get_current_user),
 ):
     accepted = await organization_runtime.accept_org_invitation(
         token=token,

@@ -23,8 +23,8 @@ from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.auth.errors import ProjectAccessDeniedError
-from sibyl.db.models import Organization, OrganizationRole, ProjectRole
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
+from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 
 log = structlog.get_logger()
 _READ_ROLES = (
@@ -44,7 +44,7 @@ router = APIRouter(
 @router.post("", response_model=SearchResponse)
 async def search(
     request: SearchRequest,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
 ) -> SearchResponse:
     """Unified semantic search across knowledge graph AND documentation.
@@ -115,7 +115,7 @@ async def search(
 @router.post("/explore", response_model=ExploreResponse)
 async def explore(
     request: ExploreRequest,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
 ) -> ExploreResponse:
     """Explore and traverse the knowledge graph.
@@ -216,7 +216,7 @@ async def explore(
 @router.post("/temporal", response_model=TemporalResponse)
 async def temporal_query(
     request: TemporalRequest,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> TemporalResponse:
     """Query bi-temporal history of edges.
 

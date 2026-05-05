@@ -11,12 +11,13 @@ from starlette.requests import Request
 
 from sibyl.auth.audit import AuditLogger
 from sibyl.db.connection import get_session
-from sibyl.db.models import Project, ProjectMember, ProjectRole, User
+from sibyl.db.models import Project, ProjectMember, User
 from sibyl.persistence.organization_common import (
     ProjectMemberChange,
     ProjectMembersResult,
     can_manage_project_members,
 )
+from sibyl_core.auth import ProjectRole
 
 LegacyProjectMembersResult = ProjectMembersResult
 LegacyProjectMemberChange = ProjectMemberChange

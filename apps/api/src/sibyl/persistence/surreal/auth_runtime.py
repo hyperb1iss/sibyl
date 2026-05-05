@@ -30,7 +30,6 @@ from sibyl.auth.primitives import (
     generate_user_code,
     hash_device_code,
 )
-from sibyl.db.models import ProjectRole, ProjectVisibility
 from sibyl.email import PasswordResetEmail, get_email_client
 from sibyl.persistence.surreal.auth import (
     SurrealAuthContextResolver,
@@ -40,7 +39,7 @@ from sibyl.persistence.surreal.auth import (
     build_surreal_auth_client,
     surreal_auth_client_scope,
 )
-from sibyl_core.auth import AuthSession, AuthUser, OrganizationRole
+from sibyl_core.auth import AuthSession, AuthUser, OrganizationRole, ProjectRole, ProjectVisibility
 
 _ORG_ADMIN_ROLE_VALUES = {"owner", "admin"}
 _PROJECT_ROLE_LEVELS: dict[ProjectRole, int] = {

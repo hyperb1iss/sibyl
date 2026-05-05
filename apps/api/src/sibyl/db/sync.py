@@ -13,7 +13,8 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sibyl.db.models import Project, ProjectVisibility
+from sibyl.db.models import Project
+from sibyl_core.auth import ProjectVisibility
 
 log = structlog.get_logger()
 

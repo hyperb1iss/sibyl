@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, Field
@@ -12,6 +11,7 @@ from sibyl import config as config_module
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_user
 from sibyl.persistence import organization_runtime
+from sibyl_core.auth import AuthUser
 
 router = APIRouter(prefix="/orgs", tags=["orgs"])
 
@@ -73,7 +73,7 @@ def _set_auth_cookies(
 
 @router.get("")
 async def list_orgs(
-    user: Any = Depends(get_current_user),
+    user: AuthUser = Depends(get_current_user),
 ):
     orgs = await organization_runtime.list_orgs(user_id=user.id)
     return {
@@ -95,7 +95,7 @@ async def create_org(
     request: Request,
     body: OrganizationCreateRequest,
     response: Response,
-    user: Any = Depends(get_current_user),
+    user: AuthUser = Depends(get_current_user),
 ):
     created = await organization_runtime.create_org(
         request=request,
@@ -163,7 +163,7 @@ async def switch_org(
     request: Request,
     slug: str,
     response: Response,
-    user: Any = Depends(get_current_user),
+    user: AuthUser = Depends(get_current_user),
 ):
     switched = await organization_runtime.switch_org(request=request, slug=slug, user_id=user.id)
     _set_auth_cookies(

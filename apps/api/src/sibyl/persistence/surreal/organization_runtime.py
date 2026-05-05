@@ -16,7 +16,6 @@ from sibyl import config as config_module
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import create_access_token, create_refresh_token
 from sibyl.auth.primitives import generate_invite_token, slugify
-from sibyl.db.models import OrganizationRole, ProjectRole, User
 from sibyl.persistence.auth_runtime import log_audit_event
 from sibyl.persistence.graph_runtime import delete_graph_data, ensure_graph_indexes
 from sibyl.persistence.organization_common import (
@@ -32,6 +31,7 @@ from sibyl.persistence.organization_common import (
 )
 from sibyl.persistence.surreal.auth import surreal_auth_client_scope
 from sibyl.persistence.surreal.auth_runtime import SurrealSessionRepository
+from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole
 
 log = structlog.get_logger()
 
@@ -1301,7 +1301,7 @@ async def delete_org_invitation(
 async def accept_org_invitation(
     *,
     token: str,
-    user: User,
+    user: AuthUser,
     request: Request,
 ) -> InvitationAcceptance:
     async with _auth_client_scope() as client:

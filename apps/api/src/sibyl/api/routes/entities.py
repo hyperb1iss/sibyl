@@ -26,14 +26,14 @@ from sibyl.api.schemas import (
     RelatedEntitySummary,
 )
 from sibyl.api.websocket import broadcast_event
-from sibyl.auth.authorization import ProjectRole, verify_entity_project_access
+from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import (
     get_auth_context,
     get_current_organization,
     require_org_role,
 )
-from sibyl.db.models import Organization, OrganizationRole, RawCapture
+from sibyl.db.models import RawCapture
 from sibyl.persistence import content_runtime
 from sibyl.persistence.auth_runtime import (
     create_project_record,
@@ -49,6 +49,7 @@ from sibyl.persistence.content_runtime import (
 from sibyl.persistence.graph_runtime import (
     get_entity_graph_runtime as _service_get_entity_graph_runtime,
 )
+from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
 
@@ -541,7 +542,7 @@ async def _fetch_related_entity_summaries(
 
 @router.get("/captures", response_model=RawCaptureListResponse)
 async def list_raw_captures(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     session: Any = Depends(get_content_read_session_dependency),
     entity_type: str | None = Query(default=None, description="Filter by entity type"),
     capture_surface: str | None = Query(default=None, description="Filter by capture surface"),
@@ -577,7 +578,7 @@ async def list_raw_captures(
 @router.get("/captures/{capture_id}", response_model=RawCaptureResponse)
 async def get_raw_capture(
     capture_id: UUID,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     session: Any = Depends(get_content_read_session_dependency),
 ) -> RawCaptureResponse:
     """Get a single archived raw quick capture."""
@@ -608,7 +609,7 @@ async def get_raw_capture(
 async def update_raw_capture_review_state(
     capture_id: UUID,
     update: RawCaptureReviewUpdate,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     session: Any = Depends(get_content_read_session_dependency),
 ) -> RawCaptureResponse:
     """Update review-state metadata for a raw capture."""
@@ -650,7 +651,7 @@ async def update_raw_capture_review_state(
 
 @router.get("", response_model=EntityListResponse)
 async def list_entities(
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     entity_type: EntityType | None = Query(default=None, description="Filter by entity type"),
     language: str | None = Query(default=None, description="Filter by programming language"),
     category: str | None = Query(default=None, description="Filter by category"),
@@ -788,7 +789,7 @@ async def list_entities(
 @router.get("/{entity_id}", response_model=EntityResponse)
 async def get_entity(
     entity_id: str,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     service: KnowledgeReadService = Depends(get_knowledge_read_service),
     include_summary: Annotated[
         bool,
@@ -956,7 +957,7 @@ async def get_entity(
 async def create_entity(
     request: Request,
     entity: EntityCreate,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
     content_session: Any = Depends(get_content_read_session_dependency),
     sync: bool = Query(
@@ -1129,7 +1130,7 @@ async def update_entity(
     entity_id: str,
     update: EntityUpdate,
     request: Request,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
     content_session: Any = Depends(get_content_read_session_dependency),
 ) -> EntityResponse:
@@ -1253,7 +1254,7 @@ async def update_entity(
 async def delete_entity(
     entity_id: str,
     request: Request,
-    org: Organization = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
     content_session: Any = Depends(get_content_read_session_dependency),
 ) -> None:

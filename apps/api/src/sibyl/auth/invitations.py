@@ -11,7 +11,8 @@ from sqlmodel import select
 
 from sibyl.auth.memberships import OrganizationMembershipManager
 from sibyl.auth.primitives import generate_invite_token
-from sibyl.db.models import OrganizationInvitation, OrganizationRole, User
+from sibyl.db.models import OrganizationInvitation, User
+from sibyl_core.auth import OrganizationRole
 
 if TYPE_CHECKING:
     from uuid import UUID

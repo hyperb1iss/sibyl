@@ -31,6 +31,7 @@ from sibyl.persistence.backups_runtime import (
     list_backups as list_backup_records,
     update_backup_settings as save_backup_settings,
 )
+from sibyl_core.auth import AuthOrganization, AuthUser
 
 log = structlog.get_logger()
 
@@ -172,7 +173,7 @@ class CleanupResponse(BaseModel):
 
 @router.get("/settings")
 async def get_backup_settings(
-    org: Any = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> BackupSettingsResponse:
     """Get backup configuration settings for the organization."""
     settings = await load_backup_settings(org.id)
@@ -183,7 +184,7 @@ async def get_backup_settings(
 @router.patch("/settings")
 async def update_backup_settings(
     request: BackupSettingsUpdate,
-    org: Any = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> BackupSettingsResponse:
     """Update backup configuration settings."""
     settings = await save_backup_settings(
@@ -214,8 +215,8 @@ async def update_backup_settings(
 @router.post("")
 async def create_backup(
     request: CreateBackupRequest,
-    org: Any = Depends(get_current_organization),
-    user: Any = Depends(get_current_user),
+    org: AuthOrganization = Depends(get_current_organization),
+    user: AuthUser = Depends(get_current_user),
 ) -> CreateBackupResponse:
     """Trigger a new backup job.
 
@@ -272,7 +273,7 @@ async def create_backup(
 
 @router.get("")
 async def list_backups(
-    org: Any = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
     limit: int = 50,
     offset: int = 0,
 ) -> BackupListResponse:
@@ -308,7 +309,7 @@ async def list_backups(
 @router.post("/cleanup")
 async def run_cleanup(
     request: CleanupRequest,
-    org: Any = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> CleanupResponse:
     """Trigger a backup cleanup job.
 
@@ -335,7 +336,7 @@ async def run_cleanup(
 @router.get("/{backup_id}")
 async def get_backup_details(
     backup_id: str,
-    org: Any = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> BackupInfo:
     """Get detailed information about a specific backup."""
     backup = await get_backup_record(org.id, backup_id)
@@ -360,7 +361,7 @@ async def get_backup_details(
 @router.get("/{backup_id}/download")
 async def download_backup(
     backup_id: str,
-    org: Any = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> FileResponse:
     """Download a backup archive.
 
@@ -399,7 +400,7 @@ async def download_backup(
 @router.delete("/{backup_id}")
 async def delete_backup(
     backup_id: str,
-    org: Any = Depends(get_current_organization),
+    org: AuthOrganization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """Delete a specific backup archive.
 

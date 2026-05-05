@@ -5,7 +5,7 @@ import pytest
 
 from sibyl.api.routes.entities import create_entity
 from sibyl.api.schemas import EntityCreate
-from sibyl.auth.authorization import ProjectRole
+from sibyl_core.auth import ProjectRole
 from sibyl_core.models.entities import EntityType
 
 
