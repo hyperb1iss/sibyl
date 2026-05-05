@@ -1,8 +1,11 @@
 """Graph runtime helpers for higher-level service layers."""
 
+from __future__ import annotations
+
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Protocol, cast
 
 import structlog
 
@@ -10,21 +13,55 @@ from sibyl_core.graph.client import GraphClient
 from sibyl_core.models.entities import EntityType
 from sibyl_core.utils.query import upper_query_tokens
 
+if TYPE_CHECKING:
+    from sibyl_core.graph.entities import EntityManager
+    from sibyl_core.graph.relationships import RelationshipManager
+
 log = structlog.get_logger()
 _SURREAL_SCHEMA_PREPARED_GROUPS: set[str] = set()
 _SURREAL_SCHEMA_PREPARE_LOCK = asyncio.Lock()
+
+
+class QueryDriver(Protocol):
+    async def execute_query(self, query: str, **params: object) -> object: ...
+
+
+class CloneableDriver(QueryDriver, Protocol):
+    def clone(self, group_id: str) -> QueryDriver: ...
+
+
+class SchemaDriver(Protocol):
+    async def build_indices_and_constraints(self) -> None: ...
+
+
+class GraphitiClientLike(Protocol):
+    driver: CloneableDriver
+
+
+class EntityRecordLike(Protocol):
+    entity_type: EntityType
+
+
+class EntityManagerLike(Protocol):
+    async def list_all(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        include_archived: bool,
+    ) -> Sequence[EntityRecordLike]: ...
 
 
 @dataclass(frozen=True)
 class ActiveGraphRuntime:
     """Bound graph collaborators for a single organization."""
 
-    client: Any
-    entity_manager: Any
-    relationship_manager: Any
+    client: GraphClient
+    entity_manager: EntityManager
+    relationship_manager: RelationshipManager
 
 
-def _is_surreal_driver(driver: Any) -> bool:
+def _is_surreal_driver(driver: object) -> bool:
     try:
         from sibyl_core.backends.surreal import SurrealDriver
     except ImportError:
@@ -37,14 +74,14 @@ def _query_tokens(query: str) -> set[str]:
     return upper_query_tokens(query)
 
 
-def _assert_surreal_query_dialect(driver: Any, query: str) -> None:
+def _assert_surreal_query_dialect(driver: object, query: str) -> None:
     if not _is_surreal_driver(driver):
         return
     if not _query_tokens(query).isdisjoint({"CALL", "MATCH", "UNWIND"}):
         raise ValueError("Surreal runtime graph queries must use SurrealQL")
 
 
-async def get_graph_client() -> Any:
+async def get_graph_client() -> GraphClient:
     """Return the shared graph client for the active store."""
 
     from sibyl_core.graph.client import get_graph_client
@@ -67,23 +104,20 @@ async def get_graph_runtime(group_id: str) -> ActiveGraphRuntime:
     )
 
 
-async def _prepare_surreal_graph_schema(client: Any, group_id: str) -> None:
+async def _prepare_surreal_graph_schema(client: GraphClient, group_id: str) -> None:
     if group_id in _SURREAL_SCHEMA_PREPARED_GROUPS:
         return
 
-    get_org_driver = getattr(client, "get_org_driver", None)
-    if get_org_driver is None:
-        return
-
-    driver = get_org_driver(group_id)
+    driver = client.get_org_driver(group_id)
     if not _is_surreal_driver(driver):
         return
+    schema_driver = cast("SchemaDriver", driver)
 
     async with _SURREAL_SCHEMA_PREPARE_LOCK:
         if group_id in _SURREAL_SCHEMA_PREPARED_GROUPS:
             return
         try:
-            await driver.build_indices_and_constraints()
+            await schema_driver.build_indices_and_constraints()
         except Exception as exc:
             log.warning(
                 "surreal_graph_schema_prepare_failed",
@@ -95,7 +129,7 @@ async def _prepare_surreal_graph_schema(client: Any, group_id: str) -> None:
 
 
 async def count_entities_by_type(
-    entity_manager: Any,
+    entity_manager: EntityManagerLike,
     *,
     include_archived: bool = False,
     page_size: int = 1000,
@@ -103,17 +137,13 @@ async def count_entities_by_type(
     """Count entities by type without assuming backend-specific aggregations."""
 
     counts = {entity_type.value: 0 for entity_type in EntityType}
-    driver = getattr(entity_manager, "_driver", None)
+    driver_obj = getattr(entity_manager, "_driver", None)
     group_id = getattr(entity_manager, "_group_id", None)
 
-    if driver is not None and group_id:
+    if driver_obj is not None and isinstance(group_id, str):
+        driver = cast("QueryDriver", driver_obj)
         try:
-            try:
-                from sibyl_core.backends.surreal import SurrealDriver
-            except ImportError:
-                SurrealDriver = None  # type: ignore[assignment]
-
-            if SurrealDriver is not None and isinstance(driver, SurrealDriver):
+            if _is_surreal_driver(driver):
                 rows = GraphClient.normalize_result(
                     await driver.execute_query(
                         """
@@ -140,7 +170,7 @@ async def count_entities_by_type(
             for row in rows:
                 entity_type = row.get("entity_type")
                 if entity_type:
-                    counts[str(entity_type)] = int(row.get("cnt", 0))
+                    counts[str(entity_type)] = _count_value(row.get("cnt"))
             return counts
         except Exception:
             pass
@@ -164,15 +194,22 @@ async def count_entities_by_type(
     return counts
 
 
+def _count_value(value: object) -> int:
+    if isinstance(value, int | float | str):
+        return int(value)
+    return 0
+
+
 async def execute_graph_query(
     group_id: str,
     query: str,
-    **params: Any,
-) -> list[dict[str, Any]]:
+    **params: object,
+) -> list[dict[str, object]]:
     """Execute a raw org-scoped graph query and normalize the result."""
 
     client = await get_graph_client()
-    driver = client.client.driver.clone(group_id)
+    graphiti_client = cast("GraphitiClientLike", client.client)
+    driver = graphiti_client.driver.clone(group_id)
     _assert_surreal_query_dialect(driver, query)
     result = await driver.execute_query(query, **params)
-    return client.normalize_result(result)
+    return cast("list[dict[str, object]]", client.normalize_result(result))
