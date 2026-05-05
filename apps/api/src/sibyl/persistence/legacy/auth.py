@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Self
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
@@ -159,6 +159,7 @@ async def create_legacy_session_record(
     user_id: UUID,
     token: str,
     expires_at,
+    session_id: UUID | None = None,
     organization_id: UUID | None = None,
     refresh_token: str | None = None,
     refresh_token_expires_at=None,
@@ -178,6 +179,7 @@ async def create_legacy_session_record(
             user_id=user_id,
             token=token,
             expires_at=expires_at,
+            session_id=session_id,
             organization_id=organization_id,
             refresh_token=refresh_token,
             refresh_token_expires_at=refresh_token_expires_at,
@@ -292,10 +294,16 @@ async def _issue_auth_session(
     action: str,
     details: dict[str, Any],
 ) -> IssuedAuthSession:
-    access_token = create_access_token(user_id=user.id, organization_id=organization.id)
+    session_id = uuid4()
+    access_token = create_access_token(
+        user_id=user.id,
+        organization_id=organization.id,
+        session_id=session_id,
+    )
     refresh_token, refresh_expires = create_refresh_token(
         user_id=user.id,
         organization_id=organization.id,
+        session_id=session_id,
     )
     access_expires = datetime.now(UTC) + timedelta(
         minutes=config_module.settings.access_token_expire_minutes
@@ -305,6 +313,7 @@ async def _issue_auth_session(
         organization_id=organization.id,
         token=access_token,
         expires_at=access_expires,
+        session_id=session_id,
         refresh_token=refresh_token,
         refresh_token_expires_at=refresh_expires,
         ip_address=request.client.host if request.client else None,
@@ -516,7 +525,26 @@ async def login_legacy_device_browser_user(
             user_id=user.id,
             role=OrganizationRole.OWNER,
         )
-        access_token = create_access_token(user_id=user.id, organization_id=organization.id)
+        session_id = uuid4()
+        access_token = create_access_token(
+            user_id=user.id,
+            organization_id=organization.id,
+            session_id=session_id,
+        )
+        access_expires = datetime.now(UTC) + timedelta(
+            minutes=config_module.settings.access_token_expire_minutes
+        )
+        await SessionManager(session).create_session(
+            user_id=user.id,
+            organization_id=organization.id,
+            token=access_token,
+            expires_at=access_expires,
+            session_id=session_id,
+            device_name="device_browser",
+            device_type="browser",
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
         await AuditLogger(session).log(
             action="auth.device.local_login",
             user_id=user.id,
@@ -612,7 +640,11 @@ async def rotate_legacy_refresh_exchange(
         if existing is None:
             return None
 
-        access_token = create_access_token(user_id=user_id, organization_id=organization_id)
+        access_token = create_access_token(
+            user_id=user_id,
+            organization_id=organization_id,
+            session_id=existing.id,
+        )
         new_refresh_token, refresh_expires = create_refresh_token(
             user_id=user_id,
             organization_id=organization_id,
@@ -1114,6 +1146,7 @@ class SessionRepository(_SessionRepository):
         user_id: UUID,
         token: str,
         expires_at,
+        session_id: UUID | None = None,
         organization_id: UUID | None = None,
         refresh_token: str | None = None,
         refresh_token_expires_at=None,
@@ -1130,6 +1163,7 @@ class SessionRepository(_SessionRepository):
                 user_id=user_id,
                 token=token,
                 expires_at=expires_at,
+                session_id=session_id,
                 organization_id=organization_id,
                 refresh_token=refresh_token,
                 refresh_token_expires_at=refresh_token_expires_at,

@@ -86,9 +86,31 @@ async def test_mcp_oauth_exchange_refresh_rotates_session(monkeypatch) -> None:
         "sibyl.auth.mcp_oauth._create_refresh_token",
         lambda **k: ("new_refresh", datetime.now(UTC) + timedelta(days=30)),
     )
-    monkeypatch.setattr("sibyl.auth.mcp_oauth.create_access_token", lambda **k: "new_access")
+    access_kwargs = {}
+    refresh_session_id = uuid4()
+
+    def create_access_token(**kwargs):
+        access_kwargs.update(kwargs)
+        return "new_access"
+
+    monkeypatch.setattr("sibyl.auth.mcp_oauth.create_access_token", create_access_token)
+    monkeypatch.setattr(
+        provider,
+        "_load_refresh_session_record",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                id=refresh_session_id,
+                user_id=user_id,
+                organization_id=org_id,
+            )
+        ),
+    )
     rotate_refresh = AsyncMock(
-        return_value=SimpleNamespace(user_id=user_id, organization_id=org_id)
+        return_value=SimpleNamespace(
+            id=refresh_session_id,
+            user_id=user_id,
+            organization_id=org_id,
+        )
     )
     monkeypatch.setattr(provider, "_rotate_refresh_session_record", rotate_refresh)
 
@@ -101,6 +123,7 @@ async def test_mcp_oauth_exchange_refresh_rotates_session(monkeypatch) -> None:
     tok = await provider.exchange_refresh_token(client, incoming, ["mcp"])
     assert tok.refresh_token == "new_refresh"
     assert tok.access_token == "new_access"
+    assert access_kwargs["session_id"] == refresh_session_id
     rotate_refresh.assert_awaited_once()
 
 
@@ -147,3 +170,22 @@ async def test_mcp_oauth_load_access_token_rejects_invalid_sub_claim(monkeypatch
     )
 
     assert await provider.load_access_token("access-token") is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_load_access_token_requires_active_session(monkeypatch) -> None:
+    provider = SibylMcpOAuthProvider()
+    user_id = uuid4()
+
+    monkeypatch.setattr(
+        "sibyl.auth.mcp_oauth.verify_access_token",
+        lambda _: {"sub": str(user_id), "exp": 123, "scope": "mcp"},
+    )
+    validate_access_session = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        "sibyl.auth.mcp_oauth.validate_access_session",
+        validate_access_session,
+    )
+
+    assert await provider.load_access_token("access-token") is None
+    validate_access_session.assert_awaited_once_with("access-token")

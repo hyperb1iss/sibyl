@@ -31,6 +31,22 @@ def test_jwt_roundtrip(monkeypatch) -> None:
     assert claims["typ"] == "access"
 
 
+def test_access_token_can_include_session_id(monkeypatch) -> None:
+    monkeypatch.setenv("SIBYL_JWT_SECRET", "secret")
+    monkeypatch.setenv("SIBYL_JWT_ALGORITHM", "HS256")
+
+    from sibyl import config as config_module
+
+    config_module.settings = Settings(_env_file=None)  # type: ignore[assignment]
+
+    user_id = uuid4()
+    session_id = uuid4()
+
+    token = create_access_token(user_id=user_id, session_id=session_id)
+
+    assert verify_access_token(token)["sid"] == str(session_id)
+
+
 def test_jwt_rejects_wrong_secret(monkeypatch) -> None:
     monkeypatch.setenv("SIBYL_JWT_SECRET", "secret1")
     from sibyl import config as config_module
@@ -55,10 +71,12 @@ def test_jwt_compatibility_surface_includes_refresh_helpers(monkeypatch) -> None
     config_module.settings = Settings(_env_file=None)  # type: ignore[assignment]
 
     user_id = uuid4()
-    refresh_token, expires_at = create_refresh_token(user_id=user_id)
+    session_id = uuid4()
+    refresh_token, expires_at = create_refresh_token(user_id=user_id, session_id=session_id)
 
     claims = verify_refresh_token(refresh_token)
     assert claims["sub"] == str(user_id)
+    assert claims["sid"] == str(session_id)
     assert claims["typ"] == "refresh"
     assert decode_token_unverified(refresh_token)["jti"] == claims["jti"]
     assert expires_at.tzinfo is not None

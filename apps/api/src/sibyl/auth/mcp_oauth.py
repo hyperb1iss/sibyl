@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import jwt
 from mcp.server.auth.provider import (
@@ -49,6 +49,7 @@ from sibyl.persistence.auth_runtime import (
     load_refresh_session_record,
     revoke_refresh_session_record,
     rotate_refresh_session_record,
+    validate_access_session,
 )
 
 OAUTH_SCOPE = "mcp"
@@ -97,6 +98,7 @@ def _create_refresh_token(
     organization_id: UUID | None,
     client_id: str,
     scopes: list[str],
+    session_id: UUID | None = None,
     expires_in: timedelta = timedelta(days=30),
 ) -> tuple[str, datetime]:
     now = datetime.now(UTC)
@@ -111,6 +113,8 @@ def _create_refresh_token(
     }
     if organization_id is not None:
         payload["org"] = str(organization_id)
+    if session_id is not None:
+        payload["sid"] = str(session_id)
     return _jwt_encode(payload), expires_at
 
 
@@ -184,9 +188,11 @@ class SibylMcpOAuthProvider(
         )
         scopes = authorization_code.scopes or [OAUTH_SCOPE]
 
+        session_id = uuid4()
         access = create_access_token(
             user_id=user_id,
             organization_id=org_id,
+            session_id=session_id,
             extra_claims={"scope": " ".join(scopes)},
         )
         refresh, refresh_expires_at = _create_refresh_token(
@@ -194,6 +200,7 @@ class SibylMcpOAuthProvider(
             organization_id=org_id,
             client_id=str(client.client_id),
             scopes=scopes,
+            session_id=session_id,
         )
 
         access_expires_at = datetime.now(UTC) + timedelta(
@@ -203,6 +210,7 @@ class SibylMcpOAuthProvider(
             user_id=user_id,
             token=access,
             expires_at=access_expires_at,
+            session_id=session_id,
             organization_id=org_id,
             refresh_token=refresh,
             refresh_token_expires_at=refresh_expires_at,
@@ -287,9 +295,16 @@ class SibylMcpOAuthProvider(
         if requested_scopes and not requested_scopes.issubset(allowed_scopes):
             scopes = list(allowed_scopes)
 
+        existing = await self._load_refresh_session_record(refresh_token.token)
+        if existing is None:
+            raise TokenError(
+                error="invalid_grant", error_description="refresh token does not exist"
+            )
+
         access = create_access_token(
             user_id=user_id,
             organization_id=org_id,
+            session_id=existing.id,
             extra_claims={"scope": " ".join(scopes)},
         )
         new_refresh, new_refresh_expires_at = _create_refresh_token(
@@ -297,19 +312,20 @@ class SibylMcpOAuthProvider(
             organization_id=org_id,
             client_id=str(client.client_id),
             scopes=scopes,
+            session_id=existing.id,
         )
 
         access_expires_at = datetime.now(UTC) + timedelta(
             minutes=config_module.settings.access_token_expire_minutes
         )
-        existing = await self._rotate_refresh_session_record(
+        rotated = await self._rotate_refresh_session_record(
             refresh_token.token,
             new_access_token=access,
             new_access_expires_at=access_expires_at,
             new_refresh_token=new_refresh,
             new_refresh_expires_at=new_refresh_expires_at,
         )
-        if existing is None:
+        if rotated is None:
             raise TokenError(
                 error="invalid_grant", error_description="refresh token does not exist"
             )
@@ -337,6 +353,11 @@ class SibylMcpOAuthProvider(
         try:
             claims = verify_access_token(token)
         except JwtError:
+            return None
+        try:
+            if not await validate_access_session(token):
+                return None
+        except TimeoutError:
             return None
 
         sub = claims.get("sub")

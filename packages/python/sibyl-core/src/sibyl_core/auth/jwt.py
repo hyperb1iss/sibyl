@@ -33,6 +33,7 @@ def create_access_token(
     *,
     user_id: UUID,
     organization_id: UUID | None = None,
+    session_id: UUID | None = None,
     expires_in: timedelta | None = None,
     extra_claims: dict[str, Any] | None = None,
 ) -> str:
@@ -41,6 +42,7 @@ def create_access_token(
     Token schema:
     - sub: user_id
     - org: organization_id (optional)
+    - sid: session_id (optional)
     - typ: "access"
     - iat/exp: unix timestamps
     """
@@ -56,6 +58,8 @@ def create_access_token(
     }
     if organization_id is not None:
         payload["org"] = str(organization_id)
+    if session_id is not None:
+        payload["sid"] = str(session_id)
     if extra_claims:
         payload.update(extra_claims)
 

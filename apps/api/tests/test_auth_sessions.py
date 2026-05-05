@@ -81,6 +81,24 @@ class TestSessionManager:
         db_session.flush.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_create_session_accepts_preallocated_session_id(self) -> None:
+        db_session = AsyncMock()
+        db_session.add = MagicMock()
+        db_session.flush = AsyncMock()
+
+        manager = SessionManager(db_session)
+        session_id = uuid4()
+
+        session = await manager.create_session(
+            user_id=uuid4(),
+            token="raw-token",
+            expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1),
+            session_id=session_id,
+        )
+
+        assert session.id == session_id
+
+    @pytest.mark.asyncio
     async def test_get_session_by_token_returns_active_session(self) -> None:
         """Should return session when token matches and not revoked."""
         db_session = AsyncMock()

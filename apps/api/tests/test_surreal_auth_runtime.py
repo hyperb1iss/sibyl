@@ -1493,6 +1493,8 @@ async def test_exchange_device_code_accepts_aware_datetime_rows(
     fake_client = _RecordingAuthClient([{"uuid": str(device_request_id)}])
     create_session = AsyncMock()
     replace_record = AsyncMock()
+    access_token_kwargs: dict[str, object] = {}
+    refresh_token_kwargs: dict[str, object] = {}
     select_one = AsyncMock(
         return_value={
             "uuid": str(device_request_id),
@@ -1519,11 +1521,16 @@ async def test_exchange_device_code_accepts_aware_datetime_rows(
         "_auth_client_scope",
         lambda: _StaticAuthClientScope(fake_client),
     )
-    monkeypatch.setattr(surreal_auth_runtime, "create_access_token", lambda **_: "access-token")
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "create_access_token",
+        lambda **kwargs: access_token_kwargs.update(kwargs) or "access-token",
+    )
     monkeypatch.setattr(
         surreal_auth_runtime,
         "create_refresh_token",
-        lambda **_: ("refresh-token", datetime.now(UTC) + timedelta(days=30)),
+        lambda **kwargs: refresh_token_kwargs.update(kwargs)
+        or ("refresh-token", datetime.now(UTC) + timedelta(days=30)),
     )
     monkeypatch.setattr(surreal_auth_runtime._SurrealRepository, "select_one", select_one)
     monkeypatch.setattr(surreal_auth_runtime._SurrealRepository, "replace_record", replace_record)
@@ -1538,6 +1545,9 @@ async def test_exchange_device_code_accepts_aware_datetime_rows(
     assert token["access_token"] == "access-token"
     assert token["refresh_token"] == "refresh-token"
     create_session.assert_awaited_once()
+    session_kwargs = create_session.await_args.kwargs
+    assert session_kwargs["session_id"] == access_token_kwargs["session_id"]
+    assert session_kwargs["session_id"] == refresh_token_kwargs["session_id"]
     replace_record.assert_not_awaited()
     assert len(fake_client.calls) == 1
     query, params = fake_client.calls[0]

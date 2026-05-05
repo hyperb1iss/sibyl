@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 from starlette.requests import Request
@@ -141,12 +141,6 @@ async def accept_legacy_org_invitation(
         except InvitationError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-        access_token = create_access_token(user_id=user.id, organization_id=invite.organization_id)
-        refresh_token, refresh_expires = create_refresh_token(
-            user_id=user.id,
-            organization_id=invite.organization_id,
-        )
-
         current = select_access_token(
             authorization=request.headers.get("authorization"),
             cookie_token=request.cookies.get("sibyl_access_token"),
@@ -155,27 +149,38 @@ async def accept_legacy_org_invitation(
             minutes=config_module.settings.access_token_expire_minutes
         )
         session_manager = SessionManager(session)
-        if current:
-            existing = await session_manager.get_session_by_token(current)
-            if existing is not None:
-                await session_manager.rotate_tokens(
-                    existing,
-                    new_access_token=access_token,
-                    new_access_expires_at=access_expires,
-                    new_refresh_token=refresh_token,
-                    new_refresh_expires_at=refresh_expires,
-                )
-            else:
-                await session_manager.create_session(
-                    user_id=user.id,
-                    organization_id=invite.organization_id,
-                    token=access_token,
-                    expires_at=access_expires,
-                    refresh_token=refresh_token,
-                    refresh_token_expires_at=refresh_expires,
-                    ip_address=request.client.host if request.client else None,
-                    user_agent=request.headers.get("user-agent"),
-                )
+        existing = await session_manager.get_session_by_token(current) if current else None
+        session_id = existing.id if existing is not None else uuid4()
+        access_token = create_access_token(
+            user_id=user.id,
+            organization_id=invite.organization_id,
+            session_id=session_id,
+        )
+        refresh_token, refresh_expires = create_refresh_token(
+            user_id=user.id,
+            organization_id=invite.organization_id,
+            session_id=session_id,
+        )
+        if existing is not None:
+            await session_manager.rotate_tokens(
+                existing,
+                new_access_token=access_token,
+                new_access_expires_at=access_expires,
+                new_refresh_token=refresh_token,
+                new_refresh_expires_at=refresh_expires,
+            )
+        else:
+            await session_manager.create_session(
+                user_id=user.id,
+                organization_id=invite.organization_id,
+                token=access_token,
+                expires_at=access_expires,
+                session_id=session_id,
+                refresh_token=refresh_token,
+                refresh_token_expires_at=refresh_expires,
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
 
         await AuditLogger(session).log(
             action="org.invitation.accept",

@@ -201,22 +201,28 @@ async def _rotate_or_create_org_session(
     request: Request,
     user_id: UUID,
     organization_id: UUID,
-    access_token: str,
-    refresh_token: str,
-    refresh_expires: datetime,
-) -> None:
+) -> tuple[str, str, datetime]:
     current = select_access_token(
         authorization=request.headers.get("authorization"),
         cookie_token=request.cookies.get("sibyl_access_token"),
     )
-    if not current:
-        return
 
     access_expires = _utcnow() + timedelta(
         minutes=config_module.settings.access_token_expire_minutes
     )
     sessions = SurrealSessionRepository.from_client(client)
-    existing = await sessions.get_session_by_token(current)
+    existing = await sessions.get_session_by_token(current) if current else None
+    session_id = existing.id if existing is not None else uuid4()
+    access_token = create_access_token(
+        user_id=user_id,
+        organization_id=organization_id,
+        session_id=session_id,
+    )
+    refresh_token, refresh_expires = create_refresh_token(
+        user_id=user_id,
+        organization_id=organization_id,
+        session_id=session_id,
+    )
     if existing is not None:
         await sessions.rotate_tokens(
             existing,
@@ -225,18 +231,20 @@ async def _rotate_or_create_org_session(
             new_refresh_token=refresh_token,
             new_refresh_expires_at=refresh_expires,
         )
-        return
+        return access_token, refresh_token, refresh_expires
 
     await sessions.create_session(
         user_id=user_id,
         organization_id=organization_id,
         token=access_token,
         expires_at=access_expires,
+        session_id=session_id,
         refresh_token=refresh_token,
         refresh_token_expires_at=refresh_expires,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
+    return access_token, refresh_token, refresh_expires
 
 
 async def _require_org_admin(
@@ -651,19 +659,11 @@ async def create_org(
                 error=str(exc),
             )
 
-        access_token = create_access_token(user_id=user_id, organization_id=organization_id)
-        refresh_token, refresh_expires = create_refresh_token(
-            user_id=user_id,
-            organization_id=organization_id,
-        )
-        await _rotate_or_create_org_session(
+        access_token, refresh_token, refresh_expires = await _rotate_or_create_org_session(
             client=client,
             request=request,
             user_id=user_id,
             organization_id=organization_id,
-            access_token=access_token,
-            refresh_token=refresh_token,
-            refresh_expires=refresh_expires,
         )
         await log_audit_event(
             action="org.create",
@@ -722,19 +722,11 @@ async def switch_org(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
         organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
-        access_token = create_access_token(user_id=user_id, organization_id=organization_id)
-        refresh_token, refresh_expires = create_refresh_token(
-            user_id=user_id,
-            organization_id=organization_id,
-        )
-        await _rotate_or_create_org_session(
+        access_token, refresh_token, refresh_expires = await _rotate_or_create_org_session(
             client=client,
             request=request,
             user_id=user_id,
             organization_id=organization_id,
-            access_token=access_token,
-            refresh_token=refresh_token,
-            refresh_expires=refresh_expires,
         )
         await log_audit_event(
             action="org.switch",
@@ -1380,19 +1372,11 @@ async def accept_org_invitation(
             msg = "Failed to write organization membership"
             raise RuntimeError(msg)
 
-        access_token = create_access_token(user_id=user.id, organization_id=organization_id)
-        refresh_token, refresh_expires = create_refresh_token(
-            user_id=user.id,
-            organization_id=organization_id,
-        )
-        await _rotate_or_create_org_session(
+        access_token, refresh_token, refresh_expires = await _rotate_or_create_org_session(
             client=client,
             request=request,
             user_id=user.id,
             organization_id=organization_id,
-            access_token=access_token,
-            refresh_token=refresh_token,
-            refresh_expires=refresh_expires,
         )
 
         updated = {

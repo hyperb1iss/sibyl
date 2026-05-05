@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 from fastapi import HTTPException, status
@@ -49,10 +49,7 @@ async def _rotate_or_create_org_session(
     request: Request,
     user_id: UUID,
     organization_id: UUID,
-    access_token: str,
-    refresh_token: str,
-    refresh_expires: datetime,
-) -> None:
+) -> tuple[str, str, datetime]:
     current = select_access_token(
         authorization=request.headers.get("authorization"),
         cookie_token=request.cookies.get("sibyl_access_token"),
@@ -60,10 +57,19 @@ async def _rotate_or_create_org_session(
     access_expires = datetime.now(UTC) + timedelta(
         minutes=config_module.settings.access_token_expire_minutes
     )
-    if not current:
-        return
 
-    existing = await session_manager.get_session_by_token(current)
+    existing = await session_manager.get_session_by_token(current) if current else None
+    session_id = existing.id if existing is not None else uuid4()
+    access_token = create_access_token(
+        user_id=user_id,
+        organization_id=organization_id,
+        session_id=session_id,
+    )
+    refresh_token, refresh_expires = create_refresh_token(
+        user_id=user_id,
+        organization_id=organization_id,
+        session_id=session_id,
+    )
     if existing is not None:
         await session_manager.rotate_tokens(
             existing,
@@ -72,18 +78,20 @@ async def _rotate_or_create_org_session(
             new_refresh_token=refresh_token,
             new_refresh_expires_at=refresh_expires,
         )
-        return
+        return access_token, refresh_token, refresh_expires
 
     await session_manager.create_session(
         user_id=user_id,
         organization_id=organization_id,
         token=access_token,
         expires_at=access_expires,
+        session_id=session_id,
         refresh_token=refresh_token,
         refresh_token_expires_at=refresh_expires,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
+    return access_token, refresh_token, refresh_expires
 
 
 async def _get_org_and_membership(
@@ -164,20 +172,11 @@ async def create_legacy_org(
         except Exception as exc:
             log.debug("Graph index setup deferred", org_id=str(org.id), error=str(exc))
 
-        access_token = create_access_token(user_id=user_id, organization_id=org.id)
-        refresh_token, refresh_expires = create_refresh_token(
-            user_id=user_id,
-            organization_id=org.id,
-        )
-
-        await _rotate_or_create_org_session(
+        access_token, refresh_token, refresh_expires = await _rotate_or_create_org_session(
             session_manager=SessionManager(session),
             request=request,
             user_id=user_id,
             organization_id=org.id,
-            access_token=access_token,
-            refresh_token=refresh_token,
-            refresh_expires=refresh_expires,
         )
 
         await AuditLogger(session).log(
@@ -284,20 +283,11 @@ async def switch_legacy_org(
         if member is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-        access_token = create_access_token(user_id=user_id, organization_id=org.id)
-        refresh_token, refresh_expires = create_refresh_token(
-            user_id=user_id,
-            organization_id=org.id,
-        )
-
-        await _rotate_or_create_org_session(
+        access_token, refresh_token, refresh_expires = await _rotate_or_create_org_session(
             session_manager=SessionManager(session),
             request=request,
             user_id=user_id,
             organization_id=org.id,
-            access_token=access_token,
-            refresh_token=refresh_token,
-            refresh_expires=refresh_expires,
         )
 
         await AuditLogger(session).log(

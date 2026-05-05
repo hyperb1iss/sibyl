@@ -137,6 +137,7 @@ class SessionRepository(Protocol):
         user_id: UUID,
         token: str,
         expires_at: datetime,
+        session_id: UUID | None = None,
         organization_id: UUID | None = None,
         refresh_token: str | None = None,
         refresh_token_expires_at: datetime | None = None,

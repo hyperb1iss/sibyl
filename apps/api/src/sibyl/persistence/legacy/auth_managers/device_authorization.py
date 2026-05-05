@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Self
+from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -176,14 +177,17 @@ class DeviceAuthorizationManager:
         if not req.user_id:
             raise DeviceTokenError("server_error", "Approved request missing user_id")
 
+        session_id = uuid4()
         access_token = create_access_token(
             user_id=req.user_id,
             organization_id=req.organization_id,
+            session_id=session_id,
             extra_claims={"scope": (req.scope or "mcp").strip() or "mcp"},
         )
         refresh_token, refresh_expires = create_refresh_token(
             user_id=req.user_id,
             organization_id=req.organization_id,
+            session_id=session_id,
         )
 
         # Create session record
@@ -193,6 +197,7 @@ class DeviceAuthorizationManager:
             organization_id=req.organization_id,
             token=access_token,
             expires_at=access_expires,
+            session_id=session_id,
             refresh_token=refresh_token,
             refresh_token_expires_at=refresh_expires,
             device_name=req.client_name,

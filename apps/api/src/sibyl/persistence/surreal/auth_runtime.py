@@ -558,6 +558,7 @@ class SurrealSessionRepository(_SurrealRepository):
         user_id: UUID,
         token: str,
         expires_at: datetime,
+        session_id: UUID | None = None,
         organization_id: UUID | None = None,
         refresh_token: str | None = None,
         refresh_token_expires_at: datetime | None = None,
@@ -571,7 +572,7 @@ class SurrealSessionRepository(_SurrealRepository):
     ) -> AuthSession:
         now = _utcnow()
         record = {
-            "uuid": str(uuid4()),
+            "uuid": str(session_id or uuid4()),
             "user_id": str(user_id),
             "organization_id": _uuid_str(organization_id),
             "token_hash": self.hash_token(token),
@@ -931,10 +932,16 @@ async def _issue_auth_session(
     action: str,
     details: SurrealRecord,
 ) -> IssuedAuthSession:
-    access_token = create_access_token(user_id=user.id, organization_id=organization.id)
+    session_id = uuid4()
+    access_token = create_access_token(
+        user_id=user.id,
+        organization_id=organization.id,
+        session_id=session_id,
+    )
     refresh_token, refresh_expires = create_refresh_token(
         user_id=user.id,
         organization_id=organization.id,
+        session_id=session_id,
     )
     access_expires = _utcnow() + timedelta(
         minutes=config_module.settings.access_token_expire_minutes
@@ -945,6 +952,7 @@ async def _issue_auth_session(
         organization_id=organization.id,
         token=access_token,
         expires_at=access_expires,
+        session_id=session_id,
         refresh_token=refresh_token,
         refresh_token_expires_at=refresh_expires,
         ip_address=request.client.host if request and request.client else None,
@@ -1163,6 +1171,7 @@ async def create_session_record(
     user_id: UUID,
     token: str,
     expires_at,
+    session_id: UUID | None = None,
     organization_id: UUID | None = None,
     refresh_token: str | None = None,
     refresh_token_expires_at=None,
@@ -1180,6 +1189,7 @@ async def create_session_record(
             user_id=user_id,
             token=token,
             expires_at=expires_at,
+            session_id=session_id,
             organization_id=organization_id,
             refresh_token=refresh_token,
             refresh_token_expires_at=refresh_token_expires_at,
@@ -1437,14 +1447,17 @@ async def exchange_device_code(*, device_code: str) -> dict[str, object]:
 
         if request_row.user_id is None:
             raise DeviceTokenError("server_error", "Approved request missing user_id")
+        session_id = uuid4()
         access_token = create_access_token(
             user_id=request_row.user_id,
             organization_id=request_row.organization_id,
+            session_id=session_id,
             extra_claims={"scope": (request_row.scope or "mcp").strip() or "mcp"},
         )
         refresh_token, refresh_expires = create_refresh_token(
             user_id=request_row.user_id,
             organization_id=request_row.organization_id,
+            session_id=session_id,
         )
         access_expires = now + timedelta(minutes=config_module.settings.access_token_expire_minutes)
         await sessions.create_session(
@@ -1452,6 +1465,7 @@ async def exchange_device_code(*, device_code: str) -> dict[str, object]:
             organization_id=request_row.organization_id,
             token=access_token,
             expires_at=access_expires,
+            session_id=session_id,
             refresh_token=refresh_token,
             refresh_token_expires_at=refresh_expires,
             device_name=request_row.client_name,
@@ -1680,7 +1694,11 @@ async def rotate_refresh_exchange(
         existing = await sessions.get_session_by_refresh_token(refresh_token)
         if existing is None:
             return None
-        access_token = create_access_token(user_id=user_id, organization_id=organization_id)
+        access_token = create_access_token(
+            user_id=user_id,
+            organization_id=organization_id,
+            session_id=existing.id,
+        )
         new_refresh_token, refresh_expires = create_refresh_token(
             user_id=user_id,
             organization_id=organization_id,
