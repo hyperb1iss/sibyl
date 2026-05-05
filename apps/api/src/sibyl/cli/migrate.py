@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
@@ -21,7 +22,11 @@ from sibyl.cli.db import (
     _restore_pg_sql,
 )
 from sibyl.config import settings
-from sibyl.persistence.auth_archive import export_auth_archive_payload, restore_auth_archive_payload
+from sibyl.persistence.auth_archive import (
+    AUTH_ARCHIVE_TABLES,
+    export_auth_archive_payload,
+    restore_auth_archive_payload,
+)
 from sibyl.persistence.backups_common import resolve_backup_runtime_options
 from sibyl.persistence.content_archive import (
     export_content_archive_payload,
@@ -60,6 +65,13 @@ DEFAULT_REHEARSAL_PASSWORD = "baseline-corpus-password-secure-123!"  # noqa: S10
 DEFAULT_AUTH_FLOW_PASSWORD = "auth-flow-password-secure-123!"  # noqa: S105
 DEFAULT_AUTH_FLOW_EMAIL_OUTBOX = Path(".moon/cache/auth-flow-email-outbox.jsonl")
 DEFAULT_CUTOVER_BENCH_LABEL = "cutover-acceptance"
+_AUTH_READ_ONLY_FUNCTION = "sibyl_reject_auth_rbac_write"
+_AUTH_READ_ONLY_TRIGGER = "sibyl_auth_rbac_read_only"
+
+
+class AuthReadOnlyMode(str, Enum):
+    freeze = "freeze"
+    unfreeze = "unfreeze"
 
 
 def _load_valid_archive(source: Path):
@@ -141,6 +153,65 @@ def _print_verify_summary(result: object) -> None:
         warn(f"Verification failed with {len(errors)} issue(s)")
         for issue in errors:
             console.print(f"  [dim]{issue}[/dim]")
+        raise typer.Exit(code=1)
+
+
+def _quote_pg_ident(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def _build_auth_readonly_sql(mode: AuthReadOnlyMode) -> str:
+    statements = ["BEGIN;"]
+    quoted_function = _quote_pg_ident(_AUTH_READ_ONLY_FUNCTION)
+    quoted_trigger = _quote_pg_ident(_AUTH_READ_ONLY_TRIGGER)
+
+    if mode is AuthReadOnlyMode.freeze:
+        statements.extend(
+            [
+                f"CREATE OR REPLACE FUNCTION {quoted_function}()",
+                "RETURNS trigger",
+                "LANGUAGE plpgsql",
+                "AS $$",
+                "BEGIN",
+                "    RAISE EXCEPTION",
+                "        'Sibyl legacy auth/RBAC tables are read-only after SurrealDB cutover'",
+                "        USING ERRCODE = '25006';",
+                "END;",
+                "$$;",
+            ]
+        )
+
+    for table in AUTH_ARCHIVE_TABLES:
+        quoted_table = _quote_pg_ident(table)
+        statements.append(f"DROP TRIGGER IF EXISTS {quoted_trigger} ON {quoted_table};")
+        if mode is AuthReadOnlyMode.freeze:
+            statements.extend(
+                [
+                    f"CREATE TRIGGER {quoted_trigger}",
+                    f"BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE ON {quoted_table}",
+                    f"FOR EACH STATEMENT EXECUTE FUNCTION {quoted_function}();",
+                ]
+            )
+
+    if mode is AuthReadOnlyMode.unfreeze:
+        statements.append(f"DROP FUNCTION IF EXISTS {quoted_function}();")
+
+    statements.append("COMMIT;")
+    return "\n".join(statements) + "\n"
+
+
+def _apply_auth_readonly_sql(sql_content: str) -> None:
+    cmd = [_find_pg_tool("psql"), *_get_pg_connection_args(), "--quiet", "--set", "ON_ERROR_STOP=1"]
+    result = subprocess.run(  # noqa: S603 - trusted psql command
+        cmd,
+        env=_get_pg_env(),
+        input=sql_content,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        error(f"Legacy auth/RBAC read-only SQL failed: {result.stderr}")
         raise typer.Exit(code=1)
 
 
@@ -314,12 +385,23 @@ def _print_cutover_plan(
         steps.append("Run bench-live-smoke acceptance check")
     if run_bench_live:
         steps.append("Run bench-live artifact capture")
+    steps.append("Apply the legacy auth/RBAC read-only guard")
     if reopen_writes:
         steps.append("Reopen writes on SurrealDB after operator acknowledgment")
     for index, step in enumerate(steps, start=1):
         info(f"  {index}. {step}")
     if run_baseline and not manifest_path.exists():
         warn(f"Baseline manifest not found yet: {manifest_path}")
+
+
+def _print_writes_remain_frozen_notice() -> None:
+    warn("Writes remain frozen. Rollback is still supported at this point.")
+    info("Freeze legacy auth/RBAC writes before reopening:")
+    typer.echo("  moon run auth-readonly -- --mode freeze --apply --yes")
+    info(
+        "Rerun with --reopen-writes --acknowledge-no-instant-rollback "
+        "after final operator sign-off."
+    )
 
 
 async def _run_cutover_acceptance(
@@ -1075,6 +1157,49 @@ def auth_flow_compare(
     _auth_flow_compare()
 
 
+@app.command("auth-readonly")
+def auth_readonly(
+    mode: Annotated[
+        AuthReadOnlyMode,
+        typer.Option(
+            "--mode",
+            help="Generate SQL to freeze or unfreeze legacy auth/RBAC writes",
+        ),
+    ] = AuthReadOnlyMode.freeze,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Write SQL to a file instead of stdout"),
+    ] = None,
+    apply_sql: Annotated[
+        bool,
+        typer.Option("--apply", help="Apply the SQL to the configured PostgreSQL database"),
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+) -> None:
+    """Generate or apply the legacy auth/RBAC read-only guard."""
+    sql_content = _build_auth_readonly_sql(mode)
+
+    if output is not None:
+        output.write_text(sql_content, encoding="utf-8")
+        success(f"Auth/RBAC {mode.value} SQL written to {output}")
+    else:
+        typer.echo(sql_content, nl=False)
+
+    if not apply_sql:
+        if output is not None:
+            info("Rerun with --apply during the cutover write-freeze when ready.")
+        return
+
+    if not yes:
+        warn("This changes write behavior on the configured PostgreSQL database.")
+        if not typer.confirm("Continue?"):
+            info("Cancelled")
+            return
+
+    _apply_auth_readonly_sql(sql_content)
+    success(f"Legacy auth/RBAC {mode.value} guard applied")
+
+
 @app.command("rehearse")
 def rehearse_archive(
     source: Annotated[Path, typer.Argument(help="Archive .tar.gz or directory to rehearse")],
@@ -1478,11 +1603,7 @@ def cutover_archive(
     )
 
     if not reopen_writes:
-        warn("Writes remain frozen. Rollback is still supported at this point.")
-        info(
-            "Rerun with --reopen-writes --acknowledge-no-instant-rollback "
-            "after final operator sign-off."
-        )
+        _print_writes_remain_frozen_notice()
         return
 
     if not acknowledge_no_instant_rollback:

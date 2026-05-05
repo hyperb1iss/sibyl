@@ -112,17 +112,29 @@ organizations, the command lists their IDs and asks you to rerun with `--org-id 
 1. Stop writes to the legacy API (drain requests, flip the ingress).
 2. Run export → import → verify against the current data.
 3. Point clients at the new Surreal-backed API (`SIBYL_STORE=surreal`, new `SIBYL_SURREAL_URL`).
-4. Keep legacy containers up for a few days as a rollback option. They hold read-only history until
+4. Freeze the legacy auth/RBAC tables so stale code paths cannot accept new writes:
+
+```bash
+moon run auth-readonly -- --mode freeze --apply --yes
+```
+
+5. Keep legacy containers up for a few days as a rollback option. They hold read-only history until
    you're confident.
-5. Decommission FalkorDB + PostgreSQL once traffic has run cleanly on Surreal.
+6. Decommission FalkorDB + PostgreSQL once traffic has run cleanly on Surreal.
 
 ## Rollback
 
 If post-cutover verification reveals a problem:
 
 1. Point clients back at the legacy API (`SIBYL_STORE=legacy`).
-2. The legacy stack is unchanged — the export is non-destructive.
-3. File an issue with the archive manifest and the failing verification output.
+2. Remove the auth/RBAC read-only guard before resuming legacy writes:
+
+```bash
+moon run auth-readonly -- --mode unfreeze --apply --yes
+```
+
+3. The legacy stack is otherwise unchanged — the export is non-destructive.
+4. File an issue with the archive manifest and the failing verification output.
 
 ## FAQ
 

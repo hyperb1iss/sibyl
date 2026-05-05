@@ -770,6 +770,37 @@ def test_migrate_auth_flow_compare_runs_dual_store_gate(tmp_path: Path) -> None:
     )
 
 
+def test_migrate_auth_readonly_prints_freeze_sql() -> None:
+    result = runner.invoke(migrate_cli.app, ["auth-readonly"])
+
+    assert result.exit_code == 0
+    assert 'CREATE OR REPLACE FUNCTION "sibyl_reject_auth_rbac_write"()' in result.output
+    assert 'CREATE TRIGGER "sibyl_auth_rbac_read_only"' in result.output
+    assert "BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE" in result.output
+    assert result.output.rstrip().endswith("COMMIT;")
+
+
+def test_migrate_auth_readonly_sql_covers_all_auth_tables() -> None:
+    sql = migrate_cli._build_auth_readonly_sql(migrate_cli.AuthReadOnlyMode.freeze)
+
+    for table in migrate_cli.AUTH_ARCHIVE_TABLES:
+        assert f'ON "{table}"' in sql
+
+
+def test_migrate_auth_readonly_apply_runs_unfreeze_sql() -> None:
+    with patch("sibyl.cli.migrate._apply_auth_readonly_sql") as apply_auth_readonly_sql:
+        result = runner.invoke(
+            migrate_cli.app,
+            ["auth-readonly", "--mode", "unfreeze", "--apply", "--yes"],
+        )
+
+    assert result.exit_code == 0
+    apply_auth_readonly_sql.assert_called_once()
+    sql = apply_auth_readonly_sql.call_args.args[0]
+    assert 'DROP TRIGGER IF EXISTS "sibyl_auth_rbac_read_only"' in sql
+    assert 'DROP FUNCTION IF EXISTS "sibyl_reject_auth_rbac_write"();' in sql
+
+
 def test_migrate_rehearse_runs_verify_and_baseline(tmp_path: Path) -> None:
     archive_path = tmp_path / "migration.tar.gz"
     manifest_path = tmp_path / "runtime-manifest.json"
@@ -893,6 +924,7 @@ def test_migrate_cutover_dry_run_prints_plan(tmp_path: Path) -> None:
     assert "Import archive into the Surreal runtime" in result.output
     assert "Run auth-flow acceptance harness" in result.output
     assert "Run bench-live artifact capture" in result.output
+    assert "Apply the legacy auth/RBAC read-only guard" in result.output
     assert "Reopen writes on SurrealDB" in result.output
     assert "Cutover dry run complete" in result.output
 
@@ -943,6 +975,7 @@ def test_migrate_cutover_leaves_writes_frozen_until_explicit_reopen(tmp_path: Pa
     assert result.exit_code == 0
     assert "Acceptance suite passed while writes remain frozen" in result.output
     assert "Rollback is still supported at this point" in result.output
+    assert "moon run auth-readonly -- --mode freeze --apply --yes" in result.output
     auth_flow.assert_awaited_once_with(
         base_url=migrate_cli.DEFAULT_REHEARSAL_BASE_URL,
         auth_flow_email="",
