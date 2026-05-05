@@ -43,14 +43,14 @@ cp .env.example .env
 #   SIBYL_OPENAI_API_KEY=sk-...
 
 # 4. Start all services
-moon run dev-surreal
+moon run dev
 ```
 
 For Redis-backed coordination, opt into the `redis` profile explicitly:
 
 ```bash
 docker compose --profile redis up -d surrealdb redis
-SIBYL_COORDINATION_BACKEND=redis moon run dev-surreal
+SIBYL_COORDINATION_BACKEND=redis moon run dev
 ```
 
 ## Service Definitions
@@ -107,10 +107,10 @@ moon run docker-up
 moon run docker-down
 
 # Start recommended Surreal local-dev stack
-moon run dev-surreal
+moon run dev
 
 # Start legacy Falkor/Postgres stack
-moon run dev
+moon run dev-legacy
 
 # Start API + Worker only (no frontend)
 moon run dev-api

@@ -25,6 +25,67 @@ is_local_service() {
   [[ -z "$value" ]]
 }
 
+usage() {
+  cat <<'EOF'
+Usage: moon run dev -- [options]
+
+Options:
+  --migrate-legacy  Migrate the local legacy setup to SurrealDB, then start dev
+  --ignore-legacy   Start SurrealDB dev even if local legacy data is detected
+  --print-env       Print resolved runtime environment and exit
+  --help            Show this help
+EOF
+}
+
+docker_legacy_setup_detected() {
+  local project_name="${COMPOSE_PROJECT_NAME:-sibyl}"
+  local compose_ps=""
+  local volumes=""
+
+  if ! command -v docker >/dev/null 2>&1; then
+    return 1
+  fi
+
+  compose_ps="$(docker compose ps -a --format json 2>/dev/null || true)"
+  if [[ "$compose_ps" == *'"Service":"falkordb"'* || "$compose_ps" == *'"Service":"postgres"'* ]]; then
+    return 0
+  fi
+
+  volumes="$(docker volume ls --format '{{.Name}}' 2>/dev/null || true)"
+  if grep -qx "${project_name}_falkordb_data" <<<"$volumes"; then
+    return 0
+  fi
+  if grep -qx "${project_name}_postgres_data" <<<"$volumes"; then
+    return 0
+  fi
+
+  return 1
+}
+
+warn_if_legacy_setup_detected() {
+  if [[ "$SIBYL_STORE" != "surreal" || "${SIBYL_DEV_SKIP_LEGACY_CHECK:-}" == "1" ]]; then
+    return 0
+  fi
+  if ! docker_legacy_setup_detected; then
+    return 0
+  fi
+
+  cat <<'EOF'
+⚠️  Local legacy data detected.
+   `moon run dev` now starts the SurrealDB runtime by default.
+
+   Migrate the common single-org setup:
+     moon run dev -- --migrate-legacy
+
+   Keep using FalkorDB + PostgreSQL:
+     moon run dev-legacy
+
+   Start a fresh SurrealDB dev runtime:
+     moon run dev -- --ignore-legacy
+EOF
+  return 1
+}
+
 resolve_coordination_backend() {
   local configured="${SIBYL_COORDINATION_BACKEND:-auto}"
 
@@ -165,6 +226,36 @@ cleanup() {
 }
 
 main() {
+  local print_env=false
+  local ignore_legacy=false
+  local migrate_legacy=false
+
+  while (($# > 0)); do
+    case "$1" in
+      --print-env)
+        print_env=true
+        shift
+        ;;
+      --ignore-legacy)
+        ignore_legacy=true
+        shift
+        ;;
+      --migrate-legacy)
+        migrate_legacy=true
+        shift
+        ;;
+      --help|-h)
+        usage
+        return 0
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        usage >&2
+        return 1
+        ;;
+    esac
+  done
+
   export SIBYL_STORE="${SIBYL_STORE:-surreal}"
   if [[ -z "${SIBYL_AUTH_STORE:-}" ]]; then
     if [[ "$SIBYL_STORE" == "surreal" ]]; then
@@ -261,7 +352,7 @@ main() {
     unset SIBYL_REDIS_PASSWORD
   fi
 
-  if [[ "${1:-}" == "--print-env" ]]; then
+  if [[ "$print_env" == true ]]; then
     printf 'SIBYL_STORE=%s\n' "$SIBYL_STORE"
     printf 'SIBYL_AUTH_STORE=%s\n' "$SIBYL_AUTH_STORE"
     printf 'SIBYL_COORDINATION_BACKEND=%s\n' "$coordination_backend"
@@ -276,6 +367,12 @@ main() {
       printf 'SIBYL_REDIS_PORT=%s\n' "$SIBYL_REDIS_PORT"
     fi
     return 0
+  fi
+
+  if [[ "$migrate_legacy" == true ]]; then
+    bash "$repo_root/tools/dev/migrate-local-surreal.sh"
+  elif [[ "$ignore_legacy" != true ]] && ! warn_if_legacy_setup_detected; then
+    return 1
   fi
 
   echo "🔮 Store: $SIBYL_STORE"

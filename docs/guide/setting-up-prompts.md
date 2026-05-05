@@ -210,7 +210,7 @@ Code skills \`\`\`
 
 ### Development Commands
 
-\`\`\`bash moon run dev-surreal # Start the recommended local runtime moon run :lint # Lint current
+\`\`\`bash moon run dev # Start the recommended local runtime moon run :lint # Lint current
 project moon run :test # Test current project moon run :check # All quality checks \`\`\`
 
 ## Key Patterns

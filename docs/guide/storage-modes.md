@@ -31,7 +31,7 @@ SIBYL_AUTH_STORE=surreal
 # SIBYL_SURREAL_DATA_DIR=./.moon/cache/surreal-dev
 ```
 
-- **Dev:** `moon run dev` starts embedded SurrealDB (RocksDB) automatically.
+- **Dev:** `moon run dev` starts local SurrealDB backed by RocksDB automatically.
 - **Prod:** run SurrealDB as a service (`ws://` or `http://` URL). In-memory mode (`memory://`) is
   rejected by the production config validator.
 

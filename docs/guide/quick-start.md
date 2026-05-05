@@ -40,7 +40,7 @@ SIBYL_COORDINATION_BACKEND=local
 
 ```bash
 # Start the recommended local-dev stack
-moon run dev-surreal
+moon run dev
 
 # Or just the API
 cd apps/api && uv run sibyld serve
@@ -48,9 +48,9 @@ cd apps/api && uv run sibyld serve
 
 The server is now running on `http://localhost:3334`.
 
-`moon run dev-surreal` starts local SurrealDB on port `8000` and keeps jobs plus schedules
-in-process under the API server. If you want Redis-backed coordination later, set
-`SIBYL_COORDINATION_BACKEND=redis` and start Redis explicitly with Docker Compose.
+`moon run dev` starts local SurrealDB on port `8000` and keeps jobs plus schedules in-process under
+the API server. If you want Redis-backed coordination later, set `SIBYL_COORDINATION_BACKEND=redis`
+and start Redis explicitly with Docker Compose.
 
 ## Step 3: Configure the CLI
 

@@ -14,7 +14,7 @@ automatically when you upgrade.
 - **Both stacks online.** Keep FalkorDB + PostgreSQL running during migration. You'll only stop them
   after verification passes.
 - **SurrealDB reachable.** Have a Surreal instance running. For local dev, `moon run dev` starts
-  embedded SurrealDB automatically. For production, set `SIBYL_SURREAL_URL=ws://...`.
+  local SurrealDB automatically. For production, set `SIBYL_SURREAL_URL=ws://...`.
 - **Take a fresh backup** of the source org first. `sibyld db backup --org-id <uuid>` dumps the
   current graph; archive archives are read-only so keeping a pre-migration snapshot is cheap
   insurance.
@@ -76,10 +76,12 @@ safest pre-cutover check — the rehearsal must pass green before the real run.
 For single-org local dev moves:
 
 ```bash
-moon run migrate-local-surreal -- --org-id <org-uuid>
+moon run migrate-local-surreal
 ```
 
-This wraps export → import → verify in one command against the local Surreal instance.
+This wraps export → import → verify in one command against the local Surreal instance. If there is
+exactly one legacy organization, Sibyl selects it automatically. If there are multiple
+organizations, the command lists their IDs and asks you to rerun with `--org-id <org-uuid>`.
 
 ## Cutover
 

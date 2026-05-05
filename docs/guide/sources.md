@@ -321,7 +321,7 @@ Active crawls show:
 sibyl crawl status source_abc123
 
 # If stuck, restart the local dev stack
-moon run stop && moon run dev-surreal
+moon run stop && moon run dev
 ```
 
 ### No Documents After Crawl

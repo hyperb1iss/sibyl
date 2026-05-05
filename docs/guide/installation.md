@@ -139,7 +139,7 @@ SIBYL_ANTHROPIC_API_KEY=...        # For LLM operations
 
 | Variable                     | Default                  | Description                                 |
 | ---------------------------- | ------------------------ | ------------------------------------------- |
-| `SIBYL_STORE`                | `legacy`                 | Persistence runtime (`surreal` or `legacy`) |
+| `SIBYL_STORE`                | `surreal`                | Persistence runtime (`surreal` or `legacy`) |
 | `SIBYL_COORDINATION_BACKEND` | `auto`                   | `local` or `redis` coordination backend     |
 | `SIBYL_SURREAL_URL`          | -                        | SurrealDB server URL                        |
 | `SIBYL_LOG_LEVEL`            | `INFO`                   | Logging level                               |
@@ -167,7 +167,7 @@ sibyl local logs
 Start the recommended Surreal local-dev stack:
 
 ```bash
-moon run dev-surreal
+moon run dev
 ```
 
 This starts:
@@ -176,7 +176,7 @@ This starts:
 - Web frontend on port 3337
 - In-process background jobs and schedules
 
-The legacy FalkorDB/PostgreSQL path remains available with `moon run dev`.
+The legacy FalkorDB/PostgreSQL path remains available with `moon run dev-legacy`.
 
 ### Individual Services
 
@@ -258,7 +258,7 @@ redis-cli -p 6380
 ```bash
 # Start the legacy profile when you need the older graph and auth stack
 docker compose --profile legacy up -d falkordb postgres
-moon run dev
+moon run dev-legacy
 ```
 
 ### OpenAI API Errors

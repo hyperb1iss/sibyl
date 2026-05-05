@@ -448,8 +448,8 @@ moon run dev
 # Legacy FalkorDB + PostgreSQL path
 moon run dev-legacy
 
-# Move one local org from Falkor/Postgres into local Surreal and verify it.
-moon run migrate-local-surreal -- --org-id <org-uuid>
+# Move a local legacy install into local Surreal and verify it.
+moon run migrate-local-surreal
 
 # Individual services
 moon run dev-api          # API only
@@ -486,9 +486,12 @@ haven't migrated yet. See
 [`docs/guide/migrating-from-falkor.md`](docs/guide/migrating-from-falkor.md) for the migration
 playbook.
 
-`moon run migrate-local-surreal -- --org-id <uuid>` is the simple local data move: it exports the
-org from legacy storage, imports it into the local Surreal server, and verifies the result. Use
-`--restore-postgres` only if you also want to replay the PostgreSQL dump.
+If local legacy data exists, `moon run dev` prints the migration path instead of starting SurrealDB.
+`moon run dev -- --migrate-legacy` runs the local migration first, then starts the Surreal dev
+runtime. `moon run migrate-local-surreal` is the same data move as a standalone command: it exports
+the only local org from legacy storage, imports it into the local Surreal server, and verifies the
+result. If there are multiple orgs, the command lists them and asks for `--org-id`. Use
+`--restore-database-dump` only if you also want to replay the database dump sidecar.
 
 ## Entity Types
 
