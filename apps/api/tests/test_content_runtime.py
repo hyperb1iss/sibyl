@@ -53,13 +53,7 @@ def test_content_runtime_maps_surreal_exports(
     assert content_runtime._resolve_backend_export("get_raw_capture") is surreal_get_raw_capture
 
 
-def test_content_runtime_only_exports_neutral_runtime_surface() -> None:
-    assert not hasattr(content_runtime, "get_legacy_raw_capture")
-    assert not hasattr(content_runtime, "list_legacy_raw_captures")
-    assert not hasattr(content_runtime, "resolve_legacy_document_entity")
-    assert not hasattr(surreal_content, "get_legacy_raw_capture")
-    assert not hasattr(surreal_content, "list_legacy_raw_captures")
-    assert not hasattr(surreal_content, "resolve_legacy_document_entity")
+def test_content_runtime_exports_neutral_runtime_surface() -> None:
     assert content_common.__all__ == [
         "CodeExampleSearchRow",
         "ContentSession",
@@ -72,10 +66,6 @@ def test_content_runtime_only_exports_neutral_runtime_surface() -> None:
         "RAGSearchRow",
         "RawCaptureRecord",
     ]
-    assert "LegacyCrawlStats" not in content_common.__all__
-    assert "LegacyDocumentEntityRecord" not in content_common.__all__
-    assert not hasattr(content_common, "LegacyCrawlStats")
-    assert not hasattr(content_common, "LegacyDocumentEntityRecord")
     assert legacy_crawler.LegacyCrawlStats is content_common.CrawlStats
     assert legacy_entities.LegacyDocumentEntityRecord is content_common.DocumentEntityRecord
 

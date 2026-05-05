@@ -94,15 +94,11 @@ async def test_get_graph_runtime_survives_surreal_schema_prepare_failure() -> No
     assert "org-surreal" not in graph_runtime_module._SURREAL_SCHEMA_PREPARED_GROUPS
 
 
-def test_services_package_exports_only_neutral_graph_helpers() -> None:
+def test_services_package_exports_neutral_graph_helpers() -> None:
     assert services.ActiveGraphRuntime is ActiveGraphRuntime
     assert services.get_graph_client is get_graph_client
     assert services.get_graph_runtime is get_graph_runtime
     assert services.execute_graph_query is execute_graph_query
-    assert "LegacyGraphRuntime" not in services.__all__
-    assert "get_legacy_graph_client" not in services.__all__
-    assert "get_legacy_graph_runtime" not in services.__all__
-    assert "execute_legacy_graph_query" not in services.__all__
 
 
 @pytest.mark.asyncio

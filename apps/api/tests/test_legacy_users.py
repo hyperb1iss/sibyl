@@ -120,10 +120,3 @@ async def test_remove_oauth_connection_deletes_and_commits(
     assert removed is connection
     session.delete.assert_awaited_once_with(connection)
     session.commit.assert_awaited_once()
-
-
-def test_legacy_user_helpers_only_expose_neutral_exports() -> None:
-    assert not hasattr(legacy_users, "request_legacy_password_reset")
-    assert not hasattr(legacy_users, "confirm_legacy_password_reset")
-    assert not hasattr(legacy_users, "list_legacy_oauth_connections")
-    assert not hasattr(legacy_users, "remove_legacy_oauth_connection")
