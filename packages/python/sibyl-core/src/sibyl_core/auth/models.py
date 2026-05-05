@@ -93,6 +93,7 @@ class AuthSession(BaseModel):
     revoked_at: datetime | None = None
     last_active_at: datetime | None = None
     is_current: bool = False
+    version: int = 0
     device_name: str | None = None
     device_type: str | None = None
     browser: str | None = None
@@ -233,6 +234,7 @@ def coerce_auth_session(value: object | None) -> AuthSession | None:
         revoked_at=_optional_datetime(_attr(value, "revoked_at")),
         last_active_at=_optional_datetime(_attr(value, "last_active_at")),
         is_current=_bool_or_default(_attr(value, "is_current")),
+        version=_optional_int(_attr(value, "version")) or 0,
         device_name=_optional_str(_attr(value, "device_name")),
         device_type=_optional_str(_attr(value, "device_type")),
         browser=_optional_str(_attr(value, "browser")),

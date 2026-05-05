@@ -355,6 +355,7 @@ async def test_rotate_tokens_updates_loaded_session_without_reload() -> None:
         "expires_at": new_access_expires_at,
         "refresh_token_expires_at": new_refresh_expires_at,
         "revoked_at": None,
+        "version": 1,
     }
     client = _RecordingAuthClient([updated_record])
     repo = surreal_auth_runtime.SurrealSessionRepository(client)
@@ -374,10 +375,79 @@ async def test_rotate_tokens_updates_loaded_session_without_reload() -> None:
     assert query.lstrip().startswith("UPDATE user_sessions")
     assert "SELECT * FROM user_sessions" not in query
     assert "UPSERT user_sessions" not in query
+    assert "version = $next_version" in query
+    assert "version = $expected_version" in query
     assert params["uuid"] == str(session.id)
+    assert params["expected_version"] == 0
+    assert params["next_version"] == 1
     assert params["token_hash"] == repo.hash_token("new-access")
     assert params["refresh_token_hash"] == repo.hash_token("new-refresh")
     assert params["last_active_at"] == params["updated_at"]
+    assert rotated.version == 1
+
+
+@pytest.mark.asyncio
+async def test_rotate_tokens_raises_lookup_error_on_version_conflict() -> None:
+    session = _auth_session()
+    client = _RecordingAuthClient([])
+    repo = surreal_auth_runtime.SurrealSessionRepository(client)
+
+    with pytest.raises(LookupError):
+        await repo.rotate_tokens(
+            session,
+            new_access_token="new-access",
+            new_access_expires_at=datetime.now(UTC) + timedelta(minutes=10),
+            new_refresh_token="new-refresh",
+            new_refresh_expires_at=datetime.now(UTC) + timedelta(days=30),
+        )
+
+    assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_rotate_refresh_exchange_returns_none_on_rotation_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _auth_session(organization_id=uuid4())
+    sessions = SimpleNamespace(
+        get_session_by_refresh_token=AsyncMock(side_effect=[session, None]),
+        rotate_tokens=AsyncMock(side_effect=LookupError("conflict")),
+    )
+    audit = AsyncMock()
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(object()),
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime.SurrealSessionRepository,
+        "from_client",
+        lambda client: sessions,
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "create_access_token",
+        lambda **kwargs: "access-token",
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "create_refresh_token",
+        lambda **kwargs: ("refresh-token", datetime.now(UTC) + timedelta(days=30)),
+    )
+    monkeypatch.setattr(surreal_auth_runtime, "_log_audit_event", audit)
+
+    rotation = await surreal_auth_runtime.rotate_refresh_exchange(
+        refresh_token="old-refresh",
+        user_id=session.user_id,
+        organization_id=session.organization_id,
+        request=None,
+    )
+
+    assert rotation is None
+    assert sessions.get_session_by_refresh_token.await_count == 2
+    sessions.rotate_tokens.assert_awaited_once()
+    audit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

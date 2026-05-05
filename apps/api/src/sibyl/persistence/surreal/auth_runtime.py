@@ -300,6 +300,19 @@ def _coerce_int(value: object | None, *, field_name: str) -> int:
     raise TypeError(msg)
 
 
+def _optional_int(value: object | None) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
 def _ns(
     record: SurrealRecord | None,
     *,
@@ -592,6 +605,7 @@ class SurrealSessionRepository(_SurrealRepository):
             "user_agent": user_agent,
             "location": location,
             "is_current": False,
+            "version": 0,
             "last_active_at": now,
             "expires_at": _coerce_datetime(expires_at) or expires_at,
             "revoked_at": None,
@@ -657,10 +671,17 @@ class SurrealSessionRepository(_SurrealRepository):
                     refresh_token_hash = $refresh_token_hash,
                     refresh_token_expires_at = $refresh_token_expires_at,
                     last_active_at = $last_active_at,
+                    version = $next_version,
                     updated_at = $updated_at
-                WHERE uuid = $uuid;
+                WHERE uuid = $uuid
+                    AND (
+                        version = $expected_version
+                        OR (version = NONE AND $expected_version = 0)
+                    );
             """,
             uuid=str(session.id),
+            expected_version=session.version,
+            next_version=session.version + 1,
             token_hash=self.hash_token(new_access_token),
             expires_at=_coerce_datetime(new_access_expires_at) or new_access_expires_at,
             refresh_token_hash=self.hash_token(new_refresh_token),
@@ -828,6 +849,7 @@ class SurrealSessionRepository(_SurrealRepository):
             revoked_at=_coerce_datetime(record.get("revoked_at")),
             last_active_at=_coerce_datetime(record.get("last_active_at")),
             is_current=bool(record.get("is_current", False)),
+            version=_optional_int(record.get("version")) or 0,
             device_name=_optional_str(record.get("device_name")),
             device_type=_optional_str(record.get("device_type")),
             browser=_optional_str(record.get("browser")),
@@ -1724,26 +1746,49 @@ async def rotate_refresh_exchange(
         existing = await sessions.get_session_by_refresh_token(refresh_token)
         if existing is None:
             return None
-        access_token = create_access_token(
-            user_id=user_id,
-            organization_id=organization_id,
-            session_id=existing.id,
-        )
-        new_refresh_token, refresh_expires = create_refresh_token(
-            user_id=user_id,
-            organization_id=organization_id,
-            session_id=existing.id,
-        )
-        access_expires = _utcnow() + timedelta(
-            minutes=config_module.settings.access_token_expire_minutes
-        )
-        await sessions.rotate_tokens(
-            existing,
-            new_access_token=access_token,
-            new_access_expires_at=access_expires,
-            new_refresh_token=new_refresh_token,
-            new_refresh_expires_at=refresh_expires,
-        )
+
+        rotation: RefreshRotation | None = None
+        for attempt in range(2):
+            access_token = create_access_token(
+                user_id=user_id,
+                organization_id=organization_id,
+                session_id=existing.id,
+            )
+            new_refresh_token, refresh_expires = create_refresh_token(
+                user_id=user_id,
+                organization_id=organization_id,
+                session_id=existing.id,
+            )
+            access_expires = _utcnow() + timedelta(
+                minutes=config_module.settings.access_token_expire_minutes
+            )
+            try:
+                await sessions.rotate_tokens(
+                    existing,
+                    new_access_token=access_token,
+                    new_access_expires_at=access_expires,
+                    new_refresh_token=new_refresh_token,
+                    new_refresh_expires_at=refresh_expires,
+                )
+            except LookupError:
+                if attempt == 1:
+                    return None
+                existing = await sessions.get_session_by_refresh_token(refresh_token)
+                if existing is None:
+                    return None
+                continue
+            rotation = RefreshRotation(
+                session_id=existing.id,
+                access_token=access_token,
+                refresh_token=new_refresh_token,
+                refresh_expires=refresh_expires,
+                user_id=user_id,
+                organization_id=organization_id,
+            )
+            break
+
+        if rotation is None:
+            return None
         await _log_audit_event(
             client,
             action="auth.token.refresh",
@@ -1752,14 +1797,7 @@ async def rotate_refresh_exchange(
             request=request,
             details={"session_id": str(existing.id)},
         )
-        return RefreshRotation(
-            session_id=existing.id,
-            access_token=access_token,
-            refresh_token=new_refresh_token,
-            refresh_expires=refresh_expires,
-            user_id=user_id,
-            organization_id=organization_id,
-        )
+        return rotation
 
 
 async def revoke_access_session(token: str) -> None:
