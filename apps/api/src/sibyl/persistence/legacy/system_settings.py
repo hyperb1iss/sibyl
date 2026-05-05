@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from sqlmodel import select
 
 from sibyl.db.models import SystemSetting
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
 
 async def get_system_setting(
-    session: Any,
+    session: AsyncSession,
     *,
     key: str,
 ) -> SystemSetting | None:
@@ -18,13 +21,13 @@ async def get_system_setting(
     return result.scalar_one_or_none()
 
 
-async def list_system_settings(session: Any) -> list[SystemSetting]:
+async def list_system_settings(session: AsyncSession) -> list[SystemSetting]:
     result = await session.execute(select(SystemSetting))
     return list(result.scalars())
 
 
 async def save_system_setting(
-    session: Any,
+    session: AsyncSession,
     *,
     setting: SystemSetting,
 ) -> SystemSetting:
@@ -44,7 +47,7 @@ async def save_system_setting(
 
 
 async def delete_system_setting(
-    session: Any,
+    session: AsyncSession,
     *,
     key: str,
 ) -> bool:

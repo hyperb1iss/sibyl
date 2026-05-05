@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import cast
 
 from sibyl.db.models import SystemSetting
 from sibyl.persistence.surreal.content import (
@@ -21,7 +22,7 @@ def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _setting_from_record(record: dict[str, Any]) -> SystemSetting:
+def _setting_from_record(record: Mapping[str, object]) -> SystemSetting:
     now = _utcnow()
     return SystemSetting(
         key=_coerce_str(record.get("key")),
@@ -33,7 +34,7 @@ def _setting_from_record(record: dict[str, Any]) -> SystemSetting:
     )
 
 
-def _setting_record(setting: SystemSetting) -> dict[str, Any]:
+def _setting_record(setting: SystemSetting) -> dict[str, object]:
     return {
         "key": setting.key,
         "value": setting.value,
@@ -44,22 +45,22 @@ def _setting_record(setting: SystemSetting) -> dict[str, Any]:
     }
 
 
-async def _select_many(query: str, **params: Any) -> list[dict[str, Any]]:
+async def _select_many(query: str, **params: object) -> list[dict[str, object]]:
     async with surreal_content_client() as client:
         result = await client.execute_query(query, **params)
 
     error = _query_error(result)
     if error is not None:
         raise RuntimeError(error)
-    return _normalize_records(result)
+    return cast("list[dict[str, object]]", _normalize_records(result))
 
 
-async def _execute_write(query: str, **params: Any) -> list[dict[str, Any]]:
+async def _execute_write(query: str, **params: object) -> list[dict[str, object]]:
     return await _select_many(query, **params)
 
 
 async def get_system_setting(
-    _session: Any,
+    _session: object,
     *,
     key: str,
 ) -> SystemSetting | None:
@@ -70,14 +71,14 @@ async def get_system_setting(
     return _setting_from_record(rows[0]) if rows else None
 
 
-async def list_system_settings(_session: Any) -> list[SystemSetting]:
+async def list_system_settings(_session: object) -> list[SystemSetting]:
     rows = await _select_many("SELECT * FROM system_settings;")
     settings = [_setting_from_record(row) for row in rows]
     return sorted(settings, key=lambda setting: setting.key)
 
 
 async def save_system_setting(
-    _session: Any,
+    _session: object,
     *,
     setting: SystemSetting,
 ) -> SystemSetting:
@@ -99,7 +100,7 @@ async def save_system_setting(
 
 
 async def delete_system_setting(
-    _session: Any,
+    _session: object,
     *,
     key: str,
 ) -> bool:
