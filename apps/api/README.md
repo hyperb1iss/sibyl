@@ -44,7 +44,7 @@ Sibyl Combined App (port 3334)
 | `auth/`       | JWT, sessions, API keys, RBAC, RLS                               |
 | `crawler/`    | Documentation ingestion pipeline                                 |
 | `jobs/`       | Background job definitions                                       |
-| `db/`         | SQLModel + Alembic migrations                                    |
+| `db/`         | Legacy SQLModel + Alembic models                                 |
 
 ## Configuration
 
@@ -66,12 +66,12 @@ SIBYL_SURREAL_PASSWORD=root
 SIBYL_REDIS_HOST=127.0.0.1            # only needed for Redis coordination
 SIBYL_REDIS_PORT=6381
 SIBYL_ANTHROPIC_API_KEY=...       # Optional model-powered extraction
-SIBYL_POSTGRES_HOST=...           # PostgreSQL
+SIBYL_POSTGRES_HOST=...           # Legacy/mixed PostgreSQL
 SIBYL_POSTGRES_PORT=...
 SIBYL_POSTGRES_USER=...
 SIBYL_POSTGRES_PASSWORD=...
 SIBYL_POSTGRES_DB=...
-SIBYL_FALKORDB_HOST=...           # Graph DB
+SIBYL_FALKORDB_HOST=...           # Legacy graph DB
 SIBYL_FALKORDB_PORT=...
 ```
 
@@ -106,8 +106,8 @@ separately.
 manager = EntityManager(client, group_id=str(org.id))
 ```
 
-Write concurrency: FalkorDB's connection pool handles concurrency natively. No application-level
-locking required.
+Write concurrency: the SurrealDB driver serializes WebSocket operations per client. Clone graph
+drivers per organization rather than sharing one driver across org scopes.
 
 **Request context:** Auth middleware injects user/org
 

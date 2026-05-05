@@ -306,7 +306,7 @@ JWT tokens include organization context:
 
 All API operations are scoped to this organization:
 
-- Graph queries use org-specific FalkorDB graph
+- Graph queries use org-specific SurrealDB namespaces
 - Document queries filter by org ownership
 - Resource access is validated against org membership
 

@@ -90,8 +90,8 @@ GET /api/entities/{entity_id}
 
 Retrieves a single entity by ID. Transparently handles both:
 
-- Graph entities (stored in FalkorDB)
-- Document chunks (stored in PostgreSQL)
+- Graph entities
+- Document chunks from crawler content storage
 
 **Path Parameters:**
 

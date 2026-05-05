@@ -87,8 +87,8 @@ curl -X POST https://api.example.com/mcp \
 
 Sibyl is multi-tenant by design. Each organization gets:
 
-- Isolated FalkorDB graph (named by org UUID)
-- Separate PostgreSQL data (crawled documents, users)
+- Isolated SurrealDB namespace
+- Scoped content, auth, and graph records
 - Scoped API access
 
 **Organization Context:**

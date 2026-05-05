@@ -85,11 +85,11 @@ results = await manager.search("authentication patterns", limit=20)
 
 ### Write Concurrency
 
-Write concurrency is handled by FalkorDB's BlockingConnectionPool (50 connections, 60s timeout).
-No application-level locking is required.
+Write concurrency is handled by the active graph driver. The SurrealDB driver serializes WebSocket
+operations per client, and org-scoped graph access should use cloned drivers.
 
 ```python
-# Direct writes are safe - connection pool handles concurrency
+# Direct writes go through the active graph backend
 await client.execute_write_org(query, org_id, **params)
 
 # Or use EntityManager
