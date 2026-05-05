@@ -158,7 +158,7 @@ need a separate Phase 3 decision if they keep relational storage.
 
 ### Phase 2.0 — Unblock surreal-mode dev (half-day)
 
-**Goal:** `moon run dev-surreal` boots a working stack while Phase 2 is in flight, without
+**Goal:** `moon run dev` boots a working stack while Phase 2 is in flight, without
 pretending Postgres has been removed.
 
 - Drop the `legacy` profile gate on `postgres` in `docker-compose.yml:56-74`. FalkorDB stays gated.
@@ -170,7 +170,7 @@ pretending Postgres has been removed.
   enough: migrations may not run and `services/settings.py` may never load.
 - Verify startup produces a working `/api/auth/me` for a logged-in dev user.
 
-**Exit:** contributors can pull the branch, run `moon run dev-surreal`, log in, and exercise authed
+**Exit:** contributors can pull the branch, run `moon run dev`, log in, and exercise authed
 endpoints without manual compose juggling.
 
 ### Phase 2.1 — Surreal auth schema + repo layer, parallel (week 1)

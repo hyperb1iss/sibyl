@@ -328,7 +328,7 @@ Cannot connect to Sibyl server
 Ensure the server is running:
 
 ```bash
-sibyld serve  # or: moon run dev-surreal
+sibyld serve  # or: moon run dev
 ```
 
 ### Authentication required

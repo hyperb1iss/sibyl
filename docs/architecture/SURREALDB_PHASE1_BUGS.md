@@ -83,7 +83,7 @@ reader snapshot rather than a durable data-loss event.
 
 The earlier draft treated the rehearsal-backed store path as possibly accidental. That no longer
 looks accurate. The current dev runtime intentionally picks the newest rehearsal snapshot under
-`.moon/cache/` for `dev-surreal`.
+`.moon/cache/` for the Surreal dev runtime.
 
 That means the bug is not "the wrong file got picked." The bug is that both `api` and `worker` are
 embedding the same file-backed store at all.
