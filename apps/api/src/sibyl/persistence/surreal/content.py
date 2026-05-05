@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Iterable, Sequence
+from collections.abc import AsyncGenerator, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Protocol, cast
 from uuid import UUID, uuid4
 
 from sibyl import config as config_module
@@ -35,6 +35,14 @@ _UPSERT_RECORD = {
     "document_chunks": "UPSERT document_chunks CONTENT $record WHERE uuid = $uuid;",
     "raw_captures": "UPSERT raw_captures CONTENT $record WHERE uuid = $uuid;",
 }
+type SurrealRecord = dict[str, object]
+type RagSearchRow = tuple[DocumentChunk, CrawledDocument, str, UUID, float]
+type CodeSearchRow = tuple[DocumentChunk, CrawledDocument, UUID, str, float]
+type HybridSearchRow = tuple[DocumentChunk, CrawledDocument, str, UUID, float, float]
+
+
+class RawExecuteQuery(Protocol):
+    async def __call__(self, query: str, **params: object) -> object: ...
 
 
 @dataclass(slots=True)
@@ -84,28 +92,29 @@ async def surreal_content_client() -> AsyncGenerator[SurrealContentClient]:
     yield await get_shared_surreal_content_client()
 
 
-def _normalize_record(record: Any) -> dict[str, Any] | None:
+def _normalize_record(record: object) -> SurrealRecord | None:
     if not isinstance(record, dict):
         return None
-    if "result" in record and ("status" in record or "time" in record):
+    out = {str(key): value for key, value in record.items()}
+    if "result" in out and ("status" in out or "time" in out):
         return None
-    out = dict(record)
     out.pop("id", None)
     return out
 
 
-def _normalize_records(result: Any) -> list[dict[str, Any]]:
+def _normalize_records(result: object) -> list[SurrealRecord]:
     if result is None:
         return []
     if isinstance(result, dict):
-        if "result" in result and ("status" in result or "time" in result):
-            return _normalize_records(result.get("result"))
-        record = _normalize_record(result)
+        payload = {str(key): value for key, value in result.items()}
+        if "result" in payload and ("status" in payload or "time" in payload):
+            return _normalize_records(payload.get("result"))
+        record = _normalize_record(payload)
         return [record] if record is not None else []
     if not isinstance(result, list):
         return []
 
-    records: list[dict[str, Any]] = []
+    records: list[SurrealRecord] = []
     for item in result:
         records.extend(_normalize_records(item))
     return records
@@ -296,7 +305,7 @@ def _sort_key(dt: datetime | None) -> tuple[int, str]:
     return (0 if dt is None else 1, dt.isoformat() if dt is not None else "")
 
 
-def _source_record(source: CrawlSource) -> dict[str, Any]:
+def _source_record(source: CrawlSource) -> SurrealRecord:
     return {
         "uuid": str(source.id),
         "organization_id": str(source.organization_id),
@@ -323,7 +332,7 @@ def _source_record(source: CrawlSource) -> dict[str, Any]:
     }
 
 
-def _source_from_record(record: dict[str, Any]) -> CrawlSource:
+def _source_from_record(record: Mapping[str, object]) -> CrawlSource:
     now = datetime.now(UTC).replace(tzinfo=None)
     return CrawlSource(
         id=_coerce_uuid(record.get("uuid"), field_name="crawl_sources.uuid"),
@@ -354,7 +363,7 @@ def _source_from_record(record: dict[str, Any]) -> CrawlSource:
     )
 
 
-def _document_from_record(record: dict[str, Any]) -> CrawledDocument:
+def _document_from_record(record: Mapping[str, object]) -> CrawledDocument:
     now = datetime.now(UTC).replace(tzinfo=None)
     return CrawledDocument(
         id=_coerce_uuid(record.get("uuid"), field_name="crawled_documents.uuid"),
@@ -382,7 +391,7 @@ def _document_from_record(record: dict[str, Any]) -> CrawledDocument:
     )
 
 
-def _document_record(document: CrawledDocument) -> dict[str, Any]:
+def _document_record(document: CrawledDocument) -> SurrealRecord:
     return {
         "uuid": str(document.id),
         "source_id": str(document.source_id),
@@ -409,7 +418,7 @@ def _document_record(document: CrawledDocument) -> dict[str, Any]:
     }
 
 
-def _chunk_from_record(record: dict[str, Any]) -> DocumentChunk:
+def _chunk_from_record(record: Mapping[str, object]) -> DocumentChunk:
     now = datetime.now(UTC).replace(tzinfo=None)
     return DocumentChunk(
         id=_coerce_uuid(record.get("uuid"), field_name="document_chunks.uuid"),
@@ -434,7 +443,7 @@ def _chunk_from_record(record: dict[str, Any]) -> DocumentChunk:
     )
 
 
-def _chunk_record(chunk: DocumentChunk) -> dict[str, Any]:
+def _chunk_record(chunk: DocumentChunk) -> SurrealRecord:
     return {
         "uuid": str(chunk.id),
         "document_id": str(chunk.document_id),
@@ -456,7 +465,7 @@ def _chunk_record(chunk: DocumentChunk) -> dict[str, Any]:
     }
 
 
-def _raw_capture_from_record(record: dict[str, Any]) -> RawCaptureRecord:
+def _raw_capture_from_record(record: Mapping[str, object]) -> RawCaptureRecord:
     now = datetime.now(UTC).replace(tzinfo=None)
     return RawCaptureRecord(
         id=_coerce_uuid(record.get("uuid"), field_name="raw_captures.uuid"),
@@ -476,7 +485,7 @@ def _raw_capture_from_record(record: dict[str, Any]) -> RawCaptureRecord:
     )
 
 
-def _raw_capture_record(capture: RawCaptureRecord) -> dict[str, Any]:
+def _raw_capture_record(capture: RawCaptureRecord) -> SurrealRecord:
     return {
         "uuid": str(capture.id),
         "organization_id": str(capture.organization_id),
@@ -516,7 +525,7 @@ def _search_candidate_limit(limit: int) -> int:
     return min(max(limit * 5, limit, 1), 100)
 
 
-def _code_chunk_clause(language: str | None) -> tuple[str, dict[str, Any]]:
+def _code_chunk_clause(language: str | None) -> tuple[str, dict[str, object]]:
     if not language:
         return " AND chunk_type = 'code' ", {}
     return (
@@ -551,8 +560,8 @@ def _where_equals(field: str, values: Sequence[str], *, prefix: str) -> tuple[st
 
 
 async def _select_many(
-    client: SurrealContentClient, query: str, **params: Any
-) -> list[dict[str, Any]]:
+    client: SurrealContentClient, query: str, **params: object
+) -> list[SurrealRecord]:
     result = await client.execute_query(query, **params)
     error = _query_error(result)
     if error is not None:
@@ -560,7 +569,7 @@ async def _select_many(
     return _normalize_records(result)
 
 
-def _normalize_raw_statement_records(result: object, *, statement_index: int) -> list[dict[str, Any]]:
+def _normalize_raw_statement_records(result: object, *, statement_index: int) -> list[SurrealRecord]:
     if isinstance(result, dict):
         payload = {str(key): value for key, value in result.items()}
         statements = payload.get("result")
@@ -577,24 +586,22 @@ def _normalize_raw_statement_records(result: object, *, statement_index: int) ->
 async def _select_many_raw(
     client: SurrealContentClient,
     query: str,
-    *,
-    statement_index: int = -1,
-    **params: Any,
-) -> list[dict[str, Any]]:
+    **params: object,
+) -> list[SurrealRecord]:
     execute_query_raw = getattr(client, "execute_query_raw", None)
-    if execute_query_raw is not None:
-        result = await execute_query_raw(query, **params)
+    if callable(execute_query_raw):
+        result = await cast("RawExecuteQuery", execute_query_raw)(query, **params)
     else:
         result = await client.execute_query(query, **params)
     error = _query_error(result)
     if error is not None:
         raise RuntimeError(error)
-    return _normalize_raw_statement_records(result, statement_index=statement_index)
+    return _normalize_raw_statement_records(result, statement_index=-1)
 
 
 async def _select_one(
-    client: SurrealContentClient, query: str, **params: Any
-) -> dict[str, Any] | None:
+    client: SurrealContentClient, query: str, **params: object
+) -> SurrealRecord | None:
     rows = await _select_many(client, query, **params)
     return rows[0] if rows else None
 
@@ -604,8 +611,8 @@ async def _replace_record(
     table: str,
     *,
     uuid: UUID | str,
-    record: dict[str, Any],
-) -> dict[str, Any]:
+    record: SurrealRecord,
+) -> SurrealRecord:
     result = await client.execute_query(_UPSERT_RECORD[table], uuid=str(uuid), record=record)
     error = _query_error(result)
     if error is not None:
@@ -656,7 +663,7 @@ async def _load_documents_for_source_ids(
     if not source_ids:
         return []
 
-    rows: list[dict[str, Any]] = []
+    rows: list[SurrealRecord] = []
     for batch_index, batch in enumerate(_value_batches(source_ids), start=1):
         where_clause, params = _where_equals("source_id", batch, prefix=f"source_{batch_index}")
         rows.extend(
@@ -676,7 +683,7 @@ async def _load_search_documents_by_ids(
     if not document_ids:
         return []
 
-    rows: list[dict[str, Any]] = []
+    rows: list[SurrealRecord] = []
     for batch in _value_batches(document_ids):
         rows.extend(
             await _select_many(
@@ -696,7 +703,7 @@ async def _load_chunks_for_document_ids(
     if not document_ids:
         return []
 
-    rows: list[dict[str, Any]] = []
+    rows: list[SurrealRecord] = []
     for batch_index, batch in enumerate(_value_batches(document_ids), start=1):
         where_clause, params = _where_equals(
             "document_id",
@@ -718,9 +725,9 @@ def _source_search_scope_clause(
     organization_id: UUID | str,
     source_id: UUID | None,
     source_name: str | None,
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, object]]:
     clauses = ["organization_id = $organization_id"]
-    params: dict[str, Any] = {"organization_id": str(organization_id)}
+    params: dict[str, object] = {"organization_id": str(organization_id)}
     if source_id is not None:
         clauses.append("uuid = $source_id")
         params["source_id"] = str(source_id)
@@ -736,7 +743,7 @@ def _source_search_scope_clause(
 
 
 def _document_ids_from_search_rows(
-    *row_groups: Sequence[dict[str, Any]],
+    *row_groups: Sequence[Mapping[str, object]],
 ) -> list[str]:
     document_ids: set[str] = set()
     for rows in row_groups:
@@ -748,7 +755,7 @@ def _document_ids_from_search_rows(
 
 
 def _hydrate_search_rows(
-    rows: Sequence[dict[str, Any]],
+    rows: Sequence[Mapping[str, object]],
     *,
     documents_by_id: dict[str, CrawledDocument],
     sources_by_id: dict[str, CrawlSource],
@@ -762,7 +769,7 @@ def _hydrate_search_rows(
         source = sources_by_id.get(str(document.source_id))
         if source is None:
             continue
-        hydrated.append((chunk, document, source.name, source.id, float(row.get("score") or 0.0)))
+        hydrated.append((chunk, document, source.name, source.id, _coerce_float(row.get("score"))))
     return hydrated
 
 
@@ -788,7 +795,7 @@ async def _load_sources_for_search_scope(
 
 
 async def list_crawl_sources_for_org(
-    _session: Any,
+    _session: object,
     *,
     organization_id: UUID,
     status: CrawlStatus | None = None,
@@ -803,7 +810,7 @@ async def list_crawl_sources_for_org(
 
 
 async def get_org_crawl_source(
-    _session: Any,
+    _session: object,
     *,
     source_id: UUID,
     organization_id: UUID,
@@ -820,7 +827,7 @@ async def get_org_crawl_source(
 
 
 async def get_crawl_source_by_id(
-    _session: Any,
+    _session: object,
     *,
     source_id: UUID,
 ) -> CrawlSource | None:
@@ -834,7 +841,7 @@ async def get_crawl_source_by_id(
 
 
 async def get_crawl_source_by_url(
-    _session: Any,
+    _session: object,
     *,
     url: str,
 ) -> CrawlSource | None:
@@ -848,7 +855,7 @@ async def get_crawl_source_by_url(
 
 
 async def get_crawl_stats_payload(
-    _session: Any,
+    _session: object,
     *,
     organization_id: UUID,
 ) -> CrawlStats:
@@ -878,7 +885,7 @@ async def get_crawl_stats_payload(
 
 
 async def list_crawled_documents_for_org(
-    _session: Any,
+    _session: object,
     *,
     organization_id: UUID,
     limit: int,
@@ -895,7 +902,7 @@ async def list_crawled_documents_for_org(
 
 
 async def list_crawl_sources(
-    _session: Any,
+    _session: object,
     *,
     status: CrawlStatus | None = None,
     limit: int | None = 50,
@@ -911,7 +918,7 @@ async def list_crawl_sources(
 
 
 async def create_crawl_source_record(
-    _session: Any,
+    _session: object,
     *,
     name: str,
     url: str,
@@ -973,7 +980,7 @@ async def create_crawl_source_record(
 
 
 async def get_crawled_document_for_org(
-    _session: Any,
+    _session: object,
     *,
     document_id: UUID,
     organization_id: UUID,
@@ -999,7 +1006,7 @@ async def get_crawled_document_for_org(
 
 
 async def save_crawl_source_record(
-    _session: Any,
+    _session: object,
     *,
     source: CrawlSource,
 ) -> CrawlSource:
@@ -1015,7 +1022,7 @@ async def save_crawl_source_record(
 
 
 async def list_document_chunks(
-    _session: Any,
+    _session: object,
     *,
     document_id: UUID,
 ) -> list[DocumentChunk]:
@@ -1030,7 +1037,7 @@ async def list_document_chunks(
 
 
 async def list_source_documents_page(
-    _session: Any,
+    _session: object,
     *,
     source_id: UUID,
     limit: int,
@@ -1054,7 +1061,7 @@ async def list_source_documents_page(
 
 
 async def list_rag_source_documents_page(
-    _session: Any,
+    _session: object,
     *,
     source_id: UUID,
     limit: int,
@@ -1078,7 +1085,7 @@ async def list_rag_source_documents_page(
 
 
 async def list_source_chunks(
-    _session: Any,
+    _session: object,
     *,
     source_id: UUID,
 ) -> list[DocumentChunk]:
@@ -1092,7 +1099,7 @@ async def list_source_chunks(
 
 
 async def list_source_documents(
-    _session: Any,
+    _session: object,
     *,
     source_id: UUID,
 ) -> list[CrawledDocument]:
@@ -1107,7 +1114,7 @@ async def list_source_documents(
 
 
 async def get_link_graph_status_payload(
-    _session: Any,
+    _session: object,
     *,
     organization_id: UUID,
 ) -> LinkGraphStatusData:
@@ -1148,7 +1155,7 @@ async def get_link_graph_status_payload(
 
 
 async def get_source_sync_counts(
-    session: Any,
+    session: object,
     *,
     source_id: UUID,
 ) -> tuple[int, int]:
@@ -1158,7 +1165,7 @@ async def get_source_sync_counts(
 
 
 async def list_sources_for_graph_linking(
-    _session: Any,
+    _session: object,
     *,
     organization_id: UUID,
     source_id: UUID | None = None,
@@ -1180,7 +1187,7 @@ async def list_sources_for_graph_linking(
 
 
 async def list_unlinked_source_chunks(
-    _session: Any,
+    _session: object,
     *,
     source_id: UUID,
     limit: int,
@@ -1191,7 +1198,7 @@ async def list_unlinked_source_chunks(
 
 
 async def count_remaining_unlinked_chunks(
-    _session: Any,
+    _session: object,
     *,
     organization_id: UUID,
     source_id: UUID | None = None,
@@ -1209,7 +1216,7 @@ async def count_remaining_unlinked_chunks(
 
 
 async def list_raw_captures(
-    _session: Any,
+    _session: object,
     *,
     organization_id: UUID,
     entity_type: str | None,
@@ -1251,7 +1258,7 @@ async def list_raw_captures(
 
 
 async def get_raw_capture(
-    _session: Any,
+    _session: object,
     *,
     organization_id: UUID,
     capture_id: UUID,
@@ -1268,7 +1275,7 @@ async def get_raw_capture(
 
 
 async def save_raw_capture_record(
-    _session: Any,
+    _session: object,
     *,
     capture: RawCaptureRecord,
 ) -> RawCaptureRecord:
@@ -1283,7 +1290,7 @@ async def save_raw_capture_record(
 
 
 async def resolve_document_entity(
-    _session: Any,
+    _session: object,
     *,
     organization_id: UUID,
     entity_id: str,
@@ -1360,7 +1367,7 @@ async def resolve_document_entity(
 
 
 async def get_document_by_url_for_org(
-    _session: Any,
+    _session: object,
     *,
     url: str,
     organization_id: UUID | str,
@@ -1385,7 +1392,7 @@ async def get_document_by_url_for_org(
 
 
 async def save_crawled_document_record(
-    _session: Any,
+    _session: object,
     *,
     document: CrawledDocument,
 ) -> CrawledDocument:
@@ -1401,7 +1408,7 @@ async def save_crawled_document_record(
 
 
 async def save_document_chunks(
-    _session: Any,
+    _session: object,
     *,
     chunks: list[DocumentChunk],
 ) -> list[DocumentChunk]:
@@ -1420,7 +1427,7 @@ async def save_document_chunks(
 
 
 async def delete_crawled_document_record(
-    _session: Any,
+    _session: object,
     *,
     document_id: UUID,
     organization_id: UUID,
@@ -1476,7 +1483,7 @@ async def delete_crawled_document_record(
 
 
 async def delete_crawl_source_record(
-    _session: Any,
+    _session: object,
     *,
     source_id: UUID,
     organization_id: UUID,
@@ -1552,7 +1559,7 @@ async def _load_search_scope(
 
 
 async def search_rag_chunks(
-    _session: Any,
+    _session: object,
     *,
     query_embedding: list[float],
     organization_id: UUID | str,
@@ -1560,7 +1567,7 @@ async def search_rag_chunks(
     match_count: int,
     source_id: UUID | None = None,
     source_name: str | None = None,
-) -> list[Any]:
+) -> list[RagSearchRow]:
     if match_count <= 0:
         return []
 
@@ -1608,14 +1615,14 @@ async def search_rag_chunks(
 
 
 async def search_code_example_chunks(
-    _session: Any,
+    _session: object,
     *,
     query_embedding: list[float],
     organization_id: UUID | str,
     match_count: int,
     source_id: UUID | None = None,
     language: str | None = None,
-) -> list[Any]:
+) -> list[CodeSearchRow]:
     if match_count <= 0:
         return []
 
@@ -1668,7 +1675,7 @@ async def search_code_example_chunks(
 
 
 async def hybrid_search_chunks(
-    _session: Any,
+    _session: object,
     *,
     query_text: str,
     query_embedding: list[float],
@@ -1677,7 +1684,7 @@ async def hybrid_search_chunks(
     match_count: int,
     source_id: UUID | None = None,
     source_name: str | None = None,
-) -> list[Any]:
+) -> list[HybridSearchRow]:
     if match_count <= 0:
         return []
 
@@ -1739,7 +1746,7 @@ async def hybrid_search_chunks(
     vector_by_id = {str(row.get("uuid")): row for row in vector_rows}
     lexical_by_id = {str(row.get("uuid")): row for row in lexical_rows}
 
-    combined: list[tuple[DocumentChunk, CrawledDocument, str, UUID, float, float]] = []
+    combined: list[HybridSearchRow] = []
     for chunk_id in set(vector_by_id) | set(lexical_by_id):
         row = vector_by_id.get(chunk_id) or lexical_by_id.get(chunk_id)
         if row is None:
@@ -1751,8 +1758,8 @@ async def hybrid_search_chunks(
         source = sources_by_id.get(str(document.source_id))
         if source is None:
             continue
-        similarity = float(vector_by_id.get(chunk_id, {}).get("score") or 0.0)
-        lexical = float(lexical_by_id.get(chunk_id, {}).get("score") or 0.0)
+        similarity = _coerce_float(vector_by_id.get(chunk_id, {}).get("score"))
+        lexical = _coerce_float(lexical_by_id.get(chunk_id, {}).get("score"))
         combined.append((chunk, document, source.name, source.id, similarity, lexical))
 
     combined.sort(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import cast
 
 from sibyl.db.models import SystemSetting
 from sibyl.persistence.surreal.content import (
@@ -52,7 +51,7 @@ async def _select_many(query: str, **params: object) -> list[dict[str, object]]:
     error = _query_error(result)
     if error is not None:
         raise RuntimeError(error)
-    return cast("list[dict[str, object]]", _normalize_records(result))
+    return _normalize_records(result)
 
 
 async def _execute_write(query: str, **params: object) -> list[dict[str, object]]:
