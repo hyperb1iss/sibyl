@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
@@ -28,36 +27,8 @@ class TestGetLinkGraphStatusData:
         """The helper should scope by org and keep source IDs distinct."""
         monkeypatch.setattr(status_service.settings, "store", "legacy")
         org_id = UUID("00000000-0000-0000-0000-000000000111")
-
         session = AsyncMock()
-        session.execute = AsyncMock(
-            side_effect=[
-                MagicMock(scalar=MagicMock(return_value=12)),
-                MagicMock(scalar=MagicMock(return_value=5)),
-                MagicMock(
-                    all=MagicMock(
-                        return_value=[
-                            SimpleNamespace(
-                                source_id=UUID("00000000-0000-0000-0000-000000000aaa"),
-                                name="Docs",
-                                pending=4,
-                            ),
-                            SimpleNamespace(
-                                source_id=UUID("00000000-0000-0000-0000-000000000bbb"),
-                                name="Docs",
-                                pending=3,
-                            ),
-                        ]
-                    )
-                ),
-            ]
-        )
-
-        status = await get_link_graph_status_data(session, org_id)
-
-        rendered_queries = [str(call.args[0]) for call in session.execute.await_args_list]
-
-        assert status == LinkGraphStatusData(
+        expected = LinkGraphStatusData(
             total_chunks=12,
             chunks_with_entities=5,
             sources=[
@@ -73,10 +44,14 @@ class TestGetLinkGraphStatusData:
                 ),
             ],
         )
+
+        helper = AsyncMock(return_value=expected)
+        with patch("sibyl.persistence.content_runtime.get_link_graph_status_payload", helper):
+            status = await get_link_graph_status_data(session, org_id)
+
+        assert status == expected
         assert status.chunks_pending == 7
-        assert all("organization_id" in query for query in rendered_queries)
-        assert any("has_entities = true" in query.lower() for query in rendered_queries)
-        assert any("has_entities = false" in query.lower() for query in rendered_queries)
+        helper.assert_awaited_once_with(session, organization_id=org_id)
 
     @pytest.mark.asyncio
     async def test_surreal_mode_aggregates_without_sql_session(

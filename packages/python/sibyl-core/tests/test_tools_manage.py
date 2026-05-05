@@ -1051,15 +1051,6 @@ class TestSourceActions:
         chunk = MagicMock()
         graph_client = MagicMock()
 
-        result = MagicMock()
-        result.scalars.return_value.all.return_value = [chunk]
-        session = AsyncMock()
-        session.execute = AsyncMock(return_value=result)
-
-        @asynccontextmanager
-        async def mock_session():
-            yield session
-
         stats = MagicMock(
             chunks_processed=1,
             entities_extracted=2,
@@ -1071,7 +1062,10 @@ class TestSourceActions:
         integration.process_chunks = AsyncMock(return_value=stats)
 
         with (
-            patch("sibyl.db.get_session", mock_session),
+            patch(
+                "sibyl_core.tools.manage.list_unlinked_document_chunks",
+                AsyncMock(return_value=[chunk]),
+            ) as list_chunks,
             patch(
                 "sibyl_core.graph.client.get_graph_client",
                 AsyncMock(return_value=graph_client),
@@ -1088,12 +1082,15 @@ class TestSourceActions:
                 organization_id=org_id,
             )
 
-        query_sql = str(session.execute.await_args.args[0])
         assert response.success is True
         assert response.data["create_new_entities"] is True
         assert response.data["new_entities_created"] == 1
         assert response.data["entities_linked"] == 2
-        assert "organization_id" in query_sql
+        list_chunks.assert_awaited_once_with(
+            organization_id=org_id,
+            source_id=source_id,
+            limit=1000,
+        )
         integration_cls.assert_called_once_with(
             graph_client,
             org_id,
@@ -1106,16 +1103,10 @@ class TestSourceActions:
         org_id = "00000000-0000-0000-0000-000000000111"
         source_id = "00000000-0000-0000-0000-000000000222"
 
-        result = MagicMock()
-        result.scalars.return_value.all.return_value = []
-        session = AsyncMock()
-        session.execute = AsyncMock(return_value=result)
-
-        @asynccontextmanager
-        async def mock_session():
-            yield session
-
-        with patch("sibyl.db.get_session", mock_session):
+        with patch(
+            "sibyl_core.tools.manage.list_unlinked_document_chunks",
+            AsyncMock(return_value=[]),
+        ) as list_chunks:
             response = await manage(
                 action="link_graph",
                 entity_id=source_id,
@@ -1125,6 +1116,11 @@ class TestSourceActions:
 
         assert response.success is True
         assert response.message == "No unlinked chunks to process"
+        list_chunks.assert_awaited_once_with(
+            organization_id=org_id,
+            source_id=source_id,
+            limit=1000,
+        )
         assert response.data == {
             "chunks_processed": 0,
             "entities_extracted": 0,

@@ -11,7 +11,7 @@ from sqlmodel import col
 from sibyl.db import CrawledDocument, CrawlSource, CrawlStatus, DocumentChunk
 from sibyl.db.models import SourceType
 from sibyl.persistence.content_common import CrawlStats
-from sibyl_core.services.link_graph_status import get_link_graph_status_data
+from sibyl_core.services.link_graph_status import LinkGraphSourceStatusData, LinkGraphStatusData
 
 LegacyCrawlStats = CrawlStats
 
@@ -227,10 +227,54 @@ async def get_link_graph_status_payload(
     session: Any,
     *,
     organization_id: UUID,
-) -> Any:
+) -> LinkGraphStatusData:
     """Load link-graph status for the active organization."""
 
-    return await get_link_graph_status_data(session, organization_id)
+    total_result = await session.execute(
+        select(func.count(DocumentChunk.id))
+        .join(CrawledDocument, col(CrawledDocument.id) == col(DocumentChunk.document_id))
+        .join(CrawlSource, col(CrawlSource.id) == col(CrawledDocument.source_id))
+        .where(col(CrawlSource.organization_id) == organization_id)
+    )
+    total_chunks = total_result.scalar() or 0
+
+    linked_result = await session.execute(
+        select(func.count(DocumentChunk.id))
+        .join(CrawledDocument, col(CrawledDocument.id) == col(DocumentChunk.document_id))
+        .join(CrawlSource, col(CrawlSource.id) == col(CrawledDocument.source_id))
+        .where(col(CrawlSource.organization_id) == organization_id)
+        .where(col(DocumentChunk.has_entities) == True)  # noqa: E712
+    )
+    chunks_with_entities = linked_result.scalar() or 0
+
+    pending_query = (
+        select(  # type: ignore[call-overload]
+            col(CrawlSource.id).label("source_id"),
+            CrawlSource.name,
+            func.count(DocumentChunk.id).label("pending"),
+        )
+        .join(CrawledDocument, col(CrawledDocument.source_id) == col(CrawlSource.id))
+        .join(DocumentChunk, col(DocumentChunk.document_id) == col(CrawledDocument.id))
+        .where(col(CrawlSource.organization_id) == organization_id)
+        .where(col(DocumentChunk.has_entities) == False)  # noqa: E712
+        .group_by(CrawlSource.id, CrawlSource.name)
+        .order_by(col(CrawlSource.name).asc(), col(CrawlSource.id).asc())
+    )
+    pending_result = await session.execute(pending_query)
+    sources = [
+        LinkGraphSourceStatusData(
+            source_id=str(row.source_id),
+            name=row.name,
+            pending=row.pending,
+        )
+        for row in pending_result.all()
+    ]
+
+    return LinkGraphStatusData(
+        total_chunks=total_chunks,
+        chunks_with_entities=chunks_with_entities,
+        sources=sources,
+    )
 
 
 async def list_crawled_documents_for_org(

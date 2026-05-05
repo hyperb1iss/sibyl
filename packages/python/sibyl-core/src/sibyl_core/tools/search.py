@@ -34,7 +34,6 @@ async def get_graph_runtime(group_id: str):
 
 __all__ = [
     "_dedupe_document_rows",
-    "_document_language_predicates",
     "_merge_document_results",
     "search",
 ]
@@ -248,21 +247,6 @@ def _matches_graph_filters(
                 pass
 
     return True
-
-
-def _document_language_predicates(
-    *,
-    language: str | None,
-    chunk_type_column: Any,
-    language_column: Any,
-    code_chunk_type: Any,
-) -> tuple[Any, ...]:
-    return document_search_service._document_language_predicates(
-        language=language,
-        chunk_type_column=chunk_type_column,
-        language_column=language_column,
-        code_chunk_type=code_chunk_type,
-    )
 
 
 def _dedupe_document_rows(

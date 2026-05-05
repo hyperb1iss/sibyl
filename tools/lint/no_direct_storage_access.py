@@ -16,6 +16,9 @@ DEFAULT_TARGETS = (
     REPO_ROOT / "apps/api/src/sibyl/server.py",
     REPO_ROOT / "apps/api/src/sibyl/auth/mcp_auth.py",
     REPO_ROOT / "apps/api/src/sibyl/auth/mcp_oauth.py",
+    REPO_ROOT / "packages/python/sibyl-core/src/sibyl_core/services/crawl_sources.py",
+    REPO_ROOT / "packages/python/sibyl-core/src/sibyl_core/services/document_search.py",
+    REPO_ROOT / "packages/python/sibyl-core/src/sibyl_core/services/link_graph_status.py",
     REPO_ROOT / "packages/python/sibyl-core/src/sibyl_core/tools",
 )
 FORBIDDEN_MODULE_PREFIXES = {

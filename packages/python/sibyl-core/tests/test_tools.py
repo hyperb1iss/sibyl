@@ -15,8 +15,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sibyl.db.models import ChunkType, DocumentChunk
-from sqlalchemy import select
 
 from sibyl_core.models.entities import EntityType, RelationshipType
 from sibyl_core.tools.helpers import (
@@ -1696,23 +1694,6 @@ class TestSearchTool:
 
 class TestDocumentSearchFusion:
     """Test document-side search fusion helpers."""
-
-    @pytest.mark.asyncio
-    async def test_search_documents_language_filter_only_queries_matching_code_chunks(self) -> None:
-        """Language filtering should exclude non-code chunks at the SQL layer."""
-        from sibyl_core.tools.search import _document_language_predicates
-
-        predicates = _document_language_predicates(
-            language="python",
-            chunk_type_column=DocumentChunk.chunk_type,
-            language_column=DocumentChunk.language,
-            code_chunk_type=ChunkType.CODE,
-        )
-        query_sql = str(select(DocumentChunk.id).where(*predicates))
-
-        assert "document_chunks.chunk_type =" in query_sql
-        assert "document_chunks.language" in query_sql
-        assert "document_chunks.chunk_type !=" not in query_sql
 
     def test_dedupe_document_rows_keeps_best_chunk_per_document(self) -> None:
         """Each document keeps only its best-scoring chunk."""

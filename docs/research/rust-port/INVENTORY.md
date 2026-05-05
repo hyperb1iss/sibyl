@@ -9,7 +9,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - MCP tools: 8
 - MCP resources: 2
 - SQLModel tables: 24
-- Raw SQL query usage files: 33
+- Raw SQL query usage files: 30
 - Session-backed storage access files: 5
 - Graphiti import files: 22
 - Dependency records: 8
@@ -114,7 +114,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - `apps/api/src/sibyl/persistence/legacy/auth_runtime.py` — session imports: none; query imports: `select`; session calls: none; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/backups.py` — session imports: `AsyncSession`; query imports: `select`; session calls: `add`, `commit`, `delete`, `execute`, `get`, `refresh`; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/crawler.py` — session imports: none; query imports: `select`; session calls: none; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/entities.py` — session imports: none; query imports: `select`; session calls: none; query calls: `select`
+- `apps/api/src/sibyl/persistence/legacy/entities.py` — session imports: `AsyncSession`; query imports: `select`; session calls: `execute`, `refresh`; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/org_members.py` — session imports: none; query imports: `select`; session calls: `execute`; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/orgs.py` — session imports: none; query imports: `select`; session calls: `execute`; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/project_members.py` — session imports: `AsyncSession`; query imports: `select`; session calls: `add`, `delete`, `execute`, `get`; query calls: `select`
@@ -124,9 +124,6 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - `apps/api/src/sibyl/persistence/legacy/system_settings.py` — session imports: none; query imports: `select`; session calls: none; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/users.py` — session imports: `AsyncSession`; query imports: `select`; session calls: `commit`, `delete`, `execute`, `get`; query calls: `select`
 - `apps/api/src/sibyl/relational_sidecar_startup.py` — session imports: none; query imports: `text`; session calls: `execute`; query calls: `text`
-- `packages/python/sibyl-core/src/sibyl_core/services/crawl_sources.py` — session imports: none; query imports: `select`; session calls: `add`, `execute`, `refresh`; query calls: `select`
-- `packages/python/sibyl-core/src/sibyl_core/services/document_search.py` — session imports: none; query imports: `select`; session calls: `execute`; query calls: `select`
-- `packages/python/sibyl-core/src/sibyl_core/services/link_graph_status.py` — session imports: none; query imports: `select`; session calls: none; query calls: `select`
 
 ### Session-backed storage access files
 - `apps/api/src/sibyl/auth/audit.py` — session imports: `AsyncSession`; query imports: none; session calls: none; query calls: none
