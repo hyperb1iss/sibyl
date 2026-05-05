@@ -91,9 +91,8 @@ embedding the same file-backed store at all.
 #### Resolution
 
 The local development runtime now starts a SurrealDB server and points the API at the WebSocket RPC
-endpoint. The default `moon run dev` flow sets `SIBYL_STORE=surreal`,
-`SIBYL_AUTH_STORE=surreal`, `SIBYL_COORDINATION_BACKEND=local`, and
-`SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc`.
+endpoint. The default `moon run dev` flow sets `SIBYL_STORE=surreal`, `SIBYL_AUTH_STORE=surreal`,
+`SIBYL_COORDINATION_BACKEND=local`, and `SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc`.
 
 Embedded Surreal storage remains useful for tests and single-process tools. It is no longer the
 default multi-process dev runtime.
@@ -102,9 +101,9 @@ default multi-process dev runtime.
 
 ## Active Follow-up Bugs
 
-No active bugs remain from the original burn-down list. The next work belongs in the Surreal
-cutover roadmap: seam cleanup, rehearsal, backup/restore confidence, and removing the last Postgres
-safety rails once a fully-Surreal run is proven.
+No active bugs remain from the original burn-down list. The next work belongs in the Surreal cutover
+roadmap: seam cleanup, rehearsal, backup/restore confidence, and removing the last Postgres safety
+rails once a fully-Surreal run is proven.
 
 ---
 
@@ -124,8 +123,8 @@ output, and accepts UUID task IDs from stdin.
 
 ### Mixed search fuses graph and document rankings
 
-`sibyl search` now rank-fuses graph and document results instead of sorting raw scores across stores,
-so graph entities can appear alongside ingested docs.
+`sibyl search` now rank-fuses graph and document results instead of sorting raw scores across
+stores, so graph entities can appear alongside ingested docs.
 
 ### Surreal graph adapters fail closed before Cypher fallbacks
 

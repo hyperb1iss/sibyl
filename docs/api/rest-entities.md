@@ -355,21 +355,21 @@ curl -X DELETE "https://api.example.com/api/entities/pattern_abc123" \
 
 ## Entity Types
 
-| Type         | Description          | Use Case                               |
-| ------------ | -------------------- | -------------------------------------- |
-| `episode`    | Temporal learning    | Insights, discoveries, debugging notes |
-| `pattern`    | Coding pattern       | Best practices, design patterns        |
-| `procedure`  | Step-by-step guide   | Runbooks, workflows, how-tos           |
-| `guide`      | Guide                | Project-level standards                |
-| `note`       | Freeform note        | Quick captures, reminders              |
-| `rule`       | Rule                 | Guidelines, standards                  |
-| `template`   | Code template        | Boilerplate, scaffolding               |
-| `topic`      | Knowledge topic      | Conceptual groupings                   |
-| `task`       | Work item            | See [rest-tasks.md](./rest-tasks.md)   |
-| `epic`       | Feature initiative   | Groups related tasks                   |
-| `project`    | Container            | Groups epics and tasks                 |
-| `source`     | Documentation source | Crawled documentation                  |
-| `document`   | Document chunk       | Individual doc sections                |
+| Type        | Description          | Use Case                               |
+| ----------- | -------------------- | -------------------------------------- |
+| `episode`   | Temporal learning    | Insights, discoveries, debugging notes |
+| `pattern`   | Coding pattern       | Best practices, design patterns        |
+| `procedure` | Step-by-step guide   | Runbooks, workflows, how-tos           |
+| `guide`     | Guide                | Project-level standards                |
+| `note`      | Freeform note        | Quick captures, reminders              |
+| `rule`      | Rule                 | Guidelines, standards                  |
+| `template`  | Code template        | Boilerplate, scaffolding               |
+| `topic`     | Knowledge topic      | Conceptual groupings                   |
+| `task`      | Work item            | See [rest-tasks.md](./rest-tasks.md)   |
+| `epic`      | Feature initiative   | Groups related tasks                   |
+| `project`   | Container            | Groups epics and tasks                 |
+| `source`    | Documentation source | Crawled documentation                  |
+| `document`  | Document chunk       | Individual doc sections                |
 
 ## Concurrency Control
 

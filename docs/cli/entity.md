@@ -22,7 +22,7 @@ episodes, templates, and other types.
 | `episode`          | Knowledge episodes, learnings          |
 | `rule`             | Rules and constraints                  |
 | `template`         | Code templates                         |
-| `guide`            | Team guidance, standards                 |
+| `guide`            | Team guidance, standards               |
 | `tool`             | Tools and utilities                    |
 | `language`         | Programming languages                  |
 | `topic`            | General topics                         |
