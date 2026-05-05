@@ -9,7 +9,8 @@ Provides REST API for:
 
 import re
 from dataclasses import asdict
-from typing import Any
+from datetime import UTC, datetime
+from typing import Protocol
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -38,11 +39,6 @@ from sibyl.api.websocket import broadcast_event
 from sibyl.auth.dependencies import get_current_organization, require_org_role
 from sibyl.config import settings
 from sibyl.crawler.service import SourceAlreadyExistsError
-from sibyl.db.models import (
-    CrawledDocument,
-    CrawlSource,
-    utcnow_naive,
-)
 from sibyl.persistence.content_runtime import (
     check_relational_backend_health,
     count_remaining_unlinked_chunks,
@@ -69,7 +65,53 @@ from sibyl_core.models import CrawlStatus, SourceType
 log = structlog.get_logger()
 
 
-async def _get_org_source(session: Any, source_id: str, org: AuthOrganization) -> CrawlSource:
+class CrawlSourceRecord(Protocol):
+    id: UUID
+    name: str
+    url: str
+    source_type: SourceType | str
+    description: str | None
+    crawl_depth: int
+    crawl_status: CrawlStatus | str
+    document_count: int
+    chunk_count: int
+    current_job_id: str | None
+    last_crawled_at: datetime | None
+    last_error: str | None
+    created_at: datetime
+    include_patterns: list[str] | None
+    exclude_patterns: list[str] | None
+
+
+class CrawledDocumentRecord(Protocol):
+    id: UUID
+    source_id: UUID
+    url: str
+    title: str
+    word_count: int
+    has_code: bool
+    is_index: bool
+    depth: int
+    crawled_at: datetime
+    headings: list[str] | None
+    code_languages: list[str] | None
+    raw_content: str
+
+
+class DocumentChunkRecord(Protocol):
+    content: str
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _enum_value(value: object) -> str:
+    enum_value = getattr(value, "value", None)
+    return str(enum_value if enum_value is not None else value)
+
+
+async def _get_org_source(session: object, source_id: str, org: AuthOrganization) -> CrawlSourceRecord:
     """Get a source and verify it belongs to the organization.
 
     Args:
@@ -78,7 +120,7 @@ async def _get_org_source(session: Any, source_id: str, org: AuthOrganization) -
         org: Current organization
 
     Returns:
-        The CrawlSource if found and owned by org
+        The source record if found and owned by org
 
     Raises:
         HTTPException: 404 if not found or not owned by org
@@ -108,20 +150,16 @@ router = APIRouter(
 )
 
 
-def _source_to_response(source: CrawlSource) -> CrawlSourceResponse:
-    """Convert DB model to response schema."""
+def _source_to_response(source: CrawlSourceRecord) -> CrawlSourceResponse:
+    """Convert source record to response schema."""
     return CrawlSourceResponse(
         id=str(source.id),
         name=source.name,
         url=source.url,
-        source_type=source.source_type.value
-        if hasattr(source.source_type, "value")
-        else str(source.source_type),
+        source_type=_enum_value(source.source_type),
         description=source.description,
         crawl_depth=source.crawl_depth,
-        crawl_status=source.crawl_status.value
-        if hasattr(source.crawl_status, "value")
-        else str(source.crawl_status),
+        crawl_status=_enum_value(source.crawl_status),
         document_count=source.document_count,
         chunk_count=source.chunk_count,
         last_crawled_at=source.last_crawled_at,
@@ -132,8 +170,8 @@ def _source_to_response(source: CrawlSource) -> CrawlSourceResponse:
     )
 
 
-def _document_to_response(doc: CrawledDocument) -> CrawlDocumentResponse:
-    """Convert DB model to response schema."""
+def _document_to_response(doc: CrawledDocumentRecord) -> CrawlDocumentResponse:
+    """Convert document record to response schema."""
     return CrawlDocumentResponse(
         id=str(doc.id),
         source_id=str(doc.source_id),
@@ -263,7 +301,7 @@ async def get_document(
 async def delete_document(
     document_id: str,
     org: AuthOrganization = Depends(get_current_organization),
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Delete a crawled document and its chunks (org-scoped)."""
     async with get_content_read_session() as session:
         deleted = await delete_crawled_document_record(
@@ -492,7 +530,7 @@ async def update_source(
 async def delete_source(
     source_id: str,
     org: AuthOrganization = Depends(get_current_organization),
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Delete a crawl source and all its documents (org-scoped)."""
     async with get_content_read_session() as session:
         source = await delete_crawl_source_record(
@@ -593,7 +631,7 @@ async def ingest_source(
 async def get_ingestion_status(
     source_id: str,
     org: AuthOrganization = Depends(get_current_organization),
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Get crawl status for a source (org-scoped).
 
     Returns both the source's crawl_status and any active job status.
@@ -604,7 +642,7 @@ async def get_ingestion_status(
 
         return {
             "source_id": source_id,
-            "crawl_status": source.crawl_status.value,
+            "crawl_status": _enum_value(source.crawl_status),
             "current_job_id": source.current_job_id,
             "document_count": source.document_count,
             "chunk_count": source.chunk_count,
@@ -675,7 +713,7 @@ async def cancel_crawl(
 async def sync_source(
     source_id: str,
     org: AuthOrganization = Depends(get_current_organization),
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Sync source stats from actual document/chunk counts (org-scoped).
 
     Useful for fixing stuck sources or after manual data changes.
@@ -696,7 +734,7 @@ async def sync_source(
             if source.crawl_status == CrawlStatus.IN_PROGRESS:
                 source.crawl_status = CrawlStatus.COMPLETED
                 if source.last_crawled_at is None:
-                    source.last_crawled_at = utcnow_naive()
+                    source.last_crawled_at = _utcnow_naive()
         elif source.crawl_status == CrawlStatus.IN_PROGRESS:
             # No documents but stuck in progress - reset to pending
             source.crawl_status = CrawlStatus.PENDING
@@ -714,8 +752,8 @@ async def sync_source(
         log.info(
             "Synced source stats",
             source_id=source_id,
-            old_status=old_status.value,
-            new_status=new_status.value,
+            old_status=_enum_value(old_status),
+            new_status=_enum_value(new_status),
             old_doc_count=old_doc_count,
             new_doc_count=actual_doc_count,
             old_chunk_count=old_chunk_count,
@@ -733,9 +771,9 @@ async def sync_source(
         "synced": True,
         "document_count": actual_doc_count,
         "chunk_count": actual_chunk_count,
-        "status": new_status.value,
+        "status": _enum_value(new_status),
         "changes": {
-            "status": f"{old_status.value} -> {new_status.value}"
+            "status": f"{_enum_value(old_status)} -> {_enum_value(new_status)}"
             if old_status != new_status
             else None,
             "document_count": f"{old_doc_count} -> {actual_doc_count}"
