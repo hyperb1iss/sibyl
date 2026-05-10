@@ -135,11 +135,23 @@ RelationshipType.BELONGS_TO, DEPENDS_ON, BLOCKS, REFERENCES
 ## Configuration
 
 ```bash
-SIBYL_OPENAI_API_KEY=sk-...         # Required (embeddings)
+SIBYL_EMBEDDING_PROVIDER=openai     # openai | gemini
+SIBYL_OPENAI_API_KEY=sk-...         # Required when provider=openai
+SIBYL_GEMINI_API_KEY=...            # Required when provider=gemini
 SIBYL_FALKORDB_HOST=localhost
 SIBYL_FALKORDB_PORT=6380
-SIBYL_ANTHROPIC_API_KEY=...         # Optional (LLM-powered features)
+SIBYL_ANTHROPIC_API_KEY=...         # Entity extraction
+
+SIBYL_EMBEDDING_MODEL=text-embedding-3-small
+SIBYL_EMBEDDING_DIMENSIONS=1536
+SIBYL_GRAPH_EMBEDDING_PROVIDER=openai
+SIBYL_GRAPH_EMBEDDING_MODEL=text-embedding-3-small
+SIBYL_GRAPH_EMBEDDING_DIMENSIONS=1024
 ```
+
+Gemini embeddings default to `gemini-embedding-2`; Gemini keys can also come from `GEMINI_API_KEY`
+or `GOOGLE_API_KEY`. Changing embedding provider, model, or dimensions requires re-embedding
+existing graph and document vectors before comparing old and new search results.
 
 ## Key Patterns
 

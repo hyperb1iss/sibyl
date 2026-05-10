@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react';
 import { Check, HelpCircle, Key, WarningTriangle, Xmark } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
-import type { SetupStatus } from '@/lib/api';
+import type { SetupStatus, UpdateSettingsRequest } from '@/lib/api';
 import { useSettings, useUpdateSettings, useValidateApiKeys } from '@/lib/hooks';
 
 interface ApiKeysStepProps {
@@ -16,8 +16,10 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
   // Form state
   const [openaiKey, setOpenaiKey] = useState('');
   const [anthropicKey, setAnthropicKey] = useState('');
+  const [geminiKey, setGeminiKey] = useState('');
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [showAnthropicKey, setShowAnthropicKey] = useState(false);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
 
   // API hooks
   const { data: settings } = useSettings();
@@ -31,7 +33,10 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
     settings?.settings?.anthropic_api_key?.configured ??
     initialStatus?.anthropic_configured ??
     false;
-  const bothConfigured = openaiConfigured && anthropicConfigured;
+  const geminiConfigured =
+    settings?.settings?.gemini_api_key?.configured ?? initialStatus?.gemini_configured ?? false;
+  const embeddingsConfigured = openaiConfigured || geminiConfigured;
+  const requiredConfigured = anthropicConfigured && embeddingsConfigured;
 
   // Validation status
   const openaiValid =
@@ -42,23 +47,55 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
     updateSettings.data?.validation?.anthropic_api_key?.valid ??
     validation?.anthropic_valid ??
     initialStatus?.anthropic_valid;
+  const geminiValid =
+    updateSettings.data?.validation?.gemini_api_key?.valid ??
+    validation?.gemini_valid ??
+    initialStatus?.gemini_valid;
 
   // Validation errors
   const openaiError =
     updateSettings.data?.validation?.openai_api_key?.error ?? validation?.openai_error;
   const anthropicError =
     updateSettings.data?.validation?.anthropic_api_key?.error ?? validation?.anthropic_error;
+  const geminiError =
+    updateSettings.data?.validation?.gemini_api_key?.error ?? validation?.gemini_error;
 
   const isSaving = updateSettings.isPending;
-  const hasKeyInput = openaiKey.trim().length > 0 || anthropicKey.trim().length > 0;
+  const enteredKeyCount = [openaiKey, anthropicKey, geminiKey].filter(
+    key => key.trim().length > 0
+  ).length;
+  const hasKeyInput = enteredKeyCount > 0;
+  const progressMessage =
+    anthropicConfigured && !embeddingsConfigured
+      ? 'Anthropic key saved. Add OpenAI or Gemini for embeddings.'
+      : embeddingsConfigured && !anthropicConfigured
+        ? 'Embedding key saved. Add Anthropic for extraction workflows.'
+        : null;
+  const disabledPrompt =
+    !anthropicConfigured && !embeddingsConfigured
+      ? 'Enter API Keys'
+      : !anthropicConfigured
+        ? 'Enter Anthropic Key'
+        : 'Enter OpenAI or Gemini Key';
 
   const handleSaveKeys = useCallback(async () => {
-    const request: { openai_api_key?: string; anthropic_api_key?: string } = {};
+    const request: UpdateSettingsRequest = {};
     if (openaiKey.trim()) {
       request.openai_api_key = openaiKey.trim();
     }
     if (anthropicKey.trim()) {
       request.anthropic_api_key = anthropicKey.trim();
+    }
+    if (geminiKey.trim()) {
+      request.gemini_api_key = geminiKey.trim();
+    }
+    if (geminiKey.trim() && !openaiKey.trim() && !openaiConfigured) {
+      request.embedding_provider = 'gemini';
+      request.graph_embedding_provider = 'gemini';
+    }
+    if (openaiKey.trim() && !geminiKey.trim() && !geminiConfigured) {
+      request.embedding_provider = 'openai';
+      request.graph_embedding_provider = 'openai';
     }
 
     if (Object.keys(request).length === 0) {
@@ -67,24 +104,44 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
 
     const result = await updateSettings.mutateAsync(request);
 
-    // Check if both keys are now valid
-    const bothNowValid =
-      (result.validation.openai_api_key?.valid ?? openaiValid === true) &&
-      (result.validation.anthropic_api_key?.valid ?? anthropicValid === true);
+    const openaiNowValid =
+      result.validation.openai_api_key?.valid === true ||
+      (result.validation.openai_api_key === undefined &&
+        (openaiValid === true || openaiConfigured));
+    const anthropicNowValid =
+      result.validation.anthropic_api_key?.valid === true ||
+      (result.validation.anthropic_api_key === undefined &&
+        (anthropicValid === true || anthropicConfigured));
+    const geminiNowValid =
+      result.validation.gemini_api_key?.valid === true ||
+      (result.validation.gemini_api_key === undefined &&
+        (geminiValid === true || geminiConfigured));
+    const requiredNowValid = anthropicNowValid && (openaiNowValid || geminiNowValid);
 
-    if (bothNowValid) {
+    if (requiredNowValid) {
       // Clear input fields on success
       setOpenaiKey('');
       setAnthropicKey('');
+      setGeminiKey('');
     }
-  }, [openaiKey, anthropicKey, updateSettings, openaiValid, anthropicValid]);
+  }, [
+    openaiKey,
+    anthropicKey,
+    geminiKey,
+    openaiConfigured,
+    anthropicConfigured,
+    geminiConfigured,
+    updateSettings,
+    openaiValid,
+    anthropicValid,
+    geminiValid,
+  ]);
 
   const handleContinue = useCallback(() => {
-    // Both keys are configured (and were validated before being saved)
-    if (bothConfigured) {
+    if (requiredConfigured) {
       onValidated(true);
     }
-  }, [bothConfigured, onValidated]);
+  }, [requiredConfigured, onValidated]);
 
   return (
     <div className="p-8">
@@ -95,8 +152,8 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
         </div>
         <h2 className="text-xl font-semibold text-sc-fg-primary mb-2">Configure API Keys</h2>
         <p className="text-sc-fg-muted text-sm max-w-md mx-auto">
-          Sibyl needs API keys for semantic search (OpenAI) and entity extraction (Anthropic). Enter
-          your keys below to save them securely.
+          Sibyl needs Anthropic for entity extraction and either OpenAI or Gemini for embeddings.
+          Enter keys below to save them securely.
         </p>
       </div>
 
@@ -104,7 +161,7 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
       <div className="space-y-4 mb-6">
         <ApiKeyInput
           name="OpenAI"
-          description="Used for embeddings and semantic search"
+          description="Embeddings and semantic search when OpenAI is selected"
           placeholder="sk-..."
           value={openaiKey}
           onChange={setOpenaiKey}
@@ -114,6 +171,20 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
           valid={openaiValid}
           error={openaiError}
           masked={settings?.settings?.openai_api_key?.masked}
+          isValidating={isSaving}
+        />
+        <ApiKeyInput
+          name="Gemini"
+          description="Embeddings and semantic search when Gemini is selected"
+          placeholder="AIza..."
+          value={geminiKey}
+          onChange={setGeminiKey}
+          showValue={showGeminiKey}
+          onToggleShow={() => setShowGeminiKey(!showGeminiKey)}
+          configured={geminiConfigured}
+          valid={geminiValid}
+          error={geminiError}
+          masked={settings?.settings?.gemini_api_key?.masked}
           isValidating={isSaving}
         />
         <ApiKeyInput
@@ -144,25 +215,18 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
         </div>
       )}
 
-      {/* Progress message - show when one key is saved but not both */}
-      {!bothConfigured && (openaiConfigured || anthropicConfigured) && (
+      {/* Progress message */}
+      {!requiredConfigured && progressMessage && (
         <div className="mb-6 p-4 rounded-xl bg-sc-green/10 border border-sc-green/20">
           <div className="flex gap-3">
             <Check width={20} height={20} className="text-sc-green flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-sc-green">
-              {openaiConfigured &&
-                !anthropicConfigured &&
-                'OpenAI key saved! Now add your Anthropic key below.'}
-              {anthropicConfigured &&
-                !openaiConfigured &&
-                'Anthropic key saved! Now add your OpenAI key below.'}
-            </p>
+            <p className="text-sm text-sc-green">{progressMessage}</p>
           </div>
         </div>
       )}
 
       {/* Help text */}
-      {!bothConfigured && !hasKeyInput && (
+      {!requiredConfigured && !hasKeyInput && (
         <div className="mb-6 p-4 rounded-xl bg-sc-cyan/10 border border-sc-cyan/20">
           <div className="flex gap-3">
             <HelpCircle width={20} height={20} className="text-sc-cyan flex-shrink-0 mt-0.5" />
@@ -178,7 +242,16 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
                 >
                   OpenAI
                 </a>{' '}
-                and{' '}
+                ,{' '}
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sc-cyan hover:underline"
+                >
+                  Google AI Studio
+                </a>
+                , and{' '}
                 <a
                   href="https://console.anthropic.com/settings/keys"
                   target="_blank"
@@ -204,8 +277,7 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
           Back
         </button>
 
-        {bothConfigured ? (
-          // Both keys saved - show Continue
+        {requiredConfigured ? (
           <button
             type="button"
             onClick={handleContinue}
@@ -214,7 +286,6 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
             Continue
           </button>
         ) : hasKeyInput ? (
-          // User has typed a key - show Save button
           <button
             type="button"
             onClick={handleSaveKeys}
@@ -227,21 +298,16 @@ export function ApiKeysStep({ initialStatus, onBack, onValidated }: ApiKeysStepP
                 Validating & Saving...
               </>
             ) : (
-              `Save ${openaiKey.trim() && anthropicKey.trim() ? 'Keys' : 'Key'}`
+              `Save ${enteredKeyCount > 1 ? 'Keys' : 'Key'}`
             )}
           </button>
         ) : (
-          // Waiting for user to enter key(s)
           <button
             type="button"
             disabled
             className="flex-1 py-2.5 px-4 rounded-lg bg-sc-fg-subtle/20 text-sc-fg-muted font-medium text-sm cursor-not-allowed"
           >
-            {openaiConfigured && !anthropicConfigured
-              ? 'Enter Anthropic Key'
-              : anthropicConfigured && !openaiConfigured
-                ? 'Enter OpenAI Key'
-                : 'Enter API Keys'}
+            {disabledPrompt}
           </button>
         )}
       </div>

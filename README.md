@@ -154,7 +154,8 @@ uv sync && pnpm install
 
 # Configure
 cp .env.example .env
-# Add SIBYL_OPENAI_API_KEY + SIBYL_JWT_SECRET
+# Add SIBYL_JWT_SECRET, SIBYL_ANTHROPIC_API_KEY, and one embedding key
+# Embeddings can use SIBYL_OPENAI_API_KEY or SIBYL_GEMINI_API_KEY
 
 # Install CLIs globally (editable, source changes reflect immediately)
 moon run install-dev
@@ -528,8 +529,12 @@ knowledge, tasks, and docs connected in one graph instead of scattering them acr
 
 ### What LLM APIs do I need?
 
-- **OpenAI** (required): For embeddings (`text-embedding-3-small`)
-- **Anthropic** (optional): For additional model-powered extraction workflows
+- **Anthropic** (required): For entity extraction and graph memory workflows
+- **OpenAI or Gemini** (required): For embeddings and semantic search
+
+OpenAI defaults to `text-embedding-3-small`; Gemini defaults to `gemini-embedding-2`. Changing
+embedding provider, model, or dimensions requires re-embedding existing graph and document vectors
+before comparing old and new search results.
 
 A typical solo developer uses ~$5/month in API costs.
 

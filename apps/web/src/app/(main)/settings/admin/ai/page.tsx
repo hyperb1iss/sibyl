@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import {
   Check,
@@ -8,14 +8,68 @@ import {
   EditPencil,
   Flash,
   Globe,
+  InfoCircle,
   RefreshDouble,
+  Settings as SettingsIcon,
   Trash,
   WarningTriangle,
   Xmark,
 } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
-import type { SettingInfo } from '@/lib/api';
+import type { SettingInfo, SettingsResponse, UpdateSettingsRequest } from '@/lib/api';
 import { useDeleteSetting, useSettings, useUpdateSettings, useValidateApiKeys } from '@/lib/hooks';
+
+type ApiKeySettingKey = 'openai_api_key' | 'anthropic_api_key' | 'gemini_api_key';
+type EmbeddingProvider = 'openai' | 'gemini';
+
+interface EmbeddingConfigState {
+  embedding_provider: EmbeddingProvider;
+  embedding_model: string;
+  embedding_dimensions: string;
+  graph_embedding_provider: EmbeddingProvider;
+  graph_embedding_model: string;
+  graph_embedding_dimensions: string;
+}
+
+const OPENAI_EMBEDDING_MODEL = 'text-embedding-3-small';
+const GEMINI_EMBEDDING_MODEL = 'gemini-embedding-2';
+
+const DEFAULT_EMBEDDING_CONFIG: EmbeddingConfigState = {
+  embedding_provider: 'openai',
+  embedding_model: OPENAI_EMBEDDING_MODEL,
+  embedding_dimensions: '1536',
+  graph_embedding_provider: 'openai',
+  graph_embedding_model: OPENAI_EMBEDDING_MODEL,
+  graph_embedding_dimensions: '1024',
+};
+
+function defaultModelForProvider(provider: EmbeddingProvider): string {
+  return provider === 'gemini' ? GEMINI_EMBEDDING_MODEL : OPENAI_EMBEDDING_MODEL;
+}
+
+function parseProvider(value: string | null | undefined, fallback: EmbeddingProvider) {
+  return value === 'gemini' || value === 'openai' ? value : fallback;
+}
+
+function readSetting(
+  settings: SettingsResponse | undefined,
+  key: keyof EmbeddingConfigState,
+  fallback: string
+) {
+  return settings?.settings?.[key]?.value ?? fallback;
+}
+
+function keyDisplayName(key: ApiKeySettingKey) {
+  if (key === 'openai_api_key') return 'OpenAI';
+  if (key === 'anthropic_api_key') return 'Anthropic';
+  return 'Gemini';
+}
+
+function keyPlaceholder(key: ApiKeySettingKey) {
+  if (key === 'openai_api_key') return 'sk-...';
+  if (key === 'anthropic_api_key') return 'sk-ant-...';
+  return 'AIza...';
+}
 
 interface ApiKeyCardProps {
   name: string;
@@ -284,6 +338,80 @@ function EditModal({
   );
 }
 
+interface EmbeddingConfigPanelProps {
+  title: string;
+  description: string;
+  provider: EmbeddingProvider;
+  model: string;
+  dimensions: string;
+  onProviderChange: (provider: EmbeddingProvider) => void;
+  onModelChange: (model: string) => void;
+  onDimensionsChange: (dimensions: string) => void;
+}
+
+function EmbeddingConfigPanel({
+  title,
+  description,
+  provider,
+  model,
+  dimensions,
+  onProviderChange,
+  onModelChange,
+  onDimensionsChange,
+}: EmbeddingConfigPanelProps) {
+  return (
+    <div className="rounded-lg border border-sc-fg-subtle/10 bg-sc-bg-dark/40 p-4">
+      <div className="mb-4">
+        <h4 className="font-medium text-sc-fg-primary">{title}</h4>
+        <p className="text-sm text-sc-fg-muted">{description}</p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-[160px_1fr_140px]">
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium uppercase tracking-[0.08em] text-sc-fg-subtle">
+            Provider
+          </span>
+          <select
+            value={provider}
+            onChange={e => onProviderChange(e.target.value as EmbeddingProvider)}
+            className="w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-base px-3 py-2.5 text-sm text-sc-fg-primary focus:border-sc-cyan/50 focus:outline-none focus:ring-1 focus:ring-sc-cyan/20"
+          >
+            <option value="openai">OpenAI</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium uppercase tracking-[0.08em] text-sc-fg-subtle">
+            Model
+          </span>
+          <input
+            type="text"
+            value={model}
+            onChange={e => onModelChange(e.target.value)}
+            className="w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-base px-3 py-2.5 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-cyan/50 focus:outline-none focus:ring-1 focus:ring-sc-cyan/20"
+          />
+        </label>
+
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-medium uppercase tracking-[0.08em] text-sc-fg-subtle">
+            Dimensions
+          </span>
+          <input
+            type="number"
+            min={128}
+            max={3072}
+            step={1}
+            value={dimensions}
+            onChange={e => onDimensionsChange(e.target.value)}
+            className="w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-base px-3 py-2.5 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-cyan/50 focus:outline-none focus:ring-1 focus:ring-sc-cyan/20"
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 export default function AIServicesPage() {
   const { data: settings, isLoading } = useSettings();
   const {
@@ -295,14 +423,58 @@ export default function AIServicesPage() {
   const deleteSetting = useDeleteSetting();
 
   const [isValidating, setIsValidating] = useState(false);
-  const [editingKey, setEditingKey] = useState<'openai_api_key' | 'anthropic_api_key' | null>(null);
+  const [editingKey, setEditingKey] = useState<ApiKeySettingKey | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [embeddingConfig, setEmbeddingConfig] = useState(DEFAULT_EMBEDDING_CONFIG);
+
+  useEffect(() => {
+    if (!settings) return;
+
+    const embeddingProvider = parseProvider(
+      readSetting(settings, 'embedding_provider', DEFAULT_EMBEDDING_CONFIG.embedding_provider),
+      DEFAULT_EMBEDDING_CONFIG.embedding_provider
+    );
+    const graphProvider = parseProvider(
+      readSetting(
+        settings,
+        'graph_embedding_provider',
+        DEFAULT_EMBEDDING_CONFIG.graph_embedding_provider
+      ),
+      DEFAULT_EMBEDDING_CONFIG.graph_embedding_provider
+    );
+
+    setEmbeddingConfig({
+      embedding_provider: embeddingProvider,
+      embedding_model: readSetting(
+        settings,
+        'embedding_model',
+        defaultModelForProvider(embeddingProvider)
+      ),
+      embedding_dimensions: readSetting(
+        settings,
+        'embedding_dimensions',
+        DEFAULT_EMBEDDING_CONFIG.embedding_dimensions
+      ),
+      graph_embedding_provider: graphProvider,
+      graph_embedding_model: readSetting(
+        settings,
+        'graph_embedding_model',
+        defaultModelForProvider(graphProvider)
+      ),
+      graph_embedding_dimensions: readSetting(
+        settings,
+        'graph_embedding_dimensions',
+        DEFAULT_EMBEDDING_CONFIG.graph_embedding_dimensions
+      ),
+    });
+  }, [settings]);
 
   const handleValidate = async () => {
     setIsValidating(true);
     try {
       const result = await revalidate();
-      if (result.data?.openai_valid && result.data?.anthropic_valid) {
+      const embeddingValid = result.data?.openai_valid || result.data?.gemini_valid;
+      if (embeddingValid && result.data?.anthropic_valid) {
         toast.success('All API keys validated successfully');
       } else {
         toast.error('Some API keys failed validation');
@@ -315,14 +487,12 @@ export default function AIServicesPage() {
   };
 
   const handleSaveKey = useCallback(
-    async (key: 'openai_api_key' | 'anthropic_api_key', value: string) => {
+    async (key: ApiKeySettingKey, value: string) => {
       try {
         const result = await updateSettings.mutateAsync({ [key]: value });
         const keyResult = result.validation[key];
         if (keyResult?.valid) {
-          toast.success(
-            `${key === 'openai_api_key' ? 'OpenAI' : 'Anthropic'} API key saved and validated`
-          );
+          toast.success(`${keyDisplayName(key)} API key saved and validated`);
           setEditingKey(null);
         } else {
           toast.error(keyResult?.error || 'API key validation failed');
@@ -349,6 +519,44 @@ export default function AIServicesPage() {
     [deleteSetting]
   );
 
+  const handleSaveEmbeddingConfig = useCallback(async () => {
+    const embeddingDimensions = Number.parseInt(embeddingConfig.embedding_dimensions, 10);
+    const graphDimensions = Number.parseInt(embeddingConfig.graph_embedding_dimensions, 10);
+
+    if (
+      !Number.isInteger(embeddingDimensions) ||
+      embeddingDimensions < 128 ||
+      embeddingDimensions > 3072 ||
+      !Number.isInteger(graphDimensions) ||
+      graphDimensions < 128 ||
+      graphDimensions > 3072
+    ) {
+      toast.error('Embedding dimensions must be whole numbers from 128 to 3072');
+      return;
+    }
+
+    const request: UpdateSettingsRequest = {
+      embedding_provider: embeddingConfig.embedding_provider,
+      embedding_model: embeddingConfig.embedding_model.trim(),
+      embedding_dimensions: embeddingDimensions,
+      graph_embedding_provider: embeddingConfig.graph_embedding_provider,
+      graph_embedding_model: embeddingConfig.graph_embedding_model.trim(),
+      graph_embedding_dimensions: graphDimensions,
+    };
+
+    if (!request.embedding_model || !request.graph_embedding_model) {
+      toast.error('Embedding models cannot be blank');
+      return;
+    }
+
+    try {
+      await updateSettings.mutateAsync(request);
+      toast.success('Embedding configuration saved');
+    } catch {
+      toast.error('Failed to save embedding configuration');
+    }
+  }, [embeddingConfig, updateSettings]);
+
   // Use validation results if available, otherwise fall back to update results, then settings
   const openaiValid =
     validation?.openai_valid ?? updateSettings.data?.validation?.openai_api_key?.valid ?? null;
@@ -356,6 +564,15 @@ export default function AIServicesPage() {
     validation?.anthropic_valid ??
     updateSettings.data?.validation?.anthropic_api_key?.valid ??
     null;
+  const geminiValid =
+    validation?.gemini_valid ?? updateSettings.data?.validation?.gemini_api_key?.valid ?? null;
+
+  const updateEmbeddingConfig = <Key extends keyof EmbeddingConfigState>(
+    key: Key,
+    value: EmbeddingConfigState[Key]
+  ) => {
+    setEmbeddingConfig(current => ({ ...current, [key]: value }));
+  };
 
   if (isLoading) {
     return (
@@ -402,8 +619,8 @@ export default function AIServicesPage() {
           </button>
         </div>
         <p className="text-sc-fg-muted">
-          Sibyl uses external AI services for semantic search and entity extraction. API keys can be
-          configured here or via environment variables.
+          Sibyl uses Anthropic for entity extraction and either OpenAI or Gemini for embeddings. API
+          keys can be configured here or via environment variables.
         </p>
       </div>
 
@@ -411,7 +628,7 @@ export default function AIServicesPage() {
       <div className="grid gap-4">
         <ApiKeyCard
           name="OpenAI"
-          description="Powers vector embeddings for semantic search. Uses text-embedding-3-small model."
+          description="Powers semantic search when OpenAI is selected as an embedding provider."
           setting={settings?.settings?.openai_api_key}
           valid={openaiValid}
           error={validation?.openai_error ?? updateSettings.data?.validation?.openai_api_key?.error}
@@ -419,6 +636,17 @@ export default function AIServicesPage() {
           onEdit={() => setEditingKey('openai_api_key')}
           onDelete={() => handleDeleteKey('openai_api_key')}
           isDeleting={deletingKey === 'openai_api_key'}
+        />
+        <ApiKeyCard
+          name="Gemini"
+          description="Powers semantic search when Gemini is selected as an embedding provider."
+          setting={settings?.settings?.gemini_api_key}
+          valid={geminiValid}
+          error={validation?.gemini_error ?? updateSettings.data?.validation?.gemini_api_key?.error}
+          isValidating={isValidating}
+          onEdit={() => setEditingKey('gemini_api_key')}
+          onDelete={() => handleDeleteKey('gemini_api_key')}
+          isDeleting={deletingKey === 'gemini_api_key'}
         />
         <ApiKeyCard
           name="Anthropic"
@@ -433,6 +661,85 @@ export default function AIServicesPage() {
           onDelete={() => handleDeleteKey('anthropic_api_key')}
           isDeleting={deletingKey === 'anthropic_api_key'}
         />
+      </div>
+
+      <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <SettingsIcon width={20} height={20} className="mt-0.5 text-sc-cyan" />
+            <div>
+              <h3 className="font-semibold text-sc-fg-primary">Embedding Configuration</h3>
+              <p className="mt-1 text-sm text-sc-fg-muted">
+                Choose the provider, model, and vector dimensions used for document chunks and graph
+                memory.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleSaveEmbeddingConfig}
+            disabled={updateSettings.isPending}
+            className="flex items-center gap-2 rounded-lg bg-sc-cyan px-3 py-2 text-sm font-medium text-sc-bg-dark transition-colors hover:bg-sc-cyan/90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {updateSettings.isPending ? (
+              <>
+                <Spinner size="sm" color="current" />
+                Saving...
+              </>
+            ) : (
+              'Save Config'
+            )}
+          </button>
+        </div>
+
+        <div className="mb-5 rounded-lg border border-sc-yellow/20 bg-sc-yellow/10 p-4">
+          <div className="flex gap-3">
+            <InfoCircle width={18} height={18} className="mt-0.5 flex-shrink-0 text-sc-yellow" />
+            <p className="text-sm text-sc-fg-secondary">
+              Changing provider, model, or dimensions changes the vector space. Re-crawl document
+              sources and rebuild graph indexes before trusting mixed search results.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-4">
+          <EmbeddingConfigPanel
+            title="Document Embeddings"
+            description="Used by crawled sources, chunks, and semantic document search."
+            provider={embeddingConfig.embedding_provider}
+            model={embeddingConfig.embedding_model}
+            dimensions={embeddingConfig.embedding_dimensions}
+            onProviderChange={provider =>
+              setEmbeddingConfig(current => ({
+                ...current,
+                embedding_provider: provider,
+                embedding_model: defaultModelForProvider(provider),
+              }))
+            }
+            onModelChange={model => updateEmbeddingConfig('embedding_model', model)}
+            onDimensionsChange={dimensions =>
+              updateEmbeddingConfig('embedding_dimensions', dimensions)
+            }
+          />
+          <EmbeddingConfigPanel
+            title="Graph Embeddings"
+            description="Used by Graphiti entities, relationships, and graph similarity search."
+            provider={embeddingConfig.graph_embedding_provider}
+            model={embeddingConfig.graph_embedding_model}
+            dimensions={embeddingConfig.graph_embedding_dimensions}
+            onProviderChange={provider =>
+              setEmbeddingConfig(current => ({
+                ...current,
+                graph_embedding_provider: provider,
+                graph_embedding_model: defaultModelForProvider(provider),
+              }))
+            }
+            onModelChange={model => updateEmbeddingConfig('graph_embedding_model', model)}
+            onDimensionsChange={dimensions =>
+              updateEmbeddingConfig('graph_embedding_dimensions', dimensions)
+            }
+          />
+        </div>
       </div>
 
       {/* Configuration Info */}
@@ -452,13 +759,14 @@ export default function AIServicesPage() {
               <span className="inline-flex items-center gap-1.5">
                 <Globe width={14} height={14} className="text-sc-purple" />
                 <strong className="text-sc-fg-secondary">Environment</strong> -
-                SIBYL_OPENAI_API_KEY, SIBYL_ANTHROPIC_API_KEY
+                SIBYL_OPENAI_API_KEY, SIBYL_ANTHROPIC_API_KEY, SIBYL_GEMINI_API_KEY
               </span>
             </li>
           </ol>
           <p className="mt-4 text-xs">
-            Database keys take precedence. Use the "Remove" button to delete a database key and fall
-            back to environment variables.
+            Database values take precedence. Gemini also checks GEMINI_API_KEY and GOOGLE_API_KEY.
+            Provider settings can be supplied with SIBYL_EMBEDDING_PROVIDER and
+            SIBYL_GRAPH_EMBEDDING_PROVIDER.
           </p>
         </div>
       </div>
@@ -466,8 +774,8 @@ export default function AIServicesPage() {
       {/* Edit Modal */}
       {editingKey && (
         <EditModal
-          name={editingKey === 'openai_api_key' ? 'OpenAI' : 'Anthropic'}
-          placeholder={editingKey === 'openai_api_key' ? 'sk-...' : 'sk-ant-...'}
+          name={keyDisplayName(editingKey)}
+          placeholder={keyPlaceholder(editingKey)}
           currentMasked={settings?.settings?.[editingKey]?.masked}
           onClose={() => setEditingKey(null)}
           onSave={value => handleSaveKey(editingKey, value)}

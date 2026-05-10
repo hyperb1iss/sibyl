@@ -47,9 +47,11 @@ export function WelcomeBanner({ totalEntities, onDismiss }: WelcomeBannerProps) 
   };
 
   const isNewUser = totalEntities === 0;
-  const openaiReady = setupStatus?.openai_valid === true;
-  const anthropicReady = setupStatus?.anthropic_valid === true;
-  const apisReady = openaiReady && anthropicReady;
+  const openaiReady = setupStatus?.openai_valid === true || setupStatus?.openai_configured === true;
+  const geminiReady = setupStatus?.gemini_valid === true || setupStatus?.gemini_configured === true;
+  const anthropicReady =
+    setupStatus?.anthropic_valid === true || setupStatus?.anthropic_configured === true;
+  const apisReady = (openaiReady || geminiReady) && anthropicReady;
 
   return (
     <div className="relative bg-gradient-to-r from-sc-purple/10 via-sc-cyan/5 to-sc-coral/10 border border-sc-purple/20 rounded-xl sm:rounded-2xl p-4 sm:p-6 mb-4 sm:mb-6 animate-fade-in overflow-hidden">

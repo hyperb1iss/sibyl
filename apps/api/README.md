@@ -51,8 +51,13 @@ Sibyl Combined App (port 3334)
 **Required:**
 
 ```bash
-SIBYL_OPENAI_API_KEY=sk-...       # Embeddings
 SIBYL_JWT_SECRET=...              # Auth
+SIBYL_ANTHROPIC_API_KEY=...       # Entity extraction
+
+# Embeddings: choose OpenAI or Gemini
+SIBYL_EMBEDDING_PROVIDER=openai   # openai | gemini
+SIBYL_OPENAI_API_KEY=sk-...       # Required when provider=openai
+# SIBYL_GEMINI_API_KEY=...        # Required when provider=gemini
 ```
 
 **Optional:**
@@ -65,7 +70,11 @@ SIBYL_SURREAL_USERNAME=root
 SIBYL_SURREAL_PASSWORD=root
 SIBYL_REDIS_HOST=127.0.0.1            # only needed for Redis coordination
 SIBYL_REDIS_PORT=6381
-SIBYL_ANTHROPIC_API_KEY=...       # Optional model-powered extraction
+SIBYL_EMBEDDING_MODEL=text-embedding-3-small
+SIBYL_EMBEDDING_DIMENSIONS=1536
+SIBYL_GRAPH_EMBEDDING_PROVIDER=openai
+SIBYL_GRAPH_EMBEDDING_MODEL=text-embedding-3-small
+SIBYL_GRAPH_EMBEDDING_DIMENSIONS=1024
 SIBYL_POSTGRES_HOST=...           # Legacy/mixed PostgreSQL
 SIBYL_POSTGRES_PORT=...
 SIBYL_POSTGRES_USER=...
@@ -74,6 +83,10 @@ SIBYL_POSTGRES_DB=...
 SIBYL_FALKORDB_HOST=...           # Legacy graph DB
 SIBYL_FALKORDB_PORT=...
 ```
+
+Gemini keys can also be supplied through `GEMINI_API_KEY` or `GOOGLE_API_KEY`. Changing embedding
+provider, model, or dimensions changes vector spaces; re-crawl sources and rebuild graph indexes
+before mixing old and new search results.
 
 ## CLI Commands
 

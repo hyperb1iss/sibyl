@@ -396,15 +396,19 @@ export interface SetupStatus {
   has_orgs: boolean;
   openai_configured: boolean;
   anthropic_configured: boolean;
+  gemini_configured: boolean;
   openai_valid: boolean | null;
   anthropic_valid: boolean | null;
+  gemini_valid: boolean | null;
 }
 
 export interface ApiKeyValidation {
   openai_valid: boolean;
   anthropic_valid: boolean;
+  gemini_valid: boolean;
   openai_error: string | null;
   anthropic_error: string | null;
+  gemini_error: string | null;
 }
 
 export interface McpCommandResponse {
@@ -422,6 +426,7 @@ export interface SettingInfo {
   source: 'database' | 'environment' | 'none';
   is_secret: boolean;
   masked: string | null;
+  value: string | null;
 }
 
 export interface SettingsResponse {
@@ -431,6 +436,13 @@ export interface SettingsResponse {
 export interface UpdateSettingsRequest {
   openai_api_key?: string;
   anthropic_api_key?: string;
+  gemini_api_key?: string;
+  embedding_provider?: 'openai' | 'gemini';
+  embedding_model?: string;
+  embedding_dimensions?: number;
+  graph_embedding_provider?: 'openai' | 'gemini';
+  graph_embedding_model?: string;
+  graph_embedding_dimensions?: number;
 }
 
 export interface UpdateSettingsResponse {

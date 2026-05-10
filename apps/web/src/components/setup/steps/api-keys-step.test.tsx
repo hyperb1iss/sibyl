@@ -27,6 +27,7 @@ describe('ApiKeysStep', () => {
         settings: {
           openai_api_key: { configured: false, masked: null },
           anthropic_api_key: { configured: false, masked: null },
+          gemini_api_key: { configured: false, masked: null },
         },
       },
     });
@@ -63,24 +64,45 @@ describe('ApiKeysStep', () => {
       expect(button).toBeDisabled();
     });
 
-    it('shows OpenAI and Anthropic input sections', () => {
+    it('shows OpenAI, Gemini, and Anthropic input sections', () => {
       render(
         <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
       // Check for input placeholders instead (more specific)
       expect(screen.getByPlaceholderText('sk-...')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('AIza...')).toBeInTheDocument();
       expect(screen.getByPlaceholderText('sk-ant-...')).toBeInTheDocument();
     });
   });
 
   describe('Configured State', () => {
-    it('shows Continue button when both keys are configured', () => {
+    it('shows Continue button when Anthropic and OpenAI are configured', () => {
       mockUseSettings.mockReturnValue({
         data: {
           settings: {
             openai_api_key: { configured: true, masked: 'sk-...abc123' },
             anthropic_api_key: { configured: true, masked: 'sk-ant-...xyz789' },
+            gemini_api_key: { configured: false, masked: null },
+          },
+        },
+      });
+
+      render(
+        <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
+      );
+
+      const continueButton = screen.getByRole('button', { name: /continue/i });
+      expect(continueButton).toBeEnabled();
+    });
+
+    it('shows Continue button when Anthropic and Gemini are configured', () => {
+      mockUseSettings.mockReturnValue({
+        data: {
+          settings: {
+            openai_api_key: { configured: false, masked: null },
+            anthropic_api_key: { configured: true, masked: 'sk-ant-...xyz789' },
+            gemini_api_key: { configured: true, masked: 'AIza...abc123' },
           },
         },
       });
@@ -99,6 +121,7 @@ describe('ApiKeysStep', () => {
           settings: {
             openai_api_key: { configured: true, masked: 'sk-...abc123' },
             anthropic_api_key: { configured: false, masked: null },
+            gemini_api_key: { configured: false, masked: null },
           },
         },
       });
@@ -107,7 +130,7 @@ describe('ApiKeysStep', () => {
         <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
-      expect(screen.getByText(/OpenAI key saved! Now add your Anthropic key/i)).toBeInTheDocument();
+      expect(screen.getByText(/Embedding key saved. Add Anthropic/i)).toBeInTheDocument();
     });
 
     it('shows progress message when only Anthropic is configured', () => {
@@ -116,6 +139,7 @@ describe('ApiKeysStep', () => {
           settings: {
             openai_api_key: { configured: false, masked: null },
             anthropic_api_key: { configured: true, masked: 'sk-ant-...xyz789' },
+            gemini_api_key: { configured: false, masked: null },
           },
         },
       });
@@ -124,7 +148,7 @@ describe('ApiKeysStep', () => {
         <ApiKeysStep initialStatus={undefined} onBack={mockOnBack} onValidated={mockOnValidated} />
       );
 
-      expect(screen.getByText(/Anthropic key saved! Now add your OpenAI key/i)).toBeInTheDocument();
+      expect(screen.getByText(/Anthropic key saved. Add OpenAI or Gemini/i)).toBeInTheDocument();
     });
   });
 
@@ -191,6 +215,7 @@ describe('ApiKeysStep', () => {
           settings: {
             openai_api_key: { configured: true, masked: 'sk-...abc123' },
             anthropic_api_key: { configured: true, masked: 'sk-ant-...xyz789' },
+            gemini_api_key: { configured: false, masked: null },
           },
         },
       });
