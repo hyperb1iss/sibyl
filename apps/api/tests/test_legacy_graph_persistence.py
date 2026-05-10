@@ -28,6 +28,7 @@ from sibyl.persistence.legacy.graph import (
     graph_stats_payload,
 )
 from sibyl_core.backends.surreal import SurrealDriver
+from sibyl_core.backends.surreal.driver import SurrealQueryError
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.storage import GraphStats, SearchFilters
 
@@ -238,6 +239,45 @@ async def test_legacy_search_index_aggregates_graph_stats_via_surreal_queries() 
             ),
         ]
     )
+
+
+@pytest.mark.asyncio
+async def test_legacy_search_index_surreal_stats_treats_missing_tables_as_empty() -> None:
+    driver = MagicMock()
+    driver.execute_query = AsyncMock(
+        side_effect=[
+            [{"entity_type": "episode", "cnt": 1}],
+            SurrealQueryError(
+                "SELECT name AS relationship_type, count() AS cnt FROM relates_to",
+                "The table 'relates_to' does not exist",
+            ),
+            [],
+            [],
+            [],
+            SurrealQueryError(
+                "SELECT count() AS cnt FROM mentions WHERE group_id = $group_id GROUP ALL;",
+                "The table 'mentions' does not exist",
+            ),
+            [],
+            [],
+            [],
+        ]
+    )
+    client = MagicMock()
+    client.get_org_driver.return_value = driver
+    search = LegacySearchIndex(
+        client,
+        "org-1",
+        LegacyEntityStore(MagicMock(), driver=driver, group_id="org-1"),
+    )
+
+    with patch("sibyl.persistence.graph_runtime._surreal_driver_for", return_value=object()):
+        stats = await search.stats()
+
+    assert stats.total_entities == 1
+    assert stats.total_relationships == 0
+    assert stats.entities_by_type == {"episode": 1}
+    assert stats.relationships_by_type == {}
 
 
 @pytest.mark.asyncio

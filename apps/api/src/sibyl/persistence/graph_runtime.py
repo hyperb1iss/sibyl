@@ -104,13 +104,31 @@ def _coerce_relationship(row: dict[str, object]) -> Relationship:
 
 
 async def _surreal_group_count(driver: Any, table: str, group_id: str) -> int:
-    rows = GraphClient.normalize_result(
-        await driver.execute_query(
-            f"SELECT count() AS cnt FROM {table} WHERE group_id = $group_id GROUP ALL;",  # noqa: S608
-            group_id=group_id,
-        )
+    rows = await _surreal_rows_or_empty(
+        driver,
+        f"SELECT count() AS cnt FROM {table} WHERE group_id = $group_id GROUP ALL;",  # noqa: S608
+        group_id=group_id,
     )
     return int(rows[0].get("cnt", 0)) if rows else 0
+
+
+def _is_surreal_missing_table_error(exc: Exception) -> bool:
+    message = str(getattr(exc, "surreal_message", exc))
+    return exc.__class__.__name__ == "SurrealQueryError" and "does not exist" in message
+
+
+async def _surreal_rows_or_empty(
+    driver: Any,
+    query: str,
+    *,
+    group_id: str,
+) -> list[dict[str, object]]:
+    try:
+        return GraphClient.normalize_result(await driver.execute_query(query, group_id=group_id))
+    except Exception as exc:
+        if _is_surreal_missing_table_error(exc):
+            return []
+        raise
 
 
 def _surreal_driver_for(driver: Any) -> Any | None:
@@ -655,27 +673,25 @@ class GraphSearchIndex(SearchIndex):
         if _surreal_driver_for(driver) is not None:
             from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
 
-            entity_rows = GraphClient.normalize_result(
-                await driver.execute_query(
-                    """
+            entity_rows = await _surreal_rows_or_empty(
+                driver,
+                """
                     SELECT entity_type, count() AS cnt
                     FROM entity
                     WHERE group_id = $group_id
                     GROUP BY entity_type;
                     """,
-                    group_id=self._group_id,
-                )
+                group_id=self._group_id,
             )
-            relates_to_rows = GraphClient.normalize_result(
-                await driver.execute_query(
-                    """
+            relates_to_rows = await _surreal_rows_or_empty(
+                driver,
+                """
                     SELECT name AS relationship_type, count() AS cnt
                     FROM relates_to
                     WHERE group_id = $group_id
                     GROUP BY name;
                     """,
-                    group_id=self._group_id,
-                )
+                group_id=self._group_id,
             )
 
             entities_by_type = {
