@@ -2,8 +2,10 @@
 # Sibyl Local Development with Tilt
 # Run with: tilt up
 
-# The scalable local stack uses minikube image builds by default.
-k8s_context(os.getenv('SIBYL_K8S_CONTEXT', 'minikube'))
+# The scalable local stack uses minikube by default, and also supports
+# Podman Desktop's Kind-powered Kubernetes plus OrbStack.
+k8s_context_name = os.getenv('SIBYL_K8S_CONTEXT', 'minikube')
+k8s_context(k8s_context_name)
 
 # Increase timeout for large charts and suppress known-intentional image warnings.
 update_settings(
@@ -18,24 +20,114 @@ config.define_bool("skip-infra")
 cfg = config.parse()
 
 
-def minikube_image_build_cmd(dockerfile):
+def local_k8s_image_build_cmd(dockerfile):
     return '''
         set -eu
         image_ref="docker.io/$EXPECTED_IMAGE:$EXPECTED_TAG"
-        archive="$(mktemp -t sibyl-image.XXXXXX.tar)"
+        archive=""
+        context="${SIBYL_K8S_CONTEXT:-''' + k8s_context_name + '''}"
+        loader="${SIBYL_IMAGE_LOADER:-auto}"
+        builder="${SIBYL_CONTAINER_BUILDER:-auto}"
+        kind_cluster="${SIBYL_KIND_CLUSTER:-}"
+
         cleanup() {
-            rm -f "$archive"
+            if [ -n "$archive" ]; then
+                rm -f "$archive"
+            fi
         }
         trap cleanup EXIT
 
-        if command -v podman >/dev/null 2>&1; then
-            podman build -t "$image_ref" -f ''' + dockerfile + ''' .
-            podman save "$image_ref" -o "$archive"
-            minikube image load "$archive"
-        else
-            docker build -t "$image_ref" -f ''' + dockerfile + ''' .
-            minikube image load --daemon "$image_ref"
+        if [ "$loader" = "auto" ]; then
+            case "$context" in
+                minikube)
+                    loader="minikube"
+                    ;;
+                kind|kind-*)
+                    loader="kind"
+                    ;;
+                orbstack|orb|orb-*)
+                    loader="none"
+                    ;;
+                *)
+                    echo "Set SIBYL_IMAGE_LOADER=minikube, kind, or none for Kubernetes context $context" >&2
+                    exit 1
+                    ;;
+            esac
         fi
+
+        if [ "$builder" = "auto" ]; then
+            case "$context" in
+                orbstack|orb|orb-*)
+                    builder="docker"
+                    ;;
+                *)
+                    if command -v podman >/dev/null 2>&1; then
+                        builder="podman"
+                    else
+                        builder="docker"
+                    fi
+                    ;;
+            esac
+        fi
+
+        case "$builder" in
+            podman)
+                command -v podman >/dev/null 2>&1 || {
+                    echo "podman is required for SIBYL_CONTAINER_BUILDER=podman" >&2
+                    exit 1
+                }
+                podman build -t "$image_ref" -f ''' + dockerfile + ''' .
+                ;;
+            docker)
+                command -v docker >/dev/null 2>&1 || {
+                    echo "docker is required for SIBYL_CONTAINER_BUILDER=docker" >&2
+                    exit 1
+                }
+                docker build -t "$image_ref" -f ''' + dockerfile + ''' .
+                ;;
+            *)
+                echo "Unknown SIBYL_CONTAINER_BUILDER: $builder" >&2
+                exit 1
+                ;;
+        esac
+
+        if [ "$loader" != "none" ]; then
+            archive="$(mktemp -t sibyl-image.XXXXXX.tar)"
+            case "$builder" in
+                podman)
+                    podman save "$image_ref" -o "$archive"
+                    ;;
+                docker)
+                    docker save "$image_ref" -o "$archive"
+                    ;;
+            esac
+        fi
+
+        case "$loader" in
+            minikube)
+                command -v minikube >/dev/null 2>&1 || {
+                    echo "minikube is required for SIBYL_IMAGE_LOADER=minikube" >&2
+                    exit 1
+                }
+                minikube image load "$archive"
+                ;;
+            kind)
+                command -v kind >/dev/null 2>&1 || {
+                    echo "kind is required for SIBYL_IMAGE_LOADER=kind" >&2
+                    exit 1
+                }
+                if [ -z "$kind_cluster" ]; then
+                    kind_cluster="${context#kind-}"
+                fi
+                kind load image-archive "$archive" --name "$kind_cluster"
+                ;;
+            none)
+                ;;
+            *)
+                echo "Unknown SIBYL_IMAGE_LOADER: $loader" >&2
+                exit 1
+                ;;
+        esac
     '''
 
 # =============================================================================
@@ -271,7 +363,7 @@ stringData:
 
 custom_build(
     'sibyl-backend',
-    minikube_image_build_cmd('apps/api/Dockerfile'),
+    local_k8s_image_build_cmd('apps/api/Dockerfile'),
     deps=[
         'pyproject.toml',
         'uv.lock',
@@ -308,7 +400,7 @@ k8s_resource(
 
 custom_build(
     'sibyl-frontend',
-    minikube_image_build_cmd('apps/web/Dockerfile'),
+    local_k8s_image_build_cmd('apps/web/Dockerfile'),
     deps=[
         'VERSION',
         'pnpm-lock.yaml',

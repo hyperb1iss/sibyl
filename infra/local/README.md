@@ -30,8 +30,18 @@ datastore and Valkey as the coordination plane for jobs, locks, pub/sub, and rat
 ## Quick Start
 
 ```bash
-# Start your Kubernetes environment first.
+# Start your Kubernetes environment first. Minikube still works:
 minikube start --cpus=6 --memory=12288 --driver=docker
+
+# Or use Podman Desktop's Kind integration:
+# Settings > Resources > Kind > Create new
+kubectl config get-contexts
+export SIBYL_K8S_CONTEXT=kind-sibyl # replace with your kind-<cluster> context
+
+# Or use OrbStack's Kubernetes runtime:
+orb start k8s
+export SIBYL_K8S_CONTEXT=orbstack
+
 podman --version # or docker version
 
 export SIBYL_JWT_SECRET="$(openssl rand -hex 32)"
@@ -43,6 +53,12 @@ tilt up
 ```
 
 The Tiltfile creates the local `sibyl-secrets` Secret from those environment variables.
+
+Image loading is selected from the Kubernetes context. `minikube` uses `minikube image load`;
+`kind-*` contexts use `kind load image-archive`, which matches Podman Desktop's Kind-powered
+Kubernetes flow. `orbstack` uses the shared OrbStack container engine directly, so Tilt builds with
+Docker and skips an explicit image load. Override with `SIBYL_CONTAINER_BUILDER=podman|docker` or
+`SIBYL_IMAGE_LOADER=minikube|kind|none` when using a custom local cluster or registry.
 
 ## Manual Render Checks
 
