@@ -59,29 +59,29 @@ Open the Tilt dashboard at `http://localhost:10350`.
 
 ## Components
 
-| Component | Namespace | Source |
-| --- | --- | --- |
-| Gateway API CRDs | cluster | upstream Gateway API manifest |
-| cert-manager | `cert-manager` | `jetstack/cert-manager` |
-| Kong Operator | `kong-system` | `kong/kong-operator` |
-| TiDB Operator | `tidb-admin` | `pingcap/tidb-operator` |
-| TiKV/PD | `sibyl` | `infra/local/tidb-cluster.yaml` |
-| SurrealDB | `sibyl` | `surrealdb/surrealdb` |
-| Valkey | `sibyl` | `valkey/valkey` |
-| Sibyl | `sibyl` | `charts/sibyl` |
-| Caddy | local process | `infra/local/Caddyfile` |
+| Component        | Namespace      | Source                          |
+| ---------------- | -------------- | ------------------------------- |
+| Gateway API CRDs | cluster        | upstream Gateway API manifest   |
+| cert-manager     | `cert-manager` | `jetstack/cert-manager`         |
+| Kong Operator    | `kong-system`  | `kong/kong-operator`            |
+| TiDB Operator    | `tidb-admin`   | `pingcap/tidb-operator`         |
+| TiKV/PD          | `sibyl`        | `infra/local/tidb-cluster.yaml` |
+| SurrealDB        | `sibyl`        | `surrealdb/surrealdb`           |
+| Valkey           | `sibyl`        | `valkey/valkey`                 |
+| Sibyl            | `sibyl`        | `charts/sibyl`                  |
+| Caddy            | local process  | `infra/local/Caddyfile`         |
 
 ## Replica Shape
 
-| Layer | Local demo shape |
-| --- | --- |
-| PD | 3 pods |
-| TiKV | 3 pods |
-| SurrealDB | 2 pods |
-| Valkey | 1 primary + 2 replicas |
-| Sibyl backend | 2 pods |
-| Sibyl worker | 2 pods |
-| Sibyl frontend | 2 pods |
+| Layer          | Local demo shape       |
+| -------------- | ---------------------- |
+| PD             | 3 pods                 |
+| TiKV           | 3 pods                 |
+| SurrealDB      | 2 pods                 |
+| Valkey         | 1 primary + 2 replicas |
+| Sibyl backend  | 2 pods                 |
+| Sibyl worker   | 2 pods                 |
+| Sibyl frontend | 2 pods                 |
 
 ## Values Files
 
@@ -95,12 +95,12 @@ Open the Tilt dashboard at `http://localhost:10350`.
 
 With Caddy and Kong running:
 
-| URL | Service |
-| --- | --- |
-| `https://sibyl.local` | Frontend UI |
-| `https://sibyl.local/api/docs` | API docs |
-| `https://sibyl.local/api/*` | REST API |
-| `https://sibyl.local/mcp` | MCP |
+| URL                            | Service     |
+| ------------------------------ | ----------- |
+| `https://sibyl.local`          | Frontend UI |
+| `https://sibyl.local/api/docs` | API docs    |
+| `https://sibyl.local/api/*`    | REST API    |
+| `https://sibyl.local/mcp`      | MCP         |
 
 Direct port-forwarding:
 

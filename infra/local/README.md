@@ -7,16 +7,16 @@ datastore and Valkey as the coordination plane for jobs, locks, pub/sub, and rat
 
 ## Components
 
-| Component | Chart or manifest | Purpose |
-| --- | --- | --- |
-| Gateway API | upstream CRDs | Gateway resources for Kong |
-| cert-manager | `jetstack/cert-manager` | Local TLS certificate plumbing |
-| Kong Operator | `kong/kong-operator` | Gateway API implementation |
-| TiDB Operator | `pingcap/tidb-operator` | Manages the TiKV cluster |
-| TiKV/PD | `infra/local/tidb-cluster.yaml` | Distributed datastore for SurrealDB |
-| SurrealDB | `surrealdb/surrealdb` | Graph, content, and auth store |
-| Valkey | `valkey/valkey` | Distributed coordination for Sibyl replicas |
-| Sibyl | `../../charts/sibyl` | Backend, worker, and frontend deployments |
+| Component     | Chart or manifest               | Purpose                                     |
+| ------------- | ------------------------------- | ------------------------------------------- |
+| Gateway API   | upstream CRDs                   | Gateway resources for Kong                  |
+| cert-manager  | `jetstack/cert-manager`         | Local TLS certificate plumbing              |
+| Kong Operator | `kong/kong-operator`            | Gateway API implementation                  |
+| TiDB Operator | `pingcap/tidb-operator`         | Manages the TiKV cluster                    |
+| TiKV/PD       | `infra/local/tidb-cluster.yaml` | Distributed datastore for SurrealDB         |
+| SurrealDB     | `surrealdb/surrealdb`           | Graph, content, and auth store              |
+| Valkey        | `valkey/valkey`                 | Distributed coordination for Sibyl replicas |
+| Sibyl         | `../../charts/sibyl`            | Backend, worker, and frontend deployments   |
 
 ## Shape
 

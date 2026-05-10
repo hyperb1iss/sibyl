@@ -24,38 +24,39 @@ jobs:
     env:
       SIBYL_ENVIRONMENT: production
       SIBYL_JWT_SECRET: test-secret-for-nightly
-      SIBYL_FALKORDB_HOST: localhost
-      SIBYL_FALKORDB_PORT: 6380
-      SIBYL_FALKORDB_PASSWORD: ""
-      SIBYL_POSTGRES_HOST: localhost
-      SIBYL_POSTGRES_PORT: 5433
-      SIBYL_POSTGRES_USER: sibyl_ci
-      SIBYL_POSTGRES_PASSWORD: sibyl_ci_password
-      SIBYL_POSTGRES_DB: sibyl_ci
+      SIBYL_STORE: surreal
+      SIBYL_AUTH_STORE: surreal
+      SIBYL_COORDINATION_BACKEND: local
+      SIBYL_SURREAL_URL: ws://localhost:8000/rpc
+      SIBYL_SURREAL_USERNAME: root
+      SIBYL_SURREAL_PASSWORD: root
       SIBYL_OPENAI_API_KEY: sk-test-key
       SIBYL_ANTHROPIC_API_KEY: sk-ant-test-key
       SIBYL_MOCK_LLM: true
-    services:
-      falkordb:
-        image: falkordb/falkordb:latest
-        ports:
-          - 6380:6379
-        options: >-
-          --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
-      postgres:
-        image: pgvector/pgvector:pg18
-        ports:
-          - 5433:5432
-        env:
-          POSTGRES_USER: sibyl_ci
-          POSTGRES_PASSWORD: sibyl_ci_password
-          POSTGRES_DB: sibyl_ci
-        options: >-
-          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Start SurrealDB
+        run: |
+          docker run --rm --detach \
+            --name sibyl-surrealdb \
+            --publish 8000:8000 \
+            surrealdb/surrealdb:latest \
+            start --log info --user root --pass root rocksdb:///data/sibyl.db
+
+          for i in {1..30}; do
+            if docker exec sibyl-surrealdb /surreal is-ready --conn http://localhost:8000; then
+              echo "SurrealDB is ready!"
+              exit 0
+            fi
+            echo "Attempt $i: SurrealDB not ready yet..."
+            sleep 1
+          done
+
+          docker logs sibyl-surrealdb || true
+          exit 1
 
       - name: Install system dependencies
         run: |
@@ -66,12 +67,15 @@ jobs:
         uses: moonrepo/setup-toolchain@v0.6
         with:
           auto-install: true
+          auto-setup: true
+          cache-version: surreal-ci-v1
 
-      - name: Warm up proto toolchain
+      - name: Verify toolchain
         run: |
-          proto use --log debug
           chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
           chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          moon --version
+          proto --version
           uv --version
 
       - name: Cache moon outputs
@@ -89,9 +93,6 @@ jobs:
           key: uv-nightly-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
           restore-keys: |
             uv-nightly-${{ runner.os }}-
-
-      - name: Run database migrations
-        run: moon run api:db-migrate
 
       - name: Start backend server
         run: |
@@ -125,18 +126,17 @@ jobs:
       - name: Collect diagnostics on failure
         if: failure()
         run: |
-          container_id="$(docker ps -q --filter ancestor=falkordb/falkordb:latest | head -n 1)"
           echo "=== Backend server logs ==="
           tail -n 200 /tmp/sibyld.log || true
           echo ""
           echo "=== Worker logs ==="
           tail -n 200 /tmp/sibyl-worker.log || true
           echo ""
-          echo "=== FalkorDB graph contents ==="
-          if [[ -n "$container_id" ]]; then
-            docker exec "$container_id" redis-cli GRAPH.QUERY default "MATCH (n) RETURN labels(n), count(*) LIMIT 10" || echo "Could not query FalkorDB"
+          echo "=== SurrealDB logs ==="
+          if docker ps --all --format '{{.Names}}' | grep -qx 'sibyl-surrealdb'; then
+            docker logs sibyl-surrealdb || true
           else
-            echo "Could not find FalkorDB container"
+            echo "Could not find SurrealDB container"
           fi
 
   live-graph:
@@ -146,40 +146,41 @@ jobs:
     env:
       SIBYL_ENVIRONMENT: production
       SIBYL_JWT_SECRET: test-secret-for-nightly
-      SIBYL_FALKORDB_HOST: localhost
-      SIBYL_FALKORDB_PORT: 6380
-      SIBYL_FALKORDB_PASSWORD: ""
-      SIBYL_POSTGRES_HOST: localhost
-      SIBYL_POSTGRES_PORT: 5433
-      SIBYL_POSTGRES_USER: sibyl_ci
-      SIBYL_POSTGRES_PASSWORD: sibyl_ci_password
-      SIBYL_POSTGRES_DB: sibyl_ci
+      SIBYL_STORE: surreal
+      SIBYL_AUTH_STORE: surreal
+      SIBYL_COORDINATION_BACKEND: local
+      SIBYL_SURREAL_URL: ws://localhost:8000/rpc
+      SIBYL_SURREAL_USERNAME: root
+      SIBYL_SURREAL_PASSWORD: root
       SIBYL_OPENAI_API_KEY: ${{ secrets.SIBYL_OPENAI_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.SIBYL_OPENAI_API_KEY }}
       SIBYL_ANTHROPIC_API_KEY: ${{ secrets.SIBYL_ANTHROPIC_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.SIBYL_ANTHROPIC_API_KEY }}
       SIBYL_MOCK_LLM: false
-    services:
-      falkordb:
-        image: falkordb/falkordb:latest
-        ports:
-          - 6380:6379
-        options: >-
-          --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
-      postgres:
-        image: pgvector/pgvector:pg18
-        ports:
-          - 5433:5432
-        env:
-          POSTGRES_USER: sibyl_ci
-          POSTGRES_PASSWORD: sibyl_ci_password
-          POSTGRES_DB: sibyl_ci
-        options: >-
-          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Start SurrealDB
+        run: |
+          docker run --rm --detach \
+            --name sibyl-surrealdb \
+            --publish 8000:8000 \
+            surrealdb/surrealdb:latest \
+            start --log info --user root --pass root rocksdb:///data/sibyl.db
+
+          for i in {1..30}; do
+            if docker exec sibyl-surrealdb /surreal is-ready --conn http://localhost:8000; then
+              echo "SurrealDB is ready!"
+              exit 0
+            fi
+            echo "Attempt $i: SurrealDB not ready yet..."
+            sleep 1
+          done
+
+          docker logs sibyl-surrealdb || true
+          exit 1
 
       - name: Install system dependencies
         run: |
@@ -190,12 +191,15 @@ jobs:
         uses: moonrepo/setup-toolchain@v0.6
         with:
           auto-install: true
+          auto-setup: true
+          cache-version: surreal-ci-v1
 
-      - name: Warm up proto toolchain
+      - name: Verify toolchain
         run: |
-          proto use --log debug
           chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
           chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          moon --version
+          proto --version
           uv --version
 
       - name: Cache moon outputs
@@ -213,9 +217,6 @@ jobs:
           key: uv-live-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
           restore-keys: |
             uv-live-${{ runner.os }}-
-
-      - name: Run database migrations
-        run: moon run api:db-migrate
 
       - name: Run live graph regression suite
         run: moon run api:test-live
