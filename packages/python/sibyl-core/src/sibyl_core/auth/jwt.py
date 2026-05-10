@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import secrets
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 import jwt
-from sibyl import config as config_module
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -22,8 +22,17 @@ class JwtError(ValueError):
     """JWT validation or creation error."""
 
 
+def _settings() -> Any:
+    try:
+        return import_module("sibyl.config").settings
+    except ModuleNotFoundError:
+        from sibyl_core.config import settings
+
+        return settings
+
+
 def _require_secret() -> str:
-    secret = config_module.settings.jwt_secret.get_secret_value()
+    secret = _settings().jwt_secret.get_secret_value()
     if not secret:
         raise JwtError("JWT secret is not configured (set SIBYL_JWT_SECRET)")
     return secret
@@ -46,9 +55,10 @@ def create_access_token(
     - typ: "access"
     - iat/exp: unix timestamps
     """
+    settings = _settings()
     secret = _require_secret()
     now = datetime.now(UTC)
-    ttl = expires_in or timedelta(minutes=config_module.settings.access_token_expire_minutes)
+    ttl = expires_in or timedelta(minutes=settings.access_token_expire_minutes)
 
     payload: dict[str, Any] = {
         "sub": str(user_id),
@@ -64,19 +74,20 @@ def create_access_token(
         payload.update(extra_claims)
 
     try:
-        return jwt.encode(payload, secret, algorithm=config_module.settings.jwt_algorithm)
+        return jwt.encode(payload, secret, algorithm=settings.jwt_algorithm)
     except Exception as e:
         raise JwtError(f"Failed to sign JWT: {e}") from e
 
 
 def verify_access_token(token: str) -> dict[str, Any]:
     """Verify token signature + expiry and return claims."""
+    settings = _settings()
     secret = _require_secret()
     try:
         claims = jwt.decode(
             token,
             secret,
-            algorithms=[config_module.settings.jwt_algorithm],
+            algorithms=[settings.jwt_algorithm],
             options={"require": ["sub", "iat", "exp"]},
         )
     except jwt.PyJWTError as e:
@@ -108,9 +119,10 @@ def create_refresh_token(
     - jti: unique token ID (for revocation)
     - iat/exp: unix timestamps
     """
+    settings = _settings()
     secret = _require_secret()
     now = datetime.now(UTC)
-    ttl = expires_in or timedelta(days=config_module.settings.refresh_token_expire_days)
+    ttl = expires_in or timedelta(days=settings.refresh_token_expire_days)
     expires_at = now + ttl
 
     payload: dict[str, Any] = {
@@ -126,7 +138,7 @@ def create_refresh_token(
         payload["sid"] = str(session_id)
 
     try:
-        token = jwt.encode(payload, secret, algorithm=config_module.settings.jwt_algorithm)
+        token = jwt.encode(payload, secret, algorithm=settings.jwt_algorithm)
         return token, expires_at
     except Exception as e:
         raise JwtError(f"Failed to sign refresh token: {e}") from e
@@ -139,12 +151,13 @@ def verify_refresh_token(token: str, *, verify_expiry: bool = True) -> dict[str,
         token: The refresh token to verify
         verify_expiry: If False, allow expired tokens (for grace period refresh)
     """
+    settings = _settings()
     secret = _require_secret()
     try:
         claims = jwt.decode(
             token,
             secret,
-            algorithms=[config_module.settings.jwt_algorithm],
+            algorithms=[settings.jwt_algorithm],
             options={
                 "require": ["sub", "iat", "exp", "jti"],
                 "verify_exp": verify_expiry,

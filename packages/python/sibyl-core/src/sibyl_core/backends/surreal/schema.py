@@ -191,7 +191,9 @@ GRAPH_EDGES = ("relates_to", "mentions", "has_episode", "next_episode", "has_mem
 
 
 def render_fulltext_compatible_sql(sql: str, *, url: str) -> str:
-    return sql.replace("FULLTEXT ANALYZER", "SEARCH ANALYZER")
+    if url.startswith(("memory://", "surrealkv://")):
+        return sql.replace("FULLTEXT ANALYZER", "SEARCH ANALYZER")
+    return sql
 
 
 async def bootstrap_schema(driver: SurrealDriver, *, reset: bool = False) -> None:

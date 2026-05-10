@@ -60,13 +60,20 @@ def test_runtime_schemafull_tables_are_altered_after_define() -> None:
         ) in schema
 
 
-def test_fulltext_indexes_render_with_surreal_2_search_syntax() -> None:
+def test_fulltext_indexes_render_with_embedded_search_syntax() -> None:
+    rendered = render_fulltext_compatible_sql(CONTENT_SCHEMA_DEFINITIONS, url="memory://")
+
+    assert "SEARCH ANALYZER" in rendered
+    assert "FULLTEXT ANALYZER" not in rendered
+
+
+def test_fulltext_indexes_keep_remote_server_syntax() -> None:
     rendered = render_fulltext_compatible_sql(
         CONTENT_SCHEMA_DEFINITIONS, url="ws://surrealdb:8000/rpc"
     )
 
-    assert "SEARCH ANALYZER" in rendered
-    assert "FULLTEXT ANALYZER" not in rendered
+    assert "FULLTEXT ANALYZER" in rendered
+    assert "SEARCH ANALYZER" not in rendered
 
 
 @pytest.mark.asyncio

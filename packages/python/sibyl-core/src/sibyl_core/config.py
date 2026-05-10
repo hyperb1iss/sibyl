@@ -106,6 +106,35 @@ class CoreConfig(BaseSettings):
         description="OpenAI API key for embeddings",
     )
 
+    # Auth primitives used by sibyl-core when the server package is absent.
+    jwt_secret: SecretStr = Field(
+        default=SecretStr(""),
+        description="JWT signing secret",
+    )
+    jwt_algorithm: str = Field(default="HS256", description="JWT signing algorithm")
+    access_token_expire_minutes: int = Field(
+        default=60,
+        ge=5,
+        le=1440,
+        description="Access token TTL in minutes",
+    )
+    refresh_token_expire_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+        description="Refresh token TTL in days",
+    )
+    password_pepper: SecretStr = Field(
+        default=SecretStr(""),
+        description="Optional password pepper",
+    )
+    password_iterations: int = Field(
+        default=310_000,
+        ge=100_000,
+        le=2_000_000,
+        description="PBKDF2-HMAC-SHA256 iterations for local passwords",
+    )
+
     @model_validator(mode="after")
     def check_api_key_fallbacks(self) -> "CoreConfig":
         """Fall back to non-prefixed env vars for API keys."""
@@ -118,6 +147,11 @@ class CoreConfig(BaseSettings):
             fallback = os.environ.get("OPENAI_API_KEY", "")
             if fallback:
                 object.__setattr__(self, "openai_api_key", SecretStr(fallback))
+
+        if not self.jwt_secret.get_secret_value():
+            fallback = os.environ.get("JWT_SECRET", "")
+            if fallback:
+                object.__setattr__(self, "jwt_secret", SecretStr(fallback))
 
         if self.surreal_url and self.surreal_data_dir:
             raise ValueError("Configure only one of surreal_url or surreal_data_dir")

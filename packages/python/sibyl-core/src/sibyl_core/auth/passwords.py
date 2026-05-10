@@ -6,8 +6,8 @@ import hmac
 import secrets
 from dataclasses import dataclass
 from hashlib import pbkdf2_hmac
-
-from sibyl import config as config_module
+from importlib import import_module
+from typing import Any
 
 
 class PasswordError(ValueError):
@@ -21,8 +21,17 @@ class PasswordHash:
     iterations: int
 
 
+def _settings() -> Any:
+    try:
+        return import_module("sibyl.config").settings
+    except ModuleNotFoundError:
+        from sibyl_core.config import settings
+
+        return settings
+
+
 def _peppered(password: str) -> bytes:
-    pepper = config_module.settings.password_pepper.get_secret_value()
+    pepper = _settings().password_pepper.get_secret_value()
     return (password + pepper).encode("utf-8")
 
 
@@ -35,7 +44,7 @@ def hash_password(
     if not password:
         raise PasswordError("Password is empty")
     salt_bytes = salt or secrets.token_bytes(16)
-    iters = iterations or int(config_module.settings.password_iterations)
+    iters = iterations or int(_settings().password_iterations)
     dk = pbkdf2_hmac("sha256", _peppered(password), salt_bytes, iters, dklen=32)
     return PasswordHash(salt_hex=salt_bytes.hex(), hash_hex=dk.hex(), iterations=iters)
 
