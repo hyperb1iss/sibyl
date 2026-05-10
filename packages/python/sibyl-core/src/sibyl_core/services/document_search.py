@@ -26,6 +26,12 @@ DOCUMENT_LEXICAL_WEIGHT = 0.3
 DOCUMENT_EMBEDDING_TIMEOUT_SECONDS = 2.0
 
 
+async def _embed_text(text: str) -> list[float]:
+    from sibyl.crawler.embedder import embed_text
+
+    return await embed_text(text)
+
+
 class DocumentSearchChunk(Protocol):
     @property
     def id(self) -> UUID | str: ...
@@ -83,9 +89,7 @@ class DocumentSearchSource(Protocol):
     def name(self) -> str: ...
 
 
-type DocumentSearchRow = tuple[
-    DocumentSearchChunk, DocumentSearchDocument, str, UUID | str, float
-]
+type DocumentSearchRow = tuple[DocumentSearchChunk, DocumentSearchDocument, str, UUID | str, float]
 
 
 def _document_result_key(result: SearchResult) -> str:
@@ -238,9 +242,7 @@ def _search_documents_from_scope(
             chunk
             for chunk in chunks
             if str(
-                chunk.chunk_type.value
-                if hasattr(chunk.chunk_type, "value")
-                else chunk.chunk_type
+                chunk.chunk_type.value if hasattr(chunk.chunk_type, "value") else chunk.chunk_type
             ).lower()
             == "code"
             and (chunk.language or "").lower() == language_filter
@@ -355,9 +357,7 @@ async def _search_documents_runtime_scan(
         if source_name:
             normalized_source_name = source_name.lower()
             sources = [
-                source
-                for source in sources
-                if normalized_source_name in source.name.lower()
+                source for source in sources if normalized_source_name in source.name.lower()
             ]
 
         documents_by_id: dict[str, DocumentSearchDocument] = {}
@@ -394,12 +394,10 @@ async def search_documents(
 ) -> list[SearchResult]:
     """Search crawled documentation using vector and lexical matching."""
 
-    from sibyl.crawler.embedder import embed_text
-
     query_embedding: list[float] | None = None
     try:
         query_embedding = await with_timeout(
-            embed_text(query),
+            _embed_text(query),
             timeout_seconds=DOCUMENT_EMBEDDING_TIMEOUT_SECONDS,
             operation_name="document_embedding",
         )

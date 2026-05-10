@@ -35,6 +35,18 @@ def _organization_uuid(organization_id: UUID | str) -> UUID:
     return UUID(str(organization_id))
 
 
+async def _get_legacy_link_graph_status_payload(
+    session: object,
+    organization_id: UUID,
+) -> LinkGraphStatusData:
+    from sibyl.persistence.content_runtime import get_link_graph_status_payload
+
+    return await get_link_graph_status_payload(
+        session,
+        organization_id=organization_id,
+    )
+
+
 async def get_link_graph_status_data(
     session: object,
     organization_id: UUID | str,
@@ -75,9 +87,7 @@ async def get_link_graph_status_data(
             ],
         )
 
-    from sibyl.persistence.content_runtime import get_link_graph_status_payload
-
-    return await get_link_graph_status_payload(
+    return await _get_legacy_link_graph_status_payload(
         session,
         organization_id=_organization_uuid(organization_id),
     )

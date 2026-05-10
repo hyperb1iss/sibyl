@@ -1157,7 +1157,7 @@ class TestSourceActions:
 
         helper = AsyncMock(return_value=status)
         with (
-            patch("sibyl.persistence.content_runtime.get_content_read_session", mock_session),
+            patch("sibyl_core.tools.manage._get_content_read_session", mock_session),
             patch("sibyl_core.tools.manage.get_link_graph_status_data", helper),
         ):
             response = await manage(
@@ -1209,7 +1209,7 @@ class TestSourceActions:
             yield None
 
         with (
-            patch("sibyl.persistence.content_runtime.get_content_read_session", mock_session),
+            patch("sibyl_core.tools.manage._get_content_read_session", mock_session),
             patch("sibyl_core.tools.manage.get_link_graph_status_data", helper),
         ):
             response = await manage(

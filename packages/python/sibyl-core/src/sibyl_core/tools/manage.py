@@ -81,6 +81,12 @@ async def get_graph_runtime(group_id: str) -> ActiveGraphRuntime:
     )
 
 
+def _get_content_read_session() -> Any:
+    from sibyl.persistence.content_runtime import get_content_read_session
+
+    return get_content_read_session()
+
+
 # =============================================================================
 # Response Models
 # =============================================================================
@@ -971,9 +977,7 @@ async def _link_graph(
 
 async def _link_graph_status(organization_id: str) -> ManageResponse:
     """Get status of graph linking (pending chunks per source)."""
-    from sibyl.persistence.content_runtime import get_content_read_session
-
-    async with get_content_read_session() as session:
+    async with _get_content_read_session() as session:
         status = await get_link_graph_status_data(session, organization_id)
 
     return ManageResponse(

@@ -46,7 +46,10 @@ class TestGetLinkGraphStatusData:
         )
 
         helper = AsyncMock(return_value=expected)
-        with patch("sibyl.persistence.content_runtime.get_link_graph_status_payload", helper):
+        with patch(
+            "sibyl_core.services.link_graph_status._get_legacy_link_graph_status_payload",
+            helper,
+        ):
             status = await get_link_graph_status_data(session, org_id)
 
         assert status == expected

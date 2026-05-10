@@ -1129,6 +1129,35 @@ class TestEntityListByType:
         assert "project_id = $project_id" not in second_query
 
     @pytest.mark.asyncio
+    async def test_list_by_type_episode_reads_surreal_episode_table(
+        self,
+        surreal_entity_manager: EntityManager,
+    ) -> None:
+        created_at = datetime.now(UTC)
+        surreal_entity_manager._driver.execute_query = AsyncMock(
+            return_value=[
+                {
+                    "uuid": "episode-001",
+                    "name": "Baseline Corpus Episode",
+                    "group_id": "test-org-123",
+                    "content": "Runtime baseline seed.",
+                    "source_description": "Baseline",
+                    "created_at": created_at,
+                }
+            ]
+        )
+
+        results = await surreal_entity_manager.list_by_type(EntityType.EPISODE)
+
+        assert len(results) == 1
+        assert results[0].id == "episode-001"
+        assert results[0].name == "Baseline Corpus Episode"
+        assert results[0].entity_type == EntityType.EPISODE
+        query = surreal_entity_manager._driver.execute_query.await_args.args[0]
+        assert "FROM episode" in query
+        assert "FROM entity" not in query
+
+    @pytest.mark.asyncio
     async def test_list_by_type_refuses_surreal_legacy_fallback(
         self,
         surreal_entity_manager: EntityManager,

@@ -68,7 +68,10 @@ class TestDocumentSearch:
                 "sibyl_core.services.document_search.load_search_scope",
                 scope_loader,
             ),
-            patch("sibyl.crawler.embedder.embed_text", AsyncMock(return_value=[1.0, 0.0])),
+            patch(
+                "sibyl_core.services.document_search._embed_text",
+                AsyncMock(return_value=[1.0, 0.0]),
+            ),
         ):
             results = await search_documents("alpha", organization_id="org-1", limit=5)
 
@@ -135,7 +138,10 @@ class TestDocumentSearch:
                 "sibyl_core.services.document_search.load_search_scope",
                 scope_loader,
             ),
-            patch("sibyl.crawler.embedder.embed_text", AsyncMock(return_value=[1.0, 0.0])),
+            patch(
+                "sibyl_core.services.document_search._embed_text",
+                AsyncMock(return_value=[1.0, 0.0]),
+            ),
         ):
             results = await search_documents("alpha", organization_id="org-1", limit=5)
 
@@ -193,7 +199,7 @@ class TestDocumentSearch:
                 "sibyl_core.services.document_search.search_document_chunks",
                 direct_search,
             ),
-            patch("sibyl.crawler.embedder.embed_text", slow_embed_text),
+            patch("sibyl_core.services.document_search._embed_text", slow_embed_text),
         ):
             results = await search_documents("alpha", organization_id="org-1", limit=5)
 
@@ -260,7 +266,10 @@ class TestDocumentSearch:
                     )
                 ),
             ),
-            patch("sibyl.crawler.embedder.embed_text", AsyncMock(return_value=[1.0, 0.0])),
+            patch(
+                "sibyl_core.services.document_search._embed_text",
+                AsyncMock(return_value=[1.0, 0.0]),
+            ),
         ):
             results = await search_documents("rareterm", organization_id="org-1", limit=5)
 
