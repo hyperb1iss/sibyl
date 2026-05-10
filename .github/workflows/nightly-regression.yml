@@ -40,14 +40,14 @@ jobs:
 
       - name: Start SurrealDB
         run: |
-          docker run --rm --detach \
+          docker run --detach \
             --name sibyl-surrealdb \
             --publish 8000:8000 \
             surrealdb/surrealdb:latest \
-            start --log info --user root --pass root rocksdb:///data/sibyl.db
+            start --no-banner --log info --user root --pass root memory
 
           for i in {1..30}; do
-            if docker exec sibyl-surrealdb /surreal is-ready --conn http://localhost:8000; then
+            if docker exec sibyl-surrealdb /surreal is-ready --endpoint http://localhost:8000; then
               echo "SurrealDB is ready!"
               exit 0
             fi
@@ -164,14 +164,14 @@ jobs:
 
       - name: Start SurrealDB
         run: |
-          docker run --rm --detach \
+          docker run --detach \
             --name sibyl-surrealdb \
             --publish 8000:8000 \
             surrealdb/surrealdb:latest \
-            start --log info --user root --pass root rocksdb:///data/sibyl.db
+            start --no-banner --log info --user root --pass root memory
 
           for i in {1..30}; do
-            if docker exec sibyl-surrealdb /surreal is-ready --conn http://localhost:8000; then
+            if docker exec sibyl-surrealdb /surreal is-ready --endpoint http://localhost:8000; then
               echo "SurrealDB is ready!"
               exit 0
             fi
