@@ -1,18 +1,5 @@
-"""Optimized search interface for FalkorDB.
+"""Search interface for the SurrealDB-backed Graphiti runtime."""
 
-Graphiti's default edge_fulltext_search does:
-  CALL db.idx.fulltext.queryRelationships(...)
-  YIELD relationship AS rel, score
-  MATCH (n:Entity)-[e:RELATES_TO {uuid: rel.uuid}]->(m:Entity)
-
-This causes a cartesian product (label scan * edge scan) that's O(n^2).
-With 2,600 entities and 2,500 edges, queries take 800ms+ and timeout.
-
-Our optimized version uses startNode(rel)/endNode(rel) directly on the
-fulltext result, avoiding the expensive MATCH and running in ~0.3ms.
-"""
-
-from copy import copy
 from typing import Any
 
 import structlog
@@ -233,7 +220,9 @@ class SurrealSearchInterface(SearchInterface):
         records = normalize_records(
             await driver.execute_query(
                 "SELECT * FROM entity WHERE "
-                + _where_clause(["uuid IN $uuids", _group_filter_clause(group_ids), *filter_clauses])
+                + _where_clause(
+                    ["uuid IN $uuids", _group_filter_clause(group_ids), *filter_clauses]
+                )
                 + " LIMIT $limit;",
                 uuids=uuids,
                 group_ids=group_ids,
@@ -606,9 +595,7 @@ class SurrealSearchInterface(SearchInterface):
             await driver.execute_query(
                 "SELECT * FROM ("
                 "SELECT *, (1 - vector::distance::knn()) AS score FROM community "
-                "WHERE "
-                + _group_filter_clause(group_ids)
-                + " AND name_embedding IS NOT NONE "
+                "WHERE " + _group_filter_clause(group_ids) + " AND name_embedding IS NOT NONE "
                 f"AND name_embedding <|{candidate_limit}, 40|> $search_vector"
                 ") WHERE score > $min_score "
                 "ORDER BY score DESC, created_at DESC, uuid DESC LIMIT $limit;",
@@ -716,219 +703,3 @@ class SurrealSearchInterface(SearchInterface):
         return [uuid for uuid in sorted_uuids if scores[uuid] >= min_score], [
             scores[uuid] for uuid in sorted_uuids if scores[uuid] >= min_score
         ]
-
-
-class FalkorDBSearchInterface(SearchInterface):
-    """Optimized search interface for FalkorDB.
-
-    Overrides Graphiti's default search methods with more efficient queries
-    that avoid cartesian products when looking up edges by UUID.
-    """
-
-    @staticmethod
-    def _fallback_driver(driver: Any) -> Any:
-        """Return a driver clone without the custom search interface.
-
-        Graphiti's fallback helpers expect the default search interface.
-        Copying the driver avoids mutating the shared singleton driver across awaits.
-        """
-        fallback_driver = copy(driver)
-        fallback_driver.search_interface = None
-        return fallback_driver
-
-    async def edge_fulltext_search(
-        self,
-        driver: Any,
-        query: str,
-        search_filter: Any,
-        group_ids: list[str] | None = None,
-        limit: int = 100,
-    ) -> list[Any]:
-        """Optimized edge fulltext search using startNode/endNode.
-
-        Instead of:
-            MATCH (n:Entity)-[e:RELATES_TO {uuid: rel.uuid}]->(m:Entity)
-        We use:
-            startNode(rel).uuid, endNode(rel).uuid
-
-        This avoids the cartesian join that causes O(n²) performance.
-        """
-        from graphiti_core.edges import EntityEdge
-        from graphiti_core.helpers import parse_db_date
-        from graphiti_core.search.search_utils import fulltext_query
-
-        fuzzy_query = fulltext_query(query, group_ids, driver)
-        if fuzzy_query == "":
-            return []
-
-        # Build filter params
-        filter_params: dict[str, Any] = {}
-        if group_ids is not None:
-            filter_params["group_ids"] = group_ids
-
-        # Optimized query: use startNode/endNode directly instead of MATCH
-        # This is the key performance fix - no cartesian product
-        cypher_query = """
-        CALL db.idx.fulltext.queryRelationships('RELATES_TO', $query)
-        YIELD relationship AS rel, score
-        WITH rel, score
-        WHERE rel.group_id IN $group_ids
-        RETURN
-            rel.uuid AS uuid,
-            startNode(rel).uuid AS source_node_uuid,
-            endNode(rel).uuid AS target_node_uuid,
-            rel.group_id AS group_id,
-            rel.created_at AS created_at,
-            rel.name AS name,
-            rel.fact AS fact,
-            rel.episodes AS episodes,
-            rel.expired_at AS expired_at,
-            rel.valid_at AS valid_at,
-            rel.invalid_at AS invalid_at,
-            properties(rel) AS attributes
-        ORDER BY score DESC
-        LIMIT $limit
-        """
-
-        records, _, _ = await driver.execute_query(
-            cypher_query,
-            query=fuzzy_query,
-            limit=limit,
-            routing_="r",
-            **filter_params,
-        )
-
-        # Convert records to EntityEdge objects
-        edges = []
-        for record in records:
-            attributes = dict(record.get("attributes", {}))
-            # Remove standard fields from attributes
-            for key in [
-                "uuid",
-                "source_node_uuid",
-                "target_node_uuid",
-                "fact",
-                "fact_embedding",
-                "name",
-                "group_id",
-                "episodes",
-                "created_at",
-                "expired_at",
-                "valid_at",
-                "invalid_at",
-            ]:
-                attributes.pop(key, None)
-
-            # Handle episodes field - can be None, List, or comma-separated String
-            raw_episodes = record.get("episodes")
-            if raw_episodes is None:
-                episodes = []
-            elif isinstance(raw_episodes, list):
-                episodes = raw_episodes
-            elif isinstance(raw_episodes, str):
-                episodes = raw_episodes.split(",") if raw_episodes else []
-            else:
-                episodes = []
-
-            edge = EntityEdge(
-                uuid=record["uuid"],
-                source_node_uuid=record["source_node_uuid"],
-                target_node_uuid=record["target_node_uuid"],
-                fact=record["fact"],
-                fact_embedding=record.get("fact_embedding"),
-                name=record["name"],
-                group_id=record["group_id"],
-                episodes=episodes,
-                created_at=parse_db_date(record["created_at"]),  # type: ignore[arg-type]
-                expired_at=parse_db_date(record["expired_at"]),
-                valid_at=parse_db_date(record["valid_at"]),
-                invalid_at=parse_db_date(record["invalid_at"]),
-                attributes=attributes,
-            )
-            edges.append(edge)
-
-        return edges
-
-    async def edge_similarity_search(
-        self,
-        driver: Any,
-        search_vector: list[float],
-        source_node_uuid: str | None,
-        target_node_uuid: str | None,
-        search_filter: Any,
-        group_ids: list[str] | None = None,
-        limit: int = 100,
-        min_score: float = 0.7,
-    ) -> list[Any]:
-        """Delegate to default Graphiti implementation."""
-        from graphiti_core.search import search_utils
-
-        return await search_utils.edge_similarity_search(
-            self._fallback_driver(driver),
-            search_vector,
-            source_node_uuid,
-            target_node_uuid,
-            search_filter,
-            group_ids,
-            limit,
-            min_score,
-        )
-
-    async def node_fulltext_search(
-        self,
-        driver: Any,
-        query: str,
-        search_filter: Any,
-        group_ids: list[str] | None = None,
-        limit: int = 100,
-    ) -> list[Any]:
-        """Delegate to default Graphiti implementation."""
-        from graphiti_core.search import search_utils
-
-        return await search_utils.node_fulltext_search(
-            self._fallback_driver(driver), query, search_filter, group_ids, limit
-        )
-
-    async def node_similarity_search(
-        self,
-        driver: Any,
-        search_vector: list[float],
-        search_filter: Any,
-        group_ids: list[str] | None = None,
-        limit: int = 100,
-        min_score: float = 0.7,
-    ) -> list[Any]:
-        """Delegate to default Graphiti implementation."""
-        from graphiti_core.search import search_utils
-
-        return await search_utils.node_similarity_search(
-            self._fallback_driver(driver),
-            search_vector,
-            search_filter,
-            group_ids,
-            limit,
-            min_score,
-        )
-
-    async def episode_fulltext_search(
-        self,
-        driver: Any,
-        query: str,
-        search_filter: Any,
-        group_ids: list[str] | None = None,
-        limit: int = 100,
-    ) -> list[Any]:
-        """Delegate to default Graphiti implementation."""
-        from graphiti_core.search import search_utils
-
-        return await search_utils.episode_fulltext_search(
-            self._fallback_driver(driver), query, search_filter, group_ids, limit
-        )
-
-    def build_node_search_filters(self, search_filters: Any) -> Any:
-        """Not used - Graphiti handles filter building internally."""
-        return search_filters
-
-    def build_edge_search_filters(self, search_filters: Any) -> Any:
-        """Not used - Graphiti handles filter building internally."""
-        return search_filters

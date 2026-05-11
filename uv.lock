@@ -750,19 +750,6 @@ wheels = [
 ]
 
 [[package]]
-name = "falkordb"
-version = "1.2.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "python-dateutil" },
-    { name = "redis" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/3b/2d846e877aec104841c523e99e1c584d4aa2423a0e31afee5b8369e3c8c5/falkordb-1.2.0.tar.gz", hash = "sha256:ce57365b86722d538e75aa5d438de67ecd8eb9478da612506d9812cd7f182d0b", size = 28976, upload-time = "2025-06-30T18:03:37.829Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/39/81/1265e623c989bb8c12fe566645bad390d04e66fa62b84ca656e5bafce1f0/falkordb-1.2.0-py3-none-any.whl", hash = "sha256:7572d9cc377735d22efc52fe6fe73c7a435422c827b6ea3ca223a850a77be12e", size = 34737, upload-time = "2025-06-30T18:03:36.582Z" },
-]
-
-[[package]]
 name = "fastapi"
 version = "0.128.0"
 source = { registry = "https://pypi.org/simple" }
@@ -970,9 +957,6 @@ wheels = [
 [package.optional-dependencies]
 anthropic = [
     { name = "anthropic" },
-]
-falkordb = [
-    { name = "falkordb" },
 ]
 google-genai = [
     { name = "google-genai" },
@@ -2955,7 +2939,7 @@ dependencies = [
     { name = "anyio" },
     { name = "crawl4ai" },
     { name = "google-genai" },
-    { name = "graphiti-core", extra = ["anthropic", "falkordb", "google-genai"] },
+    { name = "graphiti-core", extra = ["anthropic", "google-genai"] },
     { name = "httpx" },
     { name = "mistune" },
     { name = "passlib" },
@@ -2981,7 +2965,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
     { name = "crawl4ai", specifier = ">=0.7.8" },
     { name = "google-genai", specifier = ">=2.0.1" },
-    { name = "graphiti-core", extras = ["anthropic", "falkordb", "google-genai"], specifier = ">=0.28.2" },
+    { name = "graphiti-core", extras = ["anthropic", "google-genai"], specifier = ">=0.28.2" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "mistune", specifier = ">=3.0" },
     { name = "passlib", specifier = ">=1.7" },

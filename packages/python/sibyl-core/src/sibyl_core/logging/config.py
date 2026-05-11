@@ -122,7 +122,6 @@ def _configure_stdlib_logging(level: str) -> None:
     noisy_loggers = [
         "uvicorn.access",
         "uvicorn.error",
-        "graphiti_core.driver.falkordb_driver",
         "graphiti_core",
         "httpx",
         "httpcore",

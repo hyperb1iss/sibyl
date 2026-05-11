@@ -217,6 +217,7 @@ Completed evidence:
   `docker compose up -d` starts only SurrealDB by default.
 - `GraphClient` no longer imports or constructs the FalkorDB driver; it always connects through the
   SurrealDB driver.
+- The FalkorDB Graphiti search adapter and package extra were removed from `sibyl-core`.
 
 ---
 

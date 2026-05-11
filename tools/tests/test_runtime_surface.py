@@ -63,7 +63,7 @@ def test_dependency_inventory_covers_legacy_and_target_stack() -> None:
 
     assert (
         "packages/python/sibyl-core/pyproject.toml",
-        "graphiti-core[falkordb,anthropic,google-genai]>=0.28.2",
+        "graphiti-core[anthropic,google-genai]>=0.28.2",
         "legacy",
     ) in dependencies
     assert (
