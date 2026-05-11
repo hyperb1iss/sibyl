@@ -9,11 +9,11 @@ from sibyl.api.schemas import (
     ReflectionRequest,
     ReflectionResponse,
 )
+from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
-from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
-from sibyl_core.auth import AuthOrganization, OrganizationRole
+from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 
 log = structlog.get_logger()
 _READ_ROLES = (
@@ -38,6 +38,23 @@ def _append_unique_ids(existing: list[str] | None, additions: list[str] | None) 
             links.append(item)
             seen.add(item)
     return links or None
+
+
+async def _resolve_accessible_context_projects(
+    *,
+    ctx: AuthContext,
+    project: str | None,
+) -> set[str] | None:
+    if project:
+        await verify_entity_project_access(
+            None,
+            ctx,
+            project,
+            required_role=ProjectRole.VIEWER,
+        )
+        return None
+    accessible_projects = await list_accessible_project_graph_ids(ctx)
+    return {str(project_id) for project_id in accessible_projects or set()}
 
 
 async def _resolve_reflection_links(
@@ -92,12 +109,10 @@ async def context_pack(
             context_pack_to_markdown,
         )
 
-        accessible_projects = set(await list_accessible_project_graph_ids(ctx))
-        if request.project and request.project not in accessible_projects:
-            raise ProjectAccessDeniedError(
-                project_id=request.project,
-                required_role="viewer",
-            )
+        accessible_projects = await _resolve_accessible_context_projects(
+            ctx=ctx,
+            project=request.project,
+        )
 
         pack = await compile_context(
             goal=request.goal,
@@ -105,7 +120,7 @@ async def context_pack(
             layer=request.layer,
             domain=request.domain,
             project=request.project,
-            accessible_projects=None if request.project else accessible_projects,
+            accessible_projects=accessible_projects,
             principal_id=ctx.user_id,
             agent_id=request.agent_id,
             organization_id=str(org.id),
@@ -143,12 +158,10 @@ async def reflect_context(
             reflection_pack_to_markdown,
         )
 
-        accessible_projects = set(await list_accessible_project_graph_ids(ctx))
-        if request.project and request.project not in accessible_projects:
-            raise ProjectAccessDeniedError(
-                project_id=request.project,
-                required_role="viewer",
-            )
+        await _resolve_accessible_context_projects(
+            ctx=ctx,
+            project=request.project,
+        )
         related_to = await _resolve_reflection_links(
             org_id=str(org.id),
             project=request.project,

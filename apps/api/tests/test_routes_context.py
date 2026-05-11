@@ -9,6 +9,7 @@ import pytest
 from sibyl.api.routes.context import context_pack
 from sibyl.api.schemas import ContextPackRequest, ReflectionRequest
 from sibyl.auth.errors import ProjectAccessDeniedError
+from sibyl_core.auth import ProjectRole
 from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
@@ -133,12 +134,17 @@ class TestContextPackRoute:
     @pytest.mark.asyncio
     async def test_context_pack_uses_requested_accessible_project(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = _ctx()
 
         with (
             patch(
                 "sibyl.api.routes.context.list_accessible_project_graph_ids",
                 AsyncMock(return_value=["proj_1"]),
-            ),
+            ) as list_projects,
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(),
+            ) as verify_project,
             patch(
                 "sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())
             ) as compile_context,
@@ -146,9 +152,16 @@ class TestContextPackRoute:
             await context_pack(
                 request=ContextPackRequest(goal="ship faster", project="proj_1"),
                 org=org,
-                ctx=_ctx(),
+                ctx=ctx,
             )
 
+        list_projects.assert_not_awaited()
+        verify_project.assert_awaited_once_with(
+            None,
+            ctx,
+            "proj_1",
+            required_role=ProjectRole.VIEWER,
+        )
         assert compile_context.await_args.kwargs["project"] == "proj_1"
         assert compile_context.await_args.kwargs["accessible_projects"] is None
 
@@ -197,21 +210,38 @@ class TestContextPackRoute:
     @pytest.mark.asyncio
     async def test_context_pack_rejects_inaccessible_project(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = _ctx()
 
         with (
             patch(
                 "sibyl.api.routes.context.list_accessible_project_graph_ids",
                 AsyncMock(return_value=["proj_1"]),
-            ),
+            ) as list_projects,
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(
+                    side_effect=ProjectAccessDeniedError(
+                        project_id="proj_2",
+                        required_role="viewer",
+                    )
+                ),
+            ) as verify_project,
             patch("sibyl_core.tools.context.compile_context", AsyncMock()) as compile_context,
             pytest.raises(ProjectAccessDeniedError) as exc,
         ):
             await context_pack(
                 request=ContextPackRequest(goal="ship faster", project="proj_2"),
                 org=org,
-                ctx=_ctx(),
+                ctx=ctx,
             )
 
+        list_projects.assert_not_awaited()
+        verify_project.assert_awaited_once_with(
+            None,
+            ctx,
+            "proj_2",
+            required_role=ProjectRole.VIEWER,
+        )
         compile_context.assert_not_awaited()
         assert exc.value.status_code == 403
 
@@ -242,12 +272,17 @@ class TestReflectRoute:
         from sibyl.api.routes.context import reflect_context
 
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = SimpleNamespace()
 
         with (
             patch(
                 "sibyl.api.routes.context.list_accessible_project_graph_ids",
                 AsyncMock(return_value=["proj_1"]),
-            ),
+            ) as list_projects,
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(),
+            ) as verify_project,
             patch(
                 "sibyl_core.tools.core.reflect_memory",
                 AsyncMock(return_value=_reflection_pack()),
@@ -266,9 +301,16 @@ class TestReflectRoute:
                     persist=True,
                 ),
                 org=org,
-                ctx=SimpleNamespace(),
+                ctx=ctx,
             )
 
+        list_projects.assert_not_awaited()
+        verify_project.assert_awaited_once_with(
+            None,
+            ctx,
+            "proj_1",
+            required_role=ProjectRole.VIEWER,
+        )
         assert response.source_title == "Planning"
         assert response.source_id == "session_1"
         assert response.markdown is not None
@@ -292,13 +334,18 @@ class TestReflectRoute:
         from sibyl.api.routes.context import reflect_context
 
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = SimpleNamespace()
         explore = AsyncMock(return_value=SimpleNamespace(entities=[SimpleNamespace(id="task_2")]))
 
         with (
             patch(
                 "sibyl.api.routes.context.list_accessible_project_graph_ids",
                 AsyncMock(return_value=["proj_1"]),
-            ),
+            ) as list_projects,
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(),
+            ) as verify_project,
             patch(
                 "sibyl_core.tools.core.reflect_memory",
                 AsyncMock(return_value=_reflection_pack()),
@@ -316,9 +363,16 @@ class TestReflectRoute:
                     persist=True,
                 ),
                 org=org,
-                ctx=SimpleNamespace(),
+                ctx=ctx,
             )
 
+        list_projects.assert_not_awaited()
+        verify_project.assert_awaited_once_with(
+            None,
+            ctx,
+            "proj_1",
+            required_role=ProjectRole.VIEWER,
+        )
         assert reflect_memory.await_args.kwargs["related_to"] == ["plan_1", "task_1", "task_2"]
         explore.assert_awaited_once()
 
@@ -327,12 +381,17 @@ class TestReflectRoute:
         from sibyl.api.routes.context import reflect_context
 
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = SimpleNamespace()
 
         with (
             patch(
                 "sibyl.api.routes.context.list_accessible_project_graph_ids",
                 AsyncMock(return_value=["proj_1"]),
-            ),
+            ) as list_projects,
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(),
+            ) as verify_project,
             patch(
                 "sibyl_core.tools.core.reflect_memory",
                 AsyncMock(return_value=_reflection_pack()),
@@ -349,9 +408,16 @@ class TestReflectRoute:
                     persist=False,
                 ),
                 org=org,
-                ctx=SimpleNamespace(),
+                ctx=ctx,
             )
 
+        list_projects.assert_not_awaited()
+        verify_project.assert_awaited_once_with(
+            None,
+            ctx,
+            "proj_1",
+            required_role=ProjectRole.VIEWER,
+        )
         assert reflect_memory.await_args.kwargs["related_to"] == ["task_1"]
         explore.assert_not_awaited()
 
@@ -392,20 +458,37 @@ class TestReflectRoute:
         from sibyl.api.routes.context import reflect_context
 
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = SimpleNamespace()
 
         with (
             patch(
                 "sibyl.api.routes.context.list_accessible_project_graph_ids",
                 AsyncMock(return_value=["proj_1"]),
-            ),
+            ) as list_projects,
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(
+                    side_effect=ProjectAccessDeniedError(
+                        project_id="proj_2",
+                        required_role="viewer",
+                    )
+                ),
+            ) as verify_project,
             patch("sibyl_core.tools.core.reflect_memory", AsyncMock()) as reflect_memory,
             pytest.raises(ProjectAccessDeniedError) as exc,
         ):
             await reflect_context(
                 request=ReflectionRequest(content="notes", project="proj_2"),
                 org=org,
-                ctx=SimpleNamespace(),
+                ctx=ctx,
             )
 
+        list_projects.assert_not_awaited()
+        verify_project.assert_awaited_once_with(
+            None,
+            ctx,
+            "proj_2",
+            required_role=ProjectRole.VIEWER,
+        )
         reflect_memory.assert_not_awaited()
         assert exc.value.status_code == 403
