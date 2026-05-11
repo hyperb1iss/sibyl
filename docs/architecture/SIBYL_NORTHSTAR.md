@@ -654,9 +654,10 @@ Keep this northstar current as decisions harden. When implementation branches la
 
 ### W1. Native Memory Primitive
 
-Status: first slice landed; default CLI and MCP `remember` now preserve raw source material before
-durable graph writes and return raw source identifiers. Next work is latency evidence and policy
-tightening.
+Status: first slice landed and hardened. Default CLI and MCP `remember` preserve raw source material
+before durable graph writes and return raw source identifiers. The raw memory local latency gate now
+exercises real memory-backed Surreal writes/recalls, and keyed scopes require scope keys on both
+write and recall.
 
 Build the smallest shared primitive that every surface can call:
 
@@ -684,6 +685,14 @@ First-slice gates:
 - privacy fixture proves a caller cannot retrieve another scope's memory
 - local dev target: raw `remember` p95 under 300ms and scoped full-text `recall` p95 under 1s
 - no embeddings, extraction, graph traversal, reflection, custom roles, or admin UI are required
+
+Evidence:
+
+- `packages/python/sibyl-core/tests/test_surreal_content_latency.py` samples 24 raw writes and 12
+  scoped recalls against memory-backed Surreal content storage, then gates p95 under the first-slice
+  latency targets.
+- `packages/python/sibyl-core/tests/test_services_surreal_content.py` rejects delegated, project,
+  team, and shared raw-memory writes without a `scope_key`, matching the recall-side guard.
 
 ### W2. Layered Context Packs
 
@@ -785,6 +794,11 @@ Runtime gates:
 
 ### W6. Parallel Native Graph Schema Spike
 
+Status: first direct SurrealQL spike landed as a tested path. It creates raw memory, direct graph
+entities, an episode, a relationship edge, lexical/vector/graph searches, and a rendered context
+pack with raw source IDs, then compares the native records against the current graph operation
+loaders.
+
 Replace one end-to-end path with direct SurrealQL before estimating the full Graphiti removal:
 
 - create raw memory
@@ -796,6 +810,17 @@ Replace one end-to-end path with direct SurrealQL before estimating the full Gra
 - compare results against the current path
 
 The spike should produce a real estimate, not vibes.
+
+Initial estimate from the spike:
+
+- Native raw capture plus context-pack rendering is release-ready for the current CLI/MCP surface.
+- Replacing the current Graphiti write path needs 3 focused slices: entity/episode/edge write
+  adapters, hybrid retrieval fusion over lexical/vector/graph signals, and temporal/supersession
+  semantics.
+- Full Graphiti removal remains larger because extraction, duplicate detection, summaries, community
+  clustering, and temporal reasoning still live in Graphiti-shaped contracts.
+- `packages/python/sibyl-core/tests/graph/surreal/test_native_memory_spike.py` is now the minimum
+  executable contract for future native-path work.
 
 ### W7. Native Retrieval and Context Quality
 

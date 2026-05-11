@@ -937,3 +937,22 @@ class TestSurrealContentHelpers:
                 query="context",
                 memory_scope=MemoryScope.PROJECT,
             )
+
+    @pytest.mark.parametrize(
+        "memory_scope",
+        [MemoryScope.DELEGATED, MemoryScope.PROJECT, MemoryScope.TEAM, MemoryScope.SHARED],
+    )
+    @pytest.mark.asyncio
+    async def test_remember_raw_memory_requires_scope_key_for_keyed_scopes(
+        self, memory_scope: MemoryScope
+    ) -> None:
+        with pytest.raises(
+            ValueError, match=f"{memory_scope.value} raw memory requires a scope_key"
+        ):
+            await remember_raw_memory(
+                organization_id="org-1",
+                principal_id="user-a",
+                source_id="source-1",
+                raw_content="context",
+                memory_scope=memory_scope,
+            )
