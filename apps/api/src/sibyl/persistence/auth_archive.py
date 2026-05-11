@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from enum import Enum
 from uuid import UUID
 
-from sibyl import config as config_module
 from sibyl.persistence.surreal.auth import _normalize_records, build_surreal_auth_client
 from sibyl_core.backends.surreal import bootstrap_auth_schema
 
@@ -203,33 +202,6 @@ def _sort_auth_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     return sorted(rows, key=_key)
 
 
-async def _export_relational_auth_archive_payload() -> dict[str, object]:
-    from sqlalchemy import text
-
-    from sibyl.db.connection import get_session
-
-    tables: dict[str, list[dict[str, object]]] = {}
-    row_counts: dict[str, int] = {}
-
-    async with get_session() as session:
-        for table in AUTH_ARCHIVE_TABLES:
-            result = await session.execute(text(_SELECT_TABLE_ROWS[table]))
-            rows = [
-                {str(key): _serialize_value(value) for key, value in dict(row).items()}
-                for row in result.mappings().all()
-            ]
-            tables[table] = rows
-            row_counts[table] = len(rows)
-
-    return {
-        "version": AUTH_ARCHIVE_VERSION,
-        "created_at": datetime.now(UTC).isoformat(),
-        "tables": tables,
-        "row_counts": row_counts,
-        "total_rows": sum(row_counts.values()),
-    }
-
-
 async def _export_surreal_auth_archive_payload() -> dict[str, object]:
     tables: dict[str, list[dict[str, object]]] = {}
     row_counts: dict[str, int] = {}
@@ -262,11 +234,9 @@ async def _export_surreal_auth_archive_payload() -> dict[str, object]:
 
 
 async def export_auth_archive_payload() -> dict[str, object]:
-    """Export auth/RBAC tables from the active auth backend into a JSON-safe payload."""
+    """Export Surreal auth/RBAC tables into a JSON-safe payload."""
 
-    if not config_module.settings.uses_relational_auth:
-        return await _export_surreal_auth_archive_payload()
-    return await _export_relational_auth_archive_payload()
+    return await _export_surreal_auth_archive_payload()
 
 
 async def restore_auth_archive_payload(

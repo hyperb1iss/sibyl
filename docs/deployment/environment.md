@@ -124,9 +124,10 @@ Fallbacks:
 
 ## PostgreSQL
 
-Used only by historical archive and migration commands that explicitly read or restore a retained
-`postgres.sql` payload. PostgreSQL auth and ambient runtime sidecars were removed after the v0.6.0
-compatibility release; remove stale `SIBYL_AUTH_STORE=postgres` values before starting the API.
+Used only by historical archive and migration commands that explicitly restore a retained
+`postgres.sql` payload. Structured auth/content archive export now reads SurrealDB. PostgreSQL auth
+and ambient runtime sidecars were removed after the v0.6.0 compatibility release; remove stale
+`SIBYL_AUTH_STORE=postgres` values before starting the API.
 
 | Variable                      | Default     | Description                          |
 | ----------------------------- | ----------- | ------------------------------------ |

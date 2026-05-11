@@ -253,36 +253,6 @@ def _normalize_content_archive_restore_row(
     return normalized
 
 
-async def _export_relational_content_archive_payload() -> dict[str, object]:
-    from sqlalchemy import text
-
-    from sibyl.db.connection import get_session
-
-    tables: dict[str, list[dict[str, object]]] = {}
-    row_counts: dict[str, int] = {}
-
-    async with get_session() as session:
-        for spec in _CONTENT_ARCHIVE_TABLE_SPECS:
-            result = await session.execute(text(spec.select_sql))
-            rows = [
-                _normalize_content_archive_export_row(
-                    spec,
-                    {str(key): _serialize_value(value) for key, value in dict(row).items()},
-                )
-                for row in result.mappings().all()
-            ]
-            tables[spec.name] = rows
-            row_counts[spec.name] = len(rows)
-
-    return {
-        "version": CONTENT_ARCHIVE_VERSION,
-        "created_at": datetime.now(UTC).isoformat(),
-        "tables": tables,
-        "row_counts": row_counts,
-        "total_rows": sum(row_counts.values()),
-    }
-
-
 async def _export_surreal_content_archive_payload() -> dict[str, object]:
     tables: dict[str, list[dict[str, object]]] = {}
     row_counts: dict[str, int] = {}
@@ -319,11 +289,9 @@ async def _export_surreal_content_archive_payload() -> dict[str, object]:
 
 
 async def export_content_archive_payload() -> dict[str, object]:
-    """Export content/operations tables from the active content backend."""
+    """Export Surreal content/operations tables into a JSON-safe payload."""
 
-    if config_module.settings.store == "surreal":
-        return await _export_surreal_content_archive_payload()
-    return await _export_relational_content_archive_payload()
+    return await _export_surreal_content_archive_payload()
 
 
 async def restore_content_archive_payload(

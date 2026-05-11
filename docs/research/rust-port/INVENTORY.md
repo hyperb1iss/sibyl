@@ -9,7 +9,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - MCP tools: 8
 - MCP resources: 2
 - SQLModel tables: 24
-- Raw SQL query usage files: 4
+- Raw SQL query usage files: 2
 - Session-backed storage access files: 0
 - Graphiti import files: 23
 - Dependency records: 8
@@ -96,8 +96,6 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 ### Raw SQL query usage files
 - `apps/api/src/sibyl/db/connection.py` — session imports: `AsyncSession`, `async_sessionmaker`; query imports: `text`; session calls: `execute`; query calls: `text`
 - `apps/api/src/sibyl/db/models.py` — session imports: none; query imports: `text`; session calls: none; query calls: `text`
-- `apps/api/src/sibyl/persistence/auth_archive.py` — session imports: none; query imports: `text`; session calls: `execute`; query calls: `text`
-- `apps/api/src/sibyl/persistence/content_archive.py` — session imports: none; query imports: `text`; session calls: `execute`; query calls: `text`
 
 ### Session-backed storage access files
 

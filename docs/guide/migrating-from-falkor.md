@@ -41,7 +41,7 @@ SIBYL_STORE=legacy sibyld migrate export \
 This writes a versioned archive containing:
 
 - `graph.json` — Entities, relationships, and episodes from FalkorDB
-- `postgres.sql` — Optional relational dump (users, API keys, crawled docs)
+- `postgres.sql` — Optional retained relational dump for rehearsal or rollback validation
 - `auth.json` / `content.json` — Structured auth and content payloads
 - `manifest.json` — Counts and checksums for verification
 
@@ -53,9 +53,9 @@ SIBYL_SURREAL_URL=ws://localhost:8000/rpc \
 sibyld migrate import /tmp/sibyl-migration.tar.gz
 ```
 
-The structured `auth.json` and `content.json` payloads restore directly into SurrealDB.
-`--restore-database-dump` is only needed when explicitly replaying a retained `postgres.sql` archive
-during rehearsal or rollback validation.
+The structured `auth.json` and `content.json` payloads restore directly into SurrealDB. New
+structured archive exports read from Surreal; `--restore-database-dump` is only needed when
+explicitly replaying a retained `postgres.sql` archive during rehearsal or rollback validation.
 
 ### 3. Verify
 

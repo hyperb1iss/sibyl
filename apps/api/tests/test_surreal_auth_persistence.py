@@ -210,7 +210,6 @@ async def test_auth_archive_export_reads_from_surreal_backend(
     )
     close = AsyncMock()
 
-    monkeypatch.setattr(auth_archive.config_module.settings, "auth_store", "surreal")
     monkeypatch.setattr(auth_archive, "build_surreal_auth_client", lambda: surreal_auth_client)
     monkeypatch.setattr(surreal_auth_client, "close", close)
 

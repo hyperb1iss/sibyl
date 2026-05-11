@@ -31,7 +31,7 @@ Phase 3 is done when:
 From the generated inventory:
 
 - 24 SQLModel tables remain in the codebase.
-- 4 files still contain raw SQL query usage.
+- 2 files still contain raw SQL query usage.
 - 0 files show session-backed storage access outside direct query usage.
 - Legacy transition dependencies remain in `apps/api/pyproject.toml`: `alembic`, `asyncpg`,
   `pgvector`, and `sqlmodel`.
@@ -94,8 +94,7 @@ Completed evidence:
 
 ### Lane 2 - Prove and Retire Content Sidecars
 
-Status: active crawler, raw-capture, document search, and RAG runtime sidecars complete. Content
-archive policy remains open.
+Status: complete for active runtime and Surreal archive export/restore.
 
 Content has Surreal runtime and archive paths. Phase 3 needs proof before deletion.
 
@@ -106,9 +105,9 @@ Decide each legacy module:
 - `apps/api/src/sibyl/persistence/legacy/rag.py`
 - `apps/api/src/sibyl/persistence/content_archive.py`
 
-Retain `apps/api/src/sibyl/persistence/content_archive.py` until archive policy is settled. It is
-now the explicit compatibility boundary for `postgres.sql` and legacy content archive export/import,
-not active route or worker dispatch.
+`apps/api/src/sibyl/persistence/content_archive.py` is now Surreal-only for structured
+`content.json` export and restore. Retained `postgres.sql` payloads are restored only by explicit
+migration commands for rehearsal or rollback validation.
 
 Verification:
 
@@ -120,13 +119,14 @@ Completed evidence:
 
 - Content runtime dispatch now resolves directly to the Surreal implementation.
 - Legacy crawler, document entity, and RAG persistence modules were deleted.
+- Live relational content archive export was removed; structured archive export now reads Surreal.
 - Focused content/RAG route tests passed with `32 passed`.
-- Runtime inventory now reports 9 raw SQL query usage files and 0 session-backed storage access
+- Runtime inventory now reports 2 raw SQL query usage files and 0 session-backed storage access
   files.
 
 ### Lane 3 - Prove and Retire Settings and Backup Sidecars
 
-Status: settings and backup persistence sidecars complete. Archive policy remains open.
+Status: complete for active runtime and Surreal backup/archive records.
 
 Settings and backups already dispatch by runtime. Phase 3 decides when the legacy branches are no
 longer shipped.
@@ -137,8 +137,9 @@ Decide each legacy module:
 - `apps/api/src/sibyl/persistence/legacy/system_settings.py`
 - `apps/api/src/sibyl/persistence/legacy/backups.py`
 
-Retain `apps/api/src/sibyl/persistence/backups_common.py` until archive policy is settled. It now
-serves shared Surreal backup DTOs and runtime options, not legacy persistence dispatch.
+`apps/api/src/sibyl/persistence/backups_common.py` now serves shared Surreal backup DTOs and runtime
+options, not legacy persistence dispatch. New backups include structured Surreal auth/content
+snapshots; `postgres.sql` is not produced in fully Surreal mode.
 
 Verification:
 
@@ -150,13 +151,14 @@ Completed evidence:
 
 - Settings and backup runtime dispatch now resolves directly to Surreal implementations.
 - Legacy settings, system settings, and backup persistence modules were deleted.
+- Live relational auth/content archive export was removed from backup snapshots.
 - Focused API tests passed with `53 passed`.
-- Runtime inventory now reports 12 raw SQL query usage files and 0 session-backed storage access
+- Runtime inventory now reports 2 raw SQL query usage files and 0 session-backed storage access
   files.
 
 ### Lane 4 - Remove Ambient Relational Infrastructure
 
-Status: startup/session/RLS wiring complete. PostgreSQL archive and migration helpers remain.
+Status: startup/session/RLS wiring complete. Historical schema helpers remain.
 
 Do this only after lanes 1-3 remove active consumers.
 
@@ -182,7 +184,8 @@ Completed evidence:
 - Legacy relational session, RLS, and sidecar startup modules were deleted.
 - `sibyld up` no longer starts PostgreSQL for `SIBYL_STORE=legacy`.
 - Migration-era graph-to-Postgres project sync helpers and CLI commands were deleted.
-- Runtime inventory now reports 4 raw SQL query usage files and 0 session-backed storage access
+- Live relational auth/content archive export was removed; JSON archive export now reads Surreal.
+- Runtime inventory now reports 2 raw SQL query usage files and 0 session-backed storage access
   files.
 
 ### Lane 5 - Remove Legacy Graph and Dependencies

@@ -11,8 +11,8 @@ content, and auth. Do not start new deployments on FalkorDB or PostgreSQL auth.
 Legacy FalkorDB support remains available for existing installs during the migration window. It is a
 compatibility bridge, not the long-term runtime. PostgreSQL auth was removed after the v0.6.0
 compatibility release, and active content/RAG runtime paths now resolve through SurrealDB.
-PostgreSQL content archive export remains available for migration and rollback evidence while Phase
-3 settles the archive policy.
+Structured auth/content archive export now reads SurrealDB; retained `postgres.sql` payloads are
+restore-only evidence for rehearsal or rollback validation.
 
 ## What changed
 
