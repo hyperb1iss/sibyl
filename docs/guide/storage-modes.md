@@ -5,8 +5,8 @@ description: The supported storage configurations and when to pick each
 
 # Storage Modes
 
-Sibyl supports two storage configurations, controlled by `SIBYL_STORE`.
-Auth is always stored in SurrealDB.
+Sibyl supports two storage configurations, controlled by `SIBYL_STORE`. Auth is always stored in
+SurrealDB.
 
 | Mode                          | `SIBYL_STORE` | Auth store | Coordination | External services             |
 | ----------------------------- | ------------- | ---------- | ------------ | ----------------------------- |

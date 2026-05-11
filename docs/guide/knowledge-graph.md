@@ -12,9 +12,9 @@ semantic search. This guide explains how the graph works.
 
 Sibyl runs on a unified storage backend by default:
 
-| Default (fully Surreal)                           | Legacy graph/content (opt-in)                                |
-| ------------------------------------------------- | ------------------------------------------------------------ |
-| Graph + content + auth in one SurrealDB instance. | FalkorDB graph + PostgreSQL crawled docs + SurrealDB auth.   |
+| Default (fully Surreal)                           | Legacy graph/content (opt-in)                              |
+| ------------------------------------------------- | ---------------------------------------------------------- |
+| Graph + content + auth in one SurrealDB instance. | FalkorDB graph + PostgreSQL crawled docs + SurrealDB auth. |
 
 Set `SIBYL_STORE=legacy` to use the legacy graph/content stack. See
 [storage-modes.md](./storage-modes.md).
