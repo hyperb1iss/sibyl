@@ -61,8 +61,8 @@ Use the full migration playbook, not the local shortcut:
 
 Start with [Migrating from FalkorDB](./migrating-from-falkor.md).
 
-Use SurrealDB 2.x or 3.x for the target runtime, and pin the exact server image/tag used during
-rehearsal before cutting over production.
+Use SurrealDB 3.x for the target runtime, and pin the exact server image/tag used during rehearsal
+before cutting over production.
 
 Release owners should execute the live gate checklist in
 `docs/architecture/SURREALDB_PHASE2_LIVE_GATES.md` before tagging the SurrealDB-first release.

@@ -195,8 +195,7 @@ ingress:
 
 ### SurrealDB Requirements (default)
 
-- SurrealDB 2.x or 3.x. Pin an explicit tested image tag for production instead of floating on
-  `latest`.
+- SurrealDB 3.x. Pin an explicit tested image tag for production instead of floating on `latest`.
 - TiKV-backed storage for replicated SurrealDB pods, or RocksDB-backed storage for a single pod
 - Root credentials set at start (`--user` / `--pass`)
 - Persistence and backups live in the selected SurrealDB storage engine

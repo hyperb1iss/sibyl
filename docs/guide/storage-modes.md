@@ -41,7 +41,7 @@ SIBYL_AUTH_STORE=surreal
 - **Dev:** `moon run dev` starts local SurrealDB backed by RocksDB automatically.
 - **Prod:** run SurrealDB as a service (`ws://` or `http://` URL). In-memory mode (`memory://`) is
   rejected by the production config validator.
-- **Server version:** use SurrealDB 2.x or 3.x, and pin the exact server image/tag in production.
+- **Server version:** use SurrealDB 3.x, and pin the exact server image/tag in production.
 
 ## Mixed (transitional)
 
