@@ -11,10 +11,7 @@ from starlette.responses import Response
 
 from sibyl.api.routes import org_invitations as invitation_routes
 from sibyl.db.models import OrganizationRole
-from sibyl.persistence.legacy.org_invitations import (
-    LegacyInvitationAcceptance,
-    LegacyInvitationRecord,
-)
+from sibyl.persistence.organization_common import InvitationAcceptance, InvitationRecord
 
 
 def _request() -> Request:
@@ -34,7 +31,7 @@ async def test_list_invitations_uses_runtime_helper(monkeypatch: pytest.MonkeyPa
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     list_invitations = AsyncMock(
         return_value=[
-            LegacyInvitationRecord(
+            InvitationRecord(
                 id=UUID("00000000-0000-0000-0000-000000000222"),
                 email="ember@example.com",
                 role=OrganizationRole.ADMIN,
@@ -61,7 +58,7 @@ async def test_create_invitation_uses_runtime_helper(monkeypatch: pytest.MonkeyP
     request = _request()
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     create_invitation = AsyncMock(
-        return_value=LegacyInvitationRecord(
+        return_value=InvitationRecord(
             id=UUID("00000000-0000-0000-0000-000000000222"),
             email="ember@example.com",
             role=OrganizationRole.ADMIN,
@@ -133,7 +130,7 @@ async def test_accept_invitation_sets_auth_cookies(monkeypatch: pytest.MonkeyPat
     response = Response()
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     accept_invitation = AsyncMock(
-        return_value=LegacyInvitationAcceptance(
+        return_value=InvitationAcceptance(
             access_token="access-token",
             refresh_token="refresh-token",
             refresh_expires=datetime(2026, 4, 24, 12, 0, tzinfo=UTC),

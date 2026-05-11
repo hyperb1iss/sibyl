@@ -11,10 +11,6 @@ from fastapi import HTTPException
 
 from sibyl.db.models import OrganizationRole, ProjectRole
 from sibyl.persistence import organization_common, organization_runtime
-from sibyl.persistence.legacy import (
-    orgs as legacy_orgs_runtime,
-    project_members as legacy_project_members_runtime,
-)
 from sibyl.persistence.surreal import organization_runtime as surreal_organization_runtime
 
 
@@ -30,8 +26,6 @@ def _request(*, authorization: str | None = "Bearer current-token") -> SimpleNam
 
 
 def test_organization_runtime_exports_neutral_runtime_surface() -> None:
-    assert hasattr(legacy_orgs_runtime, "list_orgs")
-    assert hasattr(legacy_project_members_runtime, "list_project_members")
     assert organization_common.__all__ == [
         "InvitationAcceptance",
         "InvitationRecord",

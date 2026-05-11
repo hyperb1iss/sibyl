@@ -8,7 +8,6 @@ import pytest
 from sibyl.db.models import ProjectRole
 from sibyl.persistence import auth_runtime
 from sibyl.persistence.auth_common import InvalidAuthClaimsError, UserNotFoundError
-from sibyl.persistence.legacy import auth_runtime as legacy_auth_runtime
 from sibyl.persistence.surreal import auth_runtime as surreal_auth_runtime
 from sibyl.persistence.surreal.auth import SurrealAuthContextResolver
 from sibyl.persistence.surreal.auth_runtime import SurrealSessionRepository
@@ -47,8 +46,6 @@ def test_auth_runtime_exports_neutral_runtime_surface() -> None:
     assert "list_oauth_connections" in auth_runtime.__all__
     assert "validate_access_session" in auth_runtime.__all__
 
-    assert hasattr(legacy_auth_runtime, "resolve_auth_context")
-    assert hasattr(legacy_auth_runtime, "patch_auth_user")
     assert "AuthContextResolver" in surreal_auth_runtime.__all__
     assert "authenticate_api_key" in surreal_auth_runtime.__all__
     assert "SessionRepository" in surreal_auth_runtime.__all__

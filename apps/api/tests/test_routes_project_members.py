@@ -11,10 +11,7 @@ from fastapi import BackgroundTasks
 
 from sibyl.api.routes import project_members as project_member_routes
 from sibyl.db.models import ProjectRole
-from sibyl.persistence.legacy.project_members import (
-    LegacyProjectMemberChange,
-    LegacyProjectMembersResult,
-)
+from sibyl.persistence.organization_common import ProjectMemberChange, ProjectMembersResult
 
 
 class TestCanManageMembers:
@@ -62,7 +59,7 @@ async def test_list_members_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch)
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
     list_members = AsyncMock(
-        return_value=LegacyProjectMembersResult(
+        return_value=ProjectMembersResult(
             members=[{"user": {"id": "u1"}, "role": "owner", "is_owner": True, "created_at": None}],
             can_manage=True,
         )
@@ -90,7 +87,7 @@ async def test_add_member_uses_runtime_helper_and_broadcasts(
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
     target_user_id = UUID("00000000-0000-0000-0000-000000000333")
     add_member = AsyncMock(
-        return_value=LegacyProjectMemberChange(
+        return_value=ProjectMemberChange(
             org_id=org.id,
             project_db_id=UUID("00000000-0000-0000-0000-000000000444"),
             user_id=target_user_id,
@@ -144,7 +141,7 @@ async def test_update_member_role_uses_runtime_helper_and_broadcasts(
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
     target_user_id = UUID("00000000-0000-0000-0000-000000000333")
     update_member = AsyncMock(
-        return_value=LegacyProjectMemberChange(
+        return_value=ProjectMemberChange(
             org_id=org.id,
             project_db_id=UUID("00000000-0000-0000-0000-000000000444"),
             user_id=target_user_id,
@@ -196,7 +193,7 @@ async def test_remove_member_uses_runtime_helper_and_broadcasts(
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
     target_user_id = UUID("00000000-0000-0000-0000-000000000333")
     remove_member = AsyncMock(
-        return_value=LegacyProjectMemberChange(
+        return_value=ProjectMemberChange(
             org_id=org.id,
             project_db_id=UUID("00000000-0000-0000-0000-000000000444"),
             user_id=target_user_id,

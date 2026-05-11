@@ -9,8 +9,8 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - MCP tools: 8
 - MCP resources: 2
 - SQLModel tables: 24
-- Raw SQL query usage files: 30
-- Session-backed storage access files: 1
+- Raw SQL query usage files: 15
+- Session-backed storage access files: 0
 - Graphiti import files: 23
 - Dependency records: 8
 
@@ -100,33 +100,17 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - `apps/api/src/sibyl/db/sync.py` — session imports: `AsyncSession`; query imports: `select`; session calls: `add`, `execute`; query calls: `select`
 - `apps/api/src/sibyl/persistence/auth_archive.py` — session imports: none; query imports: `text`; session calls: `execute`; query calls: `text`
 - `apps/api/src/sibyl/persistence/content_archive.py` — session imports: none; query imports: `text`; session calls: `execute`; query calls: `text`
-- `apps/api/src/sibyl/persistence/legacy/auth.py` — session imports: `AsyncSession`; query imports: `select`; session calls: `execute`, `get`; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/auth_managers/api_keys.py` — session imports: `AsyncSession`; query imports: `select`; session calls: none; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/auth_managers/device_authorization.py` — session imports: `AsyncSession`; query imports: `select`; session calls: none; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/auth_managers/invitations.py` — session imports: `AsyncSession`; query imports: `select`; session calls: none; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/auth_managers/memberships.py` — session imports: `AsyncSession`; query imports: `select`; session calls: none; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/auth_managers/organizations.py` — session imports: `AsyncSession`; query imports: `select`; session calls: none; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/auth_managers/password_reset.py` — session imports: `AsyncSession`; query imports: `select`; session calls: none; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/auth_managers/sessions.py` — session imports: `AsyncSession`; query imports: `select`; session calls: none; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/auth_managers/users.py` — session imports: `AsyncSession`; query imports: `select`; session calls: none; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/auth_runtime.py` — session imports: none; query imports: `select`; session calls: none; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/backups.py` — session imports: `AsyncSession`; query imports: `select`; session calls: `add`, `commit`, `delete`, `execute`, `get`, `refresh`; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/crawler.py` — session imports: none; query imports: `select`; session calls: none; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/entities.py` — session imports: `AsyncSession`; query imports: `select`; session calls: `execute`, `refresh`; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/org_members.py` — session imports: none; query imports: `select`; session calls: `execute`; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/orgs.py` — session imports: none; query imports: `select`; session calls: `execute`; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/project_members.py` — session imports: `AsyncSession`; query imports: `select`; session calls: `add`, `delete`, `execute`, `get`; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/project_sync.py` — session imports: none; query imports: `select`; session calls: `commit`, `execute`; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/rag.py` — session imports: none; query imports: `select`; session calls: none; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/rls.py` — session imports: none; query imports: `text`; session calls: `execute`; query calls: `text`
 - `apps/api/src/sibyl/persistence/legacy/settings.py` — session imports: none; query imports: `select`; session calls: `execute`; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/setup.py` — session imports: none; query imports: `select`; session calls: `execute`, `get`; query calls: `select`
 - `apps/api/src/sibyl/persistence/legacy/sidecar_startup.py` — session imports: none; query imports: `text`; session calls: `execute`; query calls: `text`
 - `apps/api/src/sibyl/persistence/legacy/system_settings.py` — session imports: `AsyncSession`; query imports: `select`; session calls: `add`, `delete`, `execute`, `refresh`; query calls: `select`
-- `apps/api/src/sibyl/persistence/legacy/users.py` — session imports: `AsyncSession`; query imports: `select`; session calls: `commit`, `delete`, `execute`, `get`; query calls: `select`
 
 ### Session-backed storage access files
-- `apps/api/src/sibyl/persistence/legacy/auth_managers/audit.py` — session imports: `AsyncSession`; query imports: none; session calls: none; query calls: none
 
 ### Graphiti import files
 - `apps/api/src/sibyl/jobs/entities.py` — `graphiti_core.edges`

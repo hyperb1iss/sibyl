@@ -10,7 +10,7 @@ from starlette.requests import Request
 
 from sibyl.api.routes import org_members as org_member_routes
 from sibyl.db.models import OrganizationRole
-from sibyl.persistence.legacy.org_members import LegacyOrgMemberChange
+from sibyl.persistence.organization_common import OrgMemberChange
 
 
 def _request() -> Request:
@@ -60,7 +60,7 @@ async def test_add_member_uses_runtime_helper_and_broadcasts(
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     background_tasks = BackgroundTasks()
     add_member = AsyncMock(
-        return_value=LegacyOrgMemberChange(
+        return_value=OrgMemberChange(
             org_id=UUID("00000000-0000-0000-0000-000000000333"),
             user_id=UUID("00000000-0000-0000-0000-000000000222"),
             role=OrganizationRole.ADMIN,
@@ -114,7 +114,7 @@ async def test_update_member_role_uses_runtime_helper_and_broadcasts(
     target_user_id = UUID("00000000-0000-0000-0000-000000000222")
     background_tasks = BackgroundTasks()
     update_member = AsyncMock(
-        return_value=LegacyOrgMemberChange(
+        return_value=OrgMemberChange(
             org_id=UUID("00000000-0000-0000-0000-000000000333"),
             user_id=target_user_id,
             role=OrganizationRole.VIEWER,
@@ -167,7 +167,7 @@ async def test_remove_member_uses_runtime_helper_and_broadcasts(
     target_user_id = UUID("00000000-0000-0000-0000-000000000222")
     background_tasks = BackgroundTasks()
     remove_member = AsyncMock(
-        return_value=LegacyOrgMemberChange(
+        return_value=OrgMemberChange(
             org_id=UUID("00000000-0000-0000-0000-000000000333"),
             user_id=target_user_id,
         )

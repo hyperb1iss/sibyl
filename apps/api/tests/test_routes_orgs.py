@@ -11,7 +11,7 @@ from starlette.responses import Response
 
 from sibyl.api.routes import orgs as org_routes
 from sibyl.db.models import OrganizationRole
-from sibyl.persistence.legacy.orgs import LegacyOrgAuthResult, LegacyOrgRoleResult, LegacyOrgSummary
+from sibyl.persistence.organization_common import OrgAuthResult, OrgRoleResult, OrgSummary
 
 
 def _request() -> Request:
@@ -31,7 +31,7 @@ async def test_list_orgs_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) ->
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     list_orgs = AsyncMock(
         return_value=[
-            LegacyOrgSummary(
+            OrgSummary(
                 id=UUID("00000000-0000-0000-0000-000000000222"),
                 slug="electric-coven",
                 name="Electric Coven",
@@ -57,7 +57,7 @@ async def test_create_org_uses_runtime_helper_and_sets_cookies(
     response = Response()
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     create_org = AsyncMock(
-        return_value=LegacyOrgAuthResult(
+        return_value=OrgAuthResult(
             id=UUID("00000000-0000-0000-0000-000000000222"),
             slug="electric-coven",
             name="Electric Coven",
@@ -93,7 +93,7 @@ async def test_create_org_uses_runtime_helper_and_sets_cookies(
 async def test_get_org_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = SimpleNamespace(user=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")))
     get_org = AsyncMock(
-        return_value=LegacyOrgRoleResult(
+        return_value=OrgRoleResult(
             id=UUID("00000000-0000-0000-0000-000000000222"),
             slug="electric-coven",
             name="Electric Coven",
@@ -114,7 +114,7 @@ async def test_update_org_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) -
     request = _request()
     ctx = SimpleNamespace(user=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")))
     update_org = AsyncMock(
-        return_value=LegacyOrgSummary(
+        return_value=OrgSummary(
             id=UUID("00000000-0000-0000-0000-000000000222"),
             slug="electric-coven-2",
             name="Electric Coven 2",
@@ -166,7 +166,7 @@ async def test_switch_org_uses_runtime_helper_and_sets_cookies(
     response = Response()
     user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     switch_org = AsyncMock(
-        return_value=LegacyOrgAuthResult(
+        return_value=OrgAuthResult(
             id=UUID("00000000-0000-0000-0000-000000000222"),
             slug="electric-coven",
             name="Electric Coven",
