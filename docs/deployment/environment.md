@@ -28,7 +28,7 @@ versions as fallbacks.
 | Variable                     | Default   | Description                                       |
 | ---------------------------- | --------- | ------------------------------------------------- |
 | `SIBYL_STORE`                | `surreal` | Active persistence runtime: `surreal` or `legacy` |
-| `SIBYL_AUTH_STORE`           | `surreal` | Auth persistence: `surreal` or `postgres`         |
+| `SIBYL_AUTH_STORE`           | `surreal` | Auth persistence. Only `surreal` is supported     |
 | `SIBYL_COORDINATION_BACKEND` | `auto`    | Jobs, locks, pub/sub: `auto`, `local`, or `redis` |
 
 `auto` resolves to `local` when `SIBYL_STORE=surreal` and `redis` when `SIBYL_STORE=legacy`. See
@@ -36,7 +36,7 @@ versions as fallbacks.
 
 ## SurrealDB
 
-Used when `SIBYL_STORE=surreal` or `SIBYL_AUTH_STORE=surreal` (the default).
+Used when `SIBYL_STORE=surreal` or for the always-on Surreal auth runtime.
 
 | Variable                         | Default | Description                                                      |
 | -------------------------------- | ------- | ---------------------------------------------------------------- |
@@ -124,11 +124,9 @@ Fallbacks:
 
 ## PostgreSQL
 
-Used when `SIBYL_AUTH_STORE=postgres` (legacy or mid-migration mixed mode).
-
-PostgreSQL auth is a compatibility setting for existing installs and rollback windows. New
-deployments should leave `SIBYL_AUTH_STORE=surreal`; the PostgreSQL auth store is planned for
-removal after one compatibility release.
+Used when `SIBYL_STORE=legacy` for content and relational sidecars. PostgreSQL auth was removed
+after the v0.6.0 compatibility release; remove stale `SIBYL_AUTH_STORE=postgres` values before
+starting the API.
 
 | Variable                      | Default     | Description                          |
 | ----------------------------- | ----------- | ------------------------------------ |
@@ -284,10 +282,12 @@ SIBYL_PUBLIC_URL=https://sibyl.example.com
 
 # Storage (legacy)
 SIBYL_STORE=legacy
-SIBYL_AUTH_STORE=postgres
 SIBYL_COORDINATION_BACKEND=redis
 
 # Databases
+SIBYL_SURREAL_URL=ws://prod-surrealdb.internal:8000/rpc
+SIBYL_SURREAL_USERNAME=root
+SIBYL_SURREAL_PASSWORD=<secure-password>
 SIBYL_POSTGRES_HOST=prod-postgres.internal
 SIBYL_POSTGRES_PORT=5432
 SIBYL_POSTGRES_PASSWORD=<secure-password>
@@ -419,6 +419,6 @@ settings.resolved_surreal_url  # ws://..., surrealkv://..., or memory://
 settings.falkordb_url          # redis://:password@host:port  (legacy)
 settings.postgres_url          # postgresql+asyncpg://user:pass@host:port/db
 settings.postgres_url_sync     # postgresql://user:pass@host:port/db (for Alembic)
-settings.fully_surreal         # True when both store and auth_store are "surreal"
-settings.requires_relational_support  # True when Postgres is still needed
+settings.fully_surreal         # True when graph, content, and auth all use SurrealDB
+settings.requires_relational_support  # True when legacy content sidecars still need Postgres
 ```

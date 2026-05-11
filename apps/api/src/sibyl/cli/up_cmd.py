@@ -94,7 +94,7 @@ def _resolve_coordination_backend(env: dict[str, str]) -> str:
 
 def _apply_surreal_dev_defaults(env: dict[str, str]) -> None:
     env.setdefault("SIBYL_STORE", "surreal")
-    env.setdefault("SIBYL_AUTH_STORE", default_auth_store(store=env["SIBYL_STORE"]))
+    env["SIBYL_AUTH_STORE"] = default_auth_store(store=env["SIBYL_STORE"])
     env.setdefault("SIBYL_COORDINATION_BACKEND", "auto")
 
     if requires_surreal_support(

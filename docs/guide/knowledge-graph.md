@@ -12,11 +12,11 @@ semantic search. This guide explains how the graph works.
 
 Sibyl runs on a unified storage backend by default:
 
-| Default (fully Surreal)                           | Legacy (opt-in)                                                |
-| ------------------------------------------------- | -------------------------------------------------------------- |
-| Graph + content + auth in one SurrealDB instance. | FalkorDB (graph) + PostgreSQL (relational auth, crawled docs). |
+| Default (fully Surreal)                           | Legacy graph/content (opt-in)                                |
+| ------------------------------------------------- | ------------------------------------------------------------ |
+| Graph + content + auth in one SurrealDB instance. | FalkorDB graph + PostgreSQL crawled docs + SurrealDB auth.   |
 
-Set `SIBYL_STORE=legacy` and `SIBYL_AUTH_STORE=postgres` to use the legacy stack. See
+Set `SIBYL_STORE=legacy` to use the legacy graph/content stack. See
 [storage-modes.md](./storage-modes.md).
 
 ### SurrealDB (default)
@@ -32,8 +32,8 @@ isolation. It provides:
 ### FalkorDB (legacy)
 
 FalkorDB is a Redis-compatible graph database used when `SIBYL_STORE=legacy`. It speaks Cypher via
-Graphiti, pairs with PostgreSQL for relational auth, and remains supported for users who haven't
-migrated yet.
+Graphiti, pairs with PostgreSQL content sidecars, and remains supported for users who haven't
+migrated graph/content yet.
 
 ### Graphiti Integration
 

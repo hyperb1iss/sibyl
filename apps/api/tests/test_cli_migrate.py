@@ -265,7 +265,7 @@ def test_migrate_export_graph_only_writes_archive(tmp_path: Path) -> None:
     assert archive_path.exists()
 
 
-def test_migrate_export_writes_graph_and_postgres_archive(tmp_path: Path) -> None:
+def test_migrate_export_writes_graph_and_runtime_archive(tmp_path: Path) -> None:
     archive_path = tmp_path / "migration.tar.gz"
     graph_payload = {
         "version": "2.0",
@@ -279,7 +279,7 @@ def test_migrate_export_writes_graph_and_postgres_archive(tmp_path: Path) -> Non
 
     with (
         patch.object(migrate_cli.settings, "store", "legacy"),
-        patch.object(migrate_cli.settings, "auth_store", "postgres"),
+        patch.object(migrate_cli.settings, "auth_store", "surreal"),
         patch(
             "sibyl.cli.migrate._load_graph_export",
             return_value=(graph_payload, json.dumps(graph_payload).encode("utf-8")),
@@ -595,18 +595,21 @@ def test_migrate_import_warns_when_postgres_payload_is_skipped(tmp_path: Path) -
     assert "restore is disabled" in result.output
 
 
-def test_migrate_import_warns_when_auth_payload_is_skipped_in_postgres_mode(tmp_path: Path) -> None:
+def test_migrate_import_warns_when_auth_payload_restore_is_disabled(tmp_path: Path) -> None:
     archive_path = tmp_path / "migration.tar.gz"
     _write_full_archive(archive_path, include_auth=True)
 
     with (
-        patch.object(migrate_cli.settings, "auth_store", "postgres"),
+        patch.object(migrate_cli.settings, "auth_store", "surreal"),
         patch("sibyl.cli.migrate._restore_graph_payload", return_value=True),
     ):
-        result = runner.invoke(migrate_cli.app, ["import", str(archive_path), "--yes"])
+        result = runner.invoke(
+            migrate_cli.app,
+            ["import", str(archive_path), "--yes", "--skip-auth"],
+        )
 
     assert result.exit_code == 0
-    assert "Archive includes auth.json, but SIBYL_AUTH_STORE is not surreal" in result.output
+    assert "Archive includes auth.json, but auth restore is disabled" in result.output
 
 
 def test_migrate_import_restores_auth_when_surreal_auth_store_is_enabled(tmp_path: Path) -> None:
@@ -945,7 +948,7 @@ def test_migrate_cutover_requires_surreal_store(tmp_path: Path) -> None:
     assert "SIBYL_STORE=surreal" in result.output
 
 
-def test_migrate_cutover_requires_surreal_auth_store(tmp_path: Path) -> None:
+def test_migrate_cutover_ignores_removed_postgres_auth_store(tmp_path: Path) -> None:
     archive_path = tmp_path / "migration.tar.gz"
     _write_full_archive(archive_path, include_auth=True)
 
@@ -958,8 +961,8 @@ def test_migrate_cutover_requires_surreal_auth_store(tmp_path: Path) -> None:
             ["cutover", str(archive_path), "--dry-run", "--skip-baseline"],
         )
 
-    assert result.exit_code == 1
-    assert "SIBYL_AUTH_STORE=surreal" in result.output
+    assert result.exit_code == 0
+    assert "Cutover dry run complete" in result.output
 
 
 def test_migrate_cutover_dry_run_prints_plan(tmp_path: Path) -> None:

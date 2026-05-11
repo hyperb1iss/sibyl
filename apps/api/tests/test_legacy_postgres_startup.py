@@ -38,7 +38,7 @@ async def test_bootstrap_relational_sidecar_support_runs_all_steps(
         load_api_keys,
     )
     monkeypatch.setattr(relational_sidecar_startup.settings, "store", "legacy")
-    monkeypatch.setattr(relational_sidecar_startup.settings, "auth_store", "postgres")
+    monkeypatch.setattr(relational_sidecar_startup.settings, "auth_store", "surreal")
     monkeypatch.setattr(relational_sidecar_startup.log, "warning", warning)
 
     assert await relational_sidecar_startup.bootstrap_relational_sidecar_support() is True
@@ -46,7 +46,7 @@ async def test_bootstrap_relational_sidecar_support_runs_all_steps(
     warning.assert_called_once_with(
         "Legacy relational runtime is deprecated; migrate this install to SurrealDB",
         store="legacy",
-        auth_store="postgres",
+        auth_store="surreal",
         suggested_store="surreal",
         suggested_auth_store="surreal",
         migration_command="moon run dev -- --migrate-legacy",
@@ -88,7 +88,7 @@ async def test_bootstrap_relational_sidecar_support_stops_when_postgres_is_unava
         load_api_keys,
     )
     monkeypatch.setattr(relational_sidecar_startup.settings, "store", "legacy")
-    monkeypatch.setattr(relational_sidecar_startup.settings, "auth_store", "postgres")
+    monkeypatch.setattr(relational_sidecar_startup.settings, "auth_store", "surreal")
 
     assert await relational_sidecar_startup.bootstrap_relational_sidecar_support() is False
 
@@ -142,7 +142,7 @@ async def test_bootstrap_relational_sidecar_support_is_disabled_in_fully_surreal
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_relational_sidecar_support_skips_content_startup_in_surreal_store(
+async def test_bootstrap_relational_sidecar_support_ignores_removed_postgres_auth_store(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     check_connection = AsyncMock()
@@ -175,18 +175,10 @@ async def test_bootstrap_relational_sidecar_support_skips_content_startup_in_sur
     monkeypatch.setattr(relational_sidecar_startup.settings, "auth_store", "postgres")
     monkeypatch.setattr(relational_sidecar_startup.log, "warning", warning)
 
-    assert await relational_sidecar_startup.bootstrap_relational_sidecar_support() is True
+    assert await relational_sidecar_startup.bootstrap_relational_sidecar_support() is False
 
-    warning.assert_called_once_with(
-        "Legacy relational runtime is deprecated; migrate this install to SurrealDB",
-        store="surreal",
-        auth_store="postgres",
-        suggested_store="surreal",
-        suggested_auth_store="surreal",
-        migration_command="moon run dev -- --migrate-legacy",
-        migration_guide="docs/guide/migrating-from-falkor.md",
-    )
-    check_connection.assert_awaited_once()
-    run_migrations.assert_awaited_once()
+    warning.assert_not_called()
+    check_connection.assert_not_awaited()
+    run_migrations.assert_not_awaited()
     recover_sources.assert_not_awaited()
     load_api_keys.assert_not_awaited()

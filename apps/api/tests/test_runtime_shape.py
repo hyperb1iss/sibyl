@@ -25,20 +25,20 @@ def test_runtime_shape_helpers_cover_fully_surreal_mode() -> None:
 
 
 def test_runtime_shape_helpers_cover_mixed_surreal_mode() -> None:
-    assert default_auth_store(store="legacy") == "postgres"
-    assert fully_surreal_runtime(store="surreal", auth_store="postgres") is False
-    assert requires_surreal_support(store="surreal", auth_store="postgres") is True
-    assert uses_relational_auth(auth_store="postgres") is True
-    assert requires_relational_support(store="surreal", auth_store="postgres") is True
+    assert default_auth_store(store="legacy") == "surreal"
+    assert fully_surreal_runtime(store="legacy", auth_store="surreal") is False
+    assert requires_surreal_support(store="legacy", auth_store="surreal") is True
+    assert uses_relational_auth(auth_store="postgres") is False
+    assert requires_relational_support(store="surreal", auth_store="postgres") is False
 
 
 def test_runtime_shape_object_helpers_fall_back_to_store_defaults() -> None:
     runtime = SimpleNamespace(store="legacy", coordination_backend="auto")
 
-    assert resolve_object_auth_store(runtime, default_store="surreal") == "postgres"
-    assert requires_object_surreal_support(runtime, default_store="surreal") is False
+    assert resolve_object_auth_store(runtime, default_store="surreal") == "surreal"
+    assert requires_object_surreal_support(runtime, default_store="surreal") is True
     assert requires_object_relational_support(runtime, default_store="surreal") is True
-    assert uses_object_relational_auth(runtime, default_store="surreal") is True
+    assert uses_object_relational_auth(runtime, default_store="surreal") is False
     assert resolve_object_coordination_backend(runtime, default_store="surreal") == "redis"
 
 

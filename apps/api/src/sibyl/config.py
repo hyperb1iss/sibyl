@@ -89,7 +89,7 @@ class Settings(BaseSettings):
         default="surreal",
         description="Active persistence runtime for this process",
     )
-    auth_store: Literal["postgres", "surreal"] = Field(
+    auth_store: Literal["surreal"] = Field(
         default="surreal",
         description="Active auth persistence runtime for this process",
     )
@@ -347,9 +347,7 @@ class Settings(BaseSettings):
 
         # Gemini: check GEMINI_API_KEY then GOOGLE_API_KEY if SIBYL_GEMINI_API_KEY not set
         if not self.gemini_api_key.get_secret_value():
-            fallback = os.environ.get("GEMINI_API_KEY", "") or os.environ.get(
-                "GOOGLE_API_KEY", ""
-            )
+            fallback = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
             if fallback:
                 object.__setattr__(self, "gemini_api_key", SecretStr(fallback))
 

@@ -9,53 +9,36 @@ from sibyl.db.models import ProjectRole
 from sibyl.persistence import auth_runtime
 from sibyl.persistence.auth_common import InvalidAuthClaimsError, UserNotFoundError
 from sibyl.persistence.legacy import auth_runtime as legacy_auth_runtime
-from sibyl.persistence.legacy.auth import LegacyAuthContextResolver, LegacySessionRepository
 from sibyl.persistence.surreal import auth_runtime as surreal_auth_runtime
 from sibyl.persistence.surreal.auth import SurrealAuthContextResolver
 from sibyl.persistence.surreal.auth_runtime import SurrealSessionRepository
 
 
-def test_auth_runtime_uses_shared_error_types(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "postgres")
-
+def test_auth_runtime_uses_shared_error_types() -> None:
     assert auth_runtime.InvalidAuthClaimsError is InvalidAuthClaimsError
     assert auth_runtime.UserNotFoundError is UserNotFoundError
-    assert auth_runtime.AuthContextResolver is LegacyAuthContextResolver
-    assert auth_runtime.SessionRepository is LegacySessionRepository
+    assert auth_runtime.AuthContextResolver is SurrealAuthContextResolver
+    assert auth_runtime.SessionRepository is SurrealSessionRepository
     assert "AuthContextResolver" in dir(auth_runtime)
 
 
-def test_auth_runtime_maps_resolver_name_for_surreal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
-
+def test_auth_runtime_maps_resolver_name_for_surreal() -> None:
     assert auth_runtime.AuthContextResolver is SurrealAuthContextResolver
     assert auth_runtime.SessionRepository is SurrealSessionRepository
 
 
-def test_auth_runtime_maps_auth_exports_for_surreal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
-
+def test_auth_runtime_maps_auth_exports_for_surreal() -> None:
     assert auth_runtime._resolve_backend_export("authenticate_api_key").__module__ == (
         "sibyl.persistence.surreal.auth_runtime"
     )
 
 
-def test_auth_runtime_maps_auth_exports_for_postgres(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "postgres")
-
+def test_auth_runtime_resolves_surreal_after_postgres_auth_removal() -> None:
     assert auth_runtime._resolve_backend_export("authenticate_api_key").__module__ == (
-        "sibyl.persistence.legacy.auth"
+        "sibyl.persistence.surreal.auth_runtime"
     )
-    assert auth_runtime.AuthContextResolver is LegacyAuthContextResolver
-    assert auth_runtime.SessionRepository is LegacySessionRepository
+    assert auth_runtime.AuthContextResolver is SurrealAuthContextResolver
+    assert auth_runtime.SessionRepository is SurrealSessionRepository
 
 
 def test_auth_runtime_exports_neutral_runtime_surface() -> None:
@@ -75,28 +58,17 @@ def test_auth_runtime_exports_neutral_runtime_surface() -> None:
     assert surreal_auth_runtime.SessionRepository is SurrealSessionRepository
 
 
-def test_auth_runtime_backends_cover_public_exports(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_auth_runtime_backends_cover_public_exports() -> None:
     skipped = {"InvalidAuthClaimsError", "UserNotFoundError"}
 
-    for backend, module in (
-        ("postgres", legacy_auth_runtime),
-        ("surreal", surreal_auth_runtime),
-    ):
-        monkeypatch.setattr(auth_runtime.settings, "auth_store", backend)
-        for name in auth_runtime.__all__:
-            if name in skipped:
-                continue
-            assert hasattr(module, name), f"{backend}:{name}"
-            assert auth_runtime._resolve_backend_export(name) is getattr(module, name)
+    for name in auth_runtime.__all__:
+        if name in skipped:
+            continue
+        assert hasattr(surreal_auth_runtime, name), name
+        assert auth_runtime._resolve_backend_export(name) is getattr(surreal_auth_runtime, name)
 
 
-def test_auth_runtime_surreal_backend_covers_public_exports(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
-
+def test_auth_runtime_surreal_backend_covers_public_exports() -> None:
     skipped = {"InvalidAuthClaimsError", "UserNotFoundError"}
 
     for name in auth_runtime.__all__:
@@ -114,7 +86,6 @@ async def test_auth_runtime_dispatches_profile_patch_to_surreal(
     expected = object()
     dispatched = AsyncMock(return_value=expected)
 
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
     monkeypatch.setattr(surreal_auth_runtime, "patch_auth_user", dispatched)
 
     result = await auth_runtime.patch_auth_user(
@@ -140,7 +111,6 @@ async def test_auth_runtime_neutral_api_key_alias_dispatches_to_surreal(
     expected = object()
     dispatched = AsyncMock(return_value=expected)
 
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
     monkeypatch.setattr(surreal_auth_runtime, "authenticate_api_key", dispatched)
 
     result = await auth_runtime.authenticate_api_key("sk_live_test")
@@ -157,7 +127,6 @@ async def test_auth_runtime_neutral_login_alias_dispatches_to_surreal(
     request = object()
     dispatched = AsyncMock(return_value=expected)
 
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
     monkeypatch.setattr(surreal_auth_runtime, "login_local_user", dispatched)
 
     result = await auth_runtime.login_local_user(
@@ -175,7 +144,7 @@ async def test_auth_runtime_neutral_login_alias_dispatches_to_surreal(
 
 
 @pytest.mark.asyncio
-async def test_auth_runtime_dispatches_auth_context_resolution_to_postgres_helper(
+async def test_auth_runtime_dispatches_auth_context_resolution_to_surreal_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     claims = {"sub": str(uuid4()), "org": str(uuid4())}
@@ -183,8 +152,7 @@ async def test_auth_runtime_dispatches_auth_context_resolution_to_postgres_helpe
     expected = object()
     dispatched = AsyncMock(return_value=expected)
 
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "postgres")
-    monkeypatch.setattr(legacy_auth_runtime, "resolve_auth_context", dispatched)
+    monkeypatch.setattr(surreal_auth_runtime, "resolve_auth_context", dispatched)
 
     result = await auth_runtime.resolve_auth_context(claims=claims, session=session)
 
@@ -193,15 +161,14 @@ async def test_auth_runtime_dispatches_auth_context_resolution_to_postgres_helpe
 
 
 @pytest.mark.asyncio
-async def test_auth_runtime_dispatches_oauth_listing_to_postgres_helper(
+async def test_auth_runtime_dispatches_oauth_listing_to_surreal_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_id = uuid4()
     expected = object()
     dispatched = AsyncMock(return_value=expected)
 
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "postgres")
-    monkeypatch.setattr(legacy_auth_runtime, "list_oauth_connections", dispatched)
+    monkeypatch.setattr(surreal_auth_runtime, "list_oauth_connections", dispatched)
 
     result = await auth_runtime.list_oauth_connections(user_id=user_id)
 
@@ -217,7 +184,6 @@ async def test_auth_runtime_dispatches_project_lookup_by_graph_id_to_surreal(
     expected = object()
     dispatched = AsyncMock(return_value=expected)
 
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
     monkeypatch.setattr(surreal_auth_runtime, "get_project_record_by_graph_id", dispatched)
 
     result = await auth_runtime.get_project_record_by_graph_id(
@@ -233,7 +199,7 @@ async def test_auth_runtime_dispatches_project_lookup_by_graph_id_to_surreal(
 
 
 @pytest.mark.asyncio
-async def test_auth_runtime_dispatches_project_lookup_by_id_to_postgres_helper(
+async def test_auth_runtime_dispatches_project_lookup_by_id_to_surreal_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     organization_id = uuid4()
@@ -241,8 +207,7 @@ async def test_auth_runtime_dispatches_project_lookup_by_id_to_postgres_helper(
     expected = object()
     dispatched = AsyncMock(return_value=expected)
 
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "postgres")
-    monkeypatch.setattr(legacy_auth_runtime, "get_project_record_by_id", dispatched)
+    monkeypatch.setattr(surreal_auth_runtime, "get_project_record_by_id", dispatched)
 
     result = await auth_runtime.get_project_record_by_id(
         organization_id=organization_id,
@@ -264,7 +229,6 @@ async def test_auth_runtime_dispatches_project_access_list_to_surreal_helper(
     expected = {"project_alpha"}
     dispatched = AsyncMock(return_value=expected)
 
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "surreal")
     monkeypatch.setattr(
         surreal_auth_runtime,
         "list_accessible_project_graph_ids",
@@ -278,15 +242,14 @@ async def test_auth_runtime_dispatches_project_access_list_to_surreal_helper(
 
 
 @pytest.mark.asyncio
-async def test_auth_runtime_dispatches_entity_project_access_to_postgres_helper(
+async def test_auth_runtime_dispatches_entity_project_access_to_surreal_helper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ctx = object()
     expected = ProjectRole.CONTRIBUTOR
     dispatched = AsyncMock(return_value=expected)
 
-    monkeypatch.setattr(auth_runtime.settings, "auth_store", "postgres")
-    monkeypatch.setattr(legacy_auth_runtime, "verify_entity_project_access", dispatched)
+    monkeypatch.setattr(surreal_auth_runtime, "verify_entity_project_access", dispatched)
 
     result = await auth_runtime.verify_entity_project_access(
         ctx=ctx,

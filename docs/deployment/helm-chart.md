@@ -594,7 +594,7 @@ The chart includes these templates:
 | surreal-secret.yaml      | Auto-generated Surreal secret (default)      |
 | redis-secret.yaml        | Auto-generated Redis/Valkey secret           |
 | falkordb-secret.yaml     | Auto-generated FalkorDB secret (legacy only) |
-| migration-job.yaml       | Alembic migration Job (postgres auth only)   |
+| migration-job.yaml       | Alembic migration Job (legacy content only)  |
 | serviceaccount.yaml      | ServiceAccount                               |
 
 ## Debugging

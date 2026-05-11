@@ -1,3 +1,5 @@
+import pytest
+
 from sibyl.config import Settings
 
 
@@ -39,9 +41,9 @@ def test_settings_store_uses_store_env(monkeypatch) -> None:
     s = Settings(_env_file=None)
 
     assert s.store == "legacy"
-    assert s.auth_store == "postgres"
+    assert s.auth_store == "surreal"
     assert s.fully_surreal is False
-    assert s.uses_relational_auth is True
+    assert s.uses_relational_auth is False
     assert s.requires_relational_support is True
     assert s.resolved_coordination_backend == "redis"
 
@@ -71,17 +73,12 @@ def test_settings_reads_surreal_token(monkeypatch) -> None:
     assert s.surreal_token.get_secret_value() == "token-123"
 
 
-def test_settings_surreal_store_keeps_explicit_postgres_auth(monkeypatch) -> None:
+def test_settings_rejects_removed_postgres_auth_store(monkeypatch) -> None:
     monkeypatch.setenv("SIBYL_STORE", "surreal")
     monkeypatch.setenv("SIBYL_AUTH_STORE", "postgres")
 
-    s = Settings(_env_file=None)
-
-    assert s.store == "surreal"
-    assert s.auth_store == "postgres"
-    assert s.fully_surreal is False
-    assert s.uses_relational_auth is True
-    assert s.requires_relational_support is True
+    with pytest.raises(ValueError, match="auth_store"):
+        Settings(_env_file=None)
 
 
 def test_settings_coordination_backend_can_override_auto() -> None:

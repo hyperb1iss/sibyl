@@ -9,9 +9,9 @@ Sibyl ships CLI tooling to move an organization (or a whole install) from the le
 PostgreSQL stack to SurrealDB. The migration is an explicit, reversible operation — nothing happens
 automatically when you upgrade.
 
-SurrealDB is the default runtime now. Legacy and mixed modes remain as compatibility paths for
-existing installs during the migration window, but new deployments should not start on FalkorDB or
-PostgreSQL auth.
+SurrealDB is the default runtime now. Legacy graph/content mode remains as a compatibility path for
+existing installs during the migration window, but new deployments should not start on FalkorDB.
+Auth/RBAC always runs on SurrealDB.
 
 Read the [SurrealDB migration release notes](./surrealdb-migration-release-notes.md) first if you
 are upgrading an existing install.
@@ -49,14 +49,12 @@ This writes a versioned archive containing:
 
 ```bash
 SIBYL_STORE=surreal \
-SIBYL_AUTH_STORE=surreal \
 SIBYL_SURREAL_URL=ws://localhost:8000/rpc \
 sibyld migrate import /tmp/sibyl-migration.tar.gz
 ```
 
 The structured `auth.json` and `content.json` payloads restore directly into SurrealDB.
-`--restore-database-dump` is only needed if the target is in mixed mode or you want to keep a
-relational copy during transition.
+`--restore-database-dump` is only needed when restoring legacy relational content sidecars.
 
 ### 3. Verify
 

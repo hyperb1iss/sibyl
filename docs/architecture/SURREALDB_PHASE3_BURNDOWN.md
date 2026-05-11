@@ -51,7 +51,7 @@ Status: satisfied for opening Phase 3 by `v0.6.0`. Keep adding evidence when the
 new migration or rollback gaps.
 
 - Run a live rehearsal against a production-like legacy archive and a fresh Surreal runtime.
-- Run `auth-flow-compare` against distinct PostgreSQL-auth and Surreal-auth APIs.
+- Run the auth-flow replay against the Surreal-backed API.
 - Validate local migration from a real single-org legacy install.
 - Validate local migration from a real multi-org legacy install.
 - Keep release notes current with the results and any deviations.

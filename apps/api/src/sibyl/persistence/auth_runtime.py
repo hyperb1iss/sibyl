@@ -10,7 +10,6 @@ from uuid import UUID
 from starlette.requests import Request
 
 from sibyl.auth.context import AuthContext
-from sibyl.config import settings
 from sibyl.persistence.auth_common import InvalidAuthClaimsError, UserNotFoundError
 from sibyl_core.auth import ProjectRole
 
@@ -26,7 +25,6 @@ class ProjectRecord(Protocol):
 
 
 _BACKEND_MODULES = {
-    "postgres": "sibyl.persistence.legacy.auth_runtime",
     "surreal": "sibyl.persistence.surreal.auth_runtime",
 }
 
@@ -92,7 +90,7 @@ __all__ += [
 
 
 def _active_backend_name() -> str:
-    return settings.auth_store
+    return "surreal"
 
 
 def _resolve_backend_export(name: str) -> object:

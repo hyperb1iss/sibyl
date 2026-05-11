@@ -5,29 +5,32 @@ from __future__ import annotations
 from typing import Literal, cast
 
 RuntimeStore = Literal["legacy", "surreal"]
-AuthStore = Literal["postgres", "surreal"]
+AuthStore = Literal["surreal"]
 ConfiguredCoordinationBackend = Literal["auto", "local", "redis"]
 ResolvedCoordinationBackend = Literal["local", "redis"]
 
 
 def default_auth_store(*, store: RuntimeStore) -> AuthStore:
-    return "surreal" if store == "surreal" else "postgres"
+    del store
+    return "surreal"
 
 
-def requires_surreal_support(*, store: RuntimeStore, auth_store: AuthStore) -> bool:
+def requires_surreal_support(*, store: RuntimeStore, auth_store: str) -> bool:
     return store == "surreal" or auth_store == "surreal"
 
 
-def fully_surreal_runtime(*, store: RuntimeStore, auth_store: AuthStore) -> bool:
+def fully_surreal_runtime(*, store: RuntimeStore, auth_store: str) -> bool:
     return store == "surreal" and auth_store == "surreal"
 
 
-def uses_relational_auth(*, auth_store: AuthStore) -> bool:
-    return auth_store == "postgres"
+def uses_relational_auth(*, auth_store: str) -> bool:
+    del auth_store
+    return False
 
 
-def requires_relational_support(*, store: RuntimeStore, auth_store: AuthStore) -> bool:
-    return store == "legacy" or uses_relational_auth(auth_store=auth_store)
+def requires_relational_support(*, store: RuntimeStore, auth_store: str) -> bool:
+    del auth_store
+    return store == "legacy"
 
 
 def resolve_coordination_backend(
@@ -53,7 +56,7 @@ def resolve_object_auth_store(
     default_store: RuntimeStore = "surreal",
 ) -> AuthStore:
     auth_store = getattr(value, "auth_store", None)
-    if auth_store in {"postgres", "surreal"}:
+    if auth_store == "surreal":
         return cast("AuthStore", auth_store)
     return default_auth_store(store=resolve_object_store(value, default=default_store))
 

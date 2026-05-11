@@ -41,7 +41,7 @@ class TestDisableAuthSecurity:
                 "environment": env,
                 "disable_auth": False,
                 "store": "legacy",
-                "auth_store": "postgres",
+                "auth_store": "surreal",
             }
             if env == "production":
                 kwargs["falkordb_password"] = "secure_falkordb_pw"
@@ -74,7 +74,7 @@ class TestEnvironmentValidation:
             kwargs: dict[str, object] = {
                 "environment": env,
                 "store": "legacy",
-                "auth_store": "postgres",
+                "auth_store": "surreal",
             }
             if env == "production":
                 kwargs["falkordb_password"] = "secure_falkordb_pw"
@@ -103,7 +103,7 @@ class TestProductionPasswordSecurity:
             Settings(
                 environment="production",
                 store="legacy",
-                auth_store="postgres",
+                auth_store="surreal",
                 falkordb_password="sibyl_dev",
                 postgres_password="secure_pw",
             )
@@ -114,7 +114,7 @@ class TestProductionPasswordSecurity:
             Settings(
                 environment="production",
                 store="legacy",
-                auth_store="postgres",
+                auth_store="surreal",
                 falkordb_password="secure_pw",
                 postgres_password="sibyl_dev",
             )
@@ -145,7 +145,7 @@ class TestProductionPasswordSecurity:
         settings = Settings(
             environment="production",
             store="legacy",
-            auth_store="postgres",
+            auth_store="surreal",
             falkordb_password="my_secure_falkordb",
             postgres_password="my_secure_postgres",
         )

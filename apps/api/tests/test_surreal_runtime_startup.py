@@ -31,7 +31,7 @@ async def test_bootstrap_surreal_runtime_schemas_runs_auth_and_content(
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_surreal_runtime_schemas_skips_relational_auth(
+async def test_bootstrap_surreal_runtime_schemas_bootstraps_auth_when_postgres_requested(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bootstrap_auth = AsyncMock()
@@ -48,12 +48,12 @@ async def test_bootstrap_surreal_runtime_schemas_skips_relational_auth(
 
     assert await surreal_runtime_startup.bootstrap_surreal_runtime_schemas() is True
 
-    bootstrap_auth.assert_not_awaited()
+    bootstrap_auth.assert_awaited_once()
     bootstrap_content.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_surreal_runtime_schemas_disabled_without_surreal(
+async def test_bootstrap_surreal_runtime_schemas_bootstraps_auth_for_legacy_store(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bootstrap_auth = AsyncMock()
@@ -68,9 +68,9 @@ async def test_bootstrap_surreal_runtime_schemas_disabled_without_surreal(
         bootstrap_content,
     )
 
-    assert await surreal_runtime_startup.bootstrap_surreal_runtime_schemas() is False
+    assert await surreal_runtime_startup.bootstrap_surreal_runtime_schemas() is True
 
-    bootstrap_auth.assert_not_awaited()
+    bootstrap_auth.assert_awaited_once()
     bootstrap_content.assert_not_awaited()
 
 

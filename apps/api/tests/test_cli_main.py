@@ -81,7 +81,7 @@ def test_setup_surreal_services_skips_redis_for_local_coordination(monkeypatch) 
     assert checked == [("127.0.0.1", 8000)]
 
 
-def test_setup_surreal_services_checks_postgres_for_mixed_auth(monkeypatch) -> None:
+def test_setup_surreal_services_ignores_removed_postgres_auth(monkeypatch) -> None:
     checked: list[tuple[str, int]] = []
 
     def tcp_service_running(host: str, port: int) -> bool:
@@ -101,7 +101,7 @@ def test_setup_surreal_services_checks_postgres_for_mixed_auth(monkeypatch) -> N
     )
 
     assert cli_main._check_surreal_services(runtime_settings) is True
-    assert checked == [("127.0.0.1", 8000), ("127.0.0.1", 5433)]
+    assert checked == [("127.0.0.1", 8000)]
 
 
 def test_setup_surreal_services_checks_redis_when_configured(monkeypatch) -> None:
@@ -138,14 +138,14 @@ def test_setup_runtime_services_checks_legacy_graph_and_relational_sidecars(monk
 
     runtime_settings = SimpleNamespace(
         store="legacy",
-        auth_store="postgres",
+        auth_store="surreal",
         coordination_backend="auto",
     )
 
     assert cli_main._check_runtime_services(runtime_settings) is True
     check_falkordb.assert_called_once_with(runtime_settings)
-    check_relational.assert_called_once_with(runtime_settings)
-    check_surreal.assert_not_called()
+    check_surreal.assert_called_once_with(runtime_settings)
+    check_relational.assert_not_called()
 
 
 def test_setup_runtime_services_defaults_missing_store_to_surreal(monkeypatch) -> None:

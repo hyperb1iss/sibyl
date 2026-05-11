@@ -1,21 +1,21 @@
 ---
 title: Storage Modes
-description: The three supported storage configurations and when to pick each
+description: The supported storage configurations and when to pick each
 ---
 
 # Storage Modes
 
-Sibyl supports three storage configurations, controlled by two environment variables:
+Sibyl supports two storage configurations, controlled by `SIBYL_STORE`.
+Auth is always stored in SurrealDB.
 
-| Mode                          | `SIBYL_STORE` | `SIBYL_AUTH_STORE` | Coordination | External services             |
-| ----------------------------- | ------------- | ------------------ | ------------ | ----------------------------- |
-| **Fully Surreal** _(default)_ | `surreal`     | `surreal`          | `local`      | SurrealDB                     |
-| **Mixed (transitional)**      | `surreal`     | `postgres`         | `local`      | SurrealDB + PostgreSQL        |
-| **Legacy**                    | `legacy`      | `postgres`         | `redis`      | FalkorDB + PostgreSQL + Redis |
+| Mode                          | `SIBYL_STORE` | Auth store | Coordination | External services             |
+| ----------------------------- | ------------- | ---------- | ------------ | ----------------------------- |
+| **Fully Surreal** _(default)_ | `surreal`     | SurrealDB  | `local`      | SurrealDB                     |
+| **Legacy graph/content**      | `legacy`      | SurrealDB  | `redis`      | FalkorDB + PostgreSQL + Redis |
 
-Mixed and legacy modes are compatibility paths for existing installs. Fully Surreal is the only
-recommended target for new deployments, and the PostgreSQL auth store is planned for removal after
-one compatibility release once the migration gates are green.
+Legacy mode is a compatibility path for existing installs that still need FalkorDB graph storage or
+PostgreSQL content sidecars. Fully Surreal is the only recommended target for new deployments.
+`SIBYL_AUTH_STORE=postgres` was removed after the v0.6.0 compatibility release.
 
 Existing installs should read the
 [SurrealDB migration release notes](./surrealdb-migration-release-notes.md) before upgrading.
@@ -33,7 +33,6 @@ Graph, content, and auth all live in one SurrealDB instance, with per-org isolat
 
 ```bash
 SIBYL_STORE=surreal
-SIBYL_AUTH_STORE=surreal
 # SIBYL_SURREAL_URL=ws://surrealdb:8000/rpc  (or)
 # SIBYL_SURREAL_DATA_DIR=./.moon/cache/surreal-dev
 ```
@@ -43,37 +42,23 @@ SIBYL_AUTH_STORE=surreal
   rejected by the production config validator.
 - **Server version:** use SurrealDB 3.x, and pin the exact server image/tag in production.
 
-## Mixed (transitional)
-
-**Pick this for:** existing deploys moving from legacy, where you have a mature PostgreSQL
-operational story (backups, PITR, replicas) and want to keep auth there while graph/content move to
-SurrealDB.
-
-```bash
-SIBYL_STORE=surreal
-SIBYL_AUTH_STORE=postgres
-```
-
-This is a stepping stone, not a long-term target. Do not start a new install here. Once you're
-comfortable, migrate auth to Surreal too (`SIBYL_AUTH_STORE=surreal`) and retire Postgres.
-
-## Legacy
+## Legacy graph/content
 
 **Pick this for:** existing production deploys that aren't ready to migrate yet, or teams with
 strict dependencies on FalkorDB/Postgres tooling during the compatibility window.
 
 ```bash
 SIBYL_STORE=legacy
-SIBYL_AUTH_STORE=postgres
 SIBYL_COORDINATION_BACKEND=redis
 ```
 
 - FalkorDB backs the knowledge graph
-- PostgreSQL backs auth, crawled docs, embeddings
+- PostgreSQL backs crawled docs, embeddings, and relational sidecars
+- SurrealDB backs auth/RBAC
 - Redis/Valkey backs the job queue and coordination
 
-All three services are required. See [environment.md](../deployment/environment.md) for the full
-variable list.
+All four services are required in legacy mode. See [environment.md](../deployment/environment.md)
+for the full variable list.
 
 ## Switching modes
 
@@ -83,8 +68,5 @@ variable list.
 - **Local legacy dev install:** `moon run dev` detects existing legacy data before starting a fresh
   Surreal runtime. For the common single-org case, run `moon run dev -- --migrate-legacy` and Sibyl
   selects the only org automatically.
-- **Mixed → Fully Surreal:** export auth with `sibyld migrate export --skip-graph --skip-content`,
-  rehearse the archive, flip `SIBYL_AUTH_STORE=surreal`, import with
-  `sibyld migrate import <archive> --skip-graph --skip-content`, then run the auth-flow gate. Freeze
-  the legacy auth/RBAC tables with `moon run auth-readonly -- --mode freeze --apply --yes` for the
-  rollback window before Postgres is decommissioned.
+- **PostgreSQL auth removal:** if an old `.env` still sets `SIBYL_AUTH_STORE=postgres`, remove it.
+  The server rejects that value, and `moon run dev` normalizes local startup back to Surreal auth.

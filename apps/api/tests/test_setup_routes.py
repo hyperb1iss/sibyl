@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from sibyl.api.routes import setup as setup_routes
-from sibyl.persistence import operations_runtime
 from sibyl.persistence.legacy import setup as legacy_setup
 from sibyl.persistence.setup_common import SetupStatus
 from sibyl.persistence.surreal import setup as surreal_setup
@@ -53,7 +52,6 @@ async def test_get_setup_status_uses_surreal_setup_runtime_in_surreal_mode(
     surreal_status = AsyncMock(return_value=SetupStatus(has_users=True, has_orgs=True))
     legacy_status = AsyncMock(side_effect=AssertionError("legacy setup status should not run"))
 
-    monkeypatch.setattr(operations_runtime.settings, "auth_store", "surreal")
     monkeypatch.setattr(surreal_setup, "get_setup_status", surreal_status)
     monkeypatch.setattr(legacy_setup, "get_setup_status", legacy_status)
     monkeypatch.setattr(setup_routes, "get_settings_service", lambda: service)

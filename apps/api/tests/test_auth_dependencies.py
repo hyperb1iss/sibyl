@@ -174,7 +174,6 @@ async def test_build_auth_context_does_not_reuse_cache_for_explicit_session(
     resolve_auth_context = AsyncMock(return_value=session_ctx)
     request.state.auth_context = cached_ctx
 
-    monkeypatch.setattr(dependencies.settings, "auth_store", "postgres")
     monkeypatch.setattr(dependencies, "resolve_auth_context", resolve_auth_context)
 
     result = await dependencies.build_auth_context(request, session)
@@ -359,11 +358,9 @@ async def test_get_auth_session_uses_surreal_context_without_postgres(
 
 
 @pytest.mark.asyncio
-async def test_get_auth_session_keeps_relational_session_in_mixed_surreal_mode(
+async def test_get_auth_session_uses_plain_context_when_auth_is_surreal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from contextlib import asynccontextmanager
-
     user_id = uuid4()
     org_id = uuid4()
     request = _make_request(user_id=str(user_id), org_id=str(org_id))
@@ -371,31 +368,18 @@ async def test_get_auth_session_keeps_relational_session_in_mixed_surreal_mode(
         user=SimpleNamespace(id=user_id),
         organization=SimpleNamespace(id=org_id),
     )
-    mock_session = AsyncMock()
-    set_rls_context = AsyncMock()
     build_auth_context = AsyncMock(return_value=expected_ctx)
 
-    @asynccontextmanager
-    async def relational_session():
-        yield mock_session
-
     monkeypatch.setattr(rls.settings, "store", "surreal")
-    monkeypatch.setattr(dependencies.settings, "auth_store", "postgres")
-    monkeypatch.setattr(rls, "get_session", relational_session)
-    monkeypatch.setattr(rls, "set_rls_context", set_rls_context)
+    monkeypatch.setattr(rls.settings, "auth_store", "surreal")
     monkeypatch.setattr(dependencies, "build_auth_context", build_auth_context)
 
     generator = rls.get_auth_session(request)
     auth_session = await anext(generator)
 
     assert auth_session.ctx is expected_ctx
-    assert auth_session.session is mock_session
-    build_auth_context.assert_awaited_once_with(request, mock_session)
-    set_rls_context.assert_awaited_once_with(
-        mock_session,
-        user_id=user_id,
-        org_id=org_id,
-    )
+    assert auth_session.session is None
+    build_auth_context.assert_awaited_once_with(request, None)
 
     with pytest.raises(StopAsyncIteration):
         await anext(generator)

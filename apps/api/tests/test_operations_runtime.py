@@ -23,7 +23,6 @@ async def test_operations_runtime_dispatches_setup_status_to_surreal(
     surreal_status = AsyncMock(return_value=expected)
     legacy_status = AsyncMock(side_effect=AssertionError("legacy setup status should not run"))
 
-    monkeypatch.setattr(operations_runtime.settings, "auth_store", "surreal")
     monkeypatch.setattr(surreal_setup, "get_setup_status", surreal_status)
     monkeypatch.setattr(legacy_setup, "get_setup_status", legacy_status)
 
@@ -33,21 +32,20 @@ async def test_operations_runtime_dispatches_setup_status_to_surreal(
 
 
 @pytest.mark.asyncio
-async def test_operations_runtime_dispatches_settings_admin_to_postgres(
+async def test_operations_runtime_dispatches_settings_admin_to_surreal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = _request()
-    legacy_admin = AsyncMock()
-    surreal_admin = AsyncMock(side_effect=AssertionError("surreal settings admin should not run"))
+    legacy_admin = AsyncMock(side_effect=AssertionError("legacy settings admin should not run"))
+    surreal_admin = AsyncMock()
 
-    monkeypatch.setattr(operations_runtime.settings, "auth_store", "postgres")
     monkeypatch.setattr(legacy_setup, "require_settings_admin", legacy_admin)
     monkeypatch.setattr(surreal_setup, "require_settings_admin", surreal_admin)
 
     await operations_runtime.require_settings_admin(request)
 
-    legacy_admin.assert_awaited_once_with(request)
-    surreal_admin.assert_not_called()
+    surreal_admin.assert_awaited_once_with(request)
+    legacy_admin.assert_not_called()
 
 
 def test_operations_runtime_exports_neutral_runtime_surface() -> None:

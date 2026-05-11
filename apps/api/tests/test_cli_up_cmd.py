@@ -78,22 +78,17 @@ def test_up_starts_redis_when_surreal_coordination_backend_is_redis(
     assert env["SIBYL_REDIS_PORT"] == "6381"
 
 
-def test_up_starts_postgres_when_surreal_store_uses_postgres_auth(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_up_ignores_removed_postgres_auth_store(tmp_path: Path, monkeypatch) -> None:
     _clear_runtime_env(monkeypatch)
     (tmp_path / ".env").write_text("SIBYL_AUTH_STORE=postgres\n")
     run_compose, start_foreground = _prepare_up_command(monkeypatch, tmp_path)
 
     up_cmd.up()
 
-    run_compose.assert_called_once_with(
-        ["up", "-d", "surrealdb", "postgres"],
-        tmp_path,
-    )
+    run_compose.assert_called_once_with(["up", "-d", "surrealdb"], tmp_path)
     env = start_foreground.call_args.args[2]
     assert env["SIBYL_STORE"] == "surreal"
-    assert env["SIBYL_AUTH_STORE"] == "postgres"
+    assert env["SIBYL_AUTH_STORE"] == "surreal"
 
 
 def test_up_starts_legacy_stack_when_store_is_legacy(tmp_path: Path, monkeypatch) -> None:
@@ -103,9 +98,12 @@ def test_up_starts_legacy_stack_when_store_is_legacy(tmp_path: Path, monkeypatch
 
     up_cmd.up()
 
-    run_compose.assert_called_once_with(["up", "-d", "falkordb", "postgres", "redis"], tmp_path)
+    run_compose.assert_called_once_with(
+        ["up", "-d", "falkordb", "surrealdb", "postgres", "redis"], tmp_path
+    )
     env = start_foreground.call_args.args[2]
     assert env["SIBYL_STORE"] == "legacy"
+    assert env["SIBYL_AUTH_STORE"] == "surreal"
     assert up_cmd._resolve_coordination_backend(env) == "redis"
     assert env["SIBYL_REDIS_HOST"] == "127.0.0.1"
 
@@ -130,7 +128,7 @@ def test_warn_if_relational_runtime_recommends_surreal(monkeypatch) -> None:
     monkeypatch.setattr(up_cmd, "warn", warn)
     monkeypatch.setattr(up_cmd, "info", info)
 
-    up_cmd._warn_if_relational_runtime({"SIBYL_STORE": "surreal", "SIBYL_AUTH_STORE": "postgres"})
+    up_cmd._warn_if_relational_runtime({"SIBYL_STORE": "legacy", "SIBYL_AUTH_STORE": "surreal"})
 
     warn.assert_called_once_with(
         "Legacy relational runtime is deprecated; migrate this install to SurrealDB."

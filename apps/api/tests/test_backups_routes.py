@@ -46,7 +46,7 @@ async def test_get_backup_settings_uses_runtime_metadata(monkeypatch: pytest.Mon
         AsyncMock(return_value=settings),
     )
     monkeypatch.setattr(backup_routes.settings, "store", "legacy")
-    monkeypatch.setattr(backup_routes.settings, "auth_store", "postgres")
+    monkeypatch.setattr(backup_routes.settings, "auth_store", "surreal")
 
     response = await backup_routes.get_backup_settings(org=_org())
 
@@ -54,7 +54,7 @@ async def test_get_backup_settings_uses_runtime_metadata(monkeypatch: pytest.Mon
     assert response.retention_days == 30
     assert response.database_dump_supported is True
     assert response.include_database_dump is True
-    assert response.archive_contents == ["postgres.sql", "metadata.json"]
+    assert response.archive_contents == ["postgres.sql", "auth.json", "metadata.json"]
 
 
 @pytest.mark.asyncio
@@ -76,12 +76,12 @@ async def test_get_backup_settings_reads_database_dump_flag(
         AsyncMock(return_value=settings),
     )
     monkeypatch.setattr(backup_routes.settings, "store", "legacy")
-    monkeypatch.setattr(backup_routes.settings, "auth_store", "postgres")
+    monkeypatch.setattr(backup_routes.settings, "auth_store", "surreal")
 
     response = await backup_routes.get_backup_settings(org=_org())
 
     assert response.include_database_dump is False
-    assert response.archive_contents == ["metadata.json"]
+    assert response.archive_contents == ["auth.json", "metadata.json"]
 
 
 @pytest.mark.asyncio
@@ -92,7 +92,7 @@ async def test_create_backup_uses_runtime_record_helpers(monkeypatch: pytest.Mon
     queued = SimpleNamespace(id=backup.id, status="pending")
 
     monkeypatch.setattr(backup_routes.settings, "store", "legacy")
-    monkeypatch.setattr(backup_routes.settings, "auth_store", "postgres")
+    monkeypatch.setattr(backup_routes.settings, "auth_store", "surreal")
     monkeypatch.setattr(backup_routes, "generate_backup_id", lambda _: "backup_fixed")
     monkeypatch.setattr(
         backup_routes,
@@ -120,7 +120,7 @@ async def test_create_backup_uses_runtime_record_helpers(monkeypatch: pytest.Mon
 
     assert response.backup_id == "backup_fixed"
     assert response.job_id == "job-123"
-    assert response.archive_contents == ["postgres.sql", "metadata.json"]
+    assert response.archive_contents == ["postgres.sql", "auth.json", "metadata.json"]
 
 
 @pytest.mark.asyncio

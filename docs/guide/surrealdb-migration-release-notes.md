@@ -8,10 +8,9 @@ description: Release guidance for the SurrealDB-first storage cutover
 Sibyl now starts the SurrealDB runtime by default. New installs should use SurrealDB for graph,
 content, and auth. Do not start new deployments on FalkorDB or PostgreSQL auth.
 
-Legacy FalkorDB + PostgreSQL support remains available for existing installs during the migration
-window. It is a compatibility bridge, not the long-term runtime. Plan your migration now; the
-PostgreSQL auth store is scheduled for removal after one compatibility release once the live
-migration gates are green.
+Legacy FalkorDB + PostgreSQL content support remains available for existing installs during the
+migration window. It is a compatibility bridge, not the long-term runtime. PostgreSQL auth was
+removed after the v0.6.0 compatibility release; auth/RBAC now resolves through SurrealDB.
 
 ## What changed
 
@@ -55,7 +54,7 @@ Use the full migration playbook, not the local shortcut:
 5. Start a Surreal-backed API on a private cutover endpoint.
 6. Run archive verification.
 7. Run the auth-flow replay against the Surreal-backed API.
-8. Compare live PostgreSQL-auth and Surreal-auth stacks before cutover.
+8. Run the auth-flow replay against the target API.
 9. Run the Surreal cutover gate while writes are frozen.
 10. Freeze legacy auth/RBAC writes during the rollback window.
 
@@ -73,22 +72,20 @@ legacy-auth API and one Surreal-auth API, then pass distinct `--postgres-base-ur
 
 ## Compatibility window
 
-These paths stay available for one release cycle:
+These paths stay available while Phase 3 removes the remaining legacy storage:
 
 - `moon run dev-legacy`
 - `SIBYL_STORE=legacy`
-- `SIBYL_AUTH_STORE=postgres`
-- PostgreSQL auth/RBAC archive export
+- PostgreSQL content archive export
 - FalkorDB graph archive export
 
-After that compatibility window, Sibyl will remove the old auth/RBAC runtime first. Remaining
-non-auth PostgreSQL consumers will be removed in the Phase 3 storage cleanup.
+The old PostgreSQL auth/RBAC runtime has been removed. Remaining non-auth PostgreSQL consumers will
+be removed in the Phase 3 storage cleanup.
 
 ## Rollback posture
 
 The migration is explicit and archive-backed. Upgrading does not destructively rewrite your legacy
-data. If a cutover fails before Surreal accepts new writes, point traffic back to the legacy API and
-unfreeze auth/RBAC writes.
+data. If a cutover fails before Surreal accepts new writes, point traffic back to the legacy API.
 
 Once Surreal accepts new production writes, treating PostgreSQL as an instant read-write rollback is
 unsafe. Restore from the pre-cutover archive and replay any Surreal-only writes deliberately.

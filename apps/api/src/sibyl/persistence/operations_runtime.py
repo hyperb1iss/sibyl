@@ -7,7 +7,6 @@ from importlib import import_module
 from types import ModuleType
 from typing import TYPE_CHECKING, Protocol, cast
 
-from sibyl.config import settings
 from sibyl.persistence.auth_runtime import (
     confirm_password_reset,
     list_oauth_connections,
@@ -56,10 +55,7 @@ if TYPE_CHECKING:
     require_setup_mode_or_admin: RequireSetupModeOrAdmin
     require_setup_mode_or_auth: RequireSetupModeOrAuth
 
-_AUTH_BACKEND_MODULES = {
-    "postgres": "sibyl.persistence.legacy.setup",
-    "surreal": "sibyl.persistence.surreal.setup",
-}
+_AUTH_BACKEND_MODULE = "sibyl.persistence.surreal.setup"
 
 _AUTH_RUNTIME_EXPORTS = [
     "get_setup_status",
@@ -91,7 +87,7 @@ __all__ = [
 
 
 def _auth_backend_module() -> ModuleType:
-    return import_module(_AUTH_BACKEND_MODULES[settings.auth_store])
+    return import_module(_AUTH_BACKEND_MODULE)
 
 
 def _make_auth_runtime_proxy(name: str) -> RuntimeExport:

@@ -31,13 +31,13 @@ operational surface was heavier than the product itself.
 ## Honest tradeoffs
 
 - **Less battle-tested than Postgres** for deep relational workloads. If you have a mature Postgres
-  story (PITR, managed service, replicas), mixed mode can be a staging point while you migrate, not
-  a long-term destination.
+  story (PITR, managed service, replicas), legacy content sidecars can stay online while you
+  migrate, but they are not a long-term destination.
 - **Embedded mode is single-writer.** Multi-process local dev on embedded Surreal serializes through
   one writer; for real concurrency, run SurrealDB as a service (`ws://...`).
 - **Younger tooling.** Third-party tooling around SurrealDB (observability dashboards, migration
-  frameworks) is thinner than Postgres'. The relational auth path exists to stage the move, not to
-  keep two product stacks forever.
+  frameworks) is thinner than Postgres'. The remaining relational path exists to stage legacy
+  content migration, not to keep two product stacks forever.
 
 ## When to stay on legacy
 

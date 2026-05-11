@@ -48,17 +48,18 @@ def test_organization_runtime_exports_neutral_runtime_surface() -> None:
     assert hasattr(surreal_organization_runtime, "list_project_members")
 
 
-def test_organization_runtime_resolves_postgres_neutral_exports(
+def test_organization_runtime_uses_surreal_when_postgres_auth_is_requested(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(organization_runtime.settings, "auth_store", "postgres")
 
     assert (
-        organization_runtime._resolve_backend_export("list_orgs") is legacy_orgs_runtime.list_orgs
+        organization_runtime._resolve_backend_export("list_orgs")
+        is surreal_organization_runtime.list_orgs
     )
     assert (
         organization_runtime._resolve_backend_export("list_project_members")
-        is legacy_project_members_runtime.list_project_members
+        is surreal_organization_runtime.list_project_members
     )
 
 
@@ -1532,9 +1533,7 @@ async def test_surreal_delete_project_member_records_batches_deletes() -> None:
 
     assert len(fake_client.calls) == 1
     assert fake_client.calls[0][0] == "DELETE FROM project_members WHERE uuid IN $membership_ids;"
-    assert fake_client.calls[0][1] == {
-        "membership_ids": [str(membership_a), str(membership_b)]
-    }
+    assert fake_client.calls[0][1] == {"membership_ids": [str(membership_a), str(membership_b)]}
 
 
 @pytest.mark.asyncio

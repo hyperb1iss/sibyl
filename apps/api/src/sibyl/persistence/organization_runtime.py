@@ -220,15 +220,7 @@ _BACKEND_EXPORTS = [
     "update_project_member_role",
 ]
 
-_BACKEND_MODULES = {
-    "postgres": (
-        "sibyl.persistence.legacy.orgs",
-        "sibyl.persistence.legacy.org_members",
-        "sibyl.persistence.legacy.org_invitations",
-        "sibyl.persistence.legacy.project_members",
-    ),
-    "surreal": ("sibyl.persistence.surreal.organization_runtime",),
-}
+_BACKEND_MODULES = ("sibyl.persistence.surreal.organization_runtime",)
 
 __all__ = [
     "can_manage_project_members",
@@ -257,7 +249,7 @@ can_manage_project_members = _can_manage_project_members
 
 
 def _resolve_backend_export(name: str) -> RuntimeExport:
-    for module_path in _BACKEND_MODULES[settings.auth_store]:
+    for module_path in _BACKEND_MODULES:
         module = import_module(module_path)
         if hasattr(module, name):
             return cast("RuntimeExport", getattr(module, name))
