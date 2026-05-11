@@ -56,7 +56,7 @@ class Task(Entity):
 
     # Project organization
     # NOTE: project_id is optional during transition to shared project pattern.
-    # After running migration 0008_add_shared_project + backfill-shared-projects,
+    # After running the historical shared-project migration,
     # all entities will have a project_id (using shared project for org-wide knowledge).
     # TODO: Make this required after migration completes across all deployments.
     project_id: str | None = Field(default=None, description="Parent project UUID (optional)")

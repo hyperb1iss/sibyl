@@ -31,7 +31,7 @@ Phase 3 is done when:
 From the generated inventory:
 
 - 24 SQLModel tables remain in the codebase.
-- 7 files still contain raw SQL query usage.
+- 4 files still contain raw SQL query usage.
 - 0 files show session-backed storage access outside direct query usage.
 - Legacy transition dependencies remain in `apps/api/pyproject.toml`: `alembic`, `asyncpg`,
   `pgvector`, and `sqlmodel`.
@@ -163,8 +163,8 @@ Do this only after lanes 1-3 remove active consumers.
 Delete or retire:
 
 - `apps/api/src/sibyl/db/connection.py`
-- `apps/api/src/sibyl/db/project_sync.py`
-- `apps/api/src/sibyl/db/sync.py`
+- `apps/api/src/sibyl/db/project_sync.py` (deleted)
+- `apps/api/src/sibyl/db/sync.py` (deleted)
 - Alembic and `sibyld db` commands retained only for historical migration/archive policy.
 
 Preserve historical Alembic revisions as history. Do not rewrite old migrations.
@@ -181,7 +181,8 @@ Completed evidence:
 - API and combined app startup no longer import or call relational sidecar bootstrap.
 - Legacy relational session, RLS, and sidecar startup modules were deleted.
 - `sibyld up` no longer starts PostgreSQL for `SIBYL_STORE=legacy`.
-- Runtime inventory now reports 7 raw SQL query usage files and 0 session-backed storage access
+- Migration-era graph-to-Postgres project sync helpers and CLI commands were deleted.
+- Runtime inventory now reports 4 raw SQL query usage files and 0 session-backed storage access
   files.
 
 ### Lane 5 - Remove Legacy Graph and Dependencies

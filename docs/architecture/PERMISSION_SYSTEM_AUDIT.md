@@ -102,9 +102,8 @@ members” even for project-scoped writes when the project cannot be resolved in
   creation of the Postgres `projects` row is done** on project creation.
   - `packages/python/sibyl-core/src/sibyl_core/tools/add.py#L165-L177` (project IDs are graph IDs)
   - `apps/api/src/sibyl/api/routes/entities.py#L438-L559` (creates graph entity, no Postgres sync)
-- The only sync path found is a CLI admin utility, not a REST flow.
-  - `apps/api/src/sibyl/db/sync.py`
-  - `apps/api/src/sibyl/cli/db.py` (calls `sync_projects_from_graph()`)
+- The old graph-to-Postgres sync CLI was removed after Surreal auth became canonical; project RBAC
+  now needs to stay anchored in the Surreal auth/runtime paths instead of resurrecting the mirror.
 
 **Impact**:
 
