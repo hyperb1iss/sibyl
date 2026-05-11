@@ -767,6 +767,9 @@ First large-corpus gate:
 
 ### W5. SurrealDB SDK and Runtime Hardening
 
+Status: SDK 2.0 compatibility slice landed. The lockfile now resolves `surrealdb` 2.0.0, and the
+core/API/CLI Surreal contract tests pass against it.
+
 The official Python SDK's latest stable PyPI release is `surrealdb` 2.0.0, released 2026-04-23.
 Sibyl currently needs a compatibility spike before building new Cloud or live-query work on old SDK
 assumptions.
