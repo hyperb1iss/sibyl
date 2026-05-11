@@ -220,8 +220,8 @@ grant MCP access unless a more explicit “audience/scope” strategy is adopted
 - RLS policies explicitly allow access when `current_setting('app.org_id', true) IS NULL` (and same
   for `app.user_id`), which makes “no context” a bypass.
   - `apps/api/alembic/versions/0006_row_level_security.py#L64-L79`
-  - RLS tests explicitly assert this behavior:
-    - `apps/api/tests/test_rls_policies.py#L75-L86`
+  - The old PostgreSQL-only RLS integration test was removed when the active SQLModel/Alembic
+    runtime island was retired.
 - The historical app did not set `app.org_id` / `app.user_id` on its regular DB sessions. Active
   Surreal runtime paths no longer expose those PostgreSQL sessions.
 - A helper exists to set session variables (`get_rls_session()`), but it is not used anywhere, and
