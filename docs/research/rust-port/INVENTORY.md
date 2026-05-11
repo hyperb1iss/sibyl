@@ -11,7 +11,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - SQLModel tables: 24
 - Raw SQL query usage files: 30
 - Session-backed storage access files: 1
-- Graphiti import files: 22
+- Graphiti import files: 23
 - Dependency records: 8
 
 ## API Surface
@@ -133,8 +133,9 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - `apps/api/src/sibyl/persistence/graph_runtime.py` — `graphiti_core.edges`, `graphiti_core.errors`
 - `packages/python/sibyl-core/src/sibyl_core/backends/surreal/driver.py` — `graphiti_core.driver.driver`
 - `packages/python/sibyl-core/src/sibyl_core/graph/cached_embedder.py` — `graphiti_core.embedder.client`
-- `packages/python/sibyl-core/src/sibyl_core/graph/client.py` — `graphiti_core`, `graphiti_core.driver.driver`, `graphiti_core.driver.falkordb`, `graphiti_core.driver.falkordb_driver`, `graphiti_core.helpers`, `graphiti_core.llm_client`, `graphiti_core.llm_client.anthropic_client`, `graphiti_core.llm_client.config`, `graphiti_core.llm_client.openai_client`, `graphiti_core.search.search_utils`
+- `packages/python/sibyl-core/src/sibyl_core/graph/client.py` — `graphiti_core`, `graphiti_core.driver.driver`, `graphiti_core.driver.falkordb`, `graphiti_core.driver.falkordb_driver`, `graphiti_core.embedder.client`, `graphiti_core.embedder.openai`, `graphiti_core.helpers`, `graphiti_core.llm_client`, `graphiti_core.llm_client.anthropic_client`, `graphiti_core.llm_client.config`, `graphiti_core.llm_client.openai_client`, `graphiti_core.search.search_utils`
 - `packages/python/sibyl-core/src/sibyl_core/graph/entities.py` — `graphiti_core.nodes`, `graphiti_core.search.search_config_recipes`
+- `packages/python/sibyl-core/src/sibyl_core/graph/gemini_embedder.py` — `graphiti_core.embedder.client`
 - `packages/python/sibyl-core/src/sibyl_core/graph/mock_llm.py` — `graphiti_core.llm_client.client`, `graphiti_core.llm_client.config`, `graphiti_core.prompts.models`
 - `packages/python/sibyl-core/src/sibyl_core/graph/relationships.py` — `graphiti_core.edges`, `graphiti_core.errors`
 - `packages/python/sibyl-core/src/sibyl_core/graph/search_interface.py` — `graphiti_core.driver.record_parsers`, `graphiti_core.driver.search_interface.search_interface`, `graphiti_core.edges`, `graphiti_core.helpers`, `graphiti_core.nodes`, `graphiti_core.search`, `graphiti_core.search.search_utils`
@@ -162,7 +163,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 | `apps/api/pyproject.toml` | `asyncpg>=0.31.0` |
 | `apps/api/pyproject.toml` | `pgvector>=0.4.2` |
 | `apps/api/pyproject.toml` | `sqlmodel>=0.0.27` |
-| `packages/python/sibyl-core/pyproject.toml` | `graphiti-core[falkordb,anthropic]>=0.28.2` |
+| `packages/python/sibyl-core/pyproject.toml` | `graphiti-core[falkordb,anthropic,google-genai]>=0.28.2` |
 
 ### Target SurrealDB dependencies
 | Project | Dependency |
