@@ -108,16 +108,16 @@ class TestProductionPasswordSecurity:
                 postgres_password="secure_pw",
             )
 
-    def test_default_postgres_password_forbidden_in_production(self) -> None:
-        """Default PostgreSQL password should be rejected in production."""
-        with pytest.raises(ValueError, match="Default PostgreSQL password"):
-            Settings(
-                environment="production",
-                store="legacy",
-                auth_store="surreal",
-                falkordb_password="secure_pw",
-                postgres_password="sibyl_dev",
-            )
+    def test_default_postgres_password_allowed_after_sidecar_removal(self) -> None:
+        settings = Settings(
+            environment="production",
+            store="legacy",
+            auth_store="surreal",
+            falkordb_password="secure_pw",
+            postgres_password="sibyl_dev",
+        )
+
+        assert settings.requires_relational_support is False
 
     def test_legacy_password_defaults_do_not_block_fully_surreal_production(self) -> None:
         settings = Settings(

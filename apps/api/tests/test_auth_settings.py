@@ -44,7 +44,7 @@ def test_settings_store_uses_store_env(monkeypatch) -> None:
     assert s.auth_store == "surreal"
     assert s.fully_surreal is False
     assert s.uses_relational_auth is False
-    assert s.requires_relational_support is True
+    assert s.requires_relational_support is False
     assert s.resolved_coordination_backend == "redis"
 
 

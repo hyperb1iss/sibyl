@@ -127,7 +127,7 @@ def test_setup_surreal_services_checks_redis_when_configured(monkeypatch) -> Non
     assert checked == [("127.0.0.1", 8000), ("127.0.0.1", 6381)]
 
 
-def test_setup_runtime_services_checks_legacy_graph_and_relational_sidecars(monkeypatch) -> None:
+def test_setup_runtime_services_checks_legacy_graph_and_surreal_stack(monkeypatch) -> None:
     check_falkordb = MagicMock(return_value=True)
     check_surreal = MagicMock(return_value=True)
     check_relational = MagicMock(return_value=True)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -334,16 +333,9 @@ async def test_get_auth_session_uses_surreal_context_without_postgres(
         organization=SimpleNamespace(id=org_id),
     )
 
-    @asynccontextmanager
-    async def fail_get_session():
-        raise AssertionError("postgres session should stay off in surreal auth mode")
-        yield
-
     build_auth_context = AsyncMock(return_value=expected_ctx)
 
-    monkeypatch.setattr(rls.settings, "store", "surreal")
     monkeypatch.setattr(dependencies.settings, "auth_store", "surreal")
-    monkeypatch.setattr(rls, "get_session", fail_get_session)
     monkeypatch.setattr(dependencies, "build_auth_context", build_auth_context)
 
     generator = rls.get_auth_session(request)
@@ -370,8 +362,6 @@ async def test_get_auth_session_uses_plain_context_when_auth_is_surreal(
     )
     build_auth_context = AsyncMock(return_value=expected_ctx)
 
-    monkeypatch.setattr(rls.settings, "store", "surreal")
-    monkeypatch.setattr(rls.settings, "auth_store", "surreal")
     monkeypatch.setattr(dependencies, "build_auth_context", build_auth_context)
 
     generator = rls.get_auth_session(request)

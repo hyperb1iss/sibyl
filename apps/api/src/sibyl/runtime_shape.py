@@ -29,8 +29,9 @@ def uses_relational_auth(*, auth_store: str) -> bool:
 
 
 def requires_relational_support(*, store: RuntimeStore, auth_store: str) -> bool:
+    del store
     del auth_store
-    return store == "legacy"
+    return False
 
 
 def resolve_coordination_backend(

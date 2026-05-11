@@ -31,7 +31,7 @@ Phase 3 is done when:
 From the generated inventory:
 
 - 24 SQLModel tables remain in the codebase.
-- 9 files still contain raw SQL query usage.
+- 7 files still contain raw SQL query usage.
 - 0 files show session-backed storage access outside direct query usage.
 - Legacy transition dependencies remain in `apps/api/pyproject.toml`: `alembic`, `asyncpg`,
   `pgvector`, and `sqlmodel`.
@@ -156,6 +156,8 @@ Completed evidence:
 
 ### Lane 4 - Remove Ambient Relational Infrastructure
 
+Status: startup/session/RLS wiring complete. PostgreSQL archive and migration helpers remain.
+
 Do this only after lanes 1-3 remove active consumers.
 
 Delete or retire:
@@ -163,10 +165,7 @@ Delete or retire:
 - `apps/api/src/sibyl/db/connection.py`
 - `apps/api/src/sibyl/db/project_sync.py`
 - `apps/api/src/sibyl/db/sync.py`
-- `apps/api/src/sibyl/persistence/legacy/session.py`
-- `apps/api/src/sibyl/persistence/legacy/rls.py`
-- `apps/api/src/sibyl/persistence/legacy/sidecar_startup.py`
-- Alembic runtime wiring and `sibyld db` commands that imply PostgreSQL is active.
+- Alembic and `sibyld db` commands retained only for historical migration/archive policy.
 
 Preserve historical Alembic revisions as history. Do not rewrite old migrations.
 
@@ -175,6 +174,15 @@ Verification:
 - Startup never initializes PostgreSQL in fully Surreal mode.
 - No active route imports `sibyl.persistence.legacy.session` or `sibyl.auth.rls`.
 - Inventory shows zero session-backed storage access files.
+
+Completed evidence:
+
+- `settings.requires_relational_support` now resolves to false for all runtime shapes.
+- API and combined app startup no longer import or call relational sidecar bootstrap.
+- Legacy relational session, RLS, and sidecar startup modules were deleted.
+- `sibyld up` no longer starts PostgreSQL for `SIBYL_STORE=legacy`.
+- Runtime inventory now reports 7 raw SQL query usage files and 0 session-backed storage access
+  files.
 
 ### Lane 5 - Remove Legacy Graph and Dependencies
 
@@ -199,7 +207,7 @@ Verification:
 
 1. Remove auth/RBAC legacy code.
 2. Remove legacy content/settings/backup branches after archive policy is settled.
-3. Remove ambient PostgreSQL startup/session/RLS infrastructure.
+3. Finish PostgreSQL archive and migration policy.
 4. Remove `sqlmodel`, `asyncpg`, `pgvector`, and `alembic` from active dependencies.
 5. Remove FalkorDB compose/runtime support and Graphiti Falkor extras.
 

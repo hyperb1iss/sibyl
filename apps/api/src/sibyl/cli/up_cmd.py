@@ -29,7 +29,6 @@ from sibyl.cli.common import (
 )
 from sibyl.runtime_shape import (
     default_auth_store,
-    requires_relational_support,
     requires_surreal_support,
     resolve_coordination_backend,
 )
@@ -164,23 +163,9 @@ def _compose_services_for_env(env: dict[str, str]) -> list[str]:
         services.append("falkordb")
     if requires_surreal_support(store=store, auth_store=auth_store):
         services.append("surrealdb")
-    if requires_relational_support(store=store, auth_store=auth_store):
-        services.append("postgres")
     if _resolve_coordination_backend(env) == "redis":
         services.append("redis")
     return services
-
-
-def _warn_if_relational_runtime(env: dict[str, str]) -> None:
-    store = env.get("SIBYL_STORE", "surreal")
-    auth_store = env.get("SIBYL_AUTH_STORE", default_auth_store(store=store))
-    if not requires_relational_support(store=store, auth_store=auth_store):
-        return
-
-    warn("Legacy relational runtime is deprecated; migrate this install to SurrealDB.")
-    info("Recommended settings: SIBYL_STORE=surreal and SIBYL_AUTH_STORE=surreal")
-    info("Local single-org migration: moon run dev -- --migrate-legacy")
-    info("Migration playbook: docs/guide/migrating-from-falkor.md")
 
 
 def _configure_requested_worker_mode(env: dict[str, str], *, with_worker: bool) -> None:
@@ -231,7 +216,6 @@ def up(
     )
 
     env = _load_runtime_env(project_root)
-    _warn_if_relational_runtime(env)
 
     # Check Docker
     if not skip_docker:

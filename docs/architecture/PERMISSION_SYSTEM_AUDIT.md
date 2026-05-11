@@ -243,7 +243,8 @@ grant MCP access unless a more explicit “audience/scope” strategy is adopted
     role).
   - If NULL-bypass is required for migrations, use a dedicated migration role or explicit bypass GUC
     only settable by superuser.
-- Wire `set_rls_context()` into the DB session dependency in authenticated contexts.
+- Retired after the v0.6.0 Surreal auth cutover: relational RLS session dependencies no longer
+  participate in request handling.
 
 ---
 

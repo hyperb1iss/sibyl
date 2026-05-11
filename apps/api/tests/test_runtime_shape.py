@@ -37,7 +37,7 @@ def test_runtime_shape_object_helpers_fall_back_to_store_defaults() -> None:
 
     assert resolve_object_auth_store(runtime, default_store="surreal") == "surreal"
     assert requires_object_surreal_support(runtime, default_store="surreal") is True
-    assert requires_object_relational_support(runtime, default_store="surreal") is True
+    assert requires_object_relational_support(runtime, default_store="surreal") is False
     assert uses_object_relational_auth(runtime, default_store="surreal") is False
     assert resolve_object_coordination_backend(runtime, default_store="surreal") == "redis"
 
@@ -52,6 +52,6 @@ def test_runtime_shape_object_helpers_prefer_resolved_fields() -> None:
 
     assert resolve_object_auth_store(runtime) == "surreal"
     assert requires_object_surreal_support(runtime) is True
-    assert requires_object_relational_support(runtime) is True
+    assert requires_object_relational_support(runtime) is False
     assert uses_object_relational_auth(runtime) is False
     assert resolve_object_coordination_backend(runtime) == "local"
