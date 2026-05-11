@@ -31,7 +31,7 @@ Phase 3 is done when:
 From the generated inventory:
 
 - 24 SQLModel tables remain in the codebase.
-- 12 files still contain raw SQL query usage.
+- 9 files still contain raw SQL query usage.
 - 0 files show session-backed storage access outside direct query usage.
 - Legacy transition dependencies remain in `apps/api/pyproject.toml`: `alembic`, `asyncpg`,
   `pgvector`, and `sqlmodel`.
@@ -94,6 +94,9 @@ Completed evidence:
 
 ### Lane 2 - Prove and Retire Content Sidecars
 
+Status: active crawler, raw-capture, document search, and RAG runtime sidecars complete. Content
+archive policy remains open.
+
 Content has Surreal runtime and archive paths. Phase 3 needs proof before deletion.
 
 Decide each legacy module:
@@ -103,14 +106,23 @@ Decide each legacy module:
 - `apps/api/src/sibyl/persistence/legacy/rag.py`
 - `apps/api/src/sibyl/persistence/content_archive.py`
 
-Keep `content_archive.py` only if `postgres.sql` or legacy content archive import remains a
-supported compatibility feature after the auth cutover.
+Retain `apps/api/src/sibyl/persistence/content_archive.py` until archive policy is settled. It is
+now the explicit compatibility boundary for `postgres.sql` and legacy content archive export/import,
+not active route or worker dispatch.
 
 Verification:
 
 - Crawler, raw capture, document search, RAG, memory, and session routes pass in fully Surreal mode.
 - A real legacy content archive imports into Surreal content and verifies counts.
 - Inventory no longer lists active legacy content modules once compatibility support ends.
+
+Completed evidence:
+
+- Content runtime dispatch now resolves directly to the Surreal implementation.
+- Legacy crawler, document entity, and RAG persistence modules were deleted.
+- Focused content/RAG route tests passed with `32 passed`.
+- Runtime inventory now reports 9 raw SQL query usage files and 0 session-backed storage access
+  files.
 
 ### Lane 3 - Prove and Retire Settings and Backup Sidecars
 

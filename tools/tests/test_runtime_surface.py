@@ -40,7 +40,7 @@ def test_runtime_surface_finds_known_contracts() -> None:
     assert {record.name for record in surface.mcp_tools} >= {"search", "explore", "add"}
     assert "User" in surface.sqlmodel_tables
     assert any(
-        record.path == "apps/api/src/sibyl/persistence/legacy/crawler.py"
+        record.path == "apps/api/src/sibyl/persistence/content_archive.py"
         for record in surface.raw_sql_usage
     )
     assert not any(

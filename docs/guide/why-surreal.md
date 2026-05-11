@@ -31,8 +31,8 @@ operational surface was heavier than the product itself.
 ## Honest tradeoffs
 
 - **Less battle-tested than Postgres** for deep relational workloads. If you have a mature Postgres
-  story (PITR, managed service, replicas), legacy content sidecars can stay online while you
-  migrate, but they are not a long-term destination.
+  story (PITR, managed service, replicas), PostgreSQL archives can still support migration rehearsal
+  and rollback evidence, but they are not a long-term runtime destination.
 - **Embedded mode is single-writer.** Multi-process local dev on embedded Surreal serializes through
   one writer; for real concurrency, run SurrealDB as a service (`ws://...`).
 - **Younger tooling.** Third-party tooling around SurrealDB (observability dashboards, migration
@@ -41,10 +41,10 @@ operational surface was heavier than the product itself.
 
 ## When to stay on legacy
 
-Run `SIBYL_STORE=legacy` if you already have FalkorDB + PostgreSQL in production, haven't planned a
-migration window, or have internal tooling that reads the Postgres schema directly. Both stacks are
-supported during the migration window. See [storage-modes.md](./storage-modes.md) for the mode
-matrix and [migrating-from-falkor.md](./migrating-from-falkor.md) for the cutover playbook.
+Run `SIBYL_STORE=legacy` if you already have FalkorDB in production and haven't planned a migration
+window. PostgreSQL is now an archive/export compatibility surface, not the active content runtime.
+See [storage-modes.md](./storage-modes.md) for the mode matrix and
+[migrating-from-falkor.md](./migrating-from-falkor.md) for the cutover playbook.
 
 For the larger product and architecture direction, see
 [Sibyl Northstar](../architecture/SIBYL_NORTHSTAR.md).

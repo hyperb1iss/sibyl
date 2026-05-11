@@ -7,14 +7,14 @@ clusters.
 
 Sibyl consists of four components plus one unified storage backend (SurrealDB by default):
 
-| Component     | Purpose                              | Port   |
-| ------------- | ------------------------------------ | ------ |
-| **Backend**   | FastAPI + MCP server (sibyld serve)  | 3334   |
-| **Worker**    | arq job queue processor              | -      |
-| **Frontend**  | Next.js 16 web UI                    | 3337   |
-| **SurrealDB** | Graph + content + auth (default)     | 8000\* |
-| **FalkorDB**  | Graph database (legacy, opt-in)      | 6379\* |
-| **Postgres**  | Relational content sidecars (legacy) | 5432\* |
+| Component     | Purpose                             | Port   |
+| ------------- | ----------------------------------- | ------ |
+| **Backend**   | FastAPI + MCP server (sibyld serve) | 3334   |
+| **Worker**    | arq job queue processor             | -      |
+| **Frontend**  | Next.js 16 web UI                   | 3337   |
+| **SurrealDB** | Graph + content + auth (default)    | 8000\* |
+| **FalkorDB**  | Graph database (legacy, opt-in)     | 6379\* |
+| **Postgres**  | Archive/export sidecar (legacy)     | 5432\* |
 
 \*Default internal ports. External mappings vary by deployment mode.
 
@@ -52,8 +52,9 @@ Sibyl consists of four components plus one unified storage backend (SurrealDB by
                                    +------------------+
 ```
 
-For the legacy FalkorDB + PostgreSQL stack (`SIBYL_STORE=legacy`), the Backend and Worker connect to
-FalkorDB (knowledge graph) and PostgreSQL (relational data) instead. See
+For the legacy FalkorDB stack (`SIBYL_STORE=legacy`), the Backend and Worker connect to FalkorDB for
+the knowledge graph while active content/auth paths stay on SurrealDB. PostgreSQL remains only for
+archive export/import and temporary legacy cleanup surfaces during Phase 3. See
 [storage-modes.md](../guide/storage-modes.md) and
 [migrating-from-falkor.md](../guide/migrating-from-falkor.md).
 

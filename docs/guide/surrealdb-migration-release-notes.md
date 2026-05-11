@@ -8,9 +8,11 @@ description: Release guidance for the SurrealDB-first storage cutover
 Sibyl now starts the SurrealDB runtime by default. New installs should use SurrealDB for graph,
 content, and auth. Do not start new deployments on FalkorDB or PostgreSQL auth.
 
-Legacy FalkorDB + PostgreSQL content support remains available for existing installs during the
-migration window. It is a compatibility bridge, not the long-term runtime. PostgreSQL auth was
-removed after the v0.6.0 compatibility release; auth/RBAC now resolves through SurrealDB.
+Legacy FalkorDB support remains available for existing installs during the migration window. It is a
+compatibility bridge, not the long-term runtime. PostgreSQL auth was removed after the v0.6.0
+compatibility release, and active content/RAG runtime paths now resolve through SurrealDB.
+PostgreSQL content archive export remains available for migration and rollback evidence while Phase
+3 settles the archive policy.
 
 ## What changed
 
@@ -79,8 +81,9 @@ These paths stay available while Phase 3 removes the remaining legacy storage:
 - PostgreSQL content archive export
 - FalkorDB graph archive export
 
-The old PostgreSQL auth/RBAC runtime has been removed. Remaining non-auth PostgreSQL consumers will
-be removed in the Phase 3 storage cleanup.
+The old PostgreSQL auth/RBAC runtime and active PostgreSQL content sidecars have been removed.
+Remaining PostgreSQL consumers are archive readers/exporters and ambient legacy startup/sync code
+that will be retired in the Phase 3 storage cleanup.
 
 ## Rollback posture
 

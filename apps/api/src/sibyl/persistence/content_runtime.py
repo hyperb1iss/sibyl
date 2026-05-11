@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import asynccontextmanager
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol, cast
-
-from sibyl.config import settings
 
 
 class RuntimeExport(Protocol):
@@ -312,14 +310,7 @@ if TYPE_CHECKING:
     search_code_example_chunks: SearchCodeExampleChunks
     search_rag_chunks: SearchRAGChunks
 
-_BACKEND_MODULES = {
-    "legacy": (
-        "sibyl.persistence.legacy.crawler",
-        "sibyl.persistence.legacy.entities",
-        "sibyl.persistence.legacy.rag",
-    ),
-    "surreal": ("sibyl.persistence.surreal.content",),
-}
+_BACKEND_MODULE = "sibyl.persistence.surreal.content"
 
 _BACKEND_EXPORTS = [
     "create_crawl_source_record",
@@ -396,40 +387,18 @@ __all__ = [
 ]
 
 
-def _active_backend_name() -> str:
-    return settings.store
-
-
-def get_legacy_session() -> AbstractAsyncContextManager[object]:
-    from sibyl.persistence.legacy.session import get_legacy_session as _get_legacy_session
-
-    return _get_legacy_session()
-
-
 def _resolve_backend_export(name: str) -> RuntimeExport:
-    backend = _active_backend_name()
-    for module_name in _BACKEND_MODULES[backend]:
-        module = import_module(module_name)
-        if hasattr(module, name):
-            return cast("RuntimeExport", getattr(module, name))
-    msg = f"{name} is not implemented for SIBYL_STORE={backend!r}"
+    module = import_module(_BACKEND_MODULE)
+    if hasattr(module, name):
+        return cast("RuntimeExport", getattr(module, name))
+    msg = f"{name} is not implemented for the Surreal content runtime"
     raise AttributeError(msg)
-
-
-@asynccontextmanager
-async def get_session() -> AsyncGenerator[object]:
-    async with get_legacy_session() as session:
-        yield session
 
 
 @asynccontextmanager
 async def get_content_read_session() -> AsyncGenerator[object | None]:
     """Yield a relational session only when the active content runtime needs one."""
-    if settings.store == "surreal":
-        yield None
-        return
-    async with get_session() as session:
-        yield session
+    yield None
 
 
 async def get_content_read_session_dependency() -> AsyncGenerator[object | None]:

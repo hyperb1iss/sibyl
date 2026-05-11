@@ -139,9 +139,7 @@ class TestRAGSearchEndpoint:
     @pytest.mark.asyncio
     async def test_basic_search(
         self,
-        monkeypatch,
         mock_embed_text,
-        mock_session,
         mock_content_session,
         mock_auth_context,
         sample_chunk,
@@ -149,17 +147,12 @@ class TestRAGSearchEndpoint:
         sample_source,
     ):
         """Test basic RAG search functionality."""
-        from sibyl.persistence import content_runtime
+        rows = [(sample_chunk, sample_document, sample_source.name, sample_source.id, 0.85)]
 
-        monkeypatch.setattr(content_runtime.settings, "store", "legacy")
-        # Setup mock query result
-        mock_result = MagicMock()
-        mock_result.all.return_value = [
-            (sample_chunk, sample_document, sample_source.name, sample_source.id, 0.85)
-        ]
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        with patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session):
+        with (
+            patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session),
+            patch("sibyl.api.routes.rag.search_rag_chunks", AsyncMock(return_value=rows)),
+        ):
             from sibyl.api.routes.rag import rag_search
             from sibyl.api.schemas import RAGSearchRequest
 
@@ -288,9 +281,7 @@ class TestCodeExampleSearch:
     @pytest.mark.asyncio
     async def test_code_search(
         self,
-        monkeypatch,
         mock_embed_text,
-        mock_session,
         mock_content_session,
         mock_auth_context,
         sample_code_chunk,
@@ -298,16 +289,12 @@ class TestCodeExampleSearch:
         sample_source,
     ):
         """Test code example search."""
-        from sibyl.persistence import content_runtime
+        rows = [(sample_code_chunk, sample_document, sample_source.id, sample_source.name, 0.82)]
 
-        monkeypatch.setattr(content_runtime.settings, "store", "legacy")
-        mock_result = MagicMock()
-        mock_result.all.return_value = [
-            (sample_code_chunk, sample_document, sample_source.id, sample_source.name, 0.82)
-        ]
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        with patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session):
+        with (
+            patch("sibyl.api.routes.rag.get_content_read_session", mock_content_session),
+            patch("sibyl.api.routes.rag.search_code_example_chunks", AsyncMock(return_value=rows)),
+        ):
             from sibyl.api.routes.rag import search_code_examples
             from sibyl.api.schemas import CodeExampleRequest
 

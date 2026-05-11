@@ -420,5 +420,5 @@ settings.falkordb_url          # redis://:password@host:port  (legacy)
 settings.postgres_url          # postgresql+asyncpg://user:pass@host:port/db
 settings.postgres_url_sync     # postgresql://user:pass@host:port/db (for Alembic)
 settings.fully_surreal         # True when graph, content, and auth all use SurrealDB
-settings.requires_relational_support  # True when legacy content sidecars still need Postgres
+settings.requires_relational_support  # True while legacy archive/startup surfaces need Postgres
 ```

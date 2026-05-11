@@ -8,13 +8,15 @@ description: The supported storage configurations and when to pick each
 Sibyl supports two storage configurations, controlled by `SIBYL_STORE`. Auth is always stored in
 SurrealDB.
 
-| Mode                          | `SIBYL_STORE` | Auth store | Coordination | External services             |
-| ----------------------------- | ------------- | ---------- | ------------ | ----------------------------- |
-| **Fully Surreal** _(default)_ | `surreal`     | SurrealDB  | `local`      | SurrealDB                     |
-| **Legacy graph/content**      | `legacy`      | SurrealDB  | `redis`      | FalkorDB + PostgreSQL + Redis |
+| Mode                          | `SIBYL_STORE` | Auth store | Coordination | External services |
+| ----------------------------- | ------------- | ---------- | ------------ | ----------------- |
+| **Fully Surreal** _(default)_ | `surreal`     | SurrealDB  | `local`      | SurrealDB         |
+| **Legacy graph**              | `legacy`      | SurrealDB  | `redis`      | FalkorDB + Redis  |
 
-Legacy mode is a compatibility path for existing installs that still need FalkorDB graph storage or
-PostgreSQL content sidecars. Fully Surreal is the only recommended target for new deployments.
+Legacy mode is a compatibility path for existing installs that still need FalkorDB graph storage
+while migrating. Active auth, content, crawler, raw-capture, and RAG runtime paths resolve through
+SurrealDB. PostgreSQL remains only for archive export/import and ambient legacy cleanup until Phase
+3 removes that support. Fully Surreal is the only recommended target for new deployments.
 `SIBYL_AUTH_STORE=postgres` was removed after the v0.6.0 compatibility release.
 
 Existing installs should read the
@@ -42,10 +44,10 @@ SIBYL_STORE=surreal
   rejected by the production config validator.
 - **Server version:** use SurrealDB 3.x, and pin the exact server image/tag in production.
 
-## Legacy graph/content
+## Legacy graph
 
-**Pick this for:** existing production deploys that aren't ready to migrate yet, or teams with
-strict dependencies on FalkorDB/Postgres tooling during the compatibility window.
+**Pick this for:** existing production deploys that aren't ready to migrate the graph yet, or teams
+validating archive export/rehearsal during the compatibility window.
 
 ```bash
 SIBYL_STORE=legacy
@@ -53,12 +55,13 @@ SIBYL_COORDINATION_BACKEND=redis
 ```
 
 - FalkorDB backs the knowledge graph
-- PostgreSQL backs crawled docs, embeddings, and relational sidecars
-- SurrealDB backs auth/RBAC
+- SurrealDB backs auth/RBAC and active content/RAG runtime paths
+- PostgreSQL content archives remain available for migration and rollback evidence
 - Redis/Valkey backs the job queue and coordination
 
-All four services are required in legacy mode. See [environment.md](../deployment/environment.md)
-for the full variable list.
+Legacy cleanup code may still require PostgreSQL until Phase 3 removes the remaining relational
+startup and archive policy surfaces. See [environment.md](../deployment/environment.md) for the full
+variable list.
 
 ## Switching modes
 

@@ -7,16 +7,6 @@ from uuid import uuid4
 import pytest
 
 from sibyl.persistence import content_common, content_runtime, settings_runtime
-from sibyl.persistence.legacy import (
-    crawler as legacy_crawler,
-    entities as legacy_entities,
-)
-from sibyl.persistence.legacy.crawler import (
-    get_crawl_stats_payload as legacy_get_crawl_stats_payload,
-)
-from sibyl.persistence.legacy.entities import (
-    get_raw_capture as legacy_get_raw_capture,
-)
 from sibyl.persistence.surreal import content as surreal_content
 from sibyl.persistence.surreal.content import (
     get_crawl_stats_payload as surreal_get_crawl_stats_payload,
@@ -25,37 +15,15 @@ from sibyl.persistence.surreal.content import (
 )
 
 
-class RecordingSession:
-    def __init__(self) -> None:
-        self.added: list[object] = []
-
-    def add(self, item: object) -> None:
-        self.added.append(item)
-
-    async def flush(self) -> None:
-        return None
-
-    async def refresh(self, item: object) -> None:
-        return None
-
-
-def test_content_runtime_uses_legacy_exports_in_legacy_mode(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(content_runtime.settings, "store", "legacy")
-
+def test_content_runtime_uses_surreal_exports_only() -> None:
     assert (
         content_runtime._resolve_backend_export("get_crawl_stats_payload")
-        is legacy_get_crawl_stats_payload
+        is surreal_get_crawl_stats_payload
     )
-    assert content_runtime._resolve_backend_export("get_raw_capture") is legacy_get_raw_capture
+    assert content_runtime._resolve_backend_export("get_raw_capture") is surreal_get_raw_capture
 
 
-def test_content_runtime_maps_surreal_exports(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(content_runtime.settings, "store", "surreal")
-
+def test_content_runtime_maps_surreal_exports() -> None:
     assert (
         content_runtime._resolve_backend_export("get_crawl_stats_payload")
         is surreal_get_crawl_stats_payload
@@ -81,36 +49,6 @@ def test_content_runtime_exports_neutral_runtime_surface() -> None:
         "RAGSearchRow",
         "RawCaptureRecord",
         "utcnow_naive",
-    ]
-    assert legacy_crawler.LegacyCrawlStats is content_common.CrawlStats
-    assert legacy_entities.LegacyDocumentEntityRecord is content_common.DocumentEntityRecord
-
-
-@pytest.mark.asyncio
-async def test_legacy_content_writes_accept_neutral_records() -> None:
-    session = RecordingSession()
-    source_id = uuid4()
-    document = content_common.CrawledDocumentRecord(
-        source_id=source_id,
-        url="https://docs.example.com/guide",
-        title="Guide",
-        content="Guide",
-        content_hash="hash",
-    )
-
-    saved_document = await legacy_crawler.save_crawled_document_record(session, document=document)
-    chunk = content_common.DocumentChunkRecord(
-        document_id=saved_document.id,
-        chunk_index=0,
-        content="Guide",
-    )
-    saved_chunks = await legacy_crawler.save_document_chunks(session, chunks=[chunk])
-
-    assert saved_document.__class__.__name__ == "CrawledDocument"
-    assert saved_chunks[0].__class__.__name__ == "DocumentChunk"
-    assert [item.__class__.__name__ for item in session.added] == [
-        "CrawledDocument",
-        "DocumentChunk",
     ]
 
 
@@ -175,46 +113,9 @@ async def test_surreal_content_client_scope_reuses_shared_client(
 
 
 @pytest.mark.asyncio
-async def test_content_runtime_skips_relational_session_in_surreal_mode(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(content_runtime.settings, "store", "surreal")
-
+async def test_content_runtime_skips_relational_session() -> None:
     async with content_runtime.get_content_read_session() as session:
         assert session is None
-
-
-@pytest.mark.asyncio
-async def test_content_runtime_delegates_to_postgres_session_in_legacy_mode(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session = object()
-
-    @asynccontextmanager
-    async def mock_get_session():
-        yield session
-
-    monkeypatch.setattr(content_runtime.settings, "store", "legacy")
-    monkeypatch.setattr(content_runtime, "get_session", mock_get_session)
-
-    async with content_runtime.get_content_read_session() as yielded:
-        assert yielded is session
-
-
-@pytest.mark.asyncio
-async def test_content_runtime_get_session_uses_legacy_session_scope(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    session = object()
-
-    @asynccontextmanager
-    async def mock_get_legacy_session():
-        yield session
-
-    monkeypatch.setattr(content_runtime, "get_legacy_session", mock_get_legacy_session)
-
-    async with content_runtime.get_session() as yielded:
-        assert yielded is session
 
 
 @pytest.mark.asyncio
@@ -224,11 +125,7 @@ async def test_settings_runtime_session_is_surreal_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_content_runtime_dependency_uses_active_session(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(content_runtime.settings, "store", "surreal")
-
+async def test_content_runtime_dependency_uses_active_session() -> None:
     dependency = content_runtime.get_content_read_session_dependency()
     yielded = await anext(dependency)
     assert yielded is None

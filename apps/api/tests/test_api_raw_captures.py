@@ -13,7 +13,6 @@ from sibyl.api.routes.entities import (
     update_raw_capture_review_state,
 )
 from sibyl.api.schemas import RawCaptureReviewUpdate
-from sibyl.db.models import RawCapture
 from sibyl.persistence.content_common import RawCaptureRecord
 
 
@@ -30,12 +29,12 @@ def _capture(
     surface: str,
     entity_type: str = "episode",
     review_state: str | None = None,
-) -> RawCapture:
+) -> RawCaptureRecord:
     metadata = {"capture_mode": "quick", "capture_surface": surface}
     if review_state is not None:
         metadata["review_state"] = review_state
 
-    return RawCapture(
+    return RawCaptureRecord(
         id=uuid4(),
         organization_id=org_id,
         entity_id="episode_123",
@@ -43,7 +42,7 @@ def _capture(
         raw_content=f"raw::{title}",
         entity_type=entity_type,
         tags=["alpha"],
-        metadata_=metadata,
+        metadata=metadata,
         capture_surface=surface,
         created_by_user_id=uuid4(),
         created_at=datetime(2026, 4, 14, 16, 0, tzinfo=UTC),
@@ -51,30 +50,27 @@ def _capture(
 
 
 @pytest.mark.asyncio
-async def test_list_raw_captures_returns_paginated_summaries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from sibyl.config import settings
-
-    monkeypatch.setattr(settings, "store", "legacy")
+async def test_list_raw_captures_returns_paginated_summaries() -> None:
     org = _org()
     session = MagicMock()
-    result = MagicMock()
-    result.scalars.return_value.all.return_value = [
+    captures = [
         _capture(org_id=org.id, title="Newest", surface="dashboard"),
         _capture(org_id=org.id, title="Older", surface="cli"),
-        _capture(org_id=org.id, title="Overflow", surface="cli"),
     ]
-    session.execute = AsyncMock(return_value=result)
 
-    response = await list_raw_captures(
-        org=org,
-        session=session,
-        entity_type=None,
-        capture_surface=None,
-        limit=2,
-        offset=0,
-    )
+    with patch(
+        "sibyl.api.routes.entities.content_runtime.list_raw_captures",
+        AsyncMock(return_value=(captures, True)),
+    ) as list_captures:
+        response = await list_raw_captures(
+            org=org,
+            session=session,
+            entity_type=None,
+            capture_surface=None,
+            review_state=None,
+            limit=2,
+            offset=0,
+        )
 
     assert response.limit == 2
     assert response.offset == 0
@@ -82,59 +78,65 @@ async def test_list_raw_captures_returns_paginated_summaries(
     assert [capture.title for capture in response.captures] == ["Newest", "Older"]
     assert response.captures[0].metadata["capture_surface"] == "dashboard"
     assert response.captures[0].review_state == "pending"
-    session.execute.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_list_raw_captures_supports_review_state_filter(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from sibyl.config import settings
-
-    monkeypatch.setattr(settings, "store", "legacy")
-    org = _org()
-    session = MagicMock()
-    result = MagicMock()
-    result.scalars.return_value.all.return_value = [
-        _capture(org_id=org.id, title="Deferred", surface="dashboard", review_state="deferred"),
-    ]
-    session.execute = AsyncMock(return_value=result)
-
-    response = await list_raw_captures(
-        org=org,
-        session=session,
+    list_captures.assert_awaited_once_with(
+        session,
+        organization_id=org.id,
         entity_type=None,
         capture_surface=None,
-        review_state="deferred",
-        limit=10,
+        review_state=None,
+        limit=2,
         offset=0,
     )
 
+
+@pytest.mark.asyncio
+async def test_list_raw_captures_supports_review_state_filter() -> None:
+    org = _org()
+    session = MagicMock()
+    captures = [
+        _capture(org_id=org.id, title="Deferred", surface="dashboard", review_state="deferred"),
+    ]
+
+    with patch(
+        "sibyl.api.routes.entities.content_runtime.list_raw_captures",
+        AsyncMock(return_value=(captures, False)),
+    ) as list_captures:
+        response = await list_raw_captures(
+            org=org,
+            session=session,
+            entity_type=None,
+            capture_surface=None,
+            review_state="deferred",
+            limit=10,
+            offset=0,
+        )
+
     assert [capture.review_state for capture in response.captures] == ["deferred"]
-    session.execute.assert_awaited_once()
+    assert list_captures.await_args.kwargs["review_state"] == "deferred"
 
 
 @pytest.mark.asyncio
-async def test_get_raw_capture_returns_verbatim_content(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from sibyl.config import settings
-
-    monkeypatch.setattr(settings, "store", "legacy")
+async def test_get_raw_capture_returns_verbatim_content() -> None:
     org = _org()
     capture = _capture(org_id=org.id, title="Quick memory", surface="dashboard")
     session = MagicMock()
-    result = MagicMock()
-    result.scalar_one_or_none.return_value = capture
-    session.execute = AsyncMock(return_value=result)
 
-    response = await get_raw_capture(capture.id, org=org, session=session)
+    with patch(
+        "sibyl.api.routes.entities.content_runtime.get_raw_capture",
+        AsyncMock(return_value=capture),
+    ) as load_capture:
+        response = await get_raw_capture(capture.id, org=org, session=session)
 
     assert response.id == str(capture.id)
     assert response.title == "Quick memory"
     assert response.raw_content == "raw::Quick memory"
     assert response.capture_surface == "dashboard"
     assert response.review_state == "pending"
+    load_capture.assert_awaited_once_with(
+        session,
+        organization_id=org.id,
+        capture_id=capture.id,
+    )
 
 
 @pytest.mark.asyncio

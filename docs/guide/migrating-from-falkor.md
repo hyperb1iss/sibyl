@@ -54,7 +54,8 @@ sibyld migrate import /tmp/sibyl-migration.tar.gz
 ```
 
 The structured `auth.json` and `content.json` payloads restore directly into SurrealDB.
-`--restore-database-dump` is only needed when restoring legacy relational content sidecars.
+`--restore-database-dump` is only needed when explicitly replaying a retained `postgres.sql` archive
+during rehearsal or rollback validation.
 
 ### 3. Verify
 
