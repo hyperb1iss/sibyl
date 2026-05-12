@@ -50,7 +50,14 @@ logger = logging.getLogger(__name__)
 # See module docstring "Provider tag" for rationale.
 _SURREAL_PROVIDER_TAG: GraphProvider = GraphProvider.NEO4J
 _MAX_CLOSED_CONNECTION_RETRIES = 2
-type CompatibilityResultKind = Literal["duplicate_pair_records", "episode_records", "records"]
+_EDGE_FULLTEXT_MATCH_HEADROOM = 8
+_EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
+type CompatibilityResultKind = Literal[
+    "duplicate_pair_records",
+    "edge_fulltext_records",
+    "episode_records",
+    "records",
+]
 type GraphitiCompatQuery = tuple[str, QueryParams]
 type GraphitiCompatQueryWithKind = tuple[str, QueryParams, CompatibilityResultKind]
 type SurrealRecord = dict[str, object]
@@ -401,7 +408,7 @@ def _group_filter_clause(params: QueryParams) -> str:
 def _graphiti_fulltext_query(
     query: str,
     params: QueryParams,
-) -> GraphitiCompatQuery | None:
+) -> GraphitiCompatQueryWithKind | None:
     normalized = " ".join(query.split())
     upper = normalized.upper()
     fulltext_kind: str | None = None
@@ -422,7 +429,7 @@ def _graphiti_fulltext_query(
     next_params["limit"] = _limit_from_param(params.get("limit"))
 
     if not search_query:
-        return "RETURN [];", next_params
+        return "RETURN [];", next_params, "records"
 
     if fulltext_kind == "node":
         return (
@@ -448,9 +455,14 @@ def _graphiti_fulltext_query(
             LIMIT $limit;
             """,
             next_params,
+            "records",
         )
 
     if fulltext_kind == "edge":
+        next_params["match_limit"] = max(
+            int(next_params["limit"]) * _EDGE_FULLTEXT_MATCH_HEADROOM,
+            _EDGE_FULLTEXT_MIN_MATCH_LIMIT,
+        )
         edge_filters = [_group_filter_clause(next_params), "fact @0@ $query"]
         if params.get("edge_types"):
             edge_filters.append("name IN $edge_types")
@@ -458,20 +470,16 @@ def _graphiti_fulltext_query(
             edge_filters.append("uuid IN $edge_uuids")
         return (
             """
-            SELECT uuid, name, fact, fact_embedding, group_id,
-                   episodes, attributes,
-                   created_at, expired_at, valid_at, invalid_at,
-                   in.uuid AS source_node_uuid,
-                   out.uuid AS target_node_uuid,
-                   search::score(0) AS score
+            SELECT uuid, created_at, search::score(0) AS score
             FROM relates_to
             WHERE """
             + " AND ".join(edge_filters)
             + """
             ORDER BY score DESC, created_at DESC, uuid DESC
-            LIMIT $limit;
+            LIMIT $match_limit;
             """,
             next_params,
+            "edge_fulltext_records",
         )
 
     if fulltext_kind == "episode":
@@ -488,6 +496,7 @@ def _graphiti_fulltext_query(
             LIMIT $limit;
             """,
             next_params,
+            "records",
         )
 
     if fulltext_kind == "community":
@@ -504,6 +513,7 @@ def _graphiti_fulltext_query(
             LIMIT $limit;
             """,
             next_params,
+            "records",
         )
 
     return None
@@ -531,9 +541,60 @@ def _graphiti_compat_query(
 
     fulltext_query = _graphiti_fulltext_query(query, params)
     if fulltext_query is not None:
-        return fulltext_query[0], fulltext_query[1], "records"
+        return fulltext_query
 
     return None
+
+
+async def _execute_graphiti_edge_fulltext_query(
+    client: SurrealClient,
+    match_query: str,
+    params: QueryParams,
+) -> list[SurrealRecord]:
+    match_result = await client.query(match_query, params if params else None)
+    _raise_if_surreal_error(match_query, match_result)
+    match_records = _graphiti_records(match_result)
+    match_scores: dict[str, float] = {}
+    for record in match_records:
+        uuid = record.get("uuid")
+        if uuid is not None and uuid != "":
+            match_scores[str(uuid)] = float(record.get("score") or 0.0)
+    match_uuids = list(match_scores)
+    if not match_uuids:
+        return []
+
+    hydrate_params = dict(params)
+    hydrate_params["match_uuids"] = match_uuids
+    hydrate_params["limit"] = len(match_uuids)
+    hydrate_query = (
+        """
+        SELECT uuid, name, fact, fact_embedding, group_id,
+               episodes, attributes,
+               created_at, expired_at, valid_at, invalid_at,
+               in.uuid AS source_node_uuid,
+               out.uuid AS target_node_uuid
+        FROM relates_to
+        WHERE """
+        + " AND ".join(["uuid IN $match_uuids", _group_filter_clause(hydrate_params)])
+        + """
+        LIMIT $limit;
+        """
+    )
+    hydrate_result = await client.query(hydrate_query, hydrate_params)
+    _raise_if_surreal_error(hydrate_query, hydrate_result)
+    rows_by_uuid = {
+        str(record["uuid"]): record
+        for record in _graphiti_records(hydrate_result)
+        if record.get("uuid")
+    }
+    records: list[SurrealRecord] = []
+    for uuid in match_uuids:
+        if uuid not in rows_by_uuid:
+            continue
+        record = dict(rows_by_uuid[uuid])
+        record["score"] = match_scores[uuid]
+        records.append(record)
+    return records[: _limit_from_param(params.get("limit"))]
 
 
 class SurrealDriverSession(GraphDriverSession):
@@ -784,7 +845,14 @@ class SurrealDriver(GraphDriver):
                 while True:
                     try:
                         client = await self._ensure_client()
-                        result = await client.query(query, params if params else None)
+                        if compat_kind == "edge_fulltext_records":
+                            result = await _execute_graphiti_edge_fulltext_query(
+                                client,
+                                query,
+                                params,
+                            )
+                        else:
+                            result = await client.query(query, params if params else None)
                         break
                     except Exception as exc:
                         if not _is_transient_connection_error(exc):
@@ -852,6 +920,8 @@ class SurrealDriver(GraphDriver):
                 None,
                 None,
             )
+        if compat_kind == "edge_fulltext_records":
+            return _graphiti_records(result), None, None
         if compat_kind == "records":
             return _graphiti_records(result), None, None
         return result

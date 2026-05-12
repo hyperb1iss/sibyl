@@ -563,7 +563,7 @@ async def _edge_fulltext_candidates(
     match_rows = normalize_records(
         await client.execute_query(
             """
-            SELECT uuid, search::score(0) AS score
+            SELECT uuid, created_at, search::score(0) AS score
             FROM relates_to
             WHERE """
             + _where_clause(["group_id = $group_id", *match_clauses])

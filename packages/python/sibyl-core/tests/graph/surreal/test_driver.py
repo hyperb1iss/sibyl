@@ -844,6 +844,14 @@ class TestDriverConnection:
 
         async def fake_query(query: str, params: object | None = None) -> list[dict[str, object]]:
             calls.append((query, params))
+            if "fact @0@ $query" in query:
+                return [
+                    {
+                        "uuid": "edge-1",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "score": 0.9,
+                    }
+                ]
             return [
                 {
                     "uuid": "edge-1",
@@ -878,15 +886,24 @@ class TestDriverConnection:
             limit=5,
         )
 
-        query, params = calls[0]
-        assert "CALL" not in query
-        assert "MATCH" not in query
-        assert "FROM relates_to" in query
-        assert "fact @0@ $query" in query
-        assert "uuid IN $edge_uuids" in query
+        match_query, params = calls[0]
+        hydrate_query, hydrate_params = calls[1]
+        assert "CALL" not in match_query
+        assert "MATCH" not in match_query
+        assert "FROM relates_to" in match_query
+        assert "fact @0@ $query" in match_query
+        assert "uuid IN $edge_uuids" in match_query
+        assert "in." not in match_query
+        assert "out." not in match_query
+        assert "fact @0@ $query" not in hydrate_query
+        assert "uuid IN $match_uuids" in hydrate_query
         assert isinstance(params, dict)
         assert params["edge_uuids"] == ["edge-1"]
+        assert params["match_limit"] == 40
+        assert isinstance(hydrate_params, dict)
+        assert hydrate_params["match_uuids"] == ["edge-1"]
         assert records[0]["uuid"] == "edge-1"
+        assert records[0]["score"] == 0.9
 
     async def test_execute_query_translates_graphiti_episode_fulltext_call(
         self, monkeypatch

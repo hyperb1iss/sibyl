@@ -27,6 +27,88 @@ class FakeSurrealSearchDriver:
         return deepcopy(self.records)
 
 
+class FakeEdgeFulltextSearchDriver:
+    def __init__(self) -> None:
+        self.queries: list[tuple[str, dict[str, Any]]] = []
+
+    def build_fulltext_query(self, query: str) -> str:
+        return query.strip()
+
+    async def execute_query(self, cypher_query_: str, **params: Any) -> list[dict[str, Any]]:
+        self.queries.append((cypher_query_, params))
+        if "fact @0@" in cypher_query_:
+            return [
+                {"uuid": "edge-1", "score": 0.9},
+                {"uuid": "edge-drop", "score": 0.8},
+                {"uuid": "edge-2", "score": 0.7},
+                {"uuid": "edge-3", "score": 0.6},
+                {"uuid": "edge-4", "score": 0.5},
+            ]
+        now = datetime.now(UTC)
+        return [
+            {
+                "uuid": "edge-4",
+                "name": "RELATES_TO",
+                "fact": "Later match",
+                "fact_embedding": None,
+                "group_id": "org-1",
+                "episodes": [],
+                "attributes": {"project_id": "project-1"},
+                "created_at": now,
+                "expired_at": None,
+                "valid_at": now,
+                "invalid_at": None,
+                "source_node_uuid": "src-4",
+                "target_node_uuid": "tgt-4",
+            },
+            {
+                "uuid": "edge-1",
+                "name": "RELATES_TO",
+                "fact": "Surreal planner warning",
+                "fact_embedding": None,
+                "group_id": "org-1",
+                "episodes": [],
+                "attributes": {"project_id": "project-1"},
+                "created_at": now,
+                "expired_at": None,
+                "valid_at": now,
+                "invalid_at": None,
+                "source_node_uuid": "src-1",
+                "target_node_uuid": "tgt-1",
+            },
+            {
+                "uuid": "edge-3",
+                "name": "RELATES_TO",
+                "fact": "Third match",
+                "fact_embedding": None,
+                "group_id": "org-1",
+                "episodes": [],
+                "attributes": {"project_id": "project-1"},
+                "created_at": now,
+                "expired_at": None,
+                "valid_at": now,
+                "invalid_at": None,
+                "source_node_uuid": "src-3",
+                "target_node_uuid": "tgt-3",
+            },
+            {
+                "uuid": "edge-2",
+                "name": "RELATES_TO",
+                "fact": "Second match",
+                "fact_embedding": None,
+                "group_id": "org-1",
+                "episodes": [],
+                "attributes": {"project_id": "project-1"},
+                "created_at": now,
+                "expired_at": None,
+                "valid_at": now,
+                "invalid_at": None,
+                "source_node_uuid": "src-2",
+                "target_node_uuid": "tgt-2",
+            },
+        ]
+
+
 class TestSurrealSearchInterface:
     @pytest.mark.asyncio
     async def test_node_fulltext_search_uses_surrealql(self) -> None:
@@ -118,6 +200,35 @@ class TestSurrealSearchInterface:
         assert params["valid_at_0_0"] == now
         assert "valid_at >= $valid_at_0_0" in query
         assert result[0].uuid == "edge-1"
+
+    @pytest.mark.asyncio
+    async def test_edge_fulltext_splits_match_from_relation_hydration(self) -> None:
+        driver = FakeEdgeFulltextSearchDriver()
+
+        result = await SurrealSearchInterface().edge_fulltext_search(
+            driver,
+            "surreal planner",
+            SimpleNamespace(
+                project_ids=("project-1",),
+                edge_uuids=("edge-1", "edge-2", "edge-3", "edge-4"),
+                edge_types=("RELATES_TO",),
+            ),
+            ["org-1"],
+            3,
+        )
+
+        assert [edge.uuid for edge in result] == ["edge-1", "edge-2", "edge-3"]
+        match_query = driver.queries[0][0]
+        hydrate_query = driver.queries[1][0]
+        assert "fact @0@ $query" in match_query
+        assert "in." not in match_query
+        assert "out." not in match_query
+        assert "attributes." not in match_query
+        assert "uuid IN $edge_uuids" in match_query
+        assert "name IN $edge_types" in match_query
+        assert driver.queries[0][1]["match_limit"] == 32
+        assert "fact @0@ $query" not in hydrate_query
+        assert "uuid IN $match_uuids" in hydrate_query
 
     @pytest.mark.asyncio
     async def test_episode_fulltext_skips_project_filtered_search(self) -> None:

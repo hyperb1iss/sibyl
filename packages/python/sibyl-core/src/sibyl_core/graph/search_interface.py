@@ -17,6 +17,9 @@ from sibyl_core.graph.surreal.ops.entity_edge_ops import _ENTITY_EDGE_SELECT
 
 log = structlog.get_logger()
 
+EDGE_FULLTEXT_MATCH_HEADROOM = 8
+EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
+
 
 def _group_filter_clause(group_ids: list[str] | None) -> str:
     return "group_id IN $group_ids" if group_ids is not None else "true"
@@ -80,6 +83,27 @@ def _edge_filter_clause(
     if target_node_uuid is not None:
         clauses.append("out.uuid = $target_node_uuid")
         params["target_node_uuid"] = target_node_uuid
+
+    for field in ("valid_at", "invalid_at", "created_at", "expired_at"):
+        if temporal_clause := _temporal_filter_clause(search_filter, field, params):
+            clauses.append(temporal_clause)
+
+    return clauses, params
+
+
+def _edge_match_filter_clause(search_filter: Any) -> tuple[list[str], dict[str, Any]]:
+    clauses: list[str] = []
+    params: dict[str, Any] = {}
+
+    edge_uuids = getattr(search_filter, "edge_uuids", None)
+    if edge_uuids:
+        clauses.append("uuid IN $edge_uuids")
+        params["edge_uuids"] = edge_uuids
+
+    edge_types = getattr(search_filter, "edge_types", None)
+    if edge_types:
+        clauses.append("name IN $edge_types")
+        params["edge_types"] = edge_types
 
     for field in ("valid_at", "invalid_at", "created_at", "expired_at"):
         if temporal_clause := _temporal_filter_clause(search_filter, field, params):
@@ -339,28 +363,62 @@ class SurrealSearchInterface(SearchInterface):
         if not search_query:
             return []
 
-        filter_clauses, filter_params = _edge_filter_clause(search_filter)
-        fulltext_select = _ENTITY_EDGE_SELECT.replace(
-            "FROM relates_to",
-            ", search::score(0) AS score\nFROM relates_to",
+        result_limit = max(int(limit), 1)
+        match_limit = max(
+            result_limit * EDGE_FULLTEXT_MATCH_HEADROOM, EDGE_FULLTEXT_MIN_MATCH_LIMIT
         )
-        records = normalize_records(
+        match_clauses, match_params = _edge_match_filter_clause(search_filter)
+        match_records = normalize_records(
             await driver.execute_query(
-                fulltext_select
-                + " WHERE "
-                + _where_clause([_group_filter_clause(group_ids), *filter_clauses])
+                """
+                SELECT uuid, created_at, search::score(0) AS score
+                FROM relates_to
+                WHERE """
+                + _where_clause([_group_filter_clause(group_ids), *match_clauses])
                 + """
                   AND fact @0@ $query
                 ORDER BY score DESC, created_at DESC, uuid DESC
-                LIMIT $limit;
+                LIMIT $match_limit;
                 """,
                 query=search_query,
                 group_ids=group_ids,
-                limit=max(int(limit), 1),
+                match_limit=match_limit,
+                **match_params,
+            )
+        )
+        match_scores: dict[str, float] = {}
+        for record in match_records:
+            uuid = _record_uuid(record)
+            if uuid is not None:
+                match_scores[uuid] = float(record.get("score") or 0.0)
+        match_uuids = list(match_scores)
+        if not match_uuids:
+            return []
+
+        filter_clauses, filter_params = _edge_filter_clause(search_filter)
+        records = normalize_records(
+            await driver.execute_query(
+                _ENTITY_EDGE_SELECT
+                + " WHERE "
+                + _where_clause(
+                    ["uuid IN $match_uuids", _group_filter_clause(group_ids), *filter_clauses]
+                )
+                + " LIMIT $limit;",
+                match_uuids=match_uuids,
+                group_ids=group_ids,
+                limit=len(match_uuids),
                 **filter_params,
             )
         )
-        return [entity_edge_from_record(record) for record in records]
+        rows_by_uuid = {str(record["uuid"]): record for record in records if record.get("uuid")}
+        ordered_records: list[dict[str, object]] = []
+        for uuid in match_uuids:
+            if uuid not in rows_by_uuid:
+                continue
+            record = dict(rows_by_uuid[uuid])
+            record["score"] = match_scores[uuid]
+            ordered_records.append(record)
+        return [entity_edge_from_record(record) for record in ordered_records[:result_limit]]
 
     async def edge_similarity_search(
         self,
