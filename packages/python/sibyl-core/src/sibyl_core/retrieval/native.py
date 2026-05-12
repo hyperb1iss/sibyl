@@ -9,14 +9,16 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from sibyl_core.auth.memory_policy import MemoryPolicyDecision, authorize_memory_read
 from sibyl_core.graph.search_interface import SurrealSearchInterface
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.services import get_graph_runtime
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory, recall_raw_memory
-from sibyl_core.tools.responses import SearchResponse, SearchResult
+
+if TYPE_CHECKING:
+    from sibyl_core.tools.responses import SearchResponse, SearchResult
 
 type RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory]]]
 
@@ -214,6 +216,8 @@ async def native_context_search(
     raw_memory_recall_fn: RawMemoryRecallFn = recall_raw_memory,
 ) -> SearchResponse:
     """Search context-pack candidates through native SurrealDB paths."""
+
+    from sibyl_core.tools.responses import SearchResponse
 
     limit = max(1, min(limit, 50))
     runtime = await get_graph_runtime(plan.organization_id)
@@ -886,6 +890,8 @@ def _search_result_from_candidate(
     fusion_metadata: Mapping[str, Any],
     include_content: bool,
 ) -> SearchResult:
+    from sibyl_core.tools.responses import SearchResult
+
     freshness = _freshness_boost(candidate.created_at, cap=1.5)
     metadata = {
         **dict(candidate.metadata),
