@@ -125,6 +125,7 @@ jobs:
             --cases benchmarks/context_pack_cases.json \
             --auth-manifest .moon/cache/baseline-runtime-manifest.json \
             --label retrieval-compare \
+            --repeat 20 \
             --metadata retrieval_mode=compare
           latest_report="$(
             find .moon/cache/evals -maxdepth 1 \
@@ -136,7 +137,8 @@ jobs:
           )"
           test -n "$latest_report"
           moon run bench-gate -- "$latest_report" --profile context-pack \
-            --require-metadata retrieval_mode=compare
+            --require-metadata retrieval_mode=compare \
+            --require-metadata repeat_count=20
           moon run retrieval-mode-history -- "$latest_report" \
             --branch "${GITHUB_REF_NAME}" \
             --sha "${GITHUB_SHA}" \

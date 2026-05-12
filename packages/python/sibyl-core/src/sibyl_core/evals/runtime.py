@@ -366,14 +366,29 @@ class EvalRunner:
     async def run_context_pack_evaluation(
         self,
         cases: list[ContextPackEvalCase],
+        *,
+        repeat_count: int = 1,
     ) -> ContextPackEvalReport:
         """Run context-pack evaluation cases against a live Sibyl endpoint."""
 
-        results = [await self.run_context_pack_case(case) for case in cases]
+        if repeat_count < 1:
+            msg = "repeat_count must be at least 1"
+            raise ValueError(msg)
+
+        results: list[ContextPackCaseResult] = []
+        for repeat_index in range(1, repeat_count + 1):
+            for case in cases:
+                result = await self.run_context_pack_case(case)
+                results.append(replace(result, repeat_index=repeat_index))
+        metadata = {
+            **dict(self.config.metadata),
+            "repeat_count": str(repeat_count),
+            "case_count_per_repeat": str(len(cases)),
+        }
         report = ContextPackEvalReport(
             cases=results,
             label=self.config.label,
-            metadata=dict(self.config.metadata),
+            metadata=metadata,
         )
         if self.config.save_results:
             report.save(self.config.output_dir)
@@ -402,11 +417,13 @@ async def run_evaluation_cli(
 async def run_context_pack_evaluation_cli(
     cases_file: Path | None = None,
     config: EvalConfig | None = None,
+    *,
+    repeat_count: int = 1,
 ) -> ContextPackEvalReport:
     """Run context-pack evals from a case file or the smoke-test sample."""
 
     cases = load_context_pack_cases(cases_file) if cases_file else get_sample_context_pack_cases()
     async with EvalRunner(config) as runner:
-        report = await runner.run_context_pack_evaluation(cases)
+        report = await runner.run_context_pack_evaluation(cases, repeat_count=repeat_count)
         report.print_summary()
         return report

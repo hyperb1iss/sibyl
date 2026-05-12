@@ -89,7 +89,11 @@ async def _run(args: argparse.Namespace, cases_file: Path | None) -> ContextPack
         metadata=_parse_metadata(args.metadata),
         timeout_seconds=args.timeout,
     )
-    return await run_context_pack_evaluation_cli(cases_file=cases_file, config=config)
+    return await run_context_pack_evaluation_cli(
+        cases_file=cases_file,
+        config=config,
+        repeat_count=args.repeat,
+    )
 
 
 def main() -> None:
@@ -149,9 +153,17 @@ def main() -> None:
         default=10.0,
         help="HTTP timeout in seconds.",
     )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help="Run the full case suite this many times in one report.",
+    )
     args = parser.parse_args()
     if args.cases and args.cases_option:
         parser.error("Pass cases either positionally or with --cases, not both.")
+    if args.repeat < 1:
+        parser.error("--repeat must be at least 1.")
     cases_file = _resolve_repo_path(args.cases_option or args.cases)
 
     report = asyncio.run(_run(args, cases_file))

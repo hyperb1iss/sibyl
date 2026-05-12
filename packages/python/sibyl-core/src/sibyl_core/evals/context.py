@@ -93,6 +93,7 @@ class ContextPackCaseResult:
     result: ContextPackEvalResult
     latency_ms: float = 0.0
     error: str | None = None
+    repeat_index: int = 1
 
 
 def _numeric_case_values(cases: list[ContextPackCaseResult], key: str) -> list[float]:
@@ -174,6 +175,7 @@ class ContextPackEvalReport:
     def to_dict(self) -> dict[str, Any]:
         case_count = len(self.cases)
         passed_cases = sum(1 for case in self.cases if case.result.passed and case.error is None)
+        repeat_count = max((case.repeat_index for case in self.cases), default=0)
         latencies = [case.latency_ms for case in self.cases]
         item_counts = _numeric_case_values(self.cases, "items")
         markdown_chars = _numeric_case_values(self.cases, "markdown_chars")
@@ -196,6 +198,8 @@ class ContextPackEvalReport:
                 "cases": case_count,
                 "passed": passed_cases,
                 "failed": case_count - passed_cases,
+                "repeat_count": repeat_count,
+                "case_count_per_repeat": case_count / repeat_count if repeat_count else 0.0,
                 "pass_rate": passed_cases / case_count if case_count else 0.0,
                 "latency_ms": _average(latencies),
                 "latency_p95_ms": _percentile(latencies, 95),
@@ -217,6 +221,7 @@ class ContextPackEvalReport:
             "per_case": [
                 {
                     "name": case.case.name,
+                    "repeat_index": case.repeat_index,
                     "goal": case.case.goal,
                     "intent": case.case.intent.value,
                     "layer": case.case.layer.value,
@@ -250,6 +255,7 @@ class ContextPackEvalReport:
         metrics = self.to_dict()["metrics"]
         print("\nSibyl context-pack evaluation summary")
         print(f"  cases: {metrics['cases']}")
+        print(f"  repeat_count: {metrics['repeat_count']}")
         print(f"  pass_rate: {metrics['pass_rate']:.3f}")
         print(f"  failed: {metrics['failed']}")
         print(f"  latency_ms: {metrics['latency_ms']:.1f}")

@@ -53,7 +53,9 @@ This is the live context-pack quality guard.
 
 Nightly seeds the deterministic baseline corpus first and passes
 `.moon/cache/baseline-runtime-manifest.json` through `--auth-manifest`, so the context benchmark
-uses the same short-lived baseline user token as the seeded corpus.
+uses the same short-lived baseline user token as the seeded corpus. It also runs the frozen suite
+with `--repeat 20`; the report-level `latency_p95_ms` is computed across every repeated case run,
+and the gate requires `metadata.repeat_count = 20`.
 
 Use this when changing retrieval, source grounding, prompt hooks, policy checks, or context-pack
 rendering.
@@ -109,6 +111,10 @@ The `context-pack` profile gates dogfood context reports:
 `leak_count` is a per-case sentinel: forbidden item and forbidden term matches are reported
 separately, while the summary uses the larger of those two counts for each case so one leaked memory
 is not double-counted when it trips both signals.
+
+The current standard-runner context threshold is `latency_p95_ms <= 1000` across 20 repeated frozen
+suite runs. Tighten or relax that number only with a saved report artifact and a matching
+`retrieval-mode-history` update, because it is part of the native-default flip proof.
 
 Native Surreal retrieval starts with a vector filter-selectivity threshold of `0.1`. When a filter
 retains less than 10% of the searchable corpus, vector-only candidates are demoted unless a seeded

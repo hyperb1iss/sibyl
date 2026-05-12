@@ -20,7 +20,7 @@ def _report(
     return {
         "timestamp": "2026-05-12 09:00:00",
         "label": "retrieval-compare",
-        "metadata": {"retrieval_mode": retrieval_mode},
+        "metadata": {"retrieval_mode": retrieval_mode, "repeat_count": "20"},
         "metrics": {
             "pass_rate": pass_rate,
             "source_metadata_coverage": 1.0,
@@ -45,6 +45,19 @@ def test_current_run_blockers_require_compare_mode_and_clean_policy() -> None:
     assert "metadata['retrieval_mode'] is not 'compare'" in blockers
     assert "policy_affecting_diffs is 2" in blockers
     assert "metric 'leak_count' above 0.0000: 1.0000" in blockers
+
+
+def test_current_run_blockers_require_20_run_repeat_metadata() -> None:
+    report = _report()
+    report["metadata"] = {"retrieval_mode": "compare", "repeat_count": "1"}
+
+    blockers = retrieval_mode_history.current_run_blockers(
+        report,
+        branch="main",
+        policy_affecting_diffs=0,
+    )
+
+    assert "metadata['repeat_count'] is not '20'" in blockers
 
 
 def test_consecutive_count_stops_at_last_nonqualifying_main_run() -> None:

@@ -14,6 +14,7 @@ from typing import Any
 DEFAULT_HISTORY_PATH = Path(".moon/retrieval-mode-history.json")
 DEFAULT_REQUIRED_CONSECUTIVE = 3
 DEFAULT_MAX_RECORDS = 50
+REQUIRED_CONTEXT_REPEAT_COUNT = "20"
 
 REQUIRED_CONTEXT_METRICS: dict[str, tuple[str, float]] = {
     "pass_rate": ("minimum", 1.0),
@@ -109,6 +110,8 @@ def current_run_blockers(
         blockers.append(f"branch {branch!r} is not main")
     if metadata.get("retrieval_mode") != "compare":
         blockers.append("metadata['retrieval_mode'] is not 'compare'")
+    if str(metadata.get("repeat_count") or "") != REQUIRED_CONTEXT_REPEAT_COUNT:
+        blockers.append(f"metadata['repeat_count'] is not {REQUIRED_CONTEXT_REPEAT_COUNT!r}")
     if policy_affecting_diffs != 0:
         blockers.append(f"policy_affecting_diffs is {policy_affecting_diffs}")
 

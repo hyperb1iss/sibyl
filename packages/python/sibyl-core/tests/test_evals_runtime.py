@@ -194,6 +194,39 @@ async def test_run_context_pack_case_posts_pack_request() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_context_pack_evaluation_repeats_cases() -> None:
+    runner = EvalRunner(EvalConfig(save_results=False))
+    runner._http_client = _MockClient(
+        {
+            "goal": "repeat native memory suite",
+            "intent": "build",
+            "query": "repeat native memory suite",
+            "total_items": 0,
+            "sections": [],
+        }
+    )
+
+    report = await runner.run_context_pack_evaluation(
+        [
+            ContextPackEvalCase(
+                name="repeat-smoke",
+                goal="repeat native memory suite",
+                fixture=ContextPackFixture(name="repeat-smoke", max_items=1),
+            )
+        ],
+        repeat_count=2,
+    )
+    payload = report.to_dict()
+
+    assert len(runner._http_client.calls) == 2
+    assert report.metadata["repeat_count"] == "2"
+    assert report.metadata["case_count_per_repeat"] == "1"
+    assert [case["repeat_index"] for case in payload["per_case"]] == [1, 2]
+    assert payload["metrics"]["repeat_count"] == 2
+    assert payload["metrics"]["case_count_per_repeat"] == 1.0
+
+
+@pytest.mark.asyncio
 async def test_run_context_pack_case_enforces_latency_budget() -> None:
     runner = EvalRunner(EvalConfig(save_results=False))
     runner._http_client = _MockClient(
