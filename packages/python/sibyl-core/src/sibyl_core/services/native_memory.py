@@ -132,6 +132,7 @@ async def persist_reflection_candidate_native(
     accessible_projects: Iterable[str] | None = None,
     memory_scope: MemoryScope | str | None = None,
     scope_key: str | None = None,
+    link_source_entity: bool = True,
 ) -> NativeReflectionWriteResult:
     scope = _resolve_memory_scope(memory_scope, project)
     resolved_scope_key = _resolve_scope_key(scope, scope_key, project)
@@ -166,11 +167,14 @@ async def persist_reflection_candidate_native(
         policy_metadata=policy_metadata,
     )
     created_id = await runtime.entity_manager.create_direct(entity)
+    source_ids = _candidate_source_ids(candidate, source_id)
     relationships = _relationships_for_promotion(
         created_id,
         project=project,
-        source_id=source_id,
+        source_id=source_id if link_source_entity else None,
         related_to=related_to,
+        supersedes=_superseded_entity_ids(candidate.metadata),
+        raw_source_ids=source_ids,
     )
     if relationships:
         await runtime.relationship_manager.create_bulk(relationships)
@@ -187,8 +191,8 @@ async def persist_reflection_candidate_native(
             "native_write_mode": NativeWriteMode.ENABLED.value,
             "native_write_path": "reflection_promotion",
             "native_relationship_count": len(relationships),
-            "raw_source_ids": [source_id] if source_id else [],
-            "source_ids": [source_id] if source_id else [],
+            "raw_source_ids": source_ids,
+            "source_ids": source_ids,
         },
     )
 
@@ -325,6 +329,7 @@ async def promote_reflection_candidate_review(
         accessible_projects=accessible_projects,
         memory_scope=target_scope,
         scope_key=target_scope_key,
+        link_source_entity=False,
     )
     if not native_result.response.success:
         return NativeReflectionPromotionResult(
@@ -482,6 +487,18 @@ def _metadata_str_list(metadata: Mapping[str, object], key: str) -> list[str]:
     return [str(item) for item in value if str(item)]
 
 
+def _metadata_str_values(metadata: Mapping[str, object], *keys: str) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        value = metadata.get(key)
+        if isinstance(value, str):
+            values.append(value)
+            continue
+        if isinstance(value, Iterable) and not isinstance(value, Mapping):
+            values.extend(str(item) for item in value if str(item))
+    return list(dict.fromkeys(item for item in values if item))
+
+
 def _metadata_float(metadata: Mapping[str, object], key: str, default: float) -> float:
     value = metadata.get(key)
     if isinstance(value, int | float | str):
@@ -494,6 +511,33 @@ def _metadata_float(metadata: Mapping[str, object], key: str, default: float) ->
 
 def _raw_source_ids(memory: RawMemory) -> list[str]:
     return list(dict.fromkeys(_metadata_str_list(memory.metadata, "raw_source_ids")))
+
+
+def _candidate_source_ids(
+    candidate: ReflectionCandidate,
+    source_id: str | None,
+) -> list[str]:
+    return list(
+        dict.fromkeys(
+            item
+            for item in (
+                *([source_id] if source_id else []),
+                *candidate.raw_source_ids,
+                *_metadata_str_values(candidate.metadata, "raw_source_ids", "source_ids"),
+            )
+            if item
+        )
+    )
+
+
+def _superseded_entity_ids(metadata: Mapping[str, object]) -> list[str]:
+    return _metadata_str_values(
+        metadata,
+        "supersedes",
+        "supersedes_ids",
+        "superseded_ids",
+        "supersedes_entity_ids",
+    )
 
 
 def _is_reflection_candidate(memory: RawMemory) -> bool:
@@ -670,7 +714,8 @@ def _entity_from_candidate(
 ) -> Entity:
     entity_type = _entity_type(candidate.kind)
     entity_id = _generate_id(entity_type.value, candidate.title, domain or "general")
-    source_ids = [source_id] if source_id else []
+    source_ids = _candidate_source_ids(candidate, source_id)
+    primary_source_id = source_id or (source_ids[0] if source_ids else None)
     metadata = {
         **candidate.metadata,
         "category": domain,
@@ -688,8 +733,8 @@ def _entity_from_candidate(
     }
     if project:
         metadata["project_id"] = project
-    if source_id:
-        metadata["reflection_source_id"] = source_id
+    if primary_source_id:
+        metadata["reflection_source_id"] = primary_source_id
 
     return Entity(
         id=entity_id,
@@ -700,7 +745,7 @@ def _entity_from_candidate(
         organization_id=organization_id,
         created_by=principal_id,
         metadata=metadata,
-        source_file=source_id,
+        source_file=primary_source_id,
     )
 
 
@@ -710,6 +755,8 @@ def _relationships_for_promotion(
     project: str | None,
     source_id: str | None,
     related_to: Sequence[str] | None,
+    supersedes: Sequence[str] | None,
+    raw_source_ids: Sequence[str] | None,
 ) -> list[Relationship]:
     relationships: list[Relationship] = []
     if project and project != entity_id:
@@ -730,8 +777,9 @@ def _relationships_for_promotion(
                 metadata={"native_write_path": "reflection_promotion", "source_id": source_id},
             )
         )
+    excluded_targets = {entity_id, project, source_id}
     for related_id in related_to or ():
-        if related_id in {entity_id, project, source_id}:
+        if related_id in excluded_targets:
             continue
         relationships.append(
             _relationship(
@@ -739,6 +787,20 @@ def _relationships_for_promotion(
                 related_id,
                 RelationshipType.RELATED_TO,
                 metadata={"native_write_path": "reflection_promotion"},
+            )
+        )
+    for superseded_id in supersedes or ():
+        if superseded_id in excluded_targets:
+            continue
+        relationships.append(
+            _relationship(
+                entity_id,
+                superseded_id,
+                RelationshipType.SUPERSEDES,
+                metadata={
+                    "native_write_path": "reflection_promotion",
+                    "raw_source_ids": list(raw_source_ids or []),
+                },
             )
         )
     return relationships
