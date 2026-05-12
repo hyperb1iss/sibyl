@@ -182,9 +182,9 @@ for entity, score in results:
 
 For more control, use the hybrid search module directly:
 
-`hybrid_search()` seeds retrieval through Graphiti's node-hybrid search, which already blends
-keyword and semantic matching before Sibyl adds graph traversal, fusion, and optional temporal
-boosting.
+Native context packs use direct Surreal full-text, vector search, raw memory recall, graph
+neighborhood expansion, and RRF fusion. `hybrid_search()` remains the lower-level compatibility path
+for legacy graph search surfaces while the native loop runs through `native_context_search()`.
 
 ```python
 from sibyl_core.retrieval import hybrid_search, HybridConfig

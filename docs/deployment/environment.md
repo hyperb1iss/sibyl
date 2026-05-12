@@ -156,13 +156,13 @@ Redis/Valkey is optional. The default Surreal runtime uses local in-process coor
 
 ## LLM Configuration
 
-| Variable                           | Default                  | Description                           |
-| ---------------------------------- | ------------------------ | ------------------------------------- |
-| `SIBYL_LLM_PROVIDER`               | `anthropic`              | LLM provider: openai or anthropic     |
-| `SIBYL_LLM_MODEL`                  | `claude-haiku-4-5`       | LLM model for entity extraction       |
-| `SIBYL_EMBEDDING_MODEL`            | `text-embedding-3-small` | OpenAI embedding model                |
-| `SIBYL_EMBEDDING_DIMENSIONS`       | `1536`                   | Embedding vector dimensions           |
-| `SIBYL_GRAPH_EMBEDDING_DIMENSIONS` | `1024`                   | Graph (Graphiti) embedding dimensions |
+| Variable                           | Default                  | Description                       |
+| ---------------------------------- | ------------------------ | --------------------------------- |
+| `SIBYL_LLM_PROVIDER`               | `anthropic`              | LLM provider: openai or anthropic |
+| `SIBYL_LLM_MODEL`                  | `claude-haiku-4-5`       | LLM model for entity extraction   |
+| `SIBYL_EMBEDDING_MODEL`            | `text-embedding-3-small` | OpenAI embedding model            |
+| `SIBYL_EMBEDDING_DIMENSIONS`       | `1536`                   | Embedding vector dimensions       |
+| `SIBYL_GRAPH_EMBEDDING_DIMENSIONS` | `1024`                   | Graph embedding dimensions        |
 
 ## API Keys
 
@@ -187,7 +187,18 @@ stored encrypted in the database (using `SIBYL_SETTINGS_KEY`).
 - `OPENAI_API_KEY` -> `SIBYL_OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY` -> `SIBYL_ANTHROPIC_API_KEY`
 
-## Graphiti Configuration
+## Native Memory Configuration
+
+| Variable               | Default    | Description                                          |
+| ---------------------- | ---------- | ---------------------------------------------------- |
+| `SIBYL_RETRIEVAL_MODE` | `graphiti` | `graphiti`, `native`, or `compare` context retrieval |
+| `SIBYL_NATIVE_WRITE`   | `disabled` | Enables direct native reflection promotion writes    |
+
+`compare` mode returns native context results while logging policy-safe diffs against the
+compatibility path. The default retrieval mode flips only after the documented compare-mode gate is
+green on main.
+
+## Compatibility Graphiti Configuration
 
 | Variable                         | Default | Description                              |
 | -------------------------------- | ------- | ---------------------------------------- |

@@ -18,9 +18,9 @@ moon run core:test        # Pytest
 ## What's Here
 
 - **models/:** Domain entities (Task, Project, Epic, Source, etc.)
-- **graph/:** Graphiti client on the SurrealDB backend
+- **graph/:** SurrealDB graph managers plus Graphiti compatibility adapters
 - **backends/surreal/:** SurrealDB driver, schema, and per-table ops
-- **retrieval/:** Graphiti node-hybrid search, fusion, deduplication
+- **retrieval/:** Native context retrieval, compatibility search, fusion, deduplication
 - **tools/:** MCP tool implementations (search, explore, add, manage)
 - **tasks/:** Workflow engine, dependency resolution
 - **auth/:** JWT primitives, password hashing
@@ -39,7 +39,8 @@ src/sibyl_core/
 │   ├── entities.py       # EntityManager (CRUD, search)
 │   └── relationships.py  # RelationshipManager
 ├── retrieval/
-│   ├── hybrid.py         # Hybrid search orchestration
+│   ├── native.py         # Surreal-native context-pack retrieval
+│   ├── hybrid.py         # Compatibility hybrid search orchestration
 │   └── fusion.py         # Score fusion (RRF)
 ├── tools/
 │   ├── search.py         # Semantic search
@@ -158,15 +159,16 @@ existing graph and document vectors before comparing old and new search results.
 manager = EntityManager(client, group_id=str(org.id))
 ```
 
-**Node labels:** Graphiti creates `Episodic` and `Entity` nodes
+**Node shapes:** Native retrieval queries direct Surreal records and projectable legacy
+`Episodic`/`Entity` records
 ```cypher
 WHERE (n:Episodic OR n:Entity) AND n.entity_type = $type
 ```
 
-**Creation paths:** LLM-powered (`create`) vs direct (`create_direct`)
+**Creation paths:** direct native writes first, compatibility extraction when explicitly needed
 ```python
-await manager.create(entity)         # Slower, richer extraction
-await manager.create_direct(entity)  # Faster, no LLM
+await manager.create_direct(entity)  # Native write path, no LLM
+await manager.create(entity)         # Compatibility extraction path
 ```
 
 ## Testing

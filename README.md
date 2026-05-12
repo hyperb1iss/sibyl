@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Graphiti-Memory-e135ff?style=for-the-badge&logo=neo4j&logoColor=white" alt="Graphiti">
+  <img src="https://img.shields.io/badge/Native_Memory-SurrealDB-e135ff?style=for-the-badge&logo=surrealdb&logoColor=white" alt="Native SurrealDB memory">
   <img src="https://img.shields.io/badge/SurrealDB-Store-ff00a0?style=for-the-badge&logo=surrealdb&logoColor=white" alt="SurrealDB">
   <img src="https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/Next.js_16-Frontend-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js">
@@ -375,12 +375,14 @@ sibyl/
 
 **Stack:**
 
-- **Backend:** Python 3.13 / FastMCP / FastAPI / Graphiti / SurrealDB
+- **Backend:** Python 3.13 / FastMCP / FastAPI / SurrealDB-native memory
 - **Frontend:** Next.js 16 / React 19 / React Query / Tailwind 4
 - **Storage:** SurrealDB (graph + content + auth, unified). PostgreSQL remains only for retained
   migration/archive policy.
 - **Build:** moonrepo + uv (Python) + pnpm (TypeScript)
 - **Integrations:** Claude Code, MCP clients, and project-local hooks
+- **Compatibility:** Graphiti remains only for named fallback, compare, admin, and migration
+  surfaces while the native loop finishes its default flip gate.
 
 See [`docs/guide/why-surreal.md`](docs/guide/why-surreal.md) for the rationale and
 [`docs/guide/storage-modes.md`](docs/guide/storage-modes.md) for the mode matrix.
@@ -540,12 +542,13 @@ the system itself.
 
 - **Pure Surreal cleanup:** keep legacy services out of default runtime, charts, and docs while
   closing the remaining archive rollback policy.
-- **Native memory loop:** harden `recall -> act -> remember -> reflect` across CLI, MCP, API,
-  prompt hooks, and session startup.
+- **Native memory loop:** run `recall -> act -> remember -> reflect` through measured SurrealDB
+  context packs, policy decisions, and compare-mode flip gates across CLI, MCP, API, prompt hooks,
+  and session startup.
 - **Context quality:** make wake, recall, and deep-search packs measurable for grounding,
   permissions, latency, and token budgets.
-- **Native graph writes:** expand the first direct Surreal reflection promotion path into broader
-  default memory flows, then use the inventory to retire Graphiti dependencies deliberately.
+- **Graphiti exit:** expand the direct Surreal write paths, keep compatibility explicitly named, and
+  use the checked inventory to retire Graphiti dependencies deliberately.
 - **Human memory UX:** expose raw sources, visibility, correction, promotion, and agent access in
   a way that feels legible instead of spooky.
 
