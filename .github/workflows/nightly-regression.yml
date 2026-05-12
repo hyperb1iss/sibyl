@@ -121,12 +121,16 @@ jobs:
       - name: Run context-pack retrieval compare benchmark
         id: context-pack-compare
         run: |
+          set +e
           moon run core:bench-context -- \
             --cases benchmarks/context_pack_cases.json \
             --auth-manifest .moon/cache/baseline-runtime-manifest.json \
             --label retrieval-compare \
             --repeat 20 \
             --metadata retrieval_mode=compare
+          bench_status="$?"
+          set -e
+
           latest_report="$(
             find .moon/cache/evals -maxdepth 1 \
               -name 'eval_context_pack_retrieval_compare_*.json' \
@@ -136,6 +140,31 @@ jobs:
               | cut -d' ' -f2-
           )"
           test -n "$latest_report"
+          echo "report=$latest_report" >> "$GITHUB_OUTPUT"
+
+          if [[ "$bench_status" -ne 0 ]]; then
+            python - "$latest_report" <<'PY'
+          import json
+          import sys
+
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          failures = [case for case in report.get("per_case", []) if not case.get("passed")]
+          print()
+          print("Context-pack failures")
+          seen = set()
+          for case in failures:
+              reasons = tuple(case.get("failures") or [])
+              key = (case.get("name"), reasons)
+              if key in seen:
+                  continue
+              seen.add(key)
+              print(f"  {case.get('name')} repeat {case.get('repeat_index')}:")
+              for reason in reasons:
+                  print(f"    - {reason}")
+          PY
+            exit "$bench_status"
+          fi
+
           moon run bench-gate -- "$latest_report" --profile context-pack \
             --require-metadata retrieval_mode=compare \
             --require-metadata repeat_count=20
@@ -146,9 +175,9 @@ jobs:
             --run-attempt "${GITHUB_RUN_ATTEMPT}" \
             --event "${GITHUB_EVENT_NAME}" \
             --workflow "${GITHUB_WORKFLOW}"
-          echo "report=$latest_report" >> "$GITHUB_OUTPUT"
 
       - name: Upload context-pack retrieval compare report
+        if: always() && steps.context-pack-compare.outputs.report != ''
         uses: actions/upload-artifact@v4
         with:
           name: context-pack-retrieval-compare

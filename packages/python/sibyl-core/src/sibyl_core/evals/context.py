@@ -252,7 +252,8 @@ class ContextPackEvalReport:
         return path
 
     def print_summary(self) -> None:
-        metrics = self.to_dict()["metrics"]
+        report = self.to_dict()
+        metrics = report["metrics"]
         print("\nSibyl context-pack evaluation summary")
         print(f"  cases: {metrics['cases']}")
         print(f"  repeat_count: {metrics['repeat_count']}")
@@ -260,6 +261,19 @@ class ContextPackEvalReport:
         print(f"  failed: {metrics['failed']}")
         print(f"  latency_ms: {metrics['latency_ms']:.1f}")
         print(f"  latency_p95_ms: {metrics['latency_p95_ms']:.1f}")
+        failures = [case for case in report["per_case"] if not case["passed"]]
+        if failures:
+            print("\nFailed context-pack cases")
+            seen: set[tuple[str, tuple[str, ...]]] = set()
+            for case in failures:
+                reasons = tuple(str(reason) for reason in case["failures"])
+                signature = (str(case["name"]), reasons)
+                if signature in seen:
+                    continue
+                seen.add(signature)
+                print(f"  {case['name']} (repeat {case['repeat_index']}):")
+                for reason in reasons:
+                    print(f"    - {reason}")
 
 
 def _quality_value(item: ContextItem, key: str) -> Any:
