@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from tools.inventory.runtime_surface import (
+    GRAPHITI_EXIT_INVENTORY_PATH,
     SNAPSHOT_PATH,
     collect_runtime_surface,
     parse_dependency_name,
     render_markdown,
+    unclassified_graphiti_imports,
 )
 
 EXPECTED_ROUTER_COUNT = 24
@@ -23,6 +25,13 @@ def test_dependency_parser_strips_extras_and_markers() -> None:
 def test_runtime_surface_snapshot_is_current() -> None:
     surface = collect_runtime_surface()
     assert render_markdown(surface) == SNAPSHOT_PATH.read_text(encoding="utf-8")
+
+
+def test_graphiti_exit_inventory_covers_runtime_imports() -> None:
+    surface = collect_runtime_surface()
+
+    assert GRAPHITI_EXIT_INVENTORY_PATH.exists()
+    assert unclassified_graphiti_imports(surface) == ()
 
 
 def test_runtime_surface_finds_known_contracts() -> None:

@@ -225,6 +225,32 @@ Completed evidence:
   environment, and local Kubernetes infra no longer carries FalkorDB or CNPG manifests.
 - Active guides now describe FalkorDB and PostgreSQL only as migration/archive source surfaces.
 
+### Lane 6 - Exit Graphiti from Default Memory Loops
+
+Status: in progress for `v0.7`.
+
+Graphiti remains as a transition dependency on top of the SurrealDB driver. Its remaining work is
+not FalkorDB removal; it is default-loop removal for native memory. The generated runtime inventory
+lists every active `graphiti_core` import, while the hand-authored
+`docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md` classifies each call site by behavior,
+default-loop usage, status, removal condition, owner, and verification command.
+
+Verification:
+
+- `moon run inventory-check` verifies both the generated inventory snapshot and hand-authored
+  Graphiti exit coverage.
+- `moon run core:test` keeps the native retrieval and native write contract tests green.
+- A follow-on no-Graphiti smoke test should block Graphiti imports for `remember`, `recall`,
+  `context`, `wake`, and `reflect` once the default-loop replacements are wired.
+
+Exit criteria:
+
+- No default `remember`, `recall`, `context`, `wake`, or `reflect` path constructs Graphiti.
+- Remaining Graphiti imports are named compatibility, migration, or test-only surfaces with removal
+  owners and conditions.
+- Projectable pre-v0.7 `Episodic` and `Entity` records are documented for native projection, and
+  unprojectable records are excluded rather than treated as public memory.
+
 ---
 
 ## Dependency Removal Order

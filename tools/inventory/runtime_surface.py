@@ -12,6 +12,7 @@ import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SNAPSHOT_PATH = REPO_ROOT / "docs/research/rust-port/INVENTORY.md"
+GRAPHITI_EXIT_INVENTORY_PATH = REPO_ROOT / "docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md"
 APP_PATH = REPO_ROOT / "apps/api/src/sibyl/api/app.py"
 MODELS_PATH = REPO_ROOT / "apps/api/src/sibyl/db/models.py"
 PYPROJECT_PATHS = [
@@ -36,6 +37,7 @@ HTTP_METHOD_DECORATORS = {
 }
 SQL_IMPORT_PREFIXES = ("sqlalchemy", "sqlmodel")
 GRAPHITI_IMPORT_PREFIXES = ("graphiti", "graphiti_core")
+GRAPHITI_EXIT_INVENTORY_GROUPS = ("packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/*",)
 SQL_SESSION_IMPORTS = {
     "AsyncSession",
     "Session",
@@ -475,6 +477,31 @@ def collect_runtime_surface() -> RuntimeSurface:
     )
 
 
+def _graphiti_path_is_classified(path: str, inventory_text: str) -> bool:
+    if f"`{path}`" in inventory_text:
+        return True
+    for group in GRAPHITI_EXIT_INVENTORY_GROUPS:
+        prefix = group.removesuffix("*")
+        if path.startswith(prefix) and f"`{group}`" in inventory_text:
+            return True
+    return False
+
+
+def unclassified_graphiti_imports(
+    surface: RuntimeSurface,
+    *,
+    inventory_path: Path = GRAPHITI_EXIT_INVENTORY_PATH,
+) -> tuple[GraphitiImportRecord, ...]:
+    if not inventory_path.exists():
+        return surface.graphiti_imports
+    inventory_text = inventory_path.read_text(encoding="utf-8")
+    return tuple(
+        record
+        for record in surface.graphiti_imports
+        if not _graphiti_path_is_classified(record.path, inventory_text)
+    )
+
+
 def render_markdown(surface: RuntimeSurface) -> str:
     legacy_dependencies = tuple(
         record for record in surface.dependencies if record.classification == "legacy"
@@ -637,6 +664,21 @@ def check_snapshot(output_path: Path, rendered: str) -> int:
     return 1
 
 
+def check_graphiti_exit_inventory(surface: RuntimeSurface) -> int:
+    missing = unclassified_graphiti_imports(surface)
+    if not missing:
+        emit(f"Graphiti exit inventory covers {len(surface.graphiti_imports)} import files")
+        return 0
+
+    emit(
+        f"Graphiti exit inventory is missing {len(missing)} import files:",
+        stream=sys.stderr,
+    )
+    for record in missing:
+        emit(f"- {record.path}", stream=sys.stderr)
+    return 1
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate the Sibyl runtime inventory snapshot.")
     parser.add_argument(
@@ -656,10 +698,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     output_path = args.output.resolve()
-    rendered = render_markdown(collect_runtime_surface())
+    surface = collect_runtime_surface()
+    rendered = render_markdown(surface)
 
     if args.check:
-        return check_snapshot(output_path, rendered)
+        status = check_snapshot(output_path, rendered)
+        inventory_status = check_graphiti_exit_inventory(surface)
+        return 1 if status or inventory_status else 0
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(rendered, encoding="utf-8")
