@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import sibyl_core.retrieval.native as native_module
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.retrieval.native import (
@@ -218,3 +220,116 @@ def test_vector_matches_with_lexical_signal_do_not_demote() -> None:
     )
 
     assert "vector_only_demoted" not in ranked[0][2]
+
+
+class _EdgeFulltextClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if "fact @0@" in query:
+            return [
+                {"uuid": "edge-1", "score": 0.9},
+                {"uuid": "edge-drop", "score": 0.8},
+                {"uuid": "edge-2", "score": 0.7},
+                {"uuid": "edge-3", "score": 0.6},
+                {"uuid": "edge-4", "score": 0.5},
+            ]
+        return [
+            {
+                "uuid": "edge-4",
+                "name": "RELATES_TO",
+                "fact": "Later match",
+                "group_id": "org-123",
+                "episodes": [],
+                "attributes": {"project_id": "project_123"},
+                "created_at": None,
+                "expired_at": None,
+                "valid_at": None,
+                "invalid_at": None,
+                "source_node_uuid": "task-4",
+                "target_node_uuid": "pattern-4",
+            },
+            {
+                "uuid": "edge-1",
+                "name": "RELATES_TO",
+                "fact": "Surreal planner warning",
+                "group_id": "org-123",
+                "episodes": [],
+                "attributes": {"project_id": "project_123"},
+                "created_at": None,
+                "expired_at": None,
+                "valid_at": None,
+                "invalid_at": None,
+                "source_node_uuid": "task-1",
+                "target_node_uuid": "pattern-1",
+            },
+            {
+                "uuid": "edge-3",
+                "name": "RELATES_TO",
+                "fact": "Third match",
+                "group_id": "org-123",
+                "episodes": [],
+                "attributes": {"project_id": "project_123"},
+                "created_at": None,
+                "expired_at": None,
+                "valid_at": None,
+                "invalid_at": None,
+                "source_node_uuid": "task-3",
+                "target_node_uuid": "pattern-3",
+            },
+            {
+                "uuid": "edge-2",
+                "name": "RELATES_TO",
+                "fact": "Second match",
+                "group_id": "org-123",
+                "episodes": [],
+                "attributes": {"project_id": "project_123"},
+                "created_at": None,
+                "expired_at": None,
+                "valid_at": None,
+                "invalid_at": None,
+                "source_node_uuid": "task-2",
+                "target_node_uuid": "pattern-2",
+            },
+        ]
+
+
+@pytest.mark.asyncio
+async def test_edge_fulltext_splits_matches_from_relation_hydration() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="surreal planner warning",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+    client = _EdgeFulltextClient()
+
+    candidates = await native_module._edge_fulltext_candidates(
+        client=client,
+        plan=plan,
+        search_filter=native_module.NativeSearchFilter(
+            project_ids=("project_123",),
+            edge_uuids=("edge-1", "edge-2", "edge-3", "edge-4"),
+            edge_types=("RELATES_TO",),
+        ),
+        limit=3,
+    )
+
+    assert [candidate.id for candidate in candidates] == ["edge-1", "edge-2", "edge-3"]
+    assert [candidate.score for candidate in candidates] == [0.9, 0.7, 0.6]
+    match_query = client.calls[0][0]
+    hydrate_query = client.calls[1][0]
+    assert "fact @0@" in match_query
+    assert "in." not in match_query
+    assert "out." not in match_query
+    assert "attributes." not in match_query
+    assert "uuid IN $edge_uuids" in match_query
+    assert "name IN $edge_types" in match_query
+    assert client.calls[0][1]["match_limit"] == 32
+    assert "fact @0@" not in hydrate_query
+    assert "uuid IN $match_uuids" in hydrate_query

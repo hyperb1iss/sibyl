@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 type RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory]]]
 
 DEFAULT_FILTER_SELECTIVITY_THRESHOLD = 0.1
+EDGE_FULLTEXT_MATCH_HEADROOM = 8
+EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
 _ACTIVE_TASK_STATUSES = {"doing", "in_progress", "review"}
 _RAW_MEMORY_CONTEXT_TYPES = {"raw_memory", "session", "episode", "note"}
 
@@ -555,31 +557,68 @@ async def _edge_fulltext_candidates(
     search_query = build_fulltext_query(plan.query)
     if not search_query:
         return []
-    filter_clauses, filter_params = _edge_filter_clause(search_filter)
-    rows = normalize_records(
+    result_limit = max(int(limit), 1)
+    match_limit = max(result_limit * EDGE_FULLTEXT_MATCH_HEADROOM, EDGE_FULLTEXT_MIN_MATCH_LIMIT)
+    match_clauses, match_params = _edge_match_filter_clause(search_filter)
+    match_rows = normalize_records(
         await client.execute_query(
-            _edge_select("search::score(0) AS score")
-            + " WHERE "
-            + _where_clause(["group_id = $group_id", *filter_clauses])
+            """
+            SELECT uuid, search::score(0) AS score
+            FROM relates_to
+            WHERE """
+            + _where_clause(["group_id = $group_id", *match_clauses])
             + """
               AND fact @0@ $search_query
             ORDER BY score DESC, created_at DESC, uuid DESC
-            LIMIT $limit;
+            LIMIT $match_limit;
             """,
             group_id=plan.organization_id,
             search_query=search_query,
-            limit=max(int(limit), 1),
+            match_limit=match_limit,
+            **match_params,
+        )
+    )
+    match_scores: dict[str, float] = {}
+    for row in match_rows:
+        uuid = str(row.get("uuid") or "")
+        if uuid:
+            match_scores[uuid] = _record_score(row)
+    match_uuids = list(match_scores)
+    if search_filter.edge_uuids:
+        allowed_edge_uuids = set(search_filter.edge_uuids)
+        match_uuids = [uuid for uuid in match_uuids if uuid in allowed_edge_uuids]
+    if not match_uuids:
+        return []
+
+    hydrate_filter = NativeSearchFilter(
+        node_labels=search_filter.node_labels,
+        project_ids=search_filter.project_ids,
+        edge_types=search_filter.edge_types,
+    )
+    filter_clauses, filter_params = _edge_filter_clause(hydrate_filter)
+    rows = normalize_records(
+        await client.execute_query(
+            _edge_select()
+            + " WHERE "
+            + _where_clause(["uuid IN $match_uuids", "group_id = $group_id", *filter_clauses])
+            + " LIMIT $limit;",
+            match_uuids=match_uuids,
+            group_id=plan.organization_id,
+            limit=len(match_uuids),
             **filter_params,
         )
     )
-    return [
+    rows_by_uuid = {str(row["uuid"]): row for row in rows if row.get("uuid")}
+    candidates = [
         _candidate_from_edge_record(
-            row,
+            rows_by_uuid[uuid],
             signal=NativeRetrievalSignal.EDGE_FULLTEXT,
-            score=_record_score(row),
+            score=match_scores[uuid],
         )
-        for row in rows
+        for uuid in match_uuids
+        if uuid in rows_by_uuid
     ]
+    return candidates[:result_limit]
 
 
 async def _vector_candidate_sources(
@@ -680,6 +719,20 @@ def _edge_filter_clause(
     if target_node_uuid is not None:
         clauses.append("out.uuid = $target_node_uuid")
         params["target_node_uuid"] = target_node_uuid
+    return clauses, params
+
+
+def _edge_match_filter_clause(
+    search_filter: NativeSearchFilter,
+) -> tuple[list[str], dict[str, Any]]:
+    clauses: list[str] = []
+    params: dict[str, Any] = {}
+    if search_filter.edge_uuids:
+        clauses.append("uuid IN $edge_uuids")
+        params["edge_uuids"] = list(search_filter.edge_uuids)
+    if search_filter.edge_types:
+        clauses.append("name IN $edge_types")
+        params["edge_types"] = list(search_filter.edge_types)
     return clauses, params
 
 
