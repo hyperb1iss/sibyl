@@ -1150,6 +1150,30 @@ class TestCoerceEntity:
         assert procedure.steps[0].title == "Assess"
         assert procedure.steps[1].description == "Mitigate the issue"
 
+    def test_coerces_procedure_entity_with_nullable_defaults(self) -> None:
+        client = MockGraphClient()
+        manager = EntityManager(client, group_id=TEST_ORG_ID)
+
+        entity = Entity(
+            id="procedure_nullable",
+            name="Nullable procedure",
+            entity_type=EntityType.PROCEDURE,
+            metadata={
+                "category": None,
+                "required_tools": None,
+                "automation_level": None,
+                "steps": None,
+            },
+        )
+
+        procedure = manager._coerce_entity(entity)
+
+        assert isinstance(procedure, Procedure)
+        assert procedure.category == ""
+        assert procedure.required_tools == []
+        assert procedure.automation_level == "manual"
+        assert procedure.steps == []
+
 
 class TestBulkCreateDirect:
     """Tests for bulk_create_direct method."""

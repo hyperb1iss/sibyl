@@ -3535,7 +3535,7 @@ class EntityManager:
         """Hydrate a Procedure from a generic entity + metadata."""
         meta = entity.metadata or {}
         steps: list[ProcedureStep] = []
-        for raw_step in meta.get("steps", []):
+        for raw_step in meta.get("steps") or []:
             if isinstance(raw_step, ProcedureStep):
                 steps.append(raw_step)
             elif isinstance(raw_step, dict):
@@ -3556,10 +3556,10 @@ class EntityManager:
             source_file=entity.source_file,
             embedding=entity.embedding,
             steps=steps,
-            required_tools=meta.get("required_tools", []),
-            category=meta.get("category", ""),
+            required_tools=meta.get("required_tools") or [],
+            category=meta.get("category") or "",
             estimated_minutes=meta.get("estimated_minutes"),
-            automation_level=meta.get("automation_level", "manual"),
+            automation_level=meta.get("automation_level") or "manual",
         )
 
     def _build_bulk_direct_row(self, entity: Entity) -> dict[str, Any]:

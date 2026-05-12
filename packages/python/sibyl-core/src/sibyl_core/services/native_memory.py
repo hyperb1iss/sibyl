@@ -718,7 +718,6 @@ def _entity_from_candidate(
     primary_source_id = source_id or (source_ids[0] if source_ids else None)
     metadata = {
         **candidate.metadata,
-        "category": domain,
         "tags": list(candidate.tags),
         "organization_id": organization_id,
         "capture_mode": "reflect",
@@ -731,6 +730,10 @@ def _entity_from_candidate(
         "native_write_path": "reflection_promotion",
         **dict(policy_metadata),
     }
+    if domain:
+        metadata["category"] = domain
+    elif metadata.get("category") is None:
+        metadata.pop("category", None)
     if project:
         metadata["project_id"] = project
     if primary_source_id:
