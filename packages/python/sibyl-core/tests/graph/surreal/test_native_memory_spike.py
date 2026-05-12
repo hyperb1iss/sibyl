@@ -3,11 +3,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from graphiti_core.search.search_filters import SearchFilters
 
+import sibyl_core.retrieval.native as native_retrieval
 from sibyl_core.backends.surreal import SurrealDriver
 from sibyl_core.backends.surreal.content_client import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
@@ -15,7 +17,6 @@ from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.graph.search_interface import SurrealSearchInterface
 from sibyl_core.services.surreal_content import RawMemory, recall_raw_memory, remember_raw_memory
 from sibyl_core.tools.context import compile_context, context_pack_to_markdown
-from sibyl_core.tools.responses import SearchResponse, SearchResult
 
 
 @pytest.mark.asyncio
@@ -39,7 +40,7 @@ async def test_native_surrealql_memory_path_renders_context_pack(
     embedding = [0.1] * EMBEDDING_DIM
     try:
         raw_memory = await remember_raw_memory(
-            organization_id="org-native-spike",
+            organization_id=gid,
             principal_id="user-native",
             source_id="cli:remember:native-spike",
             raw_content=(
@@ -72,11 +73,23 @@ async def test_native_surrealql_memory_path_renders_context_pack(
                 uuid: $target_uuid,
                 name: "Native ContextPack",
                 entity_type: "artifact",
-                summary: "direct SurrealQL context pack entity",
+                summary: "Surreal native context pack source rendering entity",
                 labels: ["Entity", "Artifact"],
-                attributes: {content: "context pack renders raw source ids"},
+                attributes: {content: "Surreal native context pack source rendering"},
                 group_id: $group_id,
                 project_id: "project_native",
+                created_at: $now,
+                name_embedding: $embedding
+            };
+            CREATE entity CONTENT {
+                uuid: $other_project_uuid,
+                name: "Native Cross Project",
+                entity_type: "artifact",
+                summary: "Surreal native context pack source rendering leak candidate",
+                labels: ["Entity", "Artifact"],
+                attributes: {content: "Surreal native context pack source rendering"},
+                group_id: $group_id,
+                project_id: "project_other",
                 created_at: $now,
                 name_embedding: $embedding
             };
@@ -107,6 +120,7 @@ async def test_native_surrealql_memory_path_renders_context_pack(
             """,
             source_uuid="native-raw-memory",
             target_uuid="native-context-pack",
+            other_project_uuid="native-cross-project",
             episode_uuid="native-episode",
             edge_uuid="native-edge",
             group_id=gid,
@@ -162,38 +176,35 @@ async def test_native_surrealql_memory_path_renders_context_pack(
         async def raw_recall(**kwargs: Any) -> list[RawMemory]:
             return await recall_raw_memory(**kwargs)
 
-        async def native_search(**kwargs: Any) -> SearchResponse:
-            query = kwargs["query"]
-            if kwargs["types"] != ["session", "episode", "note"]:
-                return SearchResponse(results=[], total=0, query=query, filters={})
-            return SearchResponse(
-                results=[
-                    SearchResult(
-                        id=lexical_nodes[0].uuid,
-                        type="artifact",
-                        name=lexical_nodes[0].name,
-                        content=lexical_nodes[0].summary or "",
-                        score=1.0,
-                        source="surreal:native",
-                        metadata={"entity_type": "artifact", "project_id": "project_native"},
-                    )
-                ],
-                total=1,
-                query=query,
-                filters={},
-                graph_count=1,
-            )
+        class FakeEmbedder:
+            async def create(self, _input_data: object) -> list[float]:
+                return embedding
+
+        fake_graph_client = SimpleNamespace(
+            client=SimpleNamespace(embedder=FakeEmbedder()),
+            get_org_driver=lambda _organization_id: surreal_schema,
+        )
+
+        async def fake_get_graph_runtime(_organization_id: str) -> SimpleNamespace:
+            return SimpleNamespace(client=fake_graph_client)
+
+        async def unexpected_search(**_kwargs: Any) -> None:
+            raise AssertionError("Graphiti fallback search should not run in native mode")
+
+        monkeypatch.setattr(native_retrieval, "get_graph_runtime", fake_get_graph_runtime)
 
         pack = await compile_context(
             "Surreal native context pack source rendering",
             intent="build",
             project="project_native",
             accessible_projects={"project_native"},
-            organization_id="org-native-spike",
+            organization_id=gid,
             principal_id="user-native",
-            search_fn=native_search,
+            search_fn=unexpected_search,
             raw_memory_recall_fn=raw_recall,
             limit=6,
+            related_limit=0,
+            retrieval_mode="native",
         )
         markdown = context_pack_to_markdown(pack, max_items=6)
 
@@ -204,6 +215,9 @@ async def test_native_surrealql_memory_path_renders_context_pack(
         assert current_node.name == lexical_nodes[0].name
         assert current_edge.fact == vector_edges[0].fact
         assert current_episode.content == episode_results[0].content
+        assert "native-context-pack" in markdown
+        assert "native-cross-project" not in markdown
+        assert "native-episode" not in markdown
         assert f"raw_memory:{raw_memory.id}" in markdown
         assert "src=cli:remember:native-spike" in markdown
         assert "preserves verbatim source context" in markdown

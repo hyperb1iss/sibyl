@@ -213,6 +213,8 @@ def _reason_for(result: SearchResult, facet: ContextFacet) -> str:
         return f"{result_type} points at concrete things the agent may need to inspect or change"
     if facet == ContextFacet.PROCEDURES:
         return f"{result_type} describes repeatable steps or tools"
+    if facet == ContextFacet.RECENT_MEMORY and result_type == "raw_memory":
+        return "raw memory matched the goal and preserves verbatim source context"
     if facet == ContextFacet.CONSTRAINTS:
         return f"{result_type} constrains acceptable work"
     if facet == ContextFacet.GOTCHAS:
