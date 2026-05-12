@@ -18,6 +18,12 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
+from sibyl_core.auth.memory_policy import (
+    MemoryPolicyAction,
+    MemoryPolicyDecision,
+    authorize_memory_read,
+    authorize_memory_write,
+)
 from sibyl_core.services.native_memory import (
     NativeReflectionPromotionResult,
     promote_reflection_candidate_review,
@@ -46,35 +52,87 @@ _WRITE_ROLES = (
 router = APIRouter(prefix="/memory", tags=["memory"])
 
 
-def _is_org_admin(ctx: AuthContext) -> bool:
-    role = getattr(ctx.org_role, "value", ctx.org_role)
-    return str(role) in {OrganizationRole.OWNER.value, OrganizationRole.ADMIN.value}
+def _policy_http_status(reason: str) -> int:
+    if reason == "missing_scope_key":
+        return 400
+    if reason == "principal_mismatch":
+        return 401
+    return 403
 
 
-async def _authorize_scope(
+def _log_policy_decision(
+    *,
+    ctx: AuthContext,
+    decision: MemoryPolicyDecision,
+    surface: str,
+) -> None:
+    log.info(
+        "memory_policy_decision",
+        action=decision.action.value,
+        allowed=decision.allowed,
+        memory_scope=decision.memory_scope.value,
+        organization_id=ctx.organization_id,
+        policy_reason=decision.reason,
+        principal_id=ctx.user_id,
+        scope_key=decision.scope_key,
+        surface=surface,
+    )
+
+
+async def _project_accessible_for_policy(
     *,
     ctx: AuthContext,
     memory_scope: str,
     scope_key: str | None,
-    required_project_role: ProjectRole,
-) -> None:
-    if memory_scope == "project":
-        if not scope_key:
-            return
-        await verify_entity_project_access(
-            None,
-            ctx,
-            scope_key,
-            required_role=required_project_role,
-            require_existing_project=True,
-        )
-        return
+) -> set[str] | None:
+    if memory_scope != "project" or not scope_key:
+        return None
+    accessible_projects = await list_accessible_project_graph_ids(ctx)
+    return {str(project_id) for project_id in accessible_projects or set()}
 
-    if memory_scope in {"delegated", "team", "shared"} and not _is_org_admin(ctx):
-        raise HTTPException(
-            status_code=403,
-            detail=f"{memory_scope} raw memory requires owner/admin access until scope ACLs exist",
+
+async def _authorize_memory_policy(
+    *,
+    ctx: AuthContext,
+    action: MemoryPolicyAction,
+    memory_scope: str,
+    scope_key: str | None,
+    surface: str,
+    agent_id: str | None = None,
+    project_id: str | None = None,
+) -> MemoryPolicyDecision:
+    accessible_projects = await _project_accessible_for_policy(
+        ctx=ctx,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+    )
+    if action is MemoryPolicyAction.READ:
+        decision = authorize_memory_read(
+            principal_id=ctx.user_id,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            agent_id=agent_id,
+            project_id=project_id,
+            accessible_projects=accessible_projects,
         )
+    elif action is MemoryPolicyAction.WRITE:
+        decision = authorize_memory_write(
+            principal_id=ctx.user_id,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            accessible_projects=accessible_projects,
+        )
+    else:
+        msg = f"Unsupported raw memory policy action: {action.value}"
+        raise ValueError(msg)
+
+    _log_policy_decision(ctx=ctx, decision=decision, surface=surface)
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=_policy_http_status(decision.reason),
+            detail=decision.reason,
+        )
+    return decision
 
 
 async def _authorize_project_filter(
@@ -122,7 +180,11 @@ def _validate_diary_request(*, diary: bool, agent_id: str | None, memory_scope: 
         raise HTTPException(status_code=400, detail="agent_id is required for diary memory")
 
 
-def _raw_memory_response(memory: RawMemory) -> RawMemoryResponse:
+def _raw_memory_response(
+    memory: RawMemory,
+    *,
+    policy_reason: str | None = None,
+) -> RawMemoryResponse:
     return RawMemoryResponse(
         id=memory.id,
         organization_id=memory.organization_id,
@@ -139,6 +201,7 @@ def _raw_memory_response(memory: RawMemory) -> RawMemoryResponse:
         captured_at=memory.captured_at,
         created_at=memory.created_at,
         score=memory.score,
+        policy_reason=policy_reason,
     )
 
 
@@ -215,11 +278,12 @@ async def remember_raw(
             project_id=request.project_id,
             required_project_role=ProjectRole.CONTRIBUTOR,
         )
-        await _authorize_scope(
+        write_decision = await _authorize_memory_policy(
             ctx=ctx,
+            action=MemoryPolicyAction.WRITE,
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
-            required_project_role=ProjectRole.CONTRIBUTOR,
+            surface="raw_remember",
         )
         metadata = _diary_metadata(
             metadata=request.metadata,
@@ -240,7 +304,7 @@ async def remember_raw(
             provenance=request.provenance,
             capture_surface=capture_surface,
         )
-        return _raw_memory_response(memory)
+        return _raw_memory_response(memory, policy_reason=write_decision.reason)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except HTTPException:
@@ -271,11 +335,14 @@ async def recall_raw(
             agent_id=request.agent_id,
             memory_scope=request.memory_scope,
         )
-        await _authorize_scope(
+        read_decision = await _authorize_memory_policy(
             ctx=ctx,
+            action=MemoryPolicyAction.READ,
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
-            required_project_role=ProjectRole.VIEWER,
+            surface="raw_recall",
+            agent_id=request.agent_id,
+            project_id=request.project_id,
         )
         await _authorize_project_filter(
             ctx=ctx,
@@ -295,7 +362,11 @@ async def recall_raw(
         return RawMemoryRecallResponse(
             query=request.query,
             limit=request.limit,
-            memories=[_raw_memory_response(memory) for memory in memories],
+            memories=[
+                _raw_memory_response(memory, policy_reason=read_decision.reason)
+                for memory in memories
+            ],
+            policy_reason=read_decision.reason,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

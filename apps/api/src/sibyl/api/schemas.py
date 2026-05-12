@@ -187,6 +187,7 @@ class RawMemoryResponse(BaseModel):
     captured_at: datetime | None = Field(default=None, description="Capture timestamp")
     created_at: datetime | None = Field(default=None, description="Creation timestamp")
     score: float = Field(default=0.0, description="Recall score")
+    policy_reason: str | None = Field(default=None, description="Memory policy decision reason")
 
 
 class RawMemoryRecallResponse(BaseModel):
@@ -195,6 +196,7 @@ class RawMemoryRecallResponse(BaseModel):
     query: str = Field(..., description="Recall query")
     memories: list[RawMemoryResponse]
     limit: int
+    policy_reason: str | None = Field(default=None, description="Memory policy decision reason")
 
 
 class ReflectionPromotionRequest(BaseModel):

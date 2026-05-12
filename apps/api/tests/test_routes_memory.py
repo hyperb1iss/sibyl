@@ -27,6 +27,7 @@ def _org() -> MagicMock:
 def _ctx() -> MagicMock:
     ctx = MagicMock()
     ctx.user_id = "user-123"
+    ctx.organization_id = "org-1"
     ctx.org_role = OrganizationRole.MEMBER
     return ctx
 
@@ -89,6 +90,7 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
     assert response.id == "memory-1"
     assert response.source_id == "source-1"
     assert response.principal_id == "user-123"
+    assert response.policy_reason == "same_scope_write_allowed"
 
 
 @pytest.mark.asyncio
@@ -151,6 +153,7 @@ async def test_remember_raw_diary_sets_agent_metadata_and_surface() -> None:
     )
     assert response.metadata["agent_id"] == "nova"
     assert response.capture_surface == "agent_diary"
+    assert response.policy_reason == "same_scope_write_allowed"
 
 
 @pytest.mark.asyncio
@@ -208,17 +211,21 @@ async def test_remember_raw_defaults_source_id_from_surface() -> None:
 
 
 @pytest.mark.asyncio
-async def test_remember_raw_verifies_project_scope_write_access() -> None:
+async def test_remember_raw_uses_shared_policy_for_project_scope_write() -> None:
     org = _org()
     ctx = _ctx()
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch(
+            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_123"}),
+        ) as accessible_projects,
+        patch("sibyl.api.routes.memory.log") as route_log,
         patch(
             "sibyl.api.routes.memory.remember_raw_memory",
             AsyncMock(return_value=_memory(organization_id=str(org.id), scope_key="project_123")),
         ),
     ):
-        await remember_raw(
+        response = await remember_raw(
             RawMemoryRememberRequest(
                 raw_content="project note",
                 memory_scope="project",
@@ -228,13 +235,56 @@ async def test_remember_raw_verifies_project_scope_write_access() -> None:
             ctx=ctx,
         )
 
-    verify.assert_awaited_once_with(
-        None,
-        ctx,
-        "project_123",
-        required_role=ProjectRole.CONTRIBUTOR,
-        require_existing_project=True,
+    accessible_projects.assert_awaited_once_with(ctx)
+    route_log.info.assert_any_call(
+        "memory_policy_decision",
+        action="write",
+        allowed=True,
+        memory_scope="project",
+        organization_id="org-1",
+        policy_reason="same_scope_write_allowed",
+        principal_id="user-123",
+        scope_key="project_123",
+        surface="raw_remember",
     )
+    assert response.policy_reason == "same_scope_write_allowed"
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_denies_project_scope_without_policy_membership() -> None:
+    with (
+        patch(
+            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_other"}),
+        ),
+        patch("sibyl.api.routes.memory.log") as route_log,
+        patch("sibyl.api.routes.memory.remember_raw_memory", AsyncMock()) as remember,
+        pytest.raises(HTTPException) as exc,
+    ):
+        await remember_raw(
+            RawMemoryRememberRequest(
+                raw_content="project note",
+                memory_scope="project",
+                scope_key="project_123",
+            ),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "unverified_membership"
+    route_log.info.assert_any_call(
+        "memory_policy_decision",
+        action="write",
+        allowed=False,
+        memory_scope="project",
+        organization_id="org-1",
+        policy_reason="unverified_membership",
+        principal_id="user-123",
+        scope_key="project_123",
+        surface="raw_remember",
+    )
+    remember.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -262,7 +312,9 @@ async def test_recall_raw_returns_scoped_memories() -> None:
     )
     assert response.query == "raw memory"
     assert response.limit == 5
+    assert response.policy_reason == "private_principal_bound"
     assert [memory.id for memory in response.memories] == ["memory-1"]
+    assert response.memories[0].policy_reason == "private_principal_bound"
 
 
 @pytest.mark.asyncio
@@ -273,7 +325,7 @@ async def test_recall_raw_diary_filters_agent_and_project() -> None:
         patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
         patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock(return_value=[])) as recall,
     ):
-        await recall_raw(
+        response = await recall_raw(
             RawMemoryRecallRequest(
                 query="implementation state",
                 diary=True,
@@ -301,6 +353,7 @@ async def test_recall_raw_diary_filters_agent_and_project() -> None:
         project_id="project_123",
         limit=10,
     )
+    assert response.policy_reason == "agent_diary_private_read_allowed"
 
 
 @pytest.mark.asyncio
@@ -342,14 +395,17 @@ async def test_recall_raw_diary_requires_private_scope() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_verifies_project_scope_read_access() -> None:
+async def test_recall_raw_uses_shared_policy_for_project_scope_read() -> None:
     org = _org()
     ctx = _ctx()
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch(
+            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_123"}),
+        ) as accessible_projects,
         patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock(return_value=[])),
     ):
-        await recall_raw(
+        response = await recall_raw(
             RawMemoryRecallRequest(
                 query="project memory",
                 memory_scope="project",
@@ -359,13 +415,8 @@ async def test_recall_raw_verifies_project_scope_read_access() -> None:
             ctx=ctx,
         )
 
-    verify.assert_awaited_once_with(
-        None,
-        ctx,
-        "project_123",
-        required_role=ProjectRole.VIEWER,
-        require_existing_project=True,
-    )
+    accessible_projects.assert_awaited_once_with(ctx)
+    assert response.policy_reason == "project_access_verified"
 
 
 @pytest.mark.asyncio
@@ -381,16 +432,14 @@ async def test_recall_raw_blocks_keyed_team_scope_for_non_admin() -> None:
         )
 
     assert exc.value.status_code == 403
+    assert exc.value.detail == "scope_not_enabled"
     recall.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_recall_raw_maps_scope_errors_to_400() -> None:
     with (
-        patch(
-            "sibyl.api.routes.memory.recall_raw_memory",
-            AsyncMock(side_effect=ValueError("project raw memory requires a scope_key")),
-        ),
+        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock()) as recall,
         pytest.raises(HTTPException) as exc,
     ):
         await recall_raw(
@@ -400,6 +449,8 @@ async def test_recall_raw_maps_scope_errors_to_400() -> None:
         )
 
     assert exc.value.status_code == 400
+    assert exc.value.detail == "missing_scope_key"
+    recall.assert_not_awaited()
 
 
 @pytest.mark.asyncio
