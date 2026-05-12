@@ -240,8 +240,9 @@ Verification:
 - `moon run inventory-check` verifies both the generated inventory snapshot and hand-authored
   Graphiti exit coverage.
 - `moon run core:test` keeps the native retrieval and native write contract tests green.
-- A follow-on no-Graphiti smoke test should block Graphiti imports for `remember`, `recall`,
-  `context`, `wake`, and `reflect` once the default-loop replacements are wired.
+- The exit inventory now carries a checked no-Graphiti smoke plan for `remember`, `recall`,
+  `context`, `wake`, and `reflect`. The smoke test itself lands once native graph hydration, native
+  graph writes, summarized remember, and native embedding no longer import Graphiti.
 
 Exit criteria:
 

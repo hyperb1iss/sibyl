@@ -154,3 +154,40 @@ source metadata.
 Wave 6 exits when generated inventory and this hand-authored inventory agree, native mode owns the
 default `remember`, `recall`, `context`, `wake`, and `reflect` loops, and a no-Graphiti smoke test
 blocks Graphiti imports for those flows.
+
+## No-Graphiti Smoke Plan
+
+The import-blocking smoke test lands after the remaining default-loop blockers below move to native
+Surreal collaborators. Until then, `moon run inventory-check` is the blocking proof that every
+Graphiti import has a named owner and removal condition.
+
+Target smoke command:
+
+- `moon run core:test -- tests/test_no_graphiti_default_loop.py`
+
+Default-loop cases:
+
+- `remember`: raw capture and summarized remember both persist source material before derived graph
+  records.
+- `recall`: native retrieval runs with `SIBYL_RETRIEVAL_MODE=native`.
+- `context`: context packs and wake packs run through native retrieval and raw memory recall.
+- `wake`: wake-layer context uses the same native context-pack path with wake limits.
+- `reflect`: persisted reflection runs with `SIBYL_NATIVE_WRITE=enabled`.
+
+Current blockers:
+
+- `packages/python/sibyl-core/src/sibyl_core/retrieval/native.py` still imports
+  `sibyl_core.graph.search_interface`, which imports Graphiti record parsers for native graph
+  candidate hydration.
+- `packages/python/sibyl-core/src/sibyl_core/services/native_memory.py` still resolves graph writes
+  through `get_graph_runtime`, which imports the Graphiti-backed `GraphClient`.
+- `packages/python/sibyl-core/src/sibyl_core/tools/add.py` and
+  `apps/api/src/sibyl/api/routes/entities.py` still use the Graphiti-compatible `add` flow for
+  summarized remember and entity creation.
+- Native vector search still reads the Graphiti embedder from the active graph client. A native
+  embedding service must own that dependency before imports can be blocked.
+
+Closure condition:
+
+- The smoke test installs an import blocker for `graphiti_core`, exercises the five default-loop
+  cases above with native flags, and fails on any import or construction path that reaches Graphiti.

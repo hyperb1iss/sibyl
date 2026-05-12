@@ -34,6 +34,22 @@ def test_graphiti_exit_inventory_covers_runtime_imports() -> None:
     assert unclassified_graphiti_imports(surface) == ()
 
 
+def test_graphiti_exit_inventory_tracks_no_graphiti_smoke_plan() -> None:
+    inventory = GRAPHITI_EXIT_INVENTORY_PATH.read_text(encoding="utf-8")
+
+    assert "## No-Graphiti Smoke Plan" in inventory
+    assert "tests/test_no_graphiti_default_loop.py" in inventory
+    for loop_name in ("remember", "recall", "context", "wake", "reflect"):
+        assert f"- `{loop_name}`:" in inventory
+    for blocker_path in (
+        "packages/python/sibyl-core/src/sibyl_core/retrieval/native.py",
+        "packages/python/sibyl-core/src/sibyl_core/services/native_memory.py",
+        "packages/python/sibyl-core/src/sibyl_core/tools/add.py",
+        "apps/api/src/sibyl/api/routes/entities.py",
+    ):
+        assert blocker_path in inventory
+
+
 def test_runtime_surface_finds_known_contracts() -> None:
     surface = collect_runtime_surface()
 
