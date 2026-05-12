@@ -1,6 +1,6 @@
 # Sibyl v0.7 Native Memory Core Spec
 
-- Status: ready for implementation
+- Status: ready for implementation after cross-model spec review
 - Target release: v0.7
 - Tracking epic: `epic_564b41ff89d6`
 - Primary outcome: make `remember -> recall/context -> reflect` run on native SurrealDB primitives
@@ -51,6 +51,7 @@ v0.7 should not attempt:
   summary behavior are measured
 - replacing every MCP/API/CLI surface in one pass
 - building custom role systems beyond the minimum memory-policy contract
+- shipping graph-guided `synthesize`; that remains post-v0.7
 
 ## 4. Success Criteria
 
@@ -67,12 +68,13 @@ v0.7 is done when all of these are true:
   without Graphiti performing the write.
 - Reflection can promote a raw session capture into native decisions, procedures, artifacts, tasks,
   and relationships with source links.
-- Memory policy is centralized and used by recall, context, remember, reflection, CLI commands, MCP
-  tools, and API routes.
+- Memory policy is centralized and used by recall, context, wake, remember, reflection, CLI
+  commands, MCP tools, and API routes.
 - Graphiti has a concrete removal inventory with default-loop call sites classified by behavior and
   either replaced, gated, or explicitly deferred.
-- Pre-v0.7 Graphiti-written `Episodic` and `Entity` records remain queryable through native
-  retrieval after the default-loop flip.
+- Pre-v0.7 Graphiti-written `Episodic` and `Entity` records that can be projected into explicit
+  scope and source metadata remain queryable through native retrieval after the default-loop flip.
+  Unprojectable records are inventoried and excluded rather than default-allowed.
 
 ## 5. Product Stories
 
@@ -112,7 +114,9 @@ A named agent can write private diary notes for recurring project gotchas. Those
 
 ### 6.2 Core Primitives
 
-- `Principal`: user or delegated agent identity.
+- `Principal`: discriminated union for user or agent identity. Agent principals carry both
+  `principal_id` and `acting_for_user_id` / `agent_identity` so audit fields do not collapse the
+  actor and the human being represented.
 - `MemoryScope`: private, delegated, project, team, organization, shared, public.
 - `MemorySpace`: policy boundary for scoped recall and promotion.
 - `Source`: source adapter identity, source version, privacy class, and original metadata.
@@ -161,17 +165,22 @@ The v0.7 scoreboard uses concrete, testable metrics:
   `(items with non-empty source_id, visibility, reason, and freshness) / items`. Fixtures tagged
   `source-grounding` require coverage 1.0.
 - Token estimates use a small estimator interface. Prefer an exact tokenizer when one is already
-  available in the runtime; fall back to the evaluator's `characters / 4` estimate only when the
-  report labels the method as approximate and keeps a 20% safety margin against the hard budget.
+  available in the runtime. OpenAI-compatible budgets use `tiktoken` with the `cl100k_base` encoder
+  when it is available; fall back to the evaluator's `characters / 4` estimate only when the report
+  labels the method as approximate and keeps a 20% safety margin against the hard budget.
 - Deterministic pass/fail results require a fixed embedder, fixed index build settings, and seeded
-  fixtures. If a fixture sits inside a documented threshold tolerance band, revise the fixture
-  instead of gating on it.
+  fixtures. The seeded suite pins `SIBYL_EMBEDDER_MODEL`, embedding dimensions, index settings, and
+  tokenizer revision in eval metadata and fails if the recorded runtime drifts. If a fixture sits
+  inside a documented threshold tolerance band, revise the fixture instead of gating on it.
 - Policy decisions in v0.7 surface in two places: structured server logs with `surface`,
   `principal_id`, `memory_scope`, `scope_key`, `reason`, and `action`; and per-item `policy_reason`
   metadata on rendered context packs and remember/reflect responses.
 - Native vs. Graphiti retrieval is selected by `SIBYL_RETRIEVAL_MODE`: `graphiti` for the
   transitional fallback, `native` once the Wave 2 quality gate is green, and `compare` to run both,
   return native, and log diffs.
+- Compare-mode diff logs are policy-safe: Graphiti results are filtered through the Wave 1 read
+  policy before comparison, and diff records log source IDs, counts, and reason codes instead of raw
+  memory text.
 
 ## 7. Work Plan
 
@@ -219,16 +228,23 @@ Implementation:
 - Add a pure read-side memory policy decision helper for private, project, and delegated scopes.
   API, CLI, and MCP surfaces can supply principal, agent, project, and membership context without
   owning the decision rules.
-- Add default-deny `authorize_memory_write`, `authorize_memory_share`, and
-  `authorize_memory_reflect` decisions for scope crossings, missing scope keys, and unauthorized
-  project membership. Wave 5 expands the allowed cases; Waves 3 and 4 must call the helpers instead
-  of inventing local policy.
+- Add `authorize_memory_write`, `authorize_memory_share`, and `authorize_memory_reflect` decisions
+  with closed reason codes. Write and reflect decisions allow same-scope operations only when the
+  caller supplies principal, scope, and verified membership context. Share remains deny-only until
+  `memory_spaces` enables an explicit allowed case. The helpers deny scope crossings, missing scope
+  keys, unverified membership, principal mismatches, missing agent identity, and disabled scopes
+  with stable codes: `scope_not_enabled`, `missing_scope_key`, `unverified_membership`,
+  `scope_crossing_requires_promotion`, `principal_mismatch`, and `agent_identity_required`. Wave 5
+  expands allowed cases; Waves 3 and 4 must call the helpers instead of inventing local policy.
 - Add hard gates for max estimated tokens, max latency, source metadata coverage, forbidden terms,
   and required scoped metadata.
 - Add fixture data that includes private memories from another principal and confirms they are
   omitted.
 - Make the token estimator explicit in reports, including the estimator method and any approximate
   safety margin.
+- Measure p95 over 20 runs on the standard CI runner image and document the CI-specific threshold in
+  `docs/testing/benchmark-methodology.md`. Until that measurement lands, CI uses a 3x local latency
+  threshold.
 - Keep `stale-decision-replacement` green with scripted superseded metadata on raw captures in
   Wave 1. Upgrade the fixture to exercise native `supersedes` relations when Wave 4 lands.
 - Persist eval reports under `.moon/cache/evals` for local runs and expose a concise summary.
@@ -241,8 +257,8 @@ Acceptance:
 - forbidden private-memory fixtures produce 0 leaks
 - `wake` stays under 1,200 estimated tokens
 - `recall` stays under 2,000 estimated tokens unless the case opts into a higher limit
-- local recall context-pack p95 stays under 1s for seeded fixtures, while CI may keep a looser
-  documented gate until runner variance is measured
+- local recall context-pack p95 stays under 1s for seeded fixtures, while CI uses the documented
+  runner-specific gate
 - the frozen suite can run twice locally with identical pass/fail outcomes
 
 Verify:
@@ -289,8 +305,15 @@ Implementation:
 - Render context-pack item metadata with source ID, visibility, reason, freshness, and retrieval
   signals.
 - Select the path through `SIBYL_RETRIEVAL_MODE`. The mode flips from `graphiti` to `native` only
-  after Wave 2's seeded suite is green for three consecutive CI runs; `compare` mode logs native vs.
-  Graphiti diffs while returning native results.
+  after `compare` mode runs in CI for three consecutive merged-to-main builds with zero
+  policy-affecting diffs, recorded by `tools/inventory/retrieval_mode_history.py`. `compare` mode
+  logs policy-safe native vs. Graphiti diffs while returning native results.
+- Apply the Wave 1 read-side policy helper to Graphiti fallback results before comparison so
+  compare-mode logs cannot expose text that native retrieval would have filtered.
+- Define the filter-selectivity threshold for demoting vector-only candidates in
+  `docs/testing/benchmark-methodology.md` before Wave 2 exit. The initial threshold is 0.1: when a
+  filter retains less than 10% of the corpus, vector-only candidates are demoted unless the seeded
+  recall fixture proves they are still useful.
 
 Acceptance:
 
@@ -342,8 +365,10 @@ Implementation:
 - Keep Graphiti write behavior behind an explicit compatibility path for unported flows.
 - Promote the W6 spike into a stable native memory contract test, then keep the spike test only as
   historical coverage if it still catches a different behavior.
-- Add a feature flag only if needed for rollback. Rollback must preserve raw captures and allow
-  derived native records to be deleted or rebuilt from source IDs.
+- Gate native reflection writes behind `SIBYL_NATIVE_WRITE=enabled|disabled`, default disabled until
+  Milestone C exit. Disabled mode falls back to the Graphiti compatibility write path. Rollback
+  requires only the environment flag plus running the rebuild script against retained
+  `raw_captures`.
 
 Acceptance:
 
@@ -383,6 +408,8 @@ Implementation:
   suggested memory scope.
 - Promote accepted candidates into native graph records only after the promotion request supplies
   the target scope and the memory policy helper allows the reflect action.
+- Deny promotion when input raw captures span multiple memory scopes unless the caller passes
+  `promote_to_scope` matching the broadest input scope and policy allows it.
 - Mark superseded decisions and facts with the v0.7 `supersedes` relation when a newer source
   explicitly replaces them. Validity windows and bitemporal modeling are deferred.
 
@@ -394,6 +421,8 @@ Acceptance:
 - candidates that would cross memory scopes require an explicit promotion policy decision
 - scope-crossing promotion without an explicit `promote_to_scope` argument returns a stable deny
   reason
+- mixed-scope reflection inputs return a stable deny reason unless the promotion target is explicit
+  and allowed
 - rejected or deferred candidates remain auditable
 
 Verify:
@@ -428,9 +457,9 @@ Implementation:
 
 - Expand the Wave 1 memory policy decision helper from read plus default-deny write/share/reflect
   checks into the full v0.7 policy contract.
-- Use the helper in raw memory API routes, context routes, MCP remember/recall flows, and reflection
-  promotion. CLI commands must consume the same surfaced decisions from the API instead of
-  duplicating policy logic.
+- Use the helper in raw memory API routes, context routes, `wake`, MCP remember/recall flows, and
+  reflection promotion. CLI commands must consume the same surfaced decisions from the API instead
+  of duplicating policy logic.
 - Keep diary entries private unless principal, agent identity, project, and memory-space policy all
   match.
 - Return policy decision reasons in testable response and log metadata. Durable audit-event storage
@@ -484,6 +513,11 @@ Implementation:
 - Delete Graphiti from the default memory loop only after native evals pass.
 - Map pre-v0.7 Graphiti-written `Episodic` and `Entity` records into the native retrieval plan so
   existing memories remain queryable after the default-loop flip.
+- Define a Graphiti-record projection that assigns explicit scope metadata before native retrieval:
+  records with a project or source owner inherit that scoped owner; historical records without a
+  recoverable owner become `memory_scope = organization`, `principal_id = null`, and `source_id`
+  derived from the originating Graphiti episode UUID. Records that cannot be projected are excluded
+  from native retrieval. Document the projection rule in the exit inventory.
 - Keep historical migration and compatibility docs explicit.
 - Expand `moon run inventory-check` and `tools/inventory/runtime_surface.py` so the generated
   runtime inventory still proves code reality while the hand-authored exit inventory carries removal
@@ -496,11 +530,12 @@ Acceptance:
 - generated inventory and dependency files match the actual runtime
 - every generated-inventory Graphiti import either has its own row in the hand-authored exit
   inventory, or is covered by a documented row that groups a named adapter package
-- pre-v0.7 Graphiti-written records are covered by the native projection inventory and remain
-  queryable without reshaping them
+- projectable pre-v0.7 Graphiti-written records are covered by the native projection inventory and
+  remain queryable without reshaping them
+- projected legacy records pass the `private-leak-negative` fixture in `compare` mode
 - `inventory-check` fails if an unclassified default-loop Graphiti call site remains
 - a no-Graphiti default-loop smoke test passes by blocking or monkeypatching Graphiti imports for
-  `remember`, `recall`, `context`, and `reflect`
+  `remember`, `recall`, `context`, `wake`, and `reflect`
 
 Verify:
 
@@ -579,9 +614,9 @@ depending on passthrough test paths.
 - Context packs explain why an item was included.
 - Context packs expose enough source and quality metadata for policy decision review.
 - Reflection can propose a broader scope but cannot silently promote into it.
-- Pre-v0.7 Graphiti-written `Episodic` and `Entity` records remain queryable through native
-  retrieval. v0.7 does not delete or reshape them; Wave 6 documents how they are projected into the
-  native plan.
+- Projectable pre-v0.7 Graphiti-written `Episodic` and `Entity` records remain queryable through
+  native retrieval. v0.7 does not delete or reshape them; Wave 6 documents how they are projected
+  into the native plan and how unprojectable records are inventoried and excluded.
 
 ## 11. Risks
 
@@ -623,8 +658,8 @@ depending on passthrough test paths.
   the first v0.7 release candidate?
 - Should eval reports become CI artifacts immediately, or stay local until the harness stabilizes?
 
-These questions should not block Milestone A. They become blocking before Milestone D if they affect
-scope expansion or release confidence.
+These questions should not block Milestone A. Wave 5 owns the `memory_spaces` answer before scope
+expansion. Wave 1 owns the CI-artifact decision before the scoreboard becomes a release gate.
 
 ## 14. Recommendation
 
