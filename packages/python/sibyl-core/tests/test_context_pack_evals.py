@@ -86,6 +86,11 @@ def _raw_memory(
     )
 
 
+async def _compile_context_compat(*args: Any, **kwargs: Any):
+    kwargs.setdefault("retrieval_mode", "graphiti")
+    return await compile_context(*args, **kwargs)
+
+
 @pytest.mark.asyncio
 async def test_context_pack_fixture_passes_coding_handoff_requirements() -> None:
     async def fake_search(**kwargs: Any) -> SearchResponse:
@@ -136,7 +141,7 @@ async def test_context_pack_fixture_passes_coding_handoff_requirements() -> None
             filters={"types": kwargs["types"]},
         )
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "handoff the native memory implementation",
         intent="build",
         domain="sibyl",
@@ -192,7 +197,7 @@ async def test_context_pack_fixture_passes_raw_memory_scope_requirements() -> No
             )
         ]
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "raw scoped context",
         intent="build",
         project="project_123",
@@ -248,7 +253,7 @@ async def test_context_pack_policy_omits_inaccessible_project_memory() -> None:
             )
         ]
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "raw scoped context",
         intent="build",
         project="project_123",
@@ -292,7 +297,7 @@ async def test_context_pack_fixture_passes_multi_user_scope_requirements() -> No
             )
         ]
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "handoff scoped retrieval",
         intent="build",
         project="project_123",
@@ -463,7 +468,7 @@ async def test_context_pack_fixture_passes_agent_diary_requirements() -> None:
             require_source_metadata=True,
         ),
     )
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         case.goal,
         intent=case.intent,
         layer=case.layer,
@@ -560,7 +565,7 @@ async def test_context_pack_fixture_passes_haven_privacy_requirements() -> None:
             filters={"types": kwargs["types"]},
         )
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "what should Haven remember about the evening routine?",
         intent="research",
         domain="haven",
@@ -677,7 +682,7 @@ async def test_context_pack_fixture_reports_forbidden_haven_memory_leak() -> Non
             filters={"types": kwargs["types"]},
         )
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "what should Haven remember about the evening routine?",
         intent="research",
         domain="haven",

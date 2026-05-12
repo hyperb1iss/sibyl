@@ -25,8 +25,8 @@ operational surface was heavier than the product itself.
 - **Fewer connection boundaries.** One driver, one auth model, one set of queries. The API and
   worker talk to the same WebSocket endpoint.
 - **Graphiti transition compatibility.** The SurrealDriver plugs into Graphiti during migration, so
-  existing entity, episode, and community behavior can keep working while native SurrealDB paths are
-  built and verified.
+  explicitly named compatibility, compare, admin, and migration paths keep working while native
+  SurrealDB write coverage is retired deliberately.
 
 ## Honest tradeoffs
 

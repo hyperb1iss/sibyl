@@ -191,12 +191,12 @@ stored encrypted in the database (using `SIBYL_SETTINGS_KEY`).
 
 | Variable               | Default    | Description                                          |
 | ---------------------- | ---------- | ---------------------------------------------------- |
-| `SIBYL_RETRIEVAL_MODE` | `graphiti` | `graphiti`, `native`, or `compare` context retrieval |
+| `SIBYL_RETRIEVAL_MODE` | `native`   | `graphiti`, `native`, or `compare` context retrieval |
 | `SIBYL_NATIVE_WRITE`   | `disabled` | Enables direct native reflection promotion writes    |
 
 `compare` mode returns native context results while logging policy-safe diffs against the
-compatibility path. The default retrieval mode flips only after the documented compare-mode gate is
-green on main.
+compatibility path. Set `SIBYL_RETRIEVAL_MODE=graphiti` only when you need the named compatibility
+fallback for migration or investigation.
 
 ## Compatibility Graphiti Configuration
 

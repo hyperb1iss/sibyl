@@ -70,6 +70,11 @@ async def _empty_search_response(**kwargs: Any) -> SearchResponse:
     return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
 
 
+async def _compile_context_compat(*args: Any, **kwargs: Any):
+    kwargs.setdefault("retrieval_mode", "graphiti")
+    return await compile_context(*args, **kwargs)
+
+
 @pytest.mark.asyncio
 async def test_compile_context_groups_build_context_by_agent_facets() -> None:
     calls: list[dict[str, Any]] = []
@@ -95,7 +100,7 @@ async def test_compile_context_groups_build_context_by_agent_facets() -> None:
             filters={"types": kwargs["types"]},
         )
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "help agents build faster",
         intent="build",
         domain="agent-memory",
@@ -136,7 +141,7 @@ async def test_compile_context_runs_facet_searches_concurrently() -> None:
         finally:
             active_calls -= 1
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "parallelize context facets",
         intent="build",
         organization_id="org-123",
@@ -171,7 +176,7 @@ async def test_compile_context_keeps_successful_facets_when_one_fails(
             )
         return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "resilient context facets",
         intent="build",
         organization_id="org-123",
@@ -184,7 +189,7 @@ async def test_compile_context_keeps_successful_facets_when_one_fails(
 
 
 @pytest.mark.asyncio
-async def test_compile_context_uses_native_retrieval_mode(
+async def test_compile_context_defaults_to_native_retrieval_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     native_calls: list[dict[str, Any]] = []
@@ -227,7 +232,6 @@ async def test_compile_context_uses_native_retrieval_mode(
         principal_id="user-123",
         organization_id="org-123",
         search_fn=unexpected_search,
-        retrieval_mode="native",
     )
 
     assert [item.id for item in pack.items] == ["decision-native"]
@@ -292,7 +296,7 @@ async def test_compile_context_compare_mode_logs_policy_safe_diff(
     monkeypatch.setattr(context_module, "log", FakeLog())
     monkeypatch.setattr(context_module, "native_context_search", fake_native_context_search)
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "compare retrieval mode",
         intent="decide",
         project="project_123",
@@ -339,7 +343,7 @@ async def test_compile_context_includes_private_and_project_raw_memory() -> None
             )
         ]
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "raw context",
         intent="build",
         project="project_123",
@@ -391,7 +395,7 @@ async def test_compile_context_can_include_agent_diary_with_raw_memory() -> None
             return [_raw_memory("private-1", score=0.8)]
         return []
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "implementation stance",
         intent="build",
         project="project_123",
@@ -457,7 +461,7 @@ async def test_compile_context_native_ranks_agent_diary_by_relevance(
 
     monkeypatch.setattr(native_module, "get_native_graph_runtime", fake_native_runtime)
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "What should Nova recall from the diary for delegated handoff?",
         intent="learn",
         domain="sibyl",
@@ -504,7 +508,7 @@ async def test_compile_context_wake_layer_caps_items_and_skips_related() -> None
             )
         ]
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "wake up the coding session",
         intent="build",
         layer="wake",
@@ -532,7 +536,7 @@ async def test_compile_context_skips_raw_memory_without_principal() -> None:
     async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
         raise AssertionError("raw recall requires a principal")
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "raw context",
         intent="build",
         organization_id="org-123",
@@ -556,7 +560,7 @@ async def test_compile_context_keeps_graph_context_when_raw_memory_fails() -> No
     async def failing_raw_recall(**kwargs: Any) -> list[RawMemory]:
         raise RuntimeError("raw memory unavailable")
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "raw context",
         intent="build",
         principal_id="user-123",
@@ -585,7 +589,7 @@ async def test_compile_context_supports_non_software_ideation_domains() -> None:
             filters={},
         )
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "design a performance showcase",
         intent="ideate",
         domain="flow arts",
@@ -608,7 +612,7 @@ async def test_compile_context_dedupes_results_across_facets() -> None:
             filters={},
         )
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "ship faster",
         intent="plan",
         organization_id="org-123",
@@ -642,7 +646,7 @@ async def test_compile_context_falls_back_to_broad_project_search_when_facets_mi
             filters={},
         )
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "build project-scoped remember and recall",
         intent="build",
         domain="sibyl",
@@ -686,7 +690,7 @@ async def test_compile_context_can_attach_one_hop_related_items() -> None:
             )
         ]
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "ship faster",
         intent="decide",
         organization_id="org-123",
@@ -727,7 +731,7 @@ async def test_compile_context_adds_compact_quality_metadata_from_search_result(
             filters={},
         )
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "judge memory freshness",
         intent="research",
         organization_id="org-123",
@@ -754,7 +758,7 @@ async def test_compile_context_falls_back_to_graph_id_for_source_metadata() -> N
             filters={},
         )
 
-    pack = await compile_context(
+    pack = await _compile_context_compat(
         "source metadata coverage",
         intent="decide",
         organization_id="org-123",
@@ -771,10 +775,10 @@ async def test_compile_context_falls_back_to_graph_id_for_source_metadata() -> N
 @pytest.mark.asyncio
 async def test_compile_context_requires_goal_and_org() -> None:
     with pytest.raises(ValueError, match="goal is required"):
-        await compile_context("", organization_id="org-123")
+        await _compile_context_compat("", organization_id="org-123")
 
     with pytest.raises(ValueError, match="organization_id is required"):
-        await compile_context("ship faster")
+        await _compile_context_compat("ship faster")
 
 
 @pytest.mark.asyncio
@@ -823,7 +827,7 @@ async def async_compile_context_for_serialization():
             filters={},
         )
 
-    return await compile_context(
+    return await _compile_context_compat(
         "ship faster",
         intent="build",
         organization_id="org-123",

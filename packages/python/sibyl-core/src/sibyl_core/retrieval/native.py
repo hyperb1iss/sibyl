@@ -35,6 +35,9 @@ class NativeRetrievalMode(StrEnum):
     COMPARE = "compare"
 
 
+DEFAULT_NATIVE_RETRIEVAL_MODE = NativeRetrievalMode.NATIVE
+
+
 class NativeRetrievalSignal(StrEnum):
     RAW_LEXICAL = "raw_lexical"
     NODE_FULLTEXT = "node_fulltext"
@@ -130,11 +133,11 @@ def coerce_native_retrieval_mode(value: str | NativeRetrievalMode | None) -> Nat
     if isinstance(value, NativeRetrievalMode):
         return value
     if value is None or not value.strip():
-        return NativeRetrievalMode.GRAPHITI
+        return DEFAULT_NATIVE_RETRIEVAL_MODE
     try:
         return NativeRetrievalMode(value.strip().lower())
     except ValueError:
-        return NativeRetrievalMode.GRAPHITI
+        return DEFAULT_NATIVE_RETRIEVAL_MODE
 
 
 def native_retrieval_mode_from_env(

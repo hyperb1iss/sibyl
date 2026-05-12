@@ -36,9 +36,9 @@ auth runtime paths use SurrealDB.
 
 ### Native Graph and Compatibility
 
-Sibyl's default memory loop is moving through native SurrealDB services. Graphiti remains as a named
-compatibility, compare-mode, admin, and migration surface while native retrieval and write coverage
-finish their release gates:
+Sibyl's default context retrieval loop runs through native SurrealDB services. Graphiti remains as a
+named compatibility, compare-mode, admin, and migration surface while the remaining write coverage
+is retired deliberately:
 
 ```python
 from sibyl_core.services.native_graph import NativeEntityManager, NativeRelationshipManager
