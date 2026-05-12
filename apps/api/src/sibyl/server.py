@@ -312,7 +312,7 @@ async def _reflect_mcp_memory(
     )
 
     ctx = await _require_mcp_context()
-    await _resolve_mcp_project_scope(
+    accessible_projects = await _resolve_mcp_project_scope(
         ctx,
         project,
         require_project_when_restricted=persist,
@@ -332,6 +332,10 @@ async def _reflect_mcp_memory(
         project=project,
         related_to=resolved_links,
         organization_id=ctx.org_id,
+        principal_id=ctx.user_id,
+        accessible_projects=accessible_projects,
+        memory_scope="project" if project else "private",
+        scope_key=project,
         persist=persist,
         persist_source=persist_source,
         limit=limit,

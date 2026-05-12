@@ -324,6 +324,10 @@ async def test_reflect_mcp_memory_links_single_active_task_when_persisting() -> 
         "task_manual",
         "task_active",
     ]
+    assert reflect_memory.await_args.kwargs["principal_id"] == ctx.user_id
+    assert reflect_memory.await_args.kwargs["accessible_projects"] == {"project-a"}
+    assert reflect_memory.await_args.kwargs["memory_scope"] == "project"
+    assert reflect_memory.await_args.kwargs["scope_key"] == "project-a"
     explore.assert_awaited_once()
 
 

@@ -272,7 +272,7 @@ class TestReflectRoute:
         from sibyl.api.routes.context import reflect_context
 
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        ctx = SimpleNamespace()
+        ctx = _ctx()
 
         with (
             patch(
@@ -318,6 +318,10 @@ class TestReflectRoute:
         assert reflect_memory.await_args.kwargs["organization_id"] == str(org.id)
         assert reflect_memory.await_args.kwargs["project"] == "proj_1"
         assert reflect_memory.await_args.kwargs["related_to"] is None
+        assert reflect_memory.await_args.kwargs["principal_id"] == "user-123"
+        assert reflect_memory.await_args.kwargs["accessible_projects"] == {"proj_1"}
+        assert reflect_memory.await_args.kwargs["memory_scope"] == "project"
+        assert reflect_memory.await_args.kwargs["scope_key"] == "proj_1"
         assert reflect_memory.await_args.kwargs["persist"] is True
         assert reflect_memory.await_args.kwargs["persist_source"] is True
         explore.assert_awaited_once_with(
@@ -334,7 +338,7 @@ class TestReflectRoute:
         from sibyl.api.routes.context import reflect_context
 
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        ctx = SimpleNamespace()
+        ctx = _ctx()
         explore = AsyncMock(return_value=SimpleNamespace(entities=[SimpleNamespace(id="task_2")]))
 
         with (
@@ -374,6 +378,10 @@ class TestReflectRoute:
             required_role=ProjectRole.VIEWER,
         )
         assert reflect_memory.await_args.kwargs["related_to"] == ["plan_1", "task_1", "task_2"]
+        assert reflect_memory.await_args.kwargs["principal_id"] == "user-123"
+        assert reflect_memory.await_args.kwargs["accessible_projects"] == {"proj_1"}
+        assert reflect_memory.await_args.kwargs["memory_scope"] == "project"
+        assert reflect_memory.await_args.kwargs["scope_key"] == "proj_1"
         explore.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -381,7 +389,7 @@ class TestReflectRoute:
         from sibyl.api.routes.context import reflect_context
 
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        ctx = SimpleNamespace()
+        ctx = _ctx()
 
         with (
             patch(
@@ -419,6 +427,10 @@ class TestReflectRoute:
             required_role=ProjectRole.VIEWER,
         )
         assert reflect_memory.await_args.kwargs["related_to"] == ["task_1"]
+        assert reflect_memory.await_args.kwargs["principal_id"] == "user-123"
+        assert reflect_memory.await_args.kwargs["accessible_projects"] == {"proj_1"}
+        assert reflect_memory.await_args.kwargs["memory_scope"] == "project"
+        assert reflect_memory.await_args.kwargs["scope_key"] == "proj_1"
         explore.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -447,10 +459,14 @@ class TestReflectRoute:
                     persist=True,
                 ),
                 org=org,
-                ctx=SimpleNamespace(),
+                ctx=_ctx(),
             )
 
         assert reflect_memory.await_args.kwargs["related_to"] == ["task_1"]
+        assert reflect_memory.await_args.kwargs["principal_id"] == "user-123"
+        assert reflect_memory.await_args.kwargs["accessible_projects"] == {"proj_1"}
+        assert reflect_memory.await_args.kwargs["memory_scope"] == "private"
+        assert reflect_memory.await_args.kwargs["scope_key"] is None
         explore.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -458,7 +474,7 @@ class TestReflectRoute:
         from sibyl.api.routes.context import reflect_context
 
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        ctx = SimpleNamespace()
+        ctx = _ctx()
 
         with (
             patch(

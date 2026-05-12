@@ -158,7 +158,7 @@ async def reflect_context(
             reflection_pack_to_markdown,
         )
 
-        await _resolve_accessible_context_projects(
+        accessible_projects = await _resolve_accessible_context_projects(
             ctx=ctx,
             project=request.project,
         )
@@ -178,6 +178,10 @@ async def reflect_context(
             project=request.project,
             related_to=related_to,
             organization_id=str(org.id),
+            principal_id=getattr(ctx, "user_id", None),
+            accessible_projects=accessible_projects,
+            memory_scope="project" if request.project else "private",
+            scope_key=request.project,
             persist=request.persist,
             persist_source=request.persist_source,
             limit=request.limit,
