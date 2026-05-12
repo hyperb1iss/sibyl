@@ -5,7 +5,10 @@ from unittest.mock import patch
 import pytest
 
 from sibyl_core.evals import (
+    ContextPackCaseResult,
     ContextPackEvalCase,
+    ContextPackEvalReport,
+    ContextPackEvalResult,
     ContextPackFixture,
     EvalConfig,
     EvalQuery,
@@ -220,6 +223,72 @@ async def test_run_context_pack_case_enforces_latency_budget() -> None:
     assert result.latency_ms == pytest.approx(350.0)
     assert result.result.failures == ["latency too high: 350.0 ms > 250.0 ms"]
     assert result.result.metrics["latency_ms"] == pytest.approx(350.0)
+
+
+def test_context_pack_report_exposes_leak_and_token_metrics() -> None:
+    report = ContextPackEvalReport(
+        cases=[
+            ContextPackCaseResult(
+                case=ContextPackEvalCase(
+                    name="private-leak-negative",
+                    goal="keep private memory private",
+                    fixture=ContextPackFixture(name="private-leak-negative"),
+                ),
+                result=ContextPackEvalResult(
+                    fixture="private-leak-negative",
+                    passed=False,
+                    metrics={
+                        "estimated_tokens": 42,
+                        "source_metadata_coverage": 1.0,
+                        "facet_order_matches": True,
+                        "forbidden_item_matches": 1,
+                        "forbidden_term_matches": 0,
+                    },
+                ),
+                latency_ms=123.0,
+            )
+        ]
+    )
+
+    payload = report.to_dict()
+
+    assert payload["token_estimator"] == {
+        "method": "approximate_character_count",
+        "characters_per_token": 4,
+        "safety_margin_multiplier": 1.2,
+    }
+    assert payload["metrics"]["max_estimated_tokens"] == 42
+    assert payload["metrics"]["max_budgeted_estimated_tokens"] == 51
+    assert payload["metrics"]["leak_count"] == 1
+    assert payload["metrics"]["forbidden_item_matches"] == 1
+
+
+def test_context_pack_report_does_not_double_count_same_case_leak_signals() -> None:
+    report = ContextPackEvalReport(
+        cases=[
+            ContextPackCaseResult(
+                case=ContextPackEvalCase(
+                    name="private-leak-negative",
+                    goal="keep private memory private",
+                    fixture=ContextPackFixture(name="private-leak-negative"),
+                ),
+                result=ContextPackEvalResult(
+                    fixture="private-leak-negative",
+                    passed=False,
+                    metrics={
+                        "forbidden_item_matches": 1,
+                        "forbidden_term_matches": 1,
+                    },
+                ),
+            )
+        ]
+    )
+
+    payload = report.to_dict()
+
+    assert payload["metrics"]["forbidden_item_matches"] == 1
+    assert payload["metrics"]["forbidden_term_matches"] == 1
+    assert payload["metrics"]["leak_count"] == 1
 
 
 @pytest.mark.asyncio

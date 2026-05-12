@@ -159,7 +159,7 @@ async def _resolve_mcp_project_scope(
     if project:
         if project not in accessible_projects:
             raise ValueError(f"Project access denied: {project}")
-        return None
+        return {project}
     if require_project_when_restricted:
         raise ValueError("Project is required when MCP credentials are project-scoped.")
     return accessible_projects

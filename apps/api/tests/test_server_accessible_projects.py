@@ -73,7 +73,7 @@ async def test_resolve_mcp_project_scope_allows_explicit_accessible_project() ->
     with patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})):
         result = await _resolve_mcp_project_scope(ctx, project="project-a")
 
-    assert result is None
+    assert result == {"project-a"}
 
 
 @pytest.mark.asyncio

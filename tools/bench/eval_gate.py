@@ -34,6 +34,7 @@ PROFILE_THRESHOLDS: dict[ProfileName, dict[str, MetricThreshold]] = {
         "pass_rate": MetricThreshold(minimum=1.0),
         "source_metadata_coverage": MetricThreshold(minimum=1.0),
         "facet_order_match_rate": MetricThreshold(minimum=1.0),
+        "leak_count": MetricThreshold(maximum=0.0),
         "forbidden_term_matches": MetricThreshold(maximum=0.0),
     },
 }

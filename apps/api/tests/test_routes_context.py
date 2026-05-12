@@ -163,7 +163,7 @@ class TestContextPackRoute:
             required_role=ProjectRole.VIEWER,
         )
         assert compile_context.await_args.kwargs["project"] == "proj_1"
-        assert compile_context.await_args.kwargs["accessible_projects"] is None
+        assert compile_context.await_args.kwargs["accessible_projects"] == {"proj_1"}
 
     @pytest.mark.asyncio
     async def test_context_pack_passes_requested_layer(self) -> None:

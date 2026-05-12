@@ -6,6 +6,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
+from math import ceil
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from sibyl_core.models.context import (
 from sibyl_core.tools.context import context_pack_to_markdown
 
 APPROX_CHARS_PER_TOKEN = 4
+APPROX_TOKEN_SAFETY_MARGIN = 1.2
 
 
 @dataclass(frozen=True)
@@ -100,11 +102,39 @@ def _max(values: list[float]) -> float:
 
 def _bool_case_rate(cases: list[ContextPackCaseResult], key: str) -> float:
     values = [
-        case.result.metrics[key]
-        for case in cases
-        if isinstance(case.result.metrics.get(key), bool)
+        case.result.metrics[key] for case in cases if isinstance(case.result.metrics.get(key), bool)
     ]
     return sum(1 for value in values if value) / len(values) if values else 0.0
+
+
+def _numeric_case_value(case: ContextPackCaseResult, key: str) -> float:
+    value = case.result.metrics.get(key)
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    return 0.0
+
+
+def _sum_case_leak_counts(cases: list[ContextPackCaseResult]) -> float:
+    return sum(
+        max(
+            _numeric_case_value(case, "forbidden_item_matches"),
+            _numeric_case_value(case, "forbidden_term_matches"),
+        )
+        for case in cases
+    )
+
+
+def _budgeted_token_values(cases: list[ContextPackCaseResult]) -> list[float]:
+    values: list[float] = []
+    for case in cases:
+        value = case.result.metrics.get("budgeted_estimated_tokens")
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            values.append(float(value))
+            continue
+        estimated = case.result.metrics.get("estimated_tokens")
+        if isinstance(estimated, int | float) and not isinstance(estimated, bool):
+            values.append(float(ceil(float(estimated) * APPROX_TOKEN_SAFETY_MARGIN)))
+    return values
 
 
 @dataclass
@@ -123,19 +153,24 @@ class ContextPackEvalReport:
     def to_dict(self) -> dict[str, Any]:
         case_count = len(self.cases)
         passed_cases = sum(1 for case in self.cases if case.result.passed and case.error is None)
-        latency_ms = (
-            sum(case.latency_ms for case in self.cases) / case_count if case_count else 0.0
-        )
+        latency_ms = sum(case.latency_ms for case in self.cases) / case_count if case_count else 0.0
         item_counts = _numeric_case_values(self.cases, "items")
         markdown_chars = _numeric_case_values(self.cases, "markdown_chars")
         estimated_tokens = _numeric_case_values(self.cases, "estimated_tokens")
+        budgeted_estimated_tokens = _budgeted_token_values(self.cases)
         source_metadata_coverage = _numeric_case_values(self.cases, "source_metadata_coverage")
         forbidden_term_matches = _numeric_case_values(self.cases, "forbidden_term_matches")
+        forbidden_item_matches = _numeric_case_values(self.cases, "forbidden_item_matches")
         return {
             "timestamp": self.timestamp,
             "label": self.label,
             "search_type": "context-pack",
             "metadata": dict(self.metadata),
+            "token_estimator": {
+                "method": "approximate_character_count",
+                "characters_per_token": APPROX_CHARS_PER_TOKEN,
+                "safety_margin_multiplier": APPROX_TOKEN_SAFETY_MARGIN,
+            },
             "metrics": {
                 "cases": case_count,
                 "passed": passed_cases,
@@ -148,9 +183,13 @@ class ContextPackEvalReport:
                 "max_markdown_chars": _max(markdown_chars),
                 "avg_estimated_tokens": _average(estimated_tokens),
                 "max_estimated_tokens": _max(estimated_tokens),
+                "avg_budgeted_estimated_tokens": _average(budgeted_estimated_tokens),
+                "max_budgeted_estimated_tokens": _max(budgeted_estimated_tokens),
                 "source_metadata_coverage": _average(source_metadata_coverage),
                 "facet_order_match_rate": _bool_case_rate(self.cases, "facet_order_matches"),
+                "forbidden_item_matches": sum(forbidden_item_matches),
                 "forbidden_term_matches": sum(forbidden_term_matches),
+                "leak_count": _sum_case_leak_counts(self.cases),
             },
             "per_case": [
                 {
@@ -272,7 +311,9 @@ def evaluate_context_pack(
     )
     if not facet_order_matches:
         expected = ", ".join(facet.value for facet in fixture.required_facet_order)
-        actual = ", ".join(facet.value for facet in facet_order[: len(fixture.required_facet_order)])
+        actual = ", ".join(
+            facet.value for facet in facet_order[: len(fixture.required_facet_order)]
+        )
         failures.append(f"facet order mismatch: expected prefix {expected} got {actual}")
 
     if fixture.required_layer is not None and pack.layer != fixture.required_layer:
@@ -285,20 +326,22 @@ def evaluate_context_pack(
 
     markdown = context_pack_to_markdown(pack, max_items=max(pack.total_items, 1))
     if fixture.max_markdown_chars is not None and len(markdown) > fixture.max_markdown_chars:
-        failures.append(
-            f"markdown too large: {len(markdown)} chars > {fixture.max_markdown_chars}"
-        )
+        failures.append(f"markdown too large: {len(markdown)} chars > {fixture.max_markdown_chars}")
 
     estimated_tokens = _estimate_tokens(markdown)
-    if fixture.max_estimated_tokens is not None and estimated_tokens > fixture.max_estimated_tokens:
+    budgeted_estimated_tokens = ceil(estimated_tokens * APPROX_TOKEN_SAFETY_MARGIN)
+    if (
+        fixture.max_estimated_tokens is not None
+        and budgeted_estimated_tokens > fixture.max_estimated_tokens
+    ):
         failures.append(
-            f"estimated tokens too high: {estimated_tokens} > {fixture.max_estimated_tokens}"
+            "estimated tokens too high: "
+            f"{budgeted_estimated_tokens} > {fixture.max_estimated_tokens} "
+            "(includes 20% safety margin)"
         )
 
     text = _searchable_text(pack)
-    missing_terms = sorted(
-        term for term in fixture.required_terms if term.lower() not in text
-    )
+    missing_terms = sorted(term for term in fixture.required_terms if term.lower() not in text)
     if missing_terms:
         failures.append(f"missing required terms: {', '.join(missing_terms)}")
 
@@ -329,8 +372,7 @@ def evaluate_context_pack(
                 metadata_matches += 1
                 continue
             failures.append(
-                f"item {item_id} metadata {key} expected {expected_value!r} "
-                f"got {actual_value!r}"
+                f"item {item_id} metadata {key} expected {expected_value!r} got {actual_value!r}"
             )
 
     scoped_metadata_checks = 0
@@ -357,6 +399,7 @@ def evaluate_context_pack(
         "facet_order_matches": facet_order_matches,
         "markdown_chars": len(markdown),
         "estimated_tokens": estimated_tokens,
+        "budgeted_estimated_tokens": budgeted_estimated_tokens,
         "source_metadata_coverage": (
             1.0 if not pack_items else (len(pack_items) - len(unsourced)) / len(pack_items)
         ),
@@ -366,6 +409,7 @@ def evaluate_context_pack(
             else (len(fixture.required_item_ids) - len(missing_ids))
             / len(fixture.required_item_ids)
         ),
+        "forbidden_item_matches": len(forbidden_ids),
         "metadata_requirement_coverage": (
             1.0
             if not metadata_checks + scoped_metadata_checks
@@ -508,8 +552,12 @@ def get_sample_context_pack_cases() -> list[ContextPackEvalCase]:
             limit=8,
             fixture=ContextPackFixture(
                 name="context-pack-smoke",
+                required_facets={ContextFacet.DECISIONS, ContextFacet.RECENT_MEMORY},
                 max_items=8,
                 max_markdown_chars=8000,
+                max_estimated_tokens=1200,
+                max_latency_ms=3000.0,
+                require_source_metadata=True,
             ),
         )
     ]

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, replace
 from typing import Any
 
+from sibyl_core.auth.memory_policy import authorize_memory_read
 from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
@@ -259,6 +261,7 @@ def _quality_metadata_from_result(result: SearchResult) -> Any:
                 "source_id",
                 "reflection_source_title",
             )
+            or _compact_metadata_value(result.id)
         ),
         url=_compact_metadata_value(result.url) or _first_metadata_value(metadata, "url"),
         created_at=_first_metadata_value(metadata, "created_at", "created", "captured_at"),
@@ -307,6 +310,8 @@ async def _default_related_items(
 def _item_from_result(result: SearchResult, facet: ContextFacet) -> ContextItem:
     metadata = dict(result.metadata)
     quality = _quality_metadata_from_result(result)
+    source = _compact_metadata_value(result.source) or quality.source or result.id
+    metadata.setdefault("source_id", source)
     kwargs: dict[str, Any] = {
         "id": result.id,
         "type": result.type,
@@ -315,7 +320,7 @@ def _item_from_result(result: SearchResult, facet: ContextFacet) -> ContextItem:
         "score": result.score,
         "facet": facet,
         "reason": _reason_for(result, facet),
-        "source": result.source,
+        "source": source,
         "metadata": metadata,
     }
     if "quality" in getattr(ContextItem, "__dataclass_fields__", {}):
@@ -382,6 +387,7 @@ async def _compile_raw_memory_section(
     principal_id: str | None,
     agent_id: str | None,
     project: str | None,
+    accessible_projects: set[str] | None,
     limit: int,
     recall_fn: RawMemoryRecallFn,
 ) -> ContextSection | None:
@@ -398,6 +404,16 @@ async def _compile_raw_memory_section(
         recall_specs.append(("private", None, agent_id, project))
     for memory_scope, scope_key, spec_agent_id, spec_project_id in recall_specs:
         if memory_scope == "project" and not scope_key:
+            continue
+        decision = authorize_memory_read(
+            principal_id=principal_id,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            project_id=spec_project_id,
+            agent_id=spec_agent_id,
+            accessible_projects=accessible_projects,
+        )
+        if not decision.allowed:
             continue
         try:
             recalled = await recall_fn(
@@ -617,6 +633,35 @@ async def _compile_fallback_sections(
     ]
 
 
+async def _compile_facet_section(
+    *,
+    query: str,
+    facet: ContextFacet,
+    domain: str | None,
+    project: str | None,
+    accessible_projects: set[str] | None,
+    organization_id: str,
+    limit: int,
+    search_fn: SearchFn,
+) -> ContextSection | None:
+    response = await search_fn(
+        query=query,
+        types=FACET_TYPES[facet],
+        category=domain,
+        project=project,
+        accessible_projects=accessible_projects,
+        limit=limit,
+        include_content=True,
+        include_documents=facet == ContextFacet.ARTIFACTS,
+        include_graph=True,
+        organization_id=organization_id,
+    )
+    items = [_item_from_result(result, facet) for result in response.results]
+    if not items:
+        return None
+    return ContextSection(facet=facet, title=FACET_TITLES[facet], items=items)
+
+
 async def compile_context(
     goal: str,
     *,
@@ -652,30 +697,39 @@ async def compile_context(
     facets = _facets_for_layer(normalized_intent, normalized_layer)
     per_facet_limit = max(2, min(8, (limit + len(facets) - 1) // len(facets)))
 
-    sections: list[ContextSection] = []
-    raw_section = await _compile_raw_memory_section(
+    raw_section_task = _compile_raw_memory_section(
         query=query,
         organization_id=organization_id,
         principal_id=principal_id,
         agent_id=agent_id,
         project=project,
+        accessible_projects=accessible_projects,
         limit=min(LAYER_RAW_LIMITS[normalized_layer], limit),
         recall_fn=raw_memory_recall_fn,
     )
-    for facet in facets:
-        response = await search_fn(
+    facet_section_tasks = [
+        _compile_facet_section(
             query=query,
-            types=FACET_TYPES[facet],
-            category=domain,
+            facet=facet,
+            domain=domain,
             project=project,
             accessible_projects=accessible_projects,
-            limit=per_facet_limit,
-            include_content=True,
-            include_documents=facet == ContextFacet.ARTIFACTS,
-            include_graph=True,
             organization_id=organization_id,
+            limit=per_facet_limit,
+            search_fn=search_fn,
         )
-        items = [_item_from_result(result, facet) for result in response.results]
+        for facet in facets
+    ]
+    raw_section, facet_sections = await asyncio.gather(
+        raw_section_task,
+        asyncio.gather(*facet_section_tasks, return_exceptions=True),
+    )
+
+    sections: list[ContextSection] = []
+    for facet, facet_section in zip(facets, facet_sections, strict=True):
+        if isinstance(facet_section, BaseException):
+            continue
+        items = list(facet_section.items) if facet_section is not None else []
         if raw_section is not None and facet == ContextFacet.RECENT_MEMORY:
             items = [*raw_section.items, *items]
         if items:

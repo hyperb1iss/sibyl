@@ -195,6 +195,7 @@ async def test_context_pack_fixture_passes_raw_memory_scope_requirements() -> No
         "raw scoped context",
         intent="build",
         project="project_123",
+        accessible_projects={"project_123"},
         principal_id="user-123",
         organization_id="org-123",
         search_fn=fake_search,
@@ -230,6 +231,48 @@ async def test_context_pack_fixture_passes_raw_memory_scope_requirements() -> No
 
 
 @pytest.mark.asyncio
+async def test_context_pack_policy_omits_inaccessible_project_memory() -> None:
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    async def fake_raw_recall(**kwargs: Any) -> list[RawMemory]:
+        if kwargs["memory_scope"] == "private":
+            return [_raw_memory("private-1")]
+        return [
+            _raw_memory(
+                "project-1",
+                memory_scope=MemoryScope.PROJECT,
+                scope_key="project_123",
+                score=0.9,
+            )
+        ]
+
+    pack = await compile_context(
+        "raw scoped context",
+        intent="build",
+        project="project_123",
+        accessible_projects={"project_456"},
+        principal_id="user-123",
+        organization_id="org-123",
+        search_fn=fake_search,
+        raw_memory_recall_fn=fake_raw_recall,
+    )
+
+    result = evaluate_context_pack(
+        pack,
+        ContextPackFixture(
+            name="private-leak-negative",
+            required_item_ids={"raw_memory:private-1"},
+            forbidden_item_ids={"raw_memory:project-1"},
+            require_source_metadata=True,
+        ),
+    )
+
+    assert result.passed, result.failures
+    assert result.metrics["forbidden_item_matches"] == 0
+
+
+@pytest.mark.asyncio
 async def test_context_pack_fixture_passes_multi_user_scope_requirements() -> None:
     async def fake_search(**kwargs: Any) -> SearchResponse:
         return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
@@ -252,6 +295,7 @@ async def test_context_pack_fixture_passes_multi_user_scope_requirements() -> No
         "handoff scoped retrieval",
         intent="build",
         project="project_123",
+        accessible_projects={"project_123"},
         principal_id="user-123",
         organization_id="org-123",
         search_fn=fake_search,
@@ -333,6 +377,48 @@ def test_context_pack_fixture_reports_multi_user_raw_memory_leak() -> None:
     assert result.metrics["metadata_requirement_coverage"] == 0.5
 
 
+def test_context_pack_fixture_counts_forbidden_item_leaks() -> None:
+    pack = ContextPack(
+        goal="handoff scoped retrieval",
+        intent=ContextIntent.BUILD,
+        query="handoff scoped retrieval",
+        domain="sibyl",
+        project="project_123",
+        sections=[
+            ContextSection(
+                facet=ContextFacet.RECENT_MEMORY,
+                title="Recent Memory",
+                items=[
+                    ContextItem(
+                        id="raw_memory:other-user-private",
+                        type="raw_memory",
+                        name="Other user private memory",
+                        content="This private memory belongs to another principal.",
+                        score=0.95,
+                        facet=ContextFacet.RECENT_MEMORY,
+                        reason="raw memory matched the goal",
+                        source="source:other-user-private",
+                        metadata={"source_id": "source:other-user-private"},
+                    )
+                ],
+            )
+        ],
+        total_items=1,
+    )
+
+    result = evaluate_context_pack(
+        pack,
+        ContextPackFixture(
+            name="private-leak-negative",
+            forbidden_item_ids={"raw_memory:other-user-private"},
+        ),
+    )
+
+    assert not result.passed
+    assert result.failures == ["forbidden items present: raw_memory:other-user-private"]
+    assert result.metrics["forbidden_item_matches"] == 1
+
+
 @pytest.mark.asyncio
 async def test_context_pack_fixture_passes_agent_diary_requirements() -> None:
     async def fake_search(**kwargs: Any) -> SearchResponse:
@@ -381,6 +467,7 @@ async def test_context_pack_fixture_passes_agent_diary_requirements() -> None:
         intent=case.intent,
         layer=case.layer,
         project=case.project,
+        accessible_projects={"project_123"},
         principal_id="user-123",
         agent_id=case.agent_id,
         organization_id="org-123",
@@ -748,9 +835,12 @@ def test_context_pack_fixture_reports_estimated_token_budget() -> None:
 
     assert not result.passed
     assert result.failures == [
-        f"estimated tokens too high: {result.metrics['estimated_tokens']} > 20"
+        "estimated tokens too high: "
+        f"{result.metrics['budgeted_estimated_tokens']} > 20 "
+        "(includes 20% safety margin)"
     ]
     assert result.metrics["estimated_tokens"] > 20
+    assert result.metrics["budgeted_estimated_tokens"] > result.metrics["estimated_tokens"]
 
 
 def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
@@ -918,11 +1008,16 @@ def test_context_pack_eval_report_exposes_pass_rate_metrics() -> None:
     assert payload["metrics"]["max_markdown_chars"] == payload["metrics"]["avg_markdown_chars"]
     assert payload["metrics"]["avg_estimated_tokens"] > 0
     assert payload["metrics"]["max_estimated_tokens"] == payload["metrics"]["avg_estimated_tokens"]
+    assert (
+        payload["metrics"]["avg_budgeted_estimated_tokens"]
+        > payload["metrics"]["avg_estimated_tokens"]
+    )
     assert payload["metrics"]["source_metadata_coverage"] == 1.0
     assert payload["metrics"]["facet_order_match_rate"] == 1.0
     assert payload["metrics"]["forbidden_term_matches"] == 0
     assert payload["per_case"][0]["passed"] is True
     assert payload["per_case"][0]["metrics"]["estimated_tokens"] > 0
+    assert payload["per_case"][0]["metrics"]["budgeted_estimated_tokens"] > 0
     assert payload["per_case"][0]["intent"] == "build"
     assert payload["per_case"][0]["layer"] == "recall"
     assert payload["per_case"][0]["agent_id"] is None

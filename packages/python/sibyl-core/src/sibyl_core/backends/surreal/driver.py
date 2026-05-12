@@ -441,8 +441,8 @@ def _graphiti_fulltext_query(
               AND (
                   name @0@ $query
                   OR summary @1@ $query
-                  OR attributes.description @2@ $query
-                  OR attributes.content @3@ $query
+                  OR description @2@ $query
+                  OR content @3@ $query
               )
             ORDER BY score DESC, created_at DESC, uuid DESC
             LIMIT $limit;
@@ -844,10 +844,14 @@ class SurrealDriver(GraphDriver):
         if compat_kind == "episode_records":
             return _graphiti_episode_records(result), None, None
         if compat_kind == "duplicate_pair_records":
-            return _graphiti_duplicate_pair_records(
-                result,
-                _duplicate_pairs_from_param(params.get("duplicate_pairs")),
-            ), None, None
+            return (
+                _graphiti_duplicate_pair_records(
+                    result,
+                    _duplicate_pairs_from_param(params.get("duplicate_pairs")),
+                ),
+                None,
+                None,
+            )
         if compat_kind == "records":
             return _graphiti_records(result), None, None
         return result

@@ -76,6 +76,17 @@ def test_fulltext_indexes_keep_remote_server_syntax() -> None:
     assert "SEARCH ANALYZER" not in rendered
 
 
+def test_entity_fulltext_uses_top_level_description_and_content_indexes() -> None:
+    assert "idx_entity_description_text_ft" in NODE_DEFINITIONS
+    assert "idx_entity_content_text_ft" in NODE_DEFINITIONS
+    assert "FIELDS description FULLTEXT" in NODE_DEFINITIONS
+    assert "FIELDS content FULLTEXT" in NODE_DEFINITIONS
+    assert "FIELDS attributes.description FULLTEXT" not in NODE_DEFINITIONS
+    assert "FIELDS attributes.content FULLTEXT" not in NODE_DEFINITIONS
+    assert "description = description ?? attributes.description" in NODE_DEFINITIONS
+    assert "content = content ?? attributes.content" in NODE_DEFINITIONS
+
+
 @pytest.mark.asyncio
 async def test_auth_bootstrap_continues_after_duplicate_unique_index() -> None:
     client = _RecordingSchemaClient("idx_users_uuid")

@@ -1891,8 +1891,10 @@ class TestEntitySearch:
         assert "string::lowercase(name ?? '') = $query_lower" in fallback_query
         assert "name @0@ $search_query" in fallback_query
         assert "summary @1@ $search_query" in fallback_query
-        assert "attributes.description @2@ $search_query" in fallback_query
-        assert "attributes.content @3@ $search_query" in fallback_query
+        assert "description @2@ $search_query" in fallback_query
+        assert "content @3@ $search_query" in fallback_query
+        assert "attributes.description @2@ $search_query" not in fallback_query
+        assert "attributes.content @3@ $search_query" not in fallback_query
         assert "ORDER BY search_score DESC, updated_at DESC" in fallback_query
         assert "attributes.updated_at DESC" not in fallback_query
         assert "string::contains" not in fallback_query

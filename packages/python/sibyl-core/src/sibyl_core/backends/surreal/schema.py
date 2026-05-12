@@ -51,6 +51,8 @@ DEFINE FIELD IF NOT EXISTS uuid ON entity TYPE string;
 DEFINE FIELD IF NOT EXISTS name ON entity TYPE string;
 DEFINE FIELD IF NOT EXISTS entity_type ON entity TYPE string;
 DEFINE FIELD IF NOT EXISTS summary ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS description ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS content ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS labels ON entity TYPE array<string> DEFAULT [];
 DEFINE FIELD IF NOT EXISTS attributes ON entity TYPE object FLEXIBLE DEFAULT {{}};
 DEFINE FIELD IF NOT EXISTS group_id ON entity TYPE string;
@@ -77,8 +79,13 @@ DEFINE INDEX IF NOT EXISTS idx_entity_status ON entity FIELDS status;
 DEFINE INDEX IF NOT EXISTS idx_entity_priority ON entity FIELDS priority;
 DEFINE INDEX IF NOT EXISTS idx_entity_name_ft ON entity FIELDS name FULLTEXT ANALYZER name_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_entity_summary_ft ON entity FIELDS summary FULLTEXT ANALYZER content_analyzer BM25;
-DEFINE INDEX IF NOT EXISTS idx_entity_description_ft ON entity FIELDS attributes.description FULLTEXT ANALYZER content_analyzer BM25;
-DEFINE INDEX IF NOT EXISTS idx_entity_content_ft ON entity FIELDS attributes.content FULLTEXT ANALYZER content_analyzer BM25;
+UPDATE entity SET
+    description = description ?? attributes.description,
+    content = content ?? attributes.content
+WHERE description = NONE OR content = NONE;
+
+DEFINE INDEX IF NOT EXISTS idx_entity_description_text_ft ON entity FIELDS description FULLTEXT ANALYZER content_analyzer BM25;
+DEFINE INDEX IF NOT EXISTS idx_entity_content_text_ft ON entity FIELDS content FULLTEXT ANALYZER content_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_entity_embedding ON entity FIELDS name_embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
 

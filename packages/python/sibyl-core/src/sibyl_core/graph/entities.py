@@ -420,8 +420,8 @@ class EntityManager:
                    feature,
                    tags,
                    attributes.metadata AS metadata,
-                   attributes.description AS description,
-                   attributes.content AS content,
+                   description ?? attributes.description AS description,
+                   content ?? attributes.content AS content,
                    attributes.source_file AS source_file,
                    updated_at ?? attributes.updated_at AS updated_at,
                    created_at
@@ -477,8 +477,8 @@ class EntityManager:
                     {name_expr} = $query_lower
                     OR name @0@ $search_query
                     OR summary @1@ $search_query
-                    OR attributes.description @2@ $search_query
-                    OR attributes.content @3@ $search_query
+                    OR description @2@ $search_query
+                    OR content @3@ $search_query
                 )"""
             )
             score_expr = (
@@ -503,8 +503,8 @@ class EntityManager:
                    feature,
                    tags,
                    attributes.metadata AS metadata,
-                   attributes.description AS description,
-                   attributes.content AS content,
+                   description ?? attributes.description AS description,
+                   content ?? attributes.content AS content,
                    attributes.source_file AS source_file,
                    updated_at ?? attributes.updated_at AS updated_at,
                    {score_expr}

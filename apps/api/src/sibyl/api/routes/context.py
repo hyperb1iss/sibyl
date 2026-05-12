@@ -52,7 +52,7 @@ async def _resolve_accessible_context_projects(
             project,
             required_role=ProjectRole.VIEWER,
         )
-        return None
+        return {str(project)}
     accessible_projects = await list_accessible_project_graph_ids(ctx)
     return {str(project_id) for project_id in accessible_projects or set()}
 

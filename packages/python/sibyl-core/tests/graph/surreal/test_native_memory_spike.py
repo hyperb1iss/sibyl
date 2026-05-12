@@ -188,6 +188,7 @@ async def test_native_surrealql_memory_path_renders_context_pack(
             "Surreal native context pack source rendering",
             intent="build",
             project="project_native",
+            accessible_projects={"project_native"},
             organization_id="org-native-spike",
             principal_id="user-native",
             search_fn=native_search,

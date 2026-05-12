@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -119,6 +120,57 @@ async def test_compile_context_groups_build_context_by_agent_facets() -> None:
 
 
 @pytest.mark.asyncio
+async def test_compile_context_runs_facet_searches_concurrently() -> None:
+    active_calls = 0
+    max_active_calls = 0
+
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        nonlocal active_calls, max_active_calls
+        active_calls += 1
+        max_active_calls = max(max_active_calls, active_calls)
+        try:
+            await asyncio.sleep(0.01)
+            return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+        finally:
+            active_calls -= 1
+
+    pack = await compile_context(
+        "parallelize context facets",
+        intent="build",
+        organization_id="org-123",
+        search_fn=fake_search,
+    )
+
+    assert pack.total_items == 0
+    assert max_active_calls > 1
+
+
+@pytest.mark.asyncio
+async def test_compile_context_keeps_successful_facets_when_one_fails() -> None:
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        if kwargs["types"] == ["decision"]:
+            raise RuntimeError("decision search unavailable")
+        if kwargs["types"] == ["task", "epic", "project"]:
+            return SearchResponse(
+                results=[_result("task-1", "task", "Keep moving")],
+                total=1,
+                query=kwargs["query"],
+                filters={},
+            )
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    pack = await compile_context(
+        "resilient context facets",
+        intent="build",
+        organization_id="org-123",
+        search_fn=fake_search,
+    )
+
+    assert pack.total_items == 1
+    assert pack.items[0].id == "task-1"
+
+
+@pytest.mark.asyncio
 async def test_compile_context_includes_private_and_project_raw_memory() -> None:
     search_calls: list[dict[str, Any]] = []
     raw_calls: list[dict[str, Any]] = []
@@ -151,6 +203,7 @@ async def test_compile_context_includes_private_and_project_raw_memory() -> None
         "raw context",
         intent="build",
         project="project_123",
+        accessible_projects={"project_123"},
         principal_id="user-123",
         organization_id="org-123",
         search_fn=fake_search,
@@ -202,6 +255,7 @@ async def test_compile_context_can_include_agent_diary_with_raw_memory() -> None
         "implementation stance",
         intent="build",
         project="project_123",
+        accessible_projects={"project_123"},
         principal_id="user-123",
         agent_id="nova",
         organization_id="org-123",
@@ -392,6 +446,7 @@ async def test_compile_context_falls_back_to_broad_project_search_when_facets_mi
         intent="build",
         domain="sibyl",
         project="project_123",
+        accessible_projects={"project_123"},
         organization_id="org-123",
         search_fn=fake_search,
     )
@@ -486,6 +541,30 @@ async def test_compile_context_adds_compact_quality_metadata_from_search_result(
     assert quality.project_id == "project-123"
     assert quality.updated_at == "2026-04-20T10:30:00Z"
     assert quality.created_at == "2026-04-01T09:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_compile_context_falls_back_to_graph_id_for_source_metadata() -> None:
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(
+            results=[_result("decision-1", "decision", "Source-light graph decision")],
+            total=1,
+            query=kwargs["query"],
+            filters={},
+        )
+
+    pack = await compile_context(
+        "source metadata coverage",
+        intent="decide",
+        organization_id="org-123",
+        limit=1,
+        search_fn=fake_search,
+    )
+
+    item = pack.items[0]
+    assert item.source == "decision-1"
+    assert item.metadata["source_id"] == "decision-1"
+    assert item.quality.source == "decision-1"
 
 
 @pytest.mark.asyncio

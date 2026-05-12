@@ -263,8 +263,8 @@ class SurrealSearchInterface(SearchInterface):
                   AND (
                       name @0@ $query
                       OR summary @1@ $query
-                      OR attributes.description @2@ $query
-                      OR attributes.content @3@ $query
+                      OR description @2@ $query
+                      OR content @3@ $query
                   )
                 ORDER BY score DESC, created_at DESC, uuid DESC
                 LIMIT $limit;

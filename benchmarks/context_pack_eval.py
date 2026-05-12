@@ -13,14 +13,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages" / "python" / "sibyl-core" / "src"))
 sys.path.insert(0, str(ROOT / "apps" / "cli" / "src"))
 
-from sibyl_core.evals import EvalConfig, run_context_pack_evaluation_cli
+from sibyl_core.evals import ContextPackEvalReport, EvalConfig, run_context_pack_evaluation_cli
 
 
-def _get_client_headers() -> dict[str, str]:
+async def _get_client_headers(api_url: str, timeout: float) -> dict[str, str]:
     try:
         from sibyl_cli.client import SibylClient  # noqa: PLC0415
 
-        return SibylClient()._default_headers()
+        client = SibylClient(base_url=api_url, timeout=timeout)
+        if client.auth_token:
+            await client._refresh_token()
+        return client._default_headers()
     except Exception:
         return {"Content-Type": "application/json"}
 
@@ -41,6 +44,19 @@ def _parse_metadata(values: list[str]) -> dict[str, str]:
     return metadata
 
 
+async def _run(args: argparse.Namespace, cases_file: Path | None) -> ContextPackEvalReport:
+    config = EvalConfig(
+        api_base_url=args.api_url,
+        headers=await _get_client_headers(args.api_url, args.timeout),
+        output_dir=args.output_dir,
+        save_results=not args.no_save,
+        label=args.label,
+        metadata=_parse_metadata(args.metadata),
+        timeout_seconds=args.timeout,
+    )
+    return await run_context_pack_evaluation_cli(cases_file=cases_file, config=config)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate live Sibyl context packs.")
     parser.add_argument(
@@ -50,6 +66,12 @@ def main() -> None:
         help="Path to a JSON file with context-pack eval cases. Uses a smoke case by default.",
     )
     parser.add_argument(
+        "--cases",
+        dest="cases_option",
+        type=Path,
+        help="Path to a JSON file with context-pack eval cases.",
+    )
+    parser.add_argument(
         "--api-url",
         default="http://localhost:3334/api",
         help="Base Sibyl API URL.",
@@ -57,7 +79,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=ROOT / "benchmarks" / "results",
+        default=ROOT / ".moon" / "cache" / "evals",
         help="Directory for saved evaluation reports.",
     )
     parser.add_argument(
@@ -83,17 +105,13 @@ def main() -> None:
         help="HTTP timeout in seconds.",
     )
     args = parser.parse_args()
+    if args.cases and args.cases_option:
+        parser.error("Pass cases either positionally or with --cases, not both.")
+    cases_file = args.cases_option or args.cases
 
-    config = EvalConfig(
-        api_base_url=args.api_url,
-        headers=_get_client_headers(),
-        output_dir=args.output_dir,
-        save_results=not args.no_save,
-        label=args.label,
-        metadata=_parse_metadata(args.metadata),
-        timeout_seconds=args.timeout,
-    )
-    asyncio.run(run_context_pack_evaluation_cli(cases_file=args.cases, config=config))
+    report = asyncio.run(_run(args, cases_file))
+    if not report.passed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

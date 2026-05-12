@@ -128,9 +128,7 @@ class TestConnectionRetry:
         )
 
     def test_detects_opening_handshake_timeout_as_transient(self) -> None:
-        assert _is_transient_connection_error(
-            TimeoutError("timed out during opening handshake")
-        )
+        assert _is_transient_connection_error(TimeoutError("timed out during opening handshake"))
 
     def test_retryable_queries_are_read_only(self) -> None:
         assert _can_retry_query("SELECT * FROM entity;")
@@ -212,9 +210,7 @@ class TestDriverConnection:
         with pytest.raises(SurrealQueryError, match="Unsupported Graphiti/Cypher query"):
             await driver.execute_query("MATCH (n) RETURN n LIMIT 1")
 
-    async def test_execute_query_allows_surreal_keywords_inside_literals(
-        self, monkeypatch
-    ) -> None:
+    async def test_execute_query_allows_surreal_keywords_inside_literals(self, monkeypatch) -> None:
         driver = SurrealDriver("memory://").clone("org-abc")
         calls: list[str] = []
 
@@ -234,9 +230,7 @@ class TestDriverConnection:
         assert result == [{"ok": True}]
         assert len(calls) == 1
 
-    async def test_execute_query_allows_cypher_words_inside_comments(
-        self, monkeypatch
-    ) -> None:
+    async def test_execute_query_allows_cypher_words_inside_comments(self, monkeypatch) -> None:
         driver = SurrealDriver("memory://").clone("org-abc")
         calls: list[str] = []
 
@@ -327,7 +321,9 @@ class TestDriverConnection:
             async def close(self) -> None:
                 self.closed = True
 
-        monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+        monkeypatch.setitem(
+            sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal)
+        )
         driver = SurrealDriver("ws://localhost:8000/rpc", username="root", password="root").clone(
             "org-abc"
         )
@@ -986,7 +982,9 @@ class TestDriverConnection:
             async def close(self) -> None:
                 self.closed = True
 
-        monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+        monkeypatch.setitem(
+            sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal)
+        )
         driver = SurrealDriver("ws://localhost:8000/rpc", username="root", password="root").clone(
             "org-abc"
         )
@@ -1025,7 +1023,9 @@ class TestDriverConnection:
             async def close(self) -> None:
                 self.closed = True
 
-        monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+        monkeypatch.setitem(
+            sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal)
+        )
         driver = SurrealDriver("ws://localhost:8000/rpc", username="root", password="root").clone(
             "org-abc"
         )
@@ -1061,7 +1061,9 @@ class TestDriverConnection:
             async def close(self) -> None:
                 self.closed = True
 
-        monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+        monkeypatch.setitem(
+            sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal)
+        )
         driver = SurrealDriver("ws://localhost:8000/rpc", username="root", password="root").clone(
             "org-abc"
         )
@@ -1101,7 +1103,9 @@ class TestDriverConnection:
             async def close(self) -> None:
                 self.closed = True
 
-        monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+        monkeypatch.setitem(
+            sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal)
+        )
         driver = SurrealDriver("ws://localhost:8000/rpc", username="root", password="root").clone(
             "org-abc"
         )
@@ -1193,6 +1197,8 @@ class TestSchemaBootstrap:
                 entity_type = "pattern",
                 group_id = $gid,
                 summary = "summaryglow",
+                description = "descriptionglow",
+                content = "contentglow",
                 attributes = {
                     description: "descriptionglow",
                     content: "contentglow",
@@ -1215,8 +1221,8 @@ class TestSchemaBootstrap:
               AND (
                   name @0@ $term
                   OR summary @1@ $term
-                  OR attributes.description @2@ $term
-                  OR attributes.content @3@ $term
+                  OR description @2@ $term
+                  OR content @3@ $term
               )
             ORDER BY search_score DESC
             LIMIT 10;
@@ -1226,6 +1232,52 @@ class TestSchemaBootstrap:
             assert isinstance(rows, list)
             assert [row["uuid"] for row in rows] == ["ent-fts"]
             assert "search_score" in rows[0]
+
+    async def test_bootstrap_backfills_entity_search_text_fields(
+        self, surreal_schema: SurrealDriver
+    ) -> None:
+        gid = surreal_schema.group_id
+        await surreal_schema.execute_query(
+            """
+            CREATE entity SET
+                uuid = "ent-legacy-fts",
+                name = "legacy",
+                entity_type = "pattern",
+                group_id = $gid,
+                summary = "",
+                attributes = {
+                    description: "legacydescriptionglow",
+                    content: "legacycontentglow",
+                    metadata: {}
+                };
+            """,
+            gid=gid,
+        )
+
+        await bootstrap_schema(surreal_schema, reset=False)
+
+        rows = await surreal_schema.execute_query(
+            """
+            SELECT uuid,
+                   description,
+                   content,
+                   math::max([search::score(0), search::score(1)]) AS search_score
+            FROM entity
+            WHERE group_id = $gid
+              AND (
+                  description @0@ $term
+                  OR content @1@ $term
+              )
+            ORDER BY search_score DESC
+            LIMIT 10;
+            """,
+            gid=gid,
+            term="legacycontentglow",
+        )
+        assert isinstance(rows, list)
+        assert [row["uuid"] for row in rows] == ["ent-legacy-fts"]
+        assert rows[0]["description"] == "legacydescriptionglow"
+        assert rows[0]["content"] == "legacycontentglow"
 
     async def test_relates_to_edge_roundtrip(self, surreal_schema: SurrealDriver) -> None:
         gid = surreal_schema.group_id

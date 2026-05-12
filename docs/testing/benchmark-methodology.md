@@ -44,7 +44,9 @@ This is the live context-pack quality guard.
 
 - Talks to the live `/api/context/pack` endpoint
 - Runs seeded dogfood fixtures for coding handoffs, Haven recall, privacy boundaries, and pack shape
-- Measures pass rate, source grounding, facet order, latency, token budget, and forbidden terms
+- Measures pass rate, source grounding, facet order, latency, token budget with the reported
+  estimator margin, forbidden terms, and per-case leak signals
+- Writes timestamped JSON reports under `.moon/cache/evals/` by default
 - Writes the same JSON report shape used by the comparison and gate tools
 
 Use this when changing retrieval, source grounding, prompt hooks, policy checks, or context-pack
@@ -94,7 +96,12 @@ The `context-pack` profile gates dogfood context reports:
 - `pass_rate >= 1.00`
 - `source_metadata_coverage >= 1.00`
 - `facet_order_match_rate >= 1.00`
+- `leak_count <= 0`
 - `forbidden_term_matches <= 0`
+
+`leak_count` is a per-case sentinel: forbidden item and forbidden term matches are reported
+separately, while the summary uses the larger of those two counts for each case so one leaked memory
+is not double-counted when it trips both signals.
 
 Use `--require-metadata store=surreal` or other metadata filters when you need to prove which stack
 produced the artifact. Use `--min-metric` and `--max-metric` to tighten a gate for a specific run

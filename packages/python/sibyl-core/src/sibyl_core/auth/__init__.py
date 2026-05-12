@@ -19,6 +19,14 @@ from sibyl_core.auth.jwt import (
     decode_token_unverified,
     verify_access_token,
 )
+from sibyl_core.auth.memory_policy import (
+    MemoryPolicyAction,
+    MemoryPolicyDecision,
+    authorize_memory_read,
+    authorize_memory_reflect,
+    authorize_memory_share,
+    authorize_memory_write,
+)
 from sibyl_core.auth.models import (
     AuthMembership,
     AuthOrganization,
@@ -37,6 +45,8 @@ __all__ = [
     "AuthSession",
     "AuthUser",
     "GitHubUserIdentity",
+    "MemoryPolicyAction",
+    "MemoryPolicyDecision",
     "OrganizationMembershipRepository",
     "OrganizationRepository",
     "OrganizationRole",
@@ -45,6 +55,10 @@ __all__ = [
     "ProjectVisibility",
     "SessionRepository",
     "UserRepository",
+    "authorize_memory_read",
+    "authorize_memory_reflect",
+    "authorize_memory_share",
+    "authorize_memory_write",
     "create_access_token",
     "decode_token_unverified",
     "hash_password",
