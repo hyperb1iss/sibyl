@@ -13,6 +13,9 @@ humans and agents collaborate without leaking private memory.
 SurrealDB migration, Graphiti removal, FalkorDB/PostgreSQL deletion, and native retrieval are
 implementation threads inside this larger product direction.
 
+The executable v0.7 plan lives in
+[`SURREALDB_NATIVE_MEMORY_CORE_SPEC.md`](SURREALDB_NATIVE_MEMORY_CORE_SPEC.md).
+
 ## Northstar
 
 Sibyl becomes a domain-general, multi-user second brain for people and agents.
