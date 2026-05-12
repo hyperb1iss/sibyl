@@ -16,7 +16,7 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.reflection import ReflectionCandidate
-from sibyl_core.services import get_graph_runtime
+from sibyl_core.services.native_graph import get_native_graph_runtime
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
@@ -154,7 +154,7 @@ async def persist_reflection_candidate_native(
             metadata=policy_metadata,
         )
 
-    runtime = await get_graph_runtime(organization_id)
+    runtime = await get_native_graph_runtime(organization_id)
     entity = _entity_from_candidate(
         candidate,
         organization_id=organization_id,

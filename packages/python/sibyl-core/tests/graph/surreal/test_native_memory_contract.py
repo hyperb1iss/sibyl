@@ -96,7 +96,7 @@ async def test_native_reflection_write_contract_renders_context_pack(
         return runtime
 
     monkeypatch.setenv("SIBYL_NATIVE_WRITE", "enabled")
-    monkeypatch.setattr(native_memory, "get_graph_runtime", fake_get_graph_runtime)
+    monkeypatch.setattr(native_memory, "get_native_graph_runtime", fake_get_graph_runtime)
     monkeypatch.setattr(native_retrieval, "get_graph_runtime", fake_get_graph_runtime)
 
     await _seed_scope_entities(graph_client, group_id=group_id)
@@ -296,7 +296,7 @@ async def test_post_reflection_recall_promotes_review_candidate_into_native_cont
         return runtime
 
     monkeypatch.setenv("SIBYL_NATIVE_WRITE", "enabled")
-    monkeypatch.setattr(native_memory, "get_graph_runtime", fake_get_graph_runtime)
+    monkeypatch.setattr(native_memory, "get_native_graph_runtime", fake_get_graph_runtime)
     monkeypatch.setattr(native_retrieval, "get_graph_runtime", fake_get_graph_runtime)
 
     try:
