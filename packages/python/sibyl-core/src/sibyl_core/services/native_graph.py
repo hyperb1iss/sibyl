@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from difflib import SequenceMatcher
+from enum import Enum
 from typing import Any, cast
 
 from surrealdb import RecordID
@@ -91,6 +94,74 @@ class NativeEntityManager:
             raise KeyError(entity_id)
         return _entity_from_row(row)
 
+    async def get_notes_for_task(self, task_id: str, limit: int = 50) -> list[Entity]:
+        rows = normalize_records(
+            await self._client.execute_query(
+                """
+                SELECT *
+                FROM entity
+                WHERE group_id = $group_id
+                  AND entity_type = 'note'
+                  AND task_id = $task_id
+                ORDER BY created_at DESC, uuid DESC
+                LIMIT $limit;
+                """,
+                group_id=self._group_id,
+                task_id=task_id,
+                limit=max(int(limit), 1),
+            )
+        )
+        return [_entity_from_row(row) for row in rows]
+
+    async def update(self, entity_id: str, updates: dict[str, Any]) -> Entity | None:
+        if not updates:
+            return await self.get(entity_id)
+
+        existing = await self.get(entity_id)
+        merged_metadata = {**(existing.metadata or {})}
+        update_metadata = updates.get("metadata")
+        if isinstance(update_metadata, dict):
+            merged_metadata.update(
+                {str(key): _jsonable(value) for key, value in update_metadata.items()}
+            )
+
+        excluded_keys = {
+            "content",
+            "description",
+            "embedding",
+            "metadata",
+            "name",
+            "source_file",
+            "title",
+        }
+        merged_metadata.update(
+            {
+                str(key): _jsonable(value)
+                for key, value in updates.items()
+                if key not in excluded_keys
+            }
+        )
+
+        source_file = updates.get("source_file", existing.source_file)
+        embedding = updates.get("embedding", existing.embedding)
+        updated = Entity(
+            id=existing.id,
+            entity_type=existing.entity_type,
+            name=str(updates.get("name") or updates.get("title") or existing.name),
+            description=str(updates.get("description", existing.description) or ""),
+            content=str(updates.get("content", existing.content) or ""),
+            organization_id=existing.organization_id,
+            created_by=existing.created_by,
+            modified_by=str(updates.get("modified_by") or existing.modified_by or "") or None,
+            metadata=merged_metadata,
+            created_at=existing.created_at,
+            updated_at=datetime.now(UTC),
+            source_file=str(source_file) if source_file else None,
+            embedding=embedding if isinstance(embedding, list) else None,
+        )
+        await _replace_entity(self._client, updated, group_id=self._group_id)
+        return updated
+
     async def search(
         self,
         *,
@@ -133,7 +204,11 @@ class NativeEntityManager:
                 limit=max(int(limit), 1),
             )
         )
-        return [(_entity_from_row(row), _row_score(row)) for row in rows]
+        results: list[tuple[Entity, float]] = []
+        for row in rows:
+            entity = _entity_from_row(row)
+            results.append((entity, _bounded_similarity_score(query, entity)))
+        return results
 
 
 class NativeRelationshipManager:
@@ -155,6 +230,46 @@ class NativeRelationshipManager:
     async def create(self, relationship: Relationship) -> str:
         await _replace_relationship(self._client, relationship, group_id=self._group_id)
         return relationship.id
+
+    async def get_for_entity(
+        self,
+        entity_id: str,
+        relationship_types: Sequence[RelationshipType] | None = None,
+        direction: str = "both",
+    ) -> list[Relationship]:
+        type_values = [rel_type.value for rel_type in relationship_types or ()]
+        type_clause = " AND name IN $relationship_types" if type_values else ""
+        if direction == "outgoing":
+            direction_clause = " AND in.uuid = $entity_id"
+        elif direction == "incoming":
+            direction_clause = " AND out.uuid = $entity_id"
+        else:
+            direction_clause = " AND (in.uuid = $entity_id OR out.uuid = $entity_id)"
+
+        rows = normalize_records(
+            await self._client.execute_query(
+                """
+                SELECT uuid,
+                       name,
+                       fact,
+                       attributes,
+                       created_at,
+                       in.uuid AS source_uuid,
+                       out.uuid AS target_uuid
+                FROM relates_to
+                WHERE group_id = $group_id
+                """
+                + direction_clause
+                + type_clause
+                + """
+                ORDER BY created_at DESC, uuid DESC;
+                """,
+                group_id=self._group_id,
+                entity_id=entity_id,
+                relationship_types=type_values,
+            )
+        )
+        return [_relationship_from_row(row) for row in rows]
 
     async def get_related_entities(
         self,
@@ -223,6 +338,30 @@ class NativeRelationshipManager:
                 continue
             results.append((entity, _relationship_from_row(row)))
         return results
+
+    async def delete_between(
+        self,
+        source_id: str,
+        target_id: str,
+        relationship_type: RelationshipType,
+    ) -> int:
+        rows = normalize_records(
+            await self._client.execute_query(
+                """
+                DELETE FROM relates_to
+                WHERE group_id = $group_id
+                  AND in.uuid = $source_id
+                  AND out.uuid = $target_id
+                  AND name = $relationship_type
+                RETURN BEFORE;
+                """,
+                group_id=self._group_id,
+                source_id=source_id,
+                target_id=target_id,
+                relationship_type=relationship_type.value,
+            )
+        )
+        return len(rows)
 
 
 async def get_native_graph_runtime(group_id: str) -> NativeGraphRuntime:
@@ -340,6 +479,44 @@ def _row_score(row: SurrealRecord) -> float:
     return 1.0
 
 
+def _bounded_similarity_score(query: str, entity: Entity) -> float:
+    query_text = _normalize_search_text(query)
+    entity_text = _normalize_search_text(
+        " ".join(
+            part
+            for part in (
+                entity.name,
+                entity.description,
+                entity.content,
+                str(entity.metadata.get("summary") or ""),
+            )
+            if part
+        )
+    )
+    if not query_text or not entity_text:
+        return 0.0
+    if query_text in entity_text or entity_text in query_text:
+        return 1.0
+
+    query_tokens = set(_SEARCH_TOKEN_RE.findall(query_text))
+    entity_tokens = set(_SEARCH_TOKEN_RE.findall(entity_text))
+    if not query_tokens or not entity_tokens:
+        return 0.0
+
+    overlap = query_tokens & entity_tokens
+    jaccard = len(overlap) / len(query_tokens | entity_tokens)
+    coverage = len(overlap) / len(query_tokens)
+    sequence = SequenceMatcher(None, query_text[:1000], entity_text[:1000]).ratio()
+    return min(max(jaccard, coverage * 0.85, sequence * 0.9), 1.0)
+
+
+_SEARCH_TOKEN_RE = re.compile(r"[a-z0-9_]+")
+
+
+def _normalize_search_text(value: str) -> str:
+    return " ".join(_SEARCH_TOKEN_RE.findall(value.lower()))
+
+
 def _relationship_from_row(row: SurrealRecord) -> Relationship:
     attributes = row.get("attributes")
     metadata = dict(attributes) if isinstance(attributes, dict) else {}
@@ -455,7 +632,7 @@ async def _replace_entity(
 
 
 def _entity_record(entity: Entity, *, group_id: str) -> SurrealRecord:
-    metadata = dict(entity.metadata or {})
+    metadata = _entity_metadata(entity)
     now = datetime.now(UTC)
     updated_at = _metadata_str(metadata, "updated_at") or now.isoformat()
     created_at = entity.created_at or now
@@ -612,6 +789,47 @@ def _metadata_datetime(value: object) -> datetime | None:
         except ValueError:
             return None
     return None
+
+
+def _entity_metadata(entity: Entity) -> dict[str, object]:
+    metadata = {str(key): _jsonable(value) for key, value in dict(entity.metadata or {}).items()}
+    model_dump = entity.model_dump(
+        mode="json",
+        exclude={
+            "id",
+            "entity_type",
+            "name",
+            "description",
+            "content",
+            "organization_id",
+            "created_by",
+            "modified_by",
+            "metadata",
+            "created_at",
+            "updated_at",
+            "source_file",
+            "embedding",
+        },
+    )
+    for key, value in model_dump.items():
+        if value not in (None, "", [], {}):
+            metadata[key] = _jsonable(value)
+    return metadata
+
+
+def _jsonable(value: object) -> object:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(mode="json")
+    if isinstance(value, dict):
+        return {str(key): _jsonable(nested) for key, nested in value.items()}
+    if isinstance(value, list | tuple | set):
+        return [_jsonable(nested) for nested in value]
+    return value
 
 
 __all__ = [

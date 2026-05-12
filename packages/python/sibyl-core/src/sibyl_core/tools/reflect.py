@@ -294,22 +294,19 @@ async def reflect_memory(
         ]
     candidates = _dedupe(candidates, limit)
 
-    review_policy_metadata: dict[str, Any] = {}
-    if persist and persist_review:
-        review_decisions = _authorize_reflection_review_write(
+    persist_policy_metadata: dict[str, Any] = {}
+    if persist:
+        persist_decisions = _authorize_reflection_review_write(
             principal_id=principal_id,
             memory_scope=resolved_scope,
             scope_key=resolved_scope_key,
             accessible_projects=accessible_projects,
         )
-        review_policy_metadata = _reflect_policy_metadata(review_decisions)
-        if any(not decision.allowed for decision in review_decisions):
+        persist_policy_metadata = _reflect_policy_metadata(persist_decisions)
+        if any(not decision.allowed for decision in persist_decisions):
             denied_candidates = [
                 _candidate_with_review_metadata(
-                    replace(
-                        candidate,
-                        metadata={**candidate.metadata, **review_policy_metadata},
-                    ),
+                    replace(candidate, metadata={**candidate.metadata, **persist_policy_metadata}),
                     raw_source_ids=[],
                     suggested_memory_scope=resolved_scope,
                     suggested_scope_key=resolved_scope_key,
@@ -344,7 +341,7 @@ async def reflect_memory(
                 memory_scope=resolved_scope,
                 scope_key=resolved_scope_key,
                 extraction_prompt_metadata=extraction_prompt_metadata,
-                policy_metadata=review_policy_metadata,
+                policy_metadata=persist_policy_metadata,
             )
         elif use_native_write:
             source = await _persist_reflection_source_native(
@@ -367,6 +364,7 @@ async def reflect_memory(
                 "remember_kind": "session",
                 "reflection_intent": intent,
                 "reflection_source": True,
+                **persist_policy_metadata,
             }
             if domain:
                 source_metadata["domain"] = domain
@@ -416,13 +414,14 @@ async def reflect_memory(
             "remember_kind": candidate.kind,
             "reflection_reason": candidate.reason,
             "reflection_confidence": candidate.confidence,
+            **persist_policy_metadata,
         }
         if domain:
             metadata["domain"] = domain
         if source_id:
             metadata["reflection_source_id"] = source_id
         if persist_review:
-            candidate_metadata = {**metadata, **review_policy_metadata}
+            candidate_metadata = {**metadata, **persist_policy_metadata}
             review = await _persist_reflection_candidate_review(
                 candidate=replace(candidate, metadata=candidate_metadata),
                 organization_id=str(organization_id),

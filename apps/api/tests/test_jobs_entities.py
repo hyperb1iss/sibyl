@@ -7,38 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sibyl.jobs.entities import (
-    _save_episode_mention,
-    create_learning_episode,
-    create_learning_procedure,
-)
+from sibyl.jobs.entities import create_learning_episode, create_learning_procedure
 from sibyl_core.models.entities import Episode, Procedure
 from sibyl_core.models.tasks import Task, TaskStatus
 
 
 class TestCreateLearningEpisodeJob:
     @pytest.mark.asyncio
-    async def test_surreal_like_driver_saves_episode_mentions(self) -> None:
-        edge_ops = SimpleNamespace(save=AsyncMock())
-        driver = SimpleNamespace(episodic_edge_ops=edge_ops)
-        client = SimpleNamespace(get_org_driver=lambda group_id: driver)
-
-        assert await _save_episode_mention(
-            client,
-            group_id="org-1",
-            episode_id="episode-task-123",
-            target_id="task-123",
-            link_id="mention-1",
-        )
-
-        edge_ops.save.assert_awaited_once()
-        saved_edge = edge_ops.save.await_args.args[1]
-        assert saved_edge.uuid == "mention-1"
-        assert saved_edge.source_node_uuid == "episode-task-123"
-        assert saved_edge.target_node_uuid == "task-123"
-
-    @pytest.mark.asyncio
-    async def test_uses_episode_mentions_for_surreal_learning_links(self) -> None:
+    async def test_creates_learning_episode_with_native_relationships(self) -> None:
         task = Task(
             id="task-123",
             title="Ship the thing",
@@ -50,25 +26,27 @@ class TestCreateLearningEpisodeJob:
         task_data = task.model_dump(mode="json")
 
         entity_manager = MagicMock()
-        entity_manager.create = AsyncMock(return_value="episode_task-123")
+        entity_manager.create_direct = AsyncMock(return_value="episode_task-123")
         relationship_manager = MagicMock()
-        relationship_manager.create = AsyncMock()
+        created_relationships = []
+
+        async def _record_relationship(relationship):
+            created_relationships.append(relationship)
+            return relationship.id
+
+        relationship_manager.create = AsyncMock(side_effect=_record_relationship)
         relationship_manager.get_for_entity = AsyncMock(
             return_value=[
                 SimpleNamespace(target_id="pattern-1"),
             ]
         )
-        save_episode_mention = AsyncMock(return_value=True)
-        client = SimpleNamespace()
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
 
         with (
-            patch("sibyl_core.graph.client.get_graph_client", AsyncMock(return_value=client)),
-            patch("sibyl_core.graph.entities.EntityManager", return_value=entity_manager),
-            patch(
-                "sibyl_core.graph.relationships.RelationshipManager",
-                return_value=relationship_manager,
-            ),
-            patch("sibyl.jobs.entities._save_episode_mention", save_episode_mention),
+            patch("sibyl.jobs.entities.get_native_graph_runtime", AsyncMock(return_value=runtime)),
             patch("sibyl.jobs.entities._safe_broadcast", AsyncMock()),
         ):
             result = await create_learning_episode({}, task_data, "org-1")
@@ -76,29 +54,14 @@ class TestCreateLearningEpisodeJob:
         assert result["episode_id"] == "episode_task-123"
         assert result["task_id"] == "task-123"
         assert result["inherited_relationships"] == 1
-        entity_manager.create.assert_awaited_once()
-        created_episode = entity_manager.create.await_args.args[0]
+        entity_manager.create_direct.assert_awaited_once()
+        created_episode = entity_manager.create_direct.await_args.args[0]
         assert isinstance(created_episode, Episode)
         assert created_episode.metadata["task_id"] == "task-123"
-        relationship_manager.create.assert_not_awaited()
-        assert save_episode_mention.await_count == 2
-        save_episode_mention.assert_any_await(
-            client,
-            group_id="org-1",
-            episode_id="episode_task-123",
-            target_id="task-123",
-            link_id="rel_episode_task-123",
-        )
-        save_episode_mention.assert_any_await(
-            client,
-            group_id="org-1",
-            episode_id="episode_task-123",
-            target_id="pattern-1",
-            link_id="rel_episode_task-123_pattern-1",
-        )
+        assert {rel.target_id for rel in created_relationships} == {"task-123", "pattern-1"}
 
     @pytest.mark.asyncio
-    async def test_surreal_learning_episode_skips_missing_mention_endpoint(self) -> None:
+    async def test_learning_episode_default_path_does_not_import_graphiti(self) -> None:
         task = Task(
             id="task-123",
             title="Ship the thing",
@@ -110,30 +73,31 @@ class TestCreateLearningEpisodeJob:
         task_data = task.model_dump(mode="json")
 
         entity_manager = MagicMock()
-        entity_manager.create = AsyncMock(return_value="episode_task-123")
+        entity_manager.create_direct = AsyncMock(return_value="episode_task-123")
         relationship_manager = MagicMock()
-        relationship_manager.create = AsyncMock(side_effect=AssertionError("wrong edge table"))
+        relationship_manager.create = AsyncMock(return_value="rel_episode_task-123")
         relationship_manager.get_for_entity = AsyncMock(return_value=[])
-        save_episode_mention = AsyncMock(side_effect=ValueError("target entity not found"))
-        client = SimpleNamespace()
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
+        original_import = __import__
+
+        def guarded_import(name, globals_=None, locals_=None, fromlist=(), level=0):
+            if name == "graphiti_core" or name.startswith("graphiti_core."):
+                raise AssertionError(f"Graphiti import forbidden: {name}")
+            return original_import(name, globals_, locals_, fromlist, level)
 
         with (
-            patch("sibyl_core.graph.client.get_graph_client", AsyncMock(return_value=client)),
-            patch("sibyl_core.graph.entities.EntityManager", return_value=entity_manager),
-            patch(
-                "sibyl_core.graph.relationships.RelationshipManager",
-                return_value=relationship_manager,
-            ),
-            patch("sibyl.jobs.entities._save_episode_mention", save_episode_mention),
-            patch("sibyl.jobs.entities._get_surreal_driver", MagicMock(return_value=object())),
+            patch("builtins.__import__", side_effect=guarded_import),
+            patch("sibyl.jobs.entities.get_native_graph_runtime", AsyncMock(return_value=runtime)),
             patch("sibyl.jobs.entities._safe_broadcast", AsyncMock()),
         ):
             result = await create_learning_episode({}, task_data, "org-1")
 
         assert result["episode_id"] == "episode_task-123"
         assert result["task_id"] == "task-123"
-        relationship_manager.create.assert_not_awaited()
-        save_episode_mention.assert_awaited_once()
+        relationship_manager.create.assert_awaited_once()
 
 
 class TestCreateLearningProcedureJob:
@@ -169,15 +133,13 @@ class TestCreateLearningProcedureJob:
                 SimpleNamespace(target_id="pattern-1"),
             ]
         )
-        client = SimpleNamespace()
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
 
         with (
-            patch("sibyl_core.graph.client.get_graph_client", AsyncMock(return_value=client)),
-            patch("sibyl_core.graph.entities.EntityManager", return_value=entity_manager),
-            patch(
-                "sibyl_core.graph.relationships.RelationshipManager",
-                return_value=relationship_manager,
-            ),
+            patch("sibyl.jobs.entities.get_native_graph_runtime", AsyncMock(return_value=runtime)),
             patch("sibyl.jobs.entities._safe_broadcast", AsyncMock()),
         ):
             result = await create_learning_procedure({}, task_data, "org-1")

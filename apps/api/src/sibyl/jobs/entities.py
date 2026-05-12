@@ -4,44 +4,15 @@ These jobs handle async entity operations via SurrealDB, allowing
 the API to return quickly while background processing continues.
 """
 
-from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 
 from sibyl.api.event_types import WSEvent
+from sibyl_core.services.native_graph import get_native_graph_runtime
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
 
 log = structlog.get_logger()
-_MISSING = object()
-
-
-def _declared_driver_attr(driver: object, attr: str) -> object | None:
-    try:
-        attrs = vars(driver)
-    except TypeError:
-        return None
-
-    value = attrs.get(attr, _MISSING)
-    return None if value is _MISSING else value
-
-
-def _get_surreal_driver(client: Any, group_id: str) -> Any | None:
-    try:
-        from sibyl_core.backends.surreal import SurrealDriver
-    except ImportError:
-        return None
-
-    get_org_driver = getattr(client, "get_org_driver", None)
-    if not callable(get_org_driver):
-        return None
-
-    driver = get_org_driver(group_id)
-    if isinstance(driver, SurrealDriver):
-        return driver
-    if _declared_driver_attr(driver, "episodic_edge_ops") is not None:
-        return driver
-    return None
 
 
 async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | None) -> None:
@@ -54,69 +25,15 @@ async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | Non
         log.debug("Broadcast failed (Redis unavailable)", event=event)
 
 
-async def _save_episode_mention(
-    client: Any,
-    *,
-    group_id: str,
-    episode_id: str,
-    target_id: str,
-    link_id: str,
-) -> bool:
-    try:
-        from graphiti_core.edges import EpisodicEdge
-    except ImportError:
-        return False
-
-    driver = _get_surreal_driver(client, group_id)
-    if driver is None:
-        return False
-
-    await driver.episodic_edge_ops.save(
-        driver,
-        EpisodicEdge(
-            uuid=link_id,
-            group_id=group_id,
-            source_node_uuid=episode_id,
-            target_node_uuid=target_id,
-            created_at=datetime.now(UTC),
-        ),
-    )
-    return True
-
-
 async def _create_learning_artifact_link(
-    client: Any,
     relationship_manager: Any,
     *,
-    group_id: str,
     source_id: str,
     target_id: str,
     relationship_type: Any,
     link_id: str,
-    source_is_episode: bool = False,
     metadata: dict[str, Any] | None = None,
 ) -> str:
-    if source_is_episode:
-        try:
-            if await _save_episode_mention(
-                client,
-                group_id=group_id,
-                episode_id=source_id,
-                target_id=target_id,
-                link_id=link_id,
-            ):
-                return link_id
-        except ValueError as exc:
-            if _get_surreal_driver(client, group_id) is not None:
-                log.warning(
-                    "learning_artifact_episode_mention_skipped",
-                    error=str(exc),
-                    episode_id=source_id,
-                    target_id=target_id,
-                )
-                return link_id
-            raise
-
     from sibyl_core.models.entities import Relationship
 
     return await relationship_manager.create(
@@ -131,13 +48,10 @@ async def _create_learning_artifact_link(
 
 
 async def _inherit_task_knowledge(
-    client: Any,
     relationship_manager: Any,
     *,
-    group_id: str,
     source_id: str,
     task_id: str,
-    source_is_episode: bool = False,
 ) -> int:
     """Copy task knowledge edges onto a derived learning artifact."""
     from sibyl_core.models.entities import RelationshipType
@@ -155,14 +69,11 @@ async def _inherit_task_knowledge(
     for rel in task_relationships:
         try:
             await _create_learning_artifact_link(
-                client,
                 relationship_manager,
-                group_id=group_id,
                 source_id=source_id,
                 target_id=rel.target_id,
                 relationship_type=RelationshipType.REFERENCES,
                 link_id=f"rel_{source_id}_{rel.target_id}",
-                source_is_episode=source_is_episode,
                 metadata={"inherited_from_task": task_id},
             )
             inherited_count += 1
@@ -210,7 +121,6 @@ async def create_entity(  # noqa: PLR0915
         RelationshipType,
     )
     from sibyl_core.models.tasks import Epic, Project, Task
-    from sibyl_core.services.native_graph import get_native_graph_runtime
 
     relationships = relationships or []
 
@@ -430,7 +340,7 @@ async def create_learning_episode(
     """Create a learning episode from a completed task.
 
     This job runs in the background so task completion returns fast while
-    Graphiti handles LLM-powered entity extraction from the learnings.
+    SurrealDB persists the distilled learning artifact natively.
 
     Args:
         ctx: arq context
@@ -440,9 +350,6 @@ async def create_learning_episode(
     Returns:
         Dict with episode creation results
     """
-    from sibyl_core.graph.client import get_graph_client
-    from sibyl_core.graph.entities import EntityManager
-    from sibyl_core.graph.relationships import RelationshipManager
     from sibyl_core.models.entities import RelationshipType
     from sibyl_core.models.tasks import Task
 
@@ -455,14 +362,13 @@ async def create_learning_episode(
     )
 
     try:
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
+        runtime = await get_native_graph_runtime(group_id)
+        entity_manager = runtime.entity_manager
+        relationship_manager = runtime.relationship_manager
 
         episode = build_learning_episode(task)
 
-        # Use Graphiti create for relationship discovery from learnings
-        episode_id = await entity_manager.create(episode)
+        episode_id = await entity_manager.create_direct(episode)
 
         log.info(
             "create_learning_episode_entity_created",
@@ -472,23 +378,17 @@ async def create_learning_episode(
 
         # Link episode back to task
         await _create_learning_artifact_link(
-            client,
             relationship_manager,
-            group_id=group_id,
             source_id=episode_id,
             target_id=task.id,
             relationship_type=RelationshipType.DERIVED_FROM,
             link_id=f"rel_episode_{task.id}",
-            source_is_episode=True,
         )
 
         inherited_count = await _inherit_task_knowledge(
-            client,
             relationship_manager,
-            group_id=group_id,
             source_id=episode_id,
             task_id=task.id,
-            source_is_episode=True,
         )
 
         result = {
@@ -527,9 +427,6 @@ async def create_learning_procedure(
     group_id: str,
 ) -> dict[str, Any]:
     """Create a reusable procedure from a completed task."""
-    from sibyl_core.graph.client import get_graph_client
-    from sibyl_core.graph.entities import EntityManager
-    from sibyl_core.graph.relationships import RelationshipManager
     from sibyl_core.models.entities import Relationship, RelationshipType
     from sibyl_core.models.tasks import Task
 
@@ -542,9 +439,9 @@ async def create_learning_procedure(
     )
 
     try:
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
-        relationship_manager = RelationshipManager(client, group_id=group_id)
+        runtime = await get_native_graph_runtime(group_id)
+        entity_manager = runtime.entity_manager
+        relationship_manager = runtime.relationship_manager
 
         notes_getter = getattr(entity_manager, "get_notes_for_task", None)
         note_contents: list[str] = []
@@ -592,9 +489,7 @@ async def create_learning_procedure(
         )
 
         inherited_count = await _inherit_task_knowledge(
-            client,
             relationship_manager,
-            group_id=group_id,
             source_id=procedure_id,
             task_id=task.id,
         )
@@ -660,9 +555,6 @@ async def update_task(
         Dict with update results
     """
     from sibyl.locks import entity_lock
-    from sibyl_core.graph.client import get_graph_client
-    from sibyl_core.graph.entities import EntityManager
-    from sibyl_core.graph.relationships import RelationshipManager
     from sibyl_core.models.entities import Relationship, RelationshipType
 
     add_depends_on = add_depends_on or []
@@ -683,8 +575,8 @@ async def update_task(
                 log.warning("update_task_lock_failed", task_id=task_id)
                 return {"task_id": task_id, "success": False, "message": "Lock contention"}
 
-            client = await get_graph_client()
-            entity_manager = EntityManager(client, group_id=group_id)
+            runtime = await get_native_graph_runtime(group_id)
+            entity_manager = runtime.entity_manager
 
             # Perform the entity field update (skip if only dep changes)
             updated = None
@@ -697,7 +589,7 @@ async def update_task(
             # Create relationship manager if any relationship changes needed
             needs_rel_mgr = epic_id is not None or add_depends_on or remove_depends_on
             if needs_rel_mgr:
-                relationship_manager = RelationshipManager(client, group_id=group_id)
+                relationship_manager = runtime.relationship_manager
 
             # Create BELONGS_TO relationship for epic (if epic_id was set/changed)
             if epic_id is not None:
@@ -774,7 +666,10 @@ async def _maybe_start_epic_bg(
     if task_status not in forward_progress_states:
         return False
 
-    epic = await entity_manager.get(epic_id)
+    try:
+        epic = await entity_manager.get(epic_id)
+    except KeyError:
+        return False
     if not epic or epic.metadata.get("status") != "planning":
         return False
 
@@ -808,9 +703,6 @@ async def update_entity(
     Returns:
         Dict with update results
     """
-    from sibyl_core.graph.client import get_graph_client
-    from sibyl_core.graph.entities import EntityManager
-
     log.info(
         "update_entity_started",
         entity_id=entity_id,
@@ -819,8 +711,8 @@ async def update_entity(
     )
 
     try:
-        client = await get_graph_client()
-        entity_manager = EntityManager(client, group_id=group_id)
+        runtime = await get_native_graph_runtime(group_id)
+        entity_manager = runtime.entity_manager
 
         # Perform the update
         result = await entity_manager.update(entity_id, updates)

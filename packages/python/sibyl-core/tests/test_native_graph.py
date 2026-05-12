@@ -114,5 +114,34 @@ async def test_native_graph_writes_entities_and_relationships_without_graphiti(
                 "attributes": {"native_write_path": "test"},
             }
         ]
+
+        updated = await entity_manager.update(
+            "decision_native",
+            {"status": "done", "title": "Updated Native Decision"},
+        )
+        assert updated is not None
+        assert updated.name == "Updated Native Decision"
+        assert updated.metadata["status"] == "done"
+
+        fetched_relationships = await relationship_manager.get_for_entity(
+            "decision_native",
+            relationship_types=[RelationshipType.BELONGS_TO],
+            direction="outgoing",
+        )
+        assert [rel.target_id for rel in fetched_relationships] == ["project_native"]
+
+        deleted = await relationship_manager.delete_between(
+            "decision_native",
+            "project_native",
+            RelationshipType.BELONGS_TO,
+        )
+        assert deleted == 1
+
+        search_results = await entity_manager.search(
+            query="Updated Native Decision",
+            entity_types=[EntityType.DECISION],
+        )
+        assert search_results
+        assert all(0.0 <= score <= 1.0 for _, score in search_results)
     finally:
         await client.close()

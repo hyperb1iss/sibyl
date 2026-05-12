@@ -246,6 +246,48 @@ class TestProcessPendingOperations:
         mock_registry.clear_pending_operations.assert_awaited_once_with("task_123")
 
     @pytest.mark.asyncio
+    async def test_process_pending_operations_handles_update(
+        self, mock_registry: MagicMock
+    ) -> None:
+        mock_registry.get_pending_operations.return_value = [
+            {
+                "op_id": "op_update",
+                "operation": "update",
+                "payload": {"updates": {"status": "doing"}},
+            },
+        ]
+        mock_registry.clear_pending_operations.return_value = 1
+
+        mock_entity_manager = AsyncMock()
+        mock_relationship_manager = AsyncMock()
+        mock_runtime = MagicMock(
+            entity_manager=mock_entity_manager,
+            relationship_manager=mock_relationship_manager,
+        )
+
+        with (
+            patch("sibyl.jobs.pending.get_pending", return_value=mock_registry),
+            patch(
+                "sibyl_core.services.native_graph.get_native_graph_runtime",
+                AsyncMock(return_value=mock_runtime),
+            ),
+        ):
+            from sibyl.jobs.pending import process_pending_operations
+
+            result = await process_pending_operations("task_123", "org_456")
+
+        assert result == [
+            {
+                "op_id": "op_update",
+                "operation": "update",
+                "success": True,
+                "updated_fields": ["status"],
+            }
+        ]
+        mock_entity_manager.update.assert_awaited_once_with("task_123", {"status": "doing"})
+        mock_registry.clear_pending_operations.assert_awaited_once_with("task_123")
+
+    @pytest.mark.asyncio
     async def test_process_pending_operations_handles_unknown_operation(
         self, mock_registry: MagicMock
     ) -> None:

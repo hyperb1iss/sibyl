@@ -58,6 +58,10 @@ async def test_reflect_memory_can_persist_candidates_with_provenance() -> None:
         project="project_123",
         related_to=["project_123"],
         organization_id="org_123",
+        principal_id="user_123",
+        accessible_projects={"project_123"},
+        memory_scope="project",
+        scope_key="project_123",
         persist=True,
         add_fn=fake_add,
     )
@@ -71,8 +75,42 @@ async def test_reflect_memory_can_persist_candidates_with_provenance() -> None:
     assert calls[1]["metadata"]["capture_mode"] == "reflect"
     assert calls[1]["metadata"]["project_id"] == "project_123"
     assert calls[1]["metadata"]["reflection_source_id"] == "session_1"
+    assert calls[1]["metadata"]["policy_reasons"] == [
+        "same_scope_reflect_allowed",
+        "same_scope_write_allowed",
+    ]
     assert calls[1]["related_to"] == ["project_123", "session_1"]
     assert calls[1]["sync"] is True
+
+
+@pytest.mark.asyncio
+async def test_reflect_memory_persist_denies_unverified_project_without_native_write() -> None:
+    add_fn = AsyncMock(side_effect=AssertionError("compatibility add path should not run"))
+
+    pack = await reflect_memory(
+        "We decided unauthorized reflect writes need policy before fallback persistence.",
+        source_title="Fallback reflection denial",
+        intent="build",
+        domain="sibyl",
+        project="project_123",
+        organization_id="org_123",
+        principal_id="user_123",
+        accessible_projects={"project_other"},
+        memory_scope="project",
+        scope_key="project_123",
+        persist=True,
+        persist_review=False,
+        add_fn=add_fn,
+    )
+
+    assert pack.source_id is None
+    assert pack.persisted_count == 0
+    assert add_fn.await_count == 0
+    assert pack.candidates[0].metadata["policy_allowed"] is False
+    assert pack.candidates[0].metadata["policy_reasons"] == [
+        "unverified_membership",
+        "unverified_membership",
+    ]
 
 
 @pytest.mark.asyncio
