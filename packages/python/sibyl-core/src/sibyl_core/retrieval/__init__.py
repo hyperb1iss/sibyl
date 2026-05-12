@@ -30,6 +30,18 @@ from sibyl_core.retrieval.hybrid import (
     hybrid_search,
     simple_hybrid_search,
 )
+from sibyl_core.retrieval.native import (
+    DEFAULT_FILTER_SELECTIVITY_THRESHOLD,
+    NativeCandidateLimits,
+    NativeRetrievalMode,
+    NativeRetrievalPlan,
+    NativeRetrievalSignal,
+    NativeRetrievalWeights,
+    NativeScopeSpec,
+    build_native_context_retrieval_plan,
+    coerce_native_retrieval_mode,
+    native_retrieval_mode_from_env,
+)
 from sibyl_core.retrieval.reranking import (
     CrossEncoderConfig,
     RerankResult,
@@ -44,32 +56,35 @@ from sibyl_core.retrieval.temporal import (
 )
 
 __all__ = [
-    # BM25
+    "DEFAULT_FILTER_SELECTIVITY_THRESHOLD",
     "BM25Config",
     "BM25Index",
-    # Reranking
     "CrossEncoderConfig",
-    # Dedup
     "DedupConfig",
     "DuplicatePair",
     "EntityDeduplicator",
-    # Fusion
     "FusionConfig",
-    # Hybrid
     "HybridConfig",
     "HybridResult",
-    # Reranking
+    "NativeCandidateLimits",
+    "NativeRetrievalMode",
+    "NativeRetrievalPlan",
+    "NativeRetrievalSignal",
+    "NativeRetrievalWeights",
+    "NativeScopeSpec",
     "RerankResult",
-    # Temporal
     "TemporalConfig",
     "bm25_search",
+    "build_native_context_retrieval_plan",
     "calculate_boost",
+    "coerce_native_retrieval_mode",
     "cosine_similarity",
     "cross_encoder_rerank",
     "find_duplicates",
     "get_bm25_index",
     "get_deduplicator",
     "hybrid_search",
+    "native_retrieval_mode_from_env",
     "rerank_results",
     "rrf_merge",
     "rrf_merge_with_metadata",

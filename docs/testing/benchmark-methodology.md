@@ -103,6 +103,10 @@ The `context-pack` profile gates dogfood context reports:
 separately, while the summary uses the larger of those two counts for each case so one leaked memory
 is not double-counted when it trips both signals.
 
+Native Surreal retrieval starts with a vector filter-selectivity threshold of `0.1`. When a filter
+retains less than 10% of the searchable corpus, vector-only candidates are demoted unless a seeded
+fixture proves they preserve useful recall under that selective filter.
+
 Use `--require-metadata store=surreal` or other metadata filters when you need to prove which stack
 produced the artifact. Use `--min-metric` and `--max-metric` to tighten a gate for a specific run
 without forking the script.
