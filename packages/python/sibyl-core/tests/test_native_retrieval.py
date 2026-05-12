@@ -67,6 +67,7 @@ def test_build_native_context_retrieval_plan_records_scopes_and_weights() -> Non
     assert plan.filter_selectivity_threshold == DEFAULT_FILTER_SELECTIVITY_THRESHOLD
     assert NativeRetrievalSignal.RAW_LEXICAL in plan.signals
     assert NativeRetrievalSignal.GRAPH_EXPANSION in plan.signals
+    assert plan.filter_selectivity == 1.0
 
 
 def test_build_native_context_retrieval_plan_denies_unverified_project_scope() -> None:
@@ -122,3 +123,98 @@ def test_build_native_context_retrieval_plan_requires_principal() -> None:
         "principal_mismatch",
         "principal_mismatch",
     ]
+
+
+def test_native_plan_estimates_project_filter_selectivity() -> None:
+    accessible_projects = {f"project_{index}" for index in range(20)}
+    plan = build_native_context_retrieval_plan(
+        query="selective vector filter",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_0",
+        accessible_projects=accessible_projects,
+    )
+
+    assert plan.filter_selectivity == 1 / len(accessible_projects)
+
+
+def test_vector_only_candidates_demote_under_selective_project_filter() -> None:
+    accessible_projects = {f"project_{index}" for index in range(20)}
+    plan = build_native_context_retrieval_plan(
+        query="selective vector filter",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_0",
+        accessible_projects=accessible_projects,
+    )
+    vector_candidate = NativeRetrievalCandidate(
+        id="vector-only",
+        type="task",
+        name="Vector only",
+        content="A weak vector-only match.",
+        score=1.0,
+        source=None,
+        metadata={},
+        project_id="project_0",
+    )
+    lexical_candidate = NativeRetrievalCandidate(
+        id="lexical",
+        type="task",
+        name="Lexical",
+        content="A grounded lexical match.",
+        score=1.0,
+        source=None,
+        metadata={},
+        project_id="project_0",
+    )
+
+    ranked = native_module._fuse_candidates(
+        [
+            (NativeRetrievalSignal.NODE_VECTOR, [vector_candidate]),
+            (NativeRetrievalSignal.NODE_FULLTEXT, [lexical_candidate]),
+        ],
+        plan=plan,
+        limit=2,
+    )
+
+    assert [candidate.id for candidate, _, _ in ranked] == ["lexical", "vector-only"]
+    assert ranked[1][2]["vector_only_demoted"] is True
+    assert ranked[1][2]["filter_selectivity"] == plan.filter_selectivity
+
+
+def test_vector_matches_with_lexical_signal_do_not_demote() -> None:
+    accessible_projects = {f"project_{index}" for index in range(20)}
+    plan = build_native_context_retrieval_plan(
+        query="selective vector filter",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_0",
+        accessible_projects=accessible_projects,
+    )
+    candidate = NativeRetrievalCandidate(
+        id="shared",
+        type="task",
+        name="Shared",
+        content="A vector hit with lexical corroboration.",
+        score=1.0,
+        source=None,
+        metadata={},
+        project_id="project_0",
+    )
+
+    ranked = native_module._fuse_candidates(
+        [
+            (NativeRetrievalSignal.NODE_VECTOR, [candidate]),
+            (NativeRetrievalSignal.NODE_FULLTEXT, [candidate]),
+        ],
+        plan=plan,
+        limit=1,
+    )
+
+    assert "vector_only_demoted" not in ranked[0][2]

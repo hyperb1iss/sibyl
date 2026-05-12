@@ -96,6 +96,7 @@ class NativeRetrievalPlan:
     accessible_projects: frozenset[str] | None = None
     graph_expansion_depth: int = 1
     vector_min_score: float = 0.0
+    filter_selectivity: float | None = None
     filter_selectivity_threshold: float = DEFAULT_FILTER_SELECTIVITY_THRESHOLD
 
 
@@ -203,6 +204,7 @@ def build_native_context_retrieval_plan(
         ),
         project=project,
         accessible_projects=normalized_accessible_projects,
+        filter_selectivity=_project_filter_selectivity(project, normalized_accessible_projects),
     )
 
 
@@ -405,6 +407,17 @@ def _authorized_project_ids(plan: NativeRetrievalPlan) -> tuple[str, ...]:
     if plan.accessible_projects:
         return tuple(sorted(plan.accessible_projects))
     return ()
+
+
+def _project_filter_selectivity(
+    project: str | None,
+    accessible_projects: frozenset[str] | None,
+) -> float | None:
+    if not project or not accessible_projects:
+        return None
+    if project not in accessible_projects:
+        return 0.0
+    return 1.0 / len(accessible_projects)
 
 
 def _explicit_project_denied(plan: NativeRetrievalPlan) -> bool:
@@ -863,10 +876,43 @@ def _fuse_candidates(
     ranked: list[tuple[NativeRetrievalCandidate, float, dict[str, Any]]] = []
     for candidate_id, score in score_by_id.items():
         candidate = candidates_by_id[candidate_id]
+        fusion_metadata = metadata_by_id[candidate_id]
+        demote_multiplier = _vector_only_demote_multiplier(
+            plan,
+            signals=fusion_metadata["sources"],
+        )
+        if demote_multiplier < 1.0:
+            score *= demote_multiplier
+            fusion_metadata["vector_only_demoted"] = True
+            fusion_metadata["filter_selectivity"] = plan.filter_selectivity
+            fusion_metadata["vector_only_demote_multiplier"] = demote_multiplier
         boosted = _boost_score(candidate, score, plan=plan)
-        ranked.append((candidate, boosted, metadata_by_id[candidate_id]))
+        ranked.append((candidate, boosted, fusion_metadata))
     ranked.sort(key=lambda item: item[1], reverse=True)
     return ranked[:limit]
+
+
+def _vector_only_demote_multiplier(
+    plan: NativeRetrievalPlan,
+    *,
+    signals: Sequence[str],
+) -> float:
+    if plan.filter_selectivity is None:
+        return 1.0
+    if plan.filter_selectivity >= plan.filter_selectivity_threshold:
+        return 1.0
+    if any(
+        signal
+        not in {
+            NativeRetrievalSignal.NODE_VECTOR.value,
+            NativeRetrievalSignal.EDGE_VECTOR.value,
+        }
+        for signal in signals
+    ):
+        return 1.0
+    if plan.filter_selectivity_threshold <= 0:
+        return 1.0
+    return max(plan.filter_selectivity / plan.filter_selectivity_threshold, 0.1)
 
 
 def _boost_score(
@@ -917,6 +963,12 @@ def _search_result_from_candidate(
         "retrieval_scores": dict(fusion_metadata.get("original_scores", {})),
         "policy_reason": candidate.policy_reason,
     }
+    if fusion_metadata.get("vector_only_demoted"):
+        metadata["vector_only_demoted"] = True
+        metadata["filter_selectivity"] = fusion_metadata.get("filter_selectivity")
+        metadata["vector_only_demote_multiplier"] = fusion_metadata.get(
+            "vector_only_demote_multiplier"
+        )
     if candidate.project_id:
         metadata["project_id"] = candidate.project_id
     if candidate.created_at:
