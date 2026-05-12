@@ -1,0 +1,128 @@
+{
+  "cases": [
+    {
+      "name": "coding-handoff",
+      "goal": "Which task covers replay verification and migration acceptance?",
+      "intent": "build",
+      "domain": "sibyl",
+      "limit": 8,
+      "include_related": false,
+      "fixture": {
+        "required_facets": ["recent_memory"],
+        "required_terms": ["Silver Delta"],
+        "max_items": 8,
+        "max_estimated_tokens": 1200,
+        "require_source_metadata": true
+      }
+    },
+    {
+      "name": "personal-memory",
+      "goal": "What does personal baseline memory say to remember for private recall?",
+      "intent": "learn",
+      "domain": "sibyl",
+      "limit": 8,
+      "include_related": false,
+      "fixture": {
+        "required_facets": ["recent_memory"],
+        "required_terms": ["Amethyst Loom"],
+        "forbidden_terms": ["private health note", "medical note"],
+        "max_items": 8,
+        "max_estimated_tokens": 1200,
+        "require_source_metadata": true
+      }
+    },
+    {
+      "name": "project-recall",
+      "goal": "Which project focuses on resilience hardening for deterministic graph replay?",
+      "intent": "learn",
+      "domain": "sibyl",
+      "limit": 8,
+      "include_related": false,
+      "fixture": {
+        "required_facets": ["recent_memory"],
+        "required_terms": ["Cinder Atlas"],
+        "max_items": 8,
+        "max_estimated_tokens": 1200,
+        "require_source_metadata": true
+      }
+    },
+    {
+      "name": "delegated-recall",
+      "goal": "Find the predecessor task covering storage adapter extraction and isolation.",
+      "intent": "build",
+      "domain": "sibyl",
+      "agent_id": "nova",
+      "limit": 8,
+      "include_related": false,
+      "fixture": {
+        "required_facets": ["recent_memory"],
+        "required_terms": ["Obsidian Spire"],
+        "max_items": 8,
+        "max_estimated_tokens": 1200,
+        "require_source_metadata": true
+      }
+    },
+    {
+      "name": "agent-diary",
+      "goal": "What should Nova recall from the diary for delegated handoff?",
+      "intent": "learn",
+      "domain": "sibyl",
+      "agent_id": "nova",
+      "limit": 8,
+      "include_related": false,
+      "fixture": {
+        "required_facets": ["recent_memory"],
+        "required_terms": ["Neon Thread"],
+        "forbidden_terms": ["other agent diary"],
+        "max_items": 8,
+        "max_estimated_tokens": 1200,
+        "require_source_metadata": true
+      }
+    },
+    {
+      "name": "private-leak-negative",
+      "goal": "What baseline memory is safe for a public handoff?",
+      "intent": "learn",
+      "domain": "sibyl",
+      "limit": 8,
+      "include_related": false,
+      "fixture": {
+        "forbidden_terms": ["private health note", "medical note", "other agent diary"],
+        "max_items": 8,
+        "max_estimated_tokens": 1200,
+        "require_source_metadata": true
+      }
+    },
+    {
+      "name": "stale-decision-replacement",
+      "goal": "Which successor covers migration acceptance after storage adapter extraction?",
+      "intent": "learn",
+      "domain": "sibyl",
+      "limit": 8,
+      "include_related": false,
+      "fixture": {
+        "required_facets": ["recent_memory"],
+        "required_terms": ["Silver Delta"],
+        "forbidden_terms": ["Obsidian Spire is complete enough to skip migration acceptance"],
+        "max_items": 8,
+        "max_estimated_tokens": 1200,
+        "require_source_metadata": true
+      }
+    },
+    {
+      "name": "source-grounding",
+      "goal": "What source-linked baseline memory should be used for recall provenance?",
+      "intent": "learn",
+      "domain": "sibyl",
+      "limit": 8,
+      "include_related": false,
+      "fixture": {
+        "required_facets": ["recent_memory"],
+        "required_terms": ["source links survive promotion"],
+        "max_items": 8,
+        "max_estimated_tokens": 1200,
+        "require_source_metadata": true
+      }
+    }
+  ]
+}

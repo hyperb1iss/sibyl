@@ -52,6 +52,7 @@ tasks:
     command: uv run python ../../../benchmarks/context_pack_eval.py
     inputs:
     - /benchmarks/context_pack_eval.py
+    - /benchmarks/context_pack_cases.json
     - '@group(sources)'
     - '@group(tests)'
   bench-live-smoke:

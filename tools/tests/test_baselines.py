@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from tools.baselines.common import (
@@ -8,6 +9,7 @@ from tools.baselines.common import (
     resolve_pointer,
     validate_expectations,
     write_jsonl,
+    write_manifest,
 )
 
 EXPECTED_ERROR_COUNT = 3
@@ -95,3 +97,64 @@ def test_jsonl_round_trip(tmp_path: Path) -> None:
     write_jsonl(path, rows)
 
     assert read_jsonl(path) == rows
+
+
+def test_write_manifest_can_carry_runtime_auth_and_raw_fixtures(tmp_path: Path) -> None:
+    path = tmp_path / "manifest.json"
+
+    write_manifest(
+        path,
+        base_url="http://localhost:3334",
+        email="baseline-corpus@sibyl.dev",
+        rest_seed={
+            "id": "episode_1",
+            "title": "Baseline Corpus Episode",
+            "entity_type": "episode",
+        },
+        graph_fixture={
+            "task_a": {
+                "id": "task_a",
+                "name": "Obsidian Spire",
+                "entity_type": "task",
+            }
+        },
+        raw_memory_fixture={
+            "personal": {
+                "id": "raw_1",
+                "title": "Personal Baseline Memory",
+                "source_id": "baseline:personal-memory",
+            }
+        },
+        access_token="token-123",  # noqa: S106
+    )
+
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+
+    assert manifest["auth"] == {"access_token": "token-123"}
+    assert manifest["raw_memory_fixture"]["personal"] == {
+        "id": "raw_1",
+        "title": "Personal Baseline Memory",
+        "source_id": "baseline:personal-memory",
+    }
+
+
+def test_write_manifest_omits_auth_without_runtime_token(tmp_path: Path) -> None:
+    path = tmp_path / "manifest.json"
+
+    write_manifest(
+        path,
+        base_url="http://localhost:3334",
+        email="baseline-corpus@sibyl.dev",
+        rest_seed={"id": "episode_1", "title": "Baseline Corpus Episode"},
+        graph_fixture={
+            "task_a": {
+                "id": "task_a",
+                "name": "Obsidian Spire",
+                "entity_type": "task",
+            }
+        },
+    )
+
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+
+    assert "auth" not in manifest

@@ -14,6 +14,7 @@ from tools.baselines.common import (
     dump_json,
     emit,
     ensure_graph_fixture,
+    ensure_raw_memory_fixture,
     ensure_rest_seed,
     login_or_signup,
     write_manifest,
@@ -62,6 +63,7 @@ async def amain() -> int:
         token = str(auth_payload["access_token"])
         rest_seed = await ensure_rest_seed(api_client, token)
         graph_fixture = await ensure_graph_fixture(api_client, token)
+        raw_memory_fixture = await ensure_raw_memory_fixture(api_client, token)
 
     write_manifest(
         args.manifest_path,
@@ -69,6 +71,8 @@ async def amain() -> int:
         email=args.email,
         rest_seed=rest_seed,
         graph_fixture=graph_fixture,
+        raw_memory_fixture=raw_memory_fixture,
+        access_token=token,
     )
 
     emit(f"Wrote runtime baseline manifest to {args.manifest_path.as_posix()}")
@@ -81,6 +85,10 @@ async def amain() -> int:
                     for name, entity in graph_fixture.items()
                 },
                 "rest_seed": rest_seed,
+                "raw_memory_fixture": {
+                    name: {"id": memory["id"], "title": memory["title"]}
+                    for name, memory in raw_memory_fixture.items()
+                },
             }
         )
     )

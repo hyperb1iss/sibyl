@@ -1,6 +1,7 @@
 """Shared evaluation utilities for Sibyl retrieval surfaces."""
 
 from sibyl_core.evals.context import (
+    FROZEN_CONTEXT_PACK_SUITE_NAMES,
     ContextPackCaseResult,
     ContextPackEvalCase,
     ContextPackEvalReport,
@@ -36,6 +37,7 @@ from sibyl_core.evals.runtime import (
 )
 
 __all__ = [
+    "FROZEN_CONTEXT_PACK_SUITE_NAMES",
     "ContextPackCaseResult",
     "ContextPackEvalCase",
     "ContextPackEvalReport",

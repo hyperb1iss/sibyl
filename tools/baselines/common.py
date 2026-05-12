@@ -293,6 +293,145 @@ async def ensure_graph_fixture(client: httpx.AsyncClient, token: str) -> dict[st
     }
 
 
+async def ensure_raw_memory(
+    client: httpx.AsyncClient,
+    token: str,
+    *,
+    title: str,
+    raw_content: str,
+    source_id: str,
+    diary: bool = False,
+    agent_id: str | None = None,
+    tags: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    headers = auth_headers(token)
+    recall_payload: dict[str, Any] = {
+        "query": title,
+        "memory_scope": "private",
+        "limit": 10,
+    }
+    if diary:
+        recall_payload.update({"diary": True, "agent_id": agent_id})
+
+    recall_response = await client.post(
+        "/memory/raw/recall",
+        headers=headers,
+        json=recall_payload,
+    )
+    recall_response.raise_for_status()
+    recall_payload = parse_http_response(recall_response)["body"]
+    if isinstance(recall_payload, dict):
+        for memory in recall_payload.get("memories", []):
+            if memory.get("source_id") == source_id or memory.get("title") == title:
+                return memory
+
+    create_response = await client.post(
+        "/memory/raw",
+        headers=headers,
+        json={
+            "title": title,
+            "raw_content": raw_content,
+            "source_id": source_id,
+            "memory_scope": "private",
+            "diary": diary,
+            "agent_id": agent_id,
+            "tags": [*(tags or BASELINE_TAGS), "context-pack"],
+            "metadata": {"capture_mode": "baseline", **(metadata or {})},
+            "provenance": {"source": "baseline-seed"},
+            "capture_surface": "baseline",
+        },
+    )
+    create_response.raise_for_status()
+    return parse_http_response(create_response)["body"]
+
+
+async def ensure_raw_memory_fixture(
+    client: httpx.AsyncClient,
+    token: str,
+) -> dict[str, dict[str, Any]]:
+    personal = await ensure_raw_memory(
+        client,
+        token,
+        title="Personal Baseline Memory",
+        raw_content=("Personal baseline memory says remember Amethyst Loom for private recall."),
+        source_id="baseline:personal-memory",
+        tags=[*BASELINE_TAGS, "personal-memory"],
+    )
+    coding_handoff = await ensure_raw_memory(
+        client,
+        token,
+        title="Coding Handoff Baseline",
+        raw_content=(
+            "Coding handoff baseline says Silver Delta covers replay verification "
+            "and migration acceptance."
+        ),
+        source_id="baseline:coding-handoff",
+        tags=[*BASELINE_TAGS, "coding-handoff"],
+    )
+    project_recall = await ensure_raw_memory(
+        client,
+        token,
+        title="Project Recall Baseline",
+        raw_content=(
+            "Project recall baseline says Cinder Atlas focuses on resilience "
+            "hardening for deterministic graph replay."
+        ),
+        source_id="baseline:project-recall",
+        tags=[*BASELINE_TAGS, "project-recall"],
+    )
+    delegated_recall = await ensure_raw_memory(
+        client,
+        token,
+        title="Delegated Recall Baseline",
+        raw_content=(
+            "Delegated recall baseline says Obsidian Spire covers storage adapter "
+            "extraction and isolation."
+        ),
+        source_id="baseline:delegated-recall",
+        tags=[*BASELINE_TAGS, "delegated-recall"],
+    )
+    agent_diary = await ensure_raw_memory(
+        client,
+        token,
+        title="Nova Baseline Diary",
+        raw_content="Nova diary says checkpoint Neon Thread for delegated handoff.",
+        source_id="baseline:agent-diary",
+        diary=True,
+        agent_id="nova",
+        tags=[*BASELINE_TAGS, "agent-diary"],
+        metadata={"agent_id": "nova", "memory_kind": "agent_diary"},
+    )
+    source_grounding = await ensure_raw_memory(
+        client,
+        token,
+        title="Source Grounding Baseline",
+        raw_content=("Source grounding baseline says source links survive promotion."),
+        source_id="baseline:source-grounding",
+        tags=[*BASELINE_TAGS, "source-grounding"],
+    )
+    stale_decision = await ensure_raw_memory(
+        client,
+        token,
+        title="Stale Decision Replacement Baseline",
+        raw_content=(
+            "Stale decision replacement baseline says Silver Delta supersedes "
+            "old shortcuts for migration acceptance."
+        ),
+        source_id="baseline:stale-decision-replacement",
+        tags=[*BASELINE_TAGS, "stale-decision-replacement"],
+    )
+    return {
+        "personal": personal,
+        "coding_handoff": coding_handoff,
+        "project_recall": project_recall,
+        "delegated_recall": delegated_recall,
+        "agent_diary": agent_diary,
+        "source_grounding": source_grounding,
+        "stale_decision": stale_decision,
+    }
+
+
 def write_manifest(
     path: Path,
     *,
@@ -300,6 +439,8 @@ def write_manifest(
     email: str,
     rest_seed: dict[str, Any],
     graph_fixture: dict[str, dict[str, Any]],
+    raw_memory_fixture: dict[str, dict[str, Any]] | None = None,
+    access_token: str | None = None,
 ) -> None:
     manifest = {
         "captured_at": datetime.now(UTC).isoformat(),
@@ -324,6 +465,17 @@ def write_manifest(
             for name, entity in graph_fixture.items()
         },
     }
+    if raw_memory_fixture:
+        manifest["raw_memory_fixture"] = {
+            name: {
+                "id": memory["id"],
+                "title": memory["title"],
+                "source_id": memory["source_id"],
+            }
+            for name, memory in raw_memory_fixture.items()
+        }
+    if access_token:
+        manifest["auth"] = {"access_token": access_token}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"{json.dumps(manifest, indent=2, sort_keys=True)}\n", encoding="utf-8")
 

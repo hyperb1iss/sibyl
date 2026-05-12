@@ -8,6 +8,7 @@ from typing import Any, Literal
 import pytest
 
 from sibyl_core.evals import (
+    FROZEN_CONTEXT_PACK_SUITE_NAMES,
     ContextPackCaseResult,
     ContextPackEvalCase,
     ContextPackEvalReport,
@@ -927,6 +928,26 @@ def test_load_context_pack_cases_parses_json_fixture(tmp_path: Path) -> None:
     ]
     assert cases[0].fixture.require_source_metadata is True
     assert cases[0].include_related is False
+
+
+def test_frozen_context_pack_cases_cover_spec_suites() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    cases = load_context_pack_cases(repo_root / "benchmarks" / "context_pack_cases.json")
+
+    assert {case.name for case in cases} == FROZEN_CONTEXT_PACK_SUITE_NAMES
+    for case in cases:
+        fixture = case.fixture
+        has_quality_guard = any(
+            (
+                fixture.required_item_ids,
+                fixture.required_facets,
+                fixture.required_terms,
+                fixture.forbidden_item_ids,
+                fixture.forbidden_terms,
+                fixture.require_source_metadata,
+            )
+        )
+        assert has_quality_guard, case.name
 
 
 def test_context_pack_from_dict_parses_api_response() -> None:

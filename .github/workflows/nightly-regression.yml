@@ -121,7 +121,11 @@ jobs:
       - name: Run context-pack retrieval compare benchmark
         id: context-pack-compare
         run: |
-          moon run core:bench-context -- --label retrieval-compare --metadata retrieval_mode=compare
+          moon run core:bench-context -- \
+            --cases benchmarks/context_pack_cases.json \
+            --auth-manifest .moon/cache/baseline-runtime-manifest.json \
+            --label retrieval-compare \
+            --metadata retrieval_mode=compare
           latest_report="$(
             find .moon/cache/evals -maxdepth 1 \
               -name 'eval_context_pack_retrieval_compare_*.json' \

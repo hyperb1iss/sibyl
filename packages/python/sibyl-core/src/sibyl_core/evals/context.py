@@ -23,6 +23,18 @@ from sibyl_core.tools.context import context_pack_to_markdown
 
 APPROX_CHARS_PER_TOKEN = 4
 APPROX_TOKEN_SAFETY_MARGIN = 1.2
+FROZEN_CONTEXT_PACK_SUITE_NAMES = frozenset(
+    {
+        "agent-diary",
+        "coding-handoff",
+        "delegated-recall",
+        "personal-memory",
+        "private-leak-negative",
+        "project-recall",
+        "source-grounding",
+        "stale-decision-replacement",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -627,6 +639,7 @@ def context_pack_from_dict(data: dict[str, Any]) -> ContextPack:
 
 
 __all__ = [
+    "FROZEN_CONTEXT_PACK_SUITE_NAMES",
     "ContextPackCaseResult",
     "ContextPackEvalCase",
     "ContextPackEvalReport",

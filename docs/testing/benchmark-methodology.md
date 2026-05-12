@@ -43,11 +43,17 @@ Use this when you want a quick “is the live stack behaving sensibly?” signal
 This is the live context-pack quality guard.
 
 - Talks to the live `/api/context/pack` endpoint
-- Runs seeded dogfood fixtures for coding handoffs, Haven recall, privacy boundaries, and pack shape
+- Runs the frozen fixture file at `benchmarks/context_pack_cases.json` for coding handoffs, personal
+  memory, project recall, delegated recall, agent diary opt-in, private leak negatives,
+  stale-decision replacement, and source grounding
 - Measures pass rate, source grounding, facet order, latency, token budget with the reported
   estimator margin, forbidden terms, and per-case leak signals
 - Writes timestamped JSON reports under `.moon/cache/evals/` by default
 - Writes the same JSON report shape used by the comparison and gate tools
+
+Nightly seeds the deterministic baseline corpus first and passes
+`.moon/cache/baseline-runtime-manifest.json` through `--auth-manifest`, so the context benchmark
+uses the same short-lived baseline user token as the seeded corpus.
 
 Use this when changing retrieval, source grounding, prompt hooks, policy checks, or context-pack
 rendering.

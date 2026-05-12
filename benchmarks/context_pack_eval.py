@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -16,7 +18,40 @@ sys.path.insert(0, str(ROOT / "apps" / "cli" / "src"))
 from sibyl_core.evals import ContextPackEvalReport, EvalConfig, run_context_pack_evaluation_cli
 
 
-async def _get_client_headers(api_url: str, timeout: float) -> dict[str, str]:
+def _resolve_repo_path(path: Path | None) -> Path | None:
+    if path is None or path.exists() or path.is_absolute():
+        return path
+    repo_path = ROOT / path
+    return repo_path if repo_path.exists() else path
+
+
+def _headers_from_auth_manifest(path: Path | None) -> dict[str, str] | None:
+    path = _resolve_repo_path(path)
+    if path is None or not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return None
+    auth = payload.get("auth")
+    if not isinstance(auth, dict):
+        return None
+    token = str(auth.get("access_token") or "").strip()
+    if not token:
+        return None
+    return {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+
+
+async def _get_client_headers(
+    api_url: str,
+    timeout: float,
+    auth_manifest: Path | None,
+) -> dict[str, str]:
+    manifest_headers = _headers_from_auth_manifest(auth_manifest)
+    if manifest_headers is not None:
+        return manifest_headers
     try:
         from sibyl_cli.client import SibylClient  # noqa: PLC0415
 
@@ -47,7 +82,7 @@ def _parse_metadata(values: list[str]) -> dict[str, str]:
 async def _run(args: argparse.Namespace, cases_file: Path | None) -> ContextPackEvalReport:
     config = EvalConfig(
         api_base_url=args.api_url,
-        headers=await _get_client_headers(args.api_url, args.timeout),
+        headers=await _get_client_headers(args.api_url, args.timeout, args.auth_manifest),
         output_dir=args.output_dir,
         save_results=not args.no_save,
         label=args.label,
@@ -75,6 +110,16 @@ def main() -> None:
         "--api-url",
         default="http://localhost:3334/api",
         help="Base Sibyl API URL.",
+    )
+    parser.add_argument(
+        "--auth-manifest",
+        type=Path,
+        default=(
+            Path(os.environ["SIBYL_CONTEXT_PACK_AUTH_MANIFEST"])
+            if os.environ.get("SIBYL_CONTEXT_PACK_AUTH_MANIFEST")
+            else None
+        ),
+        help="Runtime baseline manifest containing auth.access_token.",
     )
     parser.add_argument(
         "--output-dir",
@@ -107,7 +152,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.cases and args.cases_option:
         parser.error("Pass cases either positionally or with --cases, not both.")
-    cases_file = args.cases_option or args.cases
+    cases_file = _resolve_repo_path(args.cases_option or args.cases)
 
     report = asyncio.run(_run(args, cases_file))
     if not report.passed:
