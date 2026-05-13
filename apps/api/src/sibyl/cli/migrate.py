@@ -8,7 +8,7 @@ import subprocess
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -25,24 +25,21 @@ from sibyl.persistence.content_archive import (
     export_content_archive_payload,
     restore_content_archive_payload,
 )
-from sibyl_core.migrate import (
+from sibyl_core.migrate.archive import (
     AUTH_FILENAME,
     CONTENT_FILENAME,
     GRAPH_FILENAME,
     POSTGRES_FILENAME,
-    ArchiveMergeOptions,
-    EntityCollisionPolicy,
     auth_payload_from_archive,
     build_manifest,
     content_payload_from_archive,
     effective_graph_counts,
     graph_payload_from_archive,
     load_archive,
-    merge_archives,
     validate_archive,
-    verify_graph_archive,
     write_archive,
 )
+from sibyl_core.migrate.merge import ArchiveMergeOptions, EntityCollisionPolicy, merge_archives
 
 app = typer.Typer(
     name="migrate",
@@ -60,6 +57,12 @@ DEFAULT_AUTH_FLOW_EMAIL_OUTBOX = Path(".moon/cache/auth-flow-email-outbox.jsonl"
 DEFAULT_CUTOVER_BENCH_LABEL = "cutover-acceptance"
 _AUTH_READ_ONLY_FUNCTION = "sibyl_reject_auth_rbac_write"
 _AUTH_READ_ONLY_TRIGGER = "sibyl_auth_rbac_read_only"
+
+
+async def verify_graph_archive(*args: Any, **kwargs: Any) -> Any:
+    from sibyl_core.migrate.verify import verify_graph_archive as _verify_graph_archive
+
+    return await _verify_graph_archive(*args, **kwargs)
 
 
 class AuthReadOnlyMode(str, Enum):

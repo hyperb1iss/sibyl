@@ -67,6 +67,7 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
 def test_api_factories_import_without_graphiti() -> None:
     script = r"""
 import builtins
+import importlib
 
 original_import = builtins.__import__
 
@@ -82,7 +83,10 @@ builtins.__import__ = guarded_import
 import sibyl.api.app as api_app
 import sibyl.main as main
 
+cli_main = importlib.import_module("sibyl.cli.main")
+
 api_app.create_api_app()
+assert cli_main.app is not None
 main.create_combined_app()
 """
     result = subprocess.run(  # noqa: S603
