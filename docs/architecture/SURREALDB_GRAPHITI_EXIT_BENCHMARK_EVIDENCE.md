@@ -18,7 +18,7 @@ Graphiti until the paired live runtime artifacts exist.
 
 Latest artifact:
 
-- `.moon/cache/evals/eval_context_pack_retrieval_compare_20260512_225828.json`
+- `.moon/cache/evals/eval_context_pack_retrieval_compare_20260513_014405.json`
 
 Summary:
 
@@ -29,8 +29,8 @@ Summary:
 - `passed`: `160`
 - `failed`: `0`
 - `pass_rate`: `1.0`
-- `latency_ms`: `16.1`
-- `latency_p95_ms`: `23.7`
+- `latency_ms`: `16.0`
+- `latency_p95_ms`: `23.8`
 - `source_metadata_coverage`: `1.0`
 - `facet_order_match_rate`: `1.0`
 - `leak_count`: `0.0`
@@ -38,8 +38,8 @@ Summary:
 This supports the v0.7 default-loop quality gate for the current native/compare retrieval path.
 
 The earlier passing artifact,
-`.moon/cache/evals/eval_context_pack_retrieval_compare_20260512_205740.json`, also passed `160/160`
-with `400.2 ms` p95 latency. The `20260512_225828` artifact is the latest release-gate receipt.
+`.moon/cache/evals/eval_context_pack_retrieval_compare_20260512_225828.json`, also passed `160/160`
+with `23.7 ms` p95 latency. The `20260513_014405` artifact is the latest release-gate receipt.
 
 ### Earlier Failed Local Compare Run
 
