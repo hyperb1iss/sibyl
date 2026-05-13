@@ -8,7 +8,7 @@ import json
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeGuard, cast
 
 ProfileName = Literal["smoke", "acceptance", "context-pack", "ai-memory"]
 
@@ -114,11 +114,11 @@ def build_thresholds(
     return thresholds
 
 
-def _is_non_empty_mapping(value: Any) -> bool:
+def _is_non_empty_mapping(value: Any) -> TypeGuard[dict[str, Any]]:
     return isinstance(value, dict) and bool(value)
 
 
-def _is_non_empty_sequence(value: Any) -> bool:
+def _is_non_empty_sequence(value: Any) -> TypeGuard[list[Any] | tuple[Any, ...]]:
     return isinstance(value, list | tuple) and bool(value)
 
 
@@ -190,13 +190,14 @@ def _validate_ai_memory_cases(report: dict[str, Any]) -> list[str]:
         if not isinstance(case, dict):
             failures.append(f"case_results[{index}] is not an object")
             continue
-        if not _has_any_key(case, _AI_MEMORY_CASE_ID_KEYS):
+        case_record = cast("dict[str, Any]", case)
+        if not _has_any_key(case_record, _AI_MEMORY_CASE_ID_KEYS):
             failures.append(f"case_results[{index}] missing case identifier")
-        if not _has_any_key(case, _AI_MEMORY_ANSWER_KEYS):
+        if not _has_any_key(case_record, _AI_MEMORY_ANSWER_KEYS):
             failures.append(f"case_results[{index}] missing answer IDs")
-        if not _has_any_key(case, _AI_MEMORY_RANKING_KEYS):
+        if not _has_any_key(case_record, _AI_MEMORY_RANKING_KEYS):
             failures.append(f"case_results[{index}] missing ranked result IDs")
-        if not _has_case_metric(case):
+        if not _has_case_metric(case_record):
             failures.append(f"case_results[{index}] missing numeric case metrics")
 
     return failures
