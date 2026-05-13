@@ -167,7 +167,11 @@ memory writes, wake/recall context retrieval, related expansion, and persisted r
 
 Smoke command:
 
-- `moon run core:test -- tests/test_no_graphiti_default_loop.py`
+- `moon run core:no-graphiti-smoke`
+
+Smoke file:
+
+- `packages/python/sibyl-core/tests/test_no_graphiti_default_loop.py`
 
 Default-loop cases:
 

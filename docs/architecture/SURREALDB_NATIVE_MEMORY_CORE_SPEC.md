@@ -606,7 +606,7 @@ depending on passthrough test paths.
 | Surface             | Per-wave gate                                                                   | Release gate                          |
 | ------------------- | ------------------------------------------------------------------------------- | ------------------------------------- |
 | Core evals          | `moon run core:test` plus `moon run core:bench-context`                         | frozen suite pass rate 1.0            |
-| Native graph        | `moon run core:test`                                                            | no default Graphiti write/search path |
+| Native graph        | `moon run core:test` plus `moon run core:no-graphiti-smoke`                     | no default Graphiti write/search path |
 | Reflection          | `moon run core:test`                                                            | `post-reflection-recall` green        |
 | API memory/context  | `moon run api:test -- tests/test_routes_memory.py tests/test_routes_context.py` | policy allow and deny reasons covered |
 | CLI capture/context | `moon run cli:test`                                                             | CLI consumes API policy outcomes      |

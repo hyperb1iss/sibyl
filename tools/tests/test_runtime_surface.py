@@ -38,6 +38,7 @@ def test_graphiti_exit_inventory_tracks_no_graphiti_smoke_plan() -> None:
     inventory = GRAPHITI_EXIT_INVENTORY_PATH.read_text(encoding="utf-8")
 
     assert "## No-Graphiti Smoke Plan" in inventory
+    assert "moon run core:no-graphiti-smoke" in inventory
     assert "tests/test_no_graphiti_default_loop.py" in inventory
     assert "blocks `graphiti_core` imports" in inventory
     for loop_name in ("remember", "recall", "context", "wake", "reflect"):

@@ -38,6 +38,11 @@ tasks:
     inputs:
     - '@group(sources)'
     - '@group(tests)'
+  no-graphiti-smoke:
+    command: uv run pytest tests/test_no_graphiti_default_loop.py -v
+    inputs:
+    - '@group(sources)'
+    - '@group(tests)'
   bench-retrieval:
     command: uv run pytest tests/test_retrieval_benchmarks.py -v
     inputs:

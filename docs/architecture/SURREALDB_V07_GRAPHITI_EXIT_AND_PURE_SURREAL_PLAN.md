@@ -46,7 +46,7 @@ Required gates:
 - `moon run cli:test`
 - `moon run :check`
 - `moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --label retrieval-compare`
-- `moon run core:test -- tests/test_no_graphiti_default_loop.py`
+- `moon run core:no-graphiti-smoke`
 - CI green
 - nightly regression green in `.github/workflows/nightly-regression.yml`
 
@@ -130,7 +130,7 @@ Verify:
 
 - `moon run core:test -- tests/test_graph_entities.py`
 - `moon run core:test -- tests/test_graph_relationships.py`
-- `moon run core:test -- tests/test_no_graphiti_default_loop.py`
+- `moon run core:no-graphiti-smoke`
 
 Exit criteria:
 
@@ -169,7 +169,7 @@ Files:
 
 Verify:
 
-- `moon run core:test -- tests/test_no_graphiti_default_loop.py`
+- `moon run core:no-graphiti-smoke`
 - `moon run api:test -- tests/test_jobs_entities.py`
 - `moon run api:test -- tests/test_tasks_workflow.py`
 
@@ -241,7 +241,7 @@ Files:
 Verify:
 
 - `moon run inventory-check inventory-typecheck inventory-test`
-- `moon run core:test -- tests/test_no_graphiti_default_loop.py`
+- `moon run core:no-graphiti-smoke`
 - `moon run api:test`
 - `moon run cli:test`
 
