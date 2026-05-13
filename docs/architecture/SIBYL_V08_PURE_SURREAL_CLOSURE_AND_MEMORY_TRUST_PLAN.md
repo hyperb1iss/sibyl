@@ -1,6 +1,6 @@
 # Sibyl v0.8 Pure Surreal Closure and Memory Trust Plan
 
-- Status: draft execution plan
+- Status: active execution plan
 - Target release: v0.8
 - Planning source: `plan_e464fd1e7b11`
 - Plan-authoring task: `c64a358e-aef4-4b32-8735-28f03047a13e`
@@ -511,6 +511,26 @@ Verify:
 - `moon run api:test -- tests/test_routes_entities.py tests/test_routes_entities_write.py`
 - `moon run web:typecheck`
 
+B2 progress receipt, 2026-05-13:
+
+- `8199ddf1` filters REST entity list, direct entity reads, and related-summary hydration through
+  accessible project IDs. Explicit list scopes now use the auth runtime verifier instead of local
+  set membership, and project entities authorize against their own graph project IDs.
+- `b9552139` removes write-path project fallbacks for entity, task, and epic mutations by requiring
+  registered project records before project-scoped writes proceed.
+- The tighter write gate exposed one real dogfood gap: existing graph projects can still lack
+  canonical auth-control-plane `projects` records. The next B2 slice must add an owner/admin repair
+  path that backfills records from graph project entities, then use that path to repair local
+  dogfood data before relying on stricter enforcement.
+
+B2 remaining slices:
+
+1. Add a project-record sync and backfill surface for existing graph project entities.
+2. Fix project-member routes so graph project IDs and auth project records resolve consistently.
+3. Gate setup endpoints once initialization has completed.
+4. Extend search, explore, context, and entity read tests with project-private deny fixtures.
+5. Run the B2 route gate, web typecheck, full API policy slice, and independent review.
+
 Exit criteria:
 
 - Project-private data does not leak through list, search, explore, or direct entity reads.
@@ -782,3 +802,236 @@ v0.8 should leave the system ready for:
 
 The sequencing matters. `synthesize` and sharing become powerful only after policy, provenance,
 audit, and inspection are boring.
+
+## 12. Execution Operating Model
+
+This plan should be implemented as small, reviewable commits. Each commit should retire one release
+risk and include the tests that prove it. When a wave needs multiple commits, use this loop:
+
+1. Re-read the wave purpose, exit criteria, and current tracked task.
+2. Map the touched files before editing and leave unrelated work alone.
+3. Implement one narrow behavior change.
+4. Run the tightest useful test first, then the wave gate when the slice is stable.
+5. Commit with a Conventional Commit subject and a body that explains why the change matters.
+6. Capture the learning or decision in Sibyl when the slice changes policy, compatibility, or
+   operational behavior.
+
+Non-trivial implementation slices require independent adversarial review before the task is reported
+complete. The reviewer should receive the original wave goal, changed files, verification receipts,
+and the expected deny or compatibility behavior. A self-check is useful, but it does not replace
+that review.
+
+## 13. Atomic Implementation Packets
+
+These packets are the preferred order for the next execution pass. They are smaller than the waves
+above so they can land cleanly.
+
+### Packet B2.1: Project Record Backfill
+
+Purpose: repair existing graph projects that predate canonical auth project records.
+
+Files:
+
+- `apps/api/src/sibyl/api/routes/admin.py`
+- `apps/api/src/sibyl/persistence/surreal/auth_runtime.py`
+- `apps/api/src/sibyl/persistence/auth_runtime.py`
+- `apps/api/tests/test_routes_admin.py`
+- `docs/architecture/PERMISSION_SYSTEM_AUDIT.md`
+
+Implementation:
+
+- Add an owner/admin-only dry-run and apply surface that lists graph project entities missing auth
+  `projects` records.
+- Create missing records with the acting owner/admin as owner, organization visibility, and viewer
+  default role.
+- Report created, existing, skipped, and failed project IDs without leaking private project content.
+- Document when to run the repair and why stricter write gates depend on it.
+
+Verify:
+
+- `moon run api:test -- tests/test_routes_admin.py tests/test_surreal_auth_runtime.py`
+- `moon run api:lint api:typecheck`
+- Dry-run locally before any data write.
+
+Exit criteria:
+
+- Existing graph projects can be repaired without weakening `require_existing_project=True`.
+- Local dogfood data can pass stricter project write gates after the repair is applied.
+
+### Packet B2.2: Project Member Graph-ID Resolution
+
+Purpose: make membership routes use the same graph project ID contract as entity and task routes.
+
+Files:
+
+- `apps/api/src/sibyl/api/routes/project_members.py`
+- `apps/api/src/sibyl/persistence/surreal/auth_runtime.py`
+- `apps/api/tests/test_project_members.py`
+
+Implementation:
+
+- Accept graph project IDs at route boundaries where the UI and CLI already use them.
+- Resolve graph IDs to canonical auth project records before membership reads or writes.
+- Require org membership before project membership can be granted.
+- Preserve owner/admin overrides while denying unrelated org users.
+
+Verify:
+
+- `moon run api:test -- tests/test_project_members.py`
+- `moon run api:test -- tests/test_route_access_seams.py`
+
+Exit criteria:
+
+- Project member management works against graph project IDs.
+- Missing project records fail closed with stable reason or status.
+
+### Packet B2.3: Setup Endpoint Gate
+
+Purpose: prevent setup routes from becoming a post-initialization privilege bypass.
+
+Files:
+
+- `apps/api/src/sibyl/api/routes/setup.py`
+- `apps/api/tests/test_setup_routes.py`
+- `apps/web/src/lib/api.ts`
+
+Implementation:
+
+- Gate setup actions after the first owner/admin organization is initialized.
+- Keep first-run setup ergonomic for a clean local install.
+- Return explicit already-initialized errors to the web client.
+- Ensure web setup handling does not treat the gate as a generic network failure.
+
+Verify:
+
+- `moon run api:test -- tests/test_setup_routes.py`
+- `moon run web:typecheck`
+
+Exit criteria:
+
+- Setup succeeds for a new install and denies after initialization.
+- The web client can display or handle the initialized state cleanly.
+
+### Packet B2.4: Project-Private Leak Fixtures
+
+Purpose: prove read-side project filtering across every B2 surface.
+
+Files:
+
+- `apps/api/tests/test_routes_entities.py`
+- `apps/api/tests/test_routes_entities_read.py`
+- `apps/api/tests/test_routes_search.py`
+- `apps/api/tests/test_routes_context.py`
+
+Implementation:
+
+- Add fixtures with private project entities, unassigned entities, inaccessible project entities,
+  and project entities whose own ID is the project scope.
+- Cover list, direct get, search, related summaries, and context-pack candidate hydration.
+- Assert hidden results are absent and deny responses carry stable status or reason.
+
+Verify:
+
+- `moon run api:test -- tests/test_routes_entities.py tests/test_routes_entities_read.py`
+- `moon run api:test -- tests/test_routes_search.py tests/test_routes_context.py`
+
+Exit criteria:
+
+- No project-private fixture leaks through the B2 read surfaces.
+- Tests cover both implicit accessible-project scopes and explicit requested project scopes.
+
+### Packet B3.1: Policy Context Contract
+
+Purpose: define the shared payload that REST, MCP, CLI, jobs, and core services pass around.
+
+Files:
+
+- `packages/python/sibyl-core/src/sibyl_core/auth/context.py`
+- `packages/python/sibyl-core/src/sibyl_core/auth/memory_policy.py`
+- `apps/api/src/sibyl/auth/mcp_auth.py`
+- `apps/api/src/sibyl/server.py`
+- `packages/python/sibyl-core/tests/test_memory_policy.py`
+- `apps/api/tests/test_mcp_auth.py`
+
+Implementation:
+
+- Add fields for actor user ID, agent identity, delegated authority, organization role, project
+  access, memory space, and source surface.
+- Make missing actor, missing scope, and unverified membership produce stable deny reasons.
+- Route MCP auth through the same context model used by REST.
+
+Verify:
+
+- `moon run core:test -- tests/test_memory_policy.py`
+- `moon run api:test -- tests/test_mcp_auth.py tests/test_server_accessible_projects.py`
+
+Exit criteria:
+
+- Policy decisions can be compared across REST and MCP without special-case translation.
+
+### Packet B4.1: Audit Event Skeleton
+
+Purpose: give memory trust work one compact audit record before adding more surfaces.
+
+Files:
+
+- `apps/api/src/sibyl/persistence/surreal/auth_runtime.py`
+- `apps/api/src/sibyl/persistence/auth_runtime.py`
+- `apps/api/src/sibyl/api/routes/memory.py`
+- `apps/api/tests/test_routes_memory.py`
+
+Implementation:
+
+- Persist compact audit events for remember, recall/context render, reflect, promotion preview, and
+  policy deny decisions.
+- Include actor, organization, project or memory space, action, source IDs, derived IDs, policy
+  decision, and reason.
+- Keep event payloads bounded and queryable by actor, action, source, and time.
+
+Verify:
+
+- `moon run api:test -- tests/test_routes_memory.py`
+- `moon run core:test -- tests/test_memory_policy.py`
+
+Exit criteria:
+
+- At least one allowed case and one denied case produce inspectable audit receipts.
+
+## 14. Evidence Ledger
+
+Every wave should leave a receipt block in this document or in the corresponding audit doc. Use this
+shape so release notes can be assembled without archaeology:
+
+```text
+Wave:
+Commit:
+Date:
+Changed files:
+Verification:
+  - command -> result
+Review:
+  - reviewer/tool -> PASS/FAIL and file path
+Policy or compatibility decision:
+Remaining risk:
+Sibyl memory:
+```
+
+Release evidence must distinguish local receipts from CI receipts. A local green `main` is not the
+same as a pushed green `origin/main`; CI and nightly run IDs should be recorded before release
+claims are made.
+
+## 15. Release Review
+
+Before cutting v0.8, run one explicit review over the whole release:
+
+- Confirm every required release gate in section 2 has a current receipt.
+- Confirm all Graphiti imports are either deleted or owned by a named compatibility island.
+- Confirm no default docs mention FalkorDB, PostgreSQL, or Redis/Valkey as required data services.
+- Confirm MemorySpace, project RBAC, policy context, audit, and inspect surfaces fail closed.
+- Confirm project-private leak fixtures pass through REST, MCP, CLI, context, wake, recall, and
+  reflection promotion paths.
+- Confirm benchmark and AI-memory claims only cite artifacts that pass their gates.
+- Confirm Sibyl tasks and decisions carry the final receipts and residual risks.
+
+The release recommendation should be binary: ship v0.8 or hold it. If the answer is hold, name the
+smallest blocking packet and the command that will prove it is fixed.
