@@ -1895,6 +1895,43 @@ class TestExploreTool:
             assert response.filters["priority"] == "high"
 
     @pytest.mark.asyncio
+    async def test_explore_list_mode_keeps_unassigned_episodes_with_access_filter(self) -> None:
+        """Explore lists org-level episodes even when project RBAC is scoped."""
+        from sibyl_core.tools.explore import explore
+
+        episode = MockEntity(
+            id="episode_123",
+            entity_type=EntityType.EPISODE,
+            name="Baseline Corpus Episode",
+            description="Runtime baseline seed.",
+            metadata={"tags": ["baseline-corpus"]},
+        )
+        mock_client = AsyncMock()
+        mock_entity_manager = AsyncMock()
+        mock_entity_manager.list_by_type = AsyncMock(return_value=[episode])
+
+        with patch(
+            "sibyl_core.tools.explore.get_graph_runtime",
+            AsyncMock(
+                return_value=make_graph_runtime(
+                    client=mock_client,
+                    entity_manager=mock_entity_manager,
+                )
+            ),
+        ):
+            response = await explore(
+                mode="list",
+                types=["episode"],
+                accessible_projects=set(),
+                organization_id="org_123",
+            )
+
+        assert response.total == 1
+        assert response.entities[0].name == "Baseline Corpus Episode"
+        mock_entity_manager.list_by_type.assert_awaited_once()
+        assert mock_entity_manager.list_by_type.await_args.args == (EntityType.EPISODE,)
+
+    @pytest.mark.asyncio
     async def test_explore_list_mode_builds_multi_project_filters(self) -> None:
         """Explore list mode preserves multi-project filters."""
         from sibyl_core.tools.explore import explore

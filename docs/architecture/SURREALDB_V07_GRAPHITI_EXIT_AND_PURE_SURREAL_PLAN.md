@@ -45,7 +45,9 @@ Required gates:
 - `moon run api:test`
 - `moon run cli:test`
 - `moon run :check`
-- `moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --label retrieval-compare`
+- `moon run baseline-seed`
+- `moon run baseline-replay-runtime`
+- `moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --auth-manifest .moon/cache/baseline-runtime-manifest.json --label retrieval-compare --repeat 20 --metadata retrieval_mode=compare`
 - `moon run core:no-graphiti-smoke`
 - CI green
 - nightly regression green in `.github/workflows/nightly-regression.yml`
@@ -205,7 +207,9 @@ Verify:
 
 - `moon run core:test -- tests/test_graph_client.py`
 - `moon run core:test -- tests/test_native_retrieval.py`
-- `moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --label retrieval-compare`
+- `moon run baseline-seed`
+- `moon run baseline-replay-runtime`
+- `moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --auth-manifest .moon/cache/baseline-runtime-manifest.json --label retrieval-compare --repeat 20 --metadata retrieval_mode=compare`
 
 Exit criteria:
 
@@ -492,7 +496,9 @@ Verify:
 - `moon run cli:test`
 - `moon run :check`
 - CI green
-- `moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --label retrieval-compare`
+- `moon run baseline-seed`
+- `moon run baseline-replay-runtime`
+- `moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --auth-manifest .moon/cache/baseline-runtime-manifest.json --label retrieval-compare --repeat 20 --metadata retrieval_mode=compare`
 - nightly regression green in `.github/workflows/nightly-regression.yml`
 
 Exit criteria:
