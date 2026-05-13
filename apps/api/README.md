@@ -63,7 +63,7 @@ SIBYL_OPENAI_API_KEY=sk-...       # Required when provider=openai
 **Optional:**
 
 ```bash
-SIBYL_STORE=surreal                   # surreal | legacy
+SIBYL_STORE=surreal                   # default; legacy is migration/source-side only
 SIBYL_COORDINATION_BACKEND=auto       # auto | local | redis
 SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc
 SIBYL_SURREAL_USERNAME=root

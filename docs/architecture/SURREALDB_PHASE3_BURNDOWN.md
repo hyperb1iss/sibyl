@@ -227,7 +227,8 @@ Completed evidence:
 
 ### Lane 6 - Exit Graphiti from Default Memory Loops
 
-Status: in progress for `v0.7`.
+Status: complete for the `v0.7` default loop. Retained Graphiti imports are named compatibility,
+admin, migration, or test-only surfaces.
 
 Graphiti remains as a transition dependency on top of the SurrealDB driver. Its remaining work is
 not FalkorDB removal; it is default-loop removal for native memory. The generated runtime inventory
@@ -241,9 +242,18 @@ Verification:
 - `moon run inventory-check` verifies both the generated inventory snapshot and hand-authored
   Graphiti exit coverage.
 - `moon run core:test` keeps the native retrieval and native write contract tests green.
-- The exit inventory now carries a checked no-Graphiti smoke plan for `remember`, `recall`,
-  `context`, `wake`, and `reflect`. The smoke test itself lands once native graph hydration, native
-  graph writes, summarized remember, and native embedding no longer import Graphiti.
+- `moon run core:no-graphiti-smoke` blocks `graphiti_core` imports while exercising `remember`,
+  `recall`, `context`, `wake`, `explore`, `temporal`, `health`, `manage`, `link_graph`, `reflect`,
+  default MCP imports, API job imports, crawler graph integration imports, and prompt-hook imports.
+
+Completed evidence:
+
+- Default native writes are enabled unless `SIBYL_NATIVE_WRITE=disabled` is set explicitly.
+- The no-Graphiti smoke test passes with `2 passed`.
+- The generated inventory covers every remaining `graphiti_core` import and the hand-authored
+  inventory classifies them with owners and removal conditions.
+- `graphiti-core` is isolated to the `sibyl-core[compatibility]` extra and dev/test dependencies,
+  not the default runtime dependency.
 
 Exit criteria:
 

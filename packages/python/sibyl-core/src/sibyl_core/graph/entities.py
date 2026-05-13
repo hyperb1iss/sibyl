@@ -1,7 +1,7 @@
-"""Entity management for the knowledge graph.
+"""Entity management compatibility surface for the knowledge graph.
 
-This module provides entity CRUD operations using Graphiti's native node APIs.
-All graph operations go through EntityNode/EpisodicNode rather than raw Cypher.
+Default memory flows use native Surreal managers. This module remains for named
+compatibility and admin paths that still adapt through Graphiti node models.
 """
 
 import asyncio
@@ -3577,7 +3577,7 @@ class EntityManager:
         return props
 
     async def _save_entity_node_direct(self, entity: Entity) -> None:
-        """Persist one entity through Graphiti's EntityNode.save fallback path."""
+        """Persist one entity through Surreal ops or the Graphiti node fallback."""
         node = self._build_entity_node(entity, marker_key="_generated")
         surreal_entity_ops = self._surreal_entity_node_ops()
         if surreal_entity_ops is not None:
@@ -3590,7 +3590,7 @@ class EntityManager:
         entities: list[Entity],
         batch_size: int = 100,
     ) -> tuple[int, int]:
-        """Bulk create entities using Graphiti's EntityNode.save(), bypassing LLM.
+        """Bulk create entities through direct Surreal upserts, bypassing LLM.
 
         This is faster than create() as it skips LLM-based entity extraction.
         Use this for stress testing or bulk imports where LLM processing isn't needed.

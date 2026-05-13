@@ -1,7 +1,7 @@
-"""Relationship management using Graphiti's EntityEdge API.
+"""Relationship compatibility surface for the knowledge graph.
 
-This module provides relationship operations between entities in the knowledge graph
-using Graphiti's native edge system rather than custom Cypher queries.
+Default memory flows use native Surreal relationship managers. This module remains
+for named compatibility and admin paths that still adapt through Graphiti edge models.
 """
 
 from __future__ import annotations
