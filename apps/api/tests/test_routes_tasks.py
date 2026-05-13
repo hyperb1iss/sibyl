@@ -8,8 +8,49 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
+from fastapi import HTTPException
 
-from sibyl.api.routes.tasks import CompleteTaskRequest, complete_task, list_notes
+from sibyl.api.routes.tasks import (
+    CompleteTaskRequest,
+    CreateTaskRequest,
+    complete_task,
+    create_task,
+    list_notes,
+)
+from sibyl_core.auth import ProjectRole
+
+
+@pytest.mark.asyncio
+async def test_create_task_requires_registered_project_before_runtime() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    auth = SimpleNamespace()
+    verify_access = AsyncMock(
+        side_effect=HTTPException(status_code=404, detail="Project not found")
+    )
+    runtime = AsyncMock()
+
+    with (
+        patch("sibyl.api.routes.tasks.verify_entity_project_access", verify_access),
+        patch("sibyl.api.routes.tasks.get_task_graph_runtime", runtime),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await create_task(
+            request=CreateTaskRequest(title="Scoped task", project_id="project_missing"),
+            org=org,
+            user=user,
+            auth=auth,
+        )
+
+    assert exc.value.status_code == 404
+    verify_access.assert_awaited_once_with(
+        None,
+        auth,
+        "project_missing",
+        required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
+    )
+    runtime.assert_not_awaited()
 
 
 class TestCompleteTaskRoute:

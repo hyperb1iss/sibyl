@@ -125,6 +125,7 @@ async def _verify_epic_access(
         ctx=ctx,
         entity_project_id=project_id,
         required_role=required_role,
+        require_existing_project=True,
     )
 
     return epic

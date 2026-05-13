@@ -136,6 +136,7 @@ async def test_create_entity_verifies_metadata_project_id_before_add() -> None:
         ctx,
         "project_denied",
         required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
     )
     add.assert_not_awaited()
 
@@ -178,8 +179,9 @@ async def test_update_project_routes_through_runtime_project_record() -> None:
     verify_access.assert_awaited_once_with(
         None,
         ctx,
-        None,
+        "project_new",
         required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
     )
     update_project.assert_awaited_once_with(
         organization_id=org.id,
@@ -225,8 +227,9 @@ async def test_delete_project_routes_through_runtime_project_record() -> None:
     verify_access.assert_awaited_once_with(
         None,
         ctx,
-        None,
+        "project_new",
         required_role=ProjectRole.MAINTAINER,
+        require_existing_project=True,
     )
     delete_project.assert_awaited_once_with(
         organization_id=org.id,

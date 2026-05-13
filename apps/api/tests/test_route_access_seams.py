@@ -33,6 +33,7 @@ async def test_verify_task_access_uses_knowledge_read_adapter() -> None:
         ctx,
         "project-1",
         required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
     )
 
 
@@ -57,4 +58,5 @@ async def test_verify_epic_access_uses_knowledge_read_adapter() -> None:
         ctx=ctx,
         entity_project_id="project-9",
         required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
     )

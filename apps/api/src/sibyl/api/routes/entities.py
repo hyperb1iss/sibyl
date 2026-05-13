@@ -1075,6 +1075,7 @@ async def create_entity(
                 ctx,
                 project,
                 required_role=ProjectRole.CONTRIBUTOR,
+                require_existing_project=True,
             )
 
         # Use description as content fallback (frontend sends description, add() needs content)
@@ -1242,9 +1243,13 @@ async def update_entity(
                 raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
 
             # Verify project access for entities with project_id
-            project_id = existing.metadata.get("project_id") if existing.metadata else None
+            project_id = _entity_read_project_id(existing)
             await verify_entity_project_access(
-                content_session, ctx, project_id, required_role=ProjectRole.CONTRIBUTOR
+                content_session,
+                ctx,
+                project_id,
+                required_role=ProjectRole.CONTRIBUTOR,
+                require_existing_project=True,
             )
 
             # Build update dict with only provided fields
@@ -1366,9 +1371,13 @@ async def delete_entity(
                 raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
 
             # Verify project access for entities with project_id (maintainer required to delete)
-            project_id = existing.metadata.get("project_id") if existing.metadata else None
+            project_id = _entity_read_project_id(existing)
             await verify_entity_project_access(
-                content_session, ctx, project_id, required_role=ProjectRole.MAINTAINER
+                content_session,
+                ctx,
+                project_id,
+                required_role=ProjectRole.MAINTAINER,
+                require_existing_project=True,
             )
 
             if existing.entity_type == EntityType.PROJECT:

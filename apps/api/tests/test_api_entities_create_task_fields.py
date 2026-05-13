@@ -45,7 +45,9 @@ async def test_entities_create_passes_task_fields_to_add() -> None:
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add,
         patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
-        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()) as verify_access,
+        patch(
+            "sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()
+        ) as verify_access,
     ):
         resp = await create_entity(
             request=request,
@@ -62,6 +64,7 @@ async def test_entities_create_passes_task_fields_to_add() -> None:
         ctx,
         "project_123",
         required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
     )
     add.assert_awaited_once()
     _, kwargs = add.call_args

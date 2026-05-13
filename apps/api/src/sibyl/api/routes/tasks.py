@@ -64,7 +64,13 @@ async def _verify_task_access(
 
     # Extract project_id from entity metadata
     project_id = entity.metadata.get("project_id") if entity.metadata else None
-    await verify_entity_project_access(None, ctx, project_id, required_role=required_role)
+    await verify_entity_project_access(
+        None,
+        ctx,
+        project_id,
+        required_role=required_role,
+        require_existing_project=True,
+    )
     return entity
 
 
@@ -173,7 +179,11 @@ async def create_task(
     from sibyl_core.models.tasks import Task, TaskComplexity, TaskPriority, TaskStatus
 
     await verify_entity_project_access(
-        None, auth, request.project_id, required_role=ProjectRole.CONTRIBUTOR
+        None,
+        auth,
+        request.project_id,
+        required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
     )
 
     try:
