@@ -21,6 +21,10 @@ from sibyl.persistence.surreal.auth import (
 from sibyl_core.auth import AuthUser, OrganizationRole
 
 _ADMIN_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN)
+_SETUP_COMPLETE_DETAIL = {
+    "code": "setup_already_initialized",
+    "message": "Setup is complete. Sign in with an owner or admin account.",
+}
 
 
 def _object_mapping(value: object) -> Mapping[object, object]:
@@ -36,13 +40,8 @@ def _has_records(value: object) -> bool:
 
 
 async def is_setup_mode() -> bool:
-    """Return whether the system has no users and is still in setup mode."""
-    client = build_surreal_auth_client()
-    try:
-        records = await client.execute_query("SELECT uuid FROM users LIMIT 1;")
-        return not _has_records(records)
-    finally:
-        await client.close()
+    """Return whether the system is still in setup mode."""
+    return not (await get_setup_status()).setup_complete
 
 
 async def get_setup_status() -> SetupStatus:
@@ -55,13 +54,21 @@ async def get_setup_status() -> SetupStatus:
                     RETURN {
                         users: (SELECT uuid FROM users LIMIT 1),
                         organizations: (SELECT uuid FROM organizations LIMIT 1),
+                        initialized_memberships: (
+                            SELECT uuid FROM organization_members
+                            WHERE role = $owner_role OR role = $admin_role
+                            LIMIT 1
+                        ),
                     };
-                """
+                """,
+                owner_role=OrganizationRole.OWNER.value,
+                admin_role=OrganizationRole.ADMIN.value,
             )
         )
         return SetupStatus(
             has_users=_has_records(payload.get("users")),
             has_orgs=_has_records(payload.get("organizations")),
+            setup_complete=_has_records(payload.get("initialized_memberships")),
         )
     finally:
         await client.close()
@@ -75,7 +82,7 @@ def _require_request_token(request: Request) -> str:
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Setup is complete. Authentication required.",
+            detail=_SETUP_COMPLETE_DETAIL,
         )
     return token
 
@@ -107,7 +114,7 @@ async def require_setup_mode_or_auth(request: Request) -> None:
 
 
 async def require_setup_mode_or_admin(request: Request) -> AuthUser | None:
-    """Allow setup mode access, otherwise require an authenticated admin."""
+    """Allow setup mode access, otherwise require an authenticated org owner/admin."""
     if await is_setup_mode():
         return None
 
@@ -123,10 +130,10 @@ async def require_setup_mode_or_admin(request: Request) -> AuthUser | None:
         ) from exc
 
     ctx = await build_auth_context(request, None)
-    if not ctx.user.is_admin:
+    if ctx.organization is None or ctx.org_role not in _ADMIN_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required to update server configuration",
+            detail="Admin or owner role required",
         )
     return ctx.user
 

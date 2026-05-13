@@ -2,7 +2,7 @@
 
 Public endpoints for detecting fresh installs and guiding first-time setup.
 Status endpoint is always public. Other endpoints require authentication
-once initial setup is complete (users exist).
+once initial setup is complete.
 
 Config update endpoints are admin-only after initial setup.
 """
@@ -29,9 +29,12 @@ log = structlog.get_logger()
 class SetupStatus(BaseModel):
     """Current setup state of the Sibyl instance."""
 
-    needs_setup: bool = Field(description="True if no users exist yet")
+    needs_setup: bool = Field(description="True until setup has initialized an owner/admin org")
     has_users: bool = Field(description="True if at least one user exists")
     has_orgs: bool = Field(description="True if at least one org exists")
+    setup_complete: bool = Field(
+        description="True if an owner/admin organization has been initialized"
+    )
     openai_configured: bool = Field(description="True if OpenAI API key is set")
     anthropic_configured: bool = Field(description="True if Anthropic API key is set")
     gemini_configured: bool = Field(description="True if Gemini API key is set")
@@ -178,12 +181,13 @@ async def get_setup_status(
     """Check if this Sibyl instance needs initial setup.
 
     Returns the current setup state including:
-    - Whether any users exist (needs_setup = no users)
+    - Whether setup is complete
     - Whether API keys are configured
     - Optionally validates API keys work (validate_keys=true)
 
     This endpoint requires no authentication since it must work
-    before any users exist.
+    before setup completes. Key validation only runs before setup completes;
+    initialized instances should use owner/admin validation routes.
     """
     setup_status = await get_runtime_setup_status()
 
@@ -201,7 +205,7 @@ async def get_setup_status(
     anthropic_valid: bool | None = None
     gemini_valid: bool | None = None
 
-    if validate_keys:
+    if validate_keys and not setup_status.setup_complete:
         if openai_configured:
             openai_valid, _ = await _check_openai_key(openai_key)
         if anthropic_configured:
@@ -210,9 +214,10 @@ async def get_setup_status(
             gemini_valid, _ = await _check_gemini_key(gemini_key)
 
     return SetupStatus(
-        needs_setup=not setup_status.has_users,
+        needs_setup=not setup_status.setup_complete,
         has_users=setup_status.has_users,
         has_orgs=setup_status.has_orgs,
+        setup_complete=setup_status.setup_complete,
         openai_configured=openai_configured,
         anthropic_configured=anthropic_configured,
         gemini_configured=gemini_configured,
@@ -225,7 +230,7 @@ async def get_setup_status(
 @router.get(
     "/validate-keys",
     response_model=ApiKeyValidation,
-    dependencies=[Depends(require_setup_mode_or_auth)],
+    dependencies=[Depends(require_setup_mode_or_admin)],
 )
 async def validate_api_keys() -> ApiKeyValidation:
     """Validate that configured API keys work.
@@ -233,8 +238,8 @@ async def validate_api_keys() -> ApiKeyValidation:
     Makes test requests to OpenAI and Anthropic APIs to verify
     the configured keys are valid and have appropriate permissions.
 
-    During initial setup (no users): accessible without auth.
-    After setup: requires authentication.
+    During initial setup: accessible without auth.
+    After setup: requires owner/admin authentication.
     """
     openai_valid, openai_error = await _check_openai_key()
     anthropic_valid, anthropic_error = await _check_anthropic_key()
@@ -257,7 +262,7 @@ async def get_mcp_command() -> dict[str, str]:
     Returns the command users should run to add this Sibyl server
     to their Claude Code configuration.
 
-    During initial setup (no users): accessible without auth.
+    During initial setup: accessible without auth.
     After setup: requires authentication.
     """
     # Use the configured server URL or fall back to localhost
@@ -314,8 +319,8 @@ async def update_config(
 ) -> ConfigUpdateResponse:
     """Update server configuration (API keys).
 
-    During initial setup (no users): accessible without auth.
-    After setup: requires admin authentication.
+    During initial setup: accessible without auth.
+    After setup: requires owner/admin authentication.
 
     Keys are validated before being saved. If validation fails, the key
     is still saved but the response indicates the error.
@@ -399,8 +404,8 @@ async def get_config_status(
 ) -> ConfigStatusResponse:
     """Get current server configuration status.
 
-    During initial setup (no users): accessible without auth.
-    After setup: requires admin authentication.
+    During initial setup: accessible without auth.
+    After setup: requires owner/admin authentication.
 
     Returns whether each API key is configured and its source (database or environment).
     Does not return the actual key values for security.

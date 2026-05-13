@@ -315,10 +315,19 @@ grant MCP access unless a more explicit “audience/scope” strategy is adopted
 Notably, `/setup/validate-keys` uses stored provider keys to call external APIs; this can be abused
 for rate/usage pressure even if it doesn’t leak secrets.
 
+**B2.3 update, 2026-05-13**: setup mode now stays open only until an owner/admin organization is
+initialized, rather than keying solely off the presence of users. `/setup/validate-keys` requires
+owner/admin authorization after bootstrap, and initialized unauthenticated setup calls return a
+structured `setup_already_initialized` detail so the web setup flow can redirect instead of showing
+a generic server failure. `/setup/status` remains public so login and setup routing can detect
+first-run state, but `validate_keys=true` only triggers external key validation before setup is
+complete.
+
 **Recommendation**:
 
-- Once `has_users` is true, gate these endpoints behind admin-only, or disable them entirely.
-- Add rate limiting to `validate-keys` and consider removing outbound calls from unauth endpoints.
+- Keep `/setup/status` public and side-effect free.
+- Keep key validation and config mutation owner/admin-only after setup initialization.
+- Add rate limiting to `validate-keys` if external API validation remains callable from the web UI.
 
 ---
 

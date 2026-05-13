@@ -7,6 +7,7 @@ from dataclasses import dataclass
 class SetupStatus:
     has_users: bool
     has_orgs: bool
+    setup_complete: bool = False
 
 
 __all__ = ["SetupStatus"]

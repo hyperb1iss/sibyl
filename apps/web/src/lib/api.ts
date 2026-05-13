@@ -394,6 +394,7 @@ export interface SetupStatus {
   needs_setup: boolean;
   has_users: boolean;
   has_orgs: boolean;
+  setup_complete: boolean;
   openai_configured: boolean;
   anthropic_configured: boolean;
   gemini_configured: boolean;
@@ -415,6 +416,16 @@ export interface McpCommandResponse {
   command: string;
   server_url: string;
   description: string;
+}
+
+export function isSetupAlreadyInitializedError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return (
+    error.message.includes('setup_already_initialized') ||
+    error.message.includes('Setup is complete')
+  );
 }
 
 // =============================================================================

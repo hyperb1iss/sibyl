@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi.routing import APIRoute
 
 from sibyl.api.routes import setup as setup_routes
 from sibyl.persistence.setup_common import SetupStatus
@@ -19,7 +20,7 @@ async def test_get_setup_status_uses_runtime_status_and_validates_keys(
     monkeypatch.setattr(
         setup_routes,
         "get_runtime_setup_status",
-        AsyncMock(return_value=SetupStatus(has_users=True, has_orgs=False)),
+        AsyncMock(return_value=SetupStatus(has_users=False, has_orgs=False)),
     )
     monkeypatch.setattr(setup_routes, "get_settings_service", lambda: service)
     monkeypatch.setattr(setup_routes, "_check_openai_key", AsyncMock(return_value=(True, None)))
@@ -28,9 +29,10 @@ async def test_get_setup_status_uses_runtime_status_and_validates_keys(
 
     response = await setup_routes.get_setup_status(validate_keys=True)
 
-    assert response.needs_setup is False
-    assert response.has_users is True
+    assert response.needs_setup is True
+    assert response.has_users is False
     assert response.has_orgs is False
+    assert response.setup_complete is False
     assert response.openai_configured is True
     assert response.anthropic_configured is False
     assert response.gemini_configured is True
@@ -48,7 +50,9 @@ async def test_get_setup_status_uses_surreal_setup_runtime_in_surreal_mode(
     service.get_anthropic_key.return_value = None
     service.get_gemini_key.return_value = None
 
-    surreal_status = AsyncMock(return_value=SetupStatus(has_users=True, has_orgs=True))
+    surreal_status = AsyncMock(
+        return_value=SetupStatus(has_users=True, has_orgs=True, setup_complete=True)
+    )
 
     monkeypatch.setattr(surreal_setup, "get_setup_status", surreal_status)
     monkeypatch.setattr(setup_routes, "get_settings_service", lambda: service)
@@ -58,7 +62,71 @@ async def test_get_setup_status_uses_surreal_setup_runtime_in_surreal_mode(
     assert response.needs_setup is False
     assert response.has_users is True
     assert response.has_orgs is True
+    assert response.setup_complete is True
     surreal_status.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_get_setup_status_remains_needed_until_owner_admin_org_initialized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AsyncMock()
+    service.get_openai_key.return_value = None
+    service.get_anthropic_key.return_value = None
+    service.get_gemini_key.return_value = None
+
+    monkeypatch.setattr(
+        setup_routes,
+        "get_runtime_setup_status",
+        AsyncMock(return_value=SetupStatus(has_users=True, has_orgs=True)),
+    )
+    monkeypatch.setattr(setup_routes, "get_settings_service", lambda: service)
+
+    response = await setup_routes.get_setup_status(validate_keys=False)
+
+    assert response.needs_setup is True
+    assert response.setup_complete is False
+
+
+@pytest.mark.asyncio
+async def test_get_setup_status_skips_public_key_validation_after_setup_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AsyncMock()
+    service.get_openai_key.return_value = "sk-openai"
+    service.get_anthropic_key.return_value = "sk-anthropic"
+    service.get_gemini_key.return_value = "gemini-key"
+    openai_check = AsyncMock(return_value=(True, None))
+    anthropic_check = AsyncMock(return_value=(True, None))
+    gemini_check = AsyncMock(return_value=(True, None))
+
+    monkeypatch.setattr(
+        setup_routes,
+        "get_runtime_setup_status",
+        AsyncMock(return_value=SetupStatus(has_users=True, has_orgs=True, setup_complete=True)),
+    )
+    monkeypatch.setattr(setup_routes, "get_settings_service", lambda: service)
+    monkeypatch.setattr(setup_routes, "_check_openai_key", openai_check)
+    monkeypatch.setattr(setup_routes, "_check_anthropic_key", anthropic_check)
+    monkeypatch.setattr(setup_routes, "_check_gemini_key", gemini_check)
+
+    response = await setup_routes.get_setup_status(validate_keys=True)
+
+    assert response.needs_setup is False
+    assert response.setup_complete is True
+    assert response.openai_valid is None
+    assert response.anthropic_valid is None
+    assert response.gemini_valid is None
+    openai_check.assert_not_awaited()
+    anthropic_check.assert_not_awaited()
+    gemini_check.assert_not_awaited()
+
+
+def test_validate_keys_route_requires_setup_mode_or_admin() -> None:
+    routes = [route for route in setup_routes.router.routes if isinstance(route, APIRoute)]
+    route = next(route for route in routes if route.path.endswith("/validate-keys"))
+
+    assert route.dependencies[0].dependency is setup_routes.require_setup_mode_or_admin
 
 
 @pytest.mark.asyncio

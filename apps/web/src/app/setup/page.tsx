@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { SetupWizard } from '@/components/setup';
 import { WarningTriangle } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
+import { isSetupAlreadyInitializedError } from '@/lib/api';
 import { useSetupStatus } from '@/lib/hooks';
 
 /**
@@ -19,10 +20,10 @@ export default function SetupPage() {
 
   // Redirect to login if setup is not needed
   useEffect(() => {
-    if (status && !status.needs_setup) {
+    if ((status && !status.needs_setup) || isSetupAlreadyInitializedError(error)) {
       router.replace('/login');
     }
-  }, [status, router]);
+  }, [status, error, router]);
 
   // Loading state
   if (isLoading) {
@@ -35,6 +36,15 @@ export default function SetupPage() {
   }
 
   // Connection error
+  if (isSetupAlreadyInitializedError(error)) {
+    return (
+      <div className="min-h-dvh flex flex-col items-center justify-center bg-sc-bg-dark">
+        <Spinner size="lg" color="purple" />
+        <p className="mt-4 text-sc-fg-muted text-sm">Setup complete. Redirecting to login...</p>
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center bg-sc-bg-dark px-4">

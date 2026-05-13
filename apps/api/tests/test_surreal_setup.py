@@ -1,12 +1,28 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
 
 from sibyl.persistence.surreal import setup as surreal_setup
+from sibyl_core.auth import OrganizationRole
+
+
+def _request(headers: list[tuple[bytes, bytes]] | None = None) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/setup/config",
+            "headers": headers or [],
+        }
+    )
 
 
 @pytest.mark.asyncio
-async def test_surreal_setup_mode_uses_direct_user_probe(
+async def test_surreal_setup_mode_stays_open_until_admin_org_initialized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeClient:
@@ -14,9 +30,13 @@ async def test_surreal_setup_mode_uses_direct_user_probe(
             self.calls: list[str] = []
             self.closed = False
 
-        async def execute_query(self, query: str):
+        async def execute_query(self, query: str, **_params: object):
             self.calls.append(query)
-            return []
+            return {
+                "users": [{"uuid": str(uuid4())}],
+                "organizations": [{"uuid": str(uuid4())}],
+                "initialized_memberships": [],
+            }
 
         async def close(self) -> None:
             self.closed = True
@@ -31,7 +51,10 @@ async def test_surreal_setup_mode_uses_direct_user_probe(
     )
 
     assert await surreal_setup.is_setup_mode() is True
-    assert client.calls == ["SELECT uuid FROM users LIMIT 1;"]
+    assert len(client.calls) == 1
+    assert "FROM users" in client.calls[0]
+    assert "FROM organizations" in client.calls[0]
+    assert "FROM organization_members" in client.calls[0]
     assert client.closed is True
 
 
@@ -44,11 +67,12 @@ async def test_surreal_setup_status_batches_user_and_org_probes(
             self.calls: list[str] = []
             self.closed = False
 
-        async def execute_query(self, query: str):
+        async def execute_query(self, query: str, **_params: object):
             self.calls.append(query)
             return {
                 "users": [{"uuid": str(uuid4())}],
                 "organizations": [{"uuid": str(uuid4())}],
+                "initialized_memberships": [{"uuid": str(uuid4())}],
             }
 
         async def close(self) -> None:
@@ -72,11 +96,125 @@ async def test_surreal_setup_status_batches_user_and_org_probes(
 
     assert status.has_users is True
     assert status.has_orgs is True
+    assert status.setup_complete is True
     assert len(client.calls) == 1
     assert "RETURN" in client.calls[0]
     assert "FROM users" in client.calls[0]
     assert "FROM organizations" in client.calls[0]
+    assert "FROM organization_members" in client.calls[0]
     assert client.closed is True
+
+
+@pytest.mark.asyncio
+async def test_require_setup_mode_or_admin_reports_initialized_without_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(surreal_setup, "is_setup_mode", AsyncMock(return_value=False))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_setup.require_setup_mode_or_admin(_request())
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail["code"] == "setup_already_initialized"
+
+
+@pytest.mark.asyncio
+async def test_require_setup_mode_or_admin_accepts_org_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = object()
+    monkeypatch.setattr(surreal_setup, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        surreal_setup,
+        "verify_access_token",
+        lambda _token: {"sub": str(uuid4())},
+    )
+    monkeypatch.setattr(
+        surreal_setup,
+        "build_auth_context",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                organization=object(),
+                org_role=OrganizationRole.OWNER,
+                user=user,
+            )
+        ),
+    )
+
+    result = await surreal_setup.require_setup_mode_or_admin(
+        _request(headers=[(b"authorization", b"Bearer valid-token")])
+    )
+
+    assert result is user
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", [OrganizationRole.OWNER, OrganizationRole.ADMIN])
+async def test_require_setup_mode_or_admin_accepts_org_admin_roles(
+    monkeypatch: pytest.MonkeyPatch,
+    role: OrganizationRole,
+) -> None:
+    user = object()
+    monkeypatch.setattr(surreal_setup, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        surreal_setup,
+        "verify_access_token",
+        lambda _token: {"sub": str(uuid4())},
+    )
+    monkeypatch.setattr(
+        surreal_setup,
+        "build_auth_context",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                organization=object(),
+                org_role=role,
+                user=user,
+            )
+        ),
+    )
+
+    result = await surreal_setup.require_setup_mode_or_admin(
+        _request(headers=[(b"authorization", b"Bearer valid-token")])
+    )
+
+    assert result is user
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("organization", "role"),
+    [(object(), OrganizationRole.MEMBER), (None, OrganizationRole.OWNER)],
+)
+async def test_require_setup_mode_or_admin_rejects_non_admin_context(
+    monkeypatch: pytest.MonkeyPatch,
+    organization: object | None,
+    role: OrganizationRole,
+) -> None:
+    monkeypatch.setattr(surreal_setup, "is_setup_mode", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        surreal_setup,
+        "verify_access_token",
+        lambda _token: {"sub": str(uuid4())},
+    )
+    monkeypatch.setattr(
+        surreal_setup,
+        "build_auth_context",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                organization=organization,
+                org_role=role,
+                user=object(),
+            )
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_setup.require_setup_mode_or_admin(
+            _request(headers=[(b"authorization", b"Bearer valid-token")])
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Admin or owner role required"
 
 
 def test_surreal_setup_exports_neutral_runtime_surface() -> None:

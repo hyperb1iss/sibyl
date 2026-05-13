@@ -927,8 +927,12 @@ Purpose: prevent setup routes from becoming a post-initialization privilege bypa
 Files:
 
 - `apps/api/src/sibyl/api/routes/setup.py`
+- `apps/api/src/sibyl/persistence/setup_common.py`
+- `apps/api/src/sibyl/persistence/surreal/setup.py`
 - `apps/api/tests/test_setup_routes.py`
+- `apps/api/tests/test_surreal_setup.py`
 - `apps/web/src/lib/api.ts`
+- `apps/web/src/app/setup/page.tsx`
 
 Implementation:
 
@@ -946,6 +950,33 @@ Exit criteria:
 
 - Setup succeeds for a new install and denies after initialization.
 - The web client can display or handle the initialized state cleanly.
+
+B2.3 receipt, 2026-05-13:
+
+- Setup mode now closes only after an owner/admin organization membership exists. This keeps partial
+  first-run states recoverable when users or organizations exist without an initialized owner/admin
+  org.
+- `/setup/status` returns `setup_complete` and sets `needs_setup` from that initialized-org
+  invariant. Public key validation through `validate_keys=true` is ignored once setup is complete so
+  the status route cannot be used for unauthenticated external API pressure.
+- `/setup/validate-keys` now uses the setup-or-owner/admin dependency instead of setup-or-any-auth.
+- Setup/admin gating now accepts organization owner/admin roles after initialization and returns a
+  structured `setup_already_initialized` detail when an initialized instance is hit without a token.
+- The web setup page recognizes the initialized setup error and redirects to login rather than
+  rendering the generic connection failure state.
+- Review: Claude cross-model review PASS at `/tmp/claude-review-b23-setup-gate-1778710000.txt`; the
+  public `/setup/status?validate_keys=true` follow-up was fixed before commit and re-reviewed as
+  PASS at `/tmp/claude-review-b23-setup-gate-followup-1778710500.txt`.
+- Verification:
+  - `moon run api:test -- tests/test_setup_routes.py tests/test_surreal_setup.py`: 11 passed in
+    1.13s.
+  - `moon run api:test -- tests/test_setup_routes.py tests/test_surreal_setup.py tests/test_settings_routes.py tests/test_operations_runtime.py`:
+    23 passed in 1.18s after the review follow-up.
+  - `moon run web:test -- src/lib/api.test.ts`: 1 file and 3 tests passed.
+  - `moon run api:lint api:typecheck`: lint passed; typecheck exited 0 with the existing 63 ty
+    warnings.
+  - `moon run web:typecheck`: types generated successfully.
+  - `moon run web:lint`: checked 221 files with no fixes applied.
 
 ### Packet B2.4: Project-Private Leak Fixtures
 
