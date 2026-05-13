@@ -79,8 +79,14 @@ This is the offline baseline.
 - Replays LongMemEval-style data for apples-to-apples offline comparison
 - Useful for internal baselines and competitor-style framing
 - Explicitly does not touch the live graph or API runtime
+- Writes schema `longmemeval-offline-v2` artifacts with full `case_results` by default, including
+  question IDs, question types, answer session IDs, ranked session IDs, and per-case metrics
 
 Use this for offline comparison work, and label it clearly as such.
+
+The historical `benchmarks/results_sibyl_raw.json` and `benchmarks/results_sibyl_hybrid.json`
+artifacts are aggregate-only. Re-run the benchmark with the current script before using
+LongMemEval-style numbers as external AI-memory evidence.
 
 ## Threshold Gates
 
@@ -155,6 +161,7 @@ Required record fields:
   budget
 - exact command, environment variables that affect behavior, and timeout settings
 - overall metrics and the complete per-slice table
+- per-case result records with answer IDs, ranked result IDs, and case metrics
 - ingestion time, query latency, timeout count, error count, and skipped-case count when available
 - competitor version, hosted/self-hosted mode, ingestion path, and tuning when the result compares
   against another memory product

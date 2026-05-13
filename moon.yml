@@ -323,9 +323,10 @@ tasks:
       - pyproject.toml
 
   bench-gate-test:
-    command: uv run pytest tools/tests/test_bench_gate.py -v
+    command: uv run pytest tools/tests/test_bench_gate.py tools/tests/test_longmemeval_bench.py -v
     inputs:
       - tools/**/*.py
+      - benchmarks/longmemeval_bench.py
       - pyproject.toml
 
   chaos-archive:

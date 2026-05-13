@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
+# ruff: noqa: B905, PLC0415, PLR0915, PLR2004, S110, S607, SIM105, T201
 """
-Sibyl × LongMemEval Offline Baseline
+Sibyl x LongMemEval Offline Baseline
 ====================================
 
 Evaluates an offline Sibyl-style retrieval baseline against LongMemEval using
@@ -27,9 +28,11 @@ import argparse
 import json
 import math
 import re
+import subprocess
 import sys
 import time
 from collections import defaultdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -132,7 +135,11 @@ _HYBRID_STOP_WORDS = {
 
 
 def _extract_keywords(text: str) -> list[str]:
-    return [word for word in re.findall(r"\b[a-z]{3,}\b", text.lower()) if word not in _HYBRID_STOP_WORDS]
+    return [
+        word
+        for word in re.findall(r"\b[a-z]{3,}\b", text.lower())
+        if word not in _HYBRID_STOP_WORDS
+    ]
 
 
 def _require_bench_client() -> Any:
@@ -324,6 +331,20 @@ def _parse_temporal_reference(query: str, question_date):
     return None
 
 
+def _git_commit() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    commit = result.stdout.strip()
+    return commit or None
+
+
 # =============================================================================
 # MAIN BENCHMARK
 # =============================================================================
@@ -334,6 +355,7 @@ def run_benchmark(
     mode: str = "raw",
     limit: int | None = None,
     k_values: list[int] | None = None,
+    command: list[str] | None = None,
 ) -> dict:
     """Run the full LongMemEval benchmark."""
     k_values = k_values or [5, 10]
@@ -341,6 +363,7 @@ def run_benchmark(
     with open(data_path) as f:
         entries = json.load(f)
 
+    total_entries = len(entries)
     if limit:
         entries = entries[:limit]
 
@@ -352,12 +375,12 @@ def run_benchmark(
     total = len(entries)
     start_time = time.time()
 
-    print(f"\n{'='*60}")
-    print(f"  Sibyl × LongMemEval Benchmark")
+    print(f"\n{'=' * 60}")
+    print("  Sibyl x LongMemEval Benchmark")
     print(f"  Mode: {mode}")
     print(f"  Questions: {total}")
     print(f"  K values: {k_values}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     for i, entry in enumerate(entries):
         q_type = entry["question_type"]
@@ -372,9 +395,14 @@ def run_benchmark(
             metrics[f"recall@{k}"] = r
             metrics[f"ndcg@{k}"] = n
 
+        ranked_session_ids = [corpus_ids[idx] for idx in rankings]
         result = {
             "question_id": entry["question_id"],
             "question_type": q_type,
+            "question": entry.get("question"),
+            "question_date": entry.get("question_date"),
+            "answer_session_ids": sorted(correct),
+            "ranked_session_ids": ranked_session_ids,
             **metrics,
         }
         results_by_type[q_type].append(result)
@@ -383,15 +411,17 @@ def run_benchmark(
         if (i + 1) % 50 == 0 or i == total - 1:
             elapsed = time.time() - start_time
             avg_ms = (elapsed / (i + 1)) * 1000
-            r5 = sum(r["recall@5"] for r in all_results) / len(all_results) * 100
-            print(f"  [{i+1:3d}/{total}] R@5: {r5:.1f}%  ({avg_ms:.0f}ms/q)")
+            progress_k = 5 if 5 in k_values else min(k_values)
+            recall_key = f"recall@{progress_k}"
+            recall = sum(r[recall_key] for r in all_results) / len(all_results) * 100
+            print(f"  [{i + 1:3d}/{total}] R@{progress_k}: {recall:.1f}%  ({avg_ms:.0f}ms/q)")
 
     # Aggregate
     elapsed = time.time() - start_time
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  RESULTS — {mode} mode")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     overall = {}
     for k in k_values:
@@ -399,42 +429,64 @@ def run_benchmark(
         nk = f"ndcg@{k}"
         overall[rk] = sum(r[rk] for r in all_results) / len(all_results)
         overall[nk] = sum(r[nk] for r in all_results) / len(all_results)
-        print(f"  Overall R@{k}: {overall[rk]*100:.1f}%  NDCG@{k}: {overall[nk]:.3f}")
+        print(f"  Overall R@{k}: {overall[rk] * 100:.1f}%  NDCG@{k}: {overall[nk]:.3f}")
 
-    print(f"\n  Per question type:")
+    print("\n  Per question type:")
     for q_type, type_results in sorted(results_by_type.items()):
         for k in k_values:
             rk = f"recall@{k}"
             avg = sum(r[rk] for r in type_results) / len(type_results)
-            print(f"    {q_type:35s} R@{k}: {avg*100:.1f}% ({len(type_results)} questions)")
+            print(f"    {q_type:35s} R@{k}: {avg * 100:.1f}% ({len(type_results)} questions)")
 
-    print(f"\n  Time: {elapsed:.1f}s ({elapsed/len(entries)*1000:.0f}ms/question)")
-    print(f"{'='*60}\n")
+    print(f"\n  Time: {elapsed:.1f}s ({elapsed / len(entries) * 1000:.0f}ms/question)")
+    print(f"{'=' * 60}\n")
 
     return {
+        "schema_version": "longmemeval-offline-v2",
+        "suite": "LongMemEval-style offline",
+        "generated_at": datetime.now(UTC).isoformat(),
+        "sibyl_commit": _git_commit(),
+        "command": command,
         "mode": mode,
+        "dataset": {
+            "path": data_path,
+            "total_entries": total_entries,
+            "evaluated_entries": total,
+            "limit": limit,
+        },
+        "k_values": k_values,
         "total_questions": total,
         "overall": overall,
         "per_type": {
             qt: {
                 metric: sum(r[metric] for r in results) / len(results)
-                for metric in results[0] if metric.startswith(("recall", "ndcg"))
+                for metric in results[0]
+                if metric.startswith(("recall", "ndcg"))
             }
             for qt, results in results_by_type.items()
         },
+        "case_results": all_results,
         "elapsed_seconds": elapsed,
     }
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Sibyl × LongMemEval Benchmark")
+    parser = argparse.ArgumentParser(description="Sibyl x LongMemEval Benchmark")
     parser.add_argument("data", help="Path to longmemeval_s_cleaned.json")
     parser.add_argument("--mode", choices=["raw", "hybrid"], default="raw")
     parser.add_argument("--limit", type=int, default=None, help="Limit to N questions")
-    parser.add_argument("--k", type=int, nargs="+", default=[5, 10], help="K values for recall/NDCG")
+    parser.add_argument(
+        "--k", type=int, nargs="+", default=[5, 10], help="K values for recall/NDCG"
+    )
     args = parser.parse_args()
 
-    results = run_benchmark(args.data, mode=args.mode, limit=args.limit, k_values=args.k)
+    results = run_benchmark(
+        args.data,
+        mode=args.mode,
+        limit=args.limit,
+        k_values=args.k,
+        command=sys.argv,
+    )
 
     out_path = f"benchmarks/results_sibyl_{args.mode}.json"
     with open(out_path, "w") as f:
