@@ -27,10 +27,6 @@ from sibyl.persistence.content_runtime import (
     list_crawl_sources,
     save_crawl_source_record,
 )
-from sibyl.persistence.graph_runtime import (
-    execute_debug_query,
-    get_graph_stats_payload,
-)
 from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.models import CrawlStatus
 from sibyl_core.utils import fingerprint_text
@@ -47,6 +43,22 @@ router = APIRouter(
 # Role sets for different permission levels
 _READ_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.MEMBER)
 _ADMIN_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN)
+
+
+async def get_graph_stats_payload(group_id: str) -> dict[str, object]:
+    from sibyl.persistence.graph_runtime import get_graph_stats_payload as service
+
+    return await service(group_id)
+
+
+async def execute_debug_query(
+    cypher: str,
+    group_id: str,
+    **params: object,
+) -> list[dict[str, object]]:
+    from sibyl.persistence.graph_runtime import execute_debug_query as service
+
+    return await service(cypher, group_id=group_id, **params)
 
 
 @router.get(

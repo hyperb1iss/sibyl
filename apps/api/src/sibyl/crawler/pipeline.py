@@ -40,12 +40,13 @@ from sibyl.persistence.content_runtime import (
     save_crawled_document_record,
     save_document_chunks,
 )
-from sibyl_core.graph.entities import EntityManager
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.sources import SourceType
 
 if TYPE_CHECKING:
     from uuid import UUID
+
+    from sibyl_core.graph.entities import EntityManager
 
 
 class _RollbackSession(Protocol):
@@ -134,6 +135,7 @@ class IngestionPipeline:
         if self.integrate_with_graph:
             try:
                 from sibyl_core.graph.client import get_graph_client
+                from sibyl_core.graph.entities import EntityManager
 
                 graph_client = await get_graph_client()
                 self._graph_integration = GraphIntegrationService(

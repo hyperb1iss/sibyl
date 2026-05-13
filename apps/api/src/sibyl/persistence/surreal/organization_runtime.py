@@ -18,7 +18,6 @@ from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import create_access_token, create_refresh_token
 from sibyl.auth.primitives import generate_invite_token, slugify
 from sibyl.persistence.auth_runtime import log_audit_event
-from sibyl.persistence.graph_runtime import delete_graph_data, ensure_graph_indexes
 from sibyl.persistence.organization_common import (
     InvitationAcceptance,
     InvitationRecord,
@@ -36,6 +35,18 @@ from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole
 
 log = structlog.get_logger()
 type SurrealRecord = dict[str, object]
+
+
+async def ensure_graph_indexes(group_id: str) -> None:
+    from sibyl.persistence.graph_runtime import ensure_graph_indexes as service
+
+    await service(group_id)
+
+
+async def delete_graph_data(group_id: str) -> None:
+    from sibyl.persistence.graph_runtime import delete_graph_data as service
+
+    await service(group_id)
 
 
 class QueryClient(Protocol):
@@ -153,9 +164,7 @@ async def _list_user_records_by_id(
             user_ids=user_id_strings,
         )
     )
-    return {
-        _coerce_uuid(record.get("uuid"), field_name="user.uuid"): record for record in records
-    }
+    return {_coerce_uuid(record.get("uuid"), field_name="user.uuid"): record for record in records}
 
 
 def _member_user_payload(
@@ -999,13 +1008,16 @@ async def add_org_member(
     request: Request,
 ) -> OrgMemberChange:
     async with _auth_client_scope() as client:
-        organization, actor_membership, target_user, target_membership = (
-            await _load_org_member_add_records(
-                client,
-                slug=slug,
-                actor_id=actor_id,
-                target_user_id=target_user_id,
-            )
+        (
+            organization,
+            actor_membership,
+            target_user,
+            target_membership,
+        ) = await _load_org_member_add_records(
+            client,
+            slug=slug,
+            actor_id=actor_id,
+            target_user_id=target_user_id,
         )
         if organization is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -1081,13 +1093,16 @@ async def update_org_member_role(
     request: Request,
 ) -> OrgMemberChange:
     async with _auth_client_scope() as client:
-        organization, actor_membership, target_membership, owner_memberships = (
-            await _load_org_member_mutation_records(
-                client,
-                slug=slug,
-                actor_id=actor_id,
-                target_user_id=target_user_id,
-            )
+        (
+            organization,
+            actor_membership,
+            target_membership,
+            owner_memberships,
+        ) = await _load_org_member_mutation_records(
+            client,
+            slug=slug,
+            actor_id=actor_id,
+            target_user_id=target_user_id,
         )
         if organization is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -1156,13 +1171,16 @@ async def remove_org_member(
     request: Request,
 ) -> OrgMemberChange:
     async with _auth_client_scope() as client:
-        organization, actor_membership, target_membership, owner_memberships = (
-            await _load_org_member_mutation_records(
-                client,
-                slug=slug,
-                actor_id=actor_id,
-                target_user_id=target_user_id,
-            )
+        (
+            organization,
+            actor_membership,
+            target_membership,
+            owner_memberships,
+        ) = await _load_org_member_mutation_records(
+            client,
+            slug=slug,
+            actor_id=actor_id,
+            target_user_id=target_user_id,
         )
         if organization is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -1189,9 +1207,7 @@ async def remove_org_member(
                 )
             delete_result = await client.execute_query(
                 "DELETE FROM organization_members WHERE uuid = $uuid;",
-                uuid=str(
-                    _coerce_uuid(target_membership.get("uuid"), field_name="membership.uuid")
-                ),
+                uuid=str(_coerce_uuid(target_membership.get("uuid"), field_name="membership.uuid")),
             )
             error = _query_error(delete_result)
             if error is not None:
@@ -1409,7 +1425,9 @@ async def accept_org_invitation(
         )
 
 
-async def _resolve_project_record(client: QueryClient, *, project_id: str, org_id: UUID) -> SurrealRecord:
+async def _resolve_project_record(
+    client: QueryClient, *, project_id: str, org_id: UUID
+) -> SurrealRecord:
     if project_id.startswith("project_"):
         records = _normalize_records(
             await client.execute_query(

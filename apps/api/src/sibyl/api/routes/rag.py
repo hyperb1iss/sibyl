@@ -47,16 +47,15 @@ from sibyl.persistence.content_runtime import (
     search_code_example_chunks,
     search_rag_chunks,
 )
-from sibyl.persistence.graph_runtime import (
-    get_entity_graph_runtime as _service_get_entity_graph_runtime,
-)
 from sibyl_core.auth import OrganizationRole
 
 log = structlog.get_logger()
 
 
 async def get_entity_graph_runtime(group_id: str):
-    return await _service_get_entity_graph_runtime(group_id)
+    from sibyl.persistence.graph_runtime import get_entity_graph_runtime as service
+
+    return await service(group_id)
 
 
 router = APIRouter(

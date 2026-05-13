@@ -47,9 +47,6 @@ from sibyl.persistence.content_runtime import (
     get_content_read_session_dependency,
     save_raw_capture_record,
 )
-from sibyl.persistence.graph_runtime import (
-    get_entity_graph_runtime as _service_get_entity_graph_runtime,
-)
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
@@ -58,7 +55,9 @@ log = structlog.get_logger()
 
 
 async def get_entity_graph_runtime(group_id: str):
-    return await _service_get_entity_graph_runtime(group_id)
+    from sibyl.persistence.graph_runtime import get_entity_graph_runtime as service
+
+    return await service(group_id)
 
 
 class SortField(str, Enum):

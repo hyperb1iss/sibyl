@@ -13,7 +13,6 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from sibyl.persistence.graph_runtime import reset_graph_runtime as _service_reset_graph_runtime
 from sibyl.persistence.operations_runtime import (
     is_setup_mode,
     require_settings_admin,
@@ -25,7 +24,9 @@ log = structlog.get_logger()
 
 
 async def reset_graph_runtime() -> None:
-    await _service_reset_graph_runtime()
+    from sibyl.persistence.graph_runtime import reset_graph_runtime as service
+
+    await service()
 
 
 async def _try_reset_graph_client(context: str) -> None:

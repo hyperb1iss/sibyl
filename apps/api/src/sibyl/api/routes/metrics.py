@@ -20,11 +20,6 @@ from sibyl.api.schemas import (
     TimeSeriesPoint,
 )
 from sibyl.auth.dependencies import get_current_organization, require_org_role
-from sibyl.persistence.graph_runtime import (
-    execute_surreal_graph_query as _service_execute_surreal_graph_query,
-    get_entity_graph_runtime as _service_get_entity_graph_runtime,
-    get_knowledge_read_adapter as _service_get_knowledge_read_adapter,
-)
 from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
@@ -33,11 +28,15 @@ log = structlog.get_logger()
 
 
 async def get_entity_graph_runtime(group_id: str):
-    return await _service_get_entity_graph_runtime(group_id)
+    from sibyl.persistence.graph_runtime import get_entity_graph_runtime as service
+
+    return await service(group_id)
 
 
 async def get_knowledge_read_adapter(group_id: str):
-    return await _service_get_knowledge_read_adapter(group_id)
+    from sibyl.persistence.graph_runtime import get_knowledge_read_adapter as service
+
+    return await service(group_id)
 
 
 async def execute_surreal_graph_query(
@@ -45,7 +44,9 @@ async def execute_surreal_graph_query(
     query: str,
     **params: object,
 ) -> list[dict[str, object]] | None:
-    return await _service_execute_surreal_graph_query(group_id, query, **params)
+    from sibyl.persistence.graph_runtime import execute_surreal_graph_query
+
+    return await execute_surreal_graph_query(group_id, query, **params)
 
 
 router = APIRouter(

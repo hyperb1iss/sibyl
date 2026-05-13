@@ -23,10 +23,6 @@ from sibyl.auth.dependencies import (
     require_org_role,
 )
 from sibyl.locks import entity_lock
-from sibyl.persistence.graph_runtime import (
-    get_knowledge_read_adapter as _service_get_knowledge_read_adapter,
-    get_task_graph_runtime as _service_get_task_graph_runtime,
-)
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole, ProjectRole
 from sibyl_core.models.tasks import AuthorType, Note, TaskComplexity, TaskPriority, TaskStatus
 from sibyl_core.tasks.workflow import TaskWorkflowEngine
@@ -40,11 +36,15 @@ _WRITE_ROLES = (
 
 
 async def get_knowledge_read_adapter(group_id: str):
-    return await _service_get_knowledge_read_adapter(group_id)
+    from sibyl.persistence.graph_runtime import get_knowledge_read_adapter as service
+
+    return await service(group_id)
 
 
 async def get_task_graph_runtime(group_id: str):
-    return await _service_get_task_graph_runtime(group_id)
+    from sibyl.persistence.graph_runtime import get_task_graph_runtime as service
+
+    return await service(group_id)
 
 
 async def _verify_task_access(

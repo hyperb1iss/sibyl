@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+import textwrap
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -26,10 +30,6 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
         startup_events.append("surreal")
         return True
 
-    async def get_graph_client() -> SimpleNamespace:
-        startup_events.append("graph")
-        return SimpleNamespace(is_connected=True)
-
     monkeypatch.setattr(api_app_module.settings, "store", "surreal")
     monkeypatch.setattr(api_app_module.settings, "auth_store", "surreal")
     monkeypatch.setattr(
@@ -45,17 +45,13 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     monkeypatch.setattr("sibyl.api.websocket.disable_pubsub", disable_pubsub)
     monkeypatch.setattr("sibyl.coordination.broker.get_broker", lambda: broker)
     monkeypatch.setattr("sibyl.coordination.scheduler.get_scheduler", lambda: scheduler)
-    monkeypatch.setattr(
-        "sibyl_core.graph.client.get_graph_client",
-        get_graph_client,
-    )
 
     app = api_app_module.create_api_app()
 
     async with app.router.lifespan_context(app):
         pass
 
-    assert startup_events[:2] == ["surreal", "graph"]
+    assert startup_events == ["surreal"]
     init_pubsub.assert_awaited_once()
     init_locks.assert_awaited_once()
     shutdown_pubsub.assert_awaited_once()
@@ -66,3 +62,36 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     scheduler.shutdown.assert_awaited_once()
     enable_pubsub.assert_called_once_with()
     disable_pubsub.assert_called_once_with()
+
+
+def test_api_factories_import_without_graphiti() -> None:
+    script = r"""
+import builtins
+
+original_import = builtins.__import__
+
+
+def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name == "graphiti_core" or name.startswith("graphiti_core."):
+        raise AssertionError(f"Graphiti import forbidden: {name}")
+    return original_import(name, globals, locals, fromlist, level)
+
+
+builtins.__import__ = guarded_import
+
+import sibyl.api.app as api_app
+import sibyl.main as main
+
+api_app.create_api_app()
+main.create_combined_app()
+"""
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", textwrap.dedent(script)],
+        check=False,
+        cwd=os.getcwd(),
+        text=True,
+        capture_output=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout

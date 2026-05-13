@@ -42,10 +42,6 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
         startup_events.append("surreal")
         return True
 
-    async def get_graph_client() -> SimpleNamespace:
-        startup_events.append("graph")
-        return SimpleNamespace(is_connected=True)
-
     monkeypatch.setattr(main_module.settings, "store", "surreal")
     monkeypatch.setattr(main_module.settings, "auth_store", "surreal")
     monkeypatch.setattr("sibyl.api.app.create_api_app", lambda: Starlette())
@@ -63,17 +59,13 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     monkeypatch.setattr("sibyl.api.websocket.disable_pubsub", disable_pubsub)
     monkeypatch.setattr("sibyl.coordination.broker.get_broker", lambda: broker)
     monkeypatch.setattr("sibyl.coordination.scheduler.get_scheduler", lambda: scheduler)
-    monkeypatch.setattr(
-        "sibyl_core.graph.client.get_graph_client",
-        get_graph_client,
-    )
 
     app = main_module.create_combined_app()
 
     async with app.router.lifespan_context(app):
         pass
 
-    assert startup_events[:2] == ["surreal", "graph"]
+    assert startup_events == ["surreal"]
     init_pubsub.assert_awaited_once()
     init_locks.assert_awaited_once()
     shutdown_pubsub.assert_awaited_once()

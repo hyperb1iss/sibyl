@@ -18,18 +18,39 @@ from typing import TYPE_CHECKING
 from fastapi import Depends
 
 from sibyl.auth.dependencies import get_current_organization
-from sibyl.persistence.graph_runtime import ActiveGraphStore, GraphReadServiceAdapter
 from sibyl_core.auth import AuthOrganization
-from sibyl_core.graph import EntityManager, RelationshipManager
-from sibyl_core.graph.client import get_graph_client
 from sibyl_core.services import KnowledgeReadService
 
 if TYPE_CHECKING:
+    from sibyl.persistence.graph_runtime import ActiveGraphStore as ActiveGraphStoreType
+    from sibyl_core.graph import EntityManager, RelationshipManager
     from sibyl_core.graph.client import GraphClient
+    from sibyl_core.storage import GraphStore
 
 
-GraphStore = ActiveGraphStore
-KnowledgeReadAdapter = GraphReadServiceAdapter
+class _ActiveGraphStoreProxy:
+    @staticmethod
+    def from_client(client: GraphClient, group_id: str) -> ActiveGraphStoreType:
+        from sibyl.persistence.graph_runtime import ActiveGraphStore
+
+        return ActiveGraphStore.from_client(client, group_id)
+
+
+class _GraphReadServiceAdapterProxy:
+    def __new__(cls, graph_store: GraphStore) -> KnowledgeReadService:
+        from sibyl.persistence.graph_runtime import GraphReadServiceAdapter
+
+        return GraphReadServiceAdapter(graph_store)
+
+
+ActiveGraphStore = _ActiveGraphStoreProxy
+GraphReadServiceAdapter = _GraphReadServiceAdapterProxy
+
+
+async def get_graph_client() -> GraphClient:
+    from sibyl_core.graph.client import get_graph_client as _get_graph_client
+
+    return await _get_graph_client()
 
 
 async def get_graph() -> GraphClient:
@@ -68,6 +89,8 @@ async def get_entity_manager(
         ) -> list[Entity]:
             return await manager.list_all()
     """
+    from sibyl_core.graph import EntityManager
+
     client = await get_graph_client()
     return EntityManager(client, group_id=str(org.id))
 
@@ -85,20 +108,22 @@ async def get_relationship_manager(
     Returns:
         RelationshipManager configured for the current org's graph
     """
+    from sibyl_core.graph import RelationshipManager
+
     client = await get_graph_client()
     return RelationshipManager(client, group_id=str(org.id))
 
 
 async def get_graph_store(
     org: AuthOrganization = Depends(get_current_organization),
-) -> ActiveGraphStore:
+) -> ActiveGraphStoreType:
     """Get the backend-agnostic graph store on top of the current runtime."""
     client = await get_graph_client()
     return ActiveGraphStore.from_client(client, str(org.id))
 
 
 async def get_knowledge_read_service(
-    graph_store: ActiveGraphStore = Depends(get_graph_store),
+    graph_store: ActiveGraphStoreType = Depends(get_graph_store),
 ) -> KnowledgeReadService:
     """Get the seam-based graph read service backed by the active runtime."""
     return GraphReadServiceAdapter(graph_store)

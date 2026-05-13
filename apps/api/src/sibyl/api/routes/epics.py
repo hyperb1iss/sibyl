@@ -15,10 +15,6 @@ from sibyl.api.websocket import broadcast_event
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.persistence.auth_runtime import verify_entity_project_access
-from sibyl.persistence.graph_runtime import (
-    get_knowledge_read_adapter as _service_get_knowledge_read_adapter,
-    update_graph_entity as _service_update_graph_entity,
-)
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
@@ -32,11 +28,15 @@ _WRITE_ROLES = (
 
 
 async def get_knowledge_read_adapter(group_id: str):
-    return await _service_get_knowledge_read_adapter(group_id)
+    from sibyl.persistence.graph_runtime import get_knowledge_read_adapter as service
+
+    return await service(group_id)
 
 
 async def update_graph_entity(group_id: str, entity_id: str, patch: dict[str, object]):
-    return await _service_update_graph_entity(group_id, entity_id, patch)
+    from sibyl.persistence.graph_runtime import update_graph_entity as service
+
+    return await service(group_id, entity_id, patch)
 
 
 router = APIRouter(

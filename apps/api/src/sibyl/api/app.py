@@ -91,15 +91,6 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:  # noqa: PLR0915
     await _bootstrap_surreal_runtime_schemas()
     await _load_runtime_settings_from_db()
 
-    log.info("Pre-warming graph client connection...")
-    try:
-        from sibyl_core.graph.client import get_graph_client
-
-        await get_graph_client()
-        log.info("Graph client ready", store=settings.store)
-    except Exception as e:
-        log.warning("Failed to pre-warm graph client", error=str(e))
-
     broker_initialized = False
     queue_backend = "unknown"
     try:

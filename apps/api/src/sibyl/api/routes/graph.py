@@ -6,10 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sibyl.api.dependencies import get_knowledge_read_service
 from sibyl.api.schemas import GraphData, GraphEdge, GraphNode, SubgraphRequest
 from sibyl.auth.dependencies import get_current_organization, require_org_role
-from sibyl.persistence.graph_runtime import (
-    get_entity_graph_runtime as _service_get_entity_graph_runtime,
-    get_graph_query_adapter as _service_get_graph_query_adapter,
-)
 from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
@@ -29,11 +25,15 @@ _ADMIN_ROLES = (
 
 
 async def get_entity_graph_runtime(group_id: str):
-    return await _service_get_entity_graph_runtime(group_id)
+    from sibyl.persistence.graph_runtime import get_entity_graph_runtime as service
+
+    return await service(group_id)
 
 
 async def get_graph_query_adapter(group_id: str):
-    return await _service_get_graph_query_adapter(group_id)
+    from sibyl.persistence.graph_runtime import get_graph_query_adapter as service
+
+    return await service(group_id)
 
 
 async def get_clusters_for_visualization(

@@ -27,14 +27,14 @@ import structlog
 from sibyl.persistence.content_common import DocumentChunkRecord
 from sibyl.persistence.content_runtime import get_content_read_session, save_document_chunks
 from sibyl.services.settings import get_settings_service
-from sibyl_core.graph.client import GraphClient
-from sibyl_core.graph.entities import EntityManager
-from sibyl_core.graph.relationships import RelationshipManager
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 
 if TYPE_CHECKING:
     from uuid import UUID
-    # GraphClient imported above for normalize_result
+
+    from sibyl_core.graph.client import GraphClient
+    from sibyl_core.graph.entities import EntityManager
+    from sibyl_core.graph.relationships import RelationshipManager
 
 log = structlog.get_logger()
 
@@ -46,6 +46,18 @@ _EXTRACTED_TYPE_MAP: dict[str, EntityType] = {
     "example": EntityType.PATTERN,
     "warning": EntityType.ERROR_PATTERN,
 }
+
+
+def _entity_manager(client: GraphClient, group_id: str) -> EntityManager:
+    from sibyl_core.graph.entities import EntityManager
+
+    return EntityManager(client, group_id=group_id)
+
+
+def _relationship_manager(client: GraphClient, group_id: str) -> RelationshipManager:
+    from sibyl_core.graph.relationships import RelationshipManager
+
+    return RelationshipManager(client, group_id=group_id)
 
 
 async def create_graph_integration_service(
@@ -369,7 +381,7 @@ class EntityLinker:
 
     def _get_entity_manager(self) -> EntityManager:
         if self._entity_manager is None:
-            self._entity_manager = EntityManager(self.graph_client, group_id=self.organization_id)
+            self._entity_manager = _entity_manager(self.graph_client, self.organization_id)
         return self._entity_manager
 
     async def _list_graph_entities_via_manager(
@@ -562,20 +574,20 @@ class GraphIntegrationService:
         self.extractor = EntityExtractor() if extract_entities else None
         self.linker = EntityLinker(graph_client, organization_id)
         self.entity_manager = (
-            EntityManager(graph_client, group_id=organization_id) if create_new_entities else None
+            _entity_manager(graph_client, organization_id) if create_new_entities else None
         )
         self.relationship_manager: RelationshipManager | None = None
 
     def _get_entity_manager(self) -> EntityManager:
         if self.entity_manager is None:
-            self.entity_manager = EntityManager(self.graph_client, group_id=self.organization_id)
+            self.entity_manager = _entity_manager(self.graph_client, self.organization_id)
         return self.entity_manager
 
     def _get_relationship_manager(self) -> RelationshipManager:
         if self.relationship_manager is None:
-            self.relationship_manager = RelationshipManager(
+            self.relationship_manager = _relationship_manager(
                 self.graph_client,
-                group_id=self.organization_id,
+                self.organization_id,
             )
         return self.relationship_manager
 

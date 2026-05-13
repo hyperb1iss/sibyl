@@ -124,15 +124,6 @@ def create_combined_app(  # noqa: PLR0915
         await _bootstrap_surreal_runtime_schemas()
         await _load_runtime_settings_from_db()
 
-        try:
-            from sibyl_core.graph.client import get_graph_client
-
-            client = await get_graph_client()
-            if client.is_connected:
-                log.info("Graph runtime connected", store=settings.store)
-        except Exception as e:
-            log.warning("Graph runtime unavailable at startup", store=settings.store, error=str(e))
-
         broker_initialized = False
         queue_backend = "unknown"
         try:
