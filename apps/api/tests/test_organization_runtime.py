@@ -1414,6 +1414,10 @@ async def test_surreal_list_project_members_batches_user_reads(
                             "avatar_url": None,
                         },
                     ],
+                    "org_members": [
+                        {"user_id": str(owner_id)},
+                        {"user_id": str(member_id)},
+                    ],
                 }
             return []
 
@@ -1448,6 +1452,7 @@ async def test_surreal_list_project_members_batches_user_reads(
     assert fake_client.calls[0][1] == {
         "project_id": str(project.id),
         "owner_user_id": str(owner_id),
+        "organization_id": str(org_id),
     }
 
 
@@ -1477,6 +1482,12 @@ async def test_surreal_project_role_lookup_batches_project_and_membership() -> N
                     "user_id": str(user_id),
                     "role": ProjectRole.MAINTAINER.value,
                 },
+                "org_membership": {
+                    "uuid": str(uuid4()),
+                    "organization_id": str(org_id),
+                    "user_id": str(user_id),
+                    "role": OrganizationRole.MEMBER.value,
+                },
             }
 
     fake_client = FakeClient()
@@ -1500,6 +1511,41 @@ async def test_surreal_project_role_lookup_batches_project_and_membership() -> N
         "user_id": str(user_id),
         "graph_project_id": "project_123",
     }
+
+
+@pytest.mark.asyncio
+async def test_surreal_project_role_lookup_requires_org_membership() -> None:
+    org_id = uuid4()
+    user_id = uuid4()
+    project_db_id = uuid4()
+
+    class FakeClient:
+        async def execute_query(self, _query: str, **_params):
+            return {
+                "project": {
+                    "uuid": str(project_db_id),
+                    "organization_id": str(org_id),
+                    "graph_project_id": "project_123",
+                    "owner_user_id": str(uuid4()),
+                },
+                "membership": {
+                    "uuid": str(uuid4()),
+                    "project_id": str(project_db_id),
+                    "user_id": str(user_id),
+                    "role": ProjectRole.MAINTAINER.value,
+                },
+                "org_membership": None,
+            }
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_organization_runtime._get_project_and_user_role(
+            client=FakeClient(),
+            project_id="project_123",
+            user_id=user_id,
+            org_id=org_id,
+        )
+
+    assert exc_info.value.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -1546,6 +1592,8 @@ async def test_surreal_update_project_member_role_uses_batch_update(
 
         async def execute_query(self, query: str, **params):
             self.calls.append((query, params))
+            if "SELECT * FROM organization_members" in query:
+                return [{"user_id": str(target_user_id)}]
             if "SELECT * FROM project_members" in query:
                 return [
                     {
@@ -1597,6 +1645,46 @@ async def test_surreal_update_project_member_role_uses_batch_update(
 
 
 @pytest.mark.asyncio
+async def test_surreal_update_project_member_role_rejects_non_org_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = SimpleNamespace(id=uuid4())
+    org_id = uuid4()
+    target_user_id = uuid4()
+    project = SimpleNamespace(id=uuid4(), owner_user_id=uuid4())
+
+    class FakeClient:
+        async def execute_query(self, query: str, **_params):
+            if "SELECT * FROM organization_members" in query:
+                return []
+            raise AssertionError(query)
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield FakeClient()
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+    monkeypatch.setattr(
+        surreal_organization_runtime,
+        "_get_project_and_user_role",
+        AsyncMock(return_value=(project, ProjectRole.OWNER)),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_organization_runtime.update_project_member_role(
+            request=_request(),
+            project_id="project_123",
+            actor=actor,
+            org_id=org_id,
+            target_user_id=target_user_id,
+            role=ProjectRole.MAINTAINER,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "User is not an organization member"
+
+
+@pytest.mark.asyncio
 async def test_surreal_add_project_member_rejects_existing_membership(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1614,6 +1702,7 @@ async def test_surreal_add_project_member_rejects_existing_membership(
             if "RETURN" in query:
                 return {
                     "user": {"uuid": str(target_user_id)},
+                    "org_membership": {"user_id": str(target_user_id)},
                     "membership": {"uuid": str(uuid4())},
                 }
             return []
@@ -1649,8 +1738,57 @@ async def test_surreal_add_project_member_rejects_existing_membership(
     query, params = fake_client.calls[0]
     assert "RETURN" in query
     assert "FROM users" in query
+    assert "FROM organization_members" in query
     assert "FROM project_members" in query
-    assert params == {"project_id": str(project.id), "user_id": str(target_user_id)}
+    assert params == {
+        "project_id": str(project.id),
+        "user_id": str(target_user_id),
+        "organization_id": str(org_id),
+    }
+
+
+@pytest.mark.asyncio
+async def test_surreal_add_project_member_rejects_non_org_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = SimpleNamespace(id=uuid4())
+    org_id = uuid4()
+    target_user_id = uuid4()
+    project = SimpleNamespace(id=uuid4(), owner_user_id=actor.id)
+
+    class FakeClient:
+        async def execute_query(self, query: str, **_params):
+            if "RETURN" in query:
+                return {
+                    "user": {"uuid": str(target_user_id)},
+                    "org_membership": None,
+                    "membership": None,
+                }
+            return []
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield FakeClient()
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+    monkeypatch.setattr(
+        surreal_organization_runtime,
+        "_get_project_and_user_role",
+        AsyncMock(return_value=(project, ProjectRole.OWNER)),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_organization_runtime.add_project_member(
+            request=SimpleNamespace(),
+            project_id="project_123",
+            actor=actor,
+            org_id=org_id,
+            target_user_id=target_user_id,
+            role=ProjectRole.CONTRIBUTOR,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "User is not an organization member"
 
 
 @pytest.mark.asyncio
@@ -1665,7 +1803,11 @@ async def test_surreal_add_project_member_handles_unique_index_conflict(
     class FakeClient:
         async def execute_query(self, query: str, **_params):
             if "RETURN" in query:
-                return {"user": {"uuid": str(target_user_id)}, "membership": None}
+                return {
+                    "user": {"uuid": str(target_user_id)},
+                    "org_membership": {"user_id": str(target_user_id)},
+                    "membership": None,
+                }
             if "CREATE project_members CONTENT $record" in query:
                 return {
                     "status": "ERR",

@@ -1490,6 +1490,11 @@ async def _get_project_and_user_role(
                         )
                     LIMIT 1
                 )[0],
+                org_membership: (
+                    SELECT * FROM organization_members
+                    WHERE organization_id = $organization_id AND user_id = $user_id
+                    LIMIT 1
+                )[0],
             };
         """
     else:
@@ -1517,6 +1522,11 @@ async def _get_project_and_user_role(
                         )
                     LIMIT 1
                 )[0],
+                org_membership: (
+                    SELECT * FROM organization_members
+                    WHERE organization_id = $organization_id AND user_id = $user_id
+                    LIMIT 1
+                )[0],
             };
         """
     payload = await client.execute_query(query, **params)
@@ -1524,6 +1534,8 @@ async def _get_project_and_user_role(
     project_record = _normalize_record(payload.get("project"))
     if project_record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if _normalize_record(payload.get("org_membership")) is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member")
     project = SimpleNamespace(**project_record)
     project.id = _coerce_uuid(project_record.get("uuid"), field_name="project.uuid")
     project.owner_user_id = _coerce_uuid(
@@ -1559,11 +1571,17 @@ async def _load_project_member_target(
     *,
     project_db_id: UUID,
     user_id: UUID,
-) -> tuple[SurrealRecord | None, SurrealRecord | None]:
+    org_id: UUID,
+) -> tuple[SurrealRecord | None, SurrealRecord | None, SurrealRecord | None]:
     payload = await client.execute_query(
         """
             RETURN {
                 user: (SELECT * FROM users WHERE uuid = $user_id LIMIT 1)[0],
+                org_membership: (
+                    SELECT * FROM organization_members
+                    WHERE organization_id = $organization_id AND user_id = $user_id
+                    LIMIT 1
+                )[0],
                 membership: (
                     SELECT * FROM project_members
                     WHERE project_id = $project_id AND user_id = $user_id
@@ -1573,9 +1591,31 @@ async def _load_project_member_target(
         """,
         project_id=str(project_db_id),
         user_id=str(user_id),
+        organization_id=str(org_id),
     )
     payload = _record_payload(payload)
-    return _normalize_record(payload.get("user")), _normalize_record(payload.get("membership"))
+    return (
+        _normalize_record(payload.get("user")),
+        _normalize_record(payload.get("org_membership")),
+        _normalize_record(payload.get("membership")),
+    )
+
+
+async def _target_is_org_member(
+    client: QueryClient,
+    *,
+    org_id: UUID,
+    user_id: UUID,
+) -> bool:
+    records = _normalize_records(
+        await client.execute_query(
+            "SELECT * FROM organization_members "
+            "WHERE organization_id = $organization_id AND user_id = $user_id LIMIT 1;",
+            organization_id=str(org_id),
+            user_id=str(user_id),
+        )
+    )
+    return bool(records)
 
 
 async def _delete_project_member_records(
@@ -1626,16 +1666,33 @@ async def list_project_members(
                                 WHERE project_id = $project_id
                             )
                     ),
+                    org_members: (
+                        SELECT * FROM organization_members
+                        WHERE organization_id = $organization_id
+                            AND (
+                                user_id = $owner_user_id
+                                OR user_id IN (
+                                    SELECT VALUE user_id FROM project_members
+                                    WHERE project_id = $project_id
+                                )
+                            )
+                    ),
                 };
             """,
             project_id=str(project.id),
             owner_user_id=str(project.owner_user_id),
+            organization_id=str(org_id),
         )
         payload = _record_payload(payload)
         member_records = _normalize_records(payload.get("members"))
+        org_member_ids = {
+            _coerce_uuid(record.get("user_id"), field_name="organization_members.user_id")
+            for record in _normalize_records(payload.get("org_members"))
+        }
         users_by_id = {
             _coerce_uuid(record.get("uuid"), field_name="user.uuid"): record
             for record in _normalize_records(payload.get("users"))
+            if _coerce_uuid(record.get("uuid"), field_name="user.uuid") in org_member_ids
         }
 
         rows: list[dict[str, object]] = []
@@ -1694,13 +1751,19 @@ async def add_project_member(
         )
         if not can_manage_project_members(user_role, project, actor):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-        target_user, existing = await _load_project_member_target(
+        target_user, target_org_membership, existing = await _load_project_member_target(
             client,
             project_db_id=project.id,
             user_id=target_user_id,
+            org_id=org_id,
         )
         if target_user is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        if target_org_membership is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User is not an organization member",
+            )
         if existing is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -1771,6 +1834,11 @@ async def update_project_member_role(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot change project owner's role",
+            )
+        if not await _target_is_org_member(client, org_id=org_id, user_id=target_user_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User is not an organization member",
             )
 
         membership_records = await _list_project_member_records(
