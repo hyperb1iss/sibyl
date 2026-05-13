@@ -6,6 +6,7 @@
 - Source docs:
   - `docs/architecture/SURREALDB_NATIVE_MEMORY_CORE_SPEC.md`
   - `docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md`
+  - `docs/architecture/SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md`
   - `docs/architecture/SURREALDB_PHASE3_BURNDOWN.md`
 
 This plan decomposes the next two roadmap lanes into executable work:
@@ -51,6 +52,13 @@ Required gates:
 - `moon run core:no-graphiti-smoke`
 - CI green
 - nightly regression green in `.github/workflows/nightly-regression.yml`
+
+Benchmark release rule:
+
+- v0.7 can ship on no-Graphiti default-loop proof plus the context-pack gate above.
+- Do not make public performance or quality comparisons against Graphiti until a paired `bench-live`
+  legacy Graphiti artifact and native Surreal artifact exist, are gated, and are compared with
+  `benchmarks/compare_eval_reports.py`.
 
 ## 2. Non-Goals
 
