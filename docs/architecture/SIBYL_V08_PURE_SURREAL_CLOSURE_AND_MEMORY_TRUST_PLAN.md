@@ -531,6 +531,10 @@ B2 remaining slices:
 4. Extend search, explore, context, and entity read tests with project-private deny fixtures.
 5. Run the B2 route gate, web typecheck, full API policy slice, and independent review.
 
+B2 closure update, 2026-05-13: all five slices above are implemented and verified in the packet
+receipts below. Remaining trust work moves to B3/B4/B6 policy context, inspect/audit, and release
+gate coverage.
+
 Exit criteria:
 
 - Project-private data does not leak through list, search, explore, or direct entity reads.
@@ -1032,6 +1036,18 @@ B2.4 receipt, 2026-05-13:
   - `moon run core:lint core:typecheck`: lint passed; typecheck exited 0 with the existing 26 ty
     warnings.
   - `git diff --check`: passed.
+
+B2.5 route gate receipt, 2026-05-13:
+
+- Route-gate coverage includes project-record backfill, project members, search/explore, entity
+  list/get/write, setup gating, and context/reflect route policy plumbing.
+- `moon run api:test -- tests/test_routes_admin.py tests/test_routes_project_members.py tests/test_routes_search.py`:
+  35 passed in 1.25s.
+- `moon run api:test -- tests/test_routes_entities.py tests/test_routes_entities_read.py tests/test_routes_entities_write.py tests/test_setup_routes.py tests/test_surreal_setup.py tests/test_routes_context.py`:
+  58 passed in 1.25s.
+- `moon run web:typecheck`: types generated successfully from cache.
+- Independent review for the final B2.4/B2.5 policy closure passed at
+  `/tmp/claude-review-b24-project-private-fixtures-final-1778781400.txt`.
 
 ### Packet B3.1: Policy Context Contract
 
