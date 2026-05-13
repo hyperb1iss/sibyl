@@ -191,7 +191,11 @@ document.
 For citable rows, include both native Surreal and comparator artifacts when the claim is
 comparative. For non-comparative rows, include the native Surreal artifact and label the claim as
 Sibyl-only. Every artifact must include enough metadata to reproduce the run without relying on
-local memory or chat history.
+local memory or chat history, and must pass:
+
+```bash
+moon run bench-gate -- <artifact>.json --profile ai-memory
+```
 
 ### External Benchmark Acceptance Checklist
 
@@ -208,6 +212,7 @@ comparison table:
   suite exposes them
 - keep prompts, evaluators, and scoring scripts versioned or archived with the result
 - add a claim boundary explaining what the result does and does not prove
+- pass `moon run bench-gate -- <artifact>.json --profile ai-memory`
 
 This is deliberately stricter than a normal smoke benchmark. External memory benchmarks are
 positioning evidence, so they need the whole receipt.

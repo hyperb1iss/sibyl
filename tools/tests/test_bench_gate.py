@@ -105,6 +105,53 @@ def test_evaluate_report_context_pack_profile_blocks_leaks() -> None:
     assert "metric 'forbidden_term_matches' above maximum 0.0000: 1.0000" in failures
 
 
+def test_evaluate_report_ai_memory_profile_accepts_full_records() -> None:
+    report = {
+        "schema_version": "longmemeval-offline-v2",
+        "suite": "LongMemEval-style offline",
+        "generated_at": "2026-05-13T12:00:00+00:00",
+        "sibyl_commit": "abc123",
+        "command": ["benchmarks/longmemeval_bench.py", "fixture.json"],
+        "runtime": {
+            "runtime_mode": "offline",
+            "graph_engine": "none",
+            "store": "chromadb_ephemeral",
+        },
+        "dataset": {"name": "fixture", "evaluated_entries": 1},
+        "overall": {"recall@5": 1.0, "ndcg@5": 1.0},
+        "per_type": {"temporal-reasoning": {"recall@5": 1.0}},
+        "case_results": [
+            {
+                "question_id": "q1",
+                "answer_session_ids": ["s1"],
+                "ranked_session_ids": ["s1", "s2"],
+                "recall@5": 1.0,
+                "ndcg@5": 1.0,
+            }
+        ],
+    }
+
+    failures = eval_gate.evaluate_report(report, profile="ai-memory")
+
+    assert failures == []
+
+
+def test_evaluate_report_ai_memory_profile_rejects_headline_only_records() -> None:
+    report = {
+        "suite": "LOCOMO-style long-memory suite",
+        "overall": {"score": 0.7},
+    }
+
+    failures = eval_gate.evaluate_report(report, profile="ai-memory")
+
+    assert "missing non-empty field 'schema_version'" in failures
+    assert "missing non-empty field 'sibyl_commit'" in failures
+    assert "missing non-empty field 'command'" in failures
+    assert "missing non-empty field 'dataset' or 'corpus'" in failures
+    assert "missing non-empty field 'runtime'" in failures
+    assert "missing non-empty field 'case_results'" in failures
+
+
 def test_evaluate_report_reports_threshold_and_metadata_failures() -> None:
     report = {
         "metrics": {
@@ -125,6 +172,45 @@ def test_evaluate_report_reports_threshold_and_metadata_failures() -> None:
     assert "metadata['store'] expected 'surreal', got 'legacy'" in failures
     assert "metric 'latency_ms' above maximum 3000.0000: 4200.0000" in failures
     assert "metric 'mrr' below minimum 0.2500: 0.1000" in failures
+
+
+def test_main_can_gate_ai_memory_record(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = tmp_path / "ai-memory.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "longmemeval-offline-v2",
+                "suite": "LongMemEval-style offline",
+                "generated_at": "2026-05-13T12:00:00+00:00",
+                "sibyl_commit": "abc123",
+                "command": ["benchmarks/longmemeval_bench.py", "fixture.json"],
+                "runtime": {
+                    "runtime_mode": "offline",
+                    "graph_engine": "none",
+                    "store": "chromadb_ephemeral",
+                },
+                "dataset": {"name": "fixture", "evaluated_entries": 1},
+                "overall": {"recall@5": 1.0},
+                "per_type": {"single-session-user": {"recall@5": 1.0}},
+                "case_results": [
+                    {
+                        "question_id": "q1",
+                        "answer_session_ids": ["s1"],
+                        "ranked_session_ids": ["s1"],
+                        "recall@5": 1.0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = eval_gate.main([str(path), "--profile", "ai-memory"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Checking LongMemEval-style offline with the ai-memory profile" in captured.out
+    assert "Gate passed" in captured.out
 
 
 def test_main_returns_nonzero_when_gate_fails(

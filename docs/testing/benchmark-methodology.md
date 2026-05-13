@@ -153,6 +153,12 @@ Store new artifacts under `benchmarks/results/ai-memory/` unless the suite requi
 outside git. If an artifact is too large to commit, commit a small manifest that names the archive
 location, content hash, suite version, command, commit, runtime mode, and result summary.
 
+Gate every new citable AI-memory artifact before it enters the release ledger:
+
+```bash
+moon run bench-gate -- benchmarks/results/ai-memory/<artifact>.json --profile ai-memory
+```
+
 Required record fields:
 
 - suite name, suite version or commit, dataset name, split, and preprocessing notes

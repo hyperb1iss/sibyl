@@ -72,6 +72,13 @@ def test_longmemeval_report_includes_full_case_records(
     assert report["schema_version"] == "longmemeval-offline-v2"
     assert report["sibyl_commit"] == "abc123"
     assert report["command"] == ["longmemeval_bench.py", "fixture.json"]
+    assert report["runtime"] == {
+        "runtime_mode": "offline",
+        "graph_engine": "none",
+        "store": "chromadb_ephemeral",
+        "retrieval_mode": "raw",
+        "embedding_model": "chromadb_default",
+    }
     assert report["dataset"]["evaluated_entries"] == QUESTION_COUNT
     assert report["overall"]["recall@1"] == pytest.approx(EXPECTED_RECALL_AT_1)
     assert len(report["case_results"]) == QUESTION_COUNT

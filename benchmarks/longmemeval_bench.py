@@ -444,10 +444,18 @@ def run_benchmark(
     return {
         "schema_version": "longmemeval-offline-v2",
         "suite": "LongMemEval-style offline",
+        "suite_version": "offline-runner-v2",
         "generated_at": datetime.now(UTC).isoformat(),
         "sibyl_commit": _git_commit(),
         "command": command,
         "mode": mode,
+        "runtime": {
+            "runtime_mode": "offline",
+            "graph_engine": "none",
+            "store": "chromadb_ephemeral",
+            "retrieval_mode": mode,
+            "embedding_model": "chromadb_default",
+        },
         "dataset": {
             "path": data_path,
             "total_entries": total_entries,

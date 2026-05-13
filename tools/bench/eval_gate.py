@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
-ProfileName = Literal["smoke", "acceptance", "context-pack"]
+ProfileName = Literal["smoke", "acceptance", "context-pack", "ai-memory"]
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,18 @@ PROFILE_THRESHOLDS: dict[ProfileName, dict[str, MetricThreshold]] = {
         "leak_count": MetricThreshold(maximum=0.0),
         "forbidden_term_matches": MetricThreshold(maximum=0.0),
     },
+    "ai-memory": {},
 }
+
+_AI_MEMORY_SUMMARY_KEYS = ("per_type", "per_slice", "per_category", "per_task")
+_AI_MEMORY_CASE_ID_KEYS = ("case_id", "question_id", "task_id")
+_AI_MEMORY_ANSWER_KEYS = (
+    "answer_ids",
+    "answer_session_ids",
+    "expected_ids",
+    "expected_result_ids",
+)
+_AI_MEMORY_RANKING_KEYS = ("ranked_ids", "ranked_session_ids", "ranked_result_ids", "result_ids")
 
 
 def load_report(path: Path) -> dict[str, Any]:
@@ -103,6 +114,103 @@ def build_thresholds(
     return thresholds
 
 
+def _is_non_empty_mapping(value: Any) -> bool:
+    return isinstance(value, dict) and bool(value)
+
+
+def _is_non_empty_sequence(value: Any) -> bool:
+    return isinstance(value, list | tuple) and bool(value)
+
+
+def _has_any_key(record: dict[str, Any], keys: tuple[str, ...]) -> bool:
+    return any(key in record and record[key] not in (None, "", [], {}) for key in keys)
+
+
+def _has_case_metric(record: dict[str, Any]) -> bool:
+    metrics = record.get("metrics")
+    if _is_non_empty_mapping(metrics):
+        return any(isinstance(value, int | float) for value in metrics.values())
+    return any(
+        isinstance(value, int | float)
+        for key, value in record.items()
+        if key.startswith(("recall@", "ndcg@", "precision@", "success@", "mrr"))
+    )
+
+
+def _validate_ai_memory_header(report: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    for field in ("schema_version", "suite", "sibyl_commit"):
+        if not isinstance(report.get(field), str) or not report[field].strip():
+            failures.append(f"missing non-empty field {field!r}")
+
+    if not isinstance(report.get("generated_at") or report.get("timestamp"), str):
+        failures.append("missing timestamp field 'generated_at' or 'timestamp'")
+
+    command = report.get("command")
+    if not isinstance(command, str | list) or not command:
+        failures.append("missing non-empty field 'command'")
+
+    return failures
+
+
+def _validate_ai_memory_scope(report: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    if not _is_non_empty_mapping(report.get("dataset") or report.get("corpus")):
+        failures.append("missing non-empty field 'dataset' or 'corpus'")
+
+    runtime = report.get("runtime")
+    if not _is_non_empty_mapping(runtime):
+        failures.append("missing non-empty field 'runtime'")
+    else:
+        for field in ("runtime_mode", "graph_engine", "store"):
+            if not isinstance(runtime.get(field), str) or not runtime[field].strip():
+                failures.append(f"runtime missing non-empty field {field!r}")
+
+    if not _is_non_empty_mapping(report.get("overall")):
+        failures.append("missing non-empty field 'overall'")
+
+    return failures
+
+
+def _validate_ai_memory_summaries(report: dict[str, Any]) -> list[str]:
+    if not any(_is_non_empty_mapping(report.get(key)) for key in _AI_MEMORY_SUMMARY_KEYS):
+        keys = "', '".join(_AI_MEMORY_SUMMARY_KEYS)
+        return [f"missing per-slice summary field; expected one of '{keys}'"]
+    return []
+
+
+def _validate_ai_memory_cases(report: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    case_results = report.get("case_results")
+    if not _is_non_empty_sequence(case_results):
+        failures.append("missing non-empty field 'case_results'")
+        return failures
+
+    for index, case in enumerate(case_results):
+        if not isinstance(case, dict):
+            failures.append(f"case_results[{index}] is not an object")
+            continue
+        if not _has_any_key(case, _AI_MEMORY_CASE_ID_KEYS):
+            failures.append(f"case_results[{index}] missing case identifier")
+        if not _has_any_key(case, _AI_MEMORY_ANSWER_KEYS):
+            failures.append(f"case_results[{index}] missing answer IDs")
+        if not _has_any_key(case, _AI_MEMORY_RANKING_KEYS):
+            failures.append(f"case_results[{index}] missing ranked result IDs")
+        if not _has_case_metric(case):
+            failures.append(f"case_results[{index}] missing numeric case metrics")
+
+    return failures
+
+
+def validate_ai_memory_record(report: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    failures.extend(_validate_ai_memory_header(report))
+    failures.extend(_validate_ai_memory_scope(report))
+    failures.extend(_validate_ai_memory_summaries(report))
+    failures.extend(_validate_ai_memory_cases(report))
+    return failures
+
+
 def evaluate_report(
     report: dict[str, Any],
     *,
@@ -111,7 +219,12 @@ def evaluate_report(
     maximums: dict[str, float] | None = None,
     required_metadata: dict[str, str] | None = None,
 ) -> list[str]:
-    metrics = extract_metrics(report)
+    try:
+        metrics = extract_metrics(report)
+    except TypeError:
+        if profile != "ai-memory":
+            raise
+        metrics = {}
     thresholds = build_thresholds(
         profile=profile,
         minimums=minimums or {},
@@ -128,6 +241,9 @@ def evaluate_report(
                 actual = metadata.get(key)
                 if actual != expected:
                     failures.append(f"metadata[{key!r}] expected {expected!r}, got {actual!r}")
+
+    if profile == "ai-memory":
+        failures.extend(validate_ai_memory_record(report))
 
     for metric, threshold in sorted(thresholds.items()):
         actual = metrics.get(metric)
@@ -147,7 +263,7 @@ def evaluate_report(
 
 
 def _report_name(report: dict[str, Any], fallback: str) -> str:
-    for key in ("label", "search_type"):
+    for key in ("label", "suite", "search_type"):
         value = report.get(key)
         if isinstance(value, str) and value:
             return value
@@ -165,7 +281,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("report", type=Path, help="Saved evaluation report JSON.")
     parser.add_argument(
         "--profile",
-        choices=("smoke", "acceptance", "context-pack"),
+        choices=("smoke", "acceptance", "context-pack", "ai-memory"),
         default="acceptance",
         help="Named threshold profile to enforce.",
     )
@@ -212,7 +328,12 @@ def main(argv: list[str] | None = None) -> int:
     _echo()
     _echo(f"Checking {report_name} with the {args.profile} profile")
     _echo()
-    metrics = extract_metrics(report)
+    try:
+        metrics = extract_metrics(report)
+    except TypeError:
+        if args.profile != "ai-memory":
+            raise
+        metrics = {}
     thresholds = build_thresholds(
         profile=args.profile,
         minimums=minimums,
