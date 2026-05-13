@@ -3,7 +3,10 @@
 - Status: draft execution plan
 - Target release: v0.8
 - Planning source: `plan_e464fd1e7b11`
-- Tracking task: `c64a358e-aef4-4b32-8735-28f03047a13e`
+- Plan-authoring task: `c64a358e-aef4-4b32-8735-28f03047a13e`
+- Tracking epics:
+  - Pure Surreal Closure: `epic_416f955f7f39`
+  - Memory Trust Foundation: `epic_539eea7afeb3`
 - Related docs:
   - `docs/architecture/SIBYL_NORTHSTAR.md`
   - `docs/architecture/SURREALDB_NATIVE_MEMORY_CORE_SPEC.md`
@@ -647,24 +650,27 @@ and A3.
 
 ## 7. Task Tracking Shape
 
-Recommended Sibyl tracking:
+Sibyl tracking:
 
 - Epic: `v0.8 Pure Surreal Closure`
-  - Task: lock v0.8 baseline gates
-  - Task: quarantine Graphiti compatibility
-  - Task: replace Graphiti-shaped graph managers
-  - Task: move embeddings to native ownership
-  - Task: delete or isolate Graphiti ops package
-  - Task: close archive, coordination, and legacy docs residue
-  - Task: run pure Surreal release audit
+  - ID: `epic_416f955f7f39`
+  - Task `cc561455-0b5f-43a5-a266-2e7852593edc`: lock v0.8 baseline gates
+  - Task `25c702de-95e5-452c-8705-d63389aea038`: quarantine Graphiti compatibility
+  - Task `1fb2a343-6fc8-4f45-936c-2c0f895009b2`: replace Graphiti-shaped graph managers
+  - Task `03e4a386-a556-497b-86bc-b5430e044905`: move embeddings to native ownership
+  - Task `61515e7a-f4fd-4ab7-a41f-b8789bf69272`: delete or isolate Graphiti ops package
+  - Task `bcfef650-1087-454e-aa30-be3a6bbc9b8a`: close archive, coordination, and legacy docs
+    residue
+  - Task `1114d0bb-0acc-443a-ab0d-1a830036a9b5`: run pure Surreal release audit
 - Epic: `v0.8 Memory Trust Foundation`
-  - Task: inventory trust-sensitive memory surfaces
-  - Task: add memory-space control plane
-  - Task: harden project RBAC
-  - Task: unify API, CLI, MCP, and job policy context
-  - Task: add memory audit and inspect surfaces
-  - Task: add promotion and share preview
-  - Task: run memory trust release gate
+  - ID: `epic_539eea7afeb3`
+  - Task `373c0eae-fef4-4822-9130-481193d50454`: inventory trust-sensitive memory surfaces
+  - Task `00a3beff-88d5-45d3-b5aa-dc52f01cb87a`: add memory-space control plane
+  - Task `0b7851f7-44c9-41e5-8036-7bd641d554aa`: harden project RBAC
+  - Task `e4a44b56-10f1-4411-a677-5606920c0576`: unify API, CLI, MCP, and job policy context
+  - Task `32d31cf2-70b4-4869-b683-8a6fcb5a8220`: add memory audit and inspect surfaces
+  - Task `18fd25d9-e3cb-4798-b789-a09dba5e4e08`: add promotion and share preview
+  - Task `f66e6310-8c3e-410e-805f-36c52d823910`: run memory trust release gate
 
 Each task should complete with:
 
@@ -672,6 +678,13 @@ Each task should complete with:
 - exact verification command receipts
 - policy or compatibility decisions made
 - any remaining risk or deferred follow-up
+
+Tracking integrity follow-up:
+
+- Task `a03051b5-4ac8-449f-b38a-ddb1974f5523`: fix epic progress aggregation for direct task
+  tracking. New v0.8 tasks are linked to epics, but `sibyl epic show` currently reports `0/0` totals
+  for the new epics. A0/B0 can start while this is tracked, but release receipts should not rely on
+  epic rollups until this is fixed or explicitly accounted for.
 
 ## 8. Verification Matrix
 
