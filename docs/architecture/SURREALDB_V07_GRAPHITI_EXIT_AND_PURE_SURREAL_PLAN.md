@@ -59,6 +59,9 @@ Benchmark release rule:
 - Do not make public performance or quality comparisons against Graphiti until a paired `bench-live`
   legacy Graphiti artifact and native Surreal artifact exist, are gated, and are compared with
   `benchmarks/compare_eval_reports.py`.
+- Do not make public AI memory benchmark or competitor claims until the cited suite has a raw
+  artifact, overall metrics, per-slice metrics, corpus or dataset version, command, commit, runtime
+  mode, and caveats recorded in `docs/architecture/SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md`.
 
 ## 2. Non-Goals
 
@@ -494,6 +497,8 @@ Tasks:
 - Run inventory and dependency checks from a clean checkout.
 - Run the no-Graphiti smoke with legacy services absent.
 - Audit docs for stale migration-era instructions.
+- Audit benchmark evidence for full artifact-backed AI memory results. Missing external suites must
+  stay explicit, not implied by context-pack or LongMemEval-style evidence.
 - Append release notes with supported upgrade and archive import paths.
 
 Verify:

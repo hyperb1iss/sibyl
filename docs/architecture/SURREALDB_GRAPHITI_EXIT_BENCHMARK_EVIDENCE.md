@@ -1,6 +1,6 @@
 # SurrealDB Graphiti Exit Benchmark Evidence
 
-- Status: gap identified
+- Status: partial evidence, external-suite gap identified
 - Last updated: 2026-05-13
 - Related plan: `docs/architecture/SURREALDB_V07_GRAPHITI_EXIT_AND_PURE_SURREAL_PLAN.md`
 
@@ -134,6 +134,30 @@ Coverage:
   - temporal and non-temporal hybrid ordering
 
 This is a component correctness and budget gate. It does not write a saved JSON benchmark artifact.
+
+## AI Memory Benchmark Coverage
+
+The release evidence bundle should include full results for every AI memory benchmark or competitor
+comparison we cite. A one-line headline is not enough; each suite needs the raw result artifact,
+overall metrics, per-slice metrics, corpus or dataset version, command, commit, runtime mode, and
+known caveats.
+
+Current coverage:
+
+| Suite or comparison             | Local artifact status                                | Current use                                |
+| ------------------------------- | ---------------------------------------------------- | ------------------------------------------ |
+| Context-pack frozen suite       | Full current report in `.moon/cache/evals/`          | v0.7 default-loop quality gate             |
+| LongMemEval-style offline suite | Full raw and hybrid JSON results in `benchmarks/`    | Internal offline retrieval baseline        |
+| Live Graphiti vs native Surreal | Missing paired `bench-live` artifacts                | Required before public pre/post claims     |
+| LOCOMO-style long-memory suite  | No harness or result artifact found in this checkout | Future external-suite positioning evidence |
+| RULER-style long-context suite  | No harness or result artifact found in this checkout | Future long-context stress evidence        |
+| Mem0 comparison                 | No committed result artifact found in this checkout  | Future competitor comparison, if cited     |
+| Zep comparison                  | No committed result artifact found in this checkout  | Future competitor comparison, if cited     |
+| LangMem comparison              | No committed result artifact found in this checkout  | Future competitor comparison, if cited     |
+
+Until a suite has a raw artifact and full per-slice table, cite it only as planned coverage, not as
+evidence. If we decide to make benchmark claims in release notes, the missing rows above become
+release-blocking for that claim.
 
 ### Missing Live Runtime Artifacts
 

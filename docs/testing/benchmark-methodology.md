@@ -132,6 +132,8 @@ without forking the script.
 - Treat offline baselines as directional. Do not present them as production latency or runtime
   quality claims.
 - Keep the artifact JSON from `bench-live` whenever you cite a number in docs or PRs.
+- For AI memory benchmark and competitor claims, keep full raw artifacts plus overall metrics,
+  per-slice metrics, corpus or dataset version, command, commit, runtime mode, and caveats.
 - If the live stack or auth context is unavailable, say so explicitly instead of substituting an
   offline result.
 
