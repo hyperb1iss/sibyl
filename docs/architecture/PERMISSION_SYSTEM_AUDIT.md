@@ -11,23 +11,92 @@ Update (2026-03-29): Sibyl's internal agent runtime, approval flow, and sandbox 
 removed after this audit was written. The findings below have been trimmed so the document reflects
 the remaining live surfaces.
 
+Update (2026-05-13): v0.8 B0 reconciled this audit against the Surreal auth/runtime implementation.
+The old Postgres/FalkorDB wording below is retained as historical context, but the active control
+plane is now Surreal-backed. Treat this update and the trust-surface inventory as the current
+release-planning source of truth.
+
 ## TL;DR (Highest-Risk Items)
 
-1. **Project RBAC appears effectively disabled by default** because Postgres `projects` rows are not
-   automatically created for graph projects; the auth code explicitly falls back to “allow org
-   members” when projects are not registered.
-2. **`/api/projects/{project_id}/members` uses Postgres project UUIDs**, but the rest of the system
-   (web + graph) uses graph project IDs like `project_<hash>`. The web calls this endpoint with
-   graph IDs, which will 422. This blocks project membership management and undermines project RBAC.
-3. **`verify_entity_project_access()` can bypass required project roles** when entities are missing
-   project metadata or the backing Postgres project row.
-4. **Postgres RLS policies are intentionally “ALLOW ALL when context is NULL”** and the app does not
-   set RLS session variables anywhere in the request DB session. This means RLS is currently not
-   providing defense-in-depth for tenant isolation.
+1. **Project RBAC is now Surreal-backed, but project records remain the critical control-plane
+   boundary.** Graph project create/update/delete writes project records through the Surreal auth
+   runtime, and `verify_entity_project_access()` denies non-viewer fallbacks for missing or
+   unregistered projects. The remaining risk is read-side drift where a route does not ask for
+   accessible project IDs or direct project authorization.
+2. **Direct entity list/get and raw-capture endpoints are the highest-priority read-side audit
+   targets.** Search, explore, context packs, raw memory, and MCP retrieval pass project filters,
+   but `GET /api/entities`, `GET /api/entities/{id}`, and `/api/entities/captures` need explicit
+   project access status before project-private data can be considered release-safe.
+3. **MCP is no longer an org-only bypass for the main memory loop, but generic graph mutation is not
+   yet fully policy-shaped.** MCP `search`, `explore`, `context`, `remember`, and `reflect` carry
+   user/org/project context; MCP `add` and `manage` still rely on generic graph/task authorization
+   rather than raw-memory policy decisions.
+4. **Memory policy exists and is shared for raw memory and reflection, but audit/inspect is still
+   incomplete.** Raw remember/recall log policy decisions; context packs and native retrieval carry
+   policy metadata internally; humans still need a first-class inspect surface for why memory was
+   shown, hidden, written, or denied.
+5. **Postgres RLS is no longer part of active request isolation.** The old RLS finding is now
+   documentation debt, not an active Surreal release blocker. Any remaining RLS references should be
+   labeled historical or removed from default-runtime docs.
 
-If you want one “first security pass” patch list: fix project registration + fix project member
-endpoints (graph ID vs UUID) + remove the project access bypasses + decide what RLS is supposed to
-do.
+First security pass for v0.8: harden direct entity/read surfaces in B2, route MCP/CLI/jobs through
+one policy context in B3, add audit and inspect in B4, then run the B6 memory trust release gate.
+
+## 2026-05-13 Surreal Auth Reconciliation
+
+### Active authorization model
+
+- **Auth store:** Surreal auth namespace/database via `apps/api/src/sibyl/persistence/surreal`.
+- **Org context:** JWT and API-key auth resolve `AuthContext` with user, organization, org role,
+  scopes, and API-key project restrictions.
+- **Graph tenancy:** Surreal namespace-per-org for graph data. The active group ID is the current
+  organization ID, not FalkorDB database-per-org.
+- **Project control plane:** Surreal `projects`, `project_members`, `team_projects`, and
+  `api_key_project_scopes` records are the project authorization source of truth.
+- **Project IDs:** external APIs and graph entities use graph project IDs such as `project_<hash>`;
+  the Surreal auth runtime stores them in `projects.graph_project_id`.
+- **Project fallback:** if no project control-plane records exist for an org,
+  `list_accessible_project_graph_ids()` falls back to graph project entities. This is migration
+  compatibility and should be retired or feature-gated during B2.
+- **Memory policy:** `sibyl_core.auth.memory_policy` currently enables private, verified project,
+  and verified delegated scope reads/writes/reflection. Share is deny-only across scopes until
+  promotion/share preview work lands. Team, organization, shared, and public scopes return stable
+  denies.
+
+### Trust Surface Inventory
+
+| Surface                                          | Identity/context carried                                                    | Current policy status                                                                                                                                           | Follow-up                                                                                           |
+| ------------------------------------------------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| REST `/api/memory/raw`                           | user ID, org, optional agent, `project_id`, `memory_scope`, `scope_key`     | Uses shared write policy and logs `memory_policy_decision`. Project scope checks membership through `scope_key`; diary project metadata is separately verified. | B3 should canonicalize `project_id` and project `scope_key` so metadata and policy cannot drift.    |
+| REST `/api/memory/raw/recall`                    | user ID, org, optional agent, `project_id`, `memory_scope`, `scope_key`     | Uses shared read policy and logs `memory_policy_decision`; project scope requires verified `scope_key`.                                                         | B3 should align `project_id` filters with project scope and keep deny reasons stable.               |
+| REST `/api/memory/reflection/promote`            | user ID, org, target project, target scope, related IDs                     | Verifies target project access and delegates reflect/write policy to native promotion.                                                                          | B4 should expose promotion policy decisions and source IDs through inspect/audit.                   |
+| REST `/api/context/pack`                         | user ID, org, optional agent, optional project, accessible projects         | Verifies explicit project reads or passes accessible project set into core retrieval. Raw-memory recall uses shared read policy internally.                     | B4 should surface hidden/allowed policy reasons in context-pack metadata.                           |
+| REST `/api/context/reflect`                      | user ID, org, optional project, accessible projects, project/private scope  | Verifies explicit project reads and passes reflect/write policy context into core reflection when persisting.                                                   | B3 should make route-level audit wording match raw memory decisions.                                |
+| REST `/api/search` and `/api/search/explore`     | user ID, org, explicit project or accessible project set                    | Explicit projects are verified; unscoped searches pass accessible project IDs into core search/explore.                                                         | B2 should add direct leak tests for project-private entities and related traversals.                |
+| REST `/api/search/temporal`                      | org only                                                                    | Temporal edge queries are org-scoped compatibility/history reads and do not currently apply project policy context.                                             | B2 should either add project filtering or label the route historical/admin-only.                    |
+| REST `/api/entities` list/get                    | org only on list/get route; write routes carry user/project checks          | Write routes verify project access. Direct list/get currently need explicit read-side project authorization status.                                             | B2 owns direct entity list/get filtering and negative tests.                                        |
+| REST `/api/entities/captures`                    | org only; update requires org write role                                    | Raw capture sidecar is org-scoped and reviewable, but not memory-policy scoped.                                                                                 | B4 should either classify it as legacy capture review or add project/source policy metadata.        |
+| REST `/api/rag` and `/api/session`               | user ID, org, accessible project set                                        | RAG and session-bundle routes resolve accessible projects before retrieval, but are outside raw-memory policy decisions.                                        | B4 should include them in inspect/audit output or explicitly classify them as derived context.      |
+| MCP `search`, `explore`, `context`               | user ID, org, scopes, API-key project restrictions, optional project/agent  | No longer org-only; accessible project IDs are resolved and passed to core tools.                                                                               | B3 should add explicit deny-case coverage for restricted API keys and missing users.                |
+| MCP `remember`                                   | user ID, org, project, memory scope, raw source IDs, related IDs            | Policy-backed: writes raw memory first, logs `mcp_memory_policy_decision`, then creates graph memory with raw source metadata.                                  | B4 should make raw/graph pairing inspectable.                                                       |
+| MCP `reflect`                                    | user ID, org, project, accessible projects, memory scope                    | Passes policy context into core reflection and native writes.                                                                                                   | B3/B4 should align audit and inspect output with REST reflection.                                   |
+| MCP `add`                                        | user ID and org metadata; optional project                                  | Generic graph mutation path, not raw-memory policy-backed.                                                                                                      | B3 should either route agent memory writes through `remember` or add project/policy gates to `add`. |
+| MCP `manage`                                     | user ID and org injected into action data                                   | Depends on each management action; not a unified memory policy surface.                                                                                         | B3 should classify each manage action and reject memory-sensitive actions without policy context.   |
+| CLI `remember`, `recall`, `context`, `reflect`   | bearer token/API key, linked project, optional agent/scope flags            | Thin REST client; server policy is authoritative. `remember` now captures raw memory before graph entity creation.                                              | B3 should keep CLI output showing server policy reasons and avoid local policy forks.               |
+| Prompt hook `user-prompt-submit.py`              | inherits CLI auth/config and linked project through `sibyl context` command | No direct auth logic; it asks the CLI for a context pack.                                                                                                       | B3 should document hook behavior as inherited REST policy and add failure-mode tests.               |
+| Async jobs `apps/api/src/sibyl/jobs/entities.py` | group/org ID plus queued entity/task data                                   | Jobs persist graph entities and task learning artifacts after the API has authorized the enqueueing route; job payloads do not carry a full policy decision.    | B3 should carry actor/project/policy receipt fields into job payloads and learning artifacts.       |
+
+### Test Coverage Status
+
+- Present: core memory policy allow/deny tests for private, project, delegated, and disabled scopes.
+- Present: REST raw memory tests cover project membership allow/deny, missing scope key, diary
+  constraints, and promotion project verification.
+- Present: REST context tests cover accessible project scoping and inaccessible project denial.
+- Present: MCP tests cover accessible-project resolution, restricted credentials, remember policy,
+  and reflect project context.
+- Missing before release: direct entity list/get project-private negative tests, raw-capture
+  visibility classification, temporal search access tests, MCP generic `add/manage` policy tests,
+  and job-payload policy receipt tests.
 
 ---
 

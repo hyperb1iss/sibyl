@@ -1,26 +1,38 @@
 # Multi-Tier Permission System (Org + Project): Code-Audited Plan
 
-This is the updated, code-audited permission plan for Sibyl. It reconciles the desired model with
-what already exists in the schema and runtime, and enumerates the minimal missing pieces needed to
-ship secure project-level authorization without over-engineering.
+This was the original code-audited permission plan for Sibyl's org and project model. It now serves
+as historical design context. The active v0.8 control plane is Surreal-backed; use
+`docs/architecture/PERMISSION_SYSTEM_AUDIT.md` and
+`docs/architecture/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md` for current release
+tracking.
 
 ---
 
 ## Executive Summary
 
-Sibyl currently enforces **org-level RBAC** across REST endpoints and scopes graph access by org
-(`group_id == org.id`). The Postgres schema for **project-level RBAC** does not exist yet and needs
-to be created. This plan covers both schema creation and enforcement wiring.
+Reconciled on 2026-05-13 for v0.8 B0:
 
-This plan:
+- Sibyl now enforces org-level RBAC and project control-plane lookups through the Surreal auth
+  runtime.
+- Project records, project members, team project grants, API-key project scopes, sessions, users,
+  and organization membership are Surreal auth data, not active Postgres request data.
+- Graph project IDs remain the external API and graph identity. The control plane stores them as
+  `projects.graph_project_id`.
+- Search, explore, context packs, raw memory, MCP search/context/remember/reflect, and reflection
+  promotion have current project/memory policy context.
+- Direct entity list/get, raw capture review, MCP generic `add/manage`, and background jobs are the
+  remaining surfaces that need explicit B2/B3/B4 treatment before memory trust can be release-gated.
 
-- Creates the Postgres permission tables (`projects`, `project_members`, `team_projects`).
-- Implements **app-level** project authorization everywhere (REST + MCP + graph filtering).
-- Treats Postgres RLS as **optional hardening** (Phase 3) after core enforcement is proven.
+The durable pieces of this plan still apply: graph project IDs stay stable at API boundaries,
+project membership implies org membership, app-level authorization is the primary enforcement layer,
+and RLS-style hardening is optional only after app-level policy is proven.
 
 ---
 
 ## 0. Current State (As Implemented Today)
+
+This section is historical. It describes the pre-Surreal-auth plan and should not be used to infer
+current runtime dependencies.
 
 ### 0.1 Auth & Tenancy (Works Today)
 

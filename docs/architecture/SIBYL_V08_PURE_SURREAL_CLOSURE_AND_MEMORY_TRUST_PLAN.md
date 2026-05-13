@@ -420,6 +420,21 @@ Verify:
 - `moon run core:test -- tests/test_memory_policy.py`
 - `moon run api:test -- tests/test_routes_context.py tests/test_routes_memory.py`
 
+B0 inventory receipt, 2026-05-13:
+
+- `docs/architecture/PERMISSION_SYSTEM_AUDIT.md` now has a Surreal auth reconciliation section and
+  trust-surface inventory covering REST, MCP, CLI, prompt hook, and job memory paths.
+- `docs/architecture/PERMISSION_SYSTEM_PLAN.md` is explicitly marked as historical design context
+  rather than current Postgres/RLS implementation guidance.
+- Current green coverage already includes core memory policy tests, REST memory tests, REST context
+  tests, and MCP accessible-project tests.
+- Tracked implementation gaps:
+  - B2 owns direct entity list/get project-private filtering, temporal search classification,
+    raw-capture visibility classification, and project fallback retirement.
+  - B3 owns canonical policy context across raw memory, context, MCP `add/manage`, CLI output, and
+    async job payloads.
+  - B4 owns inspect/audit output for allowed, denied, hidden, promoted, and source-derived memory.
+
 Exit criteria:
 
 - Every memory surface has an explicit policy-context status.
