@@ -233,7 +233,8 @@ Graphiti remains as a transition dependency on top of the SurrealDB driver. Its 
 not FalkorDB removal; it is default-loop removal for native memory. The generated runtime inventory
 lists every active `graphiti_core` import, while the hand-authored
 `docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md` classifies each call site by behavior,
-default-loop usage, status, removal condition, owner, and verification command.
+default-loop usage, status, removal condition, owner, and verification command. The executable v0.7
+cleanup sequence lives in `docs/architecture/SURREALDB_V07_GRAPHITI_EXIT_AND_PURE_SURREAL_PLAN.md`.
 
 Verification:
 
