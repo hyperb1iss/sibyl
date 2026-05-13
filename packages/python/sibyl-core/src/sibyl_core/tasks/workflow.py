@@ -2,7 +2,7 @@
 
 import re
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
@@ -28,6 +28,15 @@ def _declared_driver_attr(driver: object, attr: str) -> object | None:
 
     value = attrs.get(attr, _MISSING)
     return None if value is _MISSING else value
+
+
+def _first_record_id(result: object) -> object | None:
+    if not isinstance(result, list) or not result:
+        return None
+    first = result[0]
+    if not isinstance(first, dict):
+        return None
+    return cast("dict[str, object]", first).get("id")
 
 
 # =============================================================================
@@ -118,17 +127,48 @@ class TaskWorkflowEngine:
         if driver is None:
             return False
 
-        from graphiti_core.edges import EpisodicEdge
+        source_record_id = _first_record_id(
+            await driver.execute_query(
+                "SELECT id FROM episode WHERE uuid = $uuid LIMIT 1;",
+                uuid=episode_id,
+            )
+        )
+        target_record_id = _first_record_id(
+            await driver.execute_query(
+                "SELECT id FROM entity WHERE uuid = $uuid LIMIT 1;",
+                uuid=target_id,
+            )
+        )
+        if source_record_id is None or target_record_id is None:
+            msg = (
+                f"Cannot save mentions edge {link_id!r}: source episode "
+                f"{episode_id!r} or target entity {target_id!r} not found"
+            )
+            raise ValueError(msg)
 
-        await driver.episodic_edge_ops.save(
-            driver,
-            EpisodicEdge(
-                uuid=link_id,
-                group_id=self._organization_id,
-                source_node_uuid=episode_id,
-                target_node_uuid=target_id,
-                created_at=datetime.now(UTC),
-            ),
+        from surrealdb import RecordID
+
+        await driver.execute_query(
+            """DELETE FROM mentions WHERE uuid = $uuid AND (in != $src OR out != $tgt);
+LET $updated = (UPDATE mentions SET
+    in = $src,
+    out = $tgt,
+    uuid = $uuid,
+    group_id = $group_id,
+    created_at = $created_at
+    WHERE uuid = $uuid RETURN id);
+IF array::len($updated) = 0 THEN
+    RELATE $src->$rel->$tgt SET
+        uuid = $uuid,
+        group_id = $group_id,
+        created_at = $created_at;
+END;""",
+            rel=RecordID("mentions", link_id),
+            src=source_record_id,
+            tgt=target_record_id,
+            uuid=link_id,
+            group_id=self._organization_id,
+            created_at=datetime.now(UTC),
         )
         return True
 

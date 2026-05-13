@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 
 def test_default_memory_loop_runs_without_graphiti_imports() -> None:
@@ -138,6 +139,62 @@ async def main():
 asyncio.run(main())
 """
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+    result = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(script)],
+        check=False,
+        cwd=os.getcwd(),
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_default_entrypoints_import_without_graphiti() -> None:
+    script = r"""
+import builtins
+import importlib
+import os
+import runpy
+import sys
+from pathlib import Path
+
+original_import = builtins.__import__
+
+
+def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name == "graphiti_core" or name.startswith("graphiti_core."):
+        raise AssertionError(f"Graphiti import forbidden: {name}")
+    return original_import(name, globals, locals, fromlist, level)
+
+
+builtins.__import__ = guarded_import
+os.environ["SIBYL_AUTH_STORE"] = "surreal"
+os.environ["SIBYL_COORDINATION_BACKEND"] = "local"
+os.environ["SIBYL_MCP_AUTH_MODE"] = "off"
+os.environ["SIBYL_NATIVE_WRITE"] = "enabled"
+os.environ["SIBYL_STORE"] = "surreal"
+
+cli_main = importlib.import_module("sibyl_cli.main")
+import sibyl.jobs.entities
+from sibyl.server import create_mcp_server
+
+assert cli_main.app is not None
+assert create_mcp_server(host="127.0.0.1", port=3334) is not None
+
+root = Path(os.environ["SIBYL_REPO_ROOT"])
+runpy.run_path(str(root / "apps/cli/src/sibyl_cli/data/hooks/session-start.py"))
+runpy.run_path(str(root / "apps/cli/src/sibyl_cli/data/hooks/user-prompt-submit.py"))
+
+assert "graphiti_core" not in sys.modules
+"""
+    repo_root = Path(__file__).resolve().parents[4]
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(sys.path),
+        "SIBYL_REPO_ROOT": str(repo_root),
+    }
     result = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(script)],
         check=False,

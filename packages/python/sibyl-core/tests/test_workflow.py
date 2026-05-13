@@ -1,5 +1,6 @@
 """Tests for task workflow state machine and estimation."""
 
+import builtins
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -696,8 +697,16 @@ class TestWorkflowEngine:
         mock_entity_manager: MockEntityManager,
         mock_relationship_manager: MockRelationshipManager,
     ) -> None:
-        edge_ops = SimpleNamespace(save=AsyncMock())
-        driver = SimpleNamespace(episodic_edge_ops=edge_ops)
+        driver = SimpleNamespace(
+            episodic_edge_ops=object(),
+            execute_query=AsyncMock(
+                side_effect=[
+                    [{"id": "episode:episode_task_episode"}],
+                    [{"id": "entity:task_episode"}],
+                    [],
+                ]
+            ),
+        )
         graph_client = SimpleNamespace(get_org_driver=lambda group_id: driver)
         workflow_engine = TaskWorkflowEngine(
             entity_manager=mock_entity_manager,  # type: ignore[arg-type]
@@ -706,17 +715,37 @@ class TestWorkflowEngine:
             organization_id="org_test123",
         )
 
-        assert await workflow_engine._save_episode_mention(
-            episode_id="episode_task_episode",
-            target_id="task_episode",
-            link_id="rel_episode_task_episode",
-        )
+        original_import = builtins.__import__
 
-        edge_ops.save.assert_awaited_once()
-        saved_edge = edge_ops.save.await_args.args[1]
-        assert saved_edge.group_id == "org_test123"
-        assert saved_edge.source_node_uuid == "episode_task_episode"
-        assert saved_edge.target_node_uuid == "task_episode"
+        def guarded_import(
+            name: str,
+            globals: dict[str, Any] | None = None,
+            locals: dict[str, Any] | None = None,
+            fromlist: tuple[str, ...] = (),
+            level: int = 0,
+        ) -> Any:
+            if name == "graphiti_core" or name.startswith("graphiti_core."):
+                raise AssertionError(f"Graphiti import forbidden: {name}")
+            return original_import(name, globals, locals, fromlist, level)
+
+        builtins.__import__ = guarded_import
+        try:
+            assert await workflow_engine._save_episode_mention(
+                episode_id="episode_task_episode",
+                target_id="task_episode",
+                link_id="rel_episode_task_episode",
+            )
+        finally:
+            builtins.__import__ = original_import
+
+        assert driver.execute_query.await_count == 3
+        save_query = driver.execute_query.await_args_list[2].args[0]
+        save_params = driver.execute_query.await_args_list[2].kwargs
+        assert "RELATE $src->$rel->$tgt" in save_query
+        assert save_params["uuid"] == "rel_episode_task_episode"
+        assert save_params["group_id"] == "org_test123"
+        assert save_params["src"] == "episode:episode_task_episode"
+        assert save_params["tgt"] == "entity:task_episode"
 
     @pytest.mark.asyncio
     async def test_create_learning_episode_skips_missing_surreal_mention_endpoint(
