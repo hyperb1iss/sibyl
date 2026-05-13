@@ -29,6 +29,7 @@ os.environ["SIBYL_NATIVE_WRITE"] = "enabled"
 
 async def main():
     from sibyl_core.models.context import ContextLayer
+    from sibyl_core.models.entities import Relationship, RelationshipType
     from sibyl_core.services.native_graph import (
         NativeEntityManager,
         NativeGraphRuntime,
@@ -44,6 +45,7 @@ async def main():
     import sibyl_core.tools.explore as explore_module
     import sibyl_core.tools.reflect as reflect_module
     import sibyl_core.tools.search as search_module
+    import sibyl_core.tools.temporal as temporal_module
 
     group_id = "no-graphiti-default-loop"
     principal_id = "principal-no-graphiti"
@@ -70,6 +72,7 @@ async def main():
     native_retrieval.get_native_graph_runtime = runtime_factory
     native_memory.get_native_graph_runtime = runtime_factory
     search_module.get_graph_runtime = runtime_factory
+    temporal_module.get_graph_runtime = runtime_factory
 
     try:
         project = await core_module.add(
@@ -92,6 +95,18 @@ async def main():
             check_conflicts=False,
         )
         assert remembered.success, remembered.message
+        await runtime.relationship_manager.create(
+            Relationship(
+                id="rel_no_graphiti_temporal",
+                relationship_type=RelationshipType.RELATED_TO,
+                source_id=str(remembered.id),
+                target_id=project_id,
+                metadata={
+                    "fact": "No Graphiti temporal reads use native Surreal edges.",
+                    "valid_at": "2026-05-12T00:00:00+00:00",
+                },
+            )
+        )
 
         search = await core_module.search(
             "native surreal recall",
@@ -108,6 +123,17 @@ async def main():
             organization_id=group_id,
         )
         assert any(result.id == remembered.id for result in explored.entities)
+
+        temporal = await temporal_module.temporal_query(
+            mode="history",
+            entity_id=str(remembered.id),
+            organization_id=group_id,
+        )
+        temporal_edge = next(
+            edge for edge in temporal.edges if edge.id == "rel_no_graphiti_temporal"
+        )
+        assert temporal_edge.source_name == "No Graphiti Default Loop Decision"
+        assert temporal_edge.target_name == project_title
 
         pack = await context_module.compile_context(
             "native Surreal default loop decision",
