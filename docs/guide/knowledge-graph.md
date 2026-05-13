@@ -226,13 +226,13 @@ await manager.create(entity)
 
 ## Querying the Graph
 
-### Using EntityManager
+### Using the Native Runtime
 
 ```python
-from sibyl_core.graph import GraphClient, EntityManager
+from sibyl_core.services.native_graph import get_native_graph_runtime
 
-client = await GraphClient.create()
-manager = EntityManager(client, group_id=str(org_id))
+runtime = await get_native_graph_runtime(str(org_id))
+manager = runtime.entity_manager
 
 # Search
 results = await manager.search("OAuth patterns", limit=10)

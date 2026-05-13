@@ -13,7 +13,7 @@ and placed in `docs/public/screenshots/`.
 
 - [ ] `guide-architecture-diagram.png` - High-level architecture overview
 - [ ] `guide-web-dashboard.png` - Web UI dashboard view
-- [ ] `guide-knowledge-graph-visualization.png` - FalkorDB graph visualization
+- [ ] `guide-knowledge-graph-visualization.png` - SurrealDB graph visualization
 
 ### CLI Section
 

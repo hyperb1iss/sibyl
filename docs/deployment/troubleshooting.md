@@ -146,7 +146,7 @@ surrealdb error: connection refused
    - Use `limit` parameter on list endpoints
    - Paginate large result sets
 
-3. **Increase Graphiti semaphore:**
+3. **For named Graphiti compatibility runs, increase the semaphore:**
    ```bash
    SIBYL_GRAPHITI_SEMAPHORE_LIMIT=20  # Default is 10
    ```

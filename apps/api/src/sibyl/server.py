@@ -1110,7 +1110,7 @@ def _register_resources(mcp: FastMCP) -> None:
         - status: "healthy" or "unhealthy"
         - server_name: Name of the server
         - uptime_seconds: Server uptime
-        - graph_connected: Whether FalkorDB is reachable
+        - graph_connected: Whether the active graph runtime is reachable
         - entity_counts: Count of entities by type
         - errors: Any error messages
         """

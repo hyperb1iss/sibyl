@@ -365,7 +365,7 @@ async def dev_status(
     Aggregates health checks from all components:
     - API server health
     - Worker process status
-    - FalkorDB connectivity
+    - Active graph runtime connectivity
     - Job queue health
     - Recent error logs
 

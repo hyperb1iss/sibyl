@@ -103,20 +103,16 @@ async def _require_org_id() -> str:
 
 ## Code Patterns
 
-### EntityManager Pattern
+### Native Graph Runtime Pattern
 
-Always create EntityManager with explicit org context:
+Always resolve graph helpers with explicit org context:
 
 ```python
-from sibyl_core.graph import GraphClient, EntityManager
+from sibyl_core.services.native_graph import get_native_graph_runtime
 
-client = await GraphClient.create()
+runtime = await get_native_graph_runtime(str(org_id))
 
-# CORRECT - explicit org context
-manager = EntityManager(client, group_id=str(org_id))
-
-# WRONG - no org context
-manager = EntityManager(client, group_id="")  # Raises ValueError
+manager = runtime.entity_manager
 ```
 
 ### Query Pattern

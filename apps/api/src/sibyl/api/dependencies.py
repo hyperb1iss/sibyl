@@ -145,6 +145,6 @@ async def get_group_id(
     without a full manager.
 
     Returns:
-        Organization ID as string (used as FalkorDB graph namespace)
+        Organization ID as string (used as the graph group namespace)
     """
     return str(org.id)
