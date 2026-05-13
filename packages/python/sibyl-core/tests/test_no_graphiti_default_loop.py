@@ -31,6 +31,11 @@ os.environ["SIBYL_NATIVE_WRITE"] = "enabled"
 async def main():
     from sibyl_core.models.context import ContextLayer
     from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+    from sibyl_core.tasks.dependencies import (
+        get_blocking_tasks,
+        get_task_dependencies,
+        suggest_task_order,
+    )
     from sibyl_core.services.native_graph import (
         NativeEntityManager,
         NativeGraphRuntime,
@@ -208,6 +213,18 @@ async def main():
         )
         assert cycles.success, cycles.message
         assert cycles.data["has_cycles"] is True
+
+        dependencies = await get_task_dependencies(runtime.client, task_a.id, group_id)
+        assert dependencies.dependencies == [task_b.id]
+        assert dependencies.blockers == [task_b.id]
+
+        blocking = await get_blocking_tasks(runtime.client, task_b.id, group_id)
+        assert blocking.dependencies == [task_a.id]
+        assert blocking.blockers == [task_a.id]
+
+        suggested_order = await suggest_task_order(runtime.client, group_id, project_id=project_id)
+        assert sorted(suggested_order.unordered_tasks) == sorted([task_a.id, task_b.id])
+        assert suggested_order.warnings
 
         doc_links = await graph_integration.GraphIntegrationService(
             runtime.client,

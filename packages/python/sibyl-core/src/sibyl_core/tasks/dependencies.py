@@ -49,7 +49,19 @@ class TaskOrderResult:
 def _get_graph_managers(
     client: "GraphClient",
     organization_id: str,
-) -> tuple["EntityManager", "RelationshipManager"]:
+) -> tuple[Any, Any]:
+    from sibyl_core.services.native_graph import (
+        NativeEntityManager,
+        NativeRelationshipManager,
+        NativeSurrealGraphClient,
+    )
+
+    if isinstance(client, NativeSurrealGraphClient):
+        return (
+            NativeEntityManager(client, group_id=organization_id),
+            NativeRelationshipManager(client, group_id=organization_id),
+        )
+
     from sibyl_core.graph.entities import EntityManager
     from sibyl_core.graph.relationships import RelationshipManager
 
