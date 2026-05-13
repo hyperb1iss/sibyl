@@ -1,6 +1,7 @@
 """Tests for task workflow state machine and estimation."""
 
 import builtins
+import json
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -484,6 +485,33 @@ class TestWorkflowEngine:
         assert result.branch_name is not None
         assert "abcd1234" in result.branch_name
         assert "add-user-authentication" in result.branch_name
+
+    def test_entity_to_task_flattens_nested_json_metadata(
+        self, workflow_engine: TaskWorkflowEngine
+    ) -> None:
+        """Task hydration accepts native Surreal metadata stored as JSON."""
+        entity = make_entity(
+            entity_id="task_nested_metadata",
+            name="Nested metadata task",
+            metadata={
+                "metadata": json.dumps(
+                    {
+                        "status": "doing",
+                        "project_id": "project_native",
+                        "priority": "high",
+                        "assignees": ["nova"],
+                    }
+                )
+            },
+        )
+
+        task = workflow_engine._entity_to_task(entity)
+
+        assert task.status == TaskStatus.DOING
+        assert task.project_id == "project_native"
+        assert task.priority == "high"
+        assert task.assignees == ["nova"]
+        assert "metadata" not in task.metadata
 
     @pytest.mark.asyncio
     async def test_block_task_adds_blocker(

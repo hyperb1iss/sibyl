@@ -1,5 +1,6 @@
 """Task workflow engine for status transitions and automations."""
 
+import json
 import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -37,6 +38,28 @@ def _first_record_id(result: object) -> object | None:
     if not isinstance(first, dict):
         return None
     return cast("dict[str, object]", first).get("id")
+
+
+def _metadata_mapping(value: object) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return {str(key): nested for key, nested in value.items()}
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, dict):
+            return {str(key): nested for key, nested in parsed.items()}
+    return None
+
+
+def _task_metadata(value: object) -> dict[str, Any]:
+    metadata = _metadata_mapping(value) or {}
+    nested_metadata = _metadata_mapping(metadata.get("metadata"))
+    if nested_metadata is not None:
+        metadata.pop("metadata", None)
+        metadata = nested_metadata | metadata
+    return metadata
 
 
 # =============================================================================
@@ -911,7 +934,7 @@ END;""",
             return entity
 
         # Extract task-specific fields from metadata, excluding fields we pass explicitly
-        metadata = entity.metadata or {}
+        metadata = _task_metadata(entity.metadata)
         excluded_keys = {
             "id",
             "entity_type",
@@ -919,6 +942,7 @@ END;""",
             "description",
             "name",
             "content",
+            "metadata",
             "created_at",
             "updated_at",
         }
@@ -933,6 +957,7 @@ END;""",
             content=entity.content,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
+            metadata=metadata,
             # Task-specific fields from metadata
             **task_fields,
         )

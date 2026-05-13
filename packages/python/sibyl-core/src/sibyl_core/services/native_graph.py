@@ -881,14 +881,18 @@ def _namespace_for_group(prefix: str, group_id: str) -> str:
 def _entity_from_row(row: SurrealRecord) -> Entity:
     attributes = row.get("attributes")
     metadata = dict(attributes) if isinstance(attributes, dict) else {}
-    raw_metadata = metadata.get("metadata")
+    raw_metadata = metadata.get("metadata", row.get("metadata"))
     if isinstance(raw_metadata, str):
         try:
             parsed = json.loads(raw_metadata)
         except json.JSONDecodeError:
             parsed = None
         if isinstance(parsed, dict):
-            metadata.update({str(key): value for key, value in parsed.items()})
+            metadata.pop("metadata", None)
+            metadata = {str(key): value for key, value in parsed.items()} | metadata
+    elif isinstance(raw_metadata, dict):
+        metadata.pop("metadata", None)
+        metadata = {str(key): value for key, value in raw_metadata.items()} | metadata
     for key in ("project_id", "epic_id", "task_id", "status", "priority", "complexity", "feature"):
         value = row.get(key)
         if value is not None and metadata.get(key) is None:

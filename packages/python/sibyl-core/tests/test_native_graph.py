@@ -196,6 +196,11 @@ async def test_native_graph_writes_entities_and_relationships_without_graphiti(
             )
         )
 
+        fetched_task = await entity_manager.get("task_native_one")
+        assert "metadata" not in fetched_task.metadata
+        assert fetched_task.metadata["status"] == "todo"
+        assert fetched_task.metadata["project_id"] == "project_native"
+
         filtered = await entity_manager.list_by_type(
             EntityType.TASK,
             project_id="project_native",
