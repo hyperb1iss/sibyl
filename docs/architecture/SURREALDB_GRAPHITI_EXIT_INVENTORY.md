@@ -23,6 +23,11 @@ adapter package as one named compatibility surface.
   Surreal graph runtime without Graphiti edge ops.
 - `health` and `stats`: org-scoped MCP health checks and graph stats count native Surreal entity
   records without entering the compatibility graph service.
+- `manage`: task updates, task prioritization, dependency cycle detection, and source graph-linking
+  orchestration bind native Surreal managers by default. Test-only compatibility factories can still
+  be patched for legacy unit coverage.
+- `link_graph` and crawler graph integration: document/entity linking creates document entities and
+  `DOCUMENTED_IN` relationships through native Surreal managers by default.
 - `reflect`: persisted reflection sources and candidates write native graph records when
   `SIBYL_NATIVE_WRITE=enabled`. Review-mode raw candidate storage remains the explicit review path.
 - Graphiti remains only in named compatibility, compare-mode, admin, and migration surfaces until
@@ -163,8 +168,9 @@ source metadata.
 ## Exit Gate
 
 Wave 6 exits when generated inventory and this hand-authored inventory agree, native mode owns the
-default `remember`, `recall`, `context`, `wake`, `explore`, `temporal`, `health`, and `reflect`
-loops, and a no-Graphiti smoke test blocks Graphiti imports for those flows.
+default `remember`, `recall`, `context`, `wake`, `explore`, `temporal`, `health`, `manage`,
+`link_graph`, and `reflect` loops, and a no-Graphiti smoke test blocks Graphiti imports for those
+flows.
 
 ## Dependency Boundary
 
@@ -187,8 +193,9 @@ Verify:
 The import-blocking smoke test is now the default-loop proof alongside `moon run inventory-check`.
 It starts a fresh Python process, blocks `graphiti_core` imports, and exercises native Surreal
 memory writes, wake/recall context retrieval, related expansion, temporal history, health/stats,
+manage task updates, prioritization, dependency cycle detection, document graph-link helpers,
 persisted reflection, CLI import, default MCP tool-module imports, MCP server construction, API job
-import, and prompt-hook import.
+import, crawler graph-integration and pipeline imports, and prompt-hook import.
 
 Smoke command:
 
@@ -207,13 +214,17 @@ Default-loop cases:
 - `explore`: native entity listing filters through direct Surreal manager reads.
 - `temporal`: native relationship history reads source/target names from `relates_to`.
 - `health/stats`: native graph health and entity counts run through the Surreal runtime.
+- `manage`: native task updates, project prioritization, and dependency cycle detection run without
+  Graphiti manager construction.
+- `link_graph`: document graph-link helper writes document entities and relationships through native
+  Surreal managers.
 - `reflect`: persisted reflection runs with `SIBYL_NATIVE_WRITE=enabled`.
 - `entrypoints`: CLI, default MCP tool modules, MCP server construction, API job, and prompt-hook
-  imports stay Graphiti-free.
+  imports stay Graphiti-free, including crawler graph-integration and pipeline imports.
 
 Closure condition:
 
 - The smoke test installs an import blocker for `graphiti_core`, exercises the core default-loop
-  cases plus native explore, temporal, health/stats, default entrypoints, and default MCP
-  tool-module imports with native flags, and fails on any import or construction path that reaches
-  Graphiti.
+  cases plus native explore, temporal, health/stats, manage actions, document graph-link helpers,
+  default entrypoints, and default MCP tool-module imports with native flags, and fails on any
+  import or construction path that reaches Graphiti.

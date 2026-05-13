@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import structlog
@@ -32,9 +32,13 @@ from sibyl_core.models.entities import Entity, EntityType, Relationship, Relatio
 if TYPE_CHECKING:
     from uuid import UUID
 
-    from sibyl_core.graph.client import GraphClient
-    from sibyl_core.graph.entities import EntityManager
-    from sibyl_core.graph.relationships import RelationshipManager
+    from sibyl_core.services.native_graph import (
+        NativeEntityManager as EntityManager,
+        NativeGraphRuntime,
+        NativeRelationshipManager as RelationshipManager,
+    )
+
+    GraphClient = Any
 
 log = structlog.get_logger()
 
@@ -49,15 +53,21 @@ _EXTRACTED_TYPE_MAP: dict[str, EntityType] = {
 
 
 def _entity_manager(client: GraphClient, group_id: str) -> EntityManager:
-    from sibyl_core.graph.entities import EntityManager
+    from sibyl_core.services.native_graph import NativeEntityManager
 
-    return EntityManager(client, group_id=group_id)
+    return NativeEntityManager(client, group_id=group_id)
 
 
 def _relationship_manager(client: GraphClient, group_id: str) -> RelationshipManager:
-    from sibyl_core.graph.relationships import RelationshipManager
+    from sibyl_core.services.native_graph import NativeRelationshipManager
 
-    return RelationshipManager(client, group_id=group_id)
+    return NativeRelationshipManager(client, group_id=group_id)
+
+
+async def get_graph_runtime(organization_id: str) -> NativeGraphRuntime:
+    from sibyl_core.services.native_graph import get_native_graph_runtime
+
+    return await get_native_graph_runtime(organization_id)
 
 
 async def create_graph_integration_service(
@@ -66,11 +76,9 @@ async def create_graph_integration_service(
     extract_entities: bool = True,
     create_new_entities: bool = False,
 ) -> GraphIntegrationService:
-    from sibyl_core.graph.client import get_graph_client
-
-    graph_client = await get_graph_client()
+    runtime = await get_graph_runtime(organization_id)
     return GraphIntegrationService(
-        graph_client,
+        runtime.client,
         organization_id,
         extract_entities=extract_entities,
         create_new_entities=create_new_entities,
@@ -583,6 +591,9 @@ class GraphIntegrationService:
             self.entity_manager = _entity_manager(self.graph_client, self.organization_id)
         return self.entity_manager
 
+    def get_entity_manager(self) -> EntityManager:
+        return self._get_entity_manager()
+
     def _get_relationship_manager(self) -> RelationshipManager:
         if self.relationship_manager is None:
             self.relationship_manager = _relationship_manager(
@@ -719,7 +730,9 @@ class GraphIntegrationService:
             return stats
 
         # Extract entities from chunks
-        chunk_data = [(chunk.content, chunk.context, str(chunk.id)) for chunk in chunks]
+        chunk_data: list[tuple[str, str | None, str | None]] = [
+            (chunk.content, chunk.context, str(chunk.id)) for chunk in chunks
+        ]
 
         extracted = await self.extractor.extract_batch(chunk_data)
         stats.entities_extracted = len(extracted)
@@ -872,13 +885,10 @@ async def integrate_document_with_graph(
     Returns:
         IntegrationStats
     """
-    from sibyl_core.graph.client import get_graph_client
-
     try:
-        graph_client = await get_graph_client()
+        service = await create_graph_integration_service(organization_id)
     except Exception as e:
         log.warning("Graph not available for integration", error=str(e))
         return IntegrationStats()
 
-    service = GraphIntegrationService(graph_client, organization_id)
     return await service.process_chunks(chunks, source_name)

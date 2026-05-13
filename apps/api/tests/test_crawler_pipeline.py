@@ -135,6 +135,42 @@ async def test_process_document_treats_runtime_duplicate_as_race() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_uses_native_graph_integration_service() -> None:
+    service = MagicMock()
+    entity_manager = MagicMock()
+    service.get_entity_manager.return_value = entity_manager
+    crawler = MagicMock()
+    crawler.start = AsyncMock()
+    crawler.stop = AsyncMock()
+    pipeline = IngestionPipeline(
+        "org-native-graph",
+        generate_embeddings=False,
+        integrate_with_graph=True,
+    )
+
+    with (
+        patch("sibyl.crawler.pipeline.CrawlerService", return_value=crawler),
+        patch(
+            "sibyl.crawler.pipeline.create_graph_integration_service",
+            AsyncMock(return_value=service),
+        ) as create_service,
+    ):
+        await pipeline.start()
+        await pipeline.stop()
+
+    create_service.assert_awaited_once_with(
+        "org-native-graph",
+        extract_entities=True,
+        create_new_entities=False,
+    )
+    service.get_entity_manager.assert_called_once_with()
+    assert pipeline._graph_integration is service
+    assert pipeline._entity_manager is entity_manager
+    crawler.start.assert_awaited_once()
+    crawler.stop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_reingest_source_uses_runtime_lookup() -> None:
     source = CrawlSourceRecord(
         id=uuid4(),

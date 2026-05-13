@@ -13,6 +13,7 @@ import asyncio
 import builtins
 import os
 import sys
+import uuid
 
 original_import = builtins.__import__
 
@@ -29,7 +30,7 @@ os.environ["SIBYL_NATIVE_WRITE"] = "enabled"
 
 async def main():
     from sibyl_core.models.context import ContextLayer
-    from sibyl_core.models.entities import Relationship, RelationshipType
+    from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
     from sibyl_core.services.native_graph import (
         NativeEntityManager,
         NativeGraphRuntime,
@@ -44,9 +45,11 @@ async def main():
     import sibyl_core.tools.core as core_module
     import sibyl_core.tools.explore as explore_module
     import sibyl_core.tools.health as health_module
+    import sibyl_core.tools.manage as manage_module
     import sibyl_core.tools.reflect as reflect_module
     import sibyl_core.tools.search as search_module
     import sibyl_core.tools.temporal as temporal_module
+    import sibyl.crawler.graph_integration as graph_integration
 
     group_id = "no-graphiti-default-loop"
     principal_id = "principal-no-graphiti"
@@ -71,6 +74,7 @@ async def main():
     context_module.get_native_graph_runtime = runtime_factory
     explore_module.get_graph_runtime = runtime_factory
     health_module.get_graph_runtime = runtime_factory
+    manage_module.get_graph_runtime = runtime_factory
     native_retrieval.get_native_graph_runtime = runtime_factory
     native_memory.get_native_graph_runtime = runtime_factory
     search_module.get_graph_runtime = runtime_factory
@@ -109,6 +113,50 @@ async def main():
                 },
             )
         )
+        task_a = Entity(
+            id="task_no_graphiti_manage_a",
+            entity_type=EntityType.TASK,
+            name="No Graphiti Manage Task A",
+            description="Manage tool native task A.",
+            organization_id=group_id,
+            metadata={
+                "project_id": project_id,
+                "status": "todo",
+                "priority": "high",
+                "task_order": 2,
+            },
+        )
+        task_b = Entity(
+            id="task_no_graphiti_manage_b",
+            entity_type=EntityType.TASK,
+            name="No Graphiti Manage Task B",
+            description="Manage tool native task B.",
+            organization_id=group_id,
+            metadata={
+                "project_id": project_id,
+                "status": "todo",
+                "priority": "medium",
+                "task_order": 1,
+            },
+        )
+        await runtime.entity_manager.create_direct(task_a)
+        await runtime.entity_manager.create_direct(task_b)
+        await runtime.relationship_manager.create(
+            Relationship(
+                id="rel_no_graphiti_manage_dep_a_b",
+                relationship_type=RelationshipType.DEPENDS_ON,
+                source_id=task_a.id,
+                target_id=task_b.id,
+            )
+        )
+        await runtime.relationship_manager.create(
+            Relationship(
+                id="rel_no_graphiti_manage_dep_b_a",
+                relationship_type=RelationshipType.DEPENDS_ON,
+                source_id=task_b.id,
+                target_id=task_a.id,
+            )
+        )
 
         search = await core_module.search(
             "native surreal recall",
@@ -136,6 +184,42 @@ async def main():
         )
         assert temporal_edge.source_name == "No Graphiti Default Loop Decision"
         assert temporal_edge.target_name == project_title
+
+        updated = await manage_module.manage(
+            action="update_task",
+            entity_id=task_a.id,
+            data={"status": "doing"},
+            organization_id=group_id,
+        )
+        assert updated.success, updated.message
+
+        prioritized = await manage_module.manage(
+            action="prioritize",
+            entity_id=project_id,
+            organization_id=group_id,
+        )
+        assert prioritized.success, prioritized.message
+        assert prioritized.data["tasks"][0]["id"] == task_a.id
+
+        cycles = await manage_module.manage(
+            action="detect_cycles",
+            entity_id=project_id,
+            organization_id=group_id,
+        )
+        assert cycles.success, cycles.message
+        assert cycles.data["has_cycles"] is True
+
+        doc_links = await graph_integration.GraphIntegrationService(
+            runtime.client,
+            group_id,
+            extract_entities=False,
+        ).create_doc_relationships(
+            uuid.UUID("00000000-0000-0000-0000-000000000123"),
+            [str(remembered.id)],
+            document_title="No Graphiti Docs",
+            document_url="https://docs.example.test/no-graphiti",
+        )
+        assert doc_links == 1
 
         health = await core_module.get_health(organization_id=group_id)
         assert health["status"] == "healthy"
@@ -233,6 +317,7 @@ os.environ["SIBYL_STORE"] = "surreal"
 
 cli_main = importlib.import_module("sibyl_cli.main")
 import sibyl.jobs.entities
+import sibyl.crawler.pipeline
 import sibyl_core.tools.admin
 import sibyl_core.tools.conflicts
 import sibyl_core.tools.explore
@@ -240,6 +325,7 @@ import sibyl_core.tools.health
 import sibyl_core.tools.manage
 import sibyl_core.tools.search
 import sibyl_core.tools.temporal
+import sibyl.crawler.graph_integration
 from sibyl.server import create_mcp_server
 
 assert cli_main.app is not None

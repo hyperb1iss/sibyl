@@ -583,6 +583,42 @@ class NativeRelationshipManager:
             results.append((entity, _relationship_from_row(row)))
         return results
 
+    async def list_all(
+        self,
+        relationship_types: Sequence[RelationshipType] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Relationship]:
+        if limit <= 0:
+            return []
+        type_values = [rel_type.value for rel_type in relationship_types or ()]
+        type_clause = "AND name IN $relationship_types" if type_values else ""
+        rows = normalize_records(
+            await self._client.execute_query(
+                """
+                SELECT uuid,
+                       name,
+                       fact,
+                       attributes,
+                       created_at,
+                       in.uuid AS source_uuid,
+                       out.uuid AS target_uuid
+                FROM relates_to
+                WHERE group_id = $group_id
+                """
+                + type_clause
+                + """
+                ORDER BY created_at DESC, uuid DESC
+                LIMIT $limit START $offset;
+                """,
+                group_id=self._group_id,
+                relationship_types=type_values,
+                limit=max(int(limit), 1),
+                offset=max(int(offset), 0),
+            )
+        )
+        return [_relationship_from_row(row) for row in rows]
+
     async def delete_between(
         self,
         source_id: str,

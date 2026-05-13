@@ -1064,8 +1064,8 @@ class TestSourceActions:
                 AsyncMock(return_value=[chunk]),
             ) as list_chunks,
             patch(
-                "sibyl_core.graph.client.get_graph_client",
-                AsyncMock(return_value=graph_client),
+                "sibyl_core.tools.manage.get_graph_runtime",
+                AsyncMock(return_value=MagicMock(client=graph_client)),
             ),
             patch(
                 "sibyl_core.tools.manage.GraphIntegrationService",
@@ -1441,6 +1441,8 @@ class TestAnalysisActions:
                 mock_client,
                 "org_123",
                 project_id="project_123",
+                entity_manager=mock_entity_manager,
+                relationship_manager=mock_rel_manager,
             )
 
 

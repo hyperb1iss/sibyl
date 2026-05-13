@@ -617,9 +617,9 @@ class TestConvenienceFunctions:
         # Patch at the import location inside the function
         with (
             patch(
-                "sibyl_core.graph.client.get_graph_client",
+                "sibyl.crawler.graph_integration.get_graph_runtime",
                 new_callable=AsyncMock,
-                return_value=mock_client,
+                return_value=MagicMock(client=mock_client),
             ),
             patch.object(
                 GraphIntegrationService, "process_chunks", new_callable=AsyncMock
@@ -643,7 +643,7 @@ class TestConvenienceFunctions:
 
         # Patch at the import location inside the function
         with patch(
-            "sibyl_core.graph.client.get_graph_client",
+            "sibyl.crawler.graph_integration.get_graph_runtime",
             new_callable=AsyncMock,
             side_effect=Exception("Graph unavailable"),
         ):

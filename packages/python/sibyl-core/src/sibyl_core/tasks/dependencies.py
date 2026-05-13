@@ -319,10 +319,13 @@ async def get_blocking_tasks(
 
 
 async def detect_dependency_cycles(
-    client: "GraphClient",
+    client: "GraphClient | None",
     organization_id: str,
     project_id: str | None = None,
     max_depth: int = 10,
+    *,
+    entity_manager: "EntityManager | None" = None,
+    relationship_manager: "RelationshipManager | None" = None,
 ) -> CycleResult:
     """Detect circular dependencies in the task graph.
 
@@ -339,7 +342,10 @@ async def detect_dependency_cycles(
     log.info("detect_dependency_cycles", project_id=project_id, max_depth=max_depth)
 
     try:
-        entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
+        if entity_manager is None or relationship_manager is None:
+            if client is None:
+                raise ValueError("client required when graph managers are not provided")
+            entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
         tasks = await _list_task_entities(entity_manager, project_id=project_id)
         task_ids = {task.id for task in tasks if getattr(task, "id", None)}
         rows = await _list_dependency_relationships(

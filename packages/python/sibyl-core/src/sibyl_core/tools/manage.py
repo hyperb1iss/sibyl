@@ -12,7 +12,7 @@ DEPRECATION NOTICE:
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from importlib import import_module
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 
@@ -28,16 +28,25 @@ from sibyl_core.services.crawl_sources import (
 from sibyl_core.services.link_graph_status import get_link_graph_status_data
 from sibyl_core.tasks.dependencies import detect_dependency_cycles
 
-if TYPE_CHECKING:
-    from sibyl_core.services.graph_runtime import ActiveGraphRuntime
-
 log = structlog.get_logger()
 
 
-async def _default_get_graph_client() -> Any:
-    from sibyl_core.services import get_graph_client as _service_get_graph_client
+@dataclass(frozen=True, slots=True)
+class ManageGraphRuntime:
+    client: Any
+    entity_manager: Any
+    relationship_manager: Any
 
-    return await _service_get_graph_client()
+
+async def _default_get_graph_client(group_id: str | None = None) -> Any:
+    from sibyl_core.services.native_graph import (
+        get_native_graph_client,
+        prepare_native_graph_schema,
+    )
+
+    client = await get_native_graph_client(str(group_id or "default"))
+    await prepare_native_graph_schema(client)
+    return client
 
 
 def _compat_entity_manager(*args: Any, **kwargs: Any) -> Any:
@@ -53,14 +62,26 @@ RelationshipManager = _compat_relationship_manager
 GraphIntegrationService: Any = None
 
 
-async def get_graph_client() -> Any:
-    return await _default_get_graph_client()
+async def get_graph_client(group_id: str | None = None) -> Any:
+    return await _default_get_graph_client(group_id)
 
 
-async def get_graph_runtime(group_id: str) -> "ActiveGraphRuntime":
-    from sibyl_core.services.graph_runtime import ActiveGraphRuntime
+async def get_graph_runtime(group_id: str) -> ManageGraphRuntime:
+    # Tests patch these factories directly; unpatched runtime uses native managers.
+    if (
+        EntityManager is _compat_entity_manager
+        and RelationshipManager is _compat_relationship_manager
+    ):
+        from sibyl_core.services.native_graph import get_native_graph_runtime
 
-    client = await get_graph_client()
+        native_runtime = await get_native_graph_runtime(str(group_id))
+        return ManageGraphRuntime(
+            client=native_runtime.client,
+            entity_manager=native_runtime.entity_manager,
+            relationship_manager=native_runtime.relationship_manager,
+        )
+
+    client = await get_graph_client(str(group_id))
 
     entity_manager_factory = EntityManager
     if entity_manager_factory is _compat_entity_manager:
@@ -75,7 +96,7 @@ async def get_graph_runtime(group_id: str) -> "ActiveGraphRuntime":
     entity_manager = entity_manager_factory(client, group_id=str(group_id))
     relationship_manager = relationship_manager_factory(client, group_id=str(group_id))
 
-    return ActiveGraphRuntime(
+    return ManageGraphRuntime(
         client=client,
         entity_manager=entity_manager,
         relationship_manager=relationship_manager,
@@ -946,9 +967,9 @@ async def _link_graph(
         GraphIntegrationService = _GraphIntegrationService
 
     # Process chunks
-    client = await get_graph_client()
+    runtime = await get_graph_runtime(organization_id)
     integration = GraphIntegrationService(
-        client,
+        runtime.client,
         organization_id,
         create_new_entities=create_new_entities,
     )
@@ -1033,7 +1054,13 @@ async def _handle_analysis_action(
         return await _prioritize_tasks(entity_manager, relationship_manager, entity_id)
 
     if action == "detect_cycles":
-        return await _detect_cycles(client, organization_id, entity_id)
+        return await _detect_cycles(
+            client,
+            organization_id,
+            entity_id,
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
 
     if action == "suggest":
         return await _suggest_knowledge(entity_manager, relationship_manager, entity_id)
@@ -1157,12 +1184,17 @@ async def _detect_cycles(
     client: Any,
     organization_id: str,
     project_id: str,
+    *,
+    entity_manager: Any | None = None,
+    relationship_manager: Any | None = None,
 ) -> ManageResponse:
     """Detect circular dependencies in a project's task graph."""
     cycle_result = await detect_dependency_cycles(
         client,
         organization_id,
         project_id=project_id,
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
     )
     return ManageResponse(
         success=True,

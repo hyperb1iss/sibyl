@@ -599,8 +599,8 @@ class TestAnalysisActions:
         )
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager"),
-            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tools.manage.EntityManager") as entity_manager_cls,
+            patch("sibyl_core.tools.manage.RelationshipManager") as relationship_manager_cls,
             patch(
                 "sibyl_core.tools.manage.detect_dependency_cycles",
                 AsyncMock(return_value=cycle_result),
@@ -623,6 +623,8 @@ class TestAnalysisActions:
                 mock_client.return_value,
                 TEST_ORG_ID,
                 project_id="proj_123",
+                entity_manager=entity_manager_cls.return_value,
+                relationship_manager=relationship_manager_cls.return_value,
             )
 
 

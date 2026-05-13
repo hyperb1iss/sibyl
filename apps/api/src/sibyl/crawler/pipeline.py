@@ -22,7 +22,10 @@ import structlog
 
 from sibyl.crawler.chunker import ChunkStrategy, DocumentChunker
 from sibyl.crawler.embedder import EmbeddingService
-from sibyl.crawler.graph_integration import GraphIntegrationService
+from sibyl.crawler.graph_integration import (
+    GraphIntegrationService,
+    create_graph_integration_service,
+)
 from sibyl.crawler.local import LocalFileCrawler
 from sibyl.crawler.service import CrawlerService
 from sibyl.persistence.content_common import (
@@ -46,7 +49,7 @@ from sibyl_core.models.sources import SourceType
 if TYPE_CHECKING:
     from uuid import UUID
 
-    from sibyl_core.graph.entities import EntityManager
+    from sibyl_core.services.native_graph import NativeEntityManager as EntityManager
 
 
 class _RollbackSession(Protocol):
@@ -134,17 +137,12 @@ class IngestionPipeline:
 
         if self.integrate_with_graph:
             try:
-                from sibyl_core.graph.client import get_graph_client
-                from sibyl_core.graph.entities import EntityManager
-
-                graph_client = await get_graph_client()
-                self._graph_integration = GraphIntegrationService(
-                    graph_client,
+                self._graph_integration = await create_graph_integration_service(
                     self.organization_id,
                     extract_entities=True,
                     create_new_entities=False,  # Only link to existing entities for now
                 )
-                self._entity_manager = EntityManager(graph_client, group_id=self.organization_id)
+                self._entity_manager = self._graph_integration.get_entity_manager()
                 log.info(
                     "Graph integration enabled",
                     extract_entities=True,
