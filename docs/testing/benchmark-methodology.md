@@ -10,7 +10,7 @@ story.
 2. `moon run bench-live-smoke`
 3. `moon run core:bench-context -- --cases path/to/context_cases.json --label context-pack`
 4. `moon run bench-retrieval`
-5. `uv run python benchmarks/longmemeval_bench.py /path/to/longmemeval.json --mode hybrid`
+5. `uv run --with chromadb python benchmarks/longmemeval_bench.py /path/to/longmemeval.json --mode hybrid`
 
 ## What Each Command Measures
 
@@ -84,9 +84,9 @@ This is the offline baseline.
 
 Use this for offline comparison work, and label it clearly as such.
 
-The historical `benchmarks/results_sibyl_raw.json` and `benchmarks/results_sibyl_hybrid.json`
-artifacts are aggregate-only. Re-run the benchmark with the current script before using
-LongMemEval-style numbers as external AI-memory evidence.
+The committed `benchmarks/results_sibyl_raw.json` and `benchmarks/results_sibyl_hybrid.json`
+artifacts are full `longmemeval-offline-v2` outputs as of the v0.7 Surreal release work. Re-run the
+benchmark before using those numbers for a later release candidate.
 
 ## Threshold Gates
 

@@ -1,6 +1,6 @@
 # SurrealDB Graphiti Exit Benchmark Evidence
 
-- Status: partial evidence, external-suite full-result ledger required
+- Status: partial evidence, LongMemEval full offline artifacts present
 - Last updated: 2026-05-13
 - Related plan: `docs/architecture/SURREALDB_V07_GRAPHITI_EXIT_AND_PURE_SURREAL_PLAN.md`
 
@@ -59,30 +59,42 @@ Summary:
 
 This is useful debugging history. It is not a pre-Graphiti or legacy Graphiti baseline.
 
-### Offline LongMemEval-Style Aggregate Artifacts
+### Offline LongMemEval-Style Full Artifacts
 
 Artifacts:
 
 - `benchmarks/results_sibyl_raw.json`
 - `benchmarks/results_sibyl_hybrid.json`
 
-These are historical offline component artifacts generated before the benchmark runner wrote
-per-question records. They contain aggregate metrics only. They do not measure the live API path,
-default app startup, Graphiti construction, or post-native Surreal runtime behavior.
+These are full offline component artifacts generated with `longmemeval-offline-v2`. They include
+`case_results` for all `500` questions with question IDs, answer session IDs, ranked session IDs,
+and per-case metrics. They do not measure the live API path, default app startup, Graphiti
+construction, or post-native Surreal runtime behavior.
 
-They are useful internal baseline data, but they are not full AI-memory result records. Re-run
-`benchmarks/longmemeval_bench.py` with the current runner before citing LongMemEval-style results as
-external benchmark evidence; new artifacts must include `case_results` with answer IDs and ranked
-session IDs for every question.
+Source data came from the Hugging Face `xiaowu0162/longmemeval-cleaned` `longmemeval_s_cleaned.json`
+file, downloaded to `.moon/cache/benchmarks/longmemeval_s_cleaned.json` for the local run. The exact
+local wrapper used for both runs was:
 
-#### Aggregate Overall Results
+```bash
+uv run --with chromadb python benchmarks/longmemeval_bench.py \
+  .moon/cache/benchmarks/longmemeval_s_cleaned.json --mode <raw|hybrid>
+```
+
+Both artifacts passed:
+
+```bash
+moon run bench-gate -- benchmarks/results_sibyl_raw.json --profile ai-memory
+moon run bench-gate -- benchmarks/results_sibyl_hybrid.json --profile ai-memory
+```
+
+#### Overall Results
 
 | Mode   | Questions | Elapsed | Recall@5 | NDCG@5 | Recall@10 | NDCG@10 |
 | ------ | --------- | ------- | -------- | ------ | --------- | ------- |
 | raw    | 500       | 312.3s  | 0.966    | 0.888  | 0.982     | 0.889   |
-| hybrid | 500       | 270.8s  | 0.980    | 0.934  | 0.992     | 0.935   |
+| hybrid | 500       | 309.4s  | 0.980    | 0.934  | 0.992     | 0.935   |
 
-#### Aggregate Results By Question Type
+#### Results By Question Type
 
 | Mode   | Question Type             | Recall@5 | NDCG@5 | Recall@10 | NDCG@10 |
 | ------ | ------------------------- | -------- | ------ | --------- | ------- |
@@ -99,9 +111,10 @@ session IDs for every question.
 | hybrid | knowledge-update          | 1.000    | 0.980  | 1.000     | 0.980   |
 | hybrid | single-session-assistant  | 0.964    | 0.954  | 0.964     | 0.954   |
 
-The hybrid offline mode improves overall Recall@5, NDCG@5, Recall@10, NDCG@10, and elapsed time
-relative to raw mode. The one regression in this saved pair is the single-session-preference slice,
-where raw Recall@5 and NDCG remain higher.
+The hybrid offline mode improves overall Recall@5, NDCG@5, Recall@10, and NDCG@10 relative to raw
+mode. The one quality regression in this saved pair is the single-session-preference slice, where
+raw Recall@5 and NDCG remain higher. Runtime is effectively flat for this offline Chroma path, with
+raw at `312.3s` and hybrid at `309.4s`.
 
 ### Retrieval Component And Mini-Memory Gate
 
@@ -158,16 +171,16 @@ artifact, it belongs in planned coverage only.
 
 Current coverage:
 
-| Suite or comparison             | Local artifact status                                                       | Current use                                |
-| ------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------ |
-| Context-pack frozen suite       | Full current report in `.moon/cache/evals/`                                 | v0.7 default-loop quality gate             |
-| LongMemEval-style offline suite | Aggregate raw and hybrid JSON results in `benchmarks/`; full rerun required | Internal offline retrieval baseline        |
-| Live Graphiti vs native Surreal | Missing paired `bench-live` artifacts                                       | Required before public pre/post claims     |
-| LOCOMO-style long-memory suite  | No harness or result artifact found in this checkout                        | Future external-suite positioning evidence |
-| RULER-style long-context suite  | No harness or result artifact found in this checkout                        | Future long-context stress evidence        |
-| Mem0 comparison                 | No committed result artifact found in this checkout                         | Future competitor comparison, if cited     |
-| Zep comparison                  | No committed result artifact found in this checkout                         | Future competitor comparison, if cited     |
-| LangMem comparison              | No committed result artifact found in this checkout                         | Future competitor comparison, if cited     |
+| Suite or comparison             | Local artifact status                                                         | Current use                                |
+| ------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------ |
+| Context-pack frozen suite       | Full current report in `.moon/cache/evals/`                                   | v0.7 default-loop quality gate             |
+| LongMemEval-style offline suite | Full raw and hybrid JSON results in `benchmarks/`; both pass `ai-memory` gate | Citable offline retrieval baseline         |
+| Live Graphiti vs native Surreal | Missing paired `bench-live` artifacts                                         | Required before public pre/post claims     |
+| LOCOMO-style long-memory suite  | No harness or result artifact found in this checkout                          | Future external-suite positioning evidence |
+| RULER-style long-context suite  | No harness or result artifact found in this checkout                          | Future long-context stress evidence        |
+| Mem0 comparison                 | No committed result artifact found in this checkout                           | Future competitor comparison, if cited     |
+| Zep comparison                  | No committed result artifact found in this checkout                           | Future competitor comparison, if cited     |
+| LangMem comparison              | No committed result artifact found in this checkout                           | Future competitor comparison, if cited     |
 
 Until a suite has a raw artifact and full per-slice table, cite it only as planned coverage, not as
 evidence. If we decide to make benchmark claims in release notes, the missing rows above become
@@ -181,7 +194,7 @@ document.
 
 | Suite or comparison             | Required artifact pattern                                        | Current status | Required summary before citation                                          |
 | ------------------------------- | ---------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------- |
-| LongMemEval-style offline suite | `benchmarks/results_sibyl_<mode>.json`                           | aggregate-only | Overall, per-question-type metrics, and `case_results` for every question |
+| LongMemEval-style offline suite | `benchmarks/results_sibyl_<mode>.json`                           | citable        | Overall, per-question-type metrics, and `case_results` for every question |
 | LOCOMO-style long-memory suite  | `benchmarks/results/ai-memory/locomo_<engine>_<timestamp>.json`  | planned        | Overall score, per-category score, abstention/error rate, latency         |
 | RULER-style long-context suite  | `benchmarks/results/ai-memory/ruler_<engine>_<timestamp>.json`   | planned        | Task-level score, context length, failure modes, latency                  |
 | Mem0 comparison                 | `benchmarks/results/ai-memory/mem0_<engine>_<timestamp>.json`    | planned        | Overall quality, per-slice quality, ingestion latency, query latency      |
@@ -241,19 +254,18 @@ mode, data-ingestion path, and any tuning that changes retrieval quality or late
 ### Release Notes Rule
 
 Release notes can cite only the rows above that have full artifacts. For v0.7 today, that means the
-context-pack frozen suite is citable. The offline LongMemEval-style raw/hybrid files can be
-described only as historical aggregate internal baselines until re-run with full `case_results`.
-LOCOMO, RULER, Mem0, Zep, LangMem, and live Graphiti-vs-native claims stay out of release notes
-until their artifact rows exist.
+context-pack frozen suite and the offline LongMemEval-style raw/hybrid files are citable when their
+claim boundaries stay explicit. LOCOMO, RULER, Mem0, Zep, LangMem, and live Graphiti-vs-native
+claims stay out of release notes until their artifact rows exist.
 
 ### Missing Live Runtime Artifacts
 
 This checkout currently has no saved `benchmarks/results/*.json` live-runtime artifacts. That means
 there is no canonical `bench-live` legacy-vs-native pair to cite.
 
-No committed full-result LOCOMO, Mem0, Zep, LangMem, RULER, or other external AI-memory benchmark
-result files were found in this checkout. If we add those suites later, their raw result files
-should live next to the LongMemEval-style outputs and be summarized here with the same
+No committed full-result LOCOMO, Mem0, Zep, LangMem, RULER, or additional external AI-memory
+benchmark result files were found in this checkout. If we add those suites later, their raw result
+files should live next to the LongMemEval-style outputs and be summarized here with the same
 artifact-first rule.
 
 ## Claim Boundaries
@@ -261,11 +273,11 @@ artifact-first rule.
 Supported claims:
 
 - Native/compare context-pack evaluation passes the frozen 20-run suite with `160/160` cases and
-  `23.7 ms` p95 latency.
+  `23.8 ms` p95 latency.
 - The default memory loop and selected entrypoints can run with `graphiti_core` imports blocked when
   `moon run core:no-graphiti-smoke` is green.
-- Historical LongMemEval-style aggregate files show offline raw and hybrid summary metrics, but not
-  full per-question evidence.
+- Offline LongMemEval-style full artifacts show raw and hybrid component retrieval metrics across
+  500 questions, including per-question answer IDs and ranked session IDs.
 
 Unsupported claims until the missing pair exists:
 
@@ -273,7 +285,6 @@ Unsupported claims until the missing pair exists:
 - Native Surreal has better retrieval quality than Graphiti.
 - The failed `20260512_204628` context-pack artifact represents pre-Graphiti performance.
 - Offline LongMemEval-style files represent production runtime behavior.
-- Offline LongMemEval-style aggregate files are full external AI-memory benchmark receipts.
 
 ## Required Pre/Post Pair
 
@@ -320,6 +331,7 @@ Keep the raw artifact paths in release notes or PR notes whenever citing any num
 
 ## Release Rule
 
-v0.7 can ship on default-loop no-Graphiti proof plus the required context-pack gate. Any release
-note, README, or announcement that compares native Surreal against Graphiti must wait for the paired
+v0.7 can ship on default-loop no-Graphiti proof plus the required context-pack gate. The refreshed
+LongMemEval-style artifacts can be cited as offline component retrieval evidence. Any release note,
+README, or announcement that compares native Surreal against Graphiti must wait for the paired
 `bench-live` artifacts above.

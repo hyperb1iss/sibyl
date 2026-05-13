@@ -17,9 +17,9 @@ For live runtime evaluation against the production search stack, use
 `benchmarks/live_runtime_eval.py`.
 
 Usage:
-    uv run python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json
-    uv run python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json --limit 20
-    uv run python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json --mode hybrid
+    uv run --with chromadb python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json
+    uv run --with chromadb python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json --limit 20
+    uv run --with chromadb python benchmarks/longmemeval_bench.py /tmp/longmemeval-data/longmemeval_s_cleaned.json --mode hybrid
 """
 
 from __future__ import annotations
