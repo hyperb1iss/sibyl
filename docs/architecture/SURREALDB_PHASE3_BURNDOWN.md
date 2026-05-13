@@ -265,6 +265,25 @@ Exit criteria:
 
 ---
 
+## v0.8 A0 Baseline Receipt
+
+Recorded on 2026-05-13 at local commit `1de0b408`.
+
+- `moon run inventory-check inventory-typecheck inventory-test`: generated inventory current,
+  Graphiti exit inventory covers 21 import files, inventory typecheck passed, and 14 inventory tests
+  passed.
+- `moon run core:no-graphiti-smoke`: 2 passed.
+- `moon run :check`: 33 tasks completed, including 5 executed tasks and 28 cache hits. Core reported
+  1327 passed and 15 skipped; API reported 1639 passed and 1 skipped; CLI reported 156 passed; web
+  reported 88 passed.
+- `graphiti-core` remains optional through `sibyl-core[compatibility]` and the `sibyl-core` dev
+  dependency group, not default runtime dependencies.
+- Remote CI receipts are green for `origin/main` at `d2d3d926`: CI run `25801942331`, docs deploy
+  run `25801942466`, and scheduled nightly run `25791871706`. Local `main` is ahead of
+  `origin/main`, so these remote receipts do not cover local commits.
+
+---
+
 ## Dependency Removal Order
 
 1. Remove auth/RBAC legacy code.

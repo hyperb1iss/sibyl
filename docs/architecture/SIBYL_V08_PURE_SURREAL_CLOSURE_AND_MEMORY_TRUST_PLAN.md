@@ -32,13 +32,22 @@ without leaking the wrong context.
 
 ## 1. Current State
 
-Verified on 2026-05-13 after the v0.7 merge:
+Verified on 2026-05-13 during the A0 baseline lock:
 
-- `moon run inventory-check inventory-typecheck inventory-test` passes with 14 tests.
+- Local baseline commit: `1de0b408`.
+- Last pushed `origin/main` receipt commit: `d2d3d926`.
+- `moon run inventory-check inventory-typecheck inventory-test` passes; generated inventory is
+  current and covers 21 Graphiti import files; inventory tests report 14 passed.
 - `moon run core:no-graphiti-smoke` passes with 2 tests.
-- Main CI, docs deploy, and scheduled nightly regression are green.
+- `moon run :check` passes with 33 tasks completed, including 5 executed tasks and 28 cache hits.
+  Receipts include core 1327 passed and 15 skipped, API 1639 passed and 1 skipped, CLI 156 passed,
+  and web 88 passed.
+- Main CI is green on `origin/main` run ID `25801942331`. Docs deploy is green on run ID
+  `25801942466`. Scheduled nightly regression is green on run ID `25791871706`.
+- Local `main` is ahead of `origin/main`; the CI receipts cover the latest pushed main commit, and
+  the local receipts cover this A0 checkpoint.
 - Default `sibyl-core` runtime dependencies do not include `graphiti-core`; Graphiti is isolated to
-  the `compatibility` optional extra and dev/test dependency group.
+  the `compatibility` optional extra and `sibyl-core` dev dependency group.
 - Generated inventory still lists 21 Graphiti import files. They are classified as compatibility,
   admin, migration, or test scaffolding, not default-loop requirements.
 - Default compose, CI, and docs are already SurrealDB-first, with Redis/Valkey as explicit
@@ -128,6 +137,21 @@ Verify:
 - `moon run inventory-check inventory-typecheck inventory-test`
 - `moon run core:no-graphiti-smoke`
 - `moon run :check`
+
+A0 receipt, 2026-05-13:
+
+- Local commit: `1de0b408`.
+- `moon run inventory-check inventory-typecheck inventory-test`: current generated inventory, 21
+  covered Graphiti import files, 14 passed, inventory typecheck passed.
+- `moon run core:no-graphiti-smoke`: 2 passed.
+- `moon run :check`: 33 completed, including 5 executed tasks and 28 cache hits. Core reported 1327
+  passed and 15 skipped; API reported 1639 passed and 1 skipped; CLI reported 156 passed; web
+  reported 88 passed.
+- Dependency boundary: `graphiti-core` appears in `sibyl-core[compatibility]` and the `sibyl-core`
+  dev dependency group, not default `sibyl-core` runtime dependencies.
+- CI boundary: `origin/main` at `d2d3d926` has green CI and docs deploy runs from
+  2026-05-13T13:24:12Z plus a green scheduled nightly from 2026-05-13T09:56:01Z. Local `main`
+  remains ahead of `origin/main`, so this receipt does not claim CI coverage for the local commits.
 
 Exit criteria:
 
