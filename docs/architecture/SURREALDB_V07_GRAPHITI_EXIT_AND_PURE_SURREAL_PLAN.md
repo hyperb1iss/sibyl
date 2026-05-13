@@ -62,6 +62,7 @@ Benchmark release rule:
 - Do not make public AI memory benchmark or competitor claims until the cited suite has a raw
   artifact, overall metrics, per-slice metrics, corpus or dataset version, command, commit, runtime
   mode, and caveats recorded in `docs/architecture/SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md`.
+  Missing external suites stay planned coverage only.
 
 ## 2. Non-Goals
 
@@ -499,6 +500,8 @@ Tasks:
 - Audit docs for stale migration-era instructions.
 - Audit benchmark evidence for full artifact-backed AI memory results. Missing external suites must
   stay explicit, not implied by context-pack or LongMemEval-style evidence.
+- Check release notes against the benchmark evidence table so only suites with full result records
+  are cited.
 - Append release notes with supported upgrade and archive import paths.
 
 Verify:

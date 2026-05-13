@@ -142,6 +142,10 @@ comparison we cite. A one-line headline is not enough; each suite needs the raw 
 overall metrics, per-slice metrics, corpus or dataset version, command, commit, runtime mode, and
 known caveats.
 
+Every public benchmark claim must be traceable to a committed or archived artifact that a future
+release audit can re-open without guessing the corpus, mode, or code revision. If a suite has no
+artifact, it belongs in planned coverage only.
+
 Current coverage:
 
 | Suite or comparison             | Local artifact status                                | Current use                                |
@@ -158,6 +162,33 @@ Current coverage:
 Until a suite has a raw artifact and full per-slice table, cite it only as planned coverage, not as
 evidence. If we decide to make benchmark claims in release notes, the missing rows above become
 release-blocking for that claim.
+
+### Full Result Record Required Fields
+
+Each cited suite needs a result record with:
+
+- raw artifact path
+- benchmark suite name and version
+- corpus or dataset name and version
+- Sibyl commit
+- command
+- runtime mode, including graph engine and store
+- model and embedding configuration when the suite uses generated content or embeddings
+- overall metrics
+- per-slice metrics
+- elapsed time and latency metrics when available
+- pass/fail gate and profile
+- known caveats
+
+For competitor comparisons, the record also needs competitor version, hosted versus self-hosted
+mode, data-ingestion path, and any tuning that changes retrieval quality or latency.
+
+### Release Notes Rule
+
+Release notes can cite only the rows above that have full artifacts. For v0.7 today, that means the
+context-pack frozen suite and offline LongMemEval-style raw/hybrid results are citable. LOCOMO,
+RULER, Mem0, Zep, LangMem, and live Graphiti-vs-native claims stay out of release notes until their
+artifact rows exist.
 
 ### Missing Live Runtime Artifacts
 
