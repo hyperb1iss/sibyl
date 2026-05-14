@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from sibyl.cli import export as export_cli
@@ -128,6 +129,7 @@ def test_export_entities_pages_all_results(tmp_path: Path, monkeypatch) -> None:
     ]
 
 
+@pytest.mark.graphiti_compatibility
 def test_export_graph_pages_entities_and_relationships(tmp_path: Path, monkeypatch) -> None:
     output = tmp_path / "graph.json"
     entity_manager = MagicMock()

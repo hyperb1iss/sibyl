@@ -279,6 +279,7 @@ filterwarnings = [
     "ignore:unclosed.*:ResourceWarning",
 ]
 markers = [
+    "graphiti_compatibility: compatibility tests that require the Graphiti extra",
     "integration: marks tests as integration tests",
     "slow: marks tests as slow",
     "stress: marks tests as stress/load tests",

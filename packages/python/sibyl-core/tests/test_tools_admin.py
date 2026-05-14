@@ -223,6 +223,7 @@ class TestHealthAndStats:
     """Admin health/stat helpers should use paged entity seams."""
 
     @pytest.mark.asyncio
+    @pytest.mark.graphiti_compatibility
     async def test_health_check_uses_paged_entity_counts(self) -> None:
         """health_check should count through entity-manager pagination."""
         org_id = "00000000-0000-0000-0000-000000000111"
@@ -271,6 +272,7 @@ class TestHealthAndStats:
         entity_manager.search.assert_awaited_once()
 
     @pytest.mark.asyncio
+    @pytest.mark.graphiti_compatibility
     async def test_get_stats_uses_paged_entity_counts(self) -> None:
         """get_stats should sum counts from paged entity listings."""
         org_id = "00000000-0000-0000-0000-000000000111"
@@ -438,6 +440,7 @@ class TestRestoreBackup:
         assert create_args.kwargs == {"generate_embedding": False}
 
     @pytest.mark.asyncio
+    @pytest.mark.graphiti_compatibility
     async def test_restore_rehydrates_episodes_and_mentions(self) -> None:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()

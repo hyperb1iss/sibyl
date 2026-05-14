@@ -53,7 +53,40 @@ tasks:
 
   # Testing (unit tests only - e2e tests are in apps/e2e)
   test:
-    command: uv run pytest
+    command:
+      uv run pytest
+      -m "not graphiti_compatibility"
+      --ignore=tests/test_communities.py
+      --ignore=tests/test_e2e_workflows.py
+      --ignore=tests/test_graph_communities_lod.py
+      --ignore=tests/test_graph_entities.py
+      --ignore=tests/test_graph_relationships.py
+      --ignore=tests/test_harness.py
+      --ignore=tests/test_legacy_graph_persistence.py
+      --ignore=tests/test_tools_core.py
+    inputs:
+      - "@group(sources)"
+      - "@group(tests)"
+    options:
+      envFile: .env
+
+  graphiti-compatibility-test:
+    deps:
+      - ~:graphiti-compatibility-file-test
+      - ~:graphiti-compatibility-marked-test
+
+  graphiti-compatibility-file-test:
+    command:
+      uv run pytest
+      tests/test_communities.py
+      tests/test_e2e_workflows.py
+      tests/test_graph_communities_lod.py
+      tests/test_graph_entities.py
+      tests/test_graph_relationships.py
+      tests/test_harness.py
+      tests/test_legacy_graph_persistence.py
+      tests/test_tools_core.py
+      -v
     inputs:
       - "@group(sources)"
       - "@group(tests)"
@@ -89,6 +122,22 @@ tasks:
       - tests/test_auth_mcp_token_verifier.py
       - tests/test_mcp_oauth_session_refresh.py
       - tests/test_mcp_oauth_multi_org_selection.py
+    options:
+      envFile: .env
+
+  graphiti-compatibility-marked-test:
+    command:
+      uv run pytest
+      tests/test_cli_db.py
+      tests/test_cli_export.py
+      tests/test_models.py
+      tests/test_settings_api_key_loading.py
+      tests/test_tools_manage.py
+      -m graphiti_compatibility
+      -v
+    inputs:
+      - "@group(sources)"
+      - "@group(tests)"
     options:
       envFile: .env
 

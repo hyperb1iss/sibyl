@@ -1,5 +1,7 @@
 """Tests for Pydantic models."""
 
+import pytest
+
 from sibyl_core.models.entities import (
     Entity,
     EntityType,
@@ -61,6 +63,7 @@ class TestRelationshipModels:
         assert rel.weight == 0.5
 
 
+@pytest.mark.graphiti_compatibility
 class TestCypherInjectionPrevention:
     """Tests for Cypher injection prevention in relationship queries."""
 

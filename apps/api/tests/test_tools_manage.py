@@ -671,6 +671,7 @@ class TestEpicActions:
         assert "organization_id required" in result.message
 
     @pytest.mark.asyncio
+    @pytest.mark.graphiti_compatibility
     async def test_start_epic_success(self) -> None:
         """start_epic should update status to in_progress."""
         from sibyl_core.models.entities import EntityType
@@ -700,6 +701,7 @@ class TestEpicActions:
             mock_manager.update.assert_called_once_with("epic_123", {"status": "in_progress"})
 
     @pytest.mark.asyncio
+    @pytest.mark.graphiti_compatibility
     async def test_complete_epic_with_learnings(self) -> None:
         """complete_epic should capture learnings."""
         from sibyl_core.models.entities import EntityType
@@ -733,6 +735,7 @@ class TestEpicActions:
             assert call_args["learnings"] == "OAuth redirect URIs matter"
 
     @pytest.mark.asyncio
+    @pytest.mark.graphiti_compatibility
     async def test_archive_epic_with_reason(self) -> None:
         """archive_epic should archive with optional reason."""
         from sibyl_core.models.entities import EntityType
@@ -762,6 +765,7 @@ class TestEpicActions:
             assert "Superseded" in result.message
 
     @pytest.mark.asyncio
+    @pytest.mark.graphiti_compatibility
     async def test_update_epic_filters_allowed_fields(self) -> None:
         """update_epic should only allow specific fields."""
         from sibyl_core.models.entities import EntityType
@@ -798,6 +802,7 @@ class TestEpicActions:
             assert "invalid_field" not in call_args
 
     @pytest.mark.asyncio
+    @pytest.mark.graphiti_compatibility
     async def test_epic_not_found(self) -> None:
         """Epic action should fail if epic not found."""
         with (
@@ -819,6 +824,7 @@ class TestEpicActions:
             assert "not found" in result.message.lower()
 
     @pytest.mark.asyncio
+    @pytest.mark.graphiti_compatibility
     async def test_entity_not_epic_type(self) -> None:
         """Epic action should fail if entity is not an epic."""
         from sibyl_core.models.entities import EntityType

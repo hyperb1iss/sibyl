@@ -844,6 +844,7 @@ class TestVectorSearch:
         assert results == []
 
 
+@pytest.mark.graphiti_compatibility
 class TestGraphTraversal:
     """Test graph_traversal function."""
 
@@ -1181,6 +1182,7 @@ class TestHybridSearch:
         assert result.total == 5
 
     @pytest.mark.asyncio
+    @pytest.mark.graphiti_compatibility
     async def test_hybrid_search_uses_entity_manager_group_id_for_graph_traversal(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -1431,6 +1433,7 @@ class TestEdgeCases:
         assert config.similarity_threshold == 1.0
 
     @pytest.mark.asyncio
+    @pytest.mark.graphiti_compatibility
     async def test_graph_traversal_handles_manager_exception(
         self,
         monkeypatch: pytest.MonkeyPatch,

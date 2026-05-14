@@ -81,6 +81,64 @@ owner, and deletion or retention criterion.
   - Criteria: No default or fallback memory path constructs Graphiti or calls Graphiti model
     operation interfaces.
 
+## Compatibility Test Island
+
+Default test tasks avoid collecting the named Graphiti compatibility files and skip mixed-file cases
+marked `graphiti_compatibility`:
+
+- `moon run core:test`
+- `moon run api:test`
+- `moon run :check`
+
+The retained Graphiti test surface is opt-in:
+
+- `moon run core:graphiti-compatibility-test`
+- `moon run api:graphiti-compatibility-test`
+- `moon run graphiti-compatibility-test`
+
+Core compatibility tests:
+
+- `packages/python/sibyl-core/tests/graph/surreal`
+- `packages/python/sibyl-core/tests/test_graph_batch.py`
+- `packages/python/sibyl-core/tests/test_graph_client.py`
+- `packages/python/sibyl-core/tests/test_graph_entities.py`
+- `packages/python/sibyl-core/tests/test_graph_relationships.py`
+- `packages/python/sibyl-core/tests/test_graph_runtime_services.py`
+- `packages/python/sibyl-core/tests/test_log_safety.py`
+- `packages/python/sibyl-core/tests/test_migrate_archive.py`
+- `packages/python/sibyl-core/tests/test_search_interface.py`
+- `packages/python/sibyl-core/tests/test_surreal_authentication.py`
+- `packages/python/sibyl-core/tests/test_surreal_observability.py`
+
+Core marked compatibility tests:
+
+- `packages/python/sibyl-core/tests/test_models.py`
+- `packages/python/sibyl-core/tests/test_retrieval_advanced.py`
+- `packages/python/sibyl-core/tests/test_tools_admin.py`
+- `packages/python/sibyl-core/tests/test_tools_manage.py`
+
+API compatibility tests:
+
+- `apps/api/tests/test_communities.py`
+- `apps/api/tests/test_e2e_workflows.py`
+- `apps/api/tests/test_graph_communities_lod.py`
+- `apps/api/tests/test_graph_entities.py`
+- `apps/api/tests/test_graph_relationships.py`
+- `apps/api/tests/test_harness.py`
+- `apps/api/tests/test_legacy_graph_persistence.py`
+- `apps/api/tests/test_tools_core.py`
+
+API marked compatibility tests:
+
+- `apps/api/tests/test_cli_db.py`
+- `apps/api/tests/test_cli_export.py`
+- `apps/api/tests/test_models.py`
+- `apps/api/tests/test_settings_api_key_loading.py`
+- `apps/api/tests/test_tools_manage.py`
+
+These tests remain for archive, migration, graph admin, and compare/fallback coverage while the
+default runtime continues moving to native Surreal surfaces.
+
 ## Default Loop Position
 
 - `remember`: raw capture, summarized `sibyl add`, API entity creation, and async create jobs write

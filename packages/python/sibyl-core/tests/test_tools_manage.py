@@ -818,6 +818,7 @@ class TestAddNote:
 # =============================================================================
 
 
+@pytest.mark.graphiti_compatibility
 class TestEpicActions:
     """Test epic workflow actions."""
 
@@ -950,6 +951,7 @@ class TestEpicActions:
 # =============================================================================
 
 
+@pytest.mark.graphiti_compatibility
 class TestUpdateEpic:
     """Test update_epic action."""
 

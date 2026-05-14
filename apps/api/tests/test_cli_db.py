@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 from sibyl.cli import db as db_cli
@@ -28,6 +29,7 @@ def test_clear_requires_org_id() -> None:
     assert "--org-id is required for graph operations" in result.output
 
 
+@pytest.mark.graphiti_compatibility
 def test_clear_surreal_uses_org_scoped_graph_ops(monkeypatch) -> None:
     driver = MagicMock()
     driver.graph_ops = SimpleNamespace(clear_data=AsyncMock())
@@ -199,6 +201,7 @@ def test_restore_prepares_graph_runtime_before_restore(tmp_path: Path) -> None:
     prepare.assert_awaited_once_with("org-123", clean=False)
 
 
+@pytest.mark.graphiti_compatibility
 def test_prepare_graph_runtime_surreal_bootstraps_schema_and_clears_rows(
     monkeypatch,
 ) -> None:

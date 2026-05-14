@@ -159,6 +159,9 @@ invalid-argument-type = "ignore"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = ["-ra", "--strict-markers", "-v"]
+markers = [
+    "graphiti_compatibility: compatibility tests that require the Graphiti extra",
+]
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning",

@@ -245,12 +245,20 @@ tasks:
       - cli:test
       - web:test
 
+  graphiti-compatibility-test:
+    deps:
+      - core:graphiti-compatibility-test
+      - api:graphiti-compatibility-test
+
   inventory:
     command: uv run python tools/inventory/runtime_surface.py
     inputs:
       - tools/**/*.py
       - docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md
       - docs/research/rust-port/INVENTORY.md
+      - moon.yml
+      - apps/api/moon.yml
+      - packages/python/sibyl-core/moon.yml
       - apps/api/src/**/*.py
       - packages/python/sibyl-core/src/**/*.py
       - pyproject.toml
@@ -266,6 +274,9 @@ tasks:
       - tools/**/*.py
       - docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md
       - docs/research/rust-port/INVENTORY.md
+      - moon.yml
+      - apps/api/moon.yml
+      - packages/python/sibyl-core/moon.yml
       - apps/api/src/**/*.py
       - packages/python/sibyl-core/src/**/*.py
       - pyproject.toml
@@ -292,6 +303,9 @@ tasks:
       - tools/**/*.py
       - docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md
       - docs/research/rust-port/INVENTORY.md
+      - moon.yml
+      - apps/api/moon.yml
+      - packages/python/sibyl-core/moon.yml
       - apps/api/src/**/*.py
       - packages/python/sibyl-core/src/**/*.py
       - pyproject.toml

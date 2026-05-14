@@ -22,6 +22,42 @@ EXPECTED_WEBSOCKET_ROUTE_COUNT = 1
 EXPECTED_MCP_TOOL_COUNT = 8
 EXPECTED_MCP_RESOURCE_COUNT = 2
 EXPECTED_SQLMODEL_TABLE_COUNT = 0
+CORE_GRAPHITI_COMPATIBILITY_TESTS = (
+    "tests/graph/surreal",
+    "tests/test_graph_batch.py",
+    "tests/test_graph_client.py",
+    "tests/test_graph_entities.py",
+    "tests/test_graph_relationships.py",
+    "tests/test_graph_runtime_services.py",
+    "tests/test_log_safety.py",
+    "tests/test_migrate_archive.py",
+    "tests/test_search_interface.py",
+    "tests/test_surreal_authentication.py",
+    "tests/test_surreal_observability.py",
+)
+CORE_GRAPHITI_COMPATIBILITY_MARKED_TESTS = (
+    "tests/test_models.py",
+    "tests/test_retrieval_advanced.py",
+    "tests/test_tools_admin.py",
+    "tests/test_tools_manage.py",
+)
+API_GRAPHITI_COMPATIBILITY_TESTS = (
+    "tests/test_communities.py",
+    "tests/test_e2e_workflows.py",
+    "tests/test_graph_communities_lod.py",
+    "tests/test_graph_entities.py",
+    "tests/test_graph_relationships.py",
+    "tests/test_harness.py",
+    "tests/test_legacy_graph_persistence.py",
+    "tests/test_tools_core.py",
+)
+API_GRAPHITI_COMPATIBILITY_MARKED_TESTS = (
+    "tests/test_cli_db.py",
+    "tests/test_cli_export.py",
+    "tests/test_models.py",
+    "tests/test_settings_api_key_loading.py",
+    "tests/test_tools_manage.py",
+)
 
 
 def runtime_surface_with_graphiti(
@@ -91,6 +127,43 @@ def test_graphiti_exit_inventory_documents_allowlist_ownership() -> None:
         assert f"`{allowed.path}`" in inventory
         assert f"Owner: {allowed.owner}" in normalized_inventory
         assert allowed.criteria in normalized_inventory
+
+
+def test_graphiti_compatibility_test_island_is_named() -> None:
+    root_moon = (REPO_ROOT / "moon.yml").read_text(encoding="utf-8")
+    core_moon = (REPO_ROOT / "packages/python/sibyl-core/moon.yml").read_text(encoding="utf-8")
+    api_moon = (REPO_ROOT / "apps/api/moon.yml").read_text(encoding="utf-8")
+    root_pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    api_pyproject = (REPO_ROOT / "apps/api/pyproject.toml").read_text(encoding="utf-8")
+    inventory = GRAPHITI_EXIT_INVENTORY_PATH.read_text(encoding="utf-8")
+
+    assert "graphiti-compatibility-test:" in root_moon
+    assert "core:graphiti-compatibility-test" in root_moon
+    assert "api:graphiti-compatibility-test" in root_moon
+    assert "graphiti_compatibility:" in root_pyproject
+    assert "graphiti_compatibility:" in api_pyproject
+    assert '-m "not graphiti_compatibility"' in core_moon
+    assert "-m graphiti_compatibility" in core_moon
+    assert '-m "not graphiti_compatibility"' in api_moon
+    assert "-m graphiti_compatibility" in api_moon
+
+    for test_path in CORE_GRAPHITI_COMPATIBILITY_TESTS:
+        assert f"--ignore={test_path}" in core_moon
+        assert f"      {test_path}" in core_moon
+        assert f"`packages/python/sibyl-core/{test_path}`" in inventory
+
+    for test_path in CORE_GRAPHITI_COMPATIBILITY_MARKED_TESTS:
+        assert f"      {test_path}" in core_moon
+        assert f"`packages/python/sibyl-core/{test_path}`" in inventory
+
+    for test_path in API_GRAPHITI_COMPATIBILITY_TESTS:
+        assert f"--ignore={test_path}" in api_moon
+        assert f"      {test_path}" in api_moon
+        assert f"`apps/api/{test_path}`" in inventory
+
+    for test_path in API_GRAPHITI_COMPATIBILITY_MARKED_TESTS:
+        assert f"      {test_path}" in api_moon
+        assert f"`apps/api/{test_path}`" in inventory
 
 
 def test_graphiti_exit_inventory_tracks_no_graphiti_smoke_plan() -> None:
