@@ -126,6 +126,13 @@ def _parse_csv_ids(value: str | None) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _parse_id_args(values: list[str]) -> list[str]:
+    ids: list[str] = []
+    for value in values:
+        ids = _append_unique_ids(ids, _parse_csv_ids(value))
+    return ids
+
+
 def _append_unique_ids(existing: list[str], additions: list[str]) -> list[str]:
     seen = set(existing)
     combined = list(existing)
@@ -300,6 +307,76 @@ def _print_memory_audit_events(events: list[object]) -> None:
             _audit_id_summary(event.get("source_ids"), event.get("source_ids_truncated")),
             _audit_id_summary(event.get("derived_ids"), event.get("derived_ids_truncated")),
         )
+    console.print(table)
+
+
+def _preview_state(value: object) -> str:
+    return "allowed" if value is True else "denied"
+
+
+def _preview_target(scope: object, scope_key: object) -> str:
+    target = str(scope or "default")
+    if scope_key:
+        target = f"{target}:{scope_key}"
+    return target
+
+
+def _preview_id_summary(value: object) -> str:
+    if not isinstance(value, list) or not value:
+        return "-"
+    return ", ".join(str(item) for item in value)
+
+
+def _preview_count(value: object) -> str:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    return "0"
+
+
+def _preview_audit_id(data: dict[str, object]) -> str:
+    metadata = data.get("metadata")
+    if not isinstance(metadata, dict):
+        return ""
+    payload = cast("dict[str, object]", metadata)
+    for key in ("audit_id", "audit_event_id", "receipt_id"):
+        if audit_id := payload.get(key):
+            return str(audit_id)
+    return ""
+
+
+def _print_promotion_preview(data: dict[str, object]) -> None:
+    console.print("\n[bold]Promotion preview[/bold]\n")
+    table = create_table(None, "Field", "Value", expand=False)
+    table.add_row("State", _preview_state(data.get("allowed")))
+    table.add_row("Reason", str(data.get("reason") or ""))
+    table.add_row("Candidate", str(data.get("candidate_id") or ""))
+    table.add_row("Review", str(data.get("review_state") or ""))
+    table.add_row(
+        "Target",
+        _preview_target(data.get("promote_to_scope"), data.get("promote_to_scope_key")),
+    )
+    table.add_row("Sources", _preview_id_summary(data.get("raw_source_ids")))
+    table.add_row("Reasons", _preview_id_summary(data.get("policy_reasons")))
+    if audit_id := _preview_audit_id(data):
+        table.add_row("Audit", audit_id)
+    console.print(table)
+
+
+def _print_share_preview(data: dict[str, object]) -> None:
+    console.print("\n[bold]Share preview[/bold]\n")
+    table = create_table(None, "Field", "Value", expand=False)
+    table.add_row("State", _preview_state(data.get("allowed")))
+    table.add_row("Reason", str(data.get("reason") or ""))
+    table.add_row("Target", _preview_target(data.get("target_scope"), data.get("target_scope_key")))
+    table.add_row("Sources", _preview_id_summary(data.get("source_ids")))
+    table.add_row("Visible", _preview_id_summary(data.get("visible_source_ids")))
+    table.add_row("Denied", _preview_id_summary(data.get("denied_source_ids")))
+    table.add_row("Missing", _preview_id_summary(data.get("missing_source_ids")))
+    table.add_row("Redacted", _preview_count(data.get("redacted_count")))
+    table.add_row("Hidden relevant", _preview_count(data.get("hidden_but_relevant_count")))
+    table.add_row("Reasons", _preview_id_summary(data.get("policy_reasons")))
+    if audit_id := _preview_audit_id(data):
+        table.add_row("Audit", audit_id)
     console.print(table)
 
 
@@ -750,6 +827,128 @@ def memory_audit(
             _handle_client_error(e)
 
     run_memory_audit()
+
+
+@app.command("memory-promote")
+def memory_promote(
+    candidate_id: str = typer.Argument(..., help="Raw reflection candidate ID"),
+    preview: bool = typer.Option(False, "--preview", help="Preview without promoting"),
+    promote_to_scope: str | None = typer.Option(None, "--scope", help="Target memory scope"),
+    promote_to_scope_key: str | None = typer.Option(None, "--scope-key", help="Target scope key"),
+    domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    all_projects: bool = typer.Option(
+        False,
+        "--all-projects",
+        help="Do not auto-scope to the linked project",
+    ),
+    related_to: str | None = typer.Option(
+        None,
+        "--related-to",
+        help="Comma-separated graph IDs to relate after promotion",
+    ),
+    task: str | None = typer.Option(
+        None,
+        "--task",
+        help="Comma-separated task IDs to relate after promotion",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Preview reflection candidate promotion."""
+    if not preview:
+        error("memory-promote currently only supports --preview.")
+        raise typer.Exit(code=1)
+
+    effective_project = project or (None if all_projects else resolve_project_from_cwd())
+    target_scope_key = promote_to_scope_key
+    if promote_to_scope == "project" and target_scope_key is None:
+        target_scope_key = effective_project
+    related_ids = _append_unique_ids(_parse_csv_ids(related_to), _parse_csv_ids(task))
+
+    @run_async
+    async def run_memory_promote() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.preview_reflection_promotion(
+                    candidate_id=candidate_id,
+                    promote_to_scope=promote_to_scope,
+                    promote_to_scope_key=target_scope_key,
+                    domain=domain,
+                    project=effective_project,
+                    related_to=related_ids,
+                )
+            if json_output:
+                print_json(data)
+                return
+            _print_promotion_preview(cast("dict[str, object]", data))
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_memory_promote()
+
+
+@app.command("memory-share")
+def memory_share(
+    source_ids: Annotated[
+        list[str],
+        typer.Argument(help="Raw memory IDs to share-preview"),
+    ],
+    preview: bool = typer.Option(False, "--preview", help="Preview without sharing"),
+    target_scope: str | None = typer.Option(None, "--target-scope", help="Intended target scope"),
+    target_scope_key: str | None = typer.Option(None, "--target-key", help="Target scope key"),
+    recipient_organization_id: str | None = typer.Option(
+        None,
+        "--recipient-org",
+        help="Future recipient organization ID",
+    ),
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    all_projects: bool = typer.Option(
+        False,
+        "--all-projects",
+        help="Do not auto-scope to the linked project",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Preview memory sharing without enabling share writes."""
+    if not preview:
+        error("memory-share currently only supports --preview.")
+        raise typer.Exit(code=1)
+    if not target_scope:
+        error("Provide --target-scope for share preview.")
+        raise typer.Exit(code=1)
+
+    parsed_source_ids = _parse_id_args(source_ids)
+    if not parsed_source_ids:
+        error("Provide at least one raw memory ID.")
+        raise typer.Exit(code=1)
+
+    effective_project = project
+    if target_scope == "project" and effective_project is None and not all_projects:
+        effective_project = resolve_project_from_cwd()
+    resolved_target_key = target_scope_key
+    if target_scope == "project" and resolved_target_key is None:
+        resolved_target_key = effective_project
+    project_id = resolved_target_key if target_scope == "project" else project
+
+    @run_async
+    async def run_memory_share() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.preview_memory_share(
+                    source_ids=parsed_source_ids,
+                    target_scope=target_scope,
+                    target_scope_key=resolved_target_key,
+                    recipient_organization_id=recipient_organization_id,
+                    project_id=project_id,
+                )
+            if json_output:
+                print_json(data)
+                return
+            _print_share_preview(cast("dict[str, object]", data))
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_memory_share()
 
 
 @app.command("remember")

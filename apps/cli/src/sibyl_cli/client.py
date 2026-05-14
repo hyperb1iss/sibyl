@@ -882,6 +882,53 @@ class SibylClient:
             params["policy_allowed"] = policy_allowed
         return await self._request("GET", "/memory/audit", params=params)
 
+    async def preview_reflection_promotion(
+        self,
+        *,
+        candidate_id: str,
+        promote_to_scope: str | None = None,
+        promote_to_scope_key: str | None = None,
+        domain: str | None = None,
+        project: str | None = None,
+        related_to: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Preview reflection candidate promotion without mutating memory."""
+        data: dict[str, Any] = {
+            "candidate_id": candidate_id,
+            "related_to": related_to or [],
+        }
+        if promote_to_scope:
+            data["promote_to_scope"] = promote_to_scope
+        if promote_to_scope_key:
+            data["promote_to_scope_key"] = promote_to_scope_key
+        if domain:
+            data["domain"] = domain
+        if project:
+            data["project"] = project
+        return await self._request("POST", "/memory/reflection/promote/preview", json=data)
+
+    async def preview_memory_share(
+        self,
+        *,
+        source_ids: list[str],
+        target_scope: str,
+        target_scope_key: str | None = None,
+        recipient_organization_id: str | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Preview memory sharing without mutating memory."""
+        data: dict[str, Any] = {
+            "source_ids": source_ids,
+            "target_scope": target_scope,
+        }
+        if target_scope_key:
+            data["target_scope_key"] = target_scope_key
+        if recipient_organization_id:
+            data["recipient_organization_id"] = recipient_organization_id
+        if project_id:
+            data["project_id"] = project_id
+        return await self._request("POST", "/memory/share/preview", json=data)
+
     async def context_pack(
         self,
         goal: str,

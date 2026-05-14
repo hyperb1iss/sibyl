@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from typer.testing import CliRunner
 
 from sibyl_cli.client import SibylClientError
-from sibyl_cli.main import _derive_capture_title, app
+from sibyl_cli.main import _derive_capture_title, _parse_id_args, app
 
 
 class _FakeClientContext:
@@ -25,6 +25,14 @@ def test_derive_capture_title_truncates_cleanly() -> None:
     assert "  " not in title
     assert len(title) <= 72
     assert title.endswith("…")
+
+
+def test_parse_id_args_accepts_csv_and_positional_values() -> None:
+    assert _parse_id_args(["raw-1,raw-2", "raw-2", "raw-3"]) == [
+        "raw-1",
+        "raw-2",
+        "raw-3",
+    ]
 
 
 @patch("sibyl_cli.main.get_client")
@@ -686,6 +694,136 @@ def test_memory_audit_command_lists_events(mock_get_client: MagicMock) -> None:
         policy_allowed=True,
         limit=5,
     )
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_memory_promote_preview_command_renders_decision(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.preview_reflection_promotion = AsyncMock(
+        return_value={
+            "allowed": False,
+            "candidate_id": "candidate-1",
+            "reason": "scope_crossing_requires_promotion",
+            "review_state": "pending",
+            "promote_to_scope": "project",
+            "promote_to_scope_key": "project_123",
+            "raw_source_ids": ["source-1"],
+            "policy_reasons": ["scope_crossing_requires_promotion"],
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "memory-promote",
+            "candidate-1",
+            "--preview",
+            "--scope",
+            "project",
+            "--domain",
+            "sibyl",
+            "--related-to",
+            "plan_1",
+            "--task",
+            "task_1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Promotion preview" in result.stdout
+    assert "denied" in result.stdout
+    assert "candidate-1" in result.stdout
+    assert "project:project_123" in result.stdout
+    mock_client.preview_reflection_promotion.assert_awaited_once_with(
+        candidate_id="candidate-1",
+        promote_to_scope="project",
+        promote_to_scope_key="project_123",
+        domain="sibyl",
+        project="project_123",
+        related_to=["plan_1", "task_1"],
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.get_client")
+def test_memory_promote_without_preview_is_denied(mock_get_client: MagicMock) -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["memory-promote", "candidate-1"])
+
+    assert result.exit_code == 1
+    assert "only supports --preview" in result.stdout
+    mock_get_client.assert_not_called()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_memory_share_preview_command_renders_redactions(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.preview_memory_share = AsyncMock(
+        return_value={
+            "allowed": False,
+            "reason": "scope_not_enabled",
+            "target_scope": "project",
+            "target_scope_key": "project_123",
+            "source_ids": ["raw-1", "raw-2"],
+            "visible_source_ids": ["raw-1"],
+            "denied_source_ids": ["raw-2"],
+            "missing_source_ids": ["raw-2"],
+            "redacted_count": 1,
+            "hidden_but_relevant_count": 1,
+            "policy_reasons": ["scope_not_enabled", "source_not_found"],
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "memory-share",
+            "raw-1,raw-2",
+            "--preview",
+            "--target-scope",
+            "project",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Share preview" in result.stdout
+    assert "denied" in result.stdout
+    assert "raw-1" in result.stdout
+    assert "raw-2" in result.stdout
+    assert "source_not_found" in result.stdout
+    mock_client.preview_memory_share.assert_awaited_once_with(
+        source_ids=["raw-1", "raw-2"],
+        target_scope="project",
+        target_scope_key="project_123",
+        recipient_organization_id=None,
+        project_id="project_123",
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.get_client")
+def test_memory_share_without_preview_is_denied(mock_get_client: MagicMock) -> None:
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["memory-share", "raw-1", "--target-scope", "organization"],
+    )
+
+    assert result.exit_code == 1
+    assert "only supports --preview" in result.stdout
+    mock_get_client.assert_not_called()
 
 
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")

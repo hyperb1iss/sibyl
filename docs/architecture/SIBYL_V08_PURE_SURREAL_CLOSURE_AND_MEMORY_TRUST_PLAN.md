@@ -1792,10 +1792,9 @@ B5.2 receipt, 2026-05-13:
 - Independent review passed at `/tmp/claude-review-b52-share-preview-final-20260513185408.txt` after
   privacy hardening removed hidden source scope metadata from REST-visible `input_scopes`.
 - Remaining B5 risk: actual share writes remain disabled, unauthorized project targets still fail
-  through route-level project authorization rather than returning structured preview denial, and
-  B5.3 still needs CLI commands for promotion and share preview. The CLI must not render internal
-  `policy_decisions` raw because denied-source policy decisions can carry hidden scope keys for
-  internal auditing.
+  through route-level project authorization rather than returning structured preview denial, and any
+  future CLI/UI surface must not render internal `policy_decisions` raw because denied-source policy
+  decisions can carry hidden scope keys for internal auditing.
 
 ### Packet B5.3: Promotion And Share CLI Surface
 
@@ -1832,6 +1831,29 @@ Exit criteria:
 - Agents can ask for promotion/share decisions without mutating memory.
 - CLI JSON is stable enough for prompt hooks and future UI wiring.
 - Actual broad sharing remains disabled.
+
+B5.3 receipt, 2026-05-13:
+
+- Added CLI client helpers for `POST /memory/reflection/promote/preview` and
+  `POST /memory/share/preview`.
+- Added root CLI commands `sibyl memory-promote --preview` and `sibyl memory-share --preview`.
+  Non-preview invocations fail locally before opening an API client.
+- Promotion preview renders allow/deny state, denial reason, candidate ID, review state, target
+  scope/key, source IDs, policy reasons, and audit IDs when the API provides one.
+- Share preview renders allow/deny state, target scope/key, source IDs, visible IDs, denied IDs,
+  missing IDs, redaction counts, hidden-but-relevant counts, policy reasons, and audit IDs when the
+  API provides one.
+- CLI rendering uses typed preview response fields and does not render internal `policy_decisions`,
+  preserving the B5.2 hidden-scope boundary.
+- Tests cover promotion preview rendering, project target inference from the linked project, related
+  ID/task forwarding, non-preview promotion denial, share preview rendering, share source ID parsing
+  for CSV and positional values, project target inference, and non-preview share denial.
+- `moon run cli:test -- tests/test_main_capture.py`: 162 passed in 1.06s.
+- `moon run cli:lint cli:typecheck`: CLI lint and typecheck passed.
+- `moon run api:test -- tests/test_routes_memory.py`: 23 passed in 1.20s.
+- Independent review passed at `/tmp/claude-review-b53-cli-preview-20260513190657.txt`. Remaining
+  non-blocking follow-up: the CLI has a forward-compatible audit-ID row, but the preview APIs do not
+  currently return audit receipt IDs.
 
 ### Packet B6.1: Memory Trust Gate Harness
 
