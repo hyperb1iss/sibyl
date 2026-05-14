@@ -56,6 +56,13 @@ export const queryKeys = {
       ['raw-captures', 'list', params] as const,
     detail: (id: string) => ['raw-captures', 'detail', id] as const,
   },
+  memory: {
+    all: ['memory'] as const,
+    audit: (params?: Parameters<typeof api.memory.audit.list>[0]) =>
+      ['memory', 'audit', params] as const,
+    spaces: ['memory', 'spaces'] as const,
+    sourceImport: (importId: string) => ['memory', 'source-import', importId] as const,
+  },
   session: {
     all: ['session'] as const,
     bundle: (params?: Parameters<typeof api.session.bundle>[0]) =>
@@ -573,6 +580,42 @@ export function useUpdateRawCaptureReviewState() {
       queryClient.invalidateQueries({ queryKey: queryKeys.rawCaptures.all });
       queryClient.setQueryData(queryKeys.rawCaptures.detail(variables.id), data);
     },
+  });
+}
+
+export function useMemoryAudit(
+  params?: Parameters<typeof api.memory.audit.list>[0],
+  options?: { enabled?: boolean; initialData?: import('./api').MemoryAuditListResponse }
+) {
+  return useQuery({
+    queryKey: queryKeys.memory.audit(params),
+    queryFn: () => api.memory.audit.list(params),
+    enabled: options?.enabled ?? true,
+    initialData: options?.initialData,
+  });
+}
+
+export function useMemorySpaces(options?: {
+  enabled?: boolean;
+  initialData?: import('./api').MemorySpaceListResponse;
+}) {
+  return useQuery({
+    queryKey: queryKeys.memory.spaces,
+    queryFn: () => api.memory.spaces.list(),
+    enabled: options?.enabled ?? true,
+    initialData: options?.initialData,
+  });
+}
+
+export function useMemorySourceImport(
+  importId: string,
+  options?: { enabled?: boolean; initialData?: import('./api').SourceImportStatusResponse }
+) {
+  return useQuery({
+    queryKey: queryKeys.memory.sourceImport(importId),
+    queryFn: () => api.memory.sourceImportStatus(importId),
+    enabled: (options?.enabled ?? true) && !!importId,
+    initialData: options?.initialData,
   });
 }
 

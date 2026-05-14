@@ -205,6 +205,113 @@ export interface RawCaptureListResponse {
 
 export type RawCaptureReviewState = 'pending' | 'deferred' | 'archived';
 
+export type MemoryScope =
+  | 'private'
+  | 'delegated'
+  | 'project'
+  | 'team'
+  | 'organization'
+  | 'shared'
+  | 'public';
+
+export interface MemoryAuditEvent {
+  id: string;
+  organization_id: string | null;
+  user_id: string | null;
+  action: string;
+  memory_scope: string | null;
+  scope_key: string | null;
+  project_id: string | null;
+  source_surface: string | null;
+  source_ids: string[];
+  source_ids_truncated: number | null;
+  derived_ids: string[];
+  derived_ids_truncated: number | null;
+  policy_allowed: boolean | null;
+  policy_reason: string | null;
+  details: Record<string, unknown>;
+  created_at: string | null;
+}
+
+export interface MemoryAuditListResponse {
+  events: MemoryAuditEvent[];
+  limit: number;
+}
+
+export interface MemorySpaceMember {
+  id: string;
+  organization_id: string;
+  space_id: string;
+  principal_type: string;
+  principal_id: string;
+  role: string;
+  permissions: string[];
+  expires_at: string | null;
+  created_by_user_id: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface MemorySpace {
+  id: string;
+  organization_id: string;
+  memory_scope: MemoryScope;
+  scope_key: string | null;
+  name: string;
+  description: string | null;
+  state: 'active' | 'disabled';
+  disabled_reason: string | null;
+  metadata: Record<string, unknown>;
+  created_by_user_id: string;
+  created_at: string | null;
+  updated_at: string | null;
+  members: MemorySpaceMember[];
+}
+
+export interface MemorySpaceListResponse {
+  spaces: MemorySpace[];
+}
+
+export interface SourceImportProgress {
+  imported_count: number;
+  skipped_count: number;
+  dedupe_count: number;
+  error_count: number;
+  attachment_count: number;
+  extraction_pending_count: number;
+  raw_memory_count: number;
+}
+
+export type SourceImportStatus =
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'canceled';
+
+export interface SourceImportStatusResponse {
+  import_id: string;
+  adapter_name: string;
+  adapter_version: string | null;
+  source_identity: string | null;
+  source_version: string | null;
+  status: SourceImportStatus;
+  privacy_class: string | null;
+  target_memory_scope: MemoryScope | null;
+  target_scope_key: string | null;
+  checkpoint: Record<string, unknown> | null;
+  progress: SourceImportProgress;
+  raw_memory_ids: string[];
+  dedupe_keys: string[];
+  duplicate_dedupe_keys: string[];
+  skipped_records: Record<string, unknown>[];
+  errors: Record<string, unknown>[];
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
 export interface SessionBundleContext {
   generated_at: string;
   org_slug: string | null;
@@ -1454,6 +1561,44 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ review_state }),
       }),
+  },
+
+  memory: {
+    audit: {
+      list: (params?: {
+        action?: string;
+        actor_user_id?: string;
+        source_id?: string;
+        derived_id?: string;
+        memory_scope?: string;
+        project_id?: string;
+        policy_allowed?: boolean;
+        limit?: number;
+      }) => {
+        const searchParams = new URLSearchParams();
+        if (params?.action) searchParams.set('action', params.action);
+        if (params?.actor_user_id) searchParams.set('actor_user_id', params.actor_user_id);
+        if (params?.source_id) searchParams.set('source_id', params.source_id);
+        if (params?.derived_id) searchParams.set('derived_id', params.derived_id);
+        if (params?.memory_scope) searchParams.set('memory_scope', params.memory_scope);
+        if (params?.project_id) searchParams.set('project_id', params.project_id);
+        if (params?.policy_allowed !== undefined) {
+          searchParams.set('policy_allowed', String(params.policy_allowed));
+        }
+        if (params?.limit) searchParams.set('limit', params.limit.toString());
+        const query = searchParams.toString();
+        return fetchApi<MemoryAuditListResponse>(`/memory/audit${query ? `?${query}` : ''}`);
+      },
+    },
+
+    spaces: {
+      list: () => fetchApi<MemorySpaceListResponse>('/memory/spaces'),
+    },
+
+    sourceImportStatus: (importId: string) =>
+      fetchApi<SourceImportStatusResponse>(
+        `/memory/source-imports/${encodeURIComponent(importId)}`
+      ),
   },
 
   // Search

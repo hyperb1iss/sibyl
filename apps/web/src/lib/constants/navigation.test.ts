@@ -16,6 +16,11 @@ describe('navigation constants', () => {
     expect(NAVIGATION.map(item => item.href)).toContain('/archive');
   });
 
+  it('surfaces the memory cockpit in shared navigation', () => {
+    expect(ROUTE_CONFIG.memory.label).toBe('Memory');
+    expect(NAVIGATION.map(item => item.href)).toContain('/memory');
+  });
+
   it('does not expose a dead top-level documents route', () => {
     expect(ROUTE_CONFIG.documents).toBeUndefined();
   });
