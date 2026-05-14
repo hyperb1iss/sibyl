@@ -3,6 +3,10 @@ from __future__ import annotations
 import pytest
 
 import sibyl_core.retrieval.native as native_module
+from sibyl_core.embeddings.native import (
+    DeterministicNativeEmbeddingProvider,
+    NativeEmbeddingMetadata,
+)
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.retrieval.native import (
     DEFAULT_FILTER_SELECTIVITY_THRESHOLD,
@@ -221,6 +225,117 @@ def test_vector_matches_with_lexical_signal_do_not_demote() -> None:
     )
 
     assert "vector_only_demoted" not in ranked[0][2]
+
+
+@pytest.mark.asyncio
+async def test_deterministic_native_embedding_provider_batches_stably() -> None:
+    metadata = NativeEmbeddingMetadata(
+        provider="deterministic",
+        model="unit-test",
+        dimensions=4,
+        cache_namespace="retrieval-test",
+        tokenizer_estimate_method="utf8-byte-length",
+    )
+    provider = DeterministicNativeEmbeddingProvider(metadata)
+
+    first, second = await provider.embed_texts(["alpha", "alpha"], input_kind="query")
+
+    assert first == second
+    assert len(first) == 4
+    assert provider.metadata.to_dict() == {
+        "provider": "deterministic",
+        "model": "unit-test",
+        "dimensions": 4,
+        "cache_namespace": "retrieval-test",
+        "tokenizer_estimate_method": "utf8-byte-length",
+        "text_version": "native-graph-v1",
+        "normalize": True,
+    }
+
+
+class _VectorClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if "FROM entity" in query and "name_embedding" in query:
+            return [
+                {
+                    "uuid": "task-vector",
+                    "name": "Vector Task",
+                    "entity_type": "task",
+                    "content": "native vector task",
+                    "project_id": "project_123",
+                    "attributes": {},
+                    "created_at": None,
+                    "score": 0.81,
+                }
+            ]
+        if "FROM relates_to" in query and "fact_embedding" in query:
+            return [
+                {
+                    "uuid": "edge-vector",
+                    "name": "RELATED_TO",
+                    "fact": "native vector relationship",
+                    "group_id": "org-123",
+                    "episodes": [],
+                    "attributes": {"project_id": "project_123"},
+                    "created_at": None,
+                    "expired_at": None,
+                    "valid_at": None,
+                    "invalid_at": None,
+                    "source_node_uuid": "task-vector",
+                    "target_node_uuid": "pattern-vector",
+                    "score": 0.72,
+                }
+            ]
+        return []
+
+
+@pytest.mark.asyncio
+async def test_vector_candidate_sources_use_native_embedding_contract() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="native vectors",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+    provider = DeterministicNativeEmbeddingProvider(
+        NativeEmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=4,
+            cache_namespace="retrieval-test",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+    client = _VectorClient()
+
+    node_candidates, edge_candidates = await native_module._vector_candidate_sources(
+        client=client,
+        plan=plan,
+        search_filter=native_module.NativeSearchFilter(project_ids=("project_123",)),
+        embedding_provider=provider,
+    )
+
+    assert [candidate.id for candidate in node_candidates] == ["task-vector"]
+    assert [candidate.id for candidate in edge_candidates] == ["edge-vector"]
+    assert node_candidates[0].score == 0.81
+    assert edge_candidates[0].score == 0.72
+    assert node_candidates[0].metadata["embedding_metadata"] == provider.metadata.to_dict()
+    assert edge_candidates[0].metadata["embedding_metadata"] == provider.metadata.to_dict()
+    node_query, node_params = next(call for call in client.calls if "name_embedding" in call[0])
+    edge_query, edge_params = next(call for call in client.calls if "fact_embedding" in call[0])
+    assert "name_embedding <|8, 40|> $query_embedding" in node_query
+    assert "fact_embedding <|8, 40|> $query_embedding" in edge_query
+    assert len(node_params["query_embedding"]) == 4
+    assert len(edge_params["query_embedding"]) == 4
+    assert node_params["project_ids"] == ["project_123"]
+    assert edge_params["project_ids"] == ["project_123"]
 
 
 def test_node_record_candidates_keep_top_level_provenance_metadata() -> None:

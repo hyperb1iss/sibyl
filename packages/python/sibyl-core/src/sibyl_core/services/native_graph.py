@@ -16,8 +16,13 @@ from surrealdb import RecordID
 
 from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
-from sibyl_core.backends.surreal.schema import bootstrap_schema
+from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, bootstrap_schema
 from sibyl_core.config import settings
+from sibyl_core.embeddings.native import (
+    NativeEmbeddingProvider,
+    native_entity_embedding_text,
+    native_relationship_embedding_text,
+)
 from sibyl_core.models.entities import (
     Entity,
     EntityType,
@@ -81,12 +86,20 @@ class NativeSurrealGraphClient(DedicatedSurrealClient):
 class NativeEntityManager:
     supports_bounded_entity_list = True
 
-    def __init__(self, client: NativeSurrealGraphClient, *, group_id: str) -> None:
+    def __init__(
+        self,
+        client: NativeSurrealGraphClient,
+        *,
+        group_id: str,
+        embedding_provider: NativeEmbeddingProvider | None = None,
+    ) -> None:
         self._client = client
         self._group_id = group_id
+        self._embedding_provider = embedding_provider
 
     async def create_direct(self, entity: Entity, *, generate_embedding: bool = False) -> str:
-        del generate_embedding
+        if generate_embedding:
+            entity = await _entity_with_native_embedding(entity, self._embedding_provider)
         await _replace_entity(self._client, entity, group_id=self._group_id)
         return entity.id
 
@@ -725,22 +738,33 @@ class NativeEntityManager:
 
 
 class NativeRelationshipManager:
-    def __init__(self, client: NativeSurrealGraphClient, *, group_id: str) -> None:
+    def __init__(
+        self,
+        client: NativeSurrealGraphClient,
+        *,
+        group_id: str,
+        embedding_provider: NativeEmbeddingProvider | None = None,
+    ) -> None:
         self._client = client
         self._group_id = group_id
+        self._embedding_provider = embedding_provider
 
     async def create_bulk(self, relationships: Sequence[Relationship]) -> tuple[int, int]:
         created = 0
         failed = 0
         for relationship in relationships:
             try:
-                await _replace_relationship(self._client, relationship, group_id=self._group_id)
+                await self.create(relationship)
                 created += 1
             except Exception:
                 failed += 1
         return created, failed
 
     async def create(self, relationship: Relationship) -> str:
+        relationship = await _relationship_with_native_embedding(
+            relationship,
+            self._embedding_provider,
+        )
         await _replace_relationship(self._client, relationship, group_id=self._group_id)
         return relationship.id
 
@@ -1028,14 +1052,40 @@ class NativeRelationshipManager:
         return len(rows)
 
 
-async def get_native_graph_runtime(group_id: str) -> NativeGraphRuntime:
+async def get_native_graph_runtime(
+    group_id: str,
+    *,
+    embedding_provider: NativeEmbeddingProvider | None = None,
+) -> NativeGraphRuntime:
     client = await get_native_graph_client(group_id)
     await prepare_native_graph_schema(client)
+    _validate_native_embedding_dimensions(embedding_provider)
     return NativeGraphRuntime(
         client=client,
-        entity_manager=NativeEntityManager(client, group_id=group_id),
-        relationship_manager=NativeRelationshipManager(client, group_id=group_id),
+        entity_manager=NativeEntityManager(
+            client,
+            group_id=group_id,
+            embedding_provider=embedding_provider,
+        ),
+        relationship_manager=NativeRelationshipManager(
+            client,
+            group_id=group_id,
+            embedding_provider=embedding_provider,
+        ),
     )
+
+
+def _validate_native_embedding_dimensions(
+    embedding_provider: NativeEmbeddingProvider | None,
+) -> None:
+    if embedding_provider is None:
+        return
+    dimensions = embedding_provider.metadata.dimensions
+    if dimensions != EMBEDDING_DIM:
+        raise ValueError(
+            "native embedding provider dimensions "
+            f"({dimensions}) must match Surreal graph schema ({EMBEDDING_DIM})"
+        )
 
 
 async def get_native_graph_client(group_id: str) -> NativeSurrealGraphClient:
@@ -1563,6 +1613,7 @@ def relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship:
     target_id, _target_key = _relationship_endpoint(normalized_row, "target")
     for key in (
         "fact",
+        "fact_embedding",
         "group_id",
         "project_id",
         "source_id",
@@ -1582,7 +1633,11 @@ def relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship:
             continue
         value = normalized_row.get(key)
         if value is not None and metadata.get(key) is None:
-            metadata[key] = value
+            if key == "fact_embedding":
+                if vector := _metadata_float_list(value):
+                    metadata[key] = vector
+            else:
+                metadata[key] = value
 
     relationship_id = _relationship_id_from_row(normalized_row)
     record_id = _row_record_id(normalized_row)
@@ -1697,6 +1752,57 @@ async def _select_one(
 ) -> SurrealRecord | None:
     rows = normalize_records(await client.execute_query(query, **params))
     return rows[0] if rows else None
+
+
+async def _entity_with_native_embedding(
+    entity: Entity,
+    provider: NativeEmbeddingProvider | None,
+) -> Entity:
+    if provider is None or entity.embedding:
+        return entity
+    embeddings = await provider.embed_texts(
+        [native_entity_embedding_text(entity)],
+        input_kind="document",
+    )
+    embedding = _embedding_vector_from_batch(embeddings, provider.metadata.dimensions)
+    metadata = {
+        **dict(entity.metadata or {}),
+        "embedding_metadata": provider.metadata.to_dict(),
+    }
+    return entity.model_copy(update={"embedding": embedding, "metadata": metadata})
+
+
+async def _relationship_with_native_embedding(
+    relationship: Relationship,
+    provider: NativeEmbeddingProvider | None,
+) -> Relationship:
+    metadata = dict(relationship.metadata or {})
+    if provider is None or _metadata_float_list(metadata.get("fact_embedding")):
+        return relationship
+    embeddings = await provider.embed_texts(
+        [native_relationship_embedding_text(relationship)],
+        input_kind="document",
+    )
+    metadata["fact_embedding"] = _embedding_vector_from_batch(
+        embeddings,
+        provider.metadata.dimensions,
+    )
+    metadata["embedding_metadata"] = provider.metadata.to_dict()
+    return relationship.model_copy(update={"metadata": metadata})
+
+
+def _embedding_vector_from_batch(
+    embeddings: Sequence[Sequence[float]],
+    dimensions: int,
+) -> list[float]:
+    if not embeddings:
+        raise ValueError("embedding provider returned no vectors")
+    embedding = [float(value) for value in embeddings[0]]
+    if len(embedding) != dimensions:
+        raise ValueError(
+            f"embedding provider returned {len(embedding)} dimensions, expected {dimensions}"
+        )
+    return embedding
 
 
 async def _replace_entity(
@@ -1858,14 +1964,20 @@ async def _record_id(client: NativeSurrealGraphClient, uuid: str) -> object | No
 def _relationship_record(relationship: Relationship, *, group_id: str) -> SurrealRecord:
     metadata = dict(relationship.metadata or {})
     fact = _metadata_str(metadata, "fact") or _relationship_fact(relationship)
+    fact_embedding = _metadata_float_list(
+        metadata.get("fact_embedding") or metadata.get("embedding")
+    )
+    attributes = {
+        key: value for key, value in metadata.items() if key not in {"fact_embedding", "embedding"}
+    }
     return {
         "uuid": relationship.id,
         "name": relationship.relationship_type.value,
         "fact": fact,
-        "fact_embedding": None,
+        "fact_embedding": fact_embedding,
         "group_id": group_id,
         "episodes": _metadata_str_list(metadata.get("episodes")),
-        "attributes": metadata,
+        "attributes": attributes,
         "created_at": relationship.created_at,
         "expired_at": _metadata_datetime(metadata.get("expired_at")),
         "valid_at": _metadata_datetime(metadata.get("valid_at") or metadata.get("valid_from")),
@@ -1892,6 +2004,21 @@ def _metadata_str_list(value: object) -> list[str] | None:
     if not isinstance(value, Iterable) or isinstance(value, str | bytes | dict):
         return None
     return [str(item) for item in value if str(item)]
+
+
+def _metadata_float_list(value: object) -> list[float] | None:
+    if not isinstance(value, Iterable) or isinstance(value, str | bytes | dict):
+        return None
+    vector: list[float] = []
+    for item in value:
+        if isinstance(item, int | float | str):
+            try:
+                vector.append(float(item))
+            except ValueError:
+                return None
+        else:
+            return None
+    return vector
 
 
 def _metadata_datetime(value: object) -> datetime | None:

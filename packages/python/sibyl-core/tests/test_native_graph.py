@@ -8,12 +8,17 @@ from typing import Any, cast
 import pytest
 
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
+from sibyl_core.embeddings.native import (
+    DeterministicNativeEmbeddingProvider,
+    NativeEmbeddingMetadata,
+)
 from sibyl_core.models.entities import Entity, EntityType, Procedure, Relationship, RelationshipType
 from sibyl_core.retrieval.dedup import EntityDeduplicator
 from sibyl_core.services.native_graph import (
     NativeEntityManager,
     NativeRelationshipManager,
     NativeSurrealGraphClient,
+    _validate_native_embedding_dimensions,
     entity_from_surreal_row,
     normalize_records,
     prepare_native_graph_schema,
@@ -36,6 +41,61 @@ def _block_graphiti_imports(monkeypatch: pytest.MonkeyPatch) -> None:
         return real_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+
+class _EmbeddingWriteClient:
+    group_id = "org-native"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if "SELECT id AS record_id FROM entity" in query:
+            return [{"record_id": f"entity:{params['uuid']}"}]
+        if "UPSERT entity" in query:
+            return [{"uuid": params["uuid"], "name_embedding": params["name_embedding"]}]
+        if "RELATE $src->$rel->$tgt" in query:
+            return [{"uuid": params["uuid"], "fact_embedding": params["fact_embedding"]}]
+        return []
+
+
+def _deterministic_provider() -> DeterministicNativeEmbeddingProvider:
+    return DeterministicNativeEmbeddingProvider(
+        NativeEmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=4,
+            cache_namespace="native-graph-test",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+
+
+def test_native_embedding_dimension_validation_requires_schema_match() -> None:
+    _validate_native_embedding_dimensions(
+        DeterministicNativeEmbeddingProvider(
+            NativeEmbeddingMetadata(
+                provider="deterministic",
+                model="unit-test",
+                dimensions=EMBEDDING_DIM,
+                cache_namespace="native-graph-test",
+                tokenizer_estimate_method="utf8-byte-length",
+            )
+        )
+    )
+    with pytest.raises(ValueError, match="must match Surreal graph schema"):
+        _validate_native_embedding_dimensions(
+            DeterministicNativeEmbeddingProvider(
+                NativeEmbeddingMetadata(
+                    provider="deterministic",
+                    model="unit-test",
+                    dimensions=EMBEDDING_DIM + 1,
+                    cache_namespace="native-graph-test",
+                    tokenizer_estimate_method="utf8-byte-length",
+                )
+            )
+        )
 
 
 def test_entity_from_surreal_row_preserves_native_policy_metadata() -> None:
@@ -100,6 +160,65 @@ def test_entity_from_surreal_row_preserves_native_policy_metadata() -> None:
     assert "category" not in entity.metadata
 
 
+@pytest.mark.asyncio
+async def test_native_entity_manager_generates_embeddings_with_native_provider() -> None:
+    client = _EmbeddingWriteClient()
+    provider = _deterministic_provider()
+    manager = NativeEntityManager(
+        cast(NativeSurrealGraphClient, client),
+        group_id=client.group_id,
+        embedding_provider=provider,
+    )
+
+    created_id = await manager.create_direct(
+        Entity(
+            id="entity_embed",
+            entity_type=EntityType.PATTERN,
+            name="Native Embedding Pattern",
+            description="Generated without Graphiti.",
+            organization_id=client.group_id,
+        ),
+        generate_embedding=True,
+    )
+
+    assert created_id == "entity_embed"
+    write_params = client.calls[0][1]
+    assert len(cast(list[float], write_params["name_embedding"])) == 4
+    attributes = cast(dict[str, object], write_params["attributes"])
+    assert attributes["embedding_metadata"] == provider.metadata.to_dict()
+
+
+@pytest.mark.asyncio
+async def test_native_relationship_manager_generates_fact_embeddings() -> None:
+    client = _EmbeddingWriteClient()
+    provider = _deterministic_provider()
+    manager = NativeRelationshipManager(
+        cast(NativeSurrealGraphClient, client),
+        group_id=client.group_id,
+        embedding_provider=provider,
+    )
+
+    created_id = await manager.create(
+        Relationship(
+            id="rel_embed",
+            source_id="source_entity",
+            target_id="target_entity",
+            relationship_type=RelationshipType.RELATED_TO,
+            metadata={
+                "fact": "Source relates to target through native embeddings.",
+                "fact_embedding": [],
+            },
+        )
+    )
+
+    assert created_id == "rel_embed"
+    write_params = client.calls[2][1]
+    assert len(cast(list[float], write_params["fact_embedding"])) == 4
+    attributes = cast(dict[str, object], write_params["attributes"])
+    assert attributes["embedding_metadata"] == provider.metadata.to_dict()
+    assert "fact_embedding" not in attributes
+
+
 def test_entity_from_surreal_row_hydrates_legacy_shaped_rows() -> None:
     entity = entity_from_surreal_row(
         {
@@ -158,6 +277,7 @@ def test_relationship_from_surreal_row_preserves_temporal_provenance() -> None:
             "group_id": "org-native",
             "source_uuid": "task_native",
             "target_uuid": "plan_native",
+            "fact_embedding": [0.25] * EMBEDDING_DIM,
             "project_id": "project_native",
             "source_ids": ["raw_1", "raw_2"],
             "confidence": 0.87,
@@ -181,6 +301,7 @@ def test_relationship_from_surreal_row_preserves_temporal_provenance() -> None:
     assert relationship.target_id == "plan_native"
     assert relationship.weight == 0.42
     assert relationship.metadata["fact"] == "Task supports the plan"
+    assert relationship.metadata["fact_embedding"] == [0.25] * EMBEDDING_DIM
     assert relationship.metadata["project_id"] == "nested_project"
     assert relationship.metadata["source_ids"] == ["raw_1", "raw_2"]
     assert relationship.metadata["confidence"] == 0.87

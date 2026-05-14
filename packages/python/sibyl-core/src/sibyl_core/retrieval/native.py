@@ -11,8 +11,11 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
+import structlog
+
 from sibyl_core.auth.memory_policy import MemoryPolicyDecision, authorize_memory_read
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
+from sibyl_core.embeddings.native import NativeEmbeddingMetadata, NativeEmbeddingProvider
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.services.native_graph import get_native_graph_runtime, normalize_records
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory, recall_raw_memory
@@ -27,6 +30,7 @@ EDGE_FULLTEXT_MATCH_HEADROOM = 8
 EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
 _ACTIVE_TASK_STATUSES = {"doing", "in_progress", "review"}
 _RAW_MEMORY_CONTEXT_TYPES = {"raw_memory", "session", "episode", "note"}
+log = structlog.get_logger()
 
 
 class NativeRetrievalMode(StrEnum):
@@ -220,6 +224,7 @@ async def native_context_search(
     facet: ContextFacet | None = None,
     limit: int = 10,
     include_content: bool = True,
+    embedding_provider: NativeEmbeddingProvider | None = None,
     raw_memory_recall_fn: RawMemoryRecallFn = recall_raw_memory,
 ) -> SearchResponse:
     """Search context-pack candidates through native SurrealDB paths."""
@@ -265,6 +270,7 @@ async def native_context_search(
         client=client,
         plan=plan,
         search_filter=search_filter,
+        embedding_provider=embedding_provider,
     )
     graph_expansion_candidates = await _graph_expansion_candidates(
         client=client,
@@ -629,12 +635,199 @@ async def _vector_candidate_sources(
     client: Any,
     plan: NativeRetrievalPlan,
     search_filter: NativeSearchFilter,
+    embedding_provider: NativeEmbeddingProvider | None,
 ) -> list[list[NativeRetrievalCandidate]]:
-    del client, plan, search_filter
+    if embedding_provider is None:
+        return [
+            [],
+            [],
+        ]
+    if (
+        NativeRetrievalSignal.NODE_VECTOR not in plan.signals
+        and NativeRetrievalSignal.EDGE_VECTOR not in plan.signals
+    ):
+        return [
+            [],
+            [],
+        ]
+    try:
+        embeddings = await embedding_provider.embed_texts([plan.query], input_kind="query")
+    except Exception as exc:
+        log.warning(
+            "native_vector_embedding_failed",
+            organization_id=plan.organization_id,
+            query_length=len(plan.query),
+            error_type=type(exc).__name__,
+        )
+        return [
+            [],
+            [],
+        ]
+    try:
+        query_embedding = _query_embedding_from_batch(
+            embeddings,
+            dimensions=embedding_provider.metadata.dimensions,
+        )
+    except ValueError as exc:
+        log.warning(
+            "native_vector_embedding_invalid",
+            organization_id=plan.organization_id,
+            error=str(exc),
+        )
+        return [
+            [],
+            [],
+        ]
+    node_candidates: list[NativeRetrievalCandidate] = []
+    edge_candidates: list[NativeRetrievalCandidate] = []
+    tasks: list[Awaitable[list[NativeRetrievalCandidate]]] = []
+    task_signals: list[NativeRetrievalSignal] = []
+    if NativeRetrievalSignal.NODE_VECTOR in plan.signals:
+        tasks.append(
+            _node_vector_candidates(
+                client=client,
+                plan=plan,
+                search_filter=search_filter,
+                query_embedding=query_embedding,
+                embedding_metadata=embedding_provider.metadata,
+                limit=plan.candidate_limits.node_vector,
+            )
+        )
+        task_signals.append(NativeRetrievalSignal.NODE_VECTOR)
+    if NativeRetrievalSignal.EDGE_VECTOR in plan.signals:
+        tasks.append(
+            _edge_vector_candidates(
+                client=client,
+                plan=plan,
+                search_filter=search_filter,
+                query_embedding=query_embedding,
+                embedding_metadata=embedding_provider.metadata,
+                limit=plan.candidate_limits.edge_vector,
+            )
+        )
+        task_signals.append(NativeRetrievalSignal.EDGE_VECTOR)
+    gathered = await asyncio.gather(*tasks, return_exceptions=True)
+    for signal, result in zip(task_signals, gathered, strict=True):
+        if isinstance(result, BaseException):
+            log.warning(
+                "native_vector_query_failed",
+                organization_id=plan.organization_id,
+                signal=signal.value,
+                error_type=type(result).__name__,
+            )
+            continue
+        if signal is NativeRetrievalSignal.NODE_VECTOR:
+            node_candidates = _candidate_list_or_empty(result)
+        else:
+            edge_candidates = _candidate_list_or_empty(result)
+    return [node_candidates, edge_candidates]
+
+
+async def _node_vector_candidates(
+    *,
+    client: Any,
+    plan: NativeRetrievalPlan,
+    search_filter: NativeSearchFilter,
+    query_embedding: Sequence[float],
+    embedding_metadata: NativeEmbeddingMetadata,
+    limit: int,
+) -> list[NativeRetrievalCandidate]:
+    if limit <= 0:
+        return []
+    filter_clauses, filter_params = _node_filter_clause(search_filter)
+    candidate_limit = max(int(limit), 1)
+    rows = normalize_records(
+        await client.execute_query(
+            """
+            SELECT *
+            FROM (
+                SELECT *,
+                       (1 - vector::distance::knn()) AS score
+                FROM entity
+                WHERE """
+            + _where_clause(["group_id = $group_id", *filter_clauses])
+            + f"""
+                  AND name_embedding <|{candidate_limit}, 40|> $query_embedding
+            )
+            WHERE score >= $min_score
+            ORDER BY score DESC, created_at DESC, uuid DESC
+            LIMIT $limit;
+            """,
+            group_id=plan.organization_id,
+            query_embedding=list(query_embedding),
+            min_score=plan.vector_min_score,
+            limit=candidate_limit,
+            **filter_params,
+        )
+    )
     return [
-        [],
-        [],
+        _candidate_from_node_record(
+            row,
+            signal=NativeRetrievalSignal.NODE_VECTOR,
+            score=_record_score(row),
+            embedding_metadata=embedding_metadata,
+        )
+        for row in rows
     ]
+
+
+async def _edge_vector_candidates(
+    *,
+    client: Any,
+    plan: NativeRetrievalPlan,
+    search_filter: NativeSearchFilter,
+    query_embedding: Sequence[float],
+    embedding_metadata: NativeEmbeddingMetadata,
+    limit: int,
+) -> list[NativeRetrievalCandidate]:
+    if limit <= 0:
+        return []
+    filter_clauses, filter_params = _edge_filter_clause(search_filter)
+    candidate_limit = max(int(limit), 1)
+    rows = normalize_records(
+        await client.execute_query(
+            "SELECT * FROM ("
+            + _edge_select(extra="(1 - vector::distance::knn()) AS score")
+            + " WHERE "
+            + _where_clause(["group_id = $group_id", *filter_clauses])
+            + f"""
+              AND fact_embedding <|{candidate_limit}, 40|> $query_embedding
+            )
+            WHERE score >= $min_score
+            ORDER BY score DESC, created_at DESC, uuid DESC
+            LIMIT $limit;
+            """,
+            group_id=plan.organization_id,
+            query_embedding=list(query_embedding),
+            min_score=plan.vector_min_score,
+            limit=candidate_limit,
+            **filter_params,
+        )
+    )
+    return [
+        _candidate_from_edge_record(
+            row,
+            signal=NativeRetrievalSignal.EDGE_VECTOR,
+            score=_record_score(row),
+            embedding_metadata=embedding_metadata,
+        )
+        for row in rows
+    ]
+
+
+def _query_embedding_from_batch(
+    embeddings: Sequence[Sequence[float]],
+    *,
+    dimensions: int,
+) -> list[float]:
+    if not embeddings:
+        raise ValueError("embedding provider returned no vectors")
+    embedding = [float(value) for value in embeddings[0]]
+    if len(embedding) != dimensions:
+        raise ValueError(
+            f"embedding provider returned {len(embedding)} dimensions, expected {dimensions}"
+        )
+    return embedding
 
 
 async def _graph_expansion_candidates(
@@ -903,6 +1096,7 @@ def _candidate_from_node_record(
     *,
     signal: NativeRetrievalSignal,
     score: float,
+    embedding_metadata: NativeEmbeddingMetadata | None = None,
 ) -> NativeRetrievalCandidate:
     attributes = _record_attributes(row)
     entity_type = _entity_type_for_record(row, attributes)
@@ -923,6 +1117,8 @@ def _candidate_from_node_record(
         "source_id": source,
         "retrieval_signals": [signal.value],
     }
+    if embedding_metadata is not None:
+        metadata["embedding_metadata"] = embedding_metadata.to_dict()
     return NativeRetrievalCandidate(
         id=str(row.get("uuid", "")),
         type=entity_type,
@@ -968,6 +1164,7 @@ def _candidate_from_edge_record(
     *,
     signal: NativeRetrievalSignal,
     score: float,
+    embedding_metadata: NativeEmbeddingMetadata | None = None,
 ) -> NativeRetrievalCandidate:
     attributes = _record_attributes(row)
     source = _string_value(attributes.get("source_id") or row.get("uuid"))
@@ -981,6 +1178,8 @@ def _candidate_from_edge_record(
         "target_node_uuid": _string_value(row.get("target_node_uuid")),
         "retrieval_signals": [signal.value],
     }
+    if embedding_metadata is not None:
+        metadata["embedding_metadata"] = embedding_metadata.to_dict()
     return NativeRetrievalCandidate(
         id=str(row.get("uuid", "")),
         type="claim",
