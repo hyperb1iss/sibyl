@@ -231,16 +231,27 @@ class RedisQueueBroker:
         self,
         task_data: dict[str, Any],
         group_id: str,
+        *,
+        policy_context: dict[str, Any] | None = None,
     ) -> str:
         """Enqueue a learning episode creation job."""
         task_id = task_data.get("id", "unknown")
         job_id = f"learning_episode:{task_id}"
-        result = await self._enqueue_unique(
-            "create_learning_episode",
-            task_data,
-            group_id,
-            job_id=job_id,
-        )
+        if policy_context is None:
+            result = await self._enqueue_unique(
+                "create_learning_episode",
+                task_data,
+                group_id,
+                job_id=job_id,
+            )
+        else:
+            result = await self._enqueue_unique(
+                "create_learning_episode",
+                task_data,
+                group_id,
+                job_id=job_id,
+                policy_context=policy_context,
+            )
 
         if not result.created:
             log.info("Learning episode job already exists", job_id=job_id, task_id=task_id)
@@ -253,16 +264,27 @@ class RedisQueueBroker:
         self,
         task_data: dict[str, Any],
         group_id: str,
+        *,
+        policy_context: dict[str, Any] | None = None,
     ) -> str:
         """Enqueue a learning procedure creation job."""
         task_id = task_data.get("id", "unknown")
         job_id = f"learning_procedure:{task_id}"
-        result = await self._enqueue_unique(
-            "create_learning_procedure",
-            task_data,
-            group_id,
-            job_id=job_id,
-        )
+        if policy_context is None:
+            result = await self._enqueue_unique(
+                "create_learning_procedure",
+                task_data,
+                group_id,
+                job_id=job_id,
+            )
+        else:
+            result = await self._enqueue_unique(
+                "create_learning_procedure",
+                task_data,
+                group_id,
+                job_id=job_id,
+                policy_context=policy_context,
+            )
 
         if not result.created:
             log.info("Learning procedure job already exists", job_id=job_id, task_id=task_id)

@@ -259,28 +259,50 @@ class LocalQueueBroker:
         self,
         task_data: dict[str, Any],
         group_id: str,
+        *,
+        policy_context: dict[str, Any] | None = None,
     ) -> str:
         task_id = task_data.get("id", "unknown")
-        result = await self._enqueue_unique(
-            "create_learning_episode",
-            task_data,
-            group_id,
-            job_id=f"learning_episode:{task_id}",
-        )
+        if policy_context is None:
+            result = await self._enqueue_unique(
+                "create_learning_episode",
+                task_data,
+                group_id,
+                job_id=f"learning_episode:{task_id}",
+            )
+        else:
+            result = await self._enqueue_unique(
+                "create_learning_episode",
+                task_data,
+                group_id,
+                job_id=f"learning_episode:{task_id}",
+                policy_context=policy_context,
+            )
         return result.job_id
 
     async def enqueue_create_learning_procedure(
         self,
         task_data: dict[str, Any],
         group_id: str,
+        *,
+        policy_context: dict[str, Any] | None = None,
     ) -> str:
         task_id = task_data.get("id", "unknown")
-        result = await self._enqueue_unique(
-            "create_learning_procedure",
-            task_data,
-            group_id,
-            job_id=f"learning_procedure:{task_id}",
-        )
+        if policy_context is None:
+            result = await self._enqueue_unique(
+                "create_learning_procedure",
+                task_data,
+                group_id,
+                job_id=f"learning_procedure:{task_id}",
+            )
+        else:
+            result = await self._enqueue_unique(
+                "create_learning_procedure",
+                task_data,
+                group_id,
+                job_id=f"learning_procedure:{task_id}",
+                policy_context=policy_context,
+            )
         return result.job_id
 
     async def enqueue_update_task(

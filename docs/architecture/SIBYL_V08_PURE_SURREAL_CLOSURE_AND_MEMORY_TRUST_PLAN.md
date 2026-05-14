@@ -1432,8 +1432,8 @@ Status notes:
 
 - B2 implementation is closed by the receipts above. Reconcile the Sibyl task state before release
   if tracking still shows the B2 task as active.
-- B3 has the shared policy context contract and MCP parity through B3.2. CLI display parity and
-  async job payload receipts remain.
+- B3 has the shared policy context contract, MCP parity through B3.2, and task-learning job policy
+  payloads through B3.4. CLI display parity remains.
 - B4 has audit storage, audit readback, context render audit, reflection render audit, REST request
   attribution, source inspect, and denied-render audit. The remaining B4 risk is that MCP denied
   render receipts stay requestless until the MCP tool layer exposes request metadata.
@@ -1578,32 +1578,97 @@ Depends on:
 
 Files:
 
+- `apps/api/src/sibyl/api/routes/tasks.py`
+- `apps/api/src/sibyl/coordination/broker.py`
+- `apps/api/src/sibyl/coordination/_local/broker.py`
+- `apps/api/src/sibyl/coordination/_redis/broker.py`
 - `apps/api/src/sibyl/jobs/entities.py`
-- `apps/api/src/sibyl/jobs/worker.py`
-- `apps/api/src/sibyl/api/routes/context.py`
-- `apps/api/src/sibyl/api/routes/memory.py`
+- `apps/api/src/sibyl/jobs/queue.py`
+- `apps/api/src/sibyl/server.py`
 - `apps/api/tests/test_jobs_entities.py`
-- `apps/api/tests/test_routes_context.py`
-- `apps/api/tests/test_routes_memory.py`
+- `apps/api/tests/test_jobs_queue.py`
+- `apps/api/tests/test_routes_tasks.py`
+- `apps/api/tests/test_server_accessible_projects.py`
+- `apps/api/tests/test_tools_manage.py`
+- `packages/python/sibyl-core/src/sibyl_core/tools/manage.py`
+- `packages/python/sibyl-core/tests/test_tools_manage.py`
 
 Implementation:
 
-- Add a serializable policy-context payload to task-learning, reflection persistence, and promotion
-  jobs.
-- Fail closed when a job receives a project-scoped write without actor and project policy context.
+- Add a serializable policy-context payload to task-learning jobs.
+- Carry the same policy payload from REST task completion and MCP `manage complete_task`.
+- Fail closed when a task-learning job receives a project-scoped write without actor and project
+  policy context.
 - Record audit receipts for job allow and deny outcomes with `source_surface=job`.
 - Keep payloads compact and avoid storing raw memory text inside job metadata.
+- Leave reflection persistence and promotion on their current synchronous path; their policy
+  receipts are covered by the B4/B5 route receipts.
 
 Verify:
 
-- `moon run api:test -- tests/test_jobs_entities.py tests/test_routes_context.py tests/test_routes_memory.py`
-- `moon run api:lint api:typecheck`
+- `moon run core:test -- tests/test_tools_manage.py`
+- `moon run api:test -- tests/test_tools_manage.py tests/test_server_accessible_projects.py tests/test_jobs_entities.py tests/test_routes_tasks.py tests/test_jobs_queue.py tests/test_coordination_local.py`
+- `moon run api:lint api:typecheck core:lint core:typecheck`
+- `moon run memory-trust-gate`
+- `moon run docs:lint`
+- `git diff --check`
 
 Exit criteria:
 
-- Async writes apply the same policy as synchronous route calls.
-- Job retries cannot bypass project membership or disabled-scope checks.
+- Async task-learning writes apply the same policy as synchronous route calls.
+- Task-learning job retries cannot bypass project membership or disabled-scope checks.
 - Audit receipts identify the originating actor and job source surface.
+
+B3.4 receipt, 2026-05-14:
+
+- Added a serializable memory policy context payload for queued task-learning jobs.
+- REST task completion now captures the verified task project, actor, organization role, accessible
+  project set from `list_accessible_project_graph_ids`, and `source_surface=task_learning_job`
+  before enqueueing learning episode and procedure jobs.
+- MCP `manage complete_task` now passes `organization_id` into `manage`, authorizes the same policy
+  context before transition, and queues policy-stamped learning jobs instead of creating synchronous
+  derived memories. The manage boundary also rejects cross-organization policy payloads before
+  reading or transitioning the task.
+- Redis and local queue brokers now preserve that policy payload when enqueueing
+  `create_learning_episode` and `create_learning_procedure`.
+- Learning jobs restore the payload into `MemoryPolicyContext`, authorize the graph write through
+  `authorize_memory_write`, and fail before native graph writes when the payload is missing or does
+  not verify project membership, when the payload project does not match the queued task, or when
+  the payload organization does not match the job group.
+- Allowed learning jobs add policy metadata to the derived episode/procedure and emit metadata-only
+  `memory.task_learning.episode` / `memory.task_learning.procedure` audit receipts with
+  `source_surface=job`.
+- Denied manage and job paths emit metadata-only deny receipts before returning or raising, without
+  storing raw task learning text in job metadata.
+- Reflection persistence and reflection promotion are synchronous in the current Surreal-native
+  runtime, so B3.4 does not add reflection/promotion job payloads; their policy receipts are covered
+  by the B4/B5 route receipts.
+- Cross-model review `/tmp/claude-review-b34-job-policy-followup.kBTzHk` found the route payload
+  needed real accessible-project membership, manage denials needed audit receipts, and workers
+  needed an organization mismatch guard; all three are now covered by tests.
+  `/tmp/claude-review-b34-postfix.2HxzAB` passed after the project-mismatch hardening and
+  metadata-only audit detail assertions. `/tmp/claude-review-b34-final2.iBbCrz` passed the final
+  commit-blocking review with no findings.
+- `moon run core:test -- tests/test_tools_manage.py`: 888 passed, 14 skipped, 20 deselected in
+  5.22s.
+- `moon run api:test -- tests/test_tools_manage.py tests/test_server_accessible_projects.py tests/test_jobs_entities.py tests/test_routes_tasks.py tests/test_jobs_queue.py tests/test_coordination_local.py`:
+  106 passed, 6 deselected in 1.33s.
+- `moon run api:lint api:typecheck core:lint core:typecheck`: exit 0; lint clean, with the existing
+  ty warning baseline still reported.
+- `moon run memory-trust-gate`: PASS, 6 passed and 0 failed.
+- `moon run docs:lint`: all matched files use Prettier style.
+- `git diff --check`: clean.
+
+Residual risks:
+
+- Project-less MCP `manage complete_task` with learnings still fails closed under the existing
+  project-scoped MCP write policy; that is a pre-existing policy gap for private task learning.
+- `sibyl-core` still lazily imports API queue helpers for async task-learning jobs. The import is
+  isolated and tested, but the layering should be retired during the pure Surreal service split.
+- Existing queued jobs without policy payloads fail closed; operators should expect denial receipts
+  instead of silent learning writes for old in-flight jobs.
+- Audit writes remain best-effort for service availability. Authorization failure remains closed,
+  but receipt persistence can still fail independently.
 
 ### Packet B4.6: Memory Source Inspect
 

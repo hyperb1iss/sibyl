@@ -1,6 +1,7 @@
 """Tests for the manage() tool."""
 
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,6 +21,19 @@ from sibyl_core.tools.manage import (
 
 # Test organization ID for non-admin actions
 TEST_ORG_ID = "test-org-12345"
+POLICY_PAYLOAD = {
+    "actor_user_id": "user-123",
+    "organization_id": TEST_ORG_ID,
+    "organization_role": None,
+    "accessible_projects": ["project-123"],
+    "accessible_delegations": None,
+    "delegated_authority": None,
+    "agent_id": None,
+    "project_id": "project-123",
+    "memory_space": "project",
+    "scope_key": "project-123",
+    "source_surface": "mcp_manage",
+}
 
 
 class TestManageResponse:
@@ -375,12 +389,30 @@ class TestTaskWorkflowHandlers:
         """complete_task should capture learnings."""
         mock_task = MagicMock()
         mock_task.status = TaskStatus.DONE
+        mock_task.model_dump.return_value = {
+            "id": "task_123",
+            "title": "Complete API manage policy path",
+        }
+        task_entity = SimpleNamespace(
+            entity_type="task",
+            metadata={"project_id": "project-123"},
+            project_id=None,
+        )
+        mock_entity_manager = MagicMock()
+        mock_entity_manager.get = AsyncMock(return_value=task_entity)
+        enqueue_episode = AsyncMock(return_value="episode-job-123")
+        enqueue_procedure = AsyncMock(return_value="procedure-job-123")
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
-            patch("sibyl_core.tools.manage.EntityManager"),
+            patch(
+                "sibyl_core.tools.manage.EntityManager",
+                return_value=mock_entity_manager,
+            ),
             patch("sibyl_core.tools.manage.RelationshipManager"),
             patch("sibyl_core.tasks.workflow.TaskWorkflowEngine") as mock_workflow,
+            patch("sibyl.jobs.queue.enqueue_create_learning_episode", enqueue_episode),
+            patch("sibyl.jobs.queue.enqueue_create_learning_procedure", enqueue_procedure),
         ):
             mock_client.return_value = MagicMock()
             mock_engine = MagicMock()
@@ -393,13 +425,59 @@ class TestTaskWorkflowHandlers:
                 data={
                     "learnings": "OAuth tokens expire after 1 hour",
                     "actual_hours": 4.5,
+                    "_memory_policy_context": POLICY_PAYLOAD,
                 },
                 organization_id=TEST_ORG_ID,
             )
 
             assert result.success is True
             assert "learnings captured" in result.message
-            mock_engine.complete_task.assert_called_once()
+            mock_engine.complete_task.assert_awaited_once_with(
+                "task_123",
+                4.5,
+                "OAuth tokens expire after 1 hour",
+                create_episode=False,
+            )
+            mock_entity_manager.get.assert_awaited_once_with("task_123")
+            enqueue_episode.assert_awaited_once_with(
+                {"id": "task_123", "title": "Complete API manage policy path"},
+                TEST_ORG_ID,
+                policy_context=POLICY_PAYLOAD,
+            )
+            enqueue_procedure.assert_awaited_once_with(
+                {"id": "task_123", "title": "Complete API manage policy path"},
+                TEST_ORG_ID,
+                policy_context=POLICY_PAYLOAD,
+            )
+
+    @pytest.mark.asyncio
+    async def test_complete_task_with_learnings_requires_policy_context(self) -> None:
+        """complete_task should fail closed without a policy payload."""
+        with (
+            patch("sibyl_core.tools.manage.get_graph_client") as mock_client,
+            patch("sibyl_core.tools.manage.EntityManager"),
+            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch("sibyl_core.tasks.workflow.TaskWorkflowEngine") as mock_workflow,
+            patch("sibyl.persistence.auth_runtime.log_memory_audit_event", AsyncMock()) as audit,
+        ):
+            mock_client.return_value = MagicMock()
+            mock_engine = MagicMock()
+            mock_engine.complete_task = AsyncMock()
+            mock_workflow.return_value = mock_engine
+
+            result = await manage(
+                action="complete_task",
+                entity_id="task_123",
+                data={"learnings": "No context should deny."},
+                organization_id=TEST_ORG_ID,
+            )
+
+            assert result.success is False
+            assert result.data["policy_reason"] == "missing_policy_context"
+            mock_engine.complete_task.assert_not_awaited()
+            audit.assert_awaited_once()
+            assert audit.await_args.kwargs["policy_reason"] == "missing_policy_context"
+            assert audit.await_args.kwargs["details"] == {"task_id": "task_123"}
 
     @pytest.mark.asyncio
     async def test_invalid_transition_error(self) -> None:

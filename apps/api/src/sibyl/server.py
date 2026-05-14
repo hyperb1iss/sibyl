@@ -649,11 +649,23 @@ async def _manage_mcp_action(
     full_data["organization_id"] = ctx.org_id
     if ctx.user_id:
         full_data["user_id"] = ctx.user_id
+    if (
+        action.lower().strip() == "complete_task"
+        and full_data.get("learnings")
+        and policy_decision is not None
+        and policy_decision.policy_context is not None
+    ):
+        from sibyl.jobs.entities import serialize_memory_policy_context
+
+        full_data["_memory_policy_context"] = serialize_memory_policy_context(
+            policy_decision.policy_context
+        )
 
     result = await manage(
         action=action,
         entity_id=entity_id,
         data=full_data,
+        organization_id=ctx.org_id,
     )
     payload = _to_dict(result)
     if policy_decision is not None:

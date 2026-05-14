@@ -294,6 +294,28 @@ async def test_enqueue_create_learning_procedure_indexes_recent_job() -> None:
 
 
 @pytest.mark.asyncio
+async def test_enqueue_create_learning_jobs_include_policy_payload() -> None:
+    pool = RecordingEnqueuePool()
+    broker = make_broker(pool)
+    policy_context = {
+        "actor_user_id": "user-1",
+        "memory_space": "project",
+        "scope_key": "project-1",
+    }
+
+    job_id = await broker.enqueue_create_learning_episode(
+        {"id": "task-123", "title": "Ship the thing"},
+        "org-123",
+        policy_context=policy_context,
+    )
+
+    assert job_id == "learning_episode:task-123"
+    assert pool.calls[0][0] == "create_learning_episode"
+    assert pool.calls[0][2]["policy_context"] == policy_context
+    assert_recent_job_indexed(pool, "learning_episode:task-123")
+
+
+@pytest.mark.asyncio
 async def test_enqueue_consolidation_uses_org_scoped_job_id() -> None:
     pool = RecordingEnqueuePool()
     broker = make_broker(pool)

@@ -22,10 +22,13 @@ from sibyl.auth.dependencies import (
     get_current_user,
     require_org_role,
 )
+from sibyl.jobs.entities import serialize_memory_policy_context
 from sibyl.locks import entity_lock
+from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole, ProjectRole
 from sibyl_core.models.tasks import AuthorType, Note, TaskComplexity, TaskPriority, TaskStatus
 from sibyl_core.tasks.workflow import TaskWorkflowEngine
+from sibyl_core.tools.helpers import _project_id_for_policy
 
 log = structlog.get_logger()
 _WRITE_ROLES = (
@@ -62,8 +65,7 @@ async def _verify_task_access(
     if not entity:
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
 
-    # Extract project_id from entity metadata
-    project_id = entity.metadata.get("project_id") if entity.metadata else None
+    project_id = _project_id_for_policy(entity)
     await verify_entity_project_access(
         None,
         ctx,
@@ -533,7 +535,22 @@ async def complete_task(
         enqueue_create_learning_procedure,
     )
 
-    await _verify_task_access(task_id, org, auth)
+    verified_task = await _verify_task_access(task_id, org, auth)
+    project_id = _project_id_for_policy(verified_task)
+    accessible_projects = None
+    if project_id:
+        accessible_projects = {
+            str(accessible_project_id)
+            for accessible_project_id in (await list_accessible_project_graph_ids(auth) or set())
+        }
+    memory_policy_context = auth.to_memory_policy_context(
+        memory_space="project" if project_id else "private",
+        scope_key=project_id,
+        project_id=project_id,
+        accessible_projects=accessible_projects,
+        source_surface="task_learning_job",
+    )
+    policy_payload = serialize_memory_policy_context(memory_policy_context)
 
     group_id = str(org.id)
 
@@ -555,8 +572,16 @@ async def complete_task(
     if learnings:
         task_data = task.model_dump(mode="json")
         await asyncio.gather(
-            enqueue_create_learning_episode(task_data, group_id),
-            enqueue_create_learning_procedure(task_data, group_id),
+            enqueue_create_learning_episode(
+                task_data,
+                group_id,
+                policy_context=policy_payload,
+            ),
+            enqueue_create_learning_procedure(
+                task_data,
+                group_id,
+                policy_context=policy_payload,
+            ),
         )
 
     await _broadcast_task_update(

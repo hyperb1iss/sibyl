@@ -9,10 +9,69 @@ from typing import Any
 import structlog
 
 from sibyl.api.event_types import WSEvent
+from sibyl.persistence.auth_runtime import log_memory_audit_event
+from sibyl_core.auth import MemoryPolicyContext, OrganizationRole, authorize_memory_write
+from sibyl_core.auth.memory_policy import MemoryPolicyAction, MemoryPolicyDecision
 from sibyl_core.services.native_graph import get_native_graph_runtime
+from sibyl_core.services.surreal_content import MemoryScope
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
 
 log = structlog.get_logger()
+
+
+def serialize_memory_policy_context(
+    policy_context: MemoryPolicyContext | None,
+) -> dict[str, Any] | None:
+    if policy_context is None:
+        return None
+    organization_role = policy_context.organization_role
+    return {
+        "actor_user_id": policy_context.actor_user_id,
+        "organization_id": policy_context.organization_id,
+        "organization_role": organization_role.value
+        if isinstance(organization_role, OrganizationRole)
+        else organization_role,
+        "accessible_projects": sorted(policy_context.accessible_projects)
+        if policy_context.accessible_projects is not None
+        else None,
+        "accessible_delegations": sorted(policy_context.accessible_delegations)
+        if policy_context.accessible_delegations is not None
+        else None,
+        "delegated_authority": policy_context.delegated_authority,
+        "agent_id": policy_context.agent_id,
+        "project_id": policy_context.project_id,
+        "memory_space": policy_context.memory_space,
+        "scope_key": policy_context.scope_key,
+        "source_surface": policy_context.source_surface,
+    }
+
+
+def deserialize_memory_policy_context(
+    payload: dict[str, Any] | None,
+) -> MemoryPolicyContext | None:
+    if payload is None:
+        return None
+    return MemoryPolicyContext(
+        actor_user_id=payload.get("actor_user_id"),
+        organization_id=payload.get("organization_id"),
+        organization_role=payload.get("organization_role"),
+        accessible_projects=payload.get("accessible_projects"),
+        accessible_delegations=payload.get("accessible_delegations"),
+        delegated_authority=payload.get("delegated_authority"),
+        agent_id=payload.get("agent_id"),
+        project_id=payload.get("project_id"),
+        memory_space=payload.get("memory_space"),
+        scope_key=payload.get("scope_key"),
+        source_surface=payload.get("source_surface") or "job",
+    )
+
+
+def _policy_context_project_id(policy_context: MemoryPolicyContext) -> str | None:
+    if policy_context.project_id:
+        return policy_context.project_id
+    if policy_context.memory_space == MemoryScope.PROJECT.value:
+        return policy_context.scope_key
+    return None
 
 
 async def _safe_broadcast(event: str, data: dict[str, Any], *, org_id: str | None) -> None:
@@ -86,6 +145,123 @@ async def _inherit_task_knowledge(
             )
 
     return inherited_count
+
+
+async def _log_learning_job_audit(
+    *,
+    action: str,
+    group_id: str,
+    task_id: str,
+    project_id: str | None,
+    policy_context: MemoryPolicyContext | None,
+    decision: MemoryPolicyDecision,
+    derived_id: str | None = None,
+) -> None:
+    try:
+        await log_memory_audit_event(
+            action=action,
+            user_id=policy_context.actor_user_id if policy_context else None,
+            organization_id=group_id,
+            request=None,
+            memory_scope=decision.memory_scope.value,
+            scope_key=decision.scope_key,
+            project_id=project_id,
+            source_surface="job",
+            source_ids=[task_id],
+            derived_ids=[derived_id] if derived_id else [],
+            policy_allowed=decision.allowed,
+            policy_reason=decision.reason,
+            details={
+                "job": action,
+                "task_id": task_id,
+                "source_policy_surface": policy_context.source_surface if policy_context else None,
+            },
+        )
+    except Exception as exc:
+        log.warning("learning_job_audit_failed", action=action, error=str(exc), exc_info=True)
+
+
+async def _authorize_learning_job_write(
+    *,
+    action: str,
+    task_id: str,
+    project_id: str | None,
+    group_id: str,
+    policy_context_payload: dict[str, Any] | None,
+) -> tuple[MemoryPolicyDecision, MemoryPolicyContext | None]:
+    policy_context = deserialize_memory_policy_context(policy_context_payload)
+    memory_scope = MemoryScope.PROJECT if project_id else MemoryScope.PRIVATE
+    if policy_context is not None and policy_context.organization_id != str(group_id):
+        decision = MemoryPolicyDecision(
+            action=MemoryPolicyAction.WRITE,
+            allowed=False,
+            reason="organization_mismatch",
+            memory_scope=memory_scope,
+            scope_key=project_id,
+            policy_context=policy_context,
+        )
+        await _log_learning_job_audit(
+            action=action,
+            group_id=group_id,
+            task_id=task_id,
+            project_id=project_id,
+            policy_context=policy_context,
+            decision=decision,
+        )
+        raise ValueError(f"Learning job denied: {decision.reason}")
+    if policy_context is not None:
+        policy_project_id = _policy_context_project_id(policy_context)
+        if policy_project_id != project_id:
+            decision = MemoryPolicyDecision(
+                action=MemoryPolicyAction.WRITE,
+                allowed=False,
+                reason="project_mismatch",
+                memory_scope=MemoryScope.PROJECT
+                if policy_project_id or project_id
+                else MemoryScope.PRIVATE,
+                scope_key=project_id or policy_project_id,
+                policy_context=policy_context,
+            )
+            await _log_learning_job_audit(
+                action=action,
+                group_id=group_id,
+                task_id=task_id,
+                project_id=project_id or policy_project_id,
+                policy_context=policy_context,
+                decision=decision,
+            )
+            raise ValueError(f"Learning job denied: {decision.reason}")
+    decision = authorize_memory_write(
+        policy_context=policy_context,
+        memory_scope=memory_scope,
+        scope_key=project_id,
+    )
+    if not decision.allowed:
+        await _log_learning_job_audit(
+            action=action,
+            group_id=group_id,
+            task_id=task_id,
+            project_id=project_id,
+            policy_context=policy_context,
+            decision=decision,
+        )
+        raise ValueError(f"Learning job denied: {decision.reason}")
+    return decision, policy_context
+
+
+def _attach_learning_policy_metadata(entity: Any, decision: MemoryPolicyDecision) -> None:
+    metadata = dict(getattr(entity, "metadata", {}) or {})
+    metadata.update(
+        {
+            "memory_scope": decision.memory_scope.value,
+            "policy_allowed": decision.allowed,
+            "policy_reason": decision.reason,
+            "source_surface": "job",
+        }
+    )
+    if decision.scope_key:
+        metadata["scope_key"] = decision.scope_key
+    object.__setattr__(entity, "metadata", metadata)
 
 
 async def create_entity(  # noqa: PLR0915
@@ -336,6 +512,8 @@ async def create_learning_episode(
     ctx: dict[str, Any],  # noqa: ARG001
     task_data: dict[str, Any],
     group_id: str,
+    *,
+    policy_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a learning episode from a completed task.
 
@@ -346,6 +524,7 @@ async def create_learning_episode(
         ctx: arq context
         task_data: Serialized task dict (from task.model_dump())
         group_id: Organization ID
+        policy_context: Serialized actor/project policy context
 
     Returns:
         Dict with episode creation results
@@ -362,11 +541,19 @@ async def create_learning_episode(
     )
 
     try:
+        decision, restored_policy_context = await _authorize_learning_job_write(
+            action="memory.task_learning.episode",
+            task_id=task.id,
+            project_id=task.project_id,
+            group_id=group_id,
+            policy_context_payload=policy_context,
+        )
         runtime = await get_native_graph_runtime(group_id)
         entity_manager = runtime.entity_manager
         relationship_manager = runtime.relationship_manager
 
         episode = build_learning_episode(task)
+        _attach_learning_policy_metadata(episode, decision)
 
         episode_id = await entity_manager.create_direct(episode)
 
@@ -409,6 +596,15 @@ async def create_learning_episode(
             org_id=group_id,
         )
 
+        await _log_learning_job_audit(
+            action="memory.task_learning.episode",
+            group_id=group_id,
+            task_id=task.id,
+            project_id=task.project_id,
+            policy_context=restored_policy_context,
+            decision=decision,
+            derived_id=episode_id,
+        )
         log.info("create_learning_episode_completed", **result)
         return result
 
@@ -425,6 +621,8 @@ async def create_learning_procedure(
     ctx: dict[str, Any],  # noqa: ARG001
     task_data: dict[str, Any],
     group_id: str,
+    *,
+    policy_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a reusable procedure from a completed task."""
     from sibyl_core.models.entities import Relationship, RelationshipType
@@ -439,6 +637,13 @@ async def create_learning_procedure(
     )
 
     try:
+        decision, restored_policy_context = await _authorize_learning_job_write(
+            action="memory.task_learning.procedure",
+            task_id=task.id,
+            project_id=task.project_id,
+            group_id=group_id,
+            policy_context_payload=policy_context,
+        )
         runtime = await get_native_graph_runtime(group_id)
         entity_manager = runtime.entity_manager
         relationship_manager = runtime.relationship_manager
@@ -469,6 +674,7 @@ async def create_learning_procedure(
             log.info("create_learning_procedure_skipped", **result)
             return result
 
+        _attach_learning_policy_metadata(procedure, decision)
         procedure_id = await entity_manager.create_direct(procedure)
 
         await relationship_manager.create(
@@ -513,6 +719,15 @@ async def create_learning_procedure(
             org_id=group_id,
         )
 
+        await _log_learning_job_audit(
+            action="memory.task_learning.procedure",
+            group_id=group_id,
+            task_id=task.id,
+            project_id=task.project_id,
+            policy_context=restored_policy_context,
+            decision=decision,
+            derived_id=procedure_id,
+        )
         log.info("create_learning_procedure_completed", **result)
         return result
 

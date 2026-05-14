@@ -502,7 +502,21 @@ async def test_manage_mcp_action_scopes_task_metadata() -> None:
             "learnings": "MCP task learning needs policy context.",
             "organization_id": ctx.org_id,
             "user_id": ctx.user_id,
+            "_memory_policy_context": {
+                "actor_user_id": ctx.user_id,
+                "organization_id": ctx.org_id,
+                "organization_role": None,
+                "accessible_projects": ["project-a"],
+                "accessible_delegations": None,
+                "delegated_authority": None,
+                "agent_id": None,
+                "project_id": "project-a",
+                "memory_space": "project",
+                "scope_key": "project-a",
+                "source_surface": "mcp_manage",
+            },
         },
+        organization_id=ctx.org_id,
     )
 
 
@@ -536,6 +550,7 @@ async def test_manage_mcp_project_id_action_allows_admin_scope() -> None:
             "organization_id": ctx.org_id,
             "user_id": ctx.user_id,
         },
+        organization_id=ctx.org_id,
     )
 
 

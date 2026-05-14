@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -36,6 +37,20 @@ from sibyl_core.tools.manage import (
 from .conftest import (
     make_entity,
 )
+
+POLICY_PAYLOAD = {
+    "actor_user_id": "user-123",
+    "organization_id": "org_123",
+    "organization_role": None,
+    "accessible_projects": ["project-123"],
+    "accessible_delegations": None,
+    "delegated_authority": None,
+    "agent_id": None,
+    "project_id": "project-123",
+    "memory_space": "project",
+    "scope_key": "project-123",
+    "source_surface": "mcp_manage",
+}
 
 # =============================================================================
 # Action Constants Tests
@@ -420,18 +435,36 @@ class TestTaskActions:
         mock_client = AsyncMock()
         mock_task = MagicMock()
         mock_task.status = TaskStatus.DONE
+        mock_task.model_dump.return_value = {
+            "id": "task_123",
+            "title": "Complete MCP policy path",
+        }
+        task_entity = SimpleNamespace(
+            entity_type="task",
+            metadata={"project_id": "project-123"},
+            project_id=None,
+        )
+        mock_entity_manager = MagicMock()
+        mock_entity_manager.get = AsyncMock(return_value=task_entity)
 
         mock_workflow = AsyncMock()
         mock_workflow.complete_task = AsyncMock(return_value=mock_task)
+        enqueue_episode = AsyncMock(return_value="episode-job-123")
+        enqueue_procedure = AsyncMock(return_value="procedure-job-123")
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
-            patch("sibyl_core.tools.manage.EntityManager"),
+            patch(
+                "sibyl_core.tools.manage.EntityManager",
+                return_value=mock_entity_manager,
+            ),
             patch("sibyl_core.tools.manage.RelationshipManager"),
             patch(
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
             ),
+            patch("sibyl.jobs.queue.enqueue_create_learning_episode", enqueue_episode),
+            patch("sibyl.jobs.queue.enqueue_create_learning_procedure", enqueue_procedure),
         ):
             response = await manage(
                 action="complete_task",
@@ -439,6 +472,7 @@ class TestTaskActions:
                 data={
                     "learnings": "Discovered a better approach using async iterators",
                     "actual_hours": 4.5,
+                    "_memory_policy_context": POLICY_PAYLOAD,
                 },
                 organization_id="org_123",
             )
@@ -448,6 +482,146 @@ class TestTaskActions:
             assert (
                 response.data["learnings"] == "Discovered a better approach using async iterators"
             )
+            assert response.data["learning_episode_job_id"] == "episode-job-123"
+            assert response.data["learning_procedure_job_id"] == "procedure-job-123"
+            mock_entity_manager.get.assert_awaited_once_with("task_123")
+            mock_workflow.complete_task.assert_awaited_once_with(
+                "task_123",
+                4.5,
+                "Discovered a better approach using async iterators",
+                create_episode=False,
+            )
+            enqueue_episode.assert_awaited_once_with(
+                {"id": "task_123", "title": "Complete MCP policy path"},
+                "org_123",
+                policy_context=POLICY_PAYLOAD,
+            )
+            enqueue_procedure.assert_awaited_once_with(
+                {"id": "task_123", "title": "Complete MCP policy path"},
+                "org_123",
+                policy_context=POLICY_PAYLOAD,
+            )
+
+    @pytest.mark.asyncio
+    async def test_complete_task_with_learnings_requires_policy_context(self) -> None:
+        """complete_task refuses learning capture without policy context."""
+        mock_client = AsyncMock()
+        mock_workflow = AsyncMock()
+        mock_workflow.complete_task = AsyncMock()
+
+        with (
+            patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
+            patch("sibyl_core.tools.manage.EntityManager"),
+            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch(
+                "sibyl_core.tasks.workflow.TaskWorkflowEngine",
+                return_value=mock_workflow,
+            ),
+            patch("sibyl.persistence.auth_runtime.log_memory_audit_event", AsyncMock()) as audit,
+        ):
+            response = await manage(
+                action="complete_task",
+                entity_id="task_123",
+                data={"learnings": "Missing policy should fail closed."},
+                organization_id="org_123",
+            )
+
+        assert response.success is False
+        assert response.data["policy_reason"] == "missing_policy_context"
+        mock_workflow.complete_task.assert_not_awaited()
+        audit.assert_awaited_once()
+        assert audit.await_args.kwargs["policy_reason"] == "missing_policy_context"
+        assert audit.await_args.kwargs["details"] == {"task_id": "task_123"}
+
+    @pytest.mark.asyncio
+    async def test_complete_task_with_learnings_denies_project_mismatch(self) -> None:
+        """complete_task refuses learnings when context lacks task project."""
+        mock_client = AsyncMock()
+        task_entity = SimpleNamespace(
+            entity_type="task",
+            metadata={"project_id": "project-denied"},
+            project_id=None,
+        )
+        mock_entity_manager = MagicMock()
+        mock_entity_manager.get = AsyncMock(return_value=task_entity)
+        mock_workflow = AsyncMock()
+        mock_workflow.complete_task = AsyncMock()
+
+        with (
+            patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
+            patch(
+                "sibyl_core.tools.manage.EntityManager",
+                return_value=mock_entity_manager,
+            ),
+            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch(
+                "sibyl_core.tasks.workflow.TaskWorkflowEngine",
+                return_value=mock_workflow,
+            ),
+            patch("sibyl.persistence.auth_runtime.log_memory_audit_event", AsyncMock()) as audit,
+        ):
+            response = await manage(
+                action="complete_task",
+                entity_id="task_123",
+                data={
+                    "learnings": "Denied project should fail closed.",
+                    "_memory_policy_context": POLICY_PAYLOAD,
+                },
+                organization_id="org_123",
+            )
+
+        assert response.success is False
+        assert response.data["policy_reason"] == "unverified_membership"
+        mock_entity_manager.get.assert_awaited_once_with("task_123")
+        mock_workflow.complete_task.assert_not_awaited()
+        audit.assert_awaited_once()
+        assert audit.await_args.kwargs["project_id"] == "project-denied"
+        assert audit.await_args.kwargs["policy_reason"] == "unverified_membership"
+        assert audit.await_args.kwargs["details"] == {"task_id": "task_123"}
+
+    @pytest.mark.asyncio
+    async def test_complete_task_with_learnings_denies_org_mismatch(self) -> None:
+        """complete_task refuses learnings with a cross-org policy payload."""
+        mock_client = AsyncMock()
+        mock_entity_manager = MagicMock()
+        mock_entity_manager.get = AsyncMock()
+        mock_workflow = AsyncMock()
+        mock_workflow.complete_task = AsyncMock()
+
+        with (
+            patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
+            patch(
+                "sibyl_core.tools.manage.EntityManager",
+                return_value=mock_entity_manager,
+            ),
+            patch("sibyl_core.tools.manage.RelationshipManager"),
+            patch(
+                "sibyl_core.tasks.workflow.TaskWorkflowEngine",
+                return_value=mock_workflow,
+            ),
+            patch("sibyl.persistence.auth_runtime.log_memory_audit_event", AsyncMock()) as audit,
+        ):
+            response = await manage(
+                action="complete_task",
+                entity_id="task_123",
+                data={
+                    "learnings": "Cross-org payload should fail closed.",
+                    "_memory_policy_context": {
+                        **POLICY_PAYLOAD,
+                        "organization_id": "org_other",
+                    },
+                },
+                organization_id="org_123",
+            )
+
+        assert response.success is False
+        assert response.data["policy_reason"] == "organization_mismatch"
+        mock_entity_manager.get.assert_not_awaited()
+        mock_workflow.complete_task.assert_not_awaited()
+        audit.assert_awaited_once()
+        assert audit.await_args.kwargs["organization_id"] == "org_123"
+        assert audit.await_args.kwargs["policy_reason"] == "organization_mismatch"
+        assert audit.await_args.kwargs["details"] == {"task_id": "task_123"}
 
     @pytest.mark.asyncio
     async def test_complete_task_without_learnings(self) -> None:
@@ -475,6 +649,12 @@ class TestTaskActions:
             )
             assert response.success is True
             assert "learnings captured" not in response.message
+            mock_workflow.complete_task.assert_awaited_once_with(
+                "task_123",
+                None,
+                "",
+                create_episode=False,
+            )
 
     @pytest.mark.asyncio
     async def test_archive_task_success(self) -> None:

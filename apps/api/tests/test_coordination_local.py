@@ -356,6 +356,57 @@ async def test_local_queue_broker_cancels_queued_jobs_and_best_effort_running_jo
     await broker.shutdown()
 
 
+@pytest.mark.asyncio
+async def test_local_queue_broker_preserves_learning_policy_context() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def create_learning_episode(
+        _ctx: dict[str, object],
+        task_data: dict[str, object],
+        group_id: str,
+        *,
+        policy_context: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        calls.append(
+            {
+                "task_data": task_data,
+                "group_id": group_id,
+                "policy_context": policy_context,
+            }
+        )
+        return {"ok": True}
+
+    broker = LocalQueueBroker(
+        functions={"create_learning_episode": create_learning_episode},
+        max_concurrency=1,
+        result_ttl_seconds=60,
+    )
+    policy_context = {
+        "actor_user_id": "user-1",
+        "organization_id": "org-1",
+        "memory_space": "project",
+        "scope_key": "project-1",
+    }
+
+    await broker.startup()
+    job_id = await broker.enqueue_create_learning_episode(
+        {"id": "task-1", "learnings": "keep queue payload intact"},
+        "org-1",
+        policy_context=policy_context,
+    )
+    info = await _wait_for_job_status(broker, job_id, JobStatus.COMPLETE)
+    await broker.shutdown()
+
+    assert info.result == {"ok": True}
+    assert calls == [
+        {
+            "task_data": {"id": "task-1", "learnings": "keep queue payload intact"},
+            "group_id": "org-1",
+            "policy_context": policy_context,
+        }
+    ]
+
+
 @pytest.mark.parametrize("configured_backend", ["auto", "local"])
 def test_surreal_queue_backend_uses_local_broker(
     monkeypatch: pytest.MonkeyPatch,

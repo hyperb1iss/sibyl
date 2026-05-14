@@ -98,12 +98,16 @@ class QueueBroker(Protocol):
         self,
         task_data: dict[str, Any],
         group_id: str,
+        *,
+        policy_context: dict[str, Any] | None = None,
     ) -> str: ...
 
     async def enqueue_create_learning_procedure(
         self,
         task_data: dict[str, Any],
         group_id: str,
+        *,
+        policy_context: dict[str, Any] | None = None,
     ) -> str: ...
 
     async def enqueue_update_task(

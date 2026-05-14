@@ -17,7 +17,7 @@ from sibyl.api.routes.tasks import (
     create_task,
     list_notes,
 )
-from sibyl_core.auth import ProjectRole
+from sibyl_core.auth import MemoryPolicyContext, OrganizationRole, ProjectRole
 
 
 @pytest.mark.asyncio
@@ -57,7 +57,16 @@ class TestCompleteTaskRoute:
     @pytest.mark.asyncio
     async def test_complete_task_enqueues_episode_and_procedure_jobs(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        auth = SimpleNamespace()
+        auth = SimpleNamespace(
+            to_memory_policy_context=MagicMock(
+                side_effect=lambda **kwargs: MemoryPolicyContext(
+                    actor_user_id="user-1",
+                    organization_id=str(org.id),
+                    organization_role=OrganizationRole.MEMBER,
+                    **kwargs,
+                )
+            ),
+        )
         request = CompleteTaskRequest(actual_hours=2.5, learnings="Capture the pattern")
         completed_task = SimpleNamespace(
             id="task-123",
@@ -81,7 +90,14 @@ class TestCompleteTaskRoute:
             yield object()
 
         with (
-            patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
+            patch(
+                "sibyl.api.routes.tasks._verify_task_access",
+                AsyncMock(return_value=SimpleNamespace(metadata={}, project_id="proj-1")),
+            ),
+            patch(
+                "sibyl.api.routes.tasks.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj-1", "proj-2"}),
+            ),
             patch("sibyl.api.routes.tasks.entity_lock", locked_entity),
             patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
             patch("sibyl.api.routes.tasks.TaskWorkflowEngine", return_value=workflow),
@@ -99,13 +115,46 @@ class TestCompleteTaskRoute:
         workflow.complete_task.assert_awaited_once_with(
             "task-123", 2.5, "Capture the pattern", create_episode=False
         )
+        auth.to_memory_policy_context.assert_called_once_with(
+            memory_space="project",
+            scope_key="proj-1",
+            project_id="proj-1",
+            accessible_projects={"proj-1", "proj-2"},
+            source_surface="task_learning_job",
+        )
         episode_enqueue.assert_awaited_once_with(
             {"id": "task-123", "title": "Ship the thing"},
             str(org.id),
+            policy_context={
+                "actor_user_id": "user-1",
+                "organization_id": str(org.id),
+                "organization_role": "member",
+                "accessible_projects": ["proj-1", "proj-2"],
+                "accessible_delegations": None,
+                "delegated_authority": None,
+                "agent_id": None,
+                "project_id": "proj-1",
+                "memory_space": "project",
+                "scope_key": "proj-1",
+                "source_surface": "task_learning_job",
+            },
         )
         procedure_enqueue.assert_awaited_once_with(
             {"id": "task-123", "title": "Ship the thing"},
             str(org.id),
+            policy_context={
+                "actor_user_id": "user-1",
+                "organization_id": str(org.id),
+                "organization_role": "member",
+                "accessible_projects": ["proj-1", "proj-2"],
+                "accessible_delegations": None,
+                "delegated_authority": None,
+                "agent_id": None,
+                "project_id": "proj-1",
+                "memory_space": "project",
+                "scope_key": "proj-1",
+                "source_surface": "task_learning_job",
+            },
         )
         assert response.action == "complete_task"
         assert response.data["status"] == "done"

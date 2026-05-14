@@ -119,17 +119,29 @@ async def enqueue_update_entity(
 async def enqueue_create_learning_episode(
     task_data: dict[str, Any],
     group_id: str,
+    *,
+    policy_context: dict[str, Any] | None = None,
 ) -> str:
     """Enqueue a learning episode creation job."""
-    return await get_queue().enqueue_create_learning_episode(task_data, group_id)
+    return await get_queue().enqueue_create_learning_episode(
+        task_data,
+        group_id,
+        policy_context=policy_context,
+    )
 
 
 async def enqueue_create_learning_procedure(
     task_data: dict[str, Any],
     group_id: str,
+    *,
+    policy_context: dict[str, Any] | None = None,
 ) -> str:
     """Enqueue a learning procedure creation job."""
-    return await get_queue().enqueue_create_learning_procedure(task_data, group_id)
+    return await get_queue().enqueue_create_learning_procedure(
+        task_data,
+        group_id,
+        policy_context=policy_context,
+    )
 
 
 async def enqueue_update_task(

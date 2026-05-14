@@ -16,6 +16,7 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.auth import MemoryPolicyContext, authorize_memory_write
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services.crawl_sources import (
     _crawl_source_exists,
@@ -27,8 +28,10 @@ from sibyl_core.services.crawl_sources import (
 )
 from sibyl_core.services.link_graph_status import get_link_graph_status_data
 from sibyl_core.tasks.dependencies import detect_dependency_cycles
+from sibyl_core.tools.helpers import _project_id_for_policy
 
 log = structlog.get_logger()
+MEMORY_POLICY_CONTEXT_DATA_KEY = "_memory_policy_context"
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +63,27 @@ def _compat_relationship_manager(*args: Any, **kwargs: Any) -> Any:
 EntityManager = _compat_entity_manager
 RelationshipManager = _compat_relationship_manager
 GraphIntegrationService: Any = None
+
+
+def _memory_policy_context_from_payload(payload: dict[str, Any]) -> MemoryPolicyContext:
+    return MemoryPolicyContext(
+        actor_user_id=payload.get("actor_user_id"),
+        organization_id=payload.get("organization_id"),
+        organization_role=payload.get("organization_role"),
+        accessible_projects=payload.get("accessible_projects"),
+        accessible_delegations=payload.get("accessible_delegations"),
+        delegated_authority=payload.get("delegated_authority"),
+        agent_id=payload.get("agent_id"),
+        project_id=payload.get("project_id"),
+        memory_space=payload.get("memory_space"),
+        scope_key=payload.get("scope_key"),
+        source_surface=payload.get("source_surface") or "manage",
+    )
+
+
+def _memory_policy_payload(data: dict[str, Any]) -> dict[str, Any] | None:
+    payload = data.get(MEMORY_POLICY_CONTEXT_DATA_KEY)
+    return payload if isinstance(payload, dict) else None
 
 
 async def get_graph_client(group_id: str | None = None) -> Any:
@@ -124,6 +148,137 @@ class ManageResponse:
     message: str = ""
     data: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+async def _log_task_learning_capture_denied(
+    *,
+    task_id: str,
+    organization_id: str,
+    user_id: str | None,
+    memory_scope: str | None,
+    project_id: str | None,
+    policy_reason: str,
+    source_surface: str,
+) -> None:
+    try:
+        from sibyl.persistence.auth_runtime import log_memory_audit_event
+
+        await log_memory_audit_event(
+            action="memory.task_learning.manage_denied",
+            user_id=user_id,
+            organization_id=organization_id,
+            request=None,
+            memory_scope=memory_scope,
+            scope_key=project_id,
+            project_id=project_id,
+            source_surface=source_surface,
+            source_ids=[task_id],
+            policy_allowed=False,
+            policy_reason=policy_reason,
+            details={"task_id": task_id},
+        )
+    except Exception as exc:
+        log.warning("task_learning_manage_deny_audit_failed", error=str(exc), exc_info=True)
+
+
+async def _authorize_task_learning_capture(
+    entity_manager: Any,
+    *,
+    task_id: str,
+    organization_id: str,
+    data: dict[str, Any],
+) -> ManageResponse | None:
+    policy_payload = _memory_policy_payload(data)
+    if policy_payload is None:
+        await _log_task_learning_capture_denied(
+            task_id=task_id,
+            organization_id=organization_id,
+            user_id=str(data["user_id"]) if data.get("user_id") else None,
+            memory_scope=None,
+            project_id=None,
+            policy_reason="missing_policy_context",
+            source_surface="manage",
+        )
+        return ManageResponse(
+            success=False,
+            action="complete_task",
+            entity_id=task_id,
+            message="memory policy context required for task learning capture",
+            data={"policy_reason": "missing_policy_context"},
+        )
+
+    policy_context = _memory_policy_context_from_payload(policy_payload)
+    if policy_context.organization_id != str(organization_id):
+        await _log_task_learning_capture_denied(
+            task_id=task_id,
+            organization_id=organization_id,
+            user_id=policy_context.actor_user_id,
+            memory_scope=None,
+            project_id=None,
+            policy_reason="organization_mismatch",
+            source_surface=policy_context.source_surface,
+        )
+        return ManageResponse(
+            success=False,
+            action="complete_task",
+            entity_id=task_id,
+            message="task learning capture denied: organization_mismatch",
+            data={"policy_reason": "organization_mismatch"},
+        )
+
+    entity = await entity_manager.get(task_id)
+    project_id = _project_id_for_policy(entity)
+    memory_scope = "project" if project_id else "private"
+    decision = authorize_memory_write(
+        policy_context=policy_context,
+        memory_scope=memory_scope,
+        scope_key=project_id,
+    )
+    if decision.allowed:
+        return None
+    await _log_task_learning_capture_denied(
+        task_id=task_id,
+        organization_id=organization_id,
+        user_id=policy_context.actor_user_id,
+        memory_scope=memory_scope,
+        project_id=project_id,
+        policy_reason=decision.reason,
+        source_surface=policy_context.source_surface,
+    )
+    return ManageResponse(
+        success=False,
+        action="complete_task",
+        entity_id=task_id,
+        message=f"task learning capture denied: {decision.reason}",
+        data={"policy_reason": decision.reason},
+    )
+
+
+async def _enqueue_task_learning_jobs(
+    *,
+    task_data: dict[str, Any],
+    organization_id: str,
+    policy_payload: dict[str, Any],
+) -> dict[str, str]:
+    from sibyl.jobs.queue import (
+        enqueue_create_learning_episode,
+        enqueue_create_learning_procedure,
+    )
+
+    episode_job_id = await enqueue_create_learning_episode(
+        task_data,
+        organization_id,
+        policy_context=policy_payload,
+    )
+    procedure_job_id = await enqueue_create_learning_procedure(
+        task_data,
+        organization_id,
+        policy_context=policy_payload,
+    )
+    return {
+        "learning_episode_job_id": episode_job_id,
+        "learning_procedure_job_id": procedure_job_id,
+    }
 
 
 # =============================================================================
@@ -371,13 +526,37 @@ async def _handle_task_action(
             assert entity_id is not None  # validated above
             learnings = data.get("learnings", "")
             actual_hours = data.get("actual_hours")
-            task = await workflow.complete_task(entity_id, actual_hours, learnings)
+            policy_payload = _memory_policy_payload(data)
+            if learnings:
+                policy_error = await _authorize_task_learning_capture(
+                    entity_manager,
+                    task_id=entity_id,
+                    organization_id=organization_id,
+                    data=data,
+                )
+                if policy_error is not None:
+                    return policy_error
+            task = await workflow.complete_task(
+                entity_id,
+                actual_hours,
+                learnings,
+                create_episode=False,
+            )
+            response_data = {"status": task.status.value, "learnings": learnings}
+            if learnings and policy_payload is not None:
+                response_data.update(
+                    await _enqueue_task_learning_jobs(
+                        task_data=task.model_dump(mode="json"),
+                        organization_id=organization_id,
+                        policy_payload=policy_payload,
+                    )
+                )
             return ManageResponse(
                 success=True,
                 action=action,
                 entity_id=entity_id,
                 message="Task completed" + (" with learnings captured" if learnings else ""),
-                data={"status": task.status.value, "learnings": learnings},
+                data=response_data,
             )
 
         if action == "archive_task":
