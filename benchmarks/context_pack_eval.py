@@ -6,8 +6,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages" / "python" / "sibyl-core" / "src"))
 sys.path.insert(0, str(ROOT / "apps" / "cli" / "src"))
 
+from sibyl_core.config import settings
 from sibyl_core.evals import ContextPackEvalReport, EvalConfig, run_context_pack_evaluation_cli
 
 
@@ -79,6 +83,70 @@ def _parse_metadata(values: list[str]) -> dict[str, str]:
     return metadata
 
 
+def _sha256_file(path: Path | None) -> str:
+    path = _resolve_repo_path(path)
+    if path is None or not path.exists():
+        return "unavailable"
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _git_commit() -> str:
+    git = shutil.which("git")
+    if git is None:
+        return "unknown"
+    try:
+        result = subprocess.run(  # noqa: S603 - git path is resolved and args are fixed.
+            [git, "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            cwd=ROOT,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return result.stdout.strip() or "unknown"
+
+
+def _auth_manifest_id(path: Path | None) -> str:
+    path = _resolve_repo_path(path)
+    if path is None:
+        return "cli-token-or-anonymous"
+    if not path.exists():
+        return f"missing:{path}"
+    return _sha256_file(path)
+
+
+def _cases_dataset_name(cases_file: Path | None) -> str:
+    if cases_file is None:
+        return "sample-context-pack-cases"
+    return _resolve_repo_path(cases_file).stem
+
+
+def _benchmark_metadata(
+    *,
+    args: argparse.Namespace,
+    cases_file: Path | None,
+) -> dict[str, str]:
+    metadata = {
+        "retrieval_mode": "native",
+        "embedding_provider": str(settings.graph_embedding_provider),
+        "embedding_model": str(settings.graph_embedding_model),
+        "embedding_dimensions": str(settings.graph_embedding_dimensions),
+        "tokenizer_estimate_method": "provider-default",
+        "dataset_name": _cases_dataset_name(cases_file),
+        "corpus_hash": _sha256_file(cases_file),
+        "auth_manifest_id": _auth_manifest_id(args.auth_manifest),
+        "sibyl_commit": _git_commit(),
+        "runtime_mode": "live-api",
+    }
+    metadata.update(_parse_metadata(args.metadata))
+    return metadata
+
+
 async def _run(args: argparse.Namespace, cases_file: Path | None) -> ContextPackEvalReport:
     config = EvalConfig(
         api_base_url=args.api_url,
@@ -86,7 +154,7 @@ async def _run(args: argparse.Namespace, cases_file: Path | None) -> ContextPack
         output_dir=args.output_dir,
         save_results=not args.no_save,
         label=args.label,
-        metadata=_parse_metadata(args.metadata),
+        metadata=_benchmark_metadata(args=args, cases_file=cases_file),
         timeout_seconds=args.timeout,
     )
     return await run_context_pack_evaluation_cli(

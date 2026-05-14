@@ -25,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -345,6 +346,14 @@ def _git_commit() -> str | None:
     return commit or None
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
 # =============================================================================
 # MAIN BENCHMARK
 # =============================================================================
@@ -360,7 +369,8 @@ def run_benchmark(
     """Run the full LongMemEval benchmark."""
     k_values = k_values or [5, 10]
 
-    with open(data_path) as f:
+    dataset_path = Path(data_path)
+    with dataset_path.open() as f:
         entries = json.load(f)
 
     total_entries = len(entries)
@@ -454,14 +464,21 @@ def run_benchmark(
             "graph_engine": "none",
             "store": "chromadb_ephemeral",
             "retrieval_mode": mode,
+            "embedding_provider": "chromadb",
             "embedding_model": "chromadb_default",
+            "embedding_dimensions": 384,
+            "tokenizer_estimate_method": "chromadb_default",
         },
         "dataset": {
+            "name": dataset_path.stem,
             "path": data_path,
+            "corpus_hash": _sha256_file(dataset_path),
             "total_entries": total_entries,
             "evaluated_entries": total,
             "limit": limit,
         },
+        "repeat_count": 1,
+        "auth_manifest_id": "not-applicable:offline",
         "k_values": k_values,
         "total_questions": total,
         "overall": overall,

@@ -330,6 +330,8 @@ tasks:
     inputs:
       - tools/**/*.py
       - benchmarks/**/*.py
+      - benchmarks/context_pack_cases.json
+      - benchmarks/results/ai-memory/*.json
       - pyproject.toml
 
   retrieval-mode-history:

@@ -8,7 +8,7 @@ story.
 
 1. `moon run bench-live -- --label legacy --metadata store=legacy`
 2. `moon run bench-live-smoke`
-3. `moon run core:bench-context -- --cases path/to/context_cases.json --label context-pack`
+3. `moon run core:bench-context -- --cases path/to/context_cases.json --label retrieval-native`
 4. `moon run bench-retrieval`
 5. `uv run --with chromadb python benchmarks/longmemeval_bench.py /path/to/longmemeval.json --mode hybrid`
 
@@ -50,12 +50,15 @@ This is the live context-pack quality guard.
   reported estimator margin, forbidden terms, and per-case leak signals
 - Writes timestamped JSON reports under `.moon/cache/evals/` by default
 - Writes the same JSON report shape used by the comparison and gate tools
+- Adds release metadata for retrieval mode, embedding provider/model/dimensions, tokenizer method,
+  dataset name, corpus hash, auth manifest ID, commit, and live runtime mode
 
 Nightly seeds the deterministic baseline corpus first and passes
 `.moon/cache/baseline-runtime-manifest.json` through `--auth-manifest`, so the context benchmark
 uses the same short-lived baseline user token as the seeded corpus. It also runs the frozen suite
 with `--repeat 20`; the report-level `latency_p95_ms` is computed across every repeated case run,
-and the gate requires `metadata.repeat_count = 20`.
+and the gate requires `metadata.repeat_count = 20`. Compare runs must label the artifact with the
+retrieval mode, for example `--label retrieval-compare --metadata retrieval_mode=compare`.
 
 Use this when changing retrieval, source grounding, prompt hooks, policy checks, or context-pack
 rendering.
@@ -119,6 +122,16 @@ The `context-pack` profile gates dogfood context reports:
 - `leak_count <= 0`
 - `forbidden_term_matches <= 0`
 
+It also requires citable release metadata:
+
+- `metadata.retrieval_mode` is one of `pre-graphiti`, `post-graphiti`, `native`, or `compare`
+- `metadata.embedding_provider`, `metadata.embedding_model`, and `metadata.embedding_dimensions`
+- `metadata.tokenizer_estimate_method`
+- `metadata.dataset_name` and `metadata.corpus_hash`
+- `metadata.repeat_count`, `metadata.auth_manifest_id`, `metadata.sibyl_commit`, and
+  `metadata.runtime_mode`
+- `label` includes the retrieval mode so charts cannot silently mix incompatible runs
+
 `leak_count` is a per-case sentinel: forbidden item and forbidden term matches are reported
 separately, while the summary uses the larger of those two counts for each case so one leaked memory
 is not double-counted when it trips both signals.
@@ -177,6 +190,10 @@ Required record fields:
 - competitor version, hosted/self-hosted mode, ingestion path, and tuning when the result compares
   against another memory product
 - claim boundary: what the result supports and what stays unproven
+
+`moon run bench-gate` with no report argument gates the committed
+`benchmarks/results/ai-memory/manifest.json` ledger and every citable artifact it names. Use
+`moon run bench-gate -- <artifact>.json --profile ai-memory` for a single uncommitted artifact.
 
 The canonical ledger for which rows are citable is
 `docs/architecture/SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md`. If a benchmark suite is missing

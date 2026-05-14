@@ -16,13 +16,18 @@
     "graph_engine": "none",
     "store": "chromadb_ephemeral",
     "retrieval_mode": "hybrid",
-    "embedding_model": "chromadb_default"
+    "embedding_model": "chromadb_default",
+    "embedding_provider": "chromadb",
+    "embedding_dimensions": 384,
+    "tokenizer_estimate_method": "chromadb_default"
   },
   "dataset": {
     "path": ".moon/cache/benchmarks/longmemeval_s_cleaned.json",
     "total_entries": 500,
     "evaluated_entries": 500,
-    "limit": null
+    "limit": null,
+    "name": "longmemeval_s_cleaned",
+    "corpus_hash": "sha256:d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442"
   },
   "k_values": [
     5,
@@ -31819,5 +31824,8 @@
       "ndcg@10": 1.0
     }
   ],
-  "elapsed_seconds": 309.35002279281616
+  "elapsed_seconds": 309.35002279281616,
+  "repeat_count": 1,
+  "auth_manifest_id": "not-applicable:offline",
+  "claim_boundary": "Offline component retrieval baseline only; not live API runtime evidence."
 }

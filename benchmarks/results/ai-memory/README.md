@@ -15,11 +15,16 @@ full artifacts in this directory and pass the `ai-memory` gate. Entries under
 
 Each citable artifact must include overall metrics, per-slice metrics, full
 per-case records, dataset provenance, command, commit, runtime mode, and
-caveats. Gate new artifacts before citing them:
+caveats. Runtime metadata must name retrieval mode, embedding provider, model,
+dimensions, tokenizer method, repeat count, auth manifest ID, and corpus hash.
+Gate new artifacts before citing them:
 
 ```bash
 moon run bench-gate -- benchmarks/results/ai-memory/<artifact>.json --profile ai-memory
 ```
+
+Run `moon run bench-gate` without arguments to validate the committed manifest
+and every citable artifact it names.
 
 Suites without full artifacts in this directory or in a named external archive
 manifest are planned coverage only.

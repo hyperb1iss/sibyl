@@ -50,6 +50,34 @@ _AI_MEMORY_ANSWER_KEYS = (
     "expected_result_ids",
 )
 _AI_MEMORY_RANKING_KEYS = ("ranked_ids", "ranked_session_ids", "ranked_result_ids", "result_ids")
+_CONTEXT_PACK_RETRIEVAL_MODES = frozenset(("pre-graphiti", "post-graphiti", "native", "compare"))
+_AI_MEMORY_RETRIEVAL_MODES = frozenset(
+    ("pre-graphiti", "post-graphiti", "native", "compare", "raw", "hybrid")
+)
+_RELEASE_METADATA_FIELDS = (
+    "retrieval_mode",
+    "embedding_provider",
+    "embedding_model",
+    "embedding_dimensions",
+    "tokenizer_estimate_method",
+    "dataset_name",
+    "corpus_hash",
+    "repeat_count",
+    "auth_manifest_id",
+    "sibyl_commit",
+    "runtime_mode",
+)
+_AI_MEMORY_RUNTIME_FIELDS = (
+    "runtime_mode",
+    "retrieval_mode",
+    "embedding_provider",
+    "embedding_model",
+    "embedding_dimensions",
+    "tokenizer_estimate_method",
+)
+_AI_MEMORY_DATASET_FIELDS = ("name", "corpus_hash")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_AI_MEMORY_MANIFEST = REPO_ROOT / "benchmarks" / "results" / "ai-memory" / "manifest.json"
 
 
 def load_report(path: Path) -> dict[str, Any]:
@@ -118,12 +146,66 @@ def _is_non_empty_mapping(value: Any) -> TypeGuard[dict[str, Any]]:
     return isinstance(value, dict) and bool(value)
 
 
+def _is_mapping(value: Any) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def _is_non_empty_sequence(value: Any) -> TypeGuard[list[Any] | tuple[Any, ...]]:
     return isinstance(value, list | tuple) and bool(value)
 
 
 def _has_any_key(record: dict[str, Any], keys: tuple[str, ...]) -> bool:
     return any(key in record and record[key] not in (None, "", [], {}) for key in keys)
+
+
+def _is_present(value: Any) -> bool:
+    return value not in (None, "", [], {})
+
+
+def _is_positive_integer(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value > 0
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value) > 0
+    return False
+
+
+def _validate_retrieval_mode(
+    value: Any,
+    *,
+    path: str,
+    allowed: frozenset[str],
+) -> list[str]:
+    if not isinstance(value, str) or not value.strip():
+        return [f"{path} missing non-empty retrieval mode"]
+    normalized = value.strip()
+    if normalized not in allowed:
+        allowed_values = ", ".join(sorted(allowed))
+        return [
+            f"{path} has unsupported retrieval mode {normalized!r}; expected one of {allowed_values}"
+        ]
+    return []
+
+
+def _validate_positive_integer_field(value: Any, *, path: str) -> list[str]:
+    if _is_positive_integer(value):
+        return []
+    return [f"{path} must be a positive integer"]
+
+
+def _validate_required_fields(
+    mapping: dict[str, Any],
+    *,
+    path: str,
+    fields: tuple[str, ...],
+) -> list[str]:
+    failures: list[str] = []
+    for field in fields:
+        if not _is_present(mapping.get(field)):
+            failures.append(f"{path} missing non-empty field {field!r}")
+    return failures
 
 
 def _has_case_metric(record: dict[str, Any]) -> bool:
@@ -172,6 +254,69 @@ def _validate_ai_memory_scope(report: dict[str, Any]) -> list[str]:
     return failures
 
 
+def _validate_ai_memory_release_metadata(report: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    runtime = report.get("runtime")
+    dataset = report.get("dataset") or report.get("corpus")
+
+    if not isinstance(runtime, dict):
+        failures.append("missing non-empty field 'runtime'")
+    else:
+        runtime_record = cast("dict[str, Any]", runtime)
+        failures.extend(
+            _validate_required_fields(
+                runtime_record,
+                path="runtime",
+                fields=_AI_MEMORY_RUNTIME_FIELDS,
+            )
+        )
+        failures.extend(
+            _validate_retrieval_mode(
+                runtime_record.get("retrieval_mode"),
+                path="runtime['retrieval_mode']",
+                allowed=_AI_MEMORY_RETRIEVAL_MODES,
+            )
+        )
+        failures.extend(
+            _validate_positive_integer_field(
+                runtime_record.get("embedding_dimensions"),
+                path="runtime['embedding_dimensions']",
+            )
+        )
+
+    if not isinstance(dataset, dict):
+        failures.append("missing non-empty field 'dataset' or 'corpus'")
+    else:
+        dataset_record = cast("dict[str, Any]", dataset)
+        failures.extend(
+            _validate_required_fields(
+                dataset_record,
+                path="dataset",
+                fields=_AI_MEMORY_DATASET_FIELDS,
+            )
+        )
+
+    failures.extend(
+        _validate_positive_integer_field(report.get("repeat_count"), path="repeat_count")
+    )
+    if not _is_present(report.get("auth_manifest_id")):
+        failures.append("missing non-empty field 'auth_manifest_id'")
+
+    mode = report.get("mode")
+    if (
+        isinstance(runtime, dict)
+        and _is_present(mode)
+        and _is_present(runtime.get("retrieval_mode"))
+        and mode != runtime.get("retrieval_mode")
+    ):
+        failures.append(
+            f"mode {mode!r} does not match runtime['retrieval_mode'] "
+            f"{runtime.get('retrieval_mode')!r}"
+        )
+
+    return failures
+
+
 def _validate_ai_memory_summaries(report: dict[str, Any]) -> list[str]:
     if not any(_is_non_empty_mapping(report.get(key)) for key in _AI_MEMORY_SUMMARY_KEYS):
         keys = "', '".join(_AI_MEMORY_SUMMARY_KEYS)
@@ -207,8 +352,164 @@ def validate_ai_memory_record(report: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     failures.extend(_validate_ai_memory_header(report))
     failures.extend(_validate_ai_memory_scope(report))
+    failures.extend(_validate_ai_memory_release_metadata(report))
     failures.extend(_validate_ai_memory_summaries(report))
     failures.extend(_validate_ai_memory_cases(report))
+    return failures
+
+
+def validate_context_pack_release_metadata(report: dict[str, Any]) -> list[str]:
+    failures: list[str] = []
+    label = report.get("label")
+    if not isinstance(label, str) or not label.strip():
+        failures.append("missing non-empty field 'label'")
+
+    metadata = report.get("metadata")
+    if not isinstance(metadata, dict):
+        return [*failures, "report metadata is missing or invalid"]
+    metadata_record = cast("dict[str, Any]", metadata)
+    failures.extend(
+        _validate_required_fields(
+            metadata_record,
+            path="metadata",
+            fields=_RELEASE_METADATA_FIELDS,
+        )
+    )
+    failures.extend(
+        _validate_retrieval_mode(
+            metadata_record.get("retrieval_mode"),
+            path="metadata['retrieval_mode']",
+            allowed=_CONTEXT_PACK_RETRIEVAL_MODES,
+        )
+    )
+    failures.extend(
+        _validate_positive_integer_field(
+            metadata_record.get("embedding_dimensions"),
+            path="metadata['embedding_dimensions']",
+        )
+    )
+    failures.extend(
+        _validate_positive_integer_field(
+            metadata_record.get("repeat_count"),
+            path="metadata['repeat_count']",
+        )
+    )
+    retrieval_mode = metadata_record.get("retrieval_mode")
+    if isinstance(label, str) and isinstance(retrieval_mode, str):
+        normalized_label = label.lower()
+        normalized_mode = retrieval_mode.lower()
+        if normalized_mode not in normalized_label:
+            failures.append(f"label {label!r} must include retrieval mode {retrieval_mode!r}")
+    return failures
+
+
+def _validate_report_metadata_requirements(
+    report: dict[str, Any],
+    required_metadata: dict[str, str] | None,
+) -> list[str]:
+    if not required_metadata:
+        return []
+    metadata = report.get("metadata")
+    if not isinstance(metadata, dict):
+        return ["report metadata is missing or invalid"]
+    failures: list[str] = []
+    for key, expected in required_metadata.items():
+        actual = metadata.get(key)
+        if actual != expected:
+            failures.append(f"metadata[{key!r}] expected {expected!r}, got {actual!r}")
+    return failures
+
+
+def _validate_profile_requirements(
+    report: dict[str, Any],
+    profile: ProfileName,
+) -> list[str]:
+    if profile == "ai-memory":
+        return validate_ai_memory_record(report)
+    if profile == "context-pack":
+        return validate_context_pack_release_metadata(report)
+    return []
+
+
+def _validate_metric_thresholds(
+    metrics: dict[str, float],
+    thresholds: dict[str, MetricThreshold],
+) -> list[str]:
+    failures: list[str] = []
+    for metric, threshold in sorted(thresholds.items()):
+        actual = metrics.get(metric)
+        if actual is None:
+            failures.append(f"missing metric {metric!r}")
+            continue
+        if threshold.minimum is not None and actual < threshold.minimum:
+            failures.append(
+                f"metric {metric!r} below minimum {threshold.minimum:.4f}: {actual:.4f}"
+            )
+        if threshold.maximum is not None and actual > threshold.maximum:
+            failures.append(
+                f"metric {metric!r} above maximum {threshold.maximum:.4f}: {actual:.4f}"
+            )
+    return failures
+
+
+def _validate_citable_manifest_entry(
+    entry: dict[str, Any],
+    *,
+    index: int,
+    manifest_path: Path,
+) -> list[str]:
+    failures: list[str] = []
+    artifact_name = entry.get("artifact")
+    if not isinstance(artifact_name, str) or not artifact_name.strip():
+        return [f"citable[{index}] missing non-empty artifact"]
+
+    artifact_path = manifest_path.parent / artifact_name
+    if not artifact_path.exists():
+        return [f"citable[{index}] artifact does not exist: {artifact_name}"]
+
+    report = load_report(artifact_path)
+    failures.extend(
+        f"{artifact_name}: {failure}" for failure in evaluate_report(report, profile="ai-memory")
+    )
+
+    case_results = report.get("case_results")
+    case_result_count = len(case_results) if isinstance(case_results, list) else None
+    expected_pairs = (
+        ("status", "citable"),
+        ("gate_profile", "ai-memory"),
+        ("suite", report.get("suite")),
+        ("suite_version", report.get("suite_version")),
+        ("mode", report.get("mode")),
+        ("questions", report.get("total_questions")),
+        ("case_results", case_result_count),
+        ("elapsed_seconds", report.get("elapsed_seconds")),
+        ("runtime", report.get("runtime")),
+        ("dataset", report.get("dataset")),
+        ("overall", report.get("overall")),
+        ("claim_boundary", report.get("claim_boundary")),
+        ("repeat_count", report.get("repeat_count")),
+        ("auth_manifest_id", report.get("auth_manifest_id")),
+        ("sibyl_commit", report.get("sibyl_commit")),
+    )
+    for field, expected in expected_pairs:
+        if entry.get(field) != expected:
+            failures.append(f"{artifact_name}: manifest {field} does not match artifact")
+
+    return failures
+
+
+def _validate_planned_manifest_entries(planned: Any) -> list[str]:
+    failures: list[str] = []
+    if not isinstance(planned, list):
+        return failures
+    for index, entry in enumerate(planned):
+        if not _is_mapping(entry):
+            failures.append(f"planned[{index}] is not an object")
+            continue
+        if entry.get("status") != "planned":
+            failures.append(f"planned[{index}] status is not 'planned'")
+        if "artifact" in entry:
+            failures.append(f"planned[{index}] must not include artifact")
     return failures
 
 
@@ -232,34 +533,33 @@ def evaluate_report(
         maximums=maximums or {},
     )
     failures: list[str] = []
+    failures.extend(_validate_report_metadata_requirements(report, required_metadata))
+    failures.extend(_validate_profile_requirements(report, profile))
+    failures.extend(_validate_metric_thresholds(metrics, thresholds))
+    return failures
 
-    metadata = report.get("metadata")
-    if required_metadata:
-        if not isinstance(metadata, dict):
-            failures.append("report metadata is missing or invalid")
-        else:
-            for key, expected in required_metadata.items():
-                actual = metadata.get(key)
-                if actual != expected:
-                    failures.append(f"metadata[{key!r}] expected {expected!r}, got {actual!r}")
 
-    if profile == "ai-memory":
-        failures.extend(validate_ai_memory_record(report))
+def validate_ai_memory_manifest(manifest_path: Path) -> list[str]:
+    manifest = load_report(manifest_path)
+    failures: list[str] = []
+    citable = manifest.get("citable")
+    if not isinstance(citable, list) or not citable:
+        failures.append("manifest missing non-empty citable list")
+        return failures
 
-    for metric, threshold in sorted(thresholds.items()):
-        actual = metrics.get(metric)
-        if actual is None:
-            failures.append(f"missing metric {metric!r}")
+    for index, entry in enumerate(citable):
+        if not _is_mapping(entry):
+            failures.append(f"citable[{index}] is not an object")
             continue
-        if threshold.minimum is not None and actual < threshold.minimum:
-            failures.append(
-                f"metric {metric!r} below minimum {threshold.minimum:.4f}: {actual:.4f}"
+        failures.extend(
+            _validate_citable_manifest_entry(
+                entry,
+                index=index,
+                manifest_path=manifest_path,
             )
-        if threshold.maximum is not None and actual > threshold.maximum:
-            failures.append(
-                f"metric {metric!r} above maximum {threshold.maximum:.4f}: {actual:.4f}"
-            )
+        )
 
+    failures.extend(_validate_planned_manifest_entries(manifest.get("planned")))
     return failures
 
 
@@ -275,11 +575,64 @@ def _echo(message: str = "") -> None:
     sys.stdout.write(f"{message}\n")
 
 
+def _gate_default_manifest() -> int:
+    manifest_path = DEFAULT_AI_MEMORY_MANIFEST
+    failures = validate_ai_memory_manifest(manifest_path)
+    display_path = manifest_path.relative_to(REPO_ROOT)
+    _echo()
+    _echo(f"Checking {display_path} with the ai-memory manifest profile")
+    if failures:
+        _echo()
+        _echo("Gate failed:")
+        for failure in failures:
+            _echo(f"  - {failure}")
+        return 1
+    _echo()
+    _echo("Gate passed")
+    return 0
+
+
+def _print_thresholds(
+    metrics: dict[str, float],
+    thresholds: dict[str, MetricThreshold],
+) -> None:
+    for metric, threshold in sorted(thresholds.items()):
+        actual = metrics.get(metric)
+        if actual is None:
+            _echo(f"  {metric}: missing")
+            continue
+        checks: list[str] = []
+        if threshold.minimum is not None:
+            checks.append(f">= {threshold.minimum:.4f}")
+        if threshold.maximum is not None:
+            checks.append(f"<= {threshold.maximum:.4f}")
+        _echo(f"  {metric}: {actual:.4f} ({', '.join(checks)})")
+
+
+def _extract_metrics_for_profile(
+    report: dict[str, Any],
+    profile: ProfileName,
+) -> dict[str, float]:
+    try:
+        return extract_metrics(report)
+    except TypeError:
+        if profile != "ai-memory":
+            raise
+        return {}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Enforce threshold gates on a saved Sibyl eval report."
     )
-    parser.add_argument("report", type=Path, help="Saved evaluation report JSON.")
+    parser.add_argument(
+        "report",
+        nargs="?",
+        type=Path,
+        help=(
+            "Saved evaluation report JSON. When omitted, gates the committed AI-memory manifest."
+        ),
+    )
     parser.add_argument(
         "--profile",
         choices=("smoke", "acceptance", "context-pack", "ai-memory"),
@@ -309,6 +662,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.report is None:
+        return _gate_default_manifest()
+
     try:
         minimums = parse_kv_pairs(args.min_metric, value_kind="float")
         maximums = parse_kv_pairs(args.max_metric, value_kind="float")
@@ -329,28 +685,13 @@ def main(argv: list[str] | None = None) -> int:
     _echo()
     _echo(f"Checking {report_name} with the {args.profile} profile")
     _echo()
-    try:
-        metrics = extract_metrics(report)
-    except TypeError:
-        if args.profile != "ai-memory":
-            raise
-        metrics = {}
+    metrics = _extract_metrics_for_profile(report, args.profile)
     thresholds = build_thresholds(
         profile=args.profile,
         minimums=minimums,
         maximums=maximums,
     )
-    for metric, threshold in sorted(thresholds.items()):
-        actual = metrics.get(metric)
-        if actual is None:
-            _echo(f"  {metric}: missing")
-            continue
-        checks: list[str] = []
-        if threshold.minimum is not None:
-            checks.append(f">= {threshold.minimum:.4f}")
-        if threshold.maximum is not None:
-            checks.append(f"<= {threshold.maximum:.4f}")
-        _echo(f"  {metric}: {actual:.4f} ({', '.join(checks)})")
+    _print_thresholds(metrics, thresholds)
 
     if failures:
         _echo()

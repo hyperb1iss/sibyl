@@ -77,9 +77,16 @@ def test_longmemeval_report_includes_full_case_records(
         "graph_engine": "none",
         "store": "chromadb_ephemeral",
         "retrieval_mode": "raw",
+        "embedding_provider": "chromadb",
         "embedding_model": "chromadb_default",
+        "embedding_dimensions": 384,
+        "tokenizer_estimate_method": "chromadb_default",
     }
+    assert report["dataset"]["name"] == "longmemeval"
+    assert report["dataset"]["corpus_hash"].startswith("sha256:")
     assert report["dataset"]["evaluated_entries"] == QUESTION_COUNT
+    assert report["repeat_count"] == 1
+    assert report["auth_manifest_id"] == "not-applicable:offline"
     assert report["overall"]["recall@1"] == pytest.approx(EXPECTED_RECALL_AT_1)
     assert len(report["case_results"]) == QUESTION_COUNT
     assert report["case_results"][0] == {
