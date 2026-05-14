@@ -813,6 +813,9 @@ v0.8 should leave the system ready for:
 The sequencing matters. `synthesize` and sharing become powerful only after policy, provenance,
 audit, and inspection are boring.
 
+The executable post-v0.8 plan lives in
+[`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_COCKPIT_PLAN.md`](SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_COCKPIT_PLAN.md).
+
 ## 12. Execution Operating Model
 
 This plan should be implemented as small, reviewable commits. Each commit should retire one release
