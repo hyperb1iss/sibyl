@@ -449,8 +449,6 @@ class TestTaskActions:
 
         mock_workflow = AsyncMock()
         mock_workflow.complete_task = AsyncMock(return_value=mock_task)
-        enqueue_episode = AsyncMock(return_value="episode-job-123")
-        enqueue_procedure = AsyncMock(return_value="procedure-job-123")
 
         with (
             patch("sibyl_core.tools.manage.get_graph_client", return_value=mock_client),
@@ -463,8 +461,15 @@ class TestTaskActions:
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
             ),
-            patch("sibyl.jobs.queue.enqueue_create_learning_episode", enqueue_episode),
-            patch("sibyl.jobs.queue.enqueue_create_learning_procedure", enqueue_procedure),
+            patch(
+                "sibyl_core.tools.manage._enqueue_task_learning_jobs",
+                AsyncMock(
+                    return_value={
+                        "learning_episode_job_id": "episode-job-123",
+                        "learning_procedure_job_id": "procedure-job-123",
+                    }
+                ),
+            ) as enqueue_learning_jobs,
         ):
             response = await manage(
                 action="complete_task",
@@ -491,15 +496,10 @@ class TestTaskActions:
                 "Discovered a better approach using async iterators",
                 create_episode=False,
             )
-            enqueue_episode.assert_awaited_once_with(
-                {"id": "task_123", "title": "Complete MCP policy path"},
-                "org_123",
-                policy_context=POLICY_PAYLOAD,
-            )
-            enqueue_procedure.assert_awaited_once_with(
-                {"id": "task_123", "title": "Complete MCP policy path"},
-                "org_123",
-                policy_context=POLICY_PAYLOAD,
+            enqueue_learning_jobs.assert_awaited_once_with(
+                task_data={"id": "task_123", "title": "Complete MCP policy path"},
+                organization_id="org_123",
+                policy_payload=POLICY_PAYLOAD,
             )
 
     @pytest.mark.asyncio
@@ -517,7 +517,10 @@ class TestTaskActions:
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
             ),
-            patch("sibyl.persistence.auth_runtime.log_memory_audit_event", AsyncMock()) as audit,
+            patch(
+                "sibyl_core.tools.manage._log_task_learning_capture_denied",
+                AsyncMock(),
+            ) as audit,
         ):
             response = await manage(
                 action="complete_task",
@@ -531,7 +534,7 @@ class TestTaskActions:
         mock_workflow.complete_task.assert_not_awaited()
         audit.assert_awaited_once()
         assert audit.await_args.kwargs["policy_reason"] == "missing_policy_context"
-        assert audit.await_args.kwargs["details"] == {"task_id": "task_123"}
+        assert audit.await_args.kwargs["task_id"] == "task_123"
 
     @pytest.mark.asyncio
     async def test_complete_task_with_learnings_denies_project_mismatch(self) -> None:
@@ -558,7 +561,10 @@ class TestTaskActions:
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
             ),
-            patch("sibyl.persistence.auth_runtime.log_memory_audit_event", AsyncMock()) as audit,
+            patch(
+                "sibyl_core.tools.manage._log_task_learning_capture_denied",
+                AsyncMock(),
+            ) as audit,
         ):
             response = await manage(
                 action="complete_task",
@@ -577,7 +583,7 @@ class TestTaskActions:
         audit.assert_awaited_once()
         assert audit.await_args.kwargs["project_id"] == "project-denied"
         assert audit.await_args.kwargs["policy_reason"] == "unverified_membership"
-        assert audit.await_args.kwargs["details"] == {"task_id": "task_123"}
+        assert audit.await_args.kwargs["task_id"] == "task_123"
 
     @pytest.mark.asyncio
     async def test_complete_task_with_learnings_denies_org_mismatch(self) -> None:
@@ -599,7 +605,10 @@ class TestTaskActions:
                 "sibyl_core.tasks.workflow.TaskWorkflowEngine",
                 return_value=mock_workflow,
             ),
-            patch("sibyl.persistence.auth_runtime.log_memory_audit_event", AsyncMock()) as audit,
+            patch(
+                "sibyl_core.tools.manage._log_task_learning_capture_denied",
+                AsyncMock(),
+            ) as audit,
         ):
             response = await manage(
                 action="complete_task",
@@ -621,7 +630,7 @@ class TestTaskActions:
         audit.assert_awaited_once()
         assert audit.await_args.kwargs["organization_id"] == "org_123"
         assert audit.await_args.kwargs["policy_reason"] == "organization_mismatch"
-        assert audit.await_args.kwargs["details"] == {"task_id": "task_123"}
+        assert audit.await_args.kwargs["task_id"] == "task_123"
 
     @pytest.mark.asyncio
     async def test_complete_task_without_learnings(self) -> None:
