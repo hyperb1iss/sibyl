@@ -99,6 +99,16 @@ GATE_CHECKS: tuple[GateCheck, ...] = (
         ),
     ),
     GateCheck(
+        name="api-jobs-policy",
+        description="task-learning job policy payloads and audit receipts",
+        surfaces=("jobs", "task learning", "memory policy", "audit"),
+        command=(
+            "moon",
+            "run",
+            "api:memory-trust-jobs-test",
+        ),
+    ),
+    GateCheck(
         name="cli-memory",
         description="CLI remember, recall, wake, reflect, prompt hook, preview, and inspect",
         surfaces=(
@@ -129,6 +139,7 @@ REQUIRED_SURFACES: tuple[str, ...] = (
     "recall",
     "reflect",
     "mcp",
+    "jobs",
     "cli",
     "prompt hook",
     "promotion preview",

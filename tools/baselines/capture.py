@@ -375,6 +375,7 @@ def build_mcp_cases(graph_fixture: dict[str, dict[str, Any]]) -> list[dict[str, 
                 "content": MCP_ADD_CONTENT,
                 "entity_type": "pattern",
                 "category": "baseline",
+                "project": graph_ref("project"),
                 "tags": [*BASELINE_TAGS, "mcp-smoke"],
             },
             "expect": {
@@ -391,9 +392,9 @@ def build_mcp_cases(graph_fixture: dict[str, dict[str, Any]]) -> list[dict[str, 
             "expect": {
                 "equals": {
                     "/isError": False,
-                    "/structuredContent/success": False,
-                    "/structuredContent/message": "organization_id required for this action",
-                }
+                    "/structuredContent/success": True,
+                },
+                "required": ["/structuredContent/data/chunks_pending"],
             },
         },
         {

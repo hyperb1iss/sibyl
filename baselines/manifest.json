@@ -32,7 +32,7 @@
     }
   },
   "mcp_add": {
-    "note": "The replay corpus asserts current legacy behavior, including the MCP manage wrapper failure.",
+    "note": "The replay corpus asserts current MCP add and manage org-context behavior.",
     "title": "Baseline MCP Smoke Pattern"
   },
   "rest_seed": {

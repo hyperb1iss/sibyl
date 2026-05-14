@@ -454,7 +454,7 @@ def write_manifest(
         },
         "mcp_add": {
             "title": MCP_ADD_TITLE,
-            "note": "The replay corpus asserts current legacy behavior, including the MCP manage wrapper failure.",
+            "note": "The replay corpus asserts current MCP add and manage org-context behavior.",
         },
         "graph_fixture": {
             name: {

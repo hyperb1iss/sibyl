@@ -54,6 +54,7 @@ def test_gate_checks_use_moon_package_slices() -> None:
     assert ("moon", "run", "core:memory-trust-context-test") in commands
     assert ("moon", "run", "api:memory-trust-rest-test") in commands
     assert ("moon", "run", "api:memory-trust-mcp-test") in commands
+    assert ("moon", "run", "api:memory-trust-jobs-test") in commands
     assert ("moon", "run", "cli:memory-trust-test") in commands
 
 
@@ -74,6 +75,7 @@ def test_run_gate_prints_release_receipt(capsys: pytest.CaptureFixture[str]) -> 
     assert "surfaces: " in captured.out
     assert "raw memory" in captured.out
     assert "prompt hook" in captured.out
+    assert "jobs" in captured.out
     assert "promotion preview" in captured.out
     assert "share preview" in captured.out
 

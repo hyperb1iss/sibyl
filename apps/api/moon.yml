@@ -125,6 +125,20 @@ tasks:
     options:
       envFile: .env
 
+  memory-trust-jobs-test:
+    command:
+      uv run pytest tests/test_jobs_entities.py tests/test_jobs_queue.py
+      tests/test_routes_tasks.py tests/test_tools_manage.py tests/test_coordination_local.py -v
+    inputs:
+      - "@group(sources)"
+      - tests/test_jobs_entities.py
+      - tests/test_jobs_queue.py
+      - tests/test_routes_tasks.py
+      - tests/test_tools_manage.py
+      - tests/test_coordination_local.py
+    options:
+      envFile: .env
+
   graphiti-compatibility-marked-test:
     command:
       uv run pytest

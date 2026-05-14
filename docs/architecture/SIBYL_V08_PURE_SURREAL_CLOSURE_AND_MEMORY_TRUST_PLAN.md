@@ -1,6 +1,7 @@
 # Sibyl v0.8 Pure Surreal Closure and Memory Trust Plan
 
-- Status: active execution plan
+- Status: local implementation packets closed; release hold pending pushed-main CI and nightly
+  receipts
 - Target release: v0.8
 - Planning source: `plan_e464fd1e7b11`
 - Plan-authoring task: `c64a358e-aef4-4b32-8735-28f03047a13e`
@@ -80,6 +81,10 @@ v0.8 is ready when all of these are true:
   and policy reason metadata that can be inspected and tested.
 - Audit events record the actor, delegated authority, organization, project, memory scope, action,
   and policy decision for trust-sensitive memory operations.
+- Persisted `MemorySpace` CRUD and membership tables are not a v0.8 release claim. v0.8 claims the
+  `MemoryScope`/`MemoryPolicyContext` policy primitive for private, delegated, and project memory;
+  team, organization, shared, and public scopes remain disabled with stable deny reasons until the
+  post-v0.8 memory cockpit work.
 
 Required release gates:
 
@@ -446,18 +451,21 @@ Exit criteria:
 - Every memory surface has an explicit policy-context status.
 - Missing context is tracked as implementation work, not tribal knowledge.
 
-### Wave B1: MemorySpace Control Plane
+### Wave B1: Memory Scope Policy Boundary
 
-Purpose: introduce first-class memory spaces as policy boundaries.
+Purpose: install the memory-scope policy primitive needed for v0.8 and defer first-class persisted
+memory-space administration to the post-v0.8 memory cockpit work.
 
 Implementation:
 
-- Add `MemorySpace` records to the Surreal auth/control plane.
-- Model membership for private, delegated, project, team, organization, shared, and public scopes.
+- Carry `memory_space` and `scope_key` through `MemoryPolicyContext`.
+- Model private, delegated, and project membership through the current user, agent, project, and
+  accessible-project/delegation context.
 - Keep team, organization, shared, and public write/share behavior disabled until explicit policy
   cases are implemented.
-- Project graph memory should resolve to a project memory space.
-- Add graph projection only for explanation and traversal, not as the source of authorization truth.
+- Resolve project graph memory through the canonical project ID and policy scope key.
+- Defer persisted `memory_spaces` and `memory_space_members` tables, CRUD, and graph projections to
+  `docs/architecture/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_COCKPIT_PLAN.md`.
 
 Files:
 
@@ -478,9 +486,22 @@ Verify:
 
 Exit criteria:
 
-- Memory-space CRUD and membership basics exist.
-- Policy helpers can resolve space visibility without graph lookups.
+- Policy helpers can resolve private, delegated, and project visibility without graph lookups.
 - Disabled scopes return stable deny reasons.
+- Persisted memory-space CRUD and membership basics are explicitly deferred, not claimed by v0.8.
+
+B1 scope correction receipt, 2026-05-14:
+
+- Repository audit found no implemented `memory_spaces` or `memory_space_members` control-plane
+  tables. v0.8 therefore must not claim persisted MemorySpace CRUD or membership management.
+- The implemented release surface is `MemoryScope` plus `MemoryPolicyContext.memory_space` and
+  `scope_key`, used by REST, MCP, CLI-mediated API calls, context/session rendering, and
+  task-learning jobs.
+- Private, delegated, and project policy decisions are covered by `moon run core:test` and
+  `moon run memory-trust-gate`; team, organization, shared, and public scopes fail closed with
+  `scope_not_enabled`.
+- Post-v0.8 `SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_COCKPIT_PLAN.md` owns the persisted memory-space
+  control plane, membership UI/API/CLI, and agent access preview work.
 
 ### Wave B2: Project RBAC Hardening
 
@@ -702,7 +723,7 @@ Exit criteria:
 1. A0: lock post-v0.7 baseline.
 2. B0: update trust inventory against current code.
 3. A1: quarantine Graphiti compatibility.
-4. B1: introduce memory spaces as policy boundaries.
+4. B1: introduce memory-scope policy boundaries; defer persisted MemorySpace CRUD.
 5. B2: harden project RBAC and setup routes.
 6. A2: replace Graphiti-shaped native graph managers.
 7. A3: move embeddings to native ownership.
@@ -734,7 +755,8 @@ Sibyl tracking:
 - Epic: `v0.8 Memory Trust Foundation`
   - ID: `epic_539eea7afeb3`
   - Task `373c0eae-fef4-4822-9130-481193d50454`: inventory trust-sensitive memory surfaces
-  - Task `00a3beff-88d5-45d3-b5aa-dc52f01cb87a`: add memory-space control plane
+  - Task `00a3beff-88d5-45d3-b5aa-dc52f01cb87a`: add memory-space control plane; deferred post-v0.8
+    after the B1 scope correction
   - Task `0b7851f7-44c9-41e5-8036-7bd641d554aa`: harden project RBAC
   - Task `e4a44b56-10f1-4411-a677-5606920c0576`: unify API, CLI, MCP, and job policy context
   - Task `32d31cf2-70b4-4869-b683-8a6fcb5a8220`: add memory audit and inspect surfaces
@@ -768,6 +790,7 @@ Tracking integrity follow-up:
 | Memory API                      | `moon run api:test -- tests/test_routes_memory.py tests/test_routes_context.py`           |
 | MCP context                     | `moon run api:test -- tests/test_mcp_auth.py tests/test_server_accessible_projects.py`    |
 | CLI policy consumption          | `moon run cli:test`                                                                       |
+| Task-learning jobs              | `moon run api:memory-trust-jobs-test`                                                     |
 | Project RBAC                    | `moon run api:test -- tests/test_project_members.py tests/test_routes_search.py`          |
 | Docs                            | `moon run docs:lint`                                                                      |
 | Release                         | `moon run :check`, CI green, nightly green                                                |
@@ -786,18 +809,16 @@ Tracking integrity follow-up:
 
 ## 10. Open Questions
 
-These should be answered during B0/A0 before broad implementation:
+These were answered during execution where they affected v0.8 release scope:
 
-- Should `organization` memory scope become readable in v0.8, or remain disabled until explicit
-  organization memory spaces ship?
-- Should project-private graph entities without registered project records be denied for all
-  non-admin users, or migrated automatically before enforcement?
+- `organization` memory scope remains disabled until explicit organization memory spaces ship.
+- Existing project-private graph entities need canonical project-record repair before strict
+  enforcement; B2 added backfill and graph-ID resolution paths.
 - Should Graphiti compatibility remain in this repository as an optional extra after v0.8, or move
   to an archive branch once A4 is complete?
 - How long should retained `postgres.sql` restore support remain available after v0.8?
-- Should audit events for context-pack reads store item IDs only, or item IDs plus compact reason
-  metadata?
-- Should share preview land in CLI first, API first, or both?
+- Context-pack audit receipts store IDs plus compact metadata, not hidden source text.
+- Share preview landed in both API and CLI, with actual sharing disabled.
 
 ## 11. Post-v0.8 Bridge
 
@@ -1430,15 +1451,16 @@ packet's behavior and verification. Standalone planning updates stay doc-only.
 
 Status notes:
 
-- B2 implementation is closed by the receipts above. Reconcile the Sibyl task state before release
-  if tracking still shows the B2 task as active.
-- B3 has the shared policy context contract, MCP parity through B3.2, and task-learning job policy
-  payloads through B3.4. CLI display parity remains.
+- B2 implementation is closed by the receipts above. The Sibyl task state may still lag the packet
+  receipts and should not be used as release evidence by itself.
+- B3 has the shared policy context contract, MCP parity, CLI policy consumption, and task-learning
+  job policy payloads through B3.4.
 - B4 has audit storage, audit readback, context render audit, reflection render audit, REST request
   attribution, source inspect, and denied-render audit. The remaining B4 risk is that MCP denied
   render receipts stay requestless until the MCP tool layer exposes request metadata.
 - B5 reflection promotion preview, share preview, and CLI preview surfaces have receipts.
-- Track A still needs the pure-Surreal closure packets after the memory trust spine is stable.
+- Track A pure-Surreal closure packets have local receipts through A6. Pushed-main CI and nightly
+  receipts remain the release blocker.
 
 ### Packet B3.2: MCP Tool Policy Parity
 
@@ -1912,7 +1934,7 @@ B5.1 receipt, 2026-05-13:
 - Remaining B5 risk: unauthorized project targets still fail with the existing route-level 403
   instead of returning a structured `allowed=false` preview response, the preview response uses
   `promote_to_scope`/`promote_to_scope_key` while the write response uses
-  `memory_scope`/`scope_key`, and B5.3 still needs to expose the preview flows from the CLI.
+  `memory_scope`/`scope_key`. B5.3 later exposed the preview flows from the CLI.
 
 ### Packet B5.2: Share Preview Contract
 
@@ -2106,7 +2128,7 @@ Release note:
 - B6 owns the memory trust claim. A6 still owns final baseline, benchmark, inventory, CI, and
   nightly release receipts on the final tree.
 
-Current receipt:
+B6.1 receipt, 2026-05-14:
 
 - `memory-trust-gate` is a root moon task backed by `tools.trust.memory_trust_gate`.
 - The gate runs explicit package slice tasks:
@@ -2115,17 +2137,19 @@ Current receipt:
   - `api:memory-trust-rest-test`: raw memory REST, preview, audit, and inspect coverage.
   - `api:memory-trust-context-test`: context pack, session wake, reflection, and audit coverage.
   - `api:memory-trust-mcp-test`: MCP scoping, memory write, reflection, and auth coverage.
+  - `api:memory-trust-jobs-test`: task-learning job policy payloads, local queue preservation, and
+    job audit receipts.
   - `cli:memory-trust-test`: CLI remember, recall, wake, reflect, prompt hook, preview, audit, and
     inspect coverage.
 - `moon run inventory-lint inventory-typecheck memory-trust-gate-test`: tool lint and typecheck
   passed; harness tests passed with 8 tests.
-- `moon run memory-trust-gate`: PASS with 6 slices, 255 total focused tests, and covered surfaces
-  `audit`, `cli`, `context pack`, `inspect`, `mcp`, `memory policy`, `promotion preview`,
-  `prompt hook`, `raw memory`, `recall`, `reflect`, `share preview`, and `wake`.
-- Follow-up after independent review: the gate now also requires and reports `prompt hook` coverage,
+- `moon run api:memory-trust-jobs-test`: 85 passed in 1.54s.
+- `moon run memory-trust-gate`: PASS with 7 slices and covered surfaces `audit`, `cli`,
+  `context pack`, `inspect`, `jobs`, `mcp`, `memory policy`, `promotion preview`, `prompt hook`,
+  `raw memory`, `recall`, `reflect`, `share preview`, `task learning`, and `wake`.
+- Follow-up after independent review: the gate requires and reports `prompt hook` and job coverage,
   converts runner exceptions into FAIL receipts, and keeps the uncached root gate free of decorative
-  `inputs` metadata. Job-side memory policy is not in the B6.1 gate because current background jobs
-  do not read or write native raw memory policy surfaces.
+  `inputs` metadata.
 
 Exit criteria:
 
@@ -2464,8 +2488,8 @@ Receipt, 2026-05-14:
 - Policy or compatibility decision: archive import, rehearsal, and cutover require explicit
   `--source-type` and `--target-mode`; `postgres.sql` restore is historical-only and requires
   `--restore-database-dump --source-type legacy-archive --target-mode postgres-rehearsal`.
-- Remaining risk: A5.2 still needs the broader retained-term inventory across active docs and
-  deployment surfaces; this packet sweeps archive command examples and restore-policy docs.
+- Follow-up closed by A5.2: the broader retained-term inventory now covers active docs and
+  deployment surfaces.
 
 ### Packet A5.2: Legacy Docs And Compose Sweep
 
@@ -2597,9 +2621,11 @@ Exit criteria:
 
 Receipt, 2026-05-14:
 
-- Local commit under audit: `c0c05e8` (`test(inventory): guard retained legacy docs`).
-- Branch state: local `main` is ahead of `origin/main`; this receipt is local-only and does not
-  claim CI, docs deploy, or nightly coverage for the local commits.
+- Local tree under audit: this release-audit refresh packet after `e0bb7ac3`
+  (`fix(cli): clarify queued task learning`). The final commit for this packet records the exact
+  tree hash.
+- Branch state: local `main` is ahead of `origin/main`; this receipt is local-only and still does
+  not claim CI, docs deploy, or nightly coverage for the local commits.
 - Dependency boundary:
   - `graphiti-core[anthropic,google-genai]>=0.28.2` appears only in `sibyl-core[compatibility]` and
     the `sibyl-core` dev dependency group.
@@ -2608,28 +2634,37 @@ Receipt, 2026-05-14:
 - Verification:
   - `moon run inventory-check` -> generated snapshot current, Graphiti exit inventory covers 21
     import files, and retained legacy-term inventory covers 87 active doc/config files.
-  - `moon run inventory-test` -> 26 passed.
+  - `moon run inventory-test` -> 26 passed in 7.47s.
   - `moon run inventory-typecheck` -> all checks passed.
   - `moon run inventory-lint` -> all checks passed; 28 files already formatted.
   - `moon run docs:lint` -> all matched files use Prettier code style.
   - `moon run core:no-graphiti-smoke` -> 2 passed.
-  - `moon run memory-trust-gate` -> PASS, 6 checks, 0 failed. The gate covered core memory policy,
-    context pack behavior, REST memory surfaces, context-session behavior, MCP access, and CLI
-    memory.
-  - `moon run :check` -> 34 tasks completed. Core reported 885 passed, 14 skipped, and 20
-    deselected; API reported 1405 passed, 1 skipped, and 16 deselected; CLI reported 162 passed; web
-    reported 21 test files and 91 tests passed; inventory reported 26 passed.
+  - `moon run memory-trust-gate` -> PASS, 7 checks, 0 failed. The gate covers core memory policy,
+    context pack behavior, REST memory surfaces, context-session behavior, MCP access, task-learning
+    jobs, and CLI memory.
+  - `moon run core:test` -> 888 passed, 14 skipped, 20 deselected in 5.40s.
+  - `moon run api:test` -> 1428 passed, 1 skipped, 16 deselected in 11.35s.
+  - `moon run cli:test` -> 167 passed in 1.09s.
+  - `moon run core:test api:test cli:test :check` -> 34 tasks completed, 24 cache hits.
   - `moon run baseline-seed` -> wrote `.moon/cache/baseline-runtime-manifest.json`.
-  - `moon run baseline-replay-runtime` -> baseline replay passed across auth, REST, graph, search,
-    and MCP fixtures.
+  - `moon run baseline-replay-runtime` initially exposed stale MCP baseline expectations: project
+    scoped MCP credentials now require an explicit project for `add`, and `link_graph_status` now
+    succeeds with MCP org context. The baseline fixture and capture generator were updated, and the
+    replay then passed across auth, REST, graph, search, and MCP fixtures.
   - `moon run bench-gate` -> Gate passed for `benchmarks/results/ai-memory/manifest.json`.
   - `moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --auth-manifest .moon/cache/baseline-runtime-manifest.json --label retrieval-compare --repeat 20 --metadata retrieval_mode=compare`
-    -> 160 cases, 20 repeats, pass rate 1.000, 0 failed, mean latency 18.2 ms, p95 latency 30.7 ms.
+    -> 160 cases, 20 repeats, pass rate 1.000, 0 failed, mean latency 19.8 ms, p95 latency 38.6 ms.
 - Review:
   - A5.2 retained legacy-term inventory review: Claude cross-model review PASS at
     `/tmp/claude-review-a52-closed.0K0C5w`.
-- Policy or compatibility decision: the local tree is ready for a final pushed-main release audit
-  once CI, docs deploy, and scheduled nightly receipts are recorded for the pushed commit.
+  - Final release-audit refresh review: Claude cross-model review PASS at
+    `/tmp/claude-review-v08-final.h4YPjN`; it checked the B1 scope correction, job gate, MCP
+    baseline refresh, and A6/B6 receipts.
+- Policy or compatibility decision: the local tree is Surreal-only by default and memory-trust gates
+  now include task-learning jobs. Persisted MemorySpace CRUD is explicitly post-v0.8 and is not part
+  of the release claim.
+- Binary recommendation: hold the release until CI, docs deploy, and scheduled nightly receipts are
+  recorded for the pushed commit. After those are green, ship.
 - Remaining risk: CI and nightly receipts are intentionally pending because local project policy
   forbids pushing `main` from this agent session.
 
@@ -2663,7 +2698,8 @@ Before cutting v0.8, run one explicit review over the whole release:
 - Confirm every required release gate in section 2 has a current receipt.
 - Confirm all Graphiti imports are either deleted or owned by a named compatibility island.
 - Confirm no default docs mention FalkorDB, PostgreSQL, or Redis/Valkey as required data services.
-- Confirm MemorySpace, project RBAC, policy context, audit, and inspect surfaces fail closed.
+- Confirm `MemoryScope`/`MemoryPolicyContext`, project RBAC, policy context, audit, and inspect
+  surfaces fail closed; persisted MemorySpace CRUD remains post-v0.8.
 - Confirm project-private leak fixtures pass through REST, MCP, CLI, context, wake, recall, and
   reflection promotion paths.
 - Confirm benchmark and AI-memory claims only cite artifacts that pass their gates.
