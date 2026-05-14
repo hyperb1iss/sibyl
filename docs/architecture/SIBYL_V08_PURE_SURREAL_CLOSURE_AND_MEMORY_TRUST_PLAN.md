@@ -84,6 +84,7 @@ Required release gates:
 
 - `moon run inventory-check inventory-typecheck inventory-test`
 - `moon run core:no-graphiti-smoke`
+- `moon run memory-trust-gate`
 - `moon run core:test`
 - `moon run api:test`
 - `moon run cli:test`
@@ -91,9 +92,13 @@ Required release gates:
 - `moon run :check`
 - `moon run baseline-seed`
 - `moon run baseline-replay-runtime`
+- `moon run bench-gate`
 - `moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --auth-manifest .moon/cache/baseline-runtime-manifest.json --label retrieval-compare --repeat 20 --metadata retrieval_mode=compare`
 - CI green on `main`
 - Nightly regression green on `main`
+
+The baseline seed and replay gates predate v0.8 and remain required because release benchmark and
+runtime claims must be regenerated against the final tree, not inherited from earlier receipts.
 
 ## 3. Non-Goals
 
@@ -1408,6 +1413,797 @@ B4.5 receipt, 2026-05-13:
   project access can still fail before action-specific render receipts are emitted. Deployments
   behind a reverse proxy still need proxy-header handling if audit IPs should represent the original
   client instead of the proxy.
+
+### Remaining Packet Map
+
+The packets below are the remaining full execution plan for v0.8. Each packet should land as one
+atomic commit unless the implementation exposes a smaller natural boundary. Every packet needs
+targeted tests, lint/typecheck for touched packages, `git diff --check`, a receipt in this document,
+and independent review before the owning task is marked complete.
+
+Receipt updates in this document are part of the packet's atomic commit when they record that
+packet's behavior and verification. Standalone planning updates stay doc-only.
+
+Status notes:
+
+- B2 implementation is closed by the receipts above. Reconcile the Sibyl task state before release
+  if tracking still shows the B2 task as active.
+- B3 has the shared policy context contract, but still needs CLI, MCP, and jobs to consume it
+  consistently.
+- B4 has audit storage, audit readback, context render audit, reflection render audit, and REST
+  request attribution. Source inspect and denied-render attribution remain.
+- B5 has not landed in a committed packet yet.
+- Track A still needs the pure-Surreal closure packets after the memory trust spine is stable.
+
+### Packet B3.2: MCP Tool Policy Parity
+
+Purpose: make every trust-sensitive MCP memory tool call through the same policy context contract as
+REST.
+
+Depends on:
+
+- B3.1 policy context contract.
+- B2 project access hardening.
+
+Files:
+
+- `apps/api/src/sibyl/server.py`
+- `apps/api/src/sibyl/auth/mcp_auth.py`
+- `packages/python/sibyl-core/src/sibyl_core/tools/add.py`
+- `packages/python/sibyl-core/src/sibyl_core/tools/context.py`
+- `packages/python/sibyl-core/src/sibyl_core/tools/reflect.py`
+- `packages/python/sibyl-core/src/sibyl_core/tools/search.py`
+- `packages/python/sibyl-core/src/sibyl_core/tools/tasks.py`
+- `apps/api/tests/test_server_accessible_projects.py`
+- `apps/api/tests/test_mcp_auth.py`
+- `packages/python/sibyl-core/tests/test_tools.py`
+- `packages/python/sibyl-core/tests/test_context_pack.py`
+
+Implementation:
+
+- Thread `MemoryPolicyContext` through MCP `remember`, `recall`, `context`, `reflect`, `search`,
+  `explore`, and task-learning surfaces.
+- Preserve existing MCP response shapes while adding stable deny reasons in metadata where the tool
+  already returns structured output.
+- Make delegated-agent calls carry agent identity and delegated authority instead of collapsing to
+  organization membership alone.
+- Ensure accessible project IDs are computed once per MCP request and passed into core services.
+- Add negative tests for missing actor, missing scope key, inaccessible project, and disabled
+  organization/team/shared scopes.
+
+Split rule:
+
+- If this touches more than one tool cluster deeply, split into one commit for add/search/explore,
+  one commit for context/reflect, and one commit for task-learning. Each split still uses the same
+  exit criteria and review contract.
+
+Verify:
+
+- `moon run api:test -- tests/test_server_accessible_projects.py tests/test_mcp_auth.py`
+- `moon run core:test -- tests/test_tools.py tests/test_context_pack.py tests/test_memory_policy.py`
+- `moon run api:lint api:typecheck core:lint core:typecheck`
+
+Exit criteria:
+
+- MCP cannot read or write project-private memory unless the same REST policy would allow it.
+- MCP deny reasons match the shared memory policy contract.
+- Agent identity and delegation metadata survive into audit receipts when available.
+
+### Packet B3.3: CLI Policy Consumption
+
+Purpose: make the CLI display API policy decisions instead of reinterpreting policy locally.
+
+Depends on:
+
+- B3.1 policy context contract.
+- B3.2 MCP parity for shared response metadata.
+- B4.2 audit inspect response shape.
+
+Files:
+
+- `apps/cli/src/sibyl_cli/client.py`
+- `apps/cli/src/sibyl_cli/main.py`
+- `apps/cli/tests/test_main_capture.py`
+- `apps/cli/tests/test_context_pack.py`
+- `apps/api/src/sibyl/api/schemas.py`
+
+Implementation:
+
+- Normalize CLI output for allowed, denied, hidden, and redacted memory decisions.
+- Render stable reason codes in human output and preserve exact API metadata in JSON output.
+- Avoid duplicating scope policy checks in CLI commands. The CLI should send intent and scope, then
+  render the API decision.
+- Cover `remember`, `recall`, `context`, `reflect`, `memory-audit`, and task-learning commands.
+
+Verify:
+
+- `moon run cli:test`
+- `moon run cli:lint cli:typecheck`
+- `moon run api:test -- tests/test_routes_memory.py tests/test_routes_context.py`
+
+Exit criteria:
+
+- CLI policy behavior can be compared directly with REST fixtures.
+- JSON output includes reason codes and source IDs needed by agents.
+- Human output makes hidden or denied context understandable without leaking hidden text.
+
+### Packet B3.4: Job Policy Payloads
+
+Purpose: stop asynchronous memory writes from losing actor, project, and delegation context after
+the initiating request exits.
+
+Depends on:
+
+- B3.1 policy context contract.
+- B4.1 audit event skeleton.
+
+Files:
+
+- `apps/api/src/sibyl/jobs/entities.py`
+- `apps/api/src/sibyl/jobs/worker.py`
+- `apps/api/src/sibyl/api/routes/context.py`
+- `apps/api/src/sibyl/api/routes/memory.py`
+- `apps/api/tests/test_jobs_entities.py`
+- `apps/api/tests/test_routes_context.py`
+- `apps/api/tests/test_routes_memory.py`
+
+Implementation:
+
+- Add a serializable policy-context payload to task-learning, reflection persistence, and promotion
+  jobs.
+- Fail closed when a job receives a project-scoped write without actor and project policy context.
+- Record audit receipts for job allow and deny outcomes with `source_surface=job`.
+- Keep payloads compact and avoid storing raw memory text inside job metadata.
+
+Verify:
+
+- `moon run api:test -- tests/test_jobs_entities.py tests/test_routes_context.py tests/test_routes_memory.py`
+- `moon run api:lint api:typecheck`
+
+Exit criteria:
+
+- Async writes apply the same policy as synchronous route calls.
+- Job retries cannot bypass project membership or disabled-scope checks.
+- Audit receipts identify the originating actor and job source surface.
+
+### Packet B4.6: Memory Source Inspect
+
+Purpose: let owners/admins inspect a memory source, its derived records, visibility, and policy
+metadata without reading hidden content by accident.
+
+Depends on:
+
+- B4.2 audit receipt inspect.
+- B4.3 and B4.4 render audit receipts.
+
+Files:
+
+- `apps/api/src/sibyl/api/routes/memory.py`
+- `apps/api/src/sibyl/api/schemas.py`
+- `apps/api/src/sibyl/persistence/auth_runtime.py`
+- `apps/api/src/sibyl/persistence/surreal/auth_runtime.py`
+- `packages/python/sibyl-core/src/sibyl_core/services/native_memory.py`
+- `apps/cli/src/sibyl_cli/client.py`
+- `apps/cli/src/sibyl_cli/main.py`
+- `apps/api/tests/test_routes_memory.py`
+- `apps/api/tests/test_surreal_auth_runtime.py`
+- `apps/cli/tests/test_main_capture.py`
+
+Implementation:
+
+- Add an owner/admin `GET /memory/inspect/{source_id}` endpoint.
+- Return raw source metadata, derived IDs, derived types, review state, memory scope, scope key,
+  project ID, freshness timestamps, policy metadata, and recent audit receipt summaries.
+- Redact content fields unless the actor is allowed to read that source through normal memory
+  policy.
+- Add `sibyl memory-inspect <source-id>` with table and JSON output.
+- Keep source ID, derived ID, and audit ID filters bounded and static-query backed.
+
+Verify:
+
+- `moon run api:test -- tests/test_routes_memory.py tests/test_surreal_auth_runtime.py`
+- `moon run cli:test -- tests/test_main_capture.py`
+- `moon run api:lint api:typecheck cli:lint cli:typecheck`
+
+Exit criteria:
+
+- Owners/admins can explain why a memory exists and where it was used.
+- Hidden or project-private content stays redacted for actors without read permission.
+- Inspect output includes enough source and policy metadata for release evidence.
+
+### Packet B4.7: Denied Render Audit
+
+Purpose: close the remaining B4 gap where project access can fail before context or reflection
+render-specific audit receipts are emitted.
+
+Depends on:
+
+- B4.3 context pack render audit.
+- B4.4 reflection render audit.
+- B4.5 REST request attribution.
+
+Files:
+
+- `apps/api/src/sibyl/api/context_audit.py`
+- `apps/api/src/sibyl/api/routes/context.py`
+- `apps/api/tests/test_routes_context.py`
+- `apps/api/tests/test_surreal_auth_runtime.py`
+
+Implementation:
+
+- Add compact `memory.context_pack.deny` and `memory.reflect.deny` receipts for project-access
+  failures that happen before render.
+- Include requested project IDs, actor ID, organization ID, memory scope, route action, reason code,
+  and request attribution.
+- Avoid source IDs when no source selection has occurred yet.
+- Keep failures fail-open for audit writes and fail-closed for the user request.
+
+Verify:
+
+- `moon run api:test -- tests/test_routes_context.py tests/test_surreal_auth_runtime.py`
+- `moon run api:lint api:typecheck`
+
+Exit criteria:
+
+- Denied context and reflection project access leaves an inspectable audit trail.
+- Request attribution is present for REST denied-render receipts.
+- Deny receipts do not leak hidden source text or source IDs that were never authorized.
+
+### Packet B5.1: Reflection Promotion Preview
+
+Purpose: add a dry-run surface for promotion decisions before any native memory write happens.
+
+Depends on:
+
+- B3.1 policy context contract.
+- B4.1 audit event skeleton.
+- B4.2 audit receipt inspect.
+
+Files:
+
+- `packages/python/sibyl-core/src/sibyl_core/services/native_memory.py`
+- `packages/python/sibyl-core/tests/test_native_memory.py`
+- `packages/python/sibyl-core/tests/test_memory_policy.py`
+- `apps/api/src/sibyl/api/routes/memory.py`
+- `apps/api/src/sibyl/api/schemas.py`
+- `apps/api/tests/test_routes_memory.py`
+
+Implementation:
+
+- Factor promotion candidate resolution into a shared planner used by preview and write paths.
+- Return target scope, target scope key, raw source IDs, source input scopes, review state, policy
+  reasons, and metadata without calling persistence helpers.
+- Require explicit target scope and target scope key for mixed-scope or broader-scope moves.
+- Emit `memory.reflect.promote.preview` audit receipts for allow and deny cases.
+- Preserve existing promotion write behavior by making the write path consume the same planner.
+
+Verify:
+
+- `moon run core:test -- tests/test_native_memory.py tests/test_memory_policy.py`
+- `moon run api:test -- tests/test_routes_memory.py`
+- `moon run core:lint core:typecheck api:lint api:typecheck`
+
+Exit criteria:
+
+- Promotion preview is source-grounded, policy-backed, and non-mutating.
+- Preview and promotion write paths cannot drift on candidate resolution.
+- Audit receipts explain the preview decision without exposing hidden source content.
+
+### Packet B5.2: Share Preview Contract
+
+Purpose: provide a stable response shape for future sharing UX while keeping actual sharing disabled
+in v0.8.
+
+Depends on:
+
+- B5.1 promotion preview.
+- B4.6 source inspect.
+
+Files:
+
+- `packages/python/sibyl-core/src/sibyl_core/auth/memory_policy.py`
+- `packages/python/sibyl-core/src/sibyl_core/services/native_memory.py`
+- `apps/api/src/sibyl/api/routes/memory.py`
+- `apps/api/src/sibyl/api/schemas.py`
+- `apps/api/tests/test_routes_memory.py`
+- `packages/python/sibyl-core/tests/test_memory_policy.py`
+- `packages/python/sibyl-core/tests/test_native_memory.py`
+
+Implementation:
+
+- Add a share-preview service that accepts source IDs, target scope, target scope key, and intended
+  recipient context.
+- Return `allowed=false` with `scope_not_enabled` for organization, team, shared, public, and
+  cross-organization share requests until explicit policy ships.
+- Include redaction counts, hidden-but-relevant counts, visible source IDs, denied source IDs, and
+  reason codes.
+- Emit `memory.share.preview` audit receipts.
+- Keep the response contract ready for UI and CLI clients without enabling write APIs.
+
+Verify:
+
+- `moon run core:test -- tests/test_memory_policy.py tests/test_native_memory.py`
+- `moon run api:test -- tests/test_routes_memory.py`
+- `moon run api:lint api:typecheck core:lint core:typecheck`
+
+Exit criteria:
+
+- Share preview proves what would be visible, hidden, or denied.
+- Cross-org and broad sharing remain disabled with stable reason codes.
+- Private-leak fixtures stay at zero leaks.
+
+### Packet B5.3: Promotion And Share CLI Surface
+
+Purpose: expose preview decisions to agents and humans from the CLI without enabling direct sharing.
+
+Depends on:
+
+- B5.1 promotion preview.
+- B5.2 share preview contract.
+
+Files:
+
+- `apps/cli/src/sibyl_cli/client.py`
+- `apps/cli/src/sibyl_cli/main.py`
+- `apps/cli/tests/test_main_capture.py`
+- `apps/api/tests/test_routes_memory.py`
+
+Implementation:
+
+- Add `sibyl memory-promote --preview` for reflection candidates.
+- Add `sibyl memory-share --preview` for future share decisions.
+- Render target scope, source IDs, allow/deny state, reason codes, redaction counts, and audit
+  receipt IDs when available.
+- Keep non-preview share commands unavailable or explicitly denied.
+
+Verify:
+
+- `moon run cli:test -- tests/test_main_capture.py`
+- `moon run cli:lint cli:typecheck`
+- `moon run api:test -- tests/test_routes_memory.py`
+
+Exit criteria:
+
+- Agents can ask for promotion/share decisions without mutating memory.
+- CLI JSON is stable enough for prompt hooks and future UI wiring.
+- Actual broad sharing remains disabled.
+
+### Packet B6.1: Memory Trust Gate Harness
+
+Purpose: make the release trust gate one commandable harness instead of a manually assembled
+checklist.
+
+Depends on:
+
+- B3 through B5.
+
+Files:
+
+- `moon.yml`
+- `tools/tests/test_memory_trust_gate.py`
+- `packages/python/sibyl-core/tests/test_memory_policy.py`
+- `apps/api/tests/test_routes_memory.py`
+- `apps/api/tests/test_routes_context.py`
+- `apps/api/tests/test_server_accessible_projects.py`
+- `apps/cli/tests/test_main_capture.py`
+- `docs/architecture/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`
+
+Implementation:
+
+- Add a `memory-trust-gate` moon task or documented task group that runs the trust-sensitive tests.
+- Include raw memory, context pack, wake, recall, reflect, MCP, CLI, promotion preview, share
+  preview, audit, and inspect coverage.
+- Make the gate print a concise receipt summary suitable for release notes.
+- Keep the gate composed from existing package tasks so failures point to actionable slices.
+
+Verify:
+
+- `moon run memory-trust-gate`
+- `moon run :check`
+- `git diff --check`
+
+Release note:
+
+- B6 owns the memory trust claim. A6 still owns final baseline, benchmark, inventory, CI, and
+  nightly release receipts on the final tree.
+
+Exit criteria:
+
+- v0.8 has one repeatable local gate for the memory trust claim.
+- Release notes can cite the gate plus CI/nightly receipts.
+
+### Packet A1.1: Compatibility Boundary Guard
+
+Purpose: make accidental Graphiti imports in default runtime modules fail fast.
+
+Depends on:
+
+- A0 baseline.
+
+Files:
+
+- `tools/inventory/runtime_surface.py`
+- `tools/tests/test_runtime_surface.py`
+- `packages/python/sibyl-core/pyproject.toml`
+- `moon.yml`
+- `docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md`
+
+Implementation:
+
+- Teach inventory checks to classify default modules, compatibility modules, migrations, admin
+  tools, tests, and archived docs.
+- Fail default-runtime inventory when a default module imports Graphiti or Graphiti-shaped adapter
+  classes.
+- Add a compatibility allowlist with ownership notes and explicit deletion or retention criteria.
+- Keep `graphiti-core` outside default runtime dependencies.
+
+Verify:
+
+- `moon run inventory-check inventory-typecheck inventory-test`
+- `moon run core:no-graphiti-smoke`
+- `uv lock --check`
+
+Exit criteria:
+
+- New default-path Graphiti imports fail CI.
+- Retained Graphiti imports are named, owned, and optional.
+
+### Packet A1.2: Compatibility Test Island
+
+Purpose: keep compatibility tests available without making default tests require Graphiti.
+
+Depends on:
+
+- A1.1 compatibility boundary guard.
+
+Files:
+
+- `moon.yml`
+- `packages/python/sibyl-core/pyproject.toml`
+- `packages/python/sibyl-core/tests/**`
+- `apps/api/tests/**`
+- `docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md`
+
+Implementation:
+
+- Move Graphiti-dependent tests under a marker or named moon task.
+- Ensure default `core:test`, `api:test`, and `:check` work without installing the compatibility
+  extra.
+- Add a separate compatibility test task that installs or assumes `sibyl-core[compatibility]`.
+- Document which tests exist only for archive, migration, or compare workflows.
+
+Verify:
+
+- `moon run core:test`
+- `moon run api:test`
+- `moon run core:no-graphiti-smoke`
+- explicit compatibility test task
+
+Exit criteria:
+
+- Default tests prove the Surreal-only runtime.
+- Compatibility tests are opt-in and named honestly.
+
+### Packet A2.1: Native Entity Hydration
+
+Purpose: remove Graphiti node classes from default entity lookup and list hydration.
+
+Depends on:
+
+- A1 compatibility boundary.
+- B2 project filtering.
+
+Files:
+
+- `packages/python/sibyl-core/src/sibyl_core/graph/entities.py`
+- `packages/python/sibyl-core/src/sibyl_core/services/native_graph.py`
+- `packages/python/sibyl-core/src/sibyl_core/retrieval/native.py`
+- `apps/api/src/sibyl/persistence/graph_runtime.py`
+- `packages/python/sibyl-core/tests/test_graph_entities.py`
+- `apps/api/tests/test_routes_entities.py`
+- `apps/api/tests/test_routes_entities_read.py`
+
+Implementation:
+
+- Hydrate entity records directly from Surreal rows instead of `EntityNode` or other Graphiti
+  classes.
+- Preserve legacy row compatibility with explicit normalization helpers.
+- Keep project policy fields, source IDs, confidence, validity, and timestamps intact.
+- Add fixtures for native rows, legacy-shaped rows, missing optional fields, and project entities.
+
+Verify:
+
+- `moon run core:test -- tests/test_graph_entities.py`
+- `moon run api:test -- tests/test_routes_entities.py tests/test_routes_entities_read.py`
+- `moon run core:no-graphiti-smoke`
+
+Exit criteria:
+
+- Default entity reads do not import Graphiti node classes.
+- Legacy-shaped records still hydrate correctly through native helpers.
+
+### Packet A2.2: Native Relationship And Temporal Reads
+
+Purpose: move relationship CRUD, traversal, and temporal reads fully onto native Surreal
+relationships.
+
+Depends on:
+
+- A2.1 native entity hydration.
+
+Files:
+
+- `packages/python/sibyl-core/src/sibyl_core/graph/relationships.py`
+- `packages/python/sibyl-core/src/sibyl_core/services/native_graph.py`
+- `packages/python/sibyl-core/src/sibyl_core/retrieval/native.py`
+- `packages/python/sibyl-core/tests/test_graph_relationships.py`
+- `apps/api/tests/test_routes_search.py`
+- `apps/api/tests/test_routes_context.py`
+
+Implementation:
+
+- Replace Graphiti edge models with native `relates_to`, `mentions`, and temporal relationship
+  records.
+- Preserve relationship confidence, validity intervals, source IDs, and provenance.
+- Cover traverse, related summary, dependency, search, and context hydration paths.
+- Keep archive compatibility isolated behind explicit conversion helpers.
+
+Verify:
+
+- `moon run core:test -- tests/test_graph_relationships.py tests/test_native_retrieval.py`
+- `moon run api:test -- tests/test_routes_search.py tests/test_routes_context.py`
+- `moon run core:no-graphiti-smoke`
+
+Exit criteria:
+
+- Default relationship paths do not import Graphiti edge classes.
+- Temporal and traversal behavior remains covered by native fixtures.
+
+### Packet A3.1: Native Embedding Service
+
+Purpose: make embedding provider selection, dimensions, cache keys, and metadata owned by Sibyl.
+
+Depends on:
+
+- A1 compatibility boundary.
+
+Files:
+
+- `packages/python/sibyl-core/src/sibyl_core/retrieval/native.py`
+- `packages/python/sibyl-core/src/sibyl_core/services/native_graph.py`
+- `packages/python/sibyl-core/src/sibyl_core/graph/cached_embedder.py`
+- `packages/python/sibyl-core/src/sibyl_core/graph/gemini_embedder.py`
+- `packages/python/sibyl-core/src/sibyl_core/graph/client.py`
+- `packages/python/sibyl-core/tests/test_native_retrieval.py`
+- `packages/python/sibyl-core/tests/test_graph_client.py`
+
+Implementation:
+
+- Add a native embedding provider interface that is not shaped like Graphiti embedder classes.
+- Move Gemini, OpenAI, deterministic test, and cached embedding behavior behind native providers.
+- Store embedding provider, model, dimensions, tokenizer estimate method, and cache key metadata
+  with vector writes and eval reports.
+- Keep Graphiti-compatible embedders only in the compatibility island until A4 decides deletion or
+  retention.
+
+Verify:
+
+- `moon run core:test -- tests/test_native_retrieval.py tests/test_graph_client.py`
+- `moon run core:no-graphiti-smoke`
+- `moon run core:bench-context`
+
+Exit criteria:
+
+- Native vector writes and searches do not use Graphiti embedder interfaces.
+- Benchmark artifacts expose enough embedding metadata to compare runs honestly.
+
+### Packet A3.2: Benchmark Metadata Gate
+
+Purpose: make context and AI-memory benchmark claims release-safe.
+
+Depends on:
+
+- A3.1 native embedding service.
+
+Files:
+
+- `benchmarks/context_pack_eval.py`
+- `benchmarks/context_pack_cases.json`
+- `benchmarks/ai_memory/**`
+- `docs/testing/benchmark-methodology.md`
+- `moon.yml`
+
+Implementation:
+
+- Add or update `bench-gate` checks for required metadata fields.
+- Require retrieval mode, embedding provider/model/dimensions, tokenizer method, dataset name,
+  corpus hash, repeat count, and auth manifest ID.
+- Separate pre-Graphiti, post-Graphiti, native, and compare labels so charts cannot mix incompatible
+  runs.
+- Document where benchmark artifacts live and which are release-citable.
+
+Verify:
+
+- `moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --auth-manifest .moon/cache/baseline-runtime-manifest.json --label retrieval-compare --repeat 20 --metadata retrieval_mode=compare`
+- `moon run bench-gate`
+- `moon run docs:lint`
+
+Exit criteria:
+
+- Every benchmark claim in release notes can point to a gated artifact.
+- Mixed or under-metadataed benchmark outputs fail the gate.
+
+### Packet A4.1: Graphiti Ops Decision
+
+Purpose: delete unneeded Graphiti ops modules or move retained modules into a named compatibility
+namespace.
+
+Depends on:
+
+- A1 through A3.
+
+Files:
+
+- `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/**`
+- `packages/python/sibyl-core/src/sibyl_core/backends/surreal/driver.py`
+- `packages/python/sibyl-core/src/sibyl_core/graph/search_interface.py`
+- `packages/python/sibyl-core/src/sibyl_core/graph/mock_llm.py`
+- `tools/inventory/runtime_surface.py`
+- `tools/tests/test_runtime_surface.py`
+- `docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md`
+
+Implementation:
+
+- Classify every Graphiti ops module as delete, migrate, admin-only, or compatibility-retain.
+- Move retained modules into the compatibility island and update imports.
+- Delete stale Graphiti comments from default runtime files when the referenced behavior is gone.
+- Update inventory docs with final owned import counts.
+
+Verify:
+
+- `moon run inventory-check inventory-typecheck inventory-test`
+- `moon run core:no-graphiti-smoke`
+- `moon run core:test`
+- explicit compatibility test task
+
+Exit criteria:
+
+- No unowned Graphiti ops code remains in default paths.
+- Compatibility retention has a named owner, task, and test gate.
+
+### Packet A5.1: Archive And Restore Policy
+
+Purpose: keep historical recovery possible without ambient PostgreSQL, FalkorDB, or Redis data-plane
+assumptions.
+
+Depends on:
+
+- A4.1 Graphiti ops decision.
+
+Files:
+
+- `apps/api/src/sibyl/cli/migrate.py`
+- `apps/api/src/sibyl/jobs/backup.py`
+- `packages/python/sibyl-core/src/sibyl_core/migrate/archive.py`
+- `apps/api/tests/test_migrate.py`
+- `packages/python/sibyl-core/tests/test_archive_migration.py`
+- `docs/guide/surrealdb-migration-release-notes.md`
+- `docs/architecture/SURREALDB_PHASE3_BURNDOWN.md`
+
+Implementation:
+
+- Make archive import and restore commands require explicit input files, source type, and mode.
+- Label PostgreSQL and FalkorDB restore paths as historical migration only.
+- Add dry-run output that reports counts and unsupported payloads before any write.
+- Ensure backup docs describe Surreal-native backup/restore as the default.
+
+Verify:
+
+- `moon run api:test -- tests/test_migrate.py`
+- `moon run core:test -- tests/test_archive_migration.py`
+- `moon run docs:lint`
+
+Exit criteria:
+
+- Default recovery docs are Surreal-native.
+- Historical imports are explicit and cannot run from ambient service defaults.
+
+### Packet A5.2: Legacy Docs And Compose Sweep
+
+Purpose: remove stale default-runtime instructions for legacy services.
+
+Depends on:
+
+- A5.1 archive and restore policy.
+
+Files:
+
+- `README.md`
+- `apps/api/README.md`
+- `apps/cli/README.md`
+- `apps/web/README.md`
+- `docs/guide/why-surreal.md`
+- `docs/guide/surrealdb-migration-release-notes.md`
+- `docker-compose*.yml`
+- `compose.e2e.yml`
+- `.github/workflows/*`
+- `charts/**`
+- `tools/inventory/runtime_surface.py`
+- `tools/tests/test_runtime_surface.py`
+
+Implementation:
+
+- Audit active docs, compose files, CI, and charts for `postgres`, `falkor`, `redis`, `valkey`,
+  `Graphiti`, and `graphiti`.
+- Keep Redis/Valkey documented only as explicit coordination opt-in.
+- Keep Graphiti and FalkorDB references only in historical, migration, benchmark, or compatibility
+  sections.
+- Add a docs inventory note for any retained legacy terms.
+- Add or update an allowlist-backed inventory check so retained legacy terms must carry an explicit
+  owner and reason.
+
+Verify:
+
+- Discovery starter:
+  `rg -n "postgres|falkor|redis|valkey|Graphiti|graphiti" README.md apps docs docker-compose*.yml compose.e2e.yml .github charts`
+- `moon run inventory-check inventory-typecheck inventory-test`
+- `moon run docs:lint`
+- `moon run :check`
+
+Exit criteria:
+
+- A new user following active docs starts a Surreal-only default stack.
+- Retained legacy references are labeled and intentional.
+
+### Packet A6.1: Pure Surreal Release Audit
+
+Purpose: prove the default runtime, default docs, default dependencies, and default CI are
+Surreal-only.
+
+Depends on:
+
+- A1 through A5.
+- B6 trust gate, if v0.8 releases both tracks together.
+
+Files:
+
+- `docs/architecture/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`
+- `docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md`
+- `docs/architecture/SURREALDB_PHASE3_BURNDOWN.md`
+- release notes draft
+
+Implementation:
+
+- Run the full local release gate from a clean checkout or clean worktree.
+- Confirm default dependency metadata excludes Graphiti, FalkorDB, PostgreSQL, and Redis/Valkey as
+  data-plane requirements.
+- Confirm inventory, no-Graphiti smoke, docs sweep, benchmark gates, and memory trust gates have
+  current receipts.
+- Record CI, docs deploy, and nightly run IDs after the final pushed main commit.
+- Write the binary release recommendation: ship or hold.
+
+Verify:
+
+- `moon run inventory-check inventory-typecheck inventory-test`
+- `moon run core:no-graphiti-smoke`
+- `moon run memory-trust-gate`
+- `moon run core:test`
+- `moon run api:test`
+- `moon run cli:test`
+- `moon run docs:lint`
+- `moon run :check`
+- `moon run baseline-seed`
+- `moon run baseline-replay-runtime`
+- `moon run bench-gate`
+- `moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --auth-manifest .moon/cache/baseline-runtime-manifest.json --label retrieval-compare --repeat 20 --metadata retrieval_mode=compare`
+- CI green on `main`
+- nightly regression green on `main`
+
+Exit criteria:
+
+- v0.8 can claim a Surreal-only default runtime and policy-backed, inspectable memory.
+- Any retained compatibility or historical surface is opt-in, named, documented, and separately
+  tested.
 
 ## 14. Evidence Ledger
 
