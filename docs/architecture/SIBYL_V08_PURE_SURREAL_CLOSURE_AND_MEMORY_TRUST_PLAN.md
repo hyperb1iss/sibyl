@@ -1432,11 +1432,12 @@ Status notes:
 
 - B2 implementation is closed by the receipts above. Reconcile the Sibyl task state before release
   if tracking still shows the B2 task as active.
-- B3 has the shared policy context contract, but still needs CLI, MCP, and jobs to consume it
-  consistently.
-- B4 has audit storage, audit readback, context render audit, reflection render audit, and REST
-  request attribution. Source inspect and denied-render attribution remain.
-- B5 has not landed in a committed packet yet.
+- B3 has the shared policy context contract and MCP parity through B3.2. CLI display parity and
+  async job payload receipts remain.
+- B4 has audit storage, audit readback, context render audit, reflection render audit, REST request
+  attribution, source inspect, and denied-render audit. The remaining B4 risk is that MCP denied
+  render receipts stay requestless until the MCP tool layer exposes request metadata.
+- B5 reflection promotion preview, share preview, and CLI preview surfaces have receipts.
 - Track A still needs the pure-Surreal closure packets after the memory trust spine is stable.
 
 ### Packet B3.2: MCP Tool Policy Parity
@@ -1457,9 +1458,9 @@ Files:
 - `packages/python/sibyl-core/src/sibyl_core/tools/context.py`
 - `packages/python/sibyl-core/src/sibyl_core/tools/reflect.py`
 - `packages/python/sibyl-core/src/sibyl_core/tools/search.py`
-- `packages/python/sibyl-core/src/sibyl_core/tools/tasks.py`
+- `packages/python/sibyl-core/src/sibyl_core/tools/manage.py`
 - `apps/api/tests/test_server_accessible_projects.py`
-- `apps/api/tests/test_mcp_auth.py`
+- `apps/api/tests/test_auth_mcp_token_verifier.py`
 - `packages/python/sibyl-core/tests/test_tools.py`
 - `packages/python/sibyl-core/tests/test_context_pack.py`
 
@@ -1492,6 +1493,40 @@ Exit criteria:
 - MCP cannot read or write project-private memory unless the same REST policy would allow it.
 - MCP deny reasons match the shared memory policy contract.
 - Agent identity and delegation metadata survive into audit receipts when available.
+
+B3.2 receipt, 2026-05-14:
+
+- Added a top-level MCP add helper so the registered MCP `add` tool now resolves project access
+  before calling the core graph write path.
+- MCP `add` now requires a project when credentials are project-restricted, rejects missing actor
+  context through the shared `principal_mismatch` policy reason, and returns `policy_reason` in the
+  structured response.
+- MCP `add` copies metadata before adding organization and actor attribution, avoiding caller-owned
+  metadata mutation while preserving the existing core add response shape.
+- Added a top-level MCP manage helper so task, epic, and task-analysis actions resolve the target
+  project before calling the core manage path.
+- MCP `manage` now applies the shared project write policy to task learning and workflow actions,
+  blocks inaccessible task projects with `unverified_membership`, blocks missing actor context with
+  `principal_mismatch`, and copies caller data before adding organization/user attribution.
+- Added MCP tests for delegated identity preservation, project-scoped add metadata, restricted
+  unscoped add denial, add missing actor denial, task-learning metadata, inaccessible task-project
+  denial, project-ID action admin scope, and manage missing actor denial.
+- The B3.2 verification path now uses `tests/test_auth_mcp_token_verifier.py`; the old
+  `tests/test_mcp_auth.py` path no longer exists.
+- `moon run api:test -- tests/test_server_accessible_projects.py tests/test_auth_mcp_token_verifier.py`:
+  34 passed in 0.86s.
+- `moon run core:test -- tests/test_tools.py tests/test_context_pack.py tests/test_memory_policy.py`:
+  885 passed, 14 skipped, and 20 deselected in 5.38s.
+- `moon run api:lint api:typecheck core:lint core:typecheck`: lint passed; typecheck exited 0 with
+  the existing 62 API and 25 core diagnostics.
+- `moon run memory-trust-gate`: PASS with 6 checks and 0 failed.
+- `moon run docs:lint`: passed.
+- Independent review passed at `/tmp/claude-review-b32-mcp-parity.5Etjcn`. Follow-up review passed
+  at `/tmp/claude-review-b32-mcp-parity-followup.wJkktL` after MCP manage policy checks and admin
+  project-ID coverage were added.
+- Residual accepted risk: MCP source operations (`crawl`, `sync`, `refresh`, and `link_graph*`)
+  remain organization-scoped rather than project-policy scoped. They are not memory capture or
+  task-learning writes in this packet.
 
 ### Packet B3.3: CLI Policy Consumption
 

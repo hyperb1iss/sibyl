@@ -8,10 +8,12 @@ import pytest
 
 from sibyl.server import (
     McpContext,
+    _add_mcp_entity,
     _authorize_mcp_memory_write,
     _compile_mcp_context_pack,
     _get_accessible_projects,
     _get_mcp_context,
+    _manage_mcp_action,
     _reflect_mcp_memory,
     _remember_mcp_memory,
     _require_owner_mcp_context,
@@ -310,6 +312,291 @@ def test_authorize_mcp_memory_write_denies_unverified_project() -> None:
             accessible_projects={"project-a"},
             surface="mcp_remember",
         )
+
+
+def test_mcp_policy_context_preserves_delegated_identity() -> None:
+    ctx = McpContext(
+        org_id=str(uuid4()),
+        user_id=str(uuid4()),
+        scopes=["mcp"],
+        delegated_authority="agent:nova",
+        agent_id="nova",
+    )
+
+    policy_context = ctx.to_memory_policy_context(
+        memory_space="delegated",
+        scope_key="agent:nova",
+        accessible_delegations={"agent:nova"},
+        source_surface="mcp_context",
+    )
+
+    assert policy_context.actor_user_id == ctx.user_id
+    assert policy_context.delegated_authority == "agent:nova"
+    assert policy_context.agent_id == "nova"
+    assert policy_context.accessible_delegations == frozenset({"agent:nova"})
+    assert policy_context.source_surface == "mcp_context"
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_entity_scopes_project_metadata() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    add = AsyncMock(return_value={"success": True, "id": "task_123"})
+    metadata = {"source": "test"}
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl_core.tools.core.add", add),
+    ):
+        result = await _add_mcp_entity(
+            title="Wire MCP add policy",
+            content="MCP add writes must verify project membership.",
+            entity_type="task",
+            category="memory",
+            languages=None,
+            tags=["policy"],
+            related_to=["plan_1"],
+            metadata=metadata,
+            project="project-a",
+            priority="high",
+            assignees=["nova"],
+            due_date=None,
+            technologies=["python"],
+            depends_on=["task_1"],
+            repository_url=None,
+        )
+
+    assert metadata == {"source": "test"}
+    assert result == {
+        "success": True,
+        "id": "task_123",
+        "policy_reason": "same_scope_write_allowed",
+    }
+    add.assert_awaited_once_with(
+        title="Wire MCP add policy",
+        content="MCP add writes must verify project membership.",
+        entity_type="task",
+        category="memory",
+        languages=None,
+        tags=["policy"],
+        related_to=["plan_1"],
+        metadata={
+            "source": "test",
+            "organization_id": ctx.org_id,
+            "created_by": ctx.user_id,
+        },
+        project="project-a",
+        priority="high",
+        assignees=["nova"],
+        due_date=None,
+        technologies=["python"],
+        depends_on=["task_1"],
+        repository_url=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_entity_requires_project_for_restricted_credentials() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    add = AsyncMock()
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl_core.tools.core.add", add),
+        pytest.raises(ValueError, match="Project is required"),
+    ):
+        await _add_mcp_entity(
+            title="Unscoped add",
+            content="Restricted credentials should not create org-wide graph memory.",
+            entity_type="decision",
+            category=None,
+            languages=None,
+            tags=None,
+            related_to=None,
+            metadata=None,
+            project=None,
+            priority=None,
+            assignees=None,
+            due_date=None,
+            technologies=None,
+            depends_on=None,
+            repository_url=None,
+        )
+
+    add.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_entity_denies_missing_actor_with_policy_reason() -> None:
+    ctx = McpContext(
+        org_id=str(uuid4()),
+        user_id=None,
+        scopes=["mcp"],
+        api_key_project_ids=["project-a"],
+    )
+    add = AsyncMock()
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl_core.tools.core.add", add),
+        pytest.raises(ValueError, match="principal_mismatch"),
+    ):
+        await _add_mcp_entity(
+            title="Actorless add",
+            content="Writes need actor context.",
+            entity_type="decision",
+            category=None,
+            languages=None,
+            tags=None,
+            related_to=None,
+            metadata=None,
+            project="project-a",
+            priority=None,
+            assignees=None,
+            due_date=None,
+            technologies=None,
+            depends_on=None,
+            repository_url=None,
+        )
+
+    add.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_manage_mcp_action_scopes_task_metadata() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    manage = AsyncMock(return_value={"success": True, "action": "complete_task"})
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=SimpleNamespace(project_id="project-a", metadata={}))
+    )
+    runtime = SimpleNamespace(entity_manager=entity_manager)
+    data = {"learnings": "MCP task learning needs policy context."}
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch(
+            "sibyl_core.services.native_graph.get_native_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl_core.tools.manage.manage", manage),
+    ):
+        result = await _manage_mcp_action(
+            action="complete_task",
+            entity_id="task-1",
+            data=data,
+        )
+
+    assert data == {"learnings": "MCP task learning needs policy context."}
+    assert result == {
+        "success": True,
+        "action": "complete_task",
+        "policy_reason": "same_scope_write_allowed",
+    }
+    entity_manager.get.assert_awaited_once_with("task-1")
+    manage.assert_awaited_once_with(
+        action="complete_task",
+        entity_id="task-1",
+        data={
+            "learnings": "MCP task learning needs policy context.",
+            "organization_id": ctx.org_id,
+            "user_id": ctx.user_id,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_manage_mcp_project_id_action_allows_admin_scope() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    manage = AsyncMock(return_value={"success": True, "action": "prioritize"})
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value=None)),
+        patch("sibyl_core.services.native_graph.get_native_graph_runtime", AsyncMock()) as runtime,
+        patch("sibyl_core.tools.manage.manage", manage),
+    ):
+        result = await _manage_mcp_action(
+            action="prioritize",
+            entity_id="project-a",
+            data=None,
+        )
+
+    assert result == {
+        "success": True,
+        "action": "prioritize",
+        "policy_reason": "same_scope_write_allowed",
+    }
+    runtime.assert_not_awaited()
+    manage.assert_awaited_once_with(
+        action="prioritize",
+        entity_id="project-a",
+        data={
+            "organization_id": ctx.org_id,
+            "user_id": ctx.user_id,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_manage_mcp_action_denies_inaccessible_task_project() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    manage = AsyncMock()
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=SimpleNamespace(project_id="project-b", metadata={}))
+    )
+    runtime = SimpleNamespace(entity_manager=entity_manager)
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch(
+            "sibyl_core.services.native_graph.get_native_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl_core.tools.manage.manage", manage),
+        pytest.raises(ValueError, match="unverified_membership"),
+    ):
+        await _manage_mcp_action(
+            action="complete_task",
+            entity_id="task-1",
+            data={"learnings": "hidden"},
+        )
+
+    manage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_manage_mcp_action_denies_missing_actor_with_policy_reason() -> None:
+    ctx = McpContext(
+        org_id=str(uuid4()),
+        user_id=None,
+        scopes=["mcp"],
+        api_key_project_ids=["project-a"],
+    )
+    manage = AsyncMock()
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=SimpleNamespace(project_id="project-a", metadata={}))
+    )
+    runtime = SimpleNamespace(entity_manager=entity_manager)
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl_core.services.native_graph.get_native_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl_core.tools.manage.manage", manage),
+        pytest.raises(ValueError, match="principal_mismatch"),
+    ):
+        await _manage_mcp_action(
+            action="complete_task",
+            entity_id="task-1",
+            data={"learnings": "hidden"},
+        )
+
+    manage.assert_not_awaited()
 
 
 @pytest.mark.asyncio

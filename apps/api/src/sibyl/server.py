@@ -42,6 +42,24 @@ MemoryKind = Literal[
     "rule",
 ]
 
+MCP_ENTITY_PROJECT_POLICY_ACTIONS = {
+    "add_note",
+    "archive_epic",
+    "archive_task",
+    "block_task",
+    "complete_epic",
+    "complete_task",
+    "estimate",
+    "start_epic",
+    "start_task",
+    "submit_review",
+    "suggest",
+    "unblock_task",
+    "update_epic",
+    "update_task",
+}
+MCP_PROJECT_ID_POLICY_ACTIONS = {"detect_cycles", "prioritize"}
+
 
 @dataclass(frozen=True)
 class McpContext:
@@ -506,6 +524,143 @@ async def _reflect_mcp_memory(
     return payload
 
 
+async def _add_mcp_entity(
+    *,
+    title: str,
+    content: str,
+    entity_type: str,
+    category: str | None,
+    languages: list[str] | None,
+    tags: list[str] | None,
+    related_to: list[str] | None,
+    metadata: dict[str, Any] | None,
+    project: str | None,
+    priority: str | None,
+    assignees: list[str] | None,
+    due_date: str | None,
+    technologies: list[str] | None,
+    depends_on: list[str] | None,
+    repository_url: str | None,
+) -> dict[str, Any]:
+    from sibyl_core.tools.core import add
+
+    ctx = await _require_mcp_context()
+    accessible_projects = await _resolve_mcp_project_scope(
+        ctx,
+        project,
+        require_project_when_restricted=True,
+    )
+    write_decision = _authorize_mcp_memory_write(
+        ctx=ctx,
+        memory_scope="project" if project else "private",
+        scope_key=project,
+        accessible_projects=accessible_projects,
+        surface="mcp_add",
+    )
+
+    full_metadata = dict(metadata or {})
+    full_metadata["organization_id"] = ctx.org_id
+    if ctx.user_id:
+        full_metadata["created_by"] = ctx.user_id
+
+    result = await add(
+        title=title,
+        content=content,
+        entity_type=entity_type,
+        category=category,
+        languages=languages,
+        tags=tags,
+        related_to=related_to,
+        metadata=full_metadata,
+        project=project,
+        priority=priority,
+        assignees=assignees,
+        due_date=due_date,
+        technologies=technologies,
+        depends_on=depends_on,
+        repository_url=repository_url,
+    )
+    payload = _to_dict(result)
+    payload["policy_reason"] = write_decision.reason
+    return payload
+
+
+async def _mcp_entity_project_id(*, organization_id: str, entity_id: str) -> str | None:
+    from sibyl_core.services.native_graph import get_native_graph_runtime
+    from sibyl_core.tools.helpers import _project_id_for_policy
+
+    runtime = await get_native_graph_runtime(organization_id)
+    entity = await runtime.entity_manager.get(entity_id)
+    if entity is None:
+        return None
+    return _project_id_for_policy(entity)
+
+
+async def _authorize_mcp_manage_action(
+    *,
+    ctx: McpContext,
+    action: str,
+    entity_id: str | None,
+    accessible_projects: set[str] | None,
+) -> MemoryPolicyDecision | None:
+    normalized_action = action.lower().strip()
+    if normalized_action in MCP_PROJECT_ID_POLICY_ACTIONS:
+        project_id = entity_id
+    elif normalized_action in MCP_ENTITY_PROJECT_POLICY_ACTIONS:
+        if not entity_id:
+            return None
+        project_id = await _mcp_entity_project_id(
+            organization_id=ctx.org_id,
+            entity_id=entity_id,
+        )
+    else:
+        return None
+
+    policy_projects = (
+        {project_id} if accessible_projects is None and project_id else accessible_projects
+    )
+    return _authorize_mcp_memory_write(
+        ctx=ctx,
+        memory_scope="project",
+        scope_key=project_id,
+        accessible_projects=policy_projects,
+        surface="mcp_manage",
+    )
+
+
+async def _manage_mcp_action(
+    *,
+    action: str,
+    entity_id: str | None,
+    data: dict[str, Any] | None,
+) -> dict[str, Any]:
+    from sibyl_core.tools.manage import manage
+
+    ctx = await _require_mcp_context()
+    accessible_projects = await _get_accessible_projects(ctx)
+    policy_decision = await _authorize_mcp_manage_action(
+        ctx=ctx,
+        action=action,
+        entity_id=entity_id,
+        accessible_projects=accessible_projects,
+    )
+
+    full_data = dict(data or {})
+    full_data["organization_id"] = ctx.org_id
+    if ctx.user_id:
+        full_data["user_id"] = ctx.user_id
+
+    result = await manage(
+        action=action,
+        entity_id=entity_id,
+        data=full_data,
+    )
+    payload = _to_dict(result)
+    if policy_decision is not None:
+        payload["policy_reason"] = policy_decision.reason
+    return payload
+
+
 async def _require_org_id() -> str:
     """Require organization ID from MCP context.
 
@@ -944,18 +1099,7 @@ def _register_tools(mcp: FastMCP) -> None:
             add("Auth System", "Authentication and authorization",
                 entity_type="project", repository_url="github.com/org/auth")
         """
-        from sibyl_core.tools.core import add as _add
-
-        # Get full context from authenticated MCP session
-        ctx = await _require_mcp_context()
-
-        # Inject org and user context into metadata
-        full_metadata = metadata or {}
-        full_metadata["organization_id"] = ctx.org_id
-        if ctx.user_id:
-            full_metadata["created_by"] = ctx.user_id
-
-        result = await _add(
+        return await _add_mcp_entity(
             title=title,
             content=content,
             entity_type=entity_type,
@@ -963,7 +1107,7 @@ def _register_tools(mcp: FastMCP) -> None:
             languages=languages,
             tags=tags,
             related_to=related_to,
-            metadata=full_metadata,
+            metadata=metadata,
             project=project,
             priority=priority,
             assignees=assignees,
@@ -972,7 +1116,6 @@ def _register_tools(mcp: FastMCP) -> None:
             depends_on=depends_on,
             repository_url=repository_url,
         )
-        return _to_dict(result)
 
     # =========================================================================
     # TOOL 5: remember
@@ -1121,23 +1264,11 @@ def _register_tools(mcp: FastMCP) -> None:
             manage("estimate", entity_id="task-456")
             manage("health")
         """
-        from sibyl_core.tools.manage import manage as _manage
-
-        # Get full context from authenticated MCP session
-        ctx = await _require_mcp_context()
-
-        # Inject org and user context into data
-        full_data = data or {}
-        full_data["organization_id"] = ctx.org_id
-        if ctx.user_id:
-            full_data["user_id"] = ctx.user_id
-
-        result = await _manage(
+        return await _manage_mcp_action(
             action=action,
             entity_id=entity_id,
-            data=full_data,
+            data=data,
         )
-        return _to_dict(result)
 
     # =========================================================================
     # TOOL 5: logs (Developer Introspection)
