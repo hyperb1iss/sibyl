@@ -971,6 +971,16 @@ def _candidate_from_edge_record(
 ) -> NativeRetrievalCandidate:
     attributes = _record_attributes(row)
     source = _string_value(attributes.get("source_id") or row.get("uuid"))
+    metadata = {
+        **attributes,
+        **_selected_edge_metadata(row),
+        "entity_type": "claim",
+        "relationship": _string_value(row.get("name")),
+        "source_id": source,
+        "source_node_uuid": _string_value(row.get("source_node_uuid")),
+        "target_node_uuid": _string_value(row.get("target_node_uuid")),
+        "retrieval_signals": [signal.value],
+    }
     return NativeRetrievalCandidate(
         id=str(row.get("uuid", "")),
         type="claim",
@@ -978,16 +988,8 @@ def _candidate_from_edge_record(
         content=str(row.get("fact") or ""),
         score=score,
         source=source,
-        metadata={
-            **attributes,
-            "entity_type": "claim",
-            "relationship": _string_value(row.get("name")),
-            "source_id": source,
-            "source_node_uuid": _string_value(row.get("source_node_uuid")),
-            "target_node_uuid": _string_value(row.get("target_node_uuid")),
-            "retrieval_signals": [signal.value],
-        },
-        project_id=_string_value(attributes.get("project_id")),
+        metadata=metadata,
+        project_id=_string_value(metadata.get("project_id")),
         created_at=_datetime_value(row.get("created_at")),
         policy_reason="graph_projection_allowed",
         visibility="organization",
@@ -1058,6 +1060,28 @@ def _selected_record_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "invalid_at",
         "created_by",
         "modified_by",
+    ):
+        value = row.get(key)
+        if value is not None:
+            metadata[key] = value
+    return metadata
+
+
+def _selected_edge_metadata(row: Mapping[str, object]) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    for key in (
+        "group_id",
+        "project_id",
+        "source_ids",
+        "confidence",
+        "valid_at",
+        "valid_from",
+        "valid_to",
+        "invalid_at",
+        "expired_at",
+        "created_by",
+        "modified_by",
+        "episodes",
     ):
         value = row.get(key)
         if value is not None:

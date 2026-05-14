@@ -17,6 +17,7 @@ from sibyl_core.services.native_graph import (
     entity_from_surreal_row,
     normalize_records,
     prepare_native_graph_schema,
+    relationship_from_surreal_row,
 )
 
 
@@ -147,6 +148,52 @@ def test_normalize_records_preserves_surreal_record_id_without_leaking_id() -> N
     ]
 
 
+def test_relationship_from_surreal_row_preserves_temporal_provenance() -> None:
+    relationship = relationship_from_surreal_row(
+        {
+            "id": "relates_to:rel_native",
+            "uuid": "rel_native",
+            "name": "SUPPORTS",
+            "fact": "Task supports the plan",
+            "group_id": "org-native",
+            "source_uuid": "task_native",
+            "target_uuid": "plan_native",
+            "project_id": "project_native",
+            "source_ids": ["raw_1", "raw_2"],
+            "confidence": 0.87,
+            "valid_at": "2026-05-13T12:00:00+00:00",
+            "invalid_at": "2026-05-14T12:00:00+00:00",
+            "expired_at": "2026-05-15T12:00:00+00:00",
+            "created_by": "stef",
+            "modified_by": "nova",
+            "direction": "outgoing",
+            "episodes": ["episode_1"],
+            "attributes": {
+                "metadata": json.dumps({"weight": 0.42, "project_id": "nested_project"}),
+            },
+            "created_at": "2026-05-13T12:30:00+00:00",
+        }
+    )
+
+    assert relationship.id == "rel_native"
+    assert relationship.relationship_type is RelationshipType.SUPPORTS
+    assert relationship.source_id == "task_native"
+    assert relationship.target_id == "plan_native"
+    assert relationship.weight == 0.42
+    assert relationship.metadata["fact"] == "Task supports the plan"
+    assert relationship.metadata["project_id"] == "nested_project"
+    assert relationship.metadata["source_ids"] == ["raw_1", "raw_2"]
+    assert relationship.metadata["confidence"] == 0.87
+    assert relationship.metadata["valid_at"] == "2026-05-13T12:00:00+00:00"
+    assert relationship.metadata["invalid_at"] == "2026-05-14T12:00:00+00:00"
+    assert relationship.metadata["expired_at"] == "2026-05-15T12:00:00+00:00"
+    assert relationship.metadata["created_by"] == "stef"
+    assert relationship.metadata["modified_by"] == "nova"
+    assert relationship.metadata["direction"] == "outgoing"
+    assert relationship.metadata["episodes"] == ["episode_1"]
+    assert relationship.metadata["record_id"] == "relates_to:rel_native"
+
+
 @pytest.mark.asyncio
 async def test_native_entity_lists_order_by_updated_at_before_created_at() -> None:
     client = NativeSurrealGraphClient(group_id="org-native-ordering", url="memory://")
@@ -244,7 +291,13 @@ async def test_native_graph_writes_entities_and_relationships_without_graphiti(
                     source_id="decision_native",
                     target_id="project_native",
                     relationship_type=RelationshipType.BELONGS_TO,
-                    metadata={"native_write_path": "test"},
+                    metadata={
+                        "native_write_path": "test",
+                        "source_ids": ["raw_123"],
+                        "confidence": 0.82,
+                        "valid_at": "2026-05-13T12:00:00+00:00",
+                        "invalid_at": "2026-05-14T12:00:00+00:00",
+                    },
                 )
             ]
         )
@@ -267,21 +320,33 @@ async def test_native_graph_writes_entities_and_relationships_without_graphiti(
         relationships = normalize_records(
             await client.execute_query(
                 """
-                SELECT uuid, name, in.uuid AS source_uuid, out.uuid AS target_uuid, attributes
+                SELECT uuid,
+                       name,
+                       in.uuid AS source_uuid,
+                       out.uuid AS target_uuid,
+                       attributes,
+                       valid_at,
+                       invalid_at
                 FROM relates_to
                 WHERE uuid = "rel_decision_project";
                 """
             )
         )
-        assert relationships == [
-            {
-                "uuid": "rel_decision_project",
-                "name": "BELONGS_TO",
-                "source_uuid": "decision_native",
-                "target_uuid": "project_native",
-                "attributes": {"native_write_path": "test"},
-            }
-        ]
+        assert len(relationships) == 1
+        relationship_row = relationships[0]
+        assert relationship_row["uuid"] == "rel_decision_project"
+        assert relationship_row["name"] == "BELONGS_TO"
+        assert relationship_row["source_uuid"] == "decision_native"
+        assert relationship_row["target_uuid"] == "project_native"
+        assert relationship_row["attributes"] == {
+            "native_write_path": "test",
+            "source_ids": ["raw_123"],
+            "confidence": 0.82,
+            "valid_at": "2026-05-13T12:00:00+00:00",
+            "invalid_at": "2026-05-14T12:00:00+00:00",
+        }
+        assert relationship_row["valid_at"] == datetime(2026, 5, 13, 12, tzinfo=UTC)
+        assert relationship_row["invalid_at"] == datetime(2026, 5, 14, 12, tzinfo=UTC)
 
         updated = await entity_manager.update(
             "decision_native",
@@ -297,6 +362,11 @@ async def test_native_graph_writes_entities_and_relationships_without_graphiti(
             direction="outgoing",
         )
         assert [rel.target_id for rel in fetched_relationships] == ["project_native"]
+        assert fetched_relationships[0].metadata["source_ids"] == ["raw_123"]
+        assert fetched_relationships[0].metadata["confidence"] == 0.82
+        assert fetched_relationships[0].metadata["direction"] == "outgoing"
+        assert fetched_relationships[0].metadata["valid_at"]
+        assert fetched_relationships[0].metadata["invalid_at"]
 
         deleted = await relationship_manager.delete_between(
             "decision_native",

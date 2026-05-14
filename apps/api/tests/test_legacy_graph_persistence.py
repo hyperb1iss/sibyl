@@ -674,11 +674,19 @@ async def test_graph_query_adapter_lists_scoped_relationships_with_surreal_query
     driver.execute_query = AsyncMock(
         return_value=[
             {
+                "record_id": "relates_to:rel-1",
                 "uuid": "rel-1",
                 "name": "BELONGS_TO",
-                "source_id": "task-1",
-                "target_id": "project-1",
-                "metadata": {"confidence": 0.9},
+                "fact": "Task belongs to project",
+                "group_id": "org-1",
+                "episodes": ["episode-1"],
+                "attributes": {"confidence": 0.9, "source_ids": ["raw-1"]},
+                "created_at": "2026-05-13T12:00:00+00:00",
+                "expired_at": None,
+                "valid_at": "2026-05-13T12:00:00+00:00",
+                "invalid_at": None,
+                "source_uuid": "task-1",
+                "target_uuid": "project-1",
             }
         ]
     )
@@ -706,9 +714,20 @@ async def test_graph_query_adapter_lists_scoped_relationships_with_surreal_query
     assert result[0].source_id == "task-1"
     assert result[0].target_id == "project-1"
     assert result[0].relationship_type is RelationshipType.BELONGS_TO
-    assert result[0].metadata == {"confidence": 0.9}
+    assert result[0].metadata["confidence"] == 0.9
+    assert result[0].metadata["source_ids"] == ["raw-1"]
+    assert result[0].metadata["fact"] == "Task belongs to project"
+    assert result[0].metadata["group_id"] == "org-1"
+    assert result[0].metadata["episodes"] == ["episode-1"]
+    assert result[0].metadata["valid_at"] == "2026-05-13T12:00:00+00:00"
+    assert result[0].metadata["record_id"] == "relates_to:rel-1"
     query = driver.execute_query.await_args.args[0]
     assert "FROM relates_to" in query
+    assert "id AS record_id" in query
+    assert "attributes" in query
+    assert "valid_at" in query
+    assert "in.uuid AS source_uuid" in query
+    assert "out.uuid AS target_uuid" in query
     assert "in.uuid IN $entity_ids" in query
     assert "out.uuid IN $entity_ids" in query
     assert "name IN $relationship_types" in query

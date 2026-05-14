@@ -22,6 +22,7 @@ from sibyl_core.services.native_graph import (
     entity_from_surreal_row,
     get_native_graph_runtime,
     normalize_records,
+    relationship_from_surreal_row,
 )
 from sibyl_core.storage import (
     EntityBundle,
@@ -1126,11 +1127,19 @@ class GraphQueryAdapter:
                 await self._driver.execute_query(
                     f"""
                     SELECT
+                        id AS record_id,
                         uuid,
                         name,
-                        in.uuid AS source_id,
-                        out.uuid AS target_id,
-                        attributes AS metadata
+                        fact,
+                        group_id,
+                        episodes,
+                        attributes,
+                        created_at,
+                        expired_at,
+                        valid_at,
+                        invalid_at,
+                        in.uuid AS source_uuid,
+                        out.uuid AS target_uuid
                     FROM relates_to
                     WHERE group_id = $group_id
                       AND in.uuid IN $entity_ids
@@ -1147,7 +1156,7 @@ class GraphQueryAdapter:
                     offset=max(offset, 0),
                 )
             )
-            return [_coerce_relationship(row) for row in rows]
+            return [relationship_from_surreal_row(row) for row in rows]
 
         remaining_offset = max(offset, 0)
         page_offset = 0

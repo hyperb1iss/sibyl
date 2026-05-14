@@ -765,11 +765,17 @@ class NativeRelationshipManager:
         row = await _select_one(
             self._client,
             """
-            SELECT uuid,
+            SELECT id AS record_id,
+                   uuid,
                    name,
                    fact,
+                   group_id,
+                   episodes,
                    attributes,
                    created_at,
+                   expired_at,
+                   valid_at,
+                   invalid_at,
                    in.uuid AS source_uuid,
                    out.uuid AS target_uuid
             FROM relates_to
@@ -801,11 +807,17 @@ class NativeRelationshipManager:
         rows = normalize_records(
             await self._client.execute_query(
                 """
-                SELECT uuid,
+                SELECT id AS record_id,
+                       uuid,
                        name,
                        fact,
+                       group_id,
+                       episodes,
                        attributes,
                        created_at,
+                       expired_at,
+                       valid_at,
+                       invalid_at,
                        in.uuid AS source_uuid,
                        out.uuid AS target_uuid
                 FROM relates_to
@@ -821,6 +833,11 @@ class NativeRelationshipManager:
                 relationship_types=type_values,
             )
         )
+        for row in rows:
+            if row.get("source_uuid") == entity_id:
+                row["direction"] = "outgoing"
+            elif row.get("target_uuid") == entity_id:
+                row["direction"] = "incoming"
         return [_relationship_from_row(row) for row in rows]
 
     async def get_related_entities(
@@ -836,11 +853,17 @@ class NativeRelationshipManager:
         edge_rows = normalize_records(
             await self._client.execute_query(
                 """
-                SELECT uuid,
+                SELECT id AS record_id,
+                       uuid,
                        name,
                        fact,
+                       group_id,
+                       episodes,
                        attributes,
                        created_at,
+                       expired_at,
+                       valid_at,
+                       invalid_at,
                        in.uuid AS source_uuid,
                        out.uuid AS target_uuid
                 FROM relates_to
@@ -860,6 +883,10 @@ class NativeRelationshipManager:
         )
         edge_pairs: list[tuple[SurrealRecord, str]] = []
         for row in edge_rows:
+            if row.get("source_uuid") == entity_id:
+                row["direction"] = "outgoing"
+            elif row.get("target_uuid") == entity_id:
+                row["direction"] = "incoming"
             other_id = (
                 row.get("target_uuid")
                 if row.get("source_uuid") == entity_id
@@ -904,11 +931,17 @@ class NativeRelationshipManager:
         rows = normalize_records(
             await self._client.execute_query(
                 """
-                SELECT uuid,
+                SELECT id AS record_id,
+                       uuid,
                        name,
                        fact,
+                       group_id,
+                       episodes,
                        attributes,
                        created_at,
+                       expired_at,
+                       valid_at,
+                       invalid_at,
                        in.uuid AS source_uuid,
                        out.uuid AS target_uuid
                 FROM relates_to
@@ -1465,32 +1498,112 @@ def _normalize_search_text(value: str) -> str:
     return " ".join(_SEARCH_TOKEN_RE.findall(value.lower()))
 
 
-def _relationship_from_row(row: SurrealRecord) -> Relationship:
-    attributes = row.get("attributes")
-    metadata = dict(attributes) if isinstance(attributes, dict) else {}
-    fact = row.get("fact")
-    if isinstance(fact, str):
-        metadata.setdefault("fact", fact)
+def relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship:
+    normalized_row = {str(key): value for key, value in row.items()}
+    attributes = _row_attributes(normalized_row)
+    metadata = dict(attributes)
+    raw_metadata = metadata.get("metadata", normalized_row.get("metadata"))
+    if isinstance(raw_metadata, str):
+        try:
+            parsed = json.loads(raw_metadata)
+        except json.JSONDecodeError:
+            metadata.pop("metadata", None)
+        else:
+            metadata.pop("metadata", None)
+            if isinstance(parsed, dict):
+                metadata = {str(key): value for key, value in parsed.items()} | metadata
+    elif isinstance(raw_metadata, Mapping):
+        metadata.pop("metadata", None)
+        metadata = {str(key): value for key, value in raw_metadata.items()} | metadata
+
+    source_id, source_key = _relationship_endpoint(normalized_row, "source")
+    target_id, _target_key = _relationship_endpoint(normalized_row, "target")
+    for key in (
+        "fact",
+        "group_id",
+        "project_id",
+        "source_id",
+        "source_ids",
+        "confidence",
+        "valid_at",
+        "valid_from",
+        "valid_to",
+        "invalid_at",
+        "expired_at",
+        "created_by",
+        "modified_by",
+        "direction",
+        "episodes",
+    ):
+        if key == "source_id" and source_key == "source_id":
+            continue
+        value = normalized_row.get(key)
+        if value is not None and metadata.get(key) is None:
+            metadata[key] = value
+
+    relationship_id = _relationship_id_from_row(normalized_row)
+    record_id = _row_record_id(normalized_row)
+    if record_id and record_id != relationship_id and metadata.get("record_id") is None:
+        metadata["record_id"] = record_id
+
     return Relationship(
-        id=str(row.get("uuid") or ""),
-        relationship_type=_relationship_type_from_row(row),
-        source_id=str(row.get("source_uuid") or ""),
-        target_id=str(row.get("target_uuid") or ""),
+        id=relationship_id,
+        relationship_type=_relationship_type_from_row(normalized_row, metadata=metadata),
+        source_id=source_id,
+        target_id=target_id,
         weight=_metadata_weight(metadata),
         metadata=metadata,
-        created_at=_row_datetime(row.get("created_at")) or datetime.now(UTC),
+        created_at=_row_datetime(normalized_row.get("created_at")) or datetime.now(UTC),
     )
 
 
-def _relationship_type_from_row(row: SurrealRecord) -> RelationshipType:
-    value = str(row.get("name") or RelationshipType.RELATED_TO.value)
+def _relationship_from_row(row: SurrealRecord) -> Relationship:
+    return relationship_from_surreal_row(row)
+
+
+def _relationship_id_from_row(row: Mapping[str, object]) -> str:
+    for key in ("uuid", "relationship_id"):
+        if text := _first_text(row.get(key)):
+            return text
+    raw_id = row.get("id")
+    if raw_id is None:
+        raw_id = row.get("record_id")
+    if text := _first_text(raw_id):
+        return _entity_id_from_record_text(text)
+    return ""
+
+
+def _relationship_endpoint(row: Mapping[str, object], side: str) -> tuple[str, str | None]:
+    for key in (
+        f"{side}_uuid",
+        f"{side}_node_uuid",
+        f"{side}_id",
+    ):
+        if text := _first_text(row.get(key)):
+            return text, key
+    return "", None
+
+
+def _relationship_type_from_row(
+    row: Mapping[str, object],
+    *,
+    metadata: Mapping[str, object] | None = None,
+) -> RelationshipType:
+    relationship_metadata = metadata or {}
+    value = str(
+        row.get("name")
+        or row.get("relationship_type")
+        or row.get("rel_type")
+        or relationship_metadata.get("relationship_type")
+        or RelationshipType.RELATED_TO.value
+    )
     try:
         return RelationshipType(value)
     except ValueError:
         return RelationshipType.RELATED_TO
 
 
-def _metadata_weight(metadata: dict[object, object]) -> float:
+def _metadata_weight(metadata: Mapping[str, object]) -> float:
     weight = metadata.get("weight")
     if isinstance(weight, int | float):
         return float(weight)
@@ -1711,9 +1824,9 @@ def _relationship_record(relationship: Relationship, *, group_id: str) -> Surrea
         "episodes": _metadata_str_list(metadata.get("episodes")),
         "attributes": metadata,
         "created_at": relationship.created_at,
-        "expired_at": None,
-        "valid_at": _metadata_datetime(metadata.get("valid_at")),
-        "invalid_at": None,
+        "expired_at": _metadata_datetime(metadata.get("expired_at")),
+        "valid_at": _metadata_datetime(metadata.get("valid_at") or metadata.get("valid_from")),
+        "invalid_at": _metadata_datetime(metadata.get("invalid_at") or metadata.get("valid_to")),
     }
 
 
@@ -1801,4 +1914,5 @@ __all__ = [
     "get_native_graph_runtime",
     "normalize_records",
     "prepare_native_graph_schema",
+    "relationship_from_surreal_row",
 ]
