@@ -2405,6 +2405,44 @@ Exit criteria:
 - Any retained compatibility or historical surface is opt-in, named, documented, and separately
   tested.
 
+Receipt, 2026-05-14:
+
+- Local commit under audit: `c0c05e8` (`test(inventory): guard retained legacy docs`).
+- Branch state: local `main` is ahead of `origin/main`; this receipt is local-only and does not
+  claim CI, docs deploy, or nightly coverage for the local commits.
+- Dependency boundary:
+  - `graphiti-core[anthropic,google-genai]>=0.28.2` appears only in `sibyl-core[compatibility]` and
+    the `sibyl-core` dev dependency group.
+  - Default package metadata does not list FalkorDB, PostgreSQL, Redis, or Valkey as data-plane
+    dependencies. The remaining `requires_redis` package reference is an API pytest marker.
+- Verification:
+  - `moon run inventory-check` -> generated snapshot current, Graphiti exit inventory covers 21
+    import files, and retained legacy-term inventory covers 87 active doc/config files.
+  - `moon run inventory-test` -> 26 passed.
+  - `moon run inventory-typecheck` -> all checks passed.
+  - `moon run inventory-lint` -> all checks passed; 28 files already formatted.
+  - `moon run docs:lint` -> all matched files use Prettier code style.
+  - `moon run core:no-graphiti-smoke` -> 2 passed.
+  - `moon run memory-trust-gate` -> PASS, 6 checks, 0 failed. The gate covered core memory policy,
+    context pack behavior, REST memory surfaces, context-session behavior, MCP access, and CLI
+    memory.
+  - `moon run :check` -> 34 tasks completed. Core reported 885 passed, 14 skipped, and 20
+    deselected; API reported 1405 passed, 1 skipped, and 16 deselected; CLI reported 162 passed; web
+    reported 21 test files and 91 tests passed; inventory reported 26 passed.
+  - `moon run baseline-seed` -> wrote `.moon/cache/baseline-runtime-manifest.json`.
+  - `moon run baseline-replay-runtime` -> baseline replay passed across auth, REST, graph, search,
+    and MCP fixtures.
+  - `moon run bench-gate` -> Gate passed for `benchmarks/results/ai-memory/manifest.json`.
+  - `moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --auth-manifest .moon/cache/baseline-runtime-manifest.json --label retrieval-compare --repeat 20 --metadata retrieval_mode=compare`
+    -> 160 cases, 20 repeats, pass rate 1.000, 0 failed, mean latency 18.2 ms, p95 latency 30.7 ms.
+- Review:
+  - A5.2 retained legacy-term inventory review: Claude cross-model review PASS at
+    `/tmp/claude-review-a52-closed.0K0C5w`.
+- Policy or compatibility decision: the local tree is ready for a final pushed-main release audit
+  once CI, docs deploy, and scheduled nightly receipts are recorded for the pushed commit.
+- Remaining risk: CI and nightly receipts are intentionally pending because local project policy
+  forbids pushing `main` from this agent session.
+
 ## 14. Evidence Ledger
 
 Every wave should leave a receipt block in this document or in the corresponding audit doc. Use this
