@@ -364,13 +364,20 @@ class TestContextPackRoute:
         assert exc.value.status_code == 403
 
 
-def _reflection_pack() -> ReflectionPack:
+def _reflection_pack(
+    *,
+    project: str | None = "proj_1",
+    source_id: str | None = "session_1",
+    persisted_id: str | None = None,
+    raw_source_ids: list[str] | None = None,
+    metadata: dict[str, object] | None = None,
+) -> ReflectionPack:
     return ReflectionPack(
         source_title="Planning",
-        source_id="session_1",
+        source_id=source_id,
         intent="build",
         domain="sibyl",
-        project="proj_1",
+        project=project,
         candidates=[
             ReflectionCandidate(
                 kind="decision",
@@ -378,9 +385,13 @@ def _reflection_pack() -> ReflectionPack:
                 content="We decided to add reflect.",
                 reason="captures a choice",
                 confidence=0.86,
+                metadata=metadata or {},
+                raw_source_ids=raw_source_ids or [],
+                persisted_id=persisted_id,
             )
         ],
         total_candidates=1,
+        persisted_count=1 if persisted_id else 0,
     )
 
 
@@ -537,6 +548,172 @@ class TestReflectRoute:
 
         assert reflect_memory.await_args.kwargs["persist"] is True
         assert reflect_memory.await_args.kwargs["persist_review"] is True
+
+    @pytest.mark.asyncio
+    async def test_reflect_audits_render_receipt(
+        self,
+        context_audit_event: AsyncMock,
+    ) -> None:
+        from sibyl.api.routes.context import reflect_context
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+
+        with (
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(),
+            ),
+            patch(
+                "sibyl_core.tools.core.reflect_memory",
+                AsyncMock(
+                    return_value=_reflection_pack(
+                        persisted_id="decision_1",
+                        raw_source_ids=["raw_1"],
+                        metadata={
+                            "policy_allowed": True,
+                            "policy_reasons": ["same_scope_write_allowed"],
+                        },
+                    )
+                ),
+            ),
+            patch(
+                "sibyl_core.tools.core.explore",
+                AsyncMock(return_value=SimpleNamespace(entities=[])),
+            ),
+        ):
+            response = await reflect_context(
+                request=ReflectionRequest(
+                    content="We decided to add reflect.",
+                    source_title="Planning",
+                    intent=ContextIntent.BUILD,
+                    project="proj_1",
+                    persist=True,
+                    persist_review=True,
+                ),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        assert response.persisted_count == 1
+        context_audit_event.assert_awaited_once()
+        kwargs = context_audit_event.await_args.kwargs
+        assert kwargs["action"] == "memory.reflect"
+        assert kwargs["user_id"] == "user-123"
+        assert kwargs["organization_id"] == "00000000-0000-0000-0000-000000000111"
+        assert kwargs["memory_scope"] == "project"
+        assert kwargs["scope_key"] == "proj_1"
+        assert kwargs["project_id"] == "proj_1"
+        assert kwargs["source_surface"] == "context_reflect"
+        assert kwargs["source_ids"] == ["session_1", "raw_1"]
+        assert kwargs["derived_ids"] == ["decision_1"]
+        assert kwargs["policy_allowed"] is True
+        assert kwargs["policy_reason"] == "same_scope_write_allowed"
+        assert kwargs["details"]["candidate_count"] == 1
+        assert kwargs["details"]["persist"] is True
+        assert kwargs["details"]["persist_review"] is True
+        assert kwargs["details"]["persisted_count"] == 1
+        assert kwargs["details"]["source_title_length"] == 8
+        assert kwargs["details"]["accessible_project_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_reflect_audits_render_only_receipt(
+        self,
+        context_audit_event: AsyncMock,
+    ) -> None:
+        from sibyl.api.routes.context import reflect_context
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch(
+                "sibyl_core.tools.core.reflect_memory",
+                AsyncMock(return_value=_reflection_pack(project=None, source_id=None)),
+            ),
+        ):
+            await reflect_context(
+                request=ReflectionRequest(
+                    content="We decided to add reflect.",
+                    source_title="Planning",
+                    intent=ContextIntent.BUILD,
+                    persist=False,
+                ),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        context_audit_event.assert_awaited_once()
+        kwargs = context_audit_event.await_args.kwargs
+        assert kwargs["memory_scope"] == "private"
+        assert kwargs["scope_key"] is None
+        assert kwargs["project_id"] is None
+        assert kwargs["source_surface"] == "context_reflect"
+        assert kwargs["source_ids"] == []
+        assert kwargs["derived_ids"] == []
+        assert kwargs["policy_allowed"] is True
+        assert kwargs["policy_reason"] == "reflection_rendered"
+        assert kwargs["details"]["persist"] is False
+        assert kwargs["details"]["accessible_project_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_reflect_audits_persist_policy_denial(
+        self,
+        context_audit_event: AsyncMock,
+    ) -> None:
+        from sibyl.api.routes.context import reflect_context
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+
+        with (
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(),
+            ),
+            patch(
+                "sibyl_core.tools.core.reflect_memory",
+                AsyncMock(
+                    return_value=_reflection_pack(
+                        source_id=None,
+                        metadata={
+                            "policy_allowed": False,
+                            "policy_reasons": [
+                                "unverified_membership",
+                                "scope_not_enabled",
+                            ],
+                        },
+                    )
+                ),
+            ),
+            patch(
+                "sibyl_core.tools.core.explore",
+                AsyncMock(return_value=SimpleNamespace(entities=[])),
+            ),
+        ):
+            await reflect_context(
+                request=ReflectionRequest(
+                    content="We decided to add reflect.",
+                    source_title="Planning",
+                    intent=ContextIntent.BUILD,
+                    project="proj_1",
+                    persist=True,
+                ),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        context_audit_event.assert_awaited_once()
+        kwargs = context_audit_event.await_args.kwargs
+        assert kwargs["memory_scope"] == "project"
+        assert kwargs["scope_key"] == "proj_1"
+        assert kwargs["source_ids"] == []
+        assert kwargs["derived_ids"] == []
+        assert kwargs["policy_allowed"] is False
+        assert kwargs["policy_reason"] == "unverified_membership,scope_not_enabled"
+        assert kwargs["details"]["persist"] is True
+        assert kwargs["details"]["persisted_count"] == 0
 
     @pytest.mark.asyncio
     async def test_reflect_skips_active_task_lookup_when_not_persisting(self) -> None:

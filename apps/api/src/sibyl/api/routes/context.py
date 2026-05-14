@@ -3,7 +3,7 @@
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
-from sibyl.api.context_audit import log_context_pack_audit
+from sibyl.api.context_audit import log_context_pack_audit, log_reflection_audit
 from sibyl.api.schemas import (
     ContextPackRequest,
     ContextPackResponse,
@@ -203,7 +203,23 @@ async def reflect_context(
         )
         payload = reflection_pack_to_dict(pack)
         payload["markdown"] = reflection_pack_to_markdown(pack)
-        return ReflectionResponse.model_validate(payload)
+        response = ReflectionResponse.model_validate(payload)
+        await log_reflection_audit(
+            user_id=ctx.user_id,
+            organization_id=str(org.id),
+            pack=pack,
+            project=request.project,
+            accessible_projects=accessible_projects,
+            source_surface="context_reflect",
+            persist=request.persist,
+            persist_source=request.persist_source,
+            persist_review=request.persist_review,
+            active_task=request.active_task,
+            related_to=related_to,
+            task_ids=request.task_ids,
+            limit=request.limit,
+        )
+        return response
 
     except HTTPException:
         raise

@@ -440,6 +440,7 @@ async def test_reflect_mcp_memory_links_single_active_task_when_persisting() -> 
         patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
         patch("sibyl_core.tools.core.reflect_memory", reflect_memory),
         patch("sibyl_core.tools.core.explore", explore),
+        patch("sibyl.api.context_audit.log_memory_audit_event", AsyncMock()) as audit,
     ):
         result = await _reflect_mcp_memory(
             content="We decided to link reflection to active work.",
@@ -463,6 +464,14 @@ async def test_reflect_mcp_memory_links_single_active_task_when_persisting() -> 
     assert reflect_memory.await_args.kwargs["memory_scope"] == "project"
     assert reflect_memory.await_args.kwargs["scope_key"] == "project-a"
     assert reflect_memory.await_args.kwargs["persist_review"] is False
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["action"] == "memory.reflect"
+    assert audit.await_args.kwargs["source_surface"] == "mcp_reflect"
+    assert audit.await_args.kwargs["memory_scope"] == "project"
+    assert audit.await_args.kwargs["scope_key"] == "project-a"
+    assert audit.await_args.kwargs["source_ids"] == ["session_1"]
+    assert audit.await_args.kwargs["derived_ids"] == []
+    assert audit.await_args.kwargs["details"]["related_to_count"] == 3
     explore.assert_awaited_once()
 
 

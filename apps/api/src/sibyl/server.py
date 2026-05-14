@@ -13,7 +13,7 @@ import structlog
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.fastmcp import FastMCP
 
-from sibyl.api.context_audit import log_context_pack_audit
+from sibyl.api.context_audit import log_context_pack_audit, log_reflection_audit
 from sibyl.config import settings
 from sibyl.persistence.auth_runtime import (
     authenticate_api_key,
@@ -488,6 +488,21 @@ async def _reflect_mcp_memory(
     )
     payload = reflection_pack_to_dict(pack)
     payload["markdown"] = reflection_pack_to_markdown(pack)
+    await log_reflection_audit(
+        user_id=ctx.user_id,
+        organization_id=ctx.org_id,
+        pack=pack,
+        project=project,
+        accessible_projects=accessible_projects,
+        source_surface="mcp_reflect",
+        persist=persist,
+        persist_source=persist_source,
+        persist_review=persist_review,
+        active_task=active_task,
+        related_to=resolved_links,
+        task_ids=task_ids,
+        limit=limit,
+    )
     return payload
 
 

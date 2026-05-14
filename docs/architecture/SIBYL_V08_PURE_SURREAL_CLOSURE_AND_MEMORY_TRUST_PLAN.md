@@ -1285,6 +1285,68 @@ B4.3 receipt, 2026-05-13:
   is inspectable by source and derived IDs through the audit API and CLI, but audit receipts
   intentionally do not expose hidden memory text.
 
+### Packet B4.4: Reflection Render Audit
+
+Purpose: make reflection renders and optional reflection persistence leave compact metadata-only
+audit receipts before B5 promotion/share work builds on the review queue.
+
+Files:
+
+- `apps/api/src/sibyl/api/context_audit.py`
+- `apps/api/src/sibyl/api/routes/context.py`
+- `apps/api/src/sibyl/server.py`
+- `apps/api/tests/test_routes_context.py`
+- `apps/api/tests/test_server_accessible_projects.py`
+
+Implementation:
+
+- Extend the shared context audit helper with `memory.reflect` receipts for reflection packs.
+- Cover REST `/context/reflect` and the MCP `reflect` helper with source surfaces of
+  `context_reflect` and `mcp_reflect`.
+- Include actor, organization, memory scope, project, source IDs, persisted/review IDs, policy
+  state, candidate counts, persisted counts, persist settings, active-task/link counts, and
+  accessible-project count without storing reflection content.
+- Treat explicit project reflection as `project` scope and unscoped reflection as `private` scope.
+- Derive policy state from reflection candidate policy metadata when persistence policy runs, and
+  otherwise record a successful render reason.
+
+Verify:
+
+- `moon run api:test -- tests/test_routes_context.py tests/test_server_accessible_projects.py`
+- `moon run api:lint api:typecheck`
+- `moon run docs:format`
+- `moon run docs:lint`
+- `git diff --check`
+
+Exit criteria:
+
+- REST reflection renders emit metadata-only audit receipts for inspect.
+- MCP reflection renders emit the same receipt action with a distinct source surface.
+- Reflection receipts include persisted/review IDs when persistence creates them.
+- Audit failures remain fail-open and warning-logged through the shared helper.
+
+B4.4 receipt, 2026-05-13:
+
+- Added `sibyl.api.context_audit.log_reflection_audit` for bounded reflection source IDs, derived
+  persisted/review IDs, policy metadata, persist settings, candidate counts, and link counts.
+- REST `/context/reflect` records `memory.reflect` after successful response validation.
+- MCP reflection now records `memory.reflect` with `source_surface=mcp_reflect` after rendering.
+- Tests assert REST project reflection receipts, persisted IDs, raw source IDs, policy state, and
+  MCP reflection receipts with active-task link counts.
+- `moon run api:test -- tests/test_routes_context.py tests/test_server_accessible_projects.py`: 34
+  passed in 1.21s, then 36 passed in 1.22s after adding render-only and policy-denied guards.
+- `moon run api:lint api:typecheck`: lint passed; typecheck exited 0 with the existing 63 ty
+  diagnostics.
+- `moon run docs:format docs:lint`: passed.
+- `git diff --check`: passed.
+- Independent review passed at `/tmp/claude-review-b44-reflection-audit-20260513172938.txt`; final
+  exact-diff review passed at `/tmp/claude-review-b44-reflection-audit-final-20260513173458.txt`.
+- Sibyl memory captured as `procedure_e14255087d07` with raw source
+  `1bbea26d-6219-40d5-8023-297dbd2cf2b2`.
+- Remaining B4 risk: IP address and user-agent capture remain deferred from B4.1. Denied reflection
+  project access still fails before render and does not emit `memory.reflect`; project filter denies
+  are already audited on raw memory routes.
+
 ## 14. Evidence Ledger
 
 Every wave should leave a receipt block in this document or in the corresponding audit doc. Use this
