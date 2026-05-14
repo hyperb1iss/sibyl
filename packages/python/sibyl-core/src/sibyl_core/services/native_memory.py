@@ -52,6 +52,30 @@ class NativeReflectionPromotionResult:
     metadata: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class NativeReflectionPromotionPreview:
+    allowed: bool
+    candidate_id: str
+    reason: str
+    review_state: str
+    memory_scope: MemoryScope | None
+    scope_key: str | None
+    raw_source_ids: list[str]
+    policy_decisions: tuple[MemoryPolicyDecision, ...] = ()
+    metadata: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeReflectionPromotionPlan:
+    candidate_memory: RawMemory
+    promotion_candidate: ReflectionCandidate
+    target_scope: MemoryScope
+    target_scope_key: str | None
+    target_project: str | None
+    raw_source_ids: list[str]
+    input_memories: list[RawMemory]
+
+
 _PROMOTED_REVIEW_STATE = "promoted"
 _SCOPE_RANK: dict[MemoryScope, int] = {
     MemoryScope.PRIVATE: 0,
@@ -211,6 +235,135 @@ async def promote_reflection_candidate_review(
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
 ) -> NativeReflectionPromotionResult:
+    plan = await _resolve_reflection_promotion_plan(
+        candidate_id=candidate_id,
+        organization_id=organization_id,
+        principal_id=principal_id,
+        promote_to_scope=promote_to_scope,
+        promote_to_scope_key=promote_to_scope_key,
+        domain=domain,
+        project=project,
+    )
+    if isinstance(plan, NativeReflectionPromotionResult):
+        return plan
+
+    native_result = await persist_reflection_candidate_native(
+        candidate=plan.promotion_candidate,
+        organization_id=organization_id,
+        principal_id=principal_id,
+        domain=domain or _metadata_str(plan.candidate_memory.metadata, "domain"),
+        project=plan.target_project,
+        source_id=plan.raw_source_ids[0] if plan.raw_source_ids else None,
+        related_to=related_to,
+        accessible_projects=accessible_projects,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        link_source_entity=False,
+    )
+    if not native_result.response.success:
+        return NativeReflectionPromotionResult(
+            success=False,
+            candidate_id=plan.candidate_memory.id,
+            promoted_id=None,
+            reason=_policy_denial_reason(native_result.metadata),
+            review_state=plan.candidate_memory.review_state,
+            memory_scope=plan.target_scope,
+            scope_key=plan.target_scope_key,
+            raw_source_ids=plan.raw_source_ids,
+            metadata=native_result.metadata,
+        )
+
+    promoted_at = datetime.now(UTC).isoformat()
+    metadata = {
+        **plan.candidate_memory.metadata,
+        **native_result.metadata,
+        "review_state": _PROMOTED_REVIEW_STATE,
+        "promoted_at": promoted_at,
+        "promoted_entity_id": native_result.response.id,
+        "promote_to_scope": plan.target_scope.value,
+        "promote_to_scope_key": plan.target_scope_key,
+        "raw_source_ids": plan.raw_source_ids,
+        "source_ids": plan.raw_source_ids,
+    }
+    updated = replace(
+        plan.candidate_memory,
+        review_state=_PROMOTED_REVIEW_STATE,
+        metadata=metadata,
+    )
+    await save_raw_memory(updated)
+
+    return NativeReflectionPromotionResult(
+        success=True,
+        candidate_id=plan.candidate_memory.id,
+        promoted_id=native_result.response.id,
+        reason="promoted",
+        review_state=_PROMOTED_REVIEW_STATE,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        raw_source_ids=plan.raw_source_ids,
+        metadata=metadata,
+    )
+
+
+async def preview_reflection_candidate_promotion(
+    *,
+    candidate_id: str,
+    organization_id: str,
+    principal_id: str | None,
+    promote_to_scope: MemoryScope | str | None,
+    promote_to_scope_key: str | None = None,
+    domain: str | None = None,
+    project: str | None = None,
+    accessible_projects: Iterable[str] | None = None,
+) -> NativeReflectionPromotionPreview:
+    plan = await _resolve_reflection_promotion_plan(
+        candidate_id=candidate_id,
+        organization_id=organization_id,
+        principal_id=principal_id,
+        promote_to_scope=promote_to_scope,
+        promote_to_scope_key=promote_to_scope_key,
+        domain=domain,
+        project=project,
+    )
+    if isinstance(plan, NativeReflectionPromotionResult):
+        return _promotion_preview_from_denial(plan)
+
+    policy_decisions = _authorize_reflection_write(
+        principal_id=principal_id,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        accessible_projects=accessible_projects,
+    )
+    metadata = {
+        **_policy_metadata(policy_decisions),
+        "input_scopes": _scope_metadata(plan.input_memories),
+        "source_count": len(plan.raw_source_ids),
+        "target_project": plan.target_project,
+    }
+    allowed = all(decision.allowed for decision in policy_decisions)
+    return NativeReflectionPromotionPreview(
+        allowed=allowed,
+        candidate_id=plan.candidate_memory.id,
+        reason="promotion_preview_allowed" if allowed else _policy_denial_reason(metadata),
+        review_state=plan.candidate_memory.review_state,
+        memory_scope=plan.target_scope,
+        scope_key=plan.target_scope_key,
+        raw_source_ids=plan.raw_source_ids,
+        policy_decisions=policy_decisions,
+        metadata=metadata,
+    )
+
+
+async def _resolve_reflection_promotion_plan(
+    *,
+    candidate_id: str,
+    organization_id: str,
+    principal_id: str | None,
+    promote_to_scope: MemoryScope | str | None,
+    promote_to_scope_key: str | None = None,
+    domain: str | None = None,
+    project: str | None = None,
+) -> _NativeReflectionPromotionPlan | NativeReflectionPromotionResult:
     candidate_memory = await get_raw_memory(
         organization_id=organization_id,
         memory_id=candidate_id,
@@ -320,61 +473,14 @@ async def promote_reflection_candidate_review(
             "project_id",
         )
     )
-    native_result = await persist_reflection_candidate_native(
-        candidate=promotion_candidate,
-        organization_id=organization_id,
-        principal_id=principal_id,
-        domain=domain or _metadata_str(candidate_memory.metadata, "domain"),
-        project=target_project,
-        source_id=raw_source_ids[0] if raw_source_ids else None,
-        related_to=related_to,
-        accessible_projects=accessible_projects,
-        memory_scope=target_scope,
-        scope_key=target_scope_key,
-        link_source_entity=False,
-    )
-    if not native_result.response.success:
-        return NativeReflectionPromotionResult(
-            success=False,
-            candidate_id=candidate_memory.id,
-            promoted_id=None,
-            reason=_policy_denial_reason(native_result.metadata),
-            review_state=candidate_memory.review_state,
-            memory_scope=target_scope,
-            scope_key=target_scope_key,
-            raw_source_ids=raw_source_ids,
-            metadata=native_result.metadata,
-        )
-
-    promoted_at = datetime.now(UTC).isoformat()
-    metadata = {
-        **candidate_memory.metadata,
-        **native_result.metadata,
-        "review_state": _PROMOTED_REVIEW_STATE,
-        "promoted_at": promoted_at,
-        "promoted_entity_id": native_result.response.id,
-        "promote_to_scope": target_scope.value,
-        "promote_to_scope_key": target_scope_key,
-        "raw_source_ids": raw_source_ids,
-        "source_ids": raw_source_ids,
-    }
-    updated = replace(
-        candidate_memory,
-        review_state=_PROMOTED_REVIEW_STATE,
-        metadata=metadata,
-    )
-    await save_raw_memory(updated)
-
-    return NativeReflectionPromotionResult(
-        success=True,
-        candidate_id=candidate_memory.id,
-        promoted_id=native_result.response.id,
-        reason="promoted",
-        review_state=_PROMOTED_REVIEW_STATE,
-        memory_scope=target_scope,
-        scope_key=target_scope_key,
+    return _NativeReflectionPromotionPlan(
+        candidate_memory=candidate_memory,
+        promotion_candidate=promotion_candidate,
+        target_scope=target_scope,
+        target_scope_key=target_scope_key,
+        target_project=target_project,
         raw_source_ids=raw_source_ids,
-        metadata=metadata,
+        input_memories=input_memories,
     )
 
 
@@ -462,6 +568,22 @@ def _promotion_denied(
         scope_key=scope_key,
         raw_source_ids=raw_source_ids,
         metadata=payload,
+    )
+
+
+def _promotion_preview_from_denial(
+    result: NativeReflectionPromotionResult,
+) -> NativeReflectionPromotionPreview:
+    return NativeReflectionPromotionPreview(
+        allowed=False,
+        candidate_id=result.candidate_id,
+        reason=result.reason,
+        review_state=result.review_state,
+        memory_scope=result.memory_scope,
+        scope_key=result.scope_key,
+        raw_source_ids=result.raw_source_ids,
+        policy_decisions=result.policy_decisions,
+        metadata=result.metadata,
     )
 
 
@@ -833,6 +955,7 @@ def _relationship(
 
 
 __all__ = [
+    "NativeReflectionPromotionPreview",
     "NativeReflectionPromotionResult",
     "NativeReflectionWriteResult",
     "NativeWriteMode",
@@ -841,5 +964,6 @@ __all__ = [
     "native_write_mode_from_env",
     "persist_reflection_candidate_native",
     "persist_reflection_source_native",
+    "preview_reflection_candidate_promotion",
     "promote_reflection_candidate_review",
 ]

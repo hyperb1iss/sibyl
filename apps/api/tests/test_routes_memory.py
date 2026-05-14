@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from sibyl.api.routes.memory import (
     list_memory_audit,
+    preview_reflection_promotion,
     promote_reflection_candidate,
     recall_raw,
     remember_raw,
@@ -20,7 +21,10 @@ from sibyl.api.schemas import (
     ReflectionPromotionRequest,
 )
 from sibyl_core.auth import OrganizationRole, ProjectRole
-from sibyl_core.services.native_memory import NativeReflectionPromotionResult
+from sibyl_core.services.native_memory import (
+    NativeReflectionPromotionPreview,
+    NativeReflectionPromotionResult,
+)
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 
 
@@ -667,6 +671,106 @@ async def test_list_memory_audit_rejects_non_memory_action() -> None:
 
     assert exc.value.status_code == 400
     assert exc.value.detail == "invalid_memory_audit_action"
+
+
+@pytest.mark.asyncio
+async def test_preview_reflection_promotion_verifies_project_target() -> None:
+    org = _org()
+    ctx = _ctx()
+    http_request = _http_request()
+    result = NativeReflectionPromotionPreview(
+        allowed=True,
+        candidate_id="candidate-1",
+        reason="promotion_preview_allowed",
+        review_state="pending",
+        memory_scope=MemoryScope.PROJECT,
+        scope_key="project_123",
+        raw_source_ids=["source-1"],
+        metadata={
+            "policy_reasons": [
+                "same_scope_reflect_allowed",
+                "same_scope_write_allowed",
+            ],
+            "input_scopes": [
+                {
+                    "id": "candidate-1",
+                    "memory_scope": "private",
+                    "scope_key": None,
+                }
+            ],
+            "source_count": 1,
+        },
+    )
+    with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch(
+            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            AsyncMock(return_value=result),
+        ) as preview,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        response = await preview_reflection_promotion(
+            ReflectionPromotionRequest(
+                candidate_id="candidate-1",
+                promote_to_scope="project",
+                promote_to_scope_key="project_123",
+                project="project_123",
+                domain="sibyl",
+                related_to=["task_123"],
+            ),
+            http_request=http_request,
+            org=org,
+            ctx=ctx,
+        )
+
+    verify.assert_awaited_once_with(
+        None,
+        ctx,
+        "project_123",
+        required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
+    )
+    preview.assert_awaited_once_with(
+        candidate_id="candidate-1",
+        organization_id=str(org.id),
+        principal_id="user-123",
+        promote_to_scope="project",
+        promote_to_scope_key="project_123",
+        domain="sibyl",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+    audit.assert_awaited_once_with(
+        action="memory.reflect.promote.preview",
+        user_id="user-123",
+        organization_id="org-1",
+        request=http_request,
+        memory_scope="project",
+        scope_key="project_123",
+        project_id="project_123",
+        source_surface="reflection_promote_preview",
+        source_ids=["candidate-1", "source-1"],
+        derived_ids=[],
+        policy_allowed=True,
+        policy_reason="promotion_preview_allowed",
+        details={
+            "domain": "sibyl",
+            "preview": True,
+            "related_to_count": 1,
+            "review_state": "pending",
+            "source_count": 1,
+        },
+    )
+    assert response.allowed is True
+    assert response.reason == "promotion_preview_allowed"
+    assert response.promote_to_scope == "project"
+    assert response.promote_to_scope_key == "project_123"
+    assert response.raw_source_ids == ["source-1"]
+    assert response.policy_reasons == [
+        "same_scope_reflect_allowed",
+        "same_scope_write_allowed",
+    ]
+    assert response.input_scopes[0].id == "candidate-1"
 
 
 @pytest.mark.asyncio

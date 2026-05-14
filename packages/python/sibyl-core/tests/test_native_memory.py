@@ -12,6 +12,7 @@ from sibyl_core.services.native_memory import (
     coerce_native_write_mode,
     native_reflection_write_enabled,
     native_write_mode_from_env,
+    preview_reflection_candidate_promotion,
     promote_reflection_candidate_review,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
@@ -68,6 +69,119 @@ def test_native_write_mode_accepts_disabled_values() -> None:
     assert coerce_native_write_mode("false") is NativeWriteMode.DISABLED
     assert native_write_mode_from_env({"SIBYL_NATIVE_WRITE": "0"}) is NativeWriteMode.DISABLED
     assert native_reflection_write_enabled({"SIBYL_NATIVE_WRITE": "off"}) is False
+
+
+@pytest.mark.asyncio
+async def test_preview_review_candidate_returns_policy_grounded_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = _raw_review_candidate(
+        metadata={
+            **_raw_review_candidate().metadata,
+            "suggested_memory_scope": "project",
+            "suggested_scope_key": "project_123",
+        }
+    )
+    source = _raw_review_candidate(id="source-1")
+    monkeypatch.setattr(
+        native_memory,
+        "get_raw_memory",
+        AsyncMock(side_effect=[candidate, source]),
+    )
+    persist = AsyncMock()
+    save = AsyncMock()
+    monkeypatch.setattr(native_memory, "persist_reflection_candidate_native", persist)
+    monkeypatch.setattr(native_memory, "save_raw_memory", save)
+
+    result = await preview_reflection_candidate_promotion(
+        candidate_id="candidate-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="project",
+        promote_to_scope_key="project_123",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+
+    assert result.allowed
+    assert result.reason == "promotion_preview_allowed"
+    assert result.memory_scope is MemoryScope.PROJECT
+    assert result.scope_key == "project_123"
+    assert result.raw_source_ids == ["source-1"]
+    assert result.metadata is not None
+    assert result.metadata["policy_reasons"] == [
+        "same_scope_reflect_allowed",
+        "same_scope_write_allowed",
+    ]
+    assert result.metadata["input_scopes"] == [
+        {"id": "candidate-1", "memory_scope": "private", "scope_key": None},
+        {"id": "source-1", "memory_scope": "private", "scope_key": None},
+    ]
+    persist.assert_not_awaited()
+    save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_preview_review_candidate_returns_missing_without_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(native_memory, "get_raw_memory", AsyncMock(return_value=None))
+    persist = AsyncMock()
+    save = AsyncMock()
+    monkeypatch.setattr(native_memory, "persist_reflection_candidate_native", persist)
+    monkeypatch.setattr(native_memory, "save_raw_memory", save)
+
+    result = await preview_reflection_candidate_promotion(
+        candidate_id="candidate-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="project",
+        promote_to_scope_key="project_123",
+    )
+
+    assert not result.allowed
+    assert result.reason == "candidate_not_found"
+    assert result.raw_source_ids == []
+    persist.assert_not_awaited()
+    save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_preview_review_candidate_denies_unverified_project_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = _raw_review_candidate()
+    source = _raw_review_candidate(id="source-1")
+    monkeypatch.setattr(
+        native_memory,
+        "get_raw_memory",
+        AsyncMock(side_effect=[candidate, source]),
+    )
+    persist = AsyncMock()
+    save = AsyncMock()
+    monkeypatch.setattr(native_memory, "persist_reflection_candidate_native", persist)
+    monkeypatch.setattr(native_memory, "save_raw_memory", save)
+
+    result = await preview_reflection_candidate_promotion(
+        candidate_id="candidate-1",
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="project",
+        promote_to_scope_key="project_123",
+        accessible_projects={"project_other"},
+    )
+
+    assert not result.allowed
+    assert result.reason == "unverified_membership"
+    assert result.memory_scope is MemoryScope.PROJECT
+    assert result.scope_key == "project_123"
+    assert result.metadata is not None
+    assert result.metadata["policy_reasons"] == [
+        "unverified_membership",
+        "unverified_membership",
+    ]
+    persist.assert_not_awaited()
+    save.assert_not_awaited()
 
 
 @pytest.mark.asyncio

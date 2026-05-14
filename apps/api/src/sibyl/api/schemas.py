@@ -262,6 +262,30 @@ class ReflectionPromotionResponse(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class MemoryScopeInputResponse(BaseModel):
+    """Source memory scope included in a preview decision."""
+
+    id: str
+    memory_scope: MemoryScopeLiteral
+    scope_key: str | None = None
+
+
+class ReflectionPromotionPreviewResponse(BaseModel):
+    """Dry-run promotion outcome with policy and source metadata."""
+
+    allowed: bool
+    candidate_id: str
+    reason: str
+    review_state: str
+    promote_to_scope: MemoryScopeLiteral | None = None
+    promote_to_scope_key: str | None = None
+    raw_source_ids: list[str] = Field(default_factory=list)
+    policy_reasons: list[str] = Field(default_factory=list)
+    input_scopes: list[MemoryScopeInputResponse] = Field(default_factory=list)
+    source_count: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 # =============================================================================
 # Session Bundle Schemas
 # =============================================================================

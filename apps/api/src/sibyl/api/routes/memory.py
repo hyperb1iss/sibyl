@@ -11,10 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sibyl.api.schemas import (
     MemoryAuditEventResponse,
     MemoryAuditListResponse,
+    MemoryScopeInputResponse,
+    MemoryScopeLiteral,
     RawMemoryRecallRequest,
     RawMemoryRecallResponse,
     RawMemoryRememberRequest,
     RawMemoryResponse,
+    ReflectionPromotionPreviewResponse,
     ReflectionPromotionRequest,
     ReflectionPromotionResponse,
 )
@@ -34,7 +37,9 @@ from sibyl_core.auth.memory_policy import (
     authorize_memory_write,
 )
 from sibyl_core.services.native_memory import (
+    NativeReflectionPromotionPreview,
     NativeReflectionPromotionResult,
+    preview_reflection_candidate_promotion,
     promote_reflection_candidate_review,
 )
 from sibyl_core.services.surreal_content import (
@@ -292,7 +297,6 @@ def _raw_memory_response(
 
 def _promotion_response(result: NativeReflectionPromotionResult) -> ReflectionPromotionResponse:
     metadata = dict(result.metadata or {})
-    policy_reasons = metadata.get("policy_reasons")
     return ReflectionPromotionResponse(
         success=result.success,
         candidate_id=result.candidate_id,
@@ -302,9 +306,51 @@ def _promotion_response(result: NativeReflectionPromotionResult) -> ReflectionPr
         memory_scope=result.memory_scope.value if result.memory_scope else None,
         scope_key=result.scope_key,
         raw_source_ids=list(result.raw_source_ids),
-        policy_reasons=list(policy_reasons) if isinstance(policy_reasons, list) else [],
+        policy_reasons=_metadata_str_list(metadata.get("policy_reasons")),
         metadata=metadata,
     )
+
+
+def _promotion_preview_response(
+    result: NativeReflectionPromotionPreview,
+) -> ReflectionPromotionPreviewResponse:
+    metadata = dict(result.metadata or {})
+    source_count = metadata.get("source_count")
+    return ReflectionPromotionPreviewResponse(
+        allowed=result.allowed,
+        candidate_id=result.candidate_id,
+        reason=result.reason,
+        review_state=result.review_state,
+        promote_to_scope=result.memory_scope.value if result.memory_scope else None,
+        promote_to_scope_key=result.scope_key,
+        raw_source_ids=list(result.raw_source_ids),
+        policy_reasons=_metadata_str_list(metadata.get("policy_reasons")),
+        input_scopes=[
+            MemoryScopeInputResponse(
+                id=str(item.get("id") or ""),
+                memory_scope=cast(
+                    "MemoryScopeLiteral",
+                    str(item.get("memory_scope") or "private"),
+                ),
+                scope_key=str(item["scope_key"]) if item.get("scope_key") else None,
+            )
+            for item in _metadata_dict_list(metadata.get("input_scopes"))
+        ],
+        source_count=source_count if isinstance(source_count, int) else 0,
+        metadata=metadata,
+    )
+
+
+def _metadata_str_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item)]
+
+
+def _metadata_dict_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [{str(key): item[key] for key in item} for item in value if isinstance(item, dict)]
 
 
 def _str_list(value: object) -> list[str]:
@@ -614,6 +660,80 @@ async def list_memory_audit(
         events=[_audit_event_response(row) for row in rows],
         limit=limit,
     )
+
+
+@router.post(
+    "/reflection/promote/preview",
+    response_model=ReflectionPromotionPreviewResponse,
+    dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
+)
+async def preview_reflection_promotion(
+    request: ReflectionPromotionRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> ReflectionPromotionPreviewResponse:
+    """Preview a reflection promotion without writing native memory."""
+    principal_id = ctx.user_id
+    if not principal_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        accessible_projects = await _accessible_projects_for_promotion(
+            ctx=ctx,
+            request=request,
+            http_request=http_request,
+        )
+        result = await preview_reflection_candidate_promotion(
+            candidate_id=request.candidate_id,
+            organization_id=str(org.id),
+            principal_id=principal_id,
+            promote_to_scope=request.promote_to_scope,
+            promote_to_scope_key=request.promote_to_scope_key,
+            domain=request.domain,
+            project=request.project,
+            accessible_projects=accessible_projects,
+        )
+        await _log_memory_audit(
+            action="memory.reflect.promote.preview",
+            ctx=ctx,
+            request=http_request,
+            memory_scope=result.memory_scope.value
+            if result.memory_scope
+            else request.promote_to_scope,
+            scope_key=result.scope_key or request.promote_to_scope_key,
+            project_id=request.project,
+            source_surface="reflection_promote_preview",
+            source_ids=[request.candidate_id, *result.raw_source_ids],
+            derived_ids=[],
+            policy_allowed=result.allowed,
+            policy_reason=result.reason,
+            details={
+                "domain": request.domain,
+                "preview": True,
+                "related_to_count": len(request.related_to),
+                "review_state": result.review_state,
+                "source_count": len(result.raw_source_ids),
+            },
+        )
+        if result.reason == "candidate_not_found":
+            raise HTTPException(
+                status_code=404,
+                detail="reflection_candidate_not_found",
+            )
+        return _promotion_preview_response(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception(
+            "preview_reflection_promotion_failed",
+            candidate_id=request.candidate_id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to preview reflection promotion.",
+        ) from e
 
 
 @router.post(

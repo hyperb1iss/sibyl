@@ -1689,6 +1689,37 @@ Exit criteria:
 - Preview and promotion write paths cannot drift on candidate resolution.
 - Audit receipts explain the preview decision without exposing hidden source content.
 
+B5.1 receipt, 2026-05-13:
+
+- Added `NativeReflectionPromotionPreview` and a shared internal promotion planner so preview and
+  write paths resolve candidates, raw source IDs, target scope, scope key, project target, and
+  denial reasons through one code path.
+- Added `preview_reflection_candidate_promotion` to evaluate the target policy with
+  `_authorize_reflection_write` and return source-scope metadata without calling
+  `persist_reflection_candidate_native` or `save_raw_memory`.
+- Added `POST /memory/reflection/promote/preview` with the same organization role gate, project
+  target verification, accessible-project calculation, and request attribution pattern as the write
+  promotion route.
+- Added `ReflectionPromotionPreviewResponse` with target scope, target scope key, raw source IDs,
+  policy reasons, input scopes, source count, review state, and bounded metadata.
+- Tests cover allowed preview, missing-candidate preview, project-membership denial, no-write
+  guarantees, REST project target verification, response shape, and `memory.reflect.promote.preview`
+  audit receipts.
+- `moon run api:test -- tests/test_routes_memory.py`: 21 passed in 1.31s.
+- `moon run core:test -- tests/test_native_memory.py tests/test_memory_policy.py`: 1343 passed, 15
+  skipped in 8.84s.
+- `moon run api:lint api:typecheck core:lint core:typecheck`: API and core lint passed; typecheck
+  exited 0 with the existing 63 API and 26 core diagnostics.
+- Independent review passed at `/tmp/claude-review-b51-promotion-preview-20260513182458.txt`.
+  Post-review polish added direct missing-candidate preview coverage, no-write assertions on the
+  deny test, and a route formatting cleanup.
+- Final focused review of the post-polish diff passed at
+  `/tmp/claude-review-b51-promotion-preview-final-20260513183135.txt`.
+- Remaining B5 risk: unauthorized project targets still fail with the existing route-level 403
+  instead of returning a structured `allowed=false` preview response, the preview response uses
+  `promote_to_scope`/`promote_to_scope_key` while the write response uses
+  `memory_scope`/`scope_key`, and B5.2 share preview remains unimplemented.
+
 ### Packet B5.2: Share Preview Contract
 
 Purpose: provide a stable response shape for future sharing UX while keeping actual sharing disabled
