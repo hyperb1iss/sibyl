@@ -480,6 +480,63 @@ async def test_raw_candidates_sort_by_relevance_across_scopes() -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_raw_candidates_filter_lifecycle_hidden_memory() -> None:
+    plan = build_native_context_retrieval_plan(
+        query="privacy",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["session", "episode", "note"]},
+        principal_id="user-123",
+        project=None,
+        accessible_projects=None,
+        limit=8,
+    )
+
+    async def fake_recall(**_: object) -> list[RawMemory]:
+        return [
+            RawMemory(
+                id="hidden-1",
+                organization_id="org-123",
+                source_id="hidden",
+                principal_id="user-123",
+                title="Hidden memory",
+                raw_content="privacy hidden",
+                review_state="hidden",
+                score=0.9,
+            ),
+            RawMemory(
+                id="visible-1",
+                organization_id="org-123",
+                source_id="visible",
+                principal_id="user-123",
+                title="Visible memory",
+                raw_content="privacy visible",
+                score=0.5,
+            ),
+            RawMemory(
+                id="superseded-1",
+                organization_id="org-123",
+                source_id="superseded",
+                principal_id="user-123",
+                title="Superseded memory",
+                raw_content="privacy old",
+                metadata={"lifecycle_state": "superseded"},
+                score=0.4,
+            ),
+        ]
+
+    candidates = await native_module._recall_raw_candidates(
+        plan=plan,
+        facet=ContextFacet.RECENT_MEMORY,
+        requested_types={"session", "episode", "note"},
+        limit=5,
+        recall_fn=fake_recall,
+    )
+
+    assert [candidate.id for candidate in candidates] == ["raw_memory:visible-1"]
+
+
 class _EdgeFulltextClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []

@@ -7,7 +7,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 from sibyl_core.auth.memory_policy import (
     MemoryPolicyAction,
@@ -24,7 +24,9 @@ from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
     get_raw_memory,
+    get_raw_memory_by_source_id,
     list_raw_memories_for_scope,
+    raw_memory_recallable,
     save_raw_memory,
 )
 from sibyl_core.tools.helpers import _generate_id
@@ -102,6 +104,30 @@ class NativeMemoryAccessPreview:
 
 
 @dataclass(frozen=True, slots=True)
+class NativeMemoryCorrectionPreview:
+    allowed: bool
+    source_id: str
+    action: str
+    reason: str
+    target_review_state: str
+    affected_source_ids: list[str]
+    affected_derived_ids: list[str]
+    reversible: bool
+    recall_impact: dict[str, Any]
+    synthesis_impact: dict[str, Any]
+    audit_action: str
+    policy_decisions: tuple[MemoryPolicyDecision, ...] = ()
+    metadata: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NativeMemoryCorrectionResult:
+    applied: bool
+    preview: NativeMemoryCorrectionPreview
+    updated_memory: RawMemory | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class _NativeReflectionPromotionPlan:
     candidate_memory: RawMemory
     promotion_candidate: ReflectionCandidate
@@ -113,6 +139,31 @@ class _NativeReflectionPromotionPlan:
 
 
 _PROMOTED_REVIEW_STATE = "promoted"
+_ACCESS_PREVIEW_OVERFETCH_FACTOR = 4
+_CORRECTION_TARGET_STATES: dict[str, str] = {
+    "delete": "deleted",
+    "hide": "hidden",
+    "mark_duplicate": "duplicate",
+    "mark_sensitive": "sensitive",
+    "mark_stale": "stale",
+    "mark_wrong": "wrong",
+    "redact": "redacted",
+    "restore": "pending",
+    "supersede": "superseded",
+}
+_CORRECTION_RECALL_EXCLUDED_STATES = frozenset(
+    {
+        "deleted",
+        "duplicate",
+        "hidden",
+        "redacted",
+        "sensitive",
+        "stale",
+        "superseded",
+        "wrong",
+    }
+)
+_CORRECTION_IRREVERSIBLE_ACTIONS = frozenset({"delete", "redact"})
 _SCOPE_RANK: dict[MemoryScope, int] = {
     MemoryScope.PRIVATE: 0,
     MemoryScope.DELEGATED: 1,
@@ -490,7 +541,8 @@ async def preview_memory_share(
 
 def _space_field(space: Mapping[str, object] | object, key: str) -> object | None:
     if isinstance(space, Mapping):
-        return space.get(key)
+        mapping = cast(Mapping[str, object], space)
+        return mapping.get(key)
     return getattr(space, key, None)
 
 
@@ -542,6 +594,7 @@ async def preview_memory_access(
     denied_source_ids: list[str] = []
     missing_source_ids: list[str] = []
     denied_space_ids: list[str] = []
+    lifecycle_hidden_source_ids: list[str] = []
     input_scopes: list[dict[str, str | None]] = []
     decisions: list[MemoryPolicyDecision] = []
     hidden_but_relevant_count = 0
@@ -619,20 +672,33 @@ async def preview_memory_access(
         if len(visible_source_ids) >= limit:
             continue
 
+        remaining = limit - len(visible_source_ids)
         memories = await list_raw_memories_for_scope(
             organization_id=organization_id,
             principal_id=principal_id or target_principal_id,
             memory_scope=scope,
             scope_key=scope_key,
             agent_id=agent_id,
-            limit=max(limit - len(visible_source_ids), 0),
+            limit=remaining * _ACCESS_PREVIEW_OVERFETCH_FACTOR,
+            include_lifecycle_hidden=True,
         )
-        visible_source_ids.extend(memory.id for memory in memories)
-        input_scopes.extend(_scope_metadata(memories))
+        visible_memories: list[RawMemory] = []
+        for memory in memories:
+            if not raw_memory_recallable(memory):
+                if len(lifecycle_hidden_source_ids) < limit:
+                    denied_source_ids.append(memory.id)
+                    lifecycle_hidden_source_ids.append(memory.id)
+                hidden_but_relevant_count += 1
+                continue
+            if len(visible_source_ids) >= limit:
+                continue
+            visible_source_ids.append(memory.id)
+            visible_memories.append(memory)
+        input_scopes.extend(_scope_metadata(visible_memories))
 
     policy_reasons = [decision.reason for decision in decisions]
     denied_reasons = [decision.reason for decision in decisions if not decision.allowed]
-    allowed = not denied_reasons
+    allowed = not denied_reasons and not lifecycle_hidden_source_ids
     access_state = (
         "allowed"
         if allowed
@@ -644,13 +710,20 @@ async def preview_memory_access(
         "access_state": access_state,
         "denied_memory_space_ids": [space_id for space_id in denied_space_ids if space_id],
         "input_scopes": input_scopes,
+        "lifecycle_hidden_source_ids": lifecycle_hidden_source_ids,
         "policy_reasons": policy_reasons,
         "target_principal_type": normalized_target_type,
         "visible_count": len(visible_source_ids),
     }
     return NativeMemoryAccessPreview(
         allowed=allowed,
-        reason="access_preview_allowed" if allowed else denied_reasons[0],
+        reason=(
+            "access_preview_allowed"
+            if allowed
+            else denied_reasons[0]
+            if denied_reasons
+            else "lifecycle_hidden"
+        ),
         target_principal_type=normalized_target_type,
         target_principal_id=target_principal_id,
         memory_space_ids=[
@@ -666,6 +739,371 @@ async def preview_memory_access(
         policy_decisions=tuple(decisions),
         metadata=metadata,
     )
+
+
+async def _load_correction_memory(
+    *,
+    organization_id: str,
+    source_id: str,
+) -> RawMemory | None:
+    memory = await get_raw_memory(organization_id=organization_id, memory_id=source_id)
+    if memory is not None:
+        return memory
+    return await get_raw_memory_by_source_id(organization_id=organization_id, source_id=source_id)
+
+
+def _correction_audit_action(action: str) -> str:
+    return f"memory.correction.{action}"
+
+
+def _correction_derived_ids(memory: RawMemory) -> list[str]:
+    return list(
+        dict.fromkeys(
+            (
+                *_metadata_str_values(
+                    memory.metadata,
+                    "derived_ids",
+                    "promoted_entity_id",
+                    "promoted_ids",
+                    "relationship_ids",
+                ),
+            )
+        )
+    )
+
+
+def _correction_preview_denied(
+    *,
+    source_id: str,
+    action: str,
+    reason: str,
+    target_review_state: str = "",
+    policy_decisions: Sequence[MemoryPolicyDecision] = (),
+    metadata: dict[str, Any] | None = None,
+) -> NativeMemoryCorrectionPreview:
+    return NativeMemoryCorrectionPreview(
+        allowed=False,
+        source_id=source_id,
+        action=action,
+        reason=reason,
+        target_review_state=target_review_state,
+        affected_source_ids=[],
+        affected_derived_ids=[],
+        reversible=False,
+        recall_impact={"excluded_from_recall": False, "reason": reason},
+        synthesis_impact={"excluded_from_synthesis": False, "reason": reason},
+        audit_action=_correction_audit_action(action or "unknown"),
+        policy_decisions=tuple(policy_decisions),
+        metadata=metadata or {"policy_allowed": False, "policy_reasons": [reason]},
+    )
+
+
+def _correction_requirement_reason(
+    *,
+    action: str,
+    replacement_source_id: str | None,
+    duplicate_of_source_id: str | None,
+) -> str | None:
+    if action == "supersede" and not replacement_source_id:
+        return "missing_replacement_source"
+    if action == "mark_duplicate" and not duplicate_of_source_id:
+        return "missing_duplicate_source"
+    return None
+
+
+async def _validate_correction_reference(
+    *,
+    organization_id: str,
+    memory: RawMemory,
+    reference_source_id: str,
+    reference_kind: str,
+) -> tuple[RawMemory | None, str | None]:
+    reference = await _load_correction_memory(
+        organization_id=organization_id,
+        source_id=reference_source_id,
+    )
+    if reference is None:
+        return None, f"{reference_kind}_source_not_found"
+    if reference.id == memory.id:
+        return None, f"{reference_kind}_source_self_reference"
+    if not raw_memory_recallable(reference):
+        return None, f"{reference_kind}_source_not_recallable"
+    return reference, None
+
+
+def _correction_impact(target_review_state: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    excluded = target_review_state in _CORRECTION_RECALL_EXCLUDED_STATES
+    recall = {
+        "excluded_from_recall": excluded,
+        "target_review_state": target_review_state,
+    }
+    synthesis = {
+        "excluded_from_synthesis": excluded,
+        "preserve_source_truth": True,
+        "target_review_state": target_review_state,
+    }
+    return recall, synthesis
+
+
+async def preview_memory_correction(
+    *,
+    organization_id: str,
+    source_id: str,
+    principal_id: str | None,
+    action: str,
+    reason: str | None = None,
+    accessible_projects: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+    replacement_source_id: str | None = None,
+    duplicate_of_source_id: str | None = None,
+) -> NativeMemoryCorrectionPreview:
+    normalized_action = action.strip().lower()
+    target_review_state = _CORRECTION_TARGET_STATES.get(normalized_action)
+    if target_review_state is None:
+        return _correction_preview_denied(
+            source_id=source_id,
+            action=normalized_action,
+            reason="invalid_correction_action",
+        )
+
+    memory = await _load_correction_memory(
+        organization_id=organization_id,
+        source_id=source_id,
+    )
+    if memory is None:
+        return _correction_preview_denied(
+            source_id=source_id,
+            action=normalized_action,
+            reason="memory_source_not_found",
+            target_review_state=target_review_state,
+        )
+    if normalized_action == "restore":
+        target_review_state = _metadata_str(memory.metadata, "prior_review_state") or "pending"
+
+    read_decision = _authorize_share_source_read(
+        memory=memory,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        accessible_delegations=accessible_delegations,
+    )
+    if not read_decision.allowed:
+        return _correction_preview_denied(
+            source_id=memory.id,
+            action=normalized_action,
+            reason=read_decision.reason,
+            target_review_state=target_review_state,
+            policy_decisions=(read_decision,),
+            metadata={
+                "policy_allowed": False,
+                "policy_reasons": [read_decision.reason],
+                "requested_source_id": source_id,
+            },
+        )
+
+    requirement_reason = _correction_requirement_reason(
+        action=normalized_action,
+        replacement_source_id=replacement_source_id,
+        duplicate_of_source_id=duplicate_of_source_id,
+    )
+    if requirement_reason:
+        return _correction_preview_denied(
+            source_id=memory.id,
+            action=normalized_action,
+            reason=requirement_reason,
+            target_review_state=target_review_state,
+            policy_decisions=(read_decision,),
+            metadata={
+                "policy_allowed": False,
+                "policy_reasons": [requirement_reason],
+                "requested_source_id": source_id,
+            },
+        )
+
+    canonical_replacement_source_id = replacement_source_id
+    canonical_duplicate_of_source_id = duplicate_of_source_id
+    if replacement_source_id:
+        reference, reference_reason = await _validate_correction_reference(
+            organization_id=organization_id,
+            memory=memory,
+            reference_source_id=replacement_source_id,
+            reference_kind="replacement",
+        )
+        if reference_reason:
+            return _correction_preview_denied(
+                source_id=memory.id,
+                action=normalized_action,
+                reason=reference_reason,
+                target_review_state=target_review_state,
+                policy_decisions=(read_decision,),
+                metadata={
+                    "policy_allowed": False,
+                    "policy_reasons": [reference_reason],
+                    "requested_source_id": source_id,
+                    "replacement_source_id": replacement_source_id,
+                },
+            )
+        canonical_replacement_source_id = reference.id if reference else replacement_source_id
+    if duplicate_of_source_id:
+        reference, reference_reason = await _validate_correction_reference(
+            organization_id=organization_id,
+            memory=memory,
+            reference_source_id=duplicate_of_source_id,
+            reference_kind="duplicate",
+        )
+        if reference_reason:
+            return _correction_preview_denied(
+                source_id=memory.id,
+                action=normalized_action,
+                reason=reference_reason,
+                target_review_state=target_review_state,
+                policy_decisions=(read_decision,),
+                metadata={
+                    "duplicate_of_source_id": duplicate_of_source_id,
+                    "policy_allowed": False,
+                    "policy_reasons": [reference_reason],
+                    "requested_source_id": source_id,
+                },
+            )
+        canonical_duplicate_of_source_id = reference.id if reference else duplicate_of_source_id
+
+    recall_impact, synthesis_impact = _correction_impact(target_review_state)
+    affected_derived_ids = _correction_derived_ids(memory)
+    metadata = {
+        "duplicate_of_source_id": canonical_duplicate_of_source_id,
+        "policy_allowed": True,
+        "policy_reasons": [read_decision.reason],
+        "replacement_source_id": canonical_replacement_source_id,
+        "requested_source_id": source_id,
+    }
+    return NativeMemoryCorrectionPreview(
+        allowed=True,
+        source_id=memory.id,
+        action=normalized_action,
+        reason=reason or f"{normalized_action}_preview_allowed",
+        target_review_state=target_review_state,
+        affected_source_ids=[memory.id],
+        affected_derived_ids=affected_derived_ids,
+        reversible=normalized_action not in _CORRECTION_IRREVERSIBLE_ACTIONS,
+        recall_impact=recall_impact,
+        synthesis_impact=synthesis_impact,
+        audit_action=_correction_audit_action(normalized_action),
+        policy_decisions=(read_decision,),
+        metadata=metadata,
+    )
+
+
+def _correction_metadata(
+    *,
+    memory: RawMemory,
+    preview: NativeMemoryCorrectionPreview,
+    reason: str | None,
+    replacement_source_id: str | None,
+    duplicate_of_source_id: str | None,
+) -> dict[str, object]:
+    metadata = dict(memory.metadata)
+    history = list(_metadata_dict_values(metadata, "correction_history"))
+    now = datetime.now(UTC).isoformat()
+    if preview.action == "restore":
+        for key in (
+            "deleted_at",
+            "duplicate_at",
+            "duplicate_of_source_id",
+            "hidden_at",
+            "lifecycle_action",
+            "lifecycle_reason",
+            "lifecycle_state",
+            "prior_review_state",
+            "redacted_at",
+            "sensitive_at",
+            "stale_at",
+            "superseded_at",
+            "superseded_by_source_id",
+            "wrong_at",
+        ):
+            metadata.pop(key, None)
+        metadata["restored_at"] = now
+    else:
+        if not _metadata_str(metadata, "prior_review_state"):
+            metadata["prior_review_state"] = memory.review_state or "pending"
+        metadata["lifecycle_action"] = preview.action
+        metadata["lifecycle_state"] = preview.target_review_state
+        metadata["lifecycle_reason"] = reason or preview.reason
+        metadata[f"{preview.target_review_state}_at"] = now
+        if replacement_source_id:
+            metadata["superseded_by_source_id"] = replacement_source_id
+        if duplicate_of_source_id:
+            metadata["duplicate_of_source_id"] = duplicate_of_source_id
+    history.append(
+        {
+            "action": preview.action,
+            "audit_action": preview.audit_action,
+            "reason": reason or preview.reason,
+            "target_review_state": preview.target_review_state,
+            "created_at": now,
+            "replacement_source_id": replacement_source_id,
+            "duplicate_of_source_id": duplicate_of_source_id,
+        }
+    )
+    metadata["correction_history"] = history
+    metadata["review_state"] = preview.target_review_state
+    return metadata
+
+
+async def apply_memory_correction(
+    *,
+    organization_id: str,
+    source_id: str,
+    principal_id: str | None,
+    action: str,
+    reason: str | None = None,
+    accessible_projects: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+    replacement_source_id: str | None = None,
+    duplicate_of_source_id: str | None = None,
+) -> NativeMemoryCorrectionResult:
+    preview = await preview_memory_correction(
+        organization_id=organization_id,
+        source_id=source_id,
+        principal_id=principal_id,
+        action=action,
+        reason=reason,
+        accessible_projects=accessible_projects,
+        accessible_delegations=accessible_delegations,
+        replacement_source_id=replacement_source_id,
+        duplicate_of_source_id=duplicate_of_source_id,
+    )
+    if not preview.allowed:
+        return NativeMemoryCorrectionResult(applied=False, preview=preview)
+
+    memory = await _load_correction_memory(organization_id=organization_id, source_id=source_id)
+    if memory is None:
+        denied = _correction_preview_denied(
+            source_id=source_id,
+            action=preview.action,
+            reason="memory_source_not_found",
+            target_review_state=preview.target_review_state,
+        )
+        return NativeMemoryCorrectionResult(applied=False, preview=denied)
+    preview_metadata = preview.metadata or {}
+    canonical_replacement_source_id = (
+        _metadata_str(preview_metadata, "replacement_source_id") or replacement_source_id
+    )
+    canonical_duplicate_of_source_id = (
+        _metadata_str(preview_metadata, "duplicate_of_source_id") or duplicate_of_source_id
+    )
+    updated = replace(
+        memory,
+        review_state=preview.target_review_state,
+        metadata=_correction_metadata(
+            memory=memory,
+            preview=preview,
+            reason=reason,
+            replacement_source_id=canonical_replacement_source_id,
+            duplicate_of_source_id=canonical_duplicate_of_source_id,
+        ),
+    )
+    saved = await save_raw_memory(updated)
+    return NativeMemoryCorrectionResult(applied=True, preview=preview, updated_memory=saved)
 
 
 async def _resolve_reflection_promotion_plan(
@@ -994,6 +1432,18 @@ def _metadata_str_values(metadata: Mapping[str, object], *keys: str) -> list[str
         if isinstance(value, Iterable) and not isinstance(value, Mapping):
             values.extend(str(item) for item in value if str(item))
     return list(dict.fromkeys(item for item in values if item))
+
+
+def _metadata_dict_values(metadata: Mapping[str, object], key: str) -> list[dict[str, object]]:
+    value = metadata.get(key)
+    if not isinstance(value, list):
+        return []
+    dictionaries: list[dict[str, object]] = []
+    for item in value:
+        if isinstance(item, Mapping):
+            mapping = cast(Mapping[object, object], item)
+            dictionaries.append({str(field): item_value for field, item_value in mapping.items()})
+    return dictionaries
 
 
 def _metadata_float(metadata: Mapping[str, object], key: str, default: float) -> float:
@@ -1329,17 +1779,21 @@ def _relationship(
 
 __all__ = [
     "NativeMemoryAccessPreview",
+    "NativeMemoryCorrectionPreview",
+    "NativeMemoryCorrectionResult",
     "NativeMemorySharePreview",
     "NativeReflectionPromotionPreview",
     "NativeReflectionPromotionResult",
     "NativeReflectionWriteResult",
     "NativeWriteMode",
+    "apply_memory_correction",
     "coerce_native_write_mode",
     "native_reflection_write_enabled",
     "native_write_mode_from_env",
     "persist_reflection_candidate_native",
     "persist_reflection_source_native",
     "preview_memory_access",
+    "preview_memory_correction",
     "preview_memory_share",
     "preview_reflection_candidate_promotion",
     "promote_reflection_candidate_review",

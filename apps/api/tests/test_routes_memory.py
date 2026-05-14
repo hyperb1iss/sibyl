@@ -10,11 +10,13 @@ from fastapi import HTTPException
 
 from sibyl.api.routes.memory import (
     add_memory_space_member_record,
+    apply_memory_correction_route,
     create_memory_space_record,
     get_memory_space_record,
     inspect_memory_source,
     list_memory_audit,
     list_memory_space_records,
+    preview_memory_correction_route,
     preview_memory_share_route,
     preview_memory_space_member_access,
     preview_reflection_promotion,
@@ -24,6 +26,7 @@ from sibyl.api.routes.memory import (
     update_memory_space_record,
 )
 from sibyl.api.schemas import (
+    MemoryCorrectionRequest,
     MemorySharePreviewRequest,
     MemorySpaceAccessPreviewRequest,
     MemorySpaceCreateRequest,
@@ -36,6 +39,8 @@ from sibyl.api.schemas import (
 from sibyl_core.auth import OrganizationRole, ProjectRole
 from sibyl_core.services.native_memory import (
     NativeMemoryAccessPreview,
+    NativeMemoryCorrectionPreview,
+    NativeMemoryCorrectionResult,
     NativeMemorySharePreview,
     NativeReflectionPromotionPreview,
     NativeReflectionPromotionResult,
@@ -1226,6 +1231,119 @@ async def test_inspect_memory_source_returns_404_for_missing_source() -> None:
 
     assert exc.value.status_code == 404
     assert exc.value.detail == "memory_source_not_found"
+
+
+@pytest.mark.asyncio
+async def test_preview_memory_correction_audits_lifecycle_action() -> None:
+    org = _org()
+    memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
+    preview = NativeMemoryCorrectionPreview(
+        allowed=True,
+        source_id="memory-1",
+        action="hide",
+        reason="hide_preview_allowed",
+        target_review_state="hidden",
+        affected_source_ids=["memory-1"],
+        affected_derived_ids=["entity-1"],
+        reversible=True,
+        recall_impact={"excluded_from_recall": True},
+        synthesis_impact={"excluded_from_synthesis": True},
+        audit_action="memory.correction.hide",
+        metadata={"policy_reasons": ["private_principal_bound"]},
+    )
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory.preview_memory_correction",
+            AsyncMock(return_value=preview),
+        ) as preview_call,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        response = await preview_memory_correction_route(
+            "memory-1",
+            MemoryCorrectionRequest(action="hide", reason="outdated"),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    assert response.allowed is True
+    assert response.applied is False
+    assert response.audit_action == "memory.correction.hide"
+    assert response.affected_derived_ids == ["entity-1"]
+    preview_call.assert_awaited_once_with(
+        organization_id=str(org.id),
+        source_id="memory-1",
+        principal_id="user-123",
+        action="hide",
+        reason="outdated",
+        accessible_projects=None,
+        replacement_source_id=None,
+        duplicate_of_source_id=None,
+    )
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["action"] == "memory.correction.hide.preview"
+    assert audit.await_args.kwargs["source_ids"] == ["memory-1"]
+
+
+@pytest.mark.asyncio
+async def test_apply_memory_correction_returns_updated_review_state() -> None:
+    org = _org()
+    memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
+    updated = _memory(
+        id="memory-1",
+        organization_id=str(org.id),
+        source_id="source-1",
+        review_state="hidden",
+    )
+    preview = NativeMemoryCorrectionPreview(
+        allowed=True,
+        source_id="memory-1",
+        action="hide",
+        reason="hidden",
+        target_review_state="hidden",
+        affected_source_ids=["memory-1"],
+        affected_derived_ids=[],
+        reversible=True,
+        recall_impact={"excluded_from_recall": True},
+        synthesis_impact={"excluded_from_synthesis": True},
+        audit_action="memory.correction.hide",
+        metadata={"policy_reasons": ["private_principal_bound"]},
+    )
+    result = NativeMemoryCorrectionResult(applied=True, preview=preview, updated_memory=updated)
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory.apply_memory_correction",
+            AsyncMock(return_value=result),
+        ) as apply_call,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        response = await apply_memory_correction_route(
+            "memory-1",
+            MemoryCorrectionRequest(action="hide", reason="outdated"),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    assert response.applied is True
+    assert response.updated_review_state == "hidden"
+    apply_call.assert_awaited_once_with(
+        organization_id=str(org.id),
+        source_id="memory-1",
+        principal_id="user-123",
+        action="hide",
+        reason="outdated",
+        accessible_projects=None,
+        replacement_source_id=None,
+        duplicate_of_source_id=None,
+    )
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["action"] == "memory.correction.hide"
+    assert audit.await_args.kwargs["policy_allowed"] is True
 
 
 @pytest.mark.asyncio

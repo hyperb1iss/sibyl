@@ -9,10 +9,12 @@ from sibyl_core.services import native_memory
 from sibyl_core.services.native_memory import (
     NativeReflectionWriteResult,
     NativeWriteMode,
+    apply_memory_correction,
     coerce_native_write_mode,
     native_reflection_write_enabled,
     native_write_mode_from_env,
     preview_memory_access,
+    preview_memory_correction,
     preview_memory_share,
     preview_reflection_candidate_promotion,
     promote_reflection_candidate_review,
@@ -263,7 +265,8 @@ async def test_access_preview_uses_selected_project_space_as_membership(
         memory_scope=MemoryScope.PROJECT,
         scope_key="project_123",
         agent_id=None,
-        limit=25,
+        limit=100,
+        include_lifecycle_hidden=True,
     )
 
 
@@ -348,6 +351,198 @@ async def test_access_preview_keeps_denials_after_source_limit(
         "project_access_verified",
         "scope_not_enabled",
     ]
+
+
+@pytest.mark.asyncio
+async def test_access_preview_counts_lifecycle_hidden_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hidden_memory = _raw_review_candidate(
+        id="hidden-1",
+        memory_scope=MemoryScope.PROJECT,
+        scope_key="project_123",
+        principal_id="user-2",
+        review_state="hidden",
+    )
+    visible_memory = _raw_review_candidate(
+        id="visible-1",
+        memory_scope=MemoryScope.PROJECT,
+        scope_key="project_123",
+        principal_id="user-2",
+    )
+    list_memories = AsyncMock(return_value=[hidden_memory, visible_memory])
+    monkeypatch.setattr(native_memory, "list_raw_memories_for_scope", list_memories)
+
+    result = await preview_memory_access(
+        organization_id="org-1",
+        actor_user_id="user-1",
+        target_principal_type="agent",
+        target_principal_id="agent:nova",
+        memory_spaces=[
+            {
+                "id": "space-1",
+                "memory_scope": "project",
+                "scope_key": "project_123",
+                "state": "active",
+            }
+        ],
+        limit=5,
+    )
+
+    assert not result.allowed
+    assert result.reason == "lifecycle_hidden"
+    assert result.visible_source_ids == ["visible-1"]
+    assert result.denied_source_ids == ["hidden-1"]
+    assert result.redacted_count == 1
+    assert result.metadata is not None
+    assert result.metadata["access_state"] == "partial"
+    assert result.metadata["lifecycle_hidden_source_ids"] == ["hidden-1"]
+
+
+@pytest.mark.asyncio
+async def test_memory_correction_preview_requires_supersede_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(id="source-1")
+    monkeypatch.setattr(native_memory, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(native_memory, "get_raw_memory_by_source_id", AsyncMock())
+
+    result = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="supersede",
+    )
+
+    assert not result.allowed
+    assert result.reason == "missing_replacement_source"
+    assert result.target_review_state == "superseded"
+
+
+@pytest.mark.asyncio
+async def test_apply_memory_correction_marks_hidden_and_preserves_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(
+        id="source-1",
+        principal_id="user-1",
+        metadata={"correction_history": [{"action": "mark_stale"}]},
+    )
+    save_raw_memory = AsyncMock(side_effect=lambda updated: updated)
+    monkeypatch.setattr(native_memory, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(native_memory, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(native_memory, "save_raw_memory", save_raw_memory)
+
+    result = await apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="hide",
+        reason="No longer useful",
+    )
+
+    assert result.applied
+    assert result.preview.allowed
+    assert result.preview.audit_action == "memory.correction.hide"
+    assert result.updated_memory is not None
+    assert result.updated_memory.review_state == "hidden"
+    assert result.updated_memory.metadata["lifecycle_state"] == "hidden"
+    assert result.updated_memory.metadata["lifecycle_reason"] == "No longer useful"
+    assert result.updated_memory.metadata["correction_history"][0] == {
+        "action": "mark_stale"
+    }
+    assert result.updated_memory.metadata["correction_history"][1]["action"] == "hide"
+    save_raw_memory.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_memory_correction_preview_canonicalizes_supersede_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(id="source-1")
+    replacement = _raw_review_candidate(id="replacement-1", source_id="external:replacement")
+    monkeypatch.setattr(
+        native_memory,
+        "get_raw_memory",
+        AsyncMock(side_effect=[memory, None]),
+    )
+    monkeypatch.setattr(
+        native_memory,
+        "get_raw_memory_by_source_id",
+        AsyncMock(return_value=replacement),
+    )
+
+    result = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="supersede",
+        replacement_source_id="external:replacement",
+    )
+
+    assert result.allowed
+    assert result.metadata is not None
+    assert result.metadata["replacement_source_id"] == "replacement-1"
+
+
+@pytest.mark.asyncio
+async def test_memory_correction_preview_rejects_self_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(id="source-1")
+    monkeypatch.setattr(
+        native_memory,
+        "get_raw_memory",
+        AsyncMock(side_effect=[memory, memory]),
+    )
+    monkeypatch.setattr(native_memory, "get_raw_memory_by_source_id", AsyncMock())
+
+    result = await preview_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="mark_duplicate",
+        duplicate_of_source_id="source-1",
+    )
+
+    assert not result.allowed
+    assert result.reason == "duplicate_source_self_reference"
+
+
+@pytest.mark.asyncio
+async def test_apply_memory_correction_restore_preserves_prior_review_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory = _raw_review_candidate(
+        id="source-1",
+        principal_id="user-1",
+        review_state="hidden",
+        metadata={
+            "correction_history": [{"action": "hide"}],
+            "hidden_at": "2026-05-14T12:00:00+00:00",
+            "lifecycle_state": "hidden",
+            "prior_review_state": "promoted",
+        },
+    )
+    save_raw_memory = AsyncMock(side_effect=lambda updated: updated)
+    monkeypatch.setattr(native_memory, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(native_memory, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(native_memory, "save_raw_memory", save_raw_memory)
+
+    result = await apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="restore",
+    )
+
+    assert result.applied
+    assert result.updated_memory is not None
+    assert result.updated_memory.review_state == "promoted"
+    assert result.updated_memory.metadata["correction_history"][1]["action"] == "restore"
+    assert "lifecycle_state" not in result.updated_memory.metadata
+    assert "prior_review_state" not in result.updated_memory.metadata
+    assert "hidden_at" not in result.updated_memory.metadata
 
 
 @pytest.mark.asyncio

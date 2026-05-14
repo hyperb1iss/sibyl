@@ -138,6 +138,17 @@ MemoryScopeLiteral = Literal[
     "shared",
     "public",
 ]
+MemoryCorrectionActionLiteral = Literal[
+    "delete",
+    "hide",
+    "mark_duplicate",
+    "mark_sensitive",
+    "mark_stale",
+    "mark_wrong",
+    "redact",
+    "restore",
+    "supersede",
+]
 
 
 class RawMemoryRememberRequest(BaseModel):
@@ -295,7 +306,7 @@ class MemorySpaceResponse(BaseModel):
     description: str | None = None
     state: MemorySpaceStateLiteral
     disabled_reason: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Auxiliary metadata")
     created_by_user_id: str
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -322,7 +333,7 @@ class MemorySpaceAccessPreviewResponse(BaseModel):
     redacted_count: int = 0
     hidden_but_relevant_count: int = 0
     policy_reasons: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Auxiliary metadata")
 
 
 class MemoryDerivedRecordResponse(BaseModel):
@@ -401,6 +412,39 @@ class MemorySourceInspectResponse(BaseModel):
         default_factory=list,
         description="Safe next actions and whether a preview step is required",
     )
+
+
+class MemoryCorrectionRequest(BaseModel):
+    """Request to preview or apply a memory correction/lifecycle change."""
+
+    action: MemoryCorrectionActionLiteral
+    reason: str | None = Field(default=None, max_length=2000)
+    replacement_source_id: str | None = Field(default=None, max_length=500)
+    duplicate_of_source_id: str | None = Field(default=None, max_length=500)
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Audit-only metadata recorded with the correction receipt",
+    )
+
+
+class MemoryCorrectionResponse(BaseModel):
+    """Memory correction preview/apply response."""
+
+    allowed: bool
+    applied: bool = False
+    source_id: str
+    action: str
+    reason: str
+    target_review_state: str
+    updated_review_state: str | None = None
+    affected_source_ids: list[str] = Field(default_factory=list)
+    affected_derived_ids: list[str] = Field(default_factory=list)
+    reversible: bool
+    recall_impact: dict[str, Any] = Field(default_factory=dict)
+    synthesis_impact: dict[str, Any] = Field(default_factory=dict)
+    audit_action: str
+    policy_reasons: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReflectionPromotionRequest(BaseModel):

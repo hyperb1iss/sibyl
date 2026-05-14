@@ -18,7 +18,12 @@ from sibyl_core.backends.surreal.fulltext import build_fulltext_query
 from sibyl_core.embeddings.native import NativeEmbeddingMetadata, NativeEmbeddingProvider
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.services.native_graph import get_native_graph_runtime, normalize_records
-from sibyl_core.services.surreal_content import MemoryScope, RawMemory, recall_raw_memory
+from sibyl_core.services.surreal_content import (
+    MemoryScope,
+    RawMemory,
+    raw_memory_recallable,
+    recall_raw_memory,
+)
 
 if TYPE_CHECKING:
     from sibyl_core.tools.responses import SearchResponse, SearchResult
@@ -462,6 +467,8 @@ async def _recall_raw_candidates(
             limit=limit,
         )
         for memory in recalled:
+            if not raw_memory_recallable(memory):
+                continue
             if memory.id in seen_ids:
                 continue
             seen_ids.add(memory.id)

@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sibyl.api.schemas import (
     MemoryAuditEventResponse,
     MemoryAuditListResponse,
+    MemoryCorrectionRequest,
+    MemoryCorrectionResponse,
     MemoryDerivedRecordResponse,
     MemoryScopeInputResponse,
     MemoryScopeLiteral,
@@ -58,10 +60,14 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.services.native_memory import (
     NativeMemoryAccessPreview,
+    NativeMemoryCorrectionPreview,
+    NativeMemoryCorrectionResult,
     NativeMemorySharePreview,
     NativeReflectionPromotionPreview,
     NativeReflectionPromotionResult,
+    apply_memory_correction,
     preview_memory_access,
+    preview_memory_correction,
     preview_memory_share,
     preview_reflection_candidate_promotion,
     promote_reflection_candidate_review,
@@ -462,6 +468,41 @@ def _access_preview_response(result: NativeMemoryAccessPreview) -> MemorySpaceAc
     )
 
 
+def _correction_response(
+    preview: NativeMemoryCorrectionPreview,
+    *,
+    applied: bool = False,
+    updated_memory: RawMemory | None = None,
+) -> MemoryCorrectionResponse:
+    metadata = dict(preview.metadata or {})
+    return MemoryCorrectionResponse(
+        allowed=preview.allowed,
+        applied=applied,
+        source_id=preview.source_id,
+        action=preview.action,
+        reason=preview.reason,
+        target_review_state=preview.target_review_state,
+        updated_review_state=updated_memory.review_state if updated_memory else None,
+        affected_source_ids=list(preview.affected_source_ids),
+        affected_derived_ids=list(preview.affected_derived_ids),
+        reversible=preview.reversible,
+        recall_impact=dict(preview.recall_impact),
+        synthesis_impact=dict(preview.synthesis_impact),
+        audit_action=preview.audit_action,
+        policy_reasons=[decision.reason for decision in preview.policy_decisions]
+        or _metadata_str_list(metadata.get("policy_reasons")),
+        metadata=metadata,
+    )
+
+
+def _correction_result_response(result: NativeMemoryCorrectionResult) -> MemoryCorrectionResponse:
+    return _correction_response(
+        result.preview,
+        applied=result.applied,
+        updated_memory=result.updated_memory,
+    )
+
+
 def _metadata_str_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -529,6 +570,30 @@ def _memory_metadata_str(memory: RawMemory, key: str) -> str | None:
 
 def _memory_project_id(memory: RawMemory) -> str | None:
     return memory.project_id or _memory_metadata_str(memory, "project_id")
+
+
+def _memory_lifecycle_state(memory: RawMemory) -> str:
+    return str(memory.metadata.get("lifecycle_state") or memory.review_state or "pending")
+
+
+def _memory_lifecycle_redacts_content(memory: RawMemory) -> bool:
+    return _memory_lifecycle_state(memory).lower() in {"deleted", "redacted"}
+
+
+async def _load_memory_source_for_org(
+    *,
+    organization_id: str,
+    source_id: str,
+) -> RawMemory:
+    memory = await get_raw_memory(organization_id=organization_id, memory_id=source_id)
+    if memory is None:
+        memory = await get_raw_memory_by_source_id(
+            organization_id=organization_id,
+            source_id=source_id,
+        )
+    if memory is None:
+        raise HTTPException(status_code=404, detail="memory_source_not_found")
+    return memory
 
 
 async def _inspect_content_policy(
@@ -755,9 +820,9 @@ def _available_source_actions(
         },
         {
             "action": "correction.preview",
-            "available": False,
+            "available": visible,
             "preview_required": True,
-            "reason": "packet_b2_pending",
+            "reason": None if visible else policy_decision.reason,
         },
     ]
 
@@ -768,7 +833,7 @@ def _memory_source_inspect_response(
     policy_decision: MemoryPolicyDecision,
     audit_events: list[MemoryAuditEventResponse],
 ) -> MemorySourceInspectResponse:
-    content_redacted = not policy_decision.allowed
+    content_redacted = not policy_decision.allowed or _memory_lifecycle_redacts_content(memory)
     visible_audit_events = _audit_events_for_visibility(
         audit_events,
         content_visible=policy_decision.allowed,
@@ -790,6 +855,7 @@ def _memory_source_inspect_response(
         visibility={
             "content_visible": policy_decision.allowed,
             "content_redacted": content_redacted,
+            "lifecycle_state": _memory_lifecycle_state(memory),
             "memory_scope": memory.memory_scope.value,
             "scope_key": memory.scope_key,
             "principal_id": memory.principal_id,
@@ -1332,18 +1398,10 @@ async def inspect_memory_source(
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
-        memory = await get_raw_memory(
+        memory = await _load_memory_source_for_org(
             organization_id=str(org.id),
-            memory_id=source_id,
+            source_id=source_id,
         )
-        if memory is None:
-            memory = await get_raw_memory_by_source_id(
-                organization_id=str(org.id),
-                source_id=source_id,
-            )
-        if memory is None:
-            raise HTTPException(status_code=404, detail="memory_source_not_found")
-
         policy_decision = await _inspect_content_policy(ctx=ctx, memory=memory)
         audit_events = await _source_audit_events(
             organization_id=str(org.id),
@@ -1378,6 +1436,128 @@ async def inspect_memory_source(
     except Exception as e:
         log.exception("inspect_memory_source_failed", error=str(e), source_id=source_id)
         raise HTTPException(status_code=500, detail="Failed to inspect memory source.") from e
+
+
+@router.post(
+    "/inspect/{source_id:path}/corrections/preview",
+    response_model=MemoryCorrectionResponse,
+    dependencies=[Depends(require_org_role(*_ADMIN_ROLES))],
+)
+async def preview_memory_correction_route(
+    source_id: str,
+    request: MemoryCorrectionRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> MemoryCorrectionResponse:
+    """Preview a memory correction or lifecycle action without mutating."""
+    principal_id = ctx.user_id
+    if not principal_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    memory = await _load_memory_source_for_org(
+        organization_id=str(org.id),
+        source_id=source_id,
+    )
+    accessible_projects = await _project_accessible_for_policy(
+        ctx=ctx,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+    )
+    preview = await preview_memory_correction(
+        organization_id=str(org.id),
+        source_id=memory.id,
+        principal_id=principal_id,
+        action=request.action,
+        reason=request.reason,
+        accessible_projects=accessible_projects,
+        replacement_source_id=request.replacement_source_id,
+        duplicate_of_source_id=request.duplicate_of_source_id,
+    )
+    response = _correction_response(preview)
+    await _log_memory_audit(
+        action=f"{preview.audit_action}.preview",
+        ctx=ctx,
+        request=http_request,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+        project_id=_memory_project_id(memory),
+        source_surface="memory_correction_preview",
+        source_ids=preview.affected_source_ids or [memory.id],
+        derived_ids=preview.affected_derived_ids,
+        policy_allowed=preview.allowed,
+        policy_reason=preview.reason,
+        details={
+            "action": preview.action,
+            "metadata": dict(request.metadata),
+            "recall_impact": dict(preview.recall_impact),
+            "synthesis_impact": dict(preview.synthesis_impact),
+            "target_review_state": preview.target_review_state,
+        },
+    )
+    return response
+
+
+@router.post(
+    "/inspect/{source_id:path}/corrections",
+    response_model=MemoryCorrectionResponse,
+    dependencies=[Depends(require_org_role(*_ADMIN_ROLES))],
+)
+async def apply_memory_correction_route(
+    source_id: str,
+    request: MemoryCorrectionRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> MemoryCorrectionResponse:
+    """Apply a memory correction or lifecycle action."""
+    principal_id = ctx.user_id
+    if not principal_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    memory = await _load_memory_source_for_org(
+        organization_id=str(org.id),
+        source_id=source_id,
+    )
+    accessible_projects = await _project_accessible_for_policy(
+        ctx=ctx,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+    )
+    result = await apply_memory_correction(
+        organization_id=str(org.id),
+        source_id=memory.id,
+        principal_id=principal_id,
+        action=request.action,
+        reason=request.reason,
+        accessible_projects=accessible_projects,
+        replacement_source_id=request.replacement_source_id,
+        duplicate_of_source_id=request.duplicate_of_source_id,
+    )
+    response = _correction_result_response(result)
+    await _log_memory_audit(
+        action=result.preview.audit_action,
+        ctx=ctx,
+        request=http_request,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+        project_id=_memory_project_id(memory),
+        source_surface="memory_correction",
+        source_ids=result.preview.affected_source_ids or [memory.id],
+        derived_ids=result.preview.affected_derived_ids,
+        policy_allowed=result.preview.allowed and result.applied,
+        policy_reason=result.preview.reason,
+        details={
+            "action": result.preview.action,
+            "applied": result.applied,
+            "metadata": dict(request.metadata),
+            "recall_impact": dict(result.preview.recall_impact),
+            "synthesis_impact": dict(result.preview.synthesis_impact),
+            "target_review_state": result.preview.target_review_state,
+            "updated_review_state": response.updated_review_state,
+        },
+    )
+    return response
 
 
 @router.post(

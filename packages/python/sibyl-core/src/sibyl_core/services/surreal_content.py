@@ -20,6 +20,7 @@ from sibyl_core.utils.resilience import with_timeout
 
 _DEFAULT_BATCH_SIZE = 128
 _DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS = 3.0
+_LIFECYCLE_FILTER_OVERFETCH_FACTOR = 4
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
 _DELETE_BY_UUID = {
     "crawl_sources": "DELETE FROM crawl_sources WHERE uuid = $uuid;",
@@ -133,6 +134,45 @@ class RawMemory:
     captured_at: datetime | None = None
     created_at: datetime | None = None
     score: float = 0.0
+
+
+_RECALL_EXCLUDED_REVIEW_STATES = frozenset(
+    {
+        "archived",
+        "deleted",
+        "hidden",
+        "redacted",
+        "superseded",
+    }
+)
+_RECALL_EXCLUDED_LIFECYCLE_STATES = frozenset(
+    {
+        "deleted",
+        "duplicate",
+        "hidden",
+        "redacted",
+        "sensitive",
+        "stale",
+        "superseded",
+        "wrong",
+    }
+)
+
+
+def raw_memory_recallable(memory: RawMemory) -> bool:
+    review_state = str(memory.review_state or "").strip().lower()
+    lifecycle_state = str(memory.metadata.get("lifecycle_state") or "").strip().lower()
+    if review_state in _RECALL_EXCLUDED_REVIEW_STATES:
+        return False
+    if lifecycle_state in _RECALL_EXCLUDED_LIFECYCLE_STATES:
+        return False
+    if memory.metadata.get("superseded_by_source_id"):
+        return False
+    return not memory.metadata.get("duplicate_of_source_id")
+
+
+def _recallable_memories(memories: list[RawMemory], *, limit: int) -> list[RawMemory]:
+    return [memory for memory in memories if raw_memory_recallable(memory)][:limit]
 
 
 def build_surreal_content_client() -> SurrealContentClient:
@@ -699,7 +739,7 @@ async def _recall_raw_memory_lexical(
     for row in rows:
         memory = _raw_memory_from_record(row)
         memory.score = lexical_score(query, memory.title, memory.raw_content)
-        if memory.score > 0:
+        if memory.score > 0 and raw_memory_recallable(memory):
             scored.append(memory)
     return sorted(scored, key=lambda memory: (-memory.score, memory.captured_at or datetime.min))[
         :limit
@@ -882,7 +922,7 @@ async def recall_raw_memory(
                 "ORDER BY score DESC, captured_at DESC LIMIT $limit;",
                 **params,
                 search_query=normalized_query,
-                limit=limit,
+                limit=limit * _LIFECYCLE_FILTER_OVERFETCH_FACTOR,
             )
         except RuntimeError:
             return await _recall_raw_memory_lexical(
@@ -896,7 +936,7 @@ async def recall_raw_memory(
                 project_id=project_id,
                 limit=limit,
             )
-    memories = [_raw_memory_from_record(row) for row in rows]
+    memories = _recallable_memories([_raw_memory_from_record(row) for row in rows], limit=limit)
     if memories:
         return memories
 
@@ -922,10 +962,16 @@ async def list_raw_memories_for_scope(
     agent_id: str | None = None,
     project_id: str | None = None,
     limit: int = 50,
+    include_lifecycle_hidden: bool = False,
 ) -> list[RawMemory]:
     if limit <= 0:
         return []
     normalized_scope = _coerce_memory_scope(memory_scope)
+    query_limit = (
+        limit
+        if include_lifecycle_hidden
+        else limit * _LIFECYCLE_FILTER_OVERFETCH_FACTOR
+    )
     where_clause, params = _memory_scope_where(
         organization_id=organization_id,
         principal_id=principal_id,
@@ -940,9 +986,12 @@ async def list_raw_memories_for_scope(
             f"SELECT * FROM raw_captures WHERE {where_clause} "
             "ORDER BY captured_at DESC LIMIT $limit;",
             **params,
-            limit=limit,
+            limit=query_limit,
         )
-    return [_raw_memory_from_record(row) for row in rows]
+    memories = [_raw_memory_from_record(row) for row in rows]
+    if include_lifecycle_hidden:
+        return memories[:limit]
+    return _recallable_memories(memories, limit=limit)
 
 
 async def get_or_create_source(
@@ -1335,6 +1384,7 @@ __all__ = [
     "list_source_ids_for_org",
     "list_unlinked_document_chunks",
     "load_search_scope",
+    "raw_memory_recallable",
     "recall_raw_memory",
     "remember_raw_memory",
     "remember_reflection_candidate_review",
