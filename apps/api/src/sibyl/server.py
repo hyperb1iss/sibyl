@@ -41,6 +41,17 @@ MemoryKind = Literal[
     "pattern",
     "rule",
 ]
+SynthesisOutputKind = Literal[
+    "documentation",
+    "report",
+    "briefing",
+    "roadmap",
+    "release_notes",
+    "audit_packet",
+    "custom",
+]
+SynthesisDepthKind = Literal["brief", "standard", "deep"]
+SynthesisArtifactKind = Literal["markdown", "json"]
 
 MCP_ENTITY_PROJECT_POLICY_ACTIONS = {
     "add_note",
@@ -524,6 +535,171 @@ async def _reflect_mcp_memory(
     return payload
 
 
+async def _synthesis_mcp_plan(
+    *,
+    goal: str,
+    output_type: SynthesisOutputKind = "documentation",
+    audience: str | None = None,
+    depth: SynthesisDepthKind = "standard",
+    seed_query: str | None = None,
+    project: str | None = None,
+    domain: str | None = None,
+    entity_ids: list[str] | None = None,
+    decision_ids: list[str] | None = None,
+    task_ids: list[str] | None = None,
+    artifact_ids: list[str] | None = None,
+    required_sections: list[dict[str, Any] | str] | None = None,
+    constraints: list[str] | None = None,
+    max_sections: int = 6,
+    include_neighborhoods: bool = True,
+) -> dict[str, Any]:
+    from sibyl_core.tools.core import synthesis_plan
+
+    ctx = await _require_mcp_context()
+    accessible_projects = await _resolve_mcp_project_scope(ctx, project)
+    return await synthesis_plan(
+        goal=goal,
+        output_type=output_type,
+        audience=audience,
+        depth=depth,
+        seed_query=seed_query,
+        project=project,
+        domain=domain,
+        entity_ids=entity_ids,
+        decision_ids=decision_ids,
+        task_ids=task_ids,
+        artifact_ids=artifact_ids,
+        required_sections=required_sections,
+        constraints=constraints,
+        max_sections=max_sections,
+        include_neighborhoods=include_neighborhoods,
+        organization_id=ctx.org_id,
+        principal_id=ctx.user_id,
+        accessible_projects=accessible_projects,
+    )
+
+
+async def _synthesis_mcp_verify(
+    *,
+    goal: str,
+    output_type: SynthesisOutputKind = "documentation",
+    audience: str | None = None,
+    depth: SynthesisDepthKind = "standard",
+    seed_query: str | None = None,
+    project: str | None = None,
+    domain: str | None = None,
+    entity_ids: list[str] | None = None,
+    decision_ids: list[str] | None = None,
+    task_ids: list[str] | None = None,
+    artifact_ids: list[str] | None = None,
+    required_sections: list[dict[str, Any] | str] | None = None,
+    constraints: list[str] | None = None,
+    max_sections: int = 6,
+    include_neighborhoods: bool = True,
+) -> dict[str, Any]:
+    from sibyl_core.tools.core import synthesis_verify
+
+    ctx = await _require_mcp_context()
+    accessible_projects = await _resolve_mcp_project_scope(ctx, project)
+    return await synthesis_verify(
+        goal=goal,
+        output_type=output_type,
+        audience=audience,
+        depth=depth,
+        seed_query=seed_query,
+        project=project,
+        domain=domain,
+        entity_ids=entity_ids,
+        decision_ids=decision_ids,
+        task_ids=task_ids,
+        artifact_ids=artifact_ids,
+        required_sections=required_sections,
+        constraints=constraints,
+        max_sections=max_sections,
+        include_neighborhoods=include_neighborhoods,
+        organization_id=ctx.org_id,
+        principal_id=ctx.user_id,
+        accessible_projects=accessible_projects,
+    )
+
+
+async def _synthesis_mcp_draft(
+    *,
+    goal: str,
+    output_type: SynthesisOutputKind = "documentation",
+    audience: str | None = None,
+    depth: SynthesisDepthKind = "standard",
+    seed_query: str | None = None,
+    project: str | None = None,
+    domain: str | None = None,
+    entity_ids: list[str] | None = None,
+    decision_ids: list[str] | None = None,
+    task_ids: list[str] | None = None,
+    artifact_ids: list[str] | None = None,
+    required_sections: list[dict[str, Any] | str] | None = None,
+    constraints: list[str] | None = None,
+    max_sections: int = 6,
+    include_neighborhoods: bool = True,
+    output_format: SynthesisArtifactKind = "markdown",
+    remember: bool = False,
+    memory_scope: str = "private",
+    scope_key: str | None = None,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    from sibyl_core.tools.core import synthesis_draft
+
+    ctx = await _require_mcp_context()
+    accessible_projects = await _resolve_mcp_project_scope(ctx, project)
+    resolved_scope_key = scope_key
+    policy_reason: str | None = None
+    if remember:
+        write_accessible_projects = accessible_projects
+        if memory_scope == "project":
+            resolved_scope_key = resolved_scope_key or project
+            write_accessible_projects = await _resolve_mcp_project_scope(
+                ctx,
+                resolved_scope_key,
+                require_project_when_restricted=True,
+            )
+        decision = _authorize_mcp_memory_write(
+            ctx=ctx,
+            memory_scope=memory_scope,
+            scope_key=resolved_scope_key,
+            accessible_projects=write_accessible_projects,
+            surface="mcp_synthesis",
+        )
+        policy_reason = decision.reason
+
+    payload = await synthesis_draft(
+        goal=goal,
+        output_type=output_type,
+        audience=audience,
+        depth=depth,
+        seed_query=seed_query,
+        project=project,
+        domain=domain,
+        entity_ids=entity_ids,
+        decision_ids=decision_ids,
+        task_ids=task_ids,
+        artifact_ids=artifact_ids,
+        required_sections=required_sections,
+        constraints=constraints,
+        max_sections=max_sections,
+        include_neighborhoods=include_neighborhoods,
+        output_format=output_format,
+        remember=remember,
+        memory_scope=memory_scope,
+        scope_key=resolved_scope_key,
+        tags=tags,
+        organization_id=ctx.org_id,
+        principal_id=ctx.user_id,
+        accessible_projects=accessible_projects,
+    )
+    if policy_reason:
+        payload["policy_reason"] = policy_reason
+    return payload
+
+
 async def _add_mcp_entity(
     *,
     title: str,
@@ -960,7 +1136,140 @@ def _register_tools(mcp: FastMCP) -> None:
         )
 
     # =========================================================================
-    # TOOL 3: explore
+    # TOOL 3: synthesis_plan
+    # =========================================================================
+
+    @mcp.tool()
+    async def synthesis_plan(
+        goal: str,
+        output_type: SynthesisOutputKind = "documentation",
+        audience: str | None = None,
+        depth: SynthesisDepthKind = "standard",
+        seed_query: str | None = None,
+        project: str | None = None,
+        domain: str | None = None,
+        entity_ids: list[str] | None = None,
+        decision_ids: list[str] | None = None,
+        task_ids: list[str] | None = None,
+        artifact_ids: list[str] | None = None,
+        required_sections: list[dict[str, Any] | str] | None = None,
+        constraints: list[str] | None = None,
+        max_sections: int = 6,
+        include_neighborhoods: bool = True,
+    ) -> dict[str, Any]:
+        """Plan source-grounded synthesis from authorized memory."""
+        return await _synthesis_mcp_plan(
+            goal=goal,
+            output_type=output_type,
+            audience=audience,
+            depth=depth,
+            seed_query=seed_query,
+            project=project,
+            domain=domain,
+            entity_ids=entity_ids,
+            decision_ids=decision_ids,
+            task_ids=task_ids,
+            artifact_ids=artifact_ids,
+            required_sections=required_sections,
+            constraints=constraints,
+            max_sections=max_sections,
+            include_neighborhoods=include_neighborhoods,
+        )
+
+    # =========================================================================
+    # TOOL 4: synthesis_draft
+    # =========================================================================
+
+    @mcp.tool()
+    async def synthesis_draft(
+        goal: str,
+        output_type: SynthesisOutputKind = "documentation",
+        audience: str | None = None,
+        depth: SynthesisDepthKind = "standard",
+        seed_query: str | None = None,
+        project: str | None = None,
+        domain: str | None = None,
+        entity_ids: list[str] | None = None,
+        decision_ids: list[str] | None = None,
+        task_ids: list[str] | None = None,
+        artifact_ids: list[str] | None = None,
+        required_sections: list[dict[str, Any] | str] | None = None,
+        constraints: list[str] | None = None,
+        max_sections: int = 6,
+        include_neighborhoods: bool = True,
+        output_format: SynthesisArtifactKind = "markdown",
+        remember: bool = False,
+        memory_scope: str = "private",
+        scope_key: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Draft, verify, and optionally remember a source-grounded artifact."""
+        return await _synthesis_mcp_draft(
+            goal=goal,
+            output_type=output_type,
+            audience=audience,
+            depth=depth,
+            seed_query=seed_query,
+            project=project,
+            domain=domain,
+            entity_ids=entity_ids,
+            decision_ids=decision_ids,
+            task_ids=task_ids,
+            artifact_ids=artifact_ids,
+            required_sections=required_sections,
+            constraints=constraints,
+            max_sections=max_sections,
+            include_neighborhoods=include_neighborhoods,
+            output_format=output_format,
+            remember=remember,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            tags=tags,
+        )
+
+    # =========================================================================
+    # TOOL 5: synthesis_verify
+    # =========================================================================
+
+    @mcp.tool()
+    async def synthesis_verify(
+        goal: str,
+        output_type: SynthesisOutputKind = "documentation",
+        audience: str | None = None,
+        depth: SynthesisDepthKind = "standard",
+        seed_query: str | None = None,
+        project: str | None = None,
+        domain: str | None = None,
+        entity_ids: list[str] | None = None,
+        decision_ids: list[str] | None = None,
+        task_ids: list[str] | None = None,
+        artifact_ids: list[str] | None = None,
+        required_sections: list[dict[str, Any] | str] | None = None,
+        constraints: list[str] | None = None,
+        max_sections: int = 6,
+        include_neighborhoods: bool = True,
+    ) -> dict[str, Any]:
+        """Verify citation, hidden-context, freshness, and gap coverage."""
+        return await _synthesis_mcp_verify(
+            goal=goal,
+            output_type=output_type,
+            audience=audience,
+            depth=depth,
+            seed_query=seed_query,
+            project=project,
+            domain=domain,
+            entity_ids=entity_ids,
+            decision_ids=decision_ids,
+            task_ids=task_ids,
+            artifact_ids=artifact_ids,
+            required_sections=required_sections,
+            constraints=constraints,
+            max_sections=max_sections,
+            include_neighborhoods=include_neighborhoods,
+        )
+
+    # =========================================================================
+    # TOOL 6: explore
     # =========================================================================
 
     @mcp.tool()
@@ -1032,7 +1341,7 @@ def _register_tools(mcp: FastMCP) -> None:
         return _to_dict(result)
 
     # =========================================================================
-    # TOOL 4: add
+    # TOOL 7: add
     # =========================================================================
 
     @mcp.tool()
@@ -1130,7 +1439,7 @@ def _register_tools(mcp: FastMCP) -> None:
         )
 
     # =========================================================================
-    # TOOL 5: remember
+    # TOOL 8: remember
     # =========================================================================
 
     @mcp.tool()
@@ -1170,7 +1479,7 @@ def _register_tools(mcp: FastMCP) -> None:
         )
 
     # =========================================================================
-    # TOOL 6: reflect
+    # TOOL 9: reflect
     # =========================================================================
 
     @mcp.tool()
@@ -1216,7 +1525,7 @@ def _register_tools(mcp: FastMCP) -> None:
         )
 
     # =========================================================================
-    # TOOL 7: manage
+    # TOOL 10: manage
     # =========================================================================
 
     @mcp.tool()
@@ -1283,7 +1592,7 @@ def _register_tools(mcp: FastMCP) -> None:
         )
 
     # =========================================================================
-    # TOOL 5: logs (Developer Introspection)
+    # TOOL 11: logs (Developer Introspection)
     # =========================================================================
 
     @mcp.tool()

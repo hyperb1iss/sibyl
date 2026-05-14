@@ -76,6 +76,77 @@ async def test_memory_space_access_client_url_encodes_space_id() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_synthesis_plan_client_posts_contract() -> None:
+    client = SibylClient(base_url="http://example.test/api", auth_token="token")
+    client._request = AsyncMock(return_value={"run_id": "synthesis:1"})  # type: ignore[method-assign]
+
+    data = await client.synthesis_plan(
+        goal="Write roadmap",
+        output_type="roadmap",
+        seed_query="v0.9 roadmap",
+        project="project-sibyl",
+        required_sections=[
+            {
+                "title": "Current State",
+                "prompt": "Describe the current state.",
+                "required_source_ids": ["source-1"],
+            }
+        ],
+        constraints=["cite sources"],
+    )
+
+    assert data == {"run_id": "synthesis:1"}
+    client._request.assert_awaited_once_with(  # type: ignore[attr-defined]
+        "POST",
+        "/synthesis/plan",
+        json={
+            "goal": "Write roadmap",
+            "output_type": "roadmap",
+            "depth": "standard",
+            "entity_ids": [],
+            "decision_ids": [],
+            "task_ids": [],
+            "artifact_ids": [],
+            "required_sections": [
+                {
+                    "title": "Current State",
+                    "prompt": "Describe the current state.",
+                    "required_source_ids": ["source-1"],
+                }
+            ],
+            "constraints": ["cite sources"],
+            "max_sections": 6,
+            "include_neighborhoods": True,
+            "seed_query": "v0.9 roadmap",
+            "project": "project-sibyl",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_synthesis_draft_client_posts_remember_contract() -> None:
+    client = SibylClient(base_url="http://example.test/api", auth_token="token")
+    client._request = AsyncMock(return_value={"artifact": {"artifact_id": "artifact:1"}})  # type: ignore[method-assign]
+
+    await client.synthesis_draft(
+        goal="Write roadmap",
+        output_format="json",
+        remember=True,
+        memory_scope="project",
+        scope_key="project-sibyl",
+        tags=["roadmap"],
+    )
+
+    client._request.assert_awaited_once()
+    payload = client._request.await_args.kwargs["json"]  # type: ignore[attr-defined]
+    assert payload["output_format"] == "json"
+    assert payload["remember"] is True
+    assert payload["memory_scope"] == "project"
+    assert payload["scope_key"] == "project-sibyl"
+    assert payload["tags"] == ["roadmap"]
+
+
 @patch("sibyl_cli.main.get_client")
 def test_capture_command_derives_title_and_marks_quick_capture(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
@@ -681,6 +752,153 @@ def test_recall_command_reports_project_access_denied(
     assert "Requires viewer access to project" in result.stdout
     assert "Authentication required" not in result.stdout
     assert "sibyl auth login" not in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_synthesis_plan_command_outputs_section_summary(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.synthesis_plan = AsyncMock(
+        return_value={
+            "run_id": "synthesis:roadmap",
+            "outline": {
+                "title": "Write Roadmap",
+                "sections": [
+                    {
+                        "title": "Current State",
+                        "source_ids": ["source-1"],
+                        "gaps": [],
+                    }
+                ],
+            },
+            "verification": {
+                "status": "pending",
+                "source_count": 1,
+                "gap_count": 0,
+                "gaps": [],
+            },
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "synthesis",
+            "plan",
+            "Write roadmap",
+            "--type",
+            "roadmap",
+            "--seed",
+            "v0.9 roadmap",
+            "--section",
+            "Current State::Describe current state::source-1",
+            "--constraint",
+            "cite sources",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Write Roadmap" in result.stdout
+    assert "Current State" in result.stdout
+    mock_client.synthesis_plan.assert_awaited_once_with(
+        goal="Write roadmap",
+        output_type="roadmap",
+        audience=None,
+        depth="standard",
+        seed_query="v0.9 roadmap",
+        project="project_123",
+        domain=None,
+        entity_ids=[],
+        decision_ids=[],
+        task_ids=[],
+        artifact_ids=[],
+        required_sections=[
+            {
+                "title": "Current State",
+                "prompt": "Describe current state",
+                "required_source_ids": ["source-1"],
+            }
+        ],
+        constraints=["cite sources"],
+        max_sections=6,
+        include_neighborhoods=True,
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_synthesis_draft_command_outputs_markdown(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.synthesis_draft = AsyncMock(
+        return_value={
+            "artifact": {
+                "markdown": "# Roadmap\n\n- Source backed [source-1]\n",
+                "json_payload": {"sections": []},
+            }
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["synthesis", "draft", "Write roadmap"])
+
+    assert result.exit_code == 0
+    assert "# Roadmap" in result.stdout
+    mock_client.synthesis_draft.assert_awaited_once()
+    assert mock_client.synthesis_draft.await_args.kwargs["output_format"] == "markdown"
+    assert mock_client.synthesis_draft.await_args.kwargs["project"] == "project_123"
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_synthesis_remember_command_requests_artifact_persistence(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.synthesis_draft = AsyncMock(
+        return_value={
+            "artifact": {
+                "title": "Roadmap",
+                "remembered_memory_id": "memory:artifact",
+                "remembered_source_id": "artifact:generated",
+            }
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "synthesis",
+            "remember",
+            "Write roadmap",
+            "--scope",
+            "project",
+            "--tags",
+            "roadmap,synthesis",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Remembered synthesis artifact" in result.stdout
+    mock_client.synthesis_draft.assert_awaited_once()
+    kwargs = mock_client.synthesis_draft.await_args.kwargs
+    assert kwargs["remember"] is True
+    assert kwargs["memory_scope"] == "project"
+    assert kwargs["tags"] == ["roadmap", "synthesis"]
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 

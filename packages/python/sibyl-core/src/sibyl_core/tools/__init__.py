@@ -31,6 +31,9 @@ _EXPORTS = {
     "mark_server_started": ("sibyl_core.tools.admin", "mark_server_started"),
     "rebuild_indices": ("sibyl_core.tools.admin", "rebuild_indices"),
     "search": ("sibyl_core.tools.core", "search"),
+    "synthesis_draft": ("sibyl_core.tools.core", "synthesis_draft"),
+    "synthesis_plan": ("sibyl_core.tools.core", "synthesis_plan"),
+    "synthesis_verify": ("sibyl_core.tools.core", "synthesis_verify"),
     "temporal_query": ("sibyl_core.tools.temporal", "temporal_query"),
 }
 

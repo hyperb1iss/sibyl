@@ -957,6 +957,141 @@ class SibylClient:
             json=data,
         )
 
+    def _synthesis_payload(
+        self,
+        *,
+        goal: str,
+        output_type: str = "documentation",
+        audience: str | None = None,
+        depth: str = "standard",
+        seed_query: str | None = None,
+        project: str | None = None,
+        domain: str | None = None,
+        entity_ids: list[str] | None = None,
+        decision_ids: list[str] | None = None,
+        task_ids: list[str] | None = None,
+        artifact_ids: list[str] | None = None,
+        required_sections: list[dict[str, Any]] | None = None,
+        constraints: list[str] | None = None,
+        max_sections: int = 6,
+        include_neighborhoods: bool = True,
+    ) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "goal": goal,
+            "output_type": output_type,
+            "depth": depth,
+            "entity_ids": entity_ids or [],
+            "decision_ids": decision_ids or [],
+            "task_ids": task_ids or [],
+            "artifact_ids": artifact_ids or [],
+            "required_sections": required_sections or [],
+            "constraints": constraints or [],
+            "max_sections": max_sections,
+            "include_neighborhoods": include_neighborhoods,
+        }
+        if audience:
+            data["audience"] = audience
+        if seed_query:
+            data["seed_query"] = seed_query
+        if project:
+            data["project"] = project
+        if domain:
+            data["domain"] = domain
+        return data
+
+    async def synthesis_plan(
+        self,
+        *,
+        goal: str,
+        output_type: str = "documentation",
+        audience: str | None = None,
+        depth: str = "standard",
+        seed_query: str | None = None,
+        project: str | None = None,
+        domain: str | None = None,
+        entity_ids: list[str] | None = None,
+        decision_ids: list[str] | None = None,
+        task_ids: list[str] | None = None,
+        artifact_ids: list[str] | None = None,
+        required_sections: list[dict[str, Any]] | None = None,
+        constraints: list[str] | None = None,
+        max_sections: int = 6,
+        include_neighborhoods: bool = True,
+    ) -> dict[str, Any]:
+        """Plan source-grounded synthesis through the API."""
+        data = self._synthesis_payload(
+            goal=goal,
+            output_type=output_type,
+            audience=audience,
+            depth=depth,
+            seed_query=seed_query,
+            project=project,
+            domain=domain,
+            entity_ids=entity_ids,
+            decision_ids=decision_ids,
+            task_ids=task_ids,
+            artifact_ids=artifact_ids,
+            required_sections=required_sections,
+            constraints=constraints,
+            max_sections=max_sections,
+            include_neighborhoods=include_neighborhoods,
+        )
+        return await self._request("POST", "/synthesis/plan", json=data)
+
+    async def synthesis_draft(
+        self,
+        *,
+        goal: str,
+        output_type: str = "documentation",
+        audience: str | None = None,
+        depth: str = "standard",
+        seed_query: str | None = None,
+        project: str | None = None,
+        domain: str | None = None,
+        entity_ids: list[str] | None = None,
+        decision_ids: list[str] | None = None,
+        task_ids: list[str] | None = None,
+        artifact_ids: list[str] | None = None,
+        required_sections: list[dict[str, Any]] | None = None,
+        constraints: list[str] | None = None,
+        max_sections: int = 6,
+        include_neighborhoods: bool = True,
+        output_format: str = "markdown",
+        remember: bool = False,
+        memory_scope: str = "private",
+        scope_key: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Draft and optionally remember source-grounded synthesis."""
+        data = self._synthesis_payload(
+            goal=goal,
+            output_type=output_type,
+            audience=audience,
+            depth=depth,
+            seed_query=seed_query,
+            project=project,
+            domain=domain,
+            entity_ids=entity_ids,
+            decision_ids=decision_ids,
+            task_ids=task_ids,
+            artifact_ids=artifact_ids,
+            required_sections=required_sections,
+            constraints=constraints,
+            max_sections=max_sections,
+            include_neighborhoods=include_neighborhoods,
+        )
+        data.update(
+            {
+                "output_format": output_format,
+                "remember": remember,
+                "memory_scope": memory_scope,
+                "tags": tags or [],
+            }
+        )
+        if scope_key:
+            data["scope_key"] = scope_key
+        return await self._request("POST", "/synthesis/draft", json=data)
+
     async def context_pack(
         self,
         goal: str,

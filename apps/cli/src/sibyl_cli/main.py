@@ -70,6 +70,7 @@ app = typer.Typer(
     no_args_is_help=False,
 )
 memory_space_app = typer.Typer(help="Memory-space inspection and preview commands")
+synthesis_app = typer.Typer(help="Source-grounded synthesis commands")
 
 
 # Register subcommand groups
@@ -91,6 +92,7 @@ app.add_typer(local_app, name="local")
 app.add_typer(logs_app, name="logs")
 app.add_typer(update_app, name="update")
 app.add_typer(memory_space_app, name="memory-space")
+app.add_typer(synthesis_app, name="synthesis")
 
 
 SEARCH_PREVIEW_CHARS = 220
@@ -133,6 +135,60 @@ def _parse_id_args(values: list[str]) -> list[str]:
     for value in values:
         ids = _append_unique_ids(ids, _parse_csv_ids(value))
     return ids
+
+
+def _parse_section_specs(value: str | None) -> list[dict[str, object]]:
+    sections: list[dict[str, object]] = []
+    for spec in (value or "").split("|"):
+        title, _, rest = spec.strip().partition("::")
+        if not title:
+            continue
+        prompt, _, required_source_ids = rest.partition("::")
+        section: dict[str, object] = {"title": title.strip()}
+        if prompt.strip():
+            section["prompt"] = prompt.strip()
+        if required_source_ids.strip():
+            section["required_source_ids"] = _parse_csv_ids(required_source_ids)
+        sections.append(section)
+    return sections
+
+
+def _synthesis_options(
+    *,
+    goal: str,
+    output_type: str,
+    audience: str | None,
+    depth: str,
+    seed_query: str | None,
+    project: str | None,
+    all_projects: bool,
+    domain: str | None,
+    entity_ids: str | None,
+    decision_ids: str | None,
+    task_ids: str | None,
+    artifact_ids: str | None,
+    sections: str | None,
+    constraints: str | None,
+    max_sections: int,
+    include_neighborhoods: bool,
+) -> dict[str, Any]:
+    return {
+        "goal": goal,
+        "output_type": output_type,
+        "audience": audience,
+        "depth": depth,
+        "seed_query": seed_query,
+        "project": project or (None if all_projects else resolve_project_from_cwd()),
+        "domain": domain,
+        "entity_ids": _parse_csv_ids(entity_ids),
+        "decision_ids": _parse_csv_ids(decision_ids),
+        "task_ids": _parse_csv_ids(task_ids),
+        "artifact_ids": _parse_csv_ids(artifact_ids),
+        "required_sections": _parse_section_specs(sections),
+        "constraints": _parse_csv_ids(constraints),
+        "max_sections": max_sections,
+        "include_neighborhoods": include_neighborhoods,
+    }
 
 
 def _append_unique_ids(existing: list[str], additions: list[str]) -> list[str]:
@@ -238,6 +294,71 @@ def _print_raw_memory_results(memories: list[object]) -> None:
         console.print(f"    [dim]scope={scope}{score_label}{policy_label}[/dim]")
         console.print(f"    [{CORAL}]{memory_id}[/{CORAL}]")
         console.print()
+
+
+def _print_synthesis_plan(data: dict[str, object]) -> None:
+    outline = cast("dict[str, object]", data.get("outline") or {})
+    title = str(outline.get("title") or "Synthesis Plan")
+    sections = outline.get("sections")
+    section_items = sections if isinstance(sections, list) else []
+    verification = cast("dict[str, object]", data.get("verification") or {})
+    console.print(f"\n[bold]{title}[/bold]")
+    console.print(
+        f"[dim]Run: {data.get('run_id')} · "
+        f"verification={verification.get('status')} · "
+        f"sources={verification.get('source_count', 0)}[/dim]\n"
+    )
+    for item in section_items:
+        if not isinstance(item, dict):
+            continue
+        section = cast("dict[str, object]", item)
+        source_ids = section.get("source_ids")
+        source_count = len(source_ids) if isinstance(source_ids, list) else 0
+        console.print(f"  [{NEON_CYAN}]{section.get('title')}[/{NEON_CYAN}]")
+        console.print(f"    [dim]{source_count} source(s)[/dim]")
+        gaps = section.get("gaps")
+        for gap in gaps if isinstance(gaps, list) else []:
+            if isinstance(gap, dict):
+                gap_data = cast("dict[str, object]", gap)
+                console.print(f"    [dim]gap: {gap_data.get('reason')}[/dim]")
+
+
+def _print_synthesis_verification(data: dict[str, object]) -> None:
+    verification = cast("dict[str, object]", data.get("verification") or {})
+    status = str(verification.get("status") or "unknown")
+    source_count = verification.get("source_count", 0)
+    gap_count = verification.get("gap_count", 0)
+    if status == "pass":
+        success(f"Synthesis verification passed ({source_count} sources)")
+    else:
+        error(f"Synthesis verification has gaps ({gap_count})")
+    gaps = verification.get("gaps")
+    for gap in gaps if isinstance(gaps, list) else []:
+        if isinstance(gap, dict):
+            gap_data = cast("dict[str, object]", gap)
+            console.print(
+                f"  [dim]{gap_data.get('title')}: {gap_data.get('reason')}[/dim]"
+            )
+
+
+def _print_synthesis_artifact(data: dict[str, object], *, output_format: str) -> None:
+    artifact = cast("dict[str, object]", data.get("artifact") or {})
+    if output_format == "json":
+        print_json(cast("dict[str, object]", artifact.get("json_payload") or {}))
+        return
+    console.print(str(artifact.get("markdown") or ""))
+
+
+def _print_synthesis_remember(data: dict[str, object]) -> None:
+    artifact = cast("dict[str, object]", data.get("artifact") or {})
+    remembered_memory_id = artifact.get("remembered_memory_id")
+    remembered_source_id = artifact.get("remembered_source_id")
+    if remembered_memory_id:
+        success(f"Remembered synthesis artifact: {artifact.get('title')}")
+        console.print(f"  [dim]Memory: {remembered_memory_id}[/dim]")
+        console.print(f"  [dim]Source: {remembered_source_id}[/dim]")
+        return
+    error("Synthesis artifact was drafted but not remembered.")
 
 
 def _parse_policy_filter(value: str | None) -> bool | None:
@@ -794,6 +915,276 @@ def capture_memory(
             _handle_client_error(e)
 
     run_capture()
+
+
+@synthesis_app.command("plan")
+def synthesis_plan_command(
+    goal: str = typer.Argument(..., help="Synthesis goal"),
+    output_type: str = typer.Option("documentation", "--type", help="Output type"),
+    audience: str | None = typer.Option(None, "--audience", help="Intended audience"),
+    depth: str = typer.Option("standard", "--depth", help="brief, standard, or deep"),
+    seed_query: str | None = typer.Option(None, "--seed", help="Search seed query"),
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    all_projects: bool = typer.Option(False, "--all-projects", help="Skip cwd project scope"),
+    domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
+    entity_ids: str | None = typer.Option(None, "--entity", help="Comma-separated entity IDs"),
+    decision_ids: str | None = typer.Option(None, "--decision", help="Comma-separated decision IDs"),
+    task_ids: str | None = typer.Option(None, "--task", help="Comma-separated task IDs"),
+    artifact_ids: str | None = typer.Option(None, "--artifact", help="Comma-separated artifact IDs"),
+    sections: str | None = typer.Option(
+        None,
+        "--section",
+        help="Pipe-separated Title::Prompt::source-id specs",
+    ),
+    constraints: str | None = typer.Option(None, "--constraint", help="Comma-separated constraints"),
+    max_sections: int = typer.Option(6, "--max-sections", min=1, max=12),
+    include_neighborhoods: bool = typer.Option(
+        True,
+        "--neighborhoods/--no-neighborhoods",
+        help="Include one-hop graph neighborhoods",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output full JSON"),
+) -> None:
+    """Plan source-grounded synthesis from authorized memory."""
+    options = _synthesis_options(
+        goal=goal,
+        output_type=output_type,
+        audience=audience,
+        depth=depth,
+        seed_query=seed_query,
+        project=project,
+        all_projects=all_projects,
+        domain=domain,
+        entity_ids=entity_ids,
+        decision_ids=decision_ids,
+        task_ids=task_ids,
+        artifact_ids=artifact_ids,
+        sections=sections,
+        constraints=constraints,
+        max_sections=max_sections,
+        include_neighborhoods=include_neighborhoods,
+    )
+
+    @run_async
+    async def run_synthesis_plan() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.synthesis_plan(**options)
+            if json_output:
+                print_json(data)
+                return
+            _print_synthesis_plan(cast("dict[str, object]", data))
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_synthesis_plan()
+
+
+@synthesis_app.command("draft")
+def synthesis_draft_command(
+    goal: str = typer.Argument(..., help="Synthesis goal"),
+    output_type: str = typer.Option("documentation", "--type", help="Output type"),
+    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
+    audience: str | None = typer.Option(None, "--audience", help="Intended audience"),
+    depth: str = typer.Option("standard", "--depth", help="brief, standard, or deep"),
+    seed_query: str | None = typer.Option(None, "--seed", help="Search seed query"),
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    all_projects: bool = typer.Option(False, "--all-projects", help="Skip cwd project scope"),
+    domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
+    entity_ids: str | None = typer.Option(None, "--entity", help="Comma-separated entity IDs"),
+    decision_ids: str | None = typer.Option(None, "--decision", help="Comma-separated decision IDs"),
+    task_ids: str | None = typer.Option(None, "--task", help="Comma-separated task IDs"),
+    artifact_ids: str | None = typer.Option(None, "--artifact", help="Comma-separated artifact IDs"),
+    sections: str | None = typer.Option(
+        None,
+        "--section",
+        help="Pipe-separated Title::Prompt::source-id specs",
+    ),
+    constraints: str | None = typer.Option(None, "--constraint", help="Comma-separated constraints"),
+    max_sections: int = typer.Option(6, "--max-sections", min=1, max=12),
+    include_neighborhoods: bool = typer.Option(
+        True,
+        "--neighborhoods/--no-neighborhoods",
+        help="Include one-hop graph neighborhoods",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output full JSON"),
+) -> None:
+    """Draft a verified synthesis artifact."""
+    options = _synthesis_options(
+        goal=goal,
+        output_type=output_type,
+        audience=audience,
+        depth=depth,
+        seed_query=seed_query,
+        project=project,
+        all_projects=all_projects,
+        domain=domain,
+        entity_ids=entity_ids,
+        decision_ids=decision_ids,
+        task_ids=task_ids,
+        artifact_ids=artifact_ids,
+        sections=sections,
+        constraints=constraints,
+        max_sections=max_sections,
+        include_neighborhoods=include_neighborhoods,
+    )
+
+    @run_async
+    async def run_synthesis_draft() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.synthesis_draft(
+                    **options,
+                    output_format=output_format,
+                )
+            if json_output:
+                print_json(data)
+                return
+            _print_synthesis_artifact(
+                cast("dict[str, object]", data),
+                output_format=output_format,
+            )
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_synthesis_draft()
+
+
+@synthesis_app.command("verify")
+def synthesis_verify_command(
+    goal: str = typer.Argument(..., help="Synthesis goal"),
+    output_type: str = typer.Option("documentation", "--type", help="Output type"),
+    audience: str | None = typer.Option(None, "--audience", help="Intended audience"),
+    depth: str = typer.Option("standard", "--depth", help="brief, standard, or deep"),
+    seed_query: str | None = typer.Option(None, "--seed", help="Search seed query"),
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    all_projects: bool = typer.Option(False, "--all-projects", help="Skip cwd project scope"),
+    domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
+    entity_ids: str | None = typer.Option(None, "--entity", help="Comma-separated entity IDs"),
+    decision_ids: str | None = typer.Option(None, "--decision", help="Comma-separated decision IDs"),
+    task_ids: str | None = typer.Option(None, "--task", help="Comma-separated task IDs"),
+    artifact_ids: str | None = typer.Option(None, "--artifact", help="Comma-separated artifact IDs"),
+    sections: str | None = typer.Option(
+        None,
+        "--section",
+        help="Pipe-separated Title::Prompt::source-id specs",
+    ),
+    constraints: str | None = typer.Option(None, "--constraint", help="Comma-separated constraints"),
+    max_sections: int = typer.Option(6, "--max-sections", min=1, max=12),
+    include_neighborhoods: bool = typer.Option(
+        True,
+        "--neighborhoods/--no-neighborhoods",
+        help="Include one-hop graph neighborhoods",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output full JSON"),
+) -> None:
+    """Verify synthesis citation, freshness, redaction, and gap coverage."""
+    options = _synthesis_options(
+        goal=goal,
+        output_type=output_type,
+        audience=audience,
+        depth=depth,
+        seed_query=seed_query,
+        project=project,
+        all_projects=all_projects,
+        domain=domain,
+        entity_ids=entity_ids,
+        decision_ids=decision_ids,
+        task_ids=task_ids,
+        artifact_ids=artifact_ids,
+        sections=sections,
+        constraints=constraints,
+        max_sections=max_sections,
+        include_neighborhoods=include_neighborhoods,
+    )
+
+    @run_async
+    async def run_synthesis_verify() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.synthesis_draft(**options, output_format="json")
+            if json_output:
+                print_json(data)
+                return
+            _print_synthesis_verification(cast("dict[str, object]", data))
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_synthesis_verify()
+
+
+@synthesis_app.command("remember")
+def synthesis_remember_command(
+    goal: str = typer.Argument(..., help="Synthesis goal"),
+    output_type: str = typer.Option("documentation", "--type", help="Output type"),
+    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
+    audience: str | None = typer.Option(None, "--audience", help="Intended audience"),
+    depth: str = typer.Option("standard", "--depth", help="brief, standard, or deep"),
+    seed_query: str | None = typer.Option(None, "--seed", help="Search seed query"),
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    all_projects: bool = typer.Option(False, "--all-projects", help="Skip cwd project scope"),
+    domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
+    entity_ids: str | None = typer.Option(None, "--entity", help="Comma-separated entity IDs"),
+    decision_ids: str | None = typer.Option(None, "--decision", help="Comma-separated decision IDs"),
+    task_ids: str | None = typer.Option(None, "--task", help="Comma-separated task IDs"),
+    artifact_ids: str | None = typer.Option(None, "--artifact", help="Comma-separated artifact IDs"),
+    sections: str | None = typer.Option(
+        None,
+        "--section",
+        help="Pipe-separated Title::Prompt::source-id specs",
+    ),
+    constraints: str | None = typer.Option(None, "--constraint", help="Comma-separated constraints"),
+    max_sections: int = typer.Option(6, "--max-sections", min=1, max=12),
+    include_neighborhoods: bool = typer.Option(
+        True,
+        "--neighborhoods/--no-neighborhoods",
+        help="Include one-hop graph neighborhoods",
+    ),
+    memory_scope: str = typer.Option("private", "--scope", help="Artifact memory scope"),
+    scope_key: str | None = typer.Option(None, "--scope-key", help="Artifact scope key"),
+    tags: str | None = typer.Option(None, "--tags", help="Comma-separated artifact tags"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output full JSON"),
+) -> None:
+    """Draft, verify, and remember a synthesis artifact."""
+    options = _synthesis_options(
+        goal=goal,
+        output_type=output_type,
+        audience=audience,
+        depth=depth,
+        seed_query=seed_query,
+        project=project,
+        all_projects=all_projects,
+        domain=domain,
+        entity_ids=entity_ids,
+        decision_ids=decision_ids,
+        task_ids=task_ids,
+        artifact_ids=artifact_ids,
+        sections=sections,
+        constraints=constraints,
+        max_sections=max_sections,
+        include_neighborhoods=include_neighborhoods,
+    )
+
+    @run_async
+    async def run_synthesis_remember() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.synthesis_draft(
+                    **options,
+                    output_format=output_format,
+                    remember=True,
+                    memory_scope=memory_scope,
+                    scope_key=scope_key,
+                    tags=_parse_csv_ids(tags),
+                )
+            if json_output:
+                print_json(data)
+                return
+            _print_synthesis_remember(cast("dict[str, object]", data))
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_synthesis_remember()
 
 
 @app.command("recall")

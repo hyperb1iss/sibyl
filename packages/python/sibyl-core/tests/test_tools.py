@@ -16,6 +16,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from sibyl_core.models.context import (
+    ContextFacet,
+    ContextIntent,
+    ContextItem,
+    ContextItemQualityMetadata,
+    ContextPack,
+    ContextSection,
+)
 from sibyl_core.models.entities import EntityType, RelationshipType
 from sibyl_core.tools.helpers import (
     MAX_CONTENT_LENGTH,
@@ -2784,6 +2792,160 @@ class TestAddEntityTypes:
             rel_types = [r.relationship_type.value for r in created_relationships]
             assert "BELONGS_TO" in rel_types
             mock_rel_manager.create_bulk.assert_called_once()
+
+
+async def _fake_synthesis_related(**kwargs: Any) -> list[Any]:
+    return []
+
+
+async def _fake_synthesis_search(**kwargs: Any) -> SearchResponse:
+    return SearchResponse(
+        results=[
+            SearchResult(
+                id="task:synthesis",
+                type="task",
+                name="Build synthesis",
+                content="Synthesis should plan, draft, verify, and remember artifacts.",
+                score=0.91,
+            )
+        ],
+        total=1,
+        query=kwargs["query"],
+        filters={"types": kwargs["types"]},
+    )
+
+
+async def _fake_synthesis_context(**kwargs: Any) -> ContextPack:
+    return ContextPack(
+        goal=kwargs["goal"],
+        intent=ContextIntent.RESEARCH,
+        query=kwargs["goal"],
+        domain=kwargs.get("domain"),
+        project=kwargs.get("project"),
+        sections=[
+            ContextSection(
+                facet=ContextFacet.ACTIVE_WORK,
+                title="Tasks",
+                items=[
+                    ContextItem(
+                        id="task:synthesis",
+                        type="task",
+                        name="Build synthesis",
+                        content="D4 exposes synthesis through CLI and MCP.",
+                        score=0.91,
+                        facet=ContextFacet.ACTIVE_WORK,
+                        reason="task explains the next synthesis surface",
+                        source="source:synthesis-task",
+                        quality=ContextItemQualityMetadata(
+                            project_id=kwargs.get("project"),
+                            updated_at="2026-05-14T12:00:00Z",
+                        ),
+                        metadata={"source_id": "source:synthesis-task"},
+                    )
+                ],
+            )
+        ],
+        total_items=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_synthesis_plan_tool_materializes_section_sources() -> None:
+    from sibyl_core.tools.synthesis import synthesis_plan
+
+    with (
+        patch("sibyl_core.services.synthesis.default_search", _fake_synthesis_search),
+        patch("sibyl_core.services.synthesis.default_related_sources", _fake_synthesis_related),
+        patch("sibyl_core.services.synthesis.default_context_pack", _fake_synthesis_context),
+    ):
+        result = await synthesis_plan(
+            goal="Write the roadmap",
+            output_type="roadmap",
+            project="project-sibyl",
+            organization_id="org-123",
+            principal_id="user-123",
+            accessible_projects={"project-sibyl"},
+        )
+
+    assert result["outline"]["sections"][0]["title"] == "Current State"
+    assert result["source_packs"][0]["source_ids"] == ["source:synthesis-task"]
+    assert result["source_packs"][0]["freshness"] == {
+        "source:synthesis-task": "2026-05-14T12:00:00Z"
+    }
+
+
+@pytest.mark.asyncio
+async def test_synthesis_draft_tool_can_remember_artifact() -> None:
+    from sibyl_core.tools.synthesis import synthesis_draft
+
+    remember_calls: list[dict[str, Any]] = []
+
+    async def fake_remember(**kwargs: Any) -> SimpleNamespace:
+        remember_calls.append(kwargs)
+        return SimpleNamespace(id="memory:artifact", source_id=kwargs["source_id"])
+
+    with (
+        patch("sibyl_core.services.synthesis.default_search", _fake_synthesis_search),
+        patch("sibyl_core.services.synthesis.default_related_sources", _fake_synthesis_related),
+        patch("sibyl_core.services.synthesis.default_context_pack", _fake_synthesis_context),
+        patch("sibyl_core.services.synthesis.default_remember_artifact", fake_remember),
+    ):
+        result = await synthesis_draft(
+            goal="Write the roadmap",
+            output_type="roadmap",
+            output_format="json",
+            remember=True,
+            tags=["roadmap"],
+            project="project-sibyl",
+            memory_scope="project",
+            scope_key="project-sibyl",
+            organization_id="org-123",
+            principal_id="user-123",
+            accessible_projects={"project-sibyl"},
+        )
+
+    artifact = result["artifact"]
+    assert result["status"] == "verified"
+    assert artifact["remembered_memory_id"] == "memory:artifact"
+    assert artifact["remembered_source_id"] == remember_calls[0]["source_id"]
+    assert remember_calls[0]["memory_scope"] == "project"
+    assert remember_calls[0]["metadata"]["source_ids"] == ["source:synthesis-task"]
+
+
+@pytest.mark.asyncio
+async def test_synthesis_verify_tool_reports_gaps_without_artifact() -> None:
+    from sibyl_core.tools.synthesis import synthesis_verify
+
+    async def empty_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    async def empty_context(**kwargs: Any) -> ContextPack:
+        return ContextPack(
+            goal=kwargs["goal"],
+            intent=ContextIntent.RESEARCH,
+            query=kwargs["goal"],
+            domain=kwargs.get("domain"),
+            project=kwargs.get("project"),
+            sections=[],
+            total_items=0,
+        )
+
+    with (
+        patch("sibyl_core.services.synthesis.default_search", empty_search),
+        patch("sibyl_core.services.synthesis.default_related_sources", _fake_synthesis_related),
+        patch("sibyl_core.services.synthesis.default_context_pack", empty_context),
+    ):
+        result = await synthesis_verify(
+            goal="Explain an unsupported mobile launch",
+            required_sections=["Mobile Launch::Describe the supported mobile release"],
+            organization_id="org-123",
+            principal_id="user-123",
+            accessible_projects=set(),
+        )
+
+    assert "artifact" not in result
+    assert result["verification"]["status"] == "gaps"
+    assert result["verification"]["gaps"][0]["reason"] == "no_source_supports_requested_section"
 
 
 # =============================================================================

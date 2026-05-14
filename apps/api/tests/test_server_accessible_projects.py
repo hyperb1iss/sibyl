@@ -19,6 +19,9 @@ from sibyl.server import (
     _require_owner_mcp_context,
     _resolve_mcp_capture_links,
     _resolve_mcp_project_scope,
+    _synthesis_mcp_draft,
+    _synthesis_mcp_plan,
+    _synthesis_mcp_verify,
 )
 from sibyl_core.auth import AuthOrganization, AuthUser
 from sibyl_core.models.context import (
@@ -200,6 +203,118 @@ async def test_compile_mcp_context_pack_audits_render_receipt() -> None:
     assert kwargs["details"]["domain"] == "sibyl"
     assert kwargs["details"]["layer"] == "wake"
     assert kwargs["details"]["accessible_project_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_synthesis_mcp_plan_scopes_accessible_projects() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    synthesis_plan = AsyncMock(return_value={"run_id": "synthesis:1"})
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl_core.tools.core.synthesis_plan", synthesis_plan),
+    ):
+        result = await _synthesis_mcp_plan(
+            goal="Write roadmap",
+            output_type="roadmap",
+            project="project-a",
+            task_ids=["task-1"],
+        )
+
+    assert result == {"run_id": "synthesis:1"}
+    synthesis_plan.assert_awaited_once_with(
+        goal="Write roadmap",
+        output_type="roadmap",
+        audience=None,
+        depth="standard",
+        seed_query=None,
+        project="project-a",
+        domain=None,
+        entity_ids=None,
+        decision_ids=None,
+        task_ids=["task-1"],
+        artifact_ids=None,
+        required_sections=None,
+        constraints=None,
+        max_sections=6,
+        include_neighborhoods=True,
+        organization_id=ctx.org_id,
+        principal_id=ctx.user_id,
+        accessible_projects={"project-a"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_synthesis_mcp_verify_returns_verified_run() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    synthesis_verify = AsyncMock(return_value={"verification": {"status": "pass"}})
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl_core.tools.core.synthesis_verify", synthesis_verify),
+    ):
+        result = await _synthesis_mcp_verify(goal="Verify roadmap", project="project-a")
+
+    assert result == {"verification": {"status": "pass"}}
+    assert synthesis_verify.await_args.kwargs["accessible_projects"] == {"project-a"}
+    assert synthesis_verify.await_args.kwargs["principal_id"] == ctx.user_id
+
+
+@pytest.mark.asyncio
+async def test_synthesis_mcp_draft_authorizes_remembered_artifact() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    synthesis_draft = AsyncMock(
+        return_value={"artifact": {"remembered_memory_id": "memory:artifact"}}
+    )
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl_core.tools.core.synthesis_draft", synthesis_draft),
+    ):
+        result = await _synthesis_mcp_draft(
+            goal="Write roadmap",
+            project="project-a",
+            remember=True,
+            memory_scope="project",
+            tags=["roadmap"],
+        )
+
+    assert result == {
+        "artifact": {"remembered_memory_id": "memory:artifact"},
+        "policy_reason": "same_scope_write_allowed",
+    }
+    synthesis_draft.assert_awaited_once()
+    kwargs = synthesis_draft.await_args.kwargs
+    assert kwargs["remember"] is True
+    assert kwargs["memory_scope"] == "project"
+    assert kwargs["scope_key"] == "project-a"
+    assert kwargs["tags"] == ["roadmap"]
+    assert kwargs["accessible_projects"] == {"project-a"}
+
+
+@pytest.mark.asyncio
+async def test_synthesis_mcp_draft_denies_inaccessible_remember_scope() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    synthesis_draft = AsyncMock()
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl_core.tools.core.synthesis_draft", synthesis_draft),
+        pytest.raises(ValueError, match="Project access denied: project-b"),
+    ):
+        await _synthesis_mcp_draft(
+            goal="Write roadmap",
+            project="project-a",
+            remember=True,
+            memory_scope="project",
+            scope_key="project-b",
+        )
+
+    synthesis_draft.assert_not_awaited()
 
 
 @pytest.mark.asyncio

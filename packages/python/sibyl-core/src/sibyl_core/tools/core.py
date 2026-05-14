@@ -83,6 +83,24 @@ async def reflect_memory(*args: Any, **kwargs: Any) -> Any:
     return await _reflect_memory(*args, **kwargs)
 
 
+async def synthesis_plan(*args: Any, **kwargs: Any) -> Any:
+    from sibyl_core.tools.synthesis import synthesis_plan as _synthesis_plan
+
+    return await _synthesis_plan(*args, **kwargs)
+
+
+async def synthesis_draft(*args: Any, **kwargs: Any) -> Any:
+    from sibyl_core.tools.synthesis import synthesis_draft as _synthesis_draft
+
+    return await _synthesis_draft(*args, **kwargs)
+
+
+async def synthesis_verify(*args: Any, **kwargs: Any) -> Any:
+    from sibyl_core.tools.synthesis import synthesis_verify as _synthesis_verify
+
+    return await _synthesis_verify(*args, **kwargs)
+
+
 __all__ = [
     # Helper functions (for internal use)
     "MAX_CONTENT_LENGTH",
@@ -116,4 +134,7 @@ __all__ = [
     "reflection_pack_to_dict",
     "reflection_pack_to_markdown",
     "search",
+    "synthesis_draft",
+    "synthesis_plan",
+    "synthesis_verify",
 ]
