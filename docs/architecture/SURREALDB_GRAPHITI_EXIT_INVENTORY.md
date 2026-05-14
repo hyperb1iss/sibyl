@@ -70,6 +70,10 @@ owner, and deletion or retention criterion.
   - Class: `test`
   - Owner: v0.7 reflection
   - Criteria: Native reflection tests no longer instantiate Graphiti extraction clients.
+- `packages/python/sibyl-core/src/sibyl_core/tools/admin.py`
+  - Class: `admin`
+  - Owner: v0.7 archive compatibility
+  - Criteria: Backup restore helpers stop dynamically loading Graphiti node and edge classes.
 - `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/*`
   - Class: `compatibility`
   - Owner: v0.7 Graphiti exit
@@ -256,6 +260,17 @@ source metadata.
 - Owner: v0.7 reflection.
 - Verify: `moon run core:test -- tests/test_graph_client.py tests/test_reflect.py`.
 
+### `packages/python/sibyl-core/src/sibyl_core/tools/admin.py`
+
+- Behavior: backup restore helpers dynamically load legacy Graphiti episode node and edge classes
+  when restoring historical backup payloads.
+- Default-loop usage: none; default API, MCP, CLI, and worker import smoke does not call these
+  helpers.
+- Status: retained admin compatibility helper.
+- Removal condition: backup restore helpers stop dynamically loading Graphiti node and edge classes.
+- Owner: v0.7 archive compatibility.
+- Verify: `moon run graphiti-compatibility-test`.
+
 ### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/*`
 
 - Behavior: Surreal implementations of Graphiti node, edge, saga, community, and graph operation
@@ -408,8 +423,10 @@ flows.
 ## Dependency Boundary
 
 Default `sibyl-core` installs do not depend on `graphiti-core`. Retained Graphiti code lives behind
-the `compatibility` optional extra plus dev/test dependency groups so migration, admin, and
-compatibility tests can still exercise the old contracts deliberately.
+the `compatibility` optional extra plus the `sibyl-core` dev dependency group so migration, admin,
+and compatibility tests can still exercise the old contracts deliberately. The generated runtime
+inventory records dependency scope (`default`, `optional:compatibility`, or `dependency-group:dev`)
+and the inventory tests fail if `graphiti-core` appears in any default dependency set.
 
 Dependency files:
 
@@ -427,8 +444,9 @@ The import-blocking smoke test is now the default-loop proof alongside `moon run
 It starts a fresh Python process, blocks `graphiti_core` imports, and exercises native Surreal
 memory writes, wake/recall context retrieval, related expansion, temporal history, health/stats,
 manage task updates, prioritization, dependency cycle detection, document graph-link helpers,
-persisted reflection, CLI import, default MCP tool-module imports, MCP server construction, API job
-import, crawler graph-integration and pipeline imports, and prompt-hook import.
+persisted reflection, CLI import, default MCP tool-module imports, MCP server construction, API app
+construction, combined API/MCP app construction, worker entrypoint import, crawler graph-integration
+and pipeline imports, and prompt-hook import.
 
 Smoke command:
 
@@ -453,12 +471,13 @@ Default-loop cases:
   Surreal managers.
 - `reflect`: persisted reflection runs natively by default, with `SIBYL_NATIVE_WRITE=disabled` as
   the named compatibility rollback.
-- `entrypoints`: CLI, default MCP tool modules, MCP server construction, API job, and prompt-hook
-  imports stay Graphiti-free, including crawler graph-integration and pipeline imports.
+- `entrypoints`: CLI, default MCP tool modules, MCP server construction, API app construction,
+  combined API/MCP app construction, worker entrypoint import, and prompt-hook imports stay
+  Graphiti-free, including crawler graph-integration and pipeline imports.
 
 Closure condition:
 
 - The smoke test installs an import blocker for `graphiti_core`, exercises the core default-loop
   cases plus native explore, temporal, health/stats, manage actions, document graph-link helpers,
-  default entrypoints, and default MCP tool-module imports with native flags, and fails on any
-  import or construction path that reaches Graphiti.
+  default entrypoints, default API/MCP app factories, and default MCP tool-module imports with
+  native flags, and fails on any import or construction path that reaches Graphiti.

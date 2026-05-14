@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import tomllib
+import ast
+
 from tools.inventory.runtime_surface import (
     GRAPHITI_COMPATIBILITY_ALLOWLIST,
     GRAPHITI_EXIT_INVENTORY_PATH,
+    PYPROJECT_PATHS,
     REPO_ROOT,
     SNAPSHOT_PATH,
     GraphitiImportRecord,
@@ -69,6 +71,38 @@ GRAPHITI_OPS_CLASSIFICATIONS = (
 )
 
 
+def _embedded_no_graphiti_scripts() -> tuple[str, ...]:
+    test_path = REPO_ROOT / "packages/python/sibyl-core/tests/test_no_graphiti_default_loop.py"
+    tree = ast.parse(test_path.read_text(encoding="utf-8"), filename=str(test_path))
+    return tuple(
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and "Graphiti import forbidden" in node.value
+    )
+
+
+def _script_imports(script: str) -> set[str]:
+    tree = ast.parse(script)
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.add(node.module)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "import_module"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            imports.add(node.args[0].value)
+    return imports
+
+
 def runtime_surface_with_graphiti(
     *records: GraphitiImportRecord,
 ) -> RuntimeSurface:
@@ -126,6 +160,18 @@ def test_graphiti_exit_inventory_allows_named_compatibility_imports() -> None:
 
     assert graphiti_allowlist_record(record.path) is not None
     assert default_runtime_graphiti_imports(surface) == ()
+
+
+def test_graphiti_exit_inventory_detects_dynamic_imports() -> None:
+    surface = collect_runtime_surface()
+    record = next(
+        record
+        for record in surface.graphiti_imports
+        if record.path == "packages/python/sibyl-core/src/sibyl_core/tools/admin.py"
+    )
+
+    assert record.imports == ("graphiti_core.edges", "graphiti_core.nodes")
+    assert graphiti_allowlist_record(record.path) is not None
 
 
 def test_graphiti_exit_inventory_documents_allowlist_ownership() -> None:
@@ -238,38 +284,83 @@ def test_runtime_surface_finds_known_contracts() -> None:
 def test_dependency_inventory_covers_legacy_and_target_stack() -> None:
     surface = collect_runtime_surface()
     dependencies = {
-        (record.project, record.dependency, record.classification)
+        (record.project, record.scope, record.dependency, record.classification)
         for record in surface.dependencies
     }
 
     assert (
         "packages/python/sibyl-core/pyproject.toml",
+        "optional:compatibility",
+        "graphiti-core[anthropic,google-genai]>=0.28.2",
+        "graph",
+    ) in dependencies
+    assert (
+        "packages/python/sibyl-core/pyproject.toml",
+        "dependency-group:dev",
         "graphiti-core[anthropic,google-genai]>=0.28.2",
         "graph",
     ) in dependencies
     assert (
         "apps/api/pyproject.toml",
+        "default",
         "surrealdb>=1.0.8,<3.0",
         "target",
     ) in dependencies
 
 
-def test_graphiti_dependency_is_compatibility_only() -> None:
-    core_pyproject = tomllib.loads(
-        (REPO_ROOT / "packages/python/sibyl-core/pyproject.toml").read_text(encoding="utf-8")
-    )
-    default_dependencies = core_pyproject["project"]["dependencies"]
-    compatibility_dependencies = core_pyproject["project"]["optional-dependencies"]["compatibility"]
-    dev_dependencies = core_pyproject["dependency-groups"]["dev"]
+def test_dependency_inventory_scans_all_repo_pyprojects() -> None:
+    scanned = {path.relative_to(REPO_ROOT).as_posix() for path in PYPROJECT_PATHS}
 
-    assert not any(
-        parse_dependency_name(requirement) == "graphiti-core"
-        for requirement in default_dependencies
+    assert {
+        "apps/api/pyproject.toml",
+        "apps/cli/pyproject.toml",
+        "apps/e2e/pyproject.toml",
+        "hooks/pyproject.toml",
+        "packages/python/sibyl-core/pyproject.toml",
+        "pyproject.toml",
+    } <= scanned
+
+
+def test_graphiti_dependency_is_compatibility_only() -> None:
+    surface = collect_runtime_surface()
+    graphiti_dependencies = tuple(
+        record
+        for record in surface.dependencies
+        if parse_dependency_name(record.dependency) == "graphiti-core"
     )
-    assert any(
-        parse_dependency_name(requirement) == "graphiti-core"
-        for requirement in compatibility_dependencies
+
+    assert graphiti_dependencies
+    assert {record.project for record in graphiti_dependencies} == {
+        "packages/python/sibyl-core/pyproject.toml"
+    }
+    assert all(record.scope != "default" for record in graphiti_dependencies)
+    assert any(record.scope == "optional:compatibility" for record in graphiti_dependencies)
+    assert all(
+        record.scope == "optional:compatibility" or record.scope.startswith("dependency-group:")
+        for record in graphiti_dependencies
     )
-    assert any(
-        parse_dependency_name(requirement) == "graphiti-core" for requirement in dev_dependencies
-    )
+    assert all("anthropic" in record.dependency for record in graphiti_dependencies)
+    assert all("google-genai" in record.dependency for record in graphiti_dependencies)
+    assert all("falkordb" not in record.dependency for record in graphiti_dependencies)
+
+
+def test_no_graphiti_smoke_covers_default_entrypoints() -> None:
+    scripts = _embedded_no_graphiti_scripts()
+    entrypoint_script = next(script for script in scripts if "create_api_app" in script)
+    imports = _script_imports(entrypoint_script)
+
+    for expected in (
+        "sibyl.api.app",
+        "sibyl.main",
+        "sibyl.server",
+        "sibyl.jobs.worker",
+        "sibyl_core.retrieval.native",
+        "sibyl_cli.main",
+    ):
+        assert expected in imports
+
+    for expected in (
+        "apps/cli/src/sibyl_cli/data/hooks/session-start.py",
+        "apps/cli/src/sibyl_cli/data/hooks/user-prompt-submit.py",
+    ):
+        assert expected in entrypoint_script

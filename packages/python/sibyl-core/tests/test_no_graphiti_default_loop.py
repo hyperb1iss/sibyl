@@ -337,7 +337,7 @@ asyncio.run(main())
         env=env,
         text=True,
         capture_output=True,
-        timeout=20,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr + result.stdout
 
@@ -367,8 +367,17 @@ os.environ["SIBYL_MCP_AUTH_MODE"] = "off"
 os.environ["SIBYL_STORE"] = "surreal"
 
 cli_main = importlib.import_module("sibyl_cli.main")
+from sibyl.api.app import create_api_app
+from sibyl.main import create_combined_app
+import sibyl.jobs.backup
+import sibyl.jobs.consolidation
+import sibyl.jobs.crawl
 import sibyl.jobs.entities
+import sibyl.jobs.pending
+import sibyl.jobs.queue
+import sibyl.jobs.worker
 import sibyl.crawler.pipeline
+import sibyl_core.retrieval.native
 import sibyl_core.tools.admin
 import sibyl_core.tools.conflicts
 import sibyl_core.tools.explore
@@ -380,7 +389,18 @@ import sibyl.crawler.graph_integration
 from sibyl.server import create_mcp_server
 
 assert cli_main.app is not None
-assert create_mcp_server(host="127.0.0.1", port=3334) is not None
+api_app = create_api_app()
+mcp = create_mcp_server(host="127.0.0.1", port=3334)
+combined_app = create_combined_app(host="127.0.0.1", port=3334)
+api_paths = {getattr(route, "path", "") for route in api_app.routes}
+combined_routes = {
+    (getattr(route, "path", ""), getattr(route, "name", "")) for route in combined_app.routes
+}
+assert "/health" in api_paths
+assert any(str(path).startswith("/memory") for path in api_paths)
+assert mcp is not None
+assert ("/api", "api") in combined_routes
+assert ("", "mcp") in combined_routes
 
 root = Path(os.environ["SIBYL_REPO_ROOT"])
 runpy.run_path(str(root / "apps/cli/src/sibyl_cli/data/hooks/session-start.py"))
@@ -401,6 +421,6 @@ assert "graphiti_core" not in sys.modules
         env=env,
         text=True,
         capture_output=True,
-        timeout=20,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr + result.stdout

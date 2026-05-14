@@ -15,12 +15,18 @@ SNAPSHOT_PATH = REPO_ROOT / "docs/research/rust-port/INVENTORY.md"
 GRAPHITI_EXIT_INVENTORY_PATH = REPO_ROOT / "docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md"
 APP_PATH = REPO_ROOT / "apps/api/src/sibyl/api/app.py"
 MODELS_PATH = REPO_ROOT / "apps/api/src/sibyl/db/models.py"
-PYPROJECT_PATHS = [
-    REPO_ROOT / "pyproject.toml",
-    REPO_ROOT / "apps/api/pyproject.toml",
-    REPO_ROOT / "apps/cli/pyproject.toml",
-    REPO_ROOT / "packages/python/sibyl-core/pyproject.toml",
-]
+PYPROJECT_EXCLUDED_PARTS = {
+    ".git",
+    ".moon",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "build",
+    "dist",
+    "node_modules",
+}
 SOURCE_ROOTS = [
     REPO_ROOT / "apps/api/src",
     REPO_ROOT / "packages/python/sibyl-core/src",
@@ -74,6 +80,16 @@ TARGET_DEPENDENCY_NAMES = {"surrealdb"}
 GraphitiSurfaceClass = Literal["admin", "archived_docs", "compatibility", "migration", "test"]
 
 
+def _is_repo_pyproject(path: Path) -> bool:
+    relative_parts = path.relative_to(REPO_ROOT).parts
+    return not any(part in PYPROJECT_EXCLUDED_PARTS for part in relative_parts)
+
+
+PYPROJECT_PATHS = tuple(
+    sorted(path for path in REPO_ROOT.rglob("pyproject.toml") if _is_repo_pyproject(path))
+)
+
+
 @dataclass(frozen=True, slots=True)
 class HttpRoute:
     method: str
@@ -122,6 +138,7 @@ class DependencyRecord:
     project: str
     dependency: str
     classification: str
+    scope: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +203,12 @@ GRAPHITI_COMPATIBILITY_ALLOWLIST = (
         classification="test",
         owner="v0.7 reflection",
         criteria="Native reflection tests no longer instantiate Graphiti extraction clients.",
+    ),
+    GraphitiCompatibilityRecord(
+        path="packages/python/sibyl-core/src/sibyl_core/tools/admin.py",
+        classification="admin",
+        owner="v0.7 archive compatibility",
+        criteria="Backup restore helpers stop dynamically loading Graphiti node and edge classes.",
     ),
     GraphitiCompatibilityRecord(
         path="packages/python/sibyl-core/src/sibyl_core/graph/surreal/compat/ops/*",
@@ -294,12 +317,12 @@ def render_dependency_table(title: str, records: tuple[DependencyRecord, ...]) -
         return lines
     lines.extend(
         [
-            "| Project | Dependency |",
-            "| ------- | ---------- |",
+            "| Project | Scope | Dependency |",
+            "| ------- | ----- | ---------- |",
         ]
     )
     for record in records:
-        lines.append(f"| `{record.project}` | `{record.dependency}` |")
+        lines.append(f"| `{record.project}` | `{record.scope}` | `{record.dependency}` |")
     return lines
 
 
@@ -472,6 +495,10 @@ def collect_graphiti_imports() -> tuple[GraphitiImportRecord, ...]:
                     module = node.module or ""
                     if module.startswith(GRAPHITI_IMPORT_PREFIXES):
                         imports.add(module)
+                elif isinstance(node, ast.Call):
+                    dynamic_import = graphiti_dynamic_import_name(node)
+                    if dynamic_import is not None:
+                        imports.add(dynamic_import)
             if imports:
                 records.append(
                     GraphitiImportRecord(path=relpath(path), imports=tuple(sorted(imports)))
@@ -479,29 +506,50 @@ def collect_graphiti_imports() -> tuple[GraphitiImportRecord, ...]:
     return tuple(records)
 
 
-def extract_dependency_strings(pyproject: dict[str, Any]) -> list[str]:
-    strings: list[str] = []
+def graphiti_dynamic_import_name(node: ast.Call) -> str | None:
+    if not node.args:
+        return None
+
+    function_name: str | None = None
+    if isinstance(node.func, ast.Name):
+        function_name = node.func.id
+    elif isinstance(node.func, ast.Attribute):
+        function_name = node.func.attr
+
+    if function_name not in {"__import__", "import_module"}:
+        return None
+
+    module_arg = node.args[0]
+    if not isinstance(module_arg, ast.Constant) or not isinstance(module_arg.value, str):
+        return None
+    if not module_arg.value.startswith(GRAPHITI_IMPORT_PREFIXES):
+        return None
+    return module_arg.value
+
+
+def extract_dependency_items(pyproject: dict[str, Any]) -> list[tuple[str, str]]:
+    items: list[tuple[str, str]] = []
     project = pyproject.get("project", {})
-    strings.extend(project.get("dependencies", []))
+    items.extend(("default", dependency) for dependency in project.get("dependencies", []))
 
     optional_groups = project.get("optional-dependencies", {})
-    for dependencies in optional_groups.values():
-        strings.extend(dependencies)
+    for group_name, dependencies in optional_groups.items():
+        items.extend((f"optional:{group_name}", dependency) for dependency in dependencies)
 
     dependency_groups = pyproject.get("dependency-groups", {})
-    for dependencies in dependency_groups.values():
-        strings.extend(dependencies)
+    for group_name, dependencies in dependency_groups.items():
+        items.extend((f"dependency-group:{group_name}", dependency) for dependency in dependencies)
 
-    return strings
+    return items
 
 
 def collect_dependencies() -> tuple[DependencyRecord, ...]:
     records: list[DependencyRecord] = []
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, str]] = set()
     for pyproject_path in PYPROJECT_PATHS:
         data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
         project_name = relpath(pyproject_path)
-        for requirement in extract_dependency_strings(data):
+        for scope, requirement in extract_dependency_items(data):
             dependency_name = parse_dependency_name(requirement)
             classification: str | None = None
             if dependency_name in LEGACY_DEPENDENCY_NAMES or "falkordb" in requirement:
@@ -512,7 +560,7 @@ def collect_dependencies() -> tuple[DependencyRecord, ...]:
                 classification = "target"
             if classification is None:
                 continue
-            key = (project_name, requirement, classification)
+            key = (project_name, requirement, classification, scope)
             if key in seen:
                 continue
             seen.add(key)
@@ -521,11 +569,18 @@ def collect_dependencies() -> tuple[DependencyRecord, ...]:
                     project=project_name,
                     dependency=requirement,
                     classification=classification,
+                    scope=scope,
                 )
             )
     return tuple(
         sorted(
-            records, key=lambda record: (record.classification, record.project, record.dependency)
+            records,
+            key=lambda record: (
+                record.classification,
+                record.project,
+                record.scope,
+                record.dependency,
+            ),
         )
     )
 
