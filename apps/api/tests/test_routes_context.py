@@ -9,6 +9,7 @@ import pytest
 
 from sibyl.api.routes.context import context_pack
 from sibyl.api.schemas import ContextPackRequest, ReflectionRequest
+from sibyl.auth.authorization import ProjectAuthorizationError
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl_core.auth import ProjectRole
 from sibyl_core.models.context import (
@@ -370,6 +371,89 @@ class TestContextPackRoute:
             required_role=ProjectRole.VIEWER,
         )
         compile_context.assert_not_awaited()
+        assert exc.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_context_pack_audits_project_access_denial(
+        self,
+        context_audit_event: AsyncMock,
+    ) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = _ctx()
+        http_request = _http_request()
+
+        with (
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(
+                    side_effect=ProjectAuthorizationError(
+                        project_id="proj_2",
+                        required_role=ProjectRole.VIEWER,
+                        actual_role=None,
+                    )
+                ),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock()) as compile_context,
+            pytest.raises(ProjectAuthorizationError),
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal="ship faster", project="proj_2"),
+                http_request=http_request,
+                org=org,
+                ctx=ctx,
+            )
+
+        compile_context.assert_not_awaited()
+        context_audit_event.assert_awaited_once()
+        kwargs = context_audit_event.await_args.kwargs
+        assert kwargs["action"] == "memory.context_pack.deny"
+        assert kwargs["user_id"] == "user-123"
+        assert kwargs["organization_id"] == "00000000-0000-0000-0000-000000000111"
+        assert kwargs["request"] is http_request
+        assert kwargs["memory_scope"] == "project"
+        assert kwargs["scope_key"] == "proj_2"
+        assert kwargs["project_id"] == "proj_2"
+        assert kwargs["source_surface"] == "context_pack"
+        assert kwargs["source_ids"] == []
+        assert kwargs["derived_ids"] == []
+        assert kwargs["policy_allowed"] is False
+        assert kwargs["policy_reason"] == "project_access_denied"
+        assert kwargs["details"] == {
+            "requested_project_id": "proj_2",
+            "route_action": "context_pack",
+        }
+
+    @pytest.mark.asyncio
+    async def test_context_pack_audit_failure_keeps_project_denial_closed(
+        self,
+        context_audit_event: AsyncMock,
+    ) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = _ctx()
+        context_audit_event.side_effect = RuntimeError("audit backend unavailable")
+
+        with (
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(
+                    side_effect=ProjectAuthorizationError(
+                        project_id="proj_2",
+                        required_role=ProjectRole.VIEWER,
+                        actual_role=None,
+                    )
+                ),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock()) as compile_context,
+            pytest.raises(ProjectAuthorizationError) as exc,
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal="ship faster", project="proj_2"),
+                org=org,
+                ctx=ctx,
+            )
+
+        compile_context.assert_not_awaited()
+        context_audit_event.assert_awaited_once()
         assert exc.value.status_code == 403
 
 
@@ -851,3 +935,55 @@ class TestReflectRoute:
         )
         reflect_memory.assert_not_awaited()
         assert exc.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_reflect_audits_project_access_denial(
+        self,
+        context_audit_event: AsyncMock,
+    ) -> None:
+        from sibyl.api.routes.context import reflect_context
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = _ctx()
+        http_request = _http_request()
+
+        with (
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(
+                    side_effect=ProjectAuthorizationError(
+                        project_id="proj_2",
+                        required_role=ProjectRole.VIEWER,
+                        actual_role=None,
+                    )
+                ),
+            ),
+            patch("sibyl_core.tools.core.reflect_memory", AsyncMock()) as reflect_memory,
+            pytest.raises(ProjectAuthorizationError),
+        ):
+            await reflect_context(
+                request=ReflectionRequest(content="notes", project="proj_2"),
+                http_request=http_request,
+                org=org,
+                ctx=ctx,
+            )
+
+        reflect_memory.assert_not_awaited()
+        context_audit_event.assert_awaited_once()
+        kwargs = context_audit_event.await_args.kwargs
+        assert kwargs["action"] == "memory.reflect.deny"
+        assert kwargs["user_id"] == "user-123"
+        assert kwargs["organization_id"] == "00000000-0000-0000-0000-000000000111"
+        assert kwargs["request"] is http_request
+        assert kwargs["memory_scope"] == "project"
+        assert kwargs["scope_key"] == "proj_2"
+        assert kwargs["project_id"] == "proj_2"
+        assert kwargs["source_surface"] == "context_reflect"
+        assert kwargs["source_ids"] == []
+        assert kwargs["derived_ids"] == []
+        assert kwargs["policy_allowed"] is False
+        assert kwargs["policy_reason"] == "project_access_denied"
+        assert kwargs["details"] == {
+            "requested_project_id": "proj_2",
+            "route_action": "context_reflect",
+        }

@@ -5,16 +5,21 @@ from typing import cast
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from sibyl.api.context_audit import log_context_pack_audit, log_reflection_audit
+from sibyl.api.context_audit import (
+    log_context_pack_audit,
+    log_denied_render_audit,
+    log_reflection_audit,
+)
 from sibyl.api.schemas import (
     ContextPackRequest,
     ContextPackResponse,
     ReflectionRequest,
     ReflectionResponse,
 )
-from sibyl.auth.authorization import verify_entity_project_access
+from sibyl.auth.authorization import ProjectAuthorizationError, verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
+from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 
@@ -151,6 +156,18 @@ async def context_pack(
         )
         return response
 
+    except (ProjectAccessDeniedError, ProjectAuthorizationError) as exc:
+        await log_denied_render_audit(
+            action="memory.context_pack.deny",
+            user_id=ctx.user_id,
+            organization_id=str(org.id),
+            request=http_request,
+            project=request.project,
+            source_surface="context_pack",
+            route_action="context_pack",
+            reason=exc,
+        )
+        raise
     except HTTPException:
         raise
     except ValueError as e:
@@ -228,6 +245,18 @@ async def reflect_context(
         )
         return response
 
+    except (ProjectAccessDeniedError, ProjectAuthorizationError) as exc:
+        await log_denied_render_audit(
+            action="memory.reflect.deny",
+            user_id=ctx.user_id,
+            organization_id=str(org.id),
+            request=http_request,
+            project=request.project,
+            source_surface="context_reflect",
+            route_action="context_reflect",
+            reason=exc,
+        )
+        raise
     except HTTPException:
         raise
     except ValueError as e:

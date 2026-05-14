@@ -1653,6 +1653,32 @@ Exit criteria:
 - Request attribution is present for REST denied-render receipts.
 - Deny receipts do not leak hidden source text or source IDs that were never authorized.
 
+B4.7 receipt, 2026-05-14:
+
+- Added `log_denied_render_audit` as a metadata-only context audit helper for pre-render denial
+  receipts.
+- REST `/context/pack` now emits `memory.context_pack.deny` when requested project access fails
+  before context compilation.
+- REST `/context/reflect` now emits `memory.reflect.deny` when requested project access fails before
+  reflection rendering.
+- The denial handler covers both the structured `ProjectAccessDeniedError` and the deprecated
+  production `ProjectAuthorizationError` while the old runtime exception is still present.
+- Deny receipts include actor, organization, request attribution, project scope, requested project
+  ID, route action, source surface, policy denial state, and stable reason code. They intentionally
+  carry empty source and derived ID lists because no source selection has happened yet.
+- Tests also assert that an audit writer failure still leaves the user request fail-closed with the
+  original project denial.
+- `moon run api:test -- tests/test_routes_context.py tests/test_surreal_auth_runtime.py`: 70 passed
+  in 1.43s.
+- `moon run api:lint api:typecheck`: lint passed; typecheck exited 0 with the existing 62 ty
+  diagnostics.
+- `moon run memory-trust-gate`: PASS with 6 checks, 0 failed.
+- Independent review initially found that the handler missed the deprecated production
+  `ProjectAuthorizationError`; the follow-up review passed at
+  `/tmp/claude-review-b47-denied-render-followup.zKY7ME`.
+- Remaining B4 risk: source-level memory inspect is still missing from B4.6, and MCP denied render
+  receipts remain requestless until the MCP tool layer exposes a trustworthy request object.
+
 ### Packet B5.1: Reflection Promotion Preview
 
 Purpose: add a dry-run surface for promotion decisions before any native memory write happens.

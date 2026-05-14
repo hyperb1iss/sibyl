@@ -137,6 +137,15 @@ def _reflection_policy_state(pack: ReflectionPack) -> tuple[bool | None, str]:
     return False, "reflection_policy_denied"
 
 
+def _exception_reason(exc: BaseException) -> str:
+    detail = getattr(exc, "detail", None)
+    if isinstance(detail, Mapping):
+        reason = detail.get("error")
+        if reason:
+            return str(reason)
+    return exc.__class__.__name__
+
+
 async def log_context_pack_audit(
     *,
     user_id: str | None,
@@ -192,6 +201,50 @@ async def log_context_pack_audit(
     except Exception as exc:
         log.warning(
             "context_pack_audit_event_failed",
+            error=str(exc),
+            source_surface=source_surface,
+            exc_info=True,
+        )
+
+
+async def log_denied_render_audit(
+    *,
+    action: str,
+    user_id: str | None,
+    organization_id: str,
+    request: object | None = None,
+    project: str | None,
+    source_surface: str,
+    route_action: str,
+    reason: str | BaseException,
+) -> None:
+    """Record a metadata-only receipt for context or reflection denial before render."""
+
+    memory_scope, scope_key, project_id = _audit_scope(project=project)
+    policy_reason = _exception_reason(reason) if isinstance(reason, BaseException) else reason
+    try:
+        await log_memory_audit_event(
+            action=action,
+            user_id=user_id,
+            organization_id=organization_id,
+            request=request,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            project_id=project_id,
+            source_surface=source_surface,
+            source_ids=[],
+            derived_ids=[],
+            policy_allowed=False,
+            policy_reason=policy_reason,
+            details={
+                "requested_project_id": project,
+                "route_action": route_action,
+            },
+        )
+    except Exception as exc:
+        log.warning(
+            "render_deny_audit_event_failed",
+            action=action,
             error=str(exc),
             source_surface=source_surface,
             exc_info=True,
@@ -265,4 +318,4 @@ async def log_reflection_audit(
         )
 
 
-__all__ = ["log_context_pack_audit", "log_reflection_audit"]
+__all__ = ["log_context_pack_audit", "log_denied_render_audit", "log_reflection_audit"]
