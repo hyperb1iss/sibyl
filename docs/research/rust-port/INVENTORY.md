@@ -76,7 +76,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 ### Graphiti import files
 - `packages/python/sibyl-core/src/sibyl_core/backends/surreal/driver.py` — class: `compatibility`; imports: `graphiti_core.driver.driver`
 - `packages/python/sibyl-core/src/sibyl_core/graph/cached_embedder.py` — class: `compatibility`; imports: `graphiti_core.embedder.client`
-- `packages/python/sibyl-core/src/sibyl_core/graph/client.py` — class: `compatibility`; imports: `graphiti_core`, `graphiti_core.driver.driver`, `graphiti_core.embedder.client`, `graphiti_core.embedder.openai`, `graphiti_core.helpers`, `graphiti_core.llm_client`, `graphiti_core.llm_client.anthropic_client`, `graphiti_core.llm_client.config`, `graphiti_core.llm_client.openai_client`
+- `packages/python/sibyl-core/src/sibyl_core/graph/client.py` — class: `compatibility`; imports: `graphiti_core`, `graphiti_core.driver.driver`, `graphiti_core.embedder.client`, `graphiti_core.helpers`, `graphiti_core.llm_client`, `graphiti_core.llm_client.anthropic_client`, `graphiti_core.llm_client.config`, `graphiti_core.llm_client.openai_client`
 - `packages/python/sibyl-core/src/sibyl_core/graph/entities.py` — class: `compatibility`; imports: `graphiti_core.nodes`, `graphiti_core.search.search_config_recipes`
 - `packages/python/sibyl-core/src/sibyl_core/graph/gemini_embedder.py` — class: `compatibility`; imports: `graphiti_core.embedder.client`
 - `packages/python/sibyl-core/src/sibyl_core/graph/mock_llm.py` — class: `test`; imports: `graphiti_core.llm_client.client`, `graphiti_core.llm_client.config`, `graphiti_core.prompts.models`

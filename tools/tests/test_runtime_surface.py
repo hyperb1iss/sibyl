@@ -58,6 +58,15 @@ API_GRAPHITI_COMPATIBILITY_MARKED_TESTS = (
     "tests/test_settings_api_key_loading.py",
     "tests/test_tools_manage.py",
 )
+GRAPHITI_OPS_ROOT = REPO_ROOT / "packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops"
+GRAPHITI_OPS_CLASSIFICATIONS = (
+    "delete",
+    "migrate-to-native",
+    "compatibility-retain",
+    "admin-only",
+    "benchmark-only",
+    "historical migration",
+)
 
 
 def runtime_surface_with_graphiti(
@@ -127,6 +136,26 @@ def test_graphiti_exit_inventory_documents_allowlist_ownership() -> None:
         assert f"`{allowed.path}`" in inventory
         assert f"Owner: {allowed.owner}" in normalized_inventory
         assert allowed.criteria in normalized_inventory
+
+
+def test_graphiti_exit_inventory_classifies_each_ops_module() -> None:
+    inventory = GRAPHITI_EXIT_INVENTORY_PATH.read_text(encoding="utf-8")
+    ops_paths = tuple(
+        path.relative_to(REPO_ROOT).as_posix() for path in sorted(GRAPHITI_OPS_ROOT.glob("*.py"))
+    )
+
+    assert ops_paths
+    for ops_path in ops_paths:
+        heading = f"#### `{ops_path}`"
+        assert heading in inventory
+        section = inventory.split(heading, maxsplit=1)[1].split("\n#### ", maxsplit=1)[0]
+        assert any(
+            f"- Classification: `{classification}`" in section
+            for classification in GRAPHITI_OPS_CLASSIFICATIONS
+        )
+        assert "- Owner:" in section
+        assert "- Removal condition:" in section
+        assert "- Verify:" in section
 
 
 def test_graphiti_compatibility_test_island_is_named() -> None:

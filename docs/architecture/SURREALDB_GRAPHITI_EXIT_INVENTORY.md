@@ -262,10 +262,130 @@ source metadata.
   contracts.
 - Default-loop usage: compatibility substrate beneath remaining Graphiti client paths.
 - Status: retained compatibility adapter package.
+- Classification: `compatibility-retain`
 - Removal condition: no default or fallback memory path constructs Graphiti or calls Graphiti model
   operation interfaces.
 - Owner: v0.7 Graphiti exit.
 - Verify: `moon run core:test -- tests/graph/surreal`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/__init__.py`
+
+- Classification: `compatibility-retain`
+- Behavior: package marker for the Graphiti operation adapter modules.
+- Owner: v0.8 Graphiti ops disposition.
+- Removal condition: delete with the ops package after the Surreal driver stops exposing Graphiti
+  operation factories.
+- Verify: `moon run inventory-check inventory-typecheck inventory-test`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/_common.py`
+
+- Classification: `compatibility-retain`
+- Behavior: shared query, RecordID, embedding, and record-normalization helpers for Graphiti-shaped
+  operation adapters.
+- Owner: v0.8 Graphiti ops disposition.
+- Removal condition: move with retained compatibility modules or delete when no Graphiti operation
+  adapter imports it.
+- Verify: `moon run core:graphiti-compatibility-file-test -- tests/graph/surreal`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/community_edge_ops.py`
+
+- Classification: `compatibility-retain`
+- Behavior: Graphiti `CommunityEdgeOperations` over the `has_member` relation.
+- Owner: v0.8 Graphiti ops disposition.
+- Removal condition: native community membership reads and writes cover admin and compatibility
+  callers without Graphiti `CommunityEdge` models.
+- Verify: `moon run core:graphiti-compatibility-file-test -- tests/graph/surreal`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/community_node_ops.py`
+
+- Classification: `compatibility-retain`
+- Behavior: Graphiti `CommunityNodeOperations` over the `community` table.
+- Owner: v0.8 Graphiti ops disposition.
+- Removal condition: native community services own community node persistence, hydration, and lookup
+  without Graphiti `CommunityNode` parsers.
+- Verify: `moon run core:graphiti-compatibility-file-test -- tests/graph/surreal`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/entity_edge_ops.py`
+
+- Classification: `migrate-to-native`
+- Behavior: Graphiti `EntityEdgeOperations` over native `relates_to` records.
+- Owner: v0.8 native relationship manager.
+- Removal condition: native relationship manager covers edge save, lookup, semantic payload
+  hydration, and temporal reads for all default and admin callers.
+- Verify: `moon run core:test -- tests/test_native_relationship_manager.py`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/entity_node_ops.py`
+
+- Classification: `migrate-to-native`
+- Behavior: Graphiti `EntityNodeOperations` over native `entity` records.
+- Owner: v0.8 native entity manager.
+- Removal condition: native entity manager covers save, bulk save, lookup, embedding hydration, and
+  dynamic attribute projection for all default and admin callers.
+- Verify: `moon run core:test -- tests/test_native_entity_manager.py`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/episode_node_ops.py`
+
+- Classification: `historical migration`
+- Behavior: Graphiti `EpisodeNodeOperations` over legacy `episode` records.
+- Owner: v0.8 archive migration.
+- Removal condition: historical Graphiti episode imports project directly into native raw-memory and
+  entity records without constructing `EpisodicNode`.
+- Verify: `moon run core:test -- tests/test_migrate_archive.py`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/episodic_edge_ops.py`
+
+- Classification: `migrate-to-native`
+- Behavior: Graphiti `EpisodicEdgeOperations` over native `mentions` relations.
+- Owner: v0.8 native relationship manager.
+- Removal condition: native relationship manager owns episode-to-entity mention creation, hydration,
+  and lookup for default writes and historical imports.
+- Verify: `moon run core:test -- tests/test_native_relationship_manager.py`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/graph_operations_interface.py`
+
+- Classification: `compatibility-retain`
+- Behavior: adapter that maps Graphiti classmethod-style graph operations back onto Surreal driver
+  operation properties.
+- Owner: v0.8 Graphiti ops disposition.
+- Removal condition: no Graphiti node or edge class is constructed against the Surreal driver.
+- Verify: `moon run core:graphiti-compatibility-file-test -- tests/graph/surreal`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/graph_ops.py`
+
+- Classification: `admin-only`
+- Behavior: Graphiti `GraphMaintenanceOperations` for clear-data, schema bootstrap, index deletion,
+  legacy community clustering, and community cleanup.
+- Owner: v0.8 graph admin.
+- Removal condition: native graph admin tools own maintenance and community clustering without
+  Graphiti maintenance interfaces.
+- Verify: `moon run core:test -- tests/test_tools_admin.py`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/has_episode_edge_ops.py`
+
+- Classification: `historical migration`
+- Behavior: Graphiti `HasEpisodeEdgeOperations` over saga-to-episode `has_episode` relations.
+- Owner: v0.8 archive migration.
+- Removal condition: saga and episode sequence imports are either dropped as legacy-only metadata or
+  projected through native archive restore code.
+- Verify: `moon run core:test -- tests/test_migrate_archive.py`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/next_episode_edge_ops.py`
+
+- Classification: `historical migration`
+- Behavior: Graphiti `NextEpisodeEdgeOperations` over episode-to-episode `next_episode` relations.
+- Owner: v0.8 archive migration.
+- Removal condition: episode ordering imports are either dropped as legacy-only metadata or
+  projected through native archive restore code.
+- Verify: `moon run core:test -- tests/test_migrate_archive.py`.
+
+#### `packages/python/sibyl-core/src/sibyl_core/graph/surreal/ops/saga_node_ops.py`
+
+- Classification: `historical migration`
+- Behavior: Graphiti `SagaNodeOperations` over legacy `saga` records.
+- Owner: v0.8 archive migration.
+- Removal condition: saga imports are either dropped as legacy-only metadata or projected through
+  native archive restore code.
+- Verify: `moon run core:test -- tests/test_migrate_archive.py`.
 
 ### `packages/python/sibyl-core/src/sibyl_core/tasks/workflow.py`
 
