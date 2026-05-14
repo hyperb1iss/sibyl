@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from sibyl_core.models.context import ContextFacet, ContextIntent, ContextLayer
 from sibyl_core.models.entities import EntityType, RelationshipType
 from sibyl_core.models.synthesis import (
+    SynthesisArtifactFormat,
     SynthesisDepth,
     SynthesisOutputType,
     SynthesisRunStatus,
@@ -863,6 +864,38 @@ class SynthesisPlanResponse(BaseModel):
     outline: SynthesisOutlineResponse
     source_packs: list[SynthesisSourcePackResponse] = Field(default_factory=list)
     verification: SynthesisVerificationResponse
+
+
+class SynthesisDraftRequest(SynthesisPlanRequest):
+    """Request for a drafted, verified synthesis artifact."""
+
+    output_format: SynthesisArtifactFormat = Field(default=SynthesisArtifactFormat.MARKDOWN)
+    remember: bool = Field(default=False, description="Persist the generated artifact")
+    memory_scope: MemoryScopeLiteral = Field(default="private", description="Artifact memory scope")
+    scope_key: str | None = Field(default=None, description="Artifact scope key")
+    tags: list[str] = Field(default_factory=list, max_length=50)
+
+
+class SynthesisArtifactResponse(BaseModel):
+    """Generated source-grounded synthesis artifact."""
+
+    artifact_id: str
+    format: SynthesisArtifactFormat
+    title: str
+    markdown: str
+    json_payload: dict[str, Any] = Field(default_factory=dict)
+    source_ids: list[str] = Field(default_factory=list)
+    section_source_ids: dict[str, list[str]] = Field(default_factory=dict)
+    generated_text_hash: str
+    verification: SynthesisVerificationResponse
+    remembered_memory_id: str | None = None
+    remembered_source_id: str | None = None
+
+
+class SynthesisDraftResponse(SynthesisPlanResponse):
+    """Synthesis response with a drafted artifact."""
+
+    artifact: SynthesisArtifactResponse
 
 
 class ReflectionRequest(BaseModel):

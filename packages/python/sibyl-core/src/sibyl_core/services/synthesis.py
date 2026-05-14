@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import asdict, replace
@@ -10,6 +11,8 @@ from typing import Any
 
 from sibyl_core.models.context import ContextIntent, ContextLayer, ContextPack
 from sibyl_core.models.synthesis import (
+    SynthesisArtifact,
+    SynthesisArtifactFormat,
     SynthesisGap,
     SynthesisOutline,
     SynthesisOutlineSection,
@@ -28,6 +31,7 @@ from sibyl_core.tools.responses import ExploreResponse, SearchResponse, SearchRe
 SynthesisSearchFn = Callable[..., Awaitable[SearchResponse]]
 SynthesisRelatedFn = Callable[..., Awaitable[list[SynthesisSourceReference]]]
 SynthesisContextFn = Callable[..., Awaitable[ContextPack]]
+SynthesisRememberFn = Callable[..., Awaitable[Any]]
 
 SECTION_TEMPLATES: dict[SynthesisOutputType, list[tuple[str, str]]] = {
     SynthesisOutputType.DOCUMENTATION: [
@@ -94,6 +98,11 @@ TOKEN_STOPWORDS = {
     "this",
     "with",
 }
+SOURCE_ABSENCE_GAP_REASONS = {
+    "no_source_supports_requested_section",
+    "no_materialized_sources",
+    "no_citable_sources",
+}
 
 
 async def default_search(**kwargs: Any) -> SearchResponse:
@@ -125,6 +134,12 @@ async def default_context_pack(**kwargs: Any) -> ContextPack:
     from sibyl_core.tools.context import compile_context
 
     return await compile_context(**kwargs)
+
+
+async def default_remember_artifact(**kwargs: Any) -> Any:
+    from sibyl_core.services.surreal_content import remember_raw_memory
+
+    return await remember_raw_memory(**kwargs)
 
 
 def _sources_from_explore(response: ExploreResponse) -> list[SynthesisSourceReference]:
@@ -568,6 +583,303 @@ async def materialize_synthesis_section_packs(
     )
 
 
+def _source_citation(source_id: str) -> str:
+    return f"[{source_id}]"
+
+
+def _verification_gap(
+    *,
+    pack: SynthesisSourcePack,
+    reason: str,
+    query: str,
+) -> SynthesisGap:
+    return SynthesisGap(
+        section_id=pack.section_id,
+        title=pack.title,
+        reason=reason,
+        query=query,
+    )
+
+
+def _dedupe_gaps(gaps: Iterable[SynthesisGap]) -> list[SynthesisGap]:
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[SynthesisGap] = []
+    for gap in gaps:
+        key = (gap.section_id, gap.reason, gap.query)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(gap)
+    return deduped
+
+
+def verify_synthesis_run(run: SynthesisRun) -> SynthesisVerification:
+    sourceful_sections = {
+        pack.section_id for pack in run.source_packs if pack.source_ids
+    }
+    gaps: list[SynthesisGap] = [
+        gap
+        for gap in run.verification.gaps
+        if not (
+            gap.section_id in sourceful_sections
+            and gap.reason in SOURCE_ABSENCE_GAP_REASONS
+        )
+    ]
+    for pack in run.source_packs:
+        if not pack.source_ids:
+            gaps.append(
+                _verification_gap(
+                    pack=pack,
+                    reason="no_citable_sources",
+                    query=pack.query,
+                )
+            )
+            continue
+        missing_freshness = [
+            source_id
+            for source_id in pack.source_ids
+            if not pack.freshness.get(source_id)
+        ]
+        if missing_freshness:
+            gaps.append(
+                _verification_gap(
+                    pack=pack,
+                    reason="missing_freshness_metadata",
+                    query=", ".join(missing_freshness),
+                )
+            )
+        for claim in pack.unresolved_claims:
+            gaps.append(
+                _verification_gap(
+                    pack=pack,
+                    reason="unresolved_claim",
+                    query=claim,
+                )
+            )
+
+    source_ids = {source_id for pack in run.source_packs for source_id in pack.source_ids}
+    deduped_gaps = _dedupe_gaps(gaps)
+    return SynthesisVerification(
+        status=(
+            SynthesisVerificationStatus.GAPS
+            if deduped_gaps
+            else SynthesisVerificationStatus.PASS
+        ),
+        source_count=len(source_ids),
+        gap_count=len(deduped_gaps),
+        gaps=deduped_gaps,
+    )
+
+
+def apply_synthesis_verification(run: SynthesisRun) -> SynthesisRun:
+    verification = verify_synthesis_run(run)
+    return replace(
+        run,
+        status=(
+            SynthesisRunStatus.VERIFIED
+            if verification.status is SynthesisVerificationStatus.PASS
+            else run.status
+        ),
+        verification=verification,
+    )
+
+
+def _source_to_json(source: SynthesisSourceReference, pack: SynthesisSourcePack) -> dict[str, Any]:
+    return {
+        "id": source.id,
+        "type": source.type,
+        "name": source.name,
+        "content_preview": source.content_preview,
+        "score": source.score,
+        "source": source.source,
+        "origin": source.origin,
+        "relation": source.relation,
+        "freshness": pack.freshness.get(source.id),
+        "metadata": dict(source.metadata),
+    }
+
+
+def _section_to_json(pack: SynthesisSourcePack) -> dict[str, Any]:
+    return {
+        "section_id": pack.section_id,
+        "title": pack.title,
+        "query": pack.query,
+        "source_ids": list(pack.source_ids),
+        "sources": [_source_to_json(source, pack) for source in pack.sources],
+        "hidden_count": pack.hidden_count,
+        "redaction_count": pack.redaction_count,
+        "freshness": dict(pack.freshness),
+        "unresolved_claims": list(pack.unresolved_claims),
+    }
+
+
+def _artifact_json_payload(
+    run: SynthesisRun,
+    verification: SynthesisVerification,
+) -> dict[str, Any]:
+    return {
+        "run_id": run.run_id,
+        "title": run.outline.title,
+        "output_type": run.outline.output_type.value,
+        "audience": run.outline.audience,
+        "sections": [_section_to_json(pack) for pack in run.source_packs],
+        "verification": asdict(verification),
+    }
+
+
+def _source_markdown(source: SynthesisSourceReference) -> str:
+    citation = _source_citation(source.id)
+    if not source.content_preview:
+        return f"- {source.name} {citation}"
+    return f"- {source.name}: {source.content_preview} {citation}"
+
+
+def _section_markdown(pack: SynthesisSourcePack) -> list[str]:
+    lines = [f"## {pack.title}", ""]
+    if pack.sources:
+        lines.extend(_source_markdown(source) for source in pack.sources)
+    else:
+        lines.append("_No citable sources were available for this section._")
+    lines.append("")
+    if pack.source_ids:
+        cited_sources = ", ".join(f"`{source_id}`" for source_id in pack.source_ids)
+        lines.append(f"Sources: {cited_sources}")
+    if pack.hidden_count:
+        lines.append(f"Hidden context omitted: {pack.hidden_count}")
+    if pack.redaction_count:
+        lines.append(f"Redacted source previews: {pack.redaction_count}")
+    if pack.freshness:
+        freshness = ", ".join(
+            f"`{source_id}`={value or 'unknown'}"
+            for source_id, value in sorted(pack.freshness.items())
+        )
+        lines.append(f"Freshness: {freshness}")
+    if pack.unresolved_claims:
+        lines.append("Unresolved claims:")
+        lines.extend(f"- {claim}" for claim in pack.unresolved_claims)
+    return lines
+
+
+def render_synthesis_markdown(
+    run: SynthesisRun,
+    verification: SynthesisVerification | None = None,
+) -> str:
+    current_verification = verification or verify_synthesis_run(run)
+    lines = [
+        f"# {run.outline.title}",
+        "",
+        f"Run: `{run.run_id}`",
+        f"Output type: `{run.outline.output_type.value}`",
+    ]
+    if run.outline.audience:
+        lines.append(f"Audience: {run.outline.audience}")
+    lines.extend(
+        [
+            f"Verification: `{current_verification.status.value}`",
+            "",
+        ]
+    )
+    for pack in run.source_packs:
+        lines.extend(_section_markdown(pack))
+        lines.append("")
+    if current_verification.gaps:
+        lines.extend(["## Verification Gaps", ""])
+        for gap in current_verification.gaps:
+            lines.append(f"- {gap.title}: {gap.reason} ({gap.query})")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def draft_synthesis_artifact(
+    run: SynthesisRun,
+    *,
+    output_format: SynthesisArtifactFormat = SynthesisArtifactFormat.MARKDOWN,
+) -> SynthesisArtifact:
+    verification = verify_synthesis_run(run)
+    markdown = render_synthesis_markdown(run, verification)
+    json_payload = _artifact_json_payload(run, verification)
+    generated_text_hash = hashlib.sha256(markdown.encode()).hexdigest()
+    source_ids = list(
+        dict.fromkeys(source_id for pack in run.source_packs for source_id in pack.source_ids)
+    )
+    section_source_ids = {
+        pack.section_id: list(pack.source_ids)
+        for pack in run.source_packs
+    }
+    artifact_id = f"artifact:{run.run_id.split(':', 1)[-1]}:{generated_text_hash[:12]}"
+    return SynthesisArtifact(
+        artifact_id=artifact_id,
+        format=output_format,
+        title=run.outline.title,
+        markdown=markdown,
+        json_payload=json_payload,
+        source_ids=source_ids,
+        section_source_ids=section_source_ids,
+        generated_text_hash=generated_text_hash,
+        verification=verification,
+    )
+
+
+async def remember_synthesis_artifact(
+    artifact: SynthesisArtifact,
+    run: SynthesisRun,
+    *,
+    organization_id: str,
+    principal_id: str,
+    memory_scope: str = "private",
+    scope_key: str | None = None,
+    tags: list[str] | None = None,
+    remember_fn: SynthesisRememberFn = default_remember_artifact,
+) -> SynthesisArtifact:
+    if not principal_id:
+        raise ValueError("principal_id is required")
+    content = (
+        artifact.markdown
+        if artifact.format is SynthesisArtifactFormat.MARKDOWN
+        else json.dumps(artifact.json_payload, indent=2, sort_keys=True)
+    )
+    source_id = f"{artifact.artifact_id}:generated"
+    memory = await remember_fn(
+        organization_id=organization_id,
+        principal_id=principal_id,
+        source_id=source_id,
+        raw_content=content,
+        title=artifact.title,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
+        tags=list(dict.fromkeys(["synthesis", run.request.output_type.value, *(tags or [])])),
+        metadata={
+            "capture_mode": "synthesis",
+            "capture_surface": "synthesis_artifact",
+            "remember_kind": "artifact",
+            "synthesis_run_id": run.run_id,
+            "synthesis_artifact_id": artifact.artifact_id,
+            "generated_text_hash": artifact.generated_text_hash,
+            "output_type": run.request.output_type.value,
+            "audience": run.request.audience,
+            "source_ids": list(artifact.source_ids),
+            "section_source_ids": dict(artifact.section_source_ids),
+            "verification": asdict(artifact.verification),
+            "unresolved_claims": [
+                claim
+                for pack in run.source_packs
+                for claim in pack.unresolved_claims
+            ],
+        },
+        provenance={
+            "synthesis_run_id": run.run_id,
+            "source_ids": list(artifact.source_ids),
+            "section_source_ids": dict(artifact.section_source_ids),
+        },
+        capture_surface="synthesis_artifact",
+        entity_type="artifact",
+    )
+    return replace(
+        artifact,
+        remembered_memory_id=str(getattr(memory, "id", "")) or None,
+        remembered_source_id=str(getattr(memory, "source_id", "")) or None,
+    )
+
+
 async def plan_synthesis(
     request: SynthesisRequest,
     *,
@@ -714,14 +1026,26 @@ def synthesis_run_to_dict(run: SynthesisRun) -> dict[str, Any]:
     return asdict(run)
 
 
+def synthesis_artifact_to_dict(artifact: SynthesisArtifact) -> dict[str, Any]:
+    return asdict(artifact)
+
+
 __all__ = [
     "SynthesisContextFn",
     "SynthesisRelatedFn",
+    "SynthesisRememberFn",
     "SynthesisSearchFn",
+    "apply_synthesis_verification",
     "default_context_pack",
     "default_related_sources",
+    "default_remember_artifact",
     "default_search",
+    "draft_synthesis_artifact",
     "materialize_synthesis_section_packs",
     "plan_synthesis",
+    "remember_synthesis_artifact",
+    "render_synthesis_markdown",
+    "synthesis_artifact_to_dict",
     "synthesis_run_to_dict",
+    "verify_synthesis_run",
 ]

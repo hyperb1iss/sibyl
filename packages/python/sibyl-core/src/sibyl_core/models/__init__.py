@@ -61,6 +61,8 @@ from sibyl_core.models.sources import (
     SourceType,
 )
 from sibyl_core.models.synthesis import (
+    SynthesisArtifact,
+    SynthesisArtifactFormat,
     SynthesisDepth,
     SynthesisGap,
     SynthesisOutline,
@@ -167,6 +169,8 @@ __all__ = [
     "SourceSkippedRecord",
     "SourceTransformBehavior",
     "SourceType",
+    "SynthesisArtifact",
+    "SynthesisArtifactFormat",
     "SynthesisDepth",
     "SynthesisGap",
     "SynthesisOutline",

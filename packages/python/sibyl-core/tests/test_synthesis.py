@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, Literal
 
 import pytest
@@ -13,13 +14,19 @@ from sibyl_core.models.context import (
     ContextSection,
 )
 from sibyl_core.models.synthesis import (
+    SynthesisArtifactFormat,
     SynthesisOutputType,
     SynthesisRequest,
     SynthesisSectionRequest,
     SynthesisSourceReference,
     SynthesisVerificationStatus,
 )
-from sibyl_core.services.synthesis import materialize_synthesis_section_packs, plan_synthesis
+from sibyl_core.services.synthesis import (
+    draft_synthesis_artifact,
+    materialize_synthesis_section_packs,
+    plan_synthesis,
+    remember_synthesis_artifact,
+)
 from sibyl_core.tools.responses import SearchResponse, SearchResult
 
 
@@ -471,3 +478,236 @@ async def test_materialize_synthesis_section_packs_hides_private_sources_by_prin
     assert "Ownerless private text" not in repr(pack)
     assert materialized.verification.status is SynthesisVerificationStatus.GAPS
     assert materialized.verification.gaps[-1].reason == "no_materialized_sources"
+
+
+@pytest.mark.asyncio
+async def test_draft_synthesis_artifact_renders_citable_markdown_and_json() -> None:
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    run = await plan_synthesis(
+        SynthesisRequest(
+            goal="Write citable report",
+            required_sections=[SynthesisSectionRequest(title="Evidence")],
+        ),
+        organization_id="org-123",
+        search_fn=fake_search,
+        related_fn=_empty_related,
+    )
+
+    async def fake_context(**kwargs: Any) -> ContextPack:
+        return ContextPack(
+            goal=kwargs["goal"],
+            intent=ContextIntent.RESEARCH,
+            query=kwargs["goal"],
+            domain=None,
+            project="proj-allowed",
+            sections=[
+                ContextSection(
+                    facet=ContextFacet.ARTIFACTS,
+                    title="Artifacts",
+                    items=[
+                        ContextItem(
+                            id="artifact:allowed",
+                            type="artifact",
+                            name="Allowed artifact",
+                            content="Allowed artifact text.",
+                            score=0.95,
+                            facet=ContextFacet.ARTIFACTS,
+                            reason="allowed source",
+                            source="source:allowed",
+                            quality=ContextItemQualityMetadata(
+                                project_id="proj-allowed",
+                                updated_at="2026-05-14T12:00:00Z",
+                            ),
+                            metadata={"source_id": "source:allowed"},
+                        ),
+                        ContextItem(
+                            id="artifact:hidden",
+                            type="artifact",
+                            name="Hidden artifact",
+                            content="Hidden text must never draft.",
+                            score=0.9,
+                            facet=ContextFacet.ARTIFACTS,
+                            reason="hidden source",
+                            source="source:hidden",
+                            quality=ContextItemQualityMetadata(project_id="proj-secret"),
+                            metadata={"source_id": "source:hidden"},
+                        ),
+                    ],
+                )
+            ],
+            total_items=2,
+        )
+
+    materialized = await materialize_synthesis_section_packs(
+        run,
+        organization_id="org-123",
+        principal_id="user-123",
+        accessible_projects={"proj-allowed"},
+        context_fn=fake_context,
+    )
+
+    artifact = draft_synthesis_artifact(materialized)
+
+    assert artifact.verification.status is SynthesisVerificationStatus.PASS
+    assert artifact.source_ids == ["source:allowed"]
+    assert "Allowed artifact text. [source:allowed]" in artifact.markdown
+    assert "Hidden text must never draft" not in artifact.markdown
+    assert "Hidden context omitted: 1" in artifact.markdown
+    assert artifact.json_payload["sections"][0]["source_ids"] == ["source:allowed"]
+    assert artifact.json_payload["sections"][0]["hidden_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_draft_synthesis_artifact_reports_unresolved_and_freshness_gaps() -> None:
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    run = await plan_synthesis(
+        SynthesisRequest(
+            goal="Write gap report",
+            required_sections=[SynthesisSectionRequest(title="Claims")],
+        ),
+        organization_id="org-123",
+        search_fn=fake_search,
+        related_fn=_empty_related,
+    )
+
+    async def fake_context(**kwargs: Any) -> ContextPack:
+        return ContextPack(
+            goal=kwargs["goal"],
+            intent=ContextIntent.RESEARCH,
+            query=kwargs["goal"],
+            domain=None,
+            project=None,
+            sections=[
+                ContextSection(
+                    facet=ContextFacet.RECENT_MEMORY,
+                    title="Memory",
+                    items=[
+                        ContextItem(
+                            id="raw_memory:claim",
+                            type="raw_memory",
+                            name="Unsupported claim",
+                            content="This claim needs follow-up.",
+                            score=0.7,
+                            facet=ContextFacet.RECENT_MEMORY,
+                            reason="claim source",
+                            source="source:claim",
+                            metadata={
+                                "source_id": "source:claim",
+                                "unresolved_claims": ["needs external confirmation"],
+                            },
+                        )
+                    ],
+                )
+            ],
+            total_items=1,
+        )
+
+    materialized = await materialize_synthesis_section_packs(
+        run,
+        organization_id="org-123",
+        principal_id="user-123",
+        context_fn=fake_context,
+    )
+
+    artifact = draft_synthesis_artifact(materialized)
+
+    assert artifact.verification.status is SynthesisVerificationStatus.GAPS
+    assert {gap.reason for gap in artifact.verification.gaps} == {
+        "missing_freshness_metadata",
+        "unresolved_claim",
+    }
+    assert "Verification Gaps" in artifact.markdown
+    assert artifact.json_payload["verification"]["gap_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_remember_synthesis_artifact_persists_source_link_metadata() -> None:
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    run = await plan_synthesis(
+        SynthesisRequest(
+            goal="Remember generated report",
+            output_type=SynthesisOutputType.REPORT,
+            required_sections=[SynthesisSectionRequest(title="Evidence")],
+        ),
+        organization_id="org-123",
+        search_fn=fake_search,
+        related_fn=_empty_related,
+    )
+
+    async def fake_context(**kwargs: Any) -> ContextPack:
+        return ContextPack(
+            goal=kwargs["goal"],
+            intent=ContextIntent.RESEARCH,
+            query=kwargs["goal"],
+            domain=None,
+            project=None,
+            sections=[
+                ContextSection(
+                    facet=ContextFacet.ARTIFACTS,
+                    title="Artifacts",
+                    items=[
+                        ContextItem(
+                            id="artifact:allowed",
+                            type="artifact",
+                            name="Allowed artifact",
+                            content="Remembered artifact text.",
+                            score=0.95,
+                            facet=ContextFacet.ARTIFACTS,
+                            reason="allowed source",
+                            source="source:allowed",
+                            quality=ContextItemQualityMetadata(
+                                updated_at="2026-05-14T12:00:00Z"
+                            ),
+                            metadata={"source_id": "source:allowed"},
+                        )
+                    ],
+                )
+            ],
+            total_items=1,
+        )
+
+    materialized = await materialize_synthesis_section_packs(
+        run,
+        organization_id="org-123",
+        principal_id="user-123",
+        context_fn=fake_context,
+    )
+    artifact = draft_synthesis_artifact(
+        materialized,
+        output_format=SynthesisArtifactFormat.JSON,
+    )
+    calls: list[dict[str, Any]] = []
+
+    async def fake_remember(**kwargs: Any) -> SimpleNamespace:
+        calls.append(kwargs)
+        return SimpleNamespace(id="memory:artifact", source_id=kwargs["source_id"])
+
+    remembered = await remember_synthesis_artifact(
+        artifact,
+        materialized,
+        organization_id="org-123",
+        principal_id="user-123",
+        memory_scope="project",
+        scope_key="project-sibyl",
+        tags=["roadmap"],
+        remember_fn=fake_remember,
+    )
+
+    payload = calls[0]
+    assert remembered.remembered_memory_id == "memory:artifact"
+    assert remembered.remembered_source_id == artifact.artifact_id + ":generated"
+    assert payload["entity_type"] == "artifact"
+    assert payload["capture_surface"] == "synthesis_artifact"
+    assert payload["memory_scope"] == "project"
+    assert payload["scope_key"] == "project-sibyl"
+    assert payload["metadata"]["source_ids"] == ["source:allowed"]
+    assert payload["metadata"]["generated_text_hash"] == artifact.generated_text_hash
+    assert payload["provenance"]["section_source_ids"] == artifact.section_source_ids
+    assert payload["tags"] == ["synthesis", "report", "roadmap"]
+    assert '"source:allowed"' in payload["raw_content"]

@@ -36,6 +36,11 @@ class SynthesisVerificationStatus(StrEnum):
     PASS = "pass"
 
 
+class SynthesisArtifactFormat(StrEnum):
+    MARKDOWN = "markdown"
+    JSON = "json"
+
+
 @dataclass(frozen=True)
 class SynthesisSectionRequest:
     title: str
@@ -128,6 +133,21 @@ class SynthesisVerification:
 
 
 @dataclass(frozen=True)
+class SynthesisArtifact:
+    artifact_id: str
+    format: SynthesisArtifactFormat
+    title: str
+    markdown: str
+    json_payload: dict[str, Any]
+    source_ids: list[str]
+    section_source_ids: dict[str, list[str]]
+    generated_text_hash: str
+    verification: SynthesisVerification
+    remembered_memory_id: str | None = None
+    remembered_source_id: str | None = None
+
+
+@dataclass(frozen=True)
 class SynthesisRun:
     run_id: str
     status: SynthesisRunStatus
@@ -138,6 +158,8 @@ class SynthesisRun:
 
 
 __all__ = [
+    "SynthesisArtifact",
+    "SynthesisArtifactFormat",
     "SynthesisDepth",
     "SynthesisGap",
     "SynthesisOutline",

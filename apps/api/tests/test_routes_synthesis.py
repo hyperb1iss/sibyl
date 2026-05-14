@@ -8,8 +8,13 @@ from uuid import UUID
 import pytest
 
 from sibyl.api.app import create_api_app
-from sibyl.api.routes.synthesis import plan_synthesis_route
-from sibyl.api.schemas import SynthesisPlanRequest, SynthesisSectionPlanRequest
+from sibyl.api.routes.synthesis import draft_synthesis_route, plan_synthesis_route
+from sibyl.api.schemas import (
+    SynthesisDraftRequest,
+    SynthesisPlanRequest,
+    SynthesisSectionPlanRequest,
+)
+from sibyl_core.auth import OrganizationRole
 from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
@@ -19,6 +24,7 @@ from sibyl_core.models.context import (
     ContextSection,
 )
 from sibyl_core.models.synthesis import (
+    SynthesisArtifactFormat,
     SynthesisOutputType,
     SynthesisRunStatus,
 )
@@ -30,13 +36,14 @@ def _org() -> SimpleNamespace:
 
 
 def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(user_id="user-123")
+    return SimpleNamespace(user_id="user-123", org_role=OrganizationRole.MEMBER)
 
 
 def test_synthesis_plan_route_is_registered() -> None:
     paths = {route.path for route in create_api_app().routes if hasattr(route, "path")}
 
     assert "/synthesis/plan" in paths
+    assert "/synthesis/draft" in paths
 
 
 async def _empty_related(**kwargs: Any) -> list[Any]:
@@ -64,7 +71,10 @@ async def _fake_context_pack(**kwargs: Any) -> ContextPack:
                         facet=ContextFacet.ARTIFACTS,
                         reason="artifact supports synthesis",
                         source="source:context",
-                        quality=ContextItemQualityMetadata(project_id=kwargs.get("project")),
+                        quality=ContextItemQualityMetadata(
+                            project_id=kwargs.get("project"),
+                            updated_at="2026-05-14T12:00:00Z",
+                        ),
                         metadata={"source_id": "source:context"},
                     )
                 ],
@@ -177,7 +187,9 @@ async def test_plan_synthesis_route_verifies_explicit_project() -> None:
 
     verify_project.assert_awaited_once()
     assert response.request.project == "project-sibyl"
-    assert response.source_packs[0].freshness == {"source:context": None}
+    assert response.source_packs[0].freshness == {
+        "source:context": "2026-05-14T12:00:00Z"
+    }
 
 
 @pytest.mark.asyncio
@@ -216,3 +228,90 @@ async def test_plan_synthesis_route_returns_required_section_gaps() -> None:
 
     assert response.verification.status.value == "gaps"
     assert response.verification.gaps[0].reason == "no_source_supports_requested_section"
+
+
+@pytest.mark.asyncio
+async def test_draft_synthesis_route_returns_verified_artifact() -> None:
+    with (
+        patch(
+            "sibyl.api.routes.synthesis.list_accessible_project_graph_ids",
+            AsyncMock(return_value=["project-sibyl"]),
+        ),
+        patch(
+            "sibyl_core.services.synthesis.default_search",
+            _fake_search,
+        ),
+        patch(
+            "sibyl_core.services.synthesis.default_related_sources",
+            _empty_related,
+        ),
+        patch(
+            "sibyl_core.services.synthesis.default_context_pack",
+            _fake_context_pack,
+        ),
+    ):
+        response = await draft_synthesis_route(
+            SynthesisDraftRequest(
+                goal="Write synthesis roadmap",
+                output_type=SynthesisOutputType.ROADMAP,
+                seed_query="synthesis roadmap",
+            ),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    assert response.status == SynthesisRunStatus.VERIFIED
+    assert response.artifact.format is SynthesisArtifactFormat.MARKDOWN
+    assert response.artifact.verification.status.value == "pass"
+    assert "Only authorized source text" in response.artifact.markdown
+    assert "[source:context]" in response.artifact.markdown
+    assert response.artifact.json_payload["sections"][0]["source_ids"] == ["source:context"]
+
+
+@pytest.mark.asyncio
+async def test_draft_synthesis_route_can_remember_artifact() -> None:
+    remember_calls: list[dict[str, Any]] = []
+
+    async def fake_remember(**kwargs: Any) -> SimpleNamespace:
+        remember_calls.append(kwargs)
+        return SimpleNamespace(id="memory:artifact", source_id=kwargs["source_id"])
+
+    with (
+        patch(
+            "sibyl.api.routes.synthesis.list_accessible_project_graph_ids",
+            AsyncMock(return_value=["project-sibyl"]),
+        ),
+        patch(
+            "sibyl_core.services.synthesis.default_search",
+            _fake_search,
+        ),
+        patch(
+            "sibyl_core.services.synthesis.default_related_sources",
+            _empty_related,
+        ),
+        patch(
+            "sibyl_core.services.synthesis.default_context_pack",
+            _fake_context_pack,
+        ),
+        patch(
+            "sibyl_core.services.synthesis.default_remember_artifact",
+            fake_remember,
+        ),
+    ):
+        response = await draft_synthesis_route(
+            SynthesisDraftRequest(
+                goal="Write synthesis roadmap",
+                output_type=SynthesisOutputType.ROADMAP,
+                output_format=SynthesisArtifactFormat.JSON,
+                remember=True,
+                tags=["roadmap"],
+            ),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    assert response.artifact.remembered_memory_id == "memory:artifact"
+    assert response.artifact.remembered_source_id == remember_calls[0]["source_id"]
+    assert remember_calls[0]["memory_scope"] == "private"
+    assert remember_calls[0]["metadata"]["source_ids"] == ["source:context"]
+    assert '"source:context"' in remember_calls[0]["raw_content"]
