@@ -13,6 +13,7 @@ import structlog
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.fastmcp import FastMCP
 
+from sibyl.api.context_audit import log_context_pack_audit
 from sibyl.config import settings
 from sibyl.persistence.auth_runtime import (
     authenticate_api_key,
@@ -203,6 +204,57 @@ async def _resolve_mcp_project_scope(
     if require_project_when_restricted:
         raise ValueError("Project is required when MCP credentials are project-scoped.")
     return accessible_projects
+
+
+async def _compile_mcp_context_pack(
+    *,
+    goal: str,
+    intent: Literal["build", "plan", "ideate", "research", "debug", "decide", "learn", "general"],
+    layer: Literal["wake", "recall", "deep_search"],
+    domain: str | None,
+    project: str | None,
+    agent_id: str | None,
+    limit: int,
+    include_related: bool,
+    related_limit: int,
+) -> dict[str, Any]:
+    from sibyl_core.tools.core import (
+        compile_context as _compile_context,
+        context_pack_to_dict,
+        context_pack_to_markdown,
+    )
+
+    ctx = await _require_mcp_context()
+    accessible_projects = await _resolve_mcp_project_scope(ctx, project)
+    pack = await _compile_context(
+        goal=goal,
+        intent=intent,
+        layer=layer,
+        domain=domain,
+        project=project,
+        accessible_projects=accessible_projects,
+        principal_id=ctx.user_id,
+        agent_id=agent_id,
+        limit=limit,
+        include_related=include_related,
+        related_limit=related_limit,
+        organization_id=ctx.org_id,
+    )
+    payload = context_pack_to_dict(pack)
+    payload["markdown"] = context_pack_to_markdown(pack)
+    await log_context_pack_audit(
+        user_id=ctx.user_id,
+        organization_id=ctx.org_id,
+        pack=pack,
+        project=project,
+        accessible_projects=accessible_projects,
+        source_surface="mcp_context",
+        agent_id=agent_id,
+        limit=limit,
+        include_related=include_related,
+        related_limit=related_limit,
+    )
+    return payload
 
 
 def _log_mcp_policy_decision(
@@ -713,30 +765,17 @@ def _register_tools(mcp: FastMCP) -> None:
             include_related: Include one-hop related graph context.
             related_limit: Related items per selected context item.
         """
-        from sibyl_core.tools.core import (
-            compile_context as _compile_context,
-            context_pack_to_dict,
-            context_pack_to_markdown,
-        )
-
-        ctx = await _require_mcp_context()
-        pack = await _compile_context(
+        return await _compile_mcp_context_pack(
             goal=goal,
             intent=intent,
             layer=layer,
             domain=domain,
             project=project,
-            accessible_projects=await _resolve_mcp_project_scope(ctx, project),
-            principal_id=ctx.user_id,
             agent_id=agent_id,
             limit=limit,
             include_related=include_related,
             related_limit=related_limit,
-            organization_id=ctx.org_id,
         )
-        payload = context_pack_to_dict(pack)
-        payload["markdown"] = context_pack_to_markdown(pack)
-        return payload
 
     # =========================================================================
     # TOOL 3: explore

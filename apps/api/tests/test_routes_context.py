@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
@@ -22,6 +23,12 @@ from sibyl_core.models.context import (
 from sibyl_core.models.reflection import ReflectionCandidate, ReflectionPack
 
 
+@pytest.fixture(autouse=True)
+def context_audit_event() -> Iterator[AsyncMock]:
+    with patch("sibyl.api.context_audit.log_memory_audit_event", AsyncMock()) as audit:
+        yield audit
+
+
 def _pack() -> ContextPack:
     return ContextPack(
         goal="ship faster",
@@ -34,13 +41,17 @@ def _pack() -> ContextPack:
     )
 
 
-def _pack_with_quality() -> ContextPack:
+def _pack_with_quality(
+    *,
+    layer: ContextLayer = ContextLayer.RECALL,
+    project: str | None = None,
+) -> ContextPack:
     return ContextPack(
         goal="ship faster",
         intent=ContextIntent.BUILD,
         query="ship faster",
         domain=None,
-        project=None,
+        project=project,
         sections=[
             ContextSection(
                 facet=ContextFacet.DECISIONS,
@@ -65,6 +76,7 @@ def _pack_with_quality() -> ContextPack:
             )
         ],
         total_items=1,
+        layer=layer,
     )
 
 
@@ -191,6 +203,106 @@ class TestContextPackRoute:
             )
 
         assert compile_context.await_args.kwargs["layer"] == ContextLayer.WAKE
+
+    @pytest.mark.asyncio
+    async def test_context_pack_audits_render_receipt(
+        self,
+        context_audit_event: AsyncMock,
+    ) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = _ctx()
+
+        with (
+            patch(
+                "sibyl.api.routes.context.verify_entity_project_access",
+                AsyncMock(),
+            ),
+            patch(
+                "sibyl_core.tools.context.compile_context",
+                AsyncMock(
+                    return_value=_pack_with_quality(
+                        layer=ContextLayer.WAKE,
+                        project="proj_1",
+                    )
+                ),
+            ),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    project="proj_1",
+                    layer=ContextLayer.WAKE,
+                    agent_id="nova",
+                    limit=8,
+                    include_related=False,
+                    related_limit=0,
+                ),
+                org=org,
+                ctx=ctx,
+            )
+
+        assert response.layer == ContextLayer.WAKE
+        context_audit_event.assert_awaited_once()
+        kwargs = context_audit_event.await_args.kwargs
+        assert kwargs["action"] == "memory.context_pack"
+        assert kwargs["user_id"] == "user-123"
+        assert kwargs["organization_id"] == "00000000-0000-0000-0000-000000000111"
+        assert kwargs["request"] is None
+        assert kwargs["memory_scope"] == "project"
+        assert kwargs["scope_key"] == "proj_1"
+        assert kwargs["project_id"] == "proj_1"
+        assert kwargs["source_surface"] == "context_pack"
+        assert kwargs["source_ids"] == [
+            "Northstar",
+            "docs/architecture/SIBYL_NORTHSTAR.md",
+        ]
+        assert kwargs["derived_ids"] == ["decision_1"]
+        assert kwargs["policy_allowed"] is True
+        assert kwargs["policy_reason"] == "context_pack_rendered"
+        assert kwargs["details"] == {
+            "agent_id": "nova",
+            "domain": None,
+            "goal_length": 11,
+            "include_related": False,
+            "intent": "build",
+            "layer": "wake",
+            "limit": 8,
+            "related_limit": 0,
+            "result_count": 1,
+            "section_count": 1,
+            "accessible_project_count": 1,
+        }
+
+    @pytest.mark.asyncio
+    async def test_context_pack_audits_unscoped_mixed_receipt(
+        self,
+        context_audit_event: AsyncMock,
+    ) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1", "proj_2"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal="ship faster"),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        context_audit_event.assert_awaited_once()
+        kwargs = context_audit_event.await_args.kwargs
+        assert kwargs["memory_scope"] == "mixed"
+        assert kwargs["scope_key"] is None
+        assert kwargs["project_id"] is None
+        assert kwargs["source_surface"] == "context_pack"
+        assert kwargs["source_ids"] == []
+        assert kwargs["derived_ids"] == []
+        assert kwargs["details"]["layer"] == "recall"
+        assert kwargs["details"]["accessible_project_count"] == 2
 
     @pytest.mark.asyncio
     async def test_context_pack_passes_agent_id(self) -> None:

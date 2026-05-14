@@ -9,6 +9,7 @@ import pytest
 from sibyl.server import (
     McpContext,
     _authorize_mcp_memory_write,
+    _compile_mcp_context_pack,
     _get_accessible_projects,
     _get_mcp_context,
     _reflect_mcp_memory,
@@ -18,7 +19,45 @@ from sibyl.server import (
     _resolve_mcp_project_scope,
 )
 from sibyl_core.auth import AuthOrganization, AuthUser
+from sibyl_core.models.context import (
+    ContextFacet,
+    ContextIntent,
+    ContextItem,
+    ContextLayer,
+    ContextPack,
+    ContextSection,
+)
 from sibyl_core.models.reflection import ReflectionCandidate, ReflectionPack
+
+
+def _context_pack() -> ContextPack:
+    return ContextPack(
+        goal="ship faster",
+        intent=ContextIntent.BUILD,
+        query="ship faster",
+        domain="sibyl",
+        project="project-a",
+        sections=[
+            ContextSection(
+                facet=ContextFacet.DECISIONS,
+                title="Decisions",
+                items=[
+                    ContextItem(
+                        id="decision_1",
+                        type="decision",
+                        name="Use context packs",
+                        content="Agents should receive precise grouped memory.",
+                        score=0.91,
+                        facet=ContextFacet.DECISIONS,
+                        reason="decision records a choice",
+                        source="Northstar",
+                    )
+                ],
+            )
+        ],
+        total_items=1,
+        layer=ContextLayer.WAKE,
+    )
 
 
 @pytest.mark.asyncio
@@ -111,6 +150,54 @@ async def test_resolve_mcp_project_scope_requires_project_for_restricted_writes(
             project=None,
             require_project_when_restricted=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_compile_mcp_context_pack_audits_render_receipt() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    compile_context = AsyncMock(return_value=_context_pack())
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.server._resolve_mcp_project_scope",
+            AsyncMock(return_value={"project-a"}),
+        ) as resolve_scope,
+        patch("sibyl_core.tools.core.compile_context", compile_context),
+        patch("sibyl.api.context_audit.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        result = await _compile_mcp_context_pack(
+            goal="ship faster",
+            intent="build",
+            layer="wake",
+            domain="sibyl",
+            project="project-a",
+            agent_id="nova",
+            limit=8,
+            include_related=False,
+            related_limit=0,
+        )
+
+    assert result["layer"] == ContextLayer.WAKE
+    assert result["markdown"].startswith("# Sibyl Context Pack")
+    resolve_scope.assert_awaited_once_with(ctx, "project-a")
+    compile_context.assert_awaited_once()
+    assert compile_context.await_args.kwargs["accessible_projects"] == {"project-a"}
+    audit.assert_awaited_once()
+    kwargs = audit.await_args.kwargs
+    assert kwargs["action"] == "memory.context_pack"
+    assert kwargs["user_id"] == ctx.user_id
+    assert kwargs["organization_id"] == ctx.org_id
+    assert kwargs["memory_scope"] == "project"
+    assert kwargs["scope_key"] == "project-a"
+    assert kwargs["project_id"] == "project-a"
+    assert kwargs["source_surface"] == "mcp_context"
+    assert kwargs["source_ids"] == ["Northstar"]
+    assert kwargs["derived_ids"] == ["decision_1"]
+    assert kwargs["details"]["agent_id"] == "nova"
+    assert kwargs["details"]["domain"] == "sibyl"
+    assert kwargs["details"]["layer"] == "wake"
+    assert kwargs["details"]["accessible_project_count"] == 1
 
 
 @pytest.mark.asyncio

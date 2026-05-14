@@ -1214,6 +1214,77 @@ B4.2 receipt, 2026-05-13:
   visibility inspect paths still need their own B4 packets, and IP/user-agent capture remains
   deferred from B4.1.
 
+### Packet B4.3: Context Pack Render Audit
+
+Purpose: make context pack rendering, including wake-context renders, leave the same compact
+metadata-only audit trail as raw memory surfaces.
+
+Files:
+
+- `apps/api/src/sibyl/api/context_audit.py`
+- `apps/api/src/sibyl/api/routes/context.py`
+- `apps/api/src/sibyl/server.py`
+- `apps/api/tests/test_routes_context.py`
+- `apps/api/tests/test_server_accessible_projects.py`
+
+Implementation:
+
+- Add a shared context audit helper that records `memory.context_pack` receipts after a context pack
+  is compiled and rendered.
+- Cover REST `/context/pack` and the MCP `context` tool with the same receipt shape, using
+  `source_surface` values of `context_pack` and `mcp_context`.
+- Include actor, organization, memory scope, project, source IDs, derived item IDs, policy state,
+  layer, intent, result count, section count, related-context settings, and accessible-project count
+  without storing hidden memory text.
+- Treat explicit project renders as `project` scope and unscoped context renders as `mixed` scope so
+  blended private plus accessible-project context is not mislabeled as private-only.
+- Use the existing owner/admin `memory-audit` inspect path from B4.2 for source and derived ID
+  filtering.
+
+Verify:
+
+- `moon run api:test -- tests/test_routes_context.py tests/test_server_accessible_projects.py`
+- `moon run api:lint api:typecheck`
+- `moon run docs:format`
+- `moon run docs:lint`
+- `git diff --check`
+
+Exit criteria:
+
+- REST context pack renders emit metadata-only audit receipts that can be filtered through
+  `GET /memory/audit` and `sibyl memory-audit`.
+- MCP context renders emit the same receipt action with a distinct source surface.
+- Wake renders are covered by receipt metadata with `details.layer == "wake"`.
+- Audit failures remain fail-open and warning-logged through the shared helper.
+
+B4.3 receipt, 2026-05-13:
+
+- Added `sibyl.api.context_audit.log_context_pack_audit` to emit bounded source IDs, derived item
+  IDs, policy metadata, render settings, result counts, and layer/intent metadata for context pack
+  renders.
+- REST `/context/pack` now records `memory.context_pack` receipts after successful render
+  validation.
+- The MCP `context` tool now delegates through `_compile_mcp_context_pack`, preserving behavior
+  while adding the same audit receipt surface for MCP callers.
+- Tests assert REST project wake receipts, REST mixed-scope receipts, MCP project wake receipts,
+  source IDs, derived IDs, project scope, source surfaces, policy state, and accessible-project
+  counts.
+- `moon run api:test -- tests/test_routes_context.py tests/test_server_accessible_projects.py`: 32
+  passed in 1.20s, then 33 passed in 1.18s after adding the mixed-scope guard.
+- `moon run api:lint api:typecheck`: lint passed; typecheck exited 0 with the existing 63 ty
+  diagnostics.
+- `moon run docs:format docs:lint`: passed.
+- `git diff --check`: passed.
+- Independent review passed at `/tmp/claude-review-b43-context-pack-audit-20260513170901.txt`;
+  follow-up review passed at
+  `/tmp/claude-review-b43-context-pack-audit-followup-20260513171420.txt`; final exact-diff review
+  passed at `/tmp/claude-review-b43-context-pack-audit-final-20260513172003.txt`.
+- Sibyl memory captured as `procedure_b465e378996c` with raw source
+  `fd079334-e1ec-436a-8e2b-3b8bc407b9cd`.
+- Remaining B4 risk: IP address and user-agent capture remain deferred from B4.1. Source visibility
+  is inspectable by source and derived IDs through the audit API and CLI, but audit receipts
+  intentionally do not expose hidden memory text.
+
 ## 14. Evidence Ledger
 
 Every wave should leave a receipt block in this document or in the corresponding audit doc. Use this
