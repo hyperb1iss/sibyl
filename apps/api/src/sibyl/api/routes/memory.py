@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import cast
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from sibyl.api.schemas import (
     MemoryAuditEventResponse,
@@ -59,6 +60,7 @@ _WRITE_ROLES = (
 _ADMIN_ROLES = (OrganizationRole.OWNER, OrganizationRole.ADMIN)
 
 router = APIRouter(prefix="/memory", tags=["memory"])
+_REQUEST_AUTO_INJECT_SENTINEL: Request = cast("Request", None)
 
 
 def _policy_http_status(reason: str) -> int:
@@ -92,6 +94,7 @@ async def _log_memory_audit(
     *,
     action: str,
     ctx: AuthContext,
+    request: Request | None = None,
     memory_scope: str | None,
     scope_key: str | None,
     source_surface: str,
@@ -107,7 +110,7 @@ async def _log_memory_audit(
             action=action,
             user_id=ctx.user_id,
             organization_id=ctx.organization_id,
-            request=None,
+            request=request,
             memory_scope=memory_scope,
             scope_key=scope_key,
             project_id=project_id,
@@ -141,6 +144,7 @@ async def _authorize_memory_policy(
     memory_scope: str,
     scope_key: str | None,
     surface: str,
+    request: Request | None = None,
     agent_id: str | None = None,
     project_id: str | None = None,
 ) -> MemoryPolicyDecision:
@@ -177,6 +181,7 @@ async def _authorize_memory_policy(
         await _log_memory_audit(
             action="memory.policy_deny",
             ctx=ctx,
+            request=request,
             memory_scope=memory_scope,
             scope_key=scope_key,
             project_id=project_id,
@@ -201,6 +206,7 @@ async def _authorize_project_filter(
     memory_scope: str | None,
     scope_key: str | None,
     policy_action: str,
+    request: Request | None = None,
 ) -> None:
     if not project_id:
         return
@@ -216,6 +222,7 @@ async def _authorize_project_filter(
         await _log_memory_audit(
             action="memory.policy_deny",
             ctx=ctx,
+            request=request,
             memory_scope=memory_scope,
             scope_key=scope_key,
             project_id=project_id,
@@ -367,6 +374,7 @@ async def _accessible_projects_for_promotion(
     *,
     ctx: AuthContext,
     request: ReflectionPromotionRequest,
+    http_request: Request | None = None,
 ) -> set[str]:
     project_ids: set[str] = set()
     if request.project:
@@ -385,6 +393,7 @@ async def _accessible_projects_for_promotion(
             memory_scope=request.promote_to_scope,
             scope_key=request.promote_to_scope_key or request.project,
             policy_action="promote",
+            request=http_request,
         )
 
     if project_ids:
@@ -400,6 +409,7 @@ async def _accessible_projects_for_promotion(
 )
 async def remember_raw(
     request: RawMemoryRememberRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
 ) -> RawMemoryResponse:
@@ -424,6 +434,7 @@ async def remember_raw(
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
             policy_action="write",
+            request=http_request,
         )
         write_decision = await _authorize_memory_policy(
             ctx=ctx,
@@ -431,6 +442,7 @@ async def remember_raw(
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
             surface="raw_remember",
+            request=http_request,
             project_id=request.project_id,
         )
         metadata = _diary_metadata(
@@ -455,6 +467,7 @@ async def remember_raw(
         await _log_memory_audit(
             action="memory.remember",
             ctx=ctx,
+            request=http_request,
             memory_scope=memory.memory_scope.value,
             scope_key=memory.scope_key,
             project_id=request.project_id,
@@ -486,6 +499,7 @@ async def remember_raw(
 )
 async def recall_raw(
     request: RawMemoryRecallRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
 ) -> RawMemoryRecallResponse:
@@ -506,6 +520,7 @@ async def recall_raw(
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
             surface="raw_recall",
+            request=http_request,
             agent_id=request.agent_id,
             project_id=request.project_id,
         )
@@ -517,6 +532,7 @@ async def recall_raw(
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
             policy_action="read",
+            request=http_request,
         )
         memories = await recall_raw_memory(
             organization_id=str(org.id),
@@ -531,6 +547,7 @@ async def recall_raw(
         await _log_memory_audit(
             action="memory.recall",
             ctx=ctx,
+            request=http_request,
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
             project_id=request.project_id,
@@ -606,6 +623,7 @@ async def list_memory_audit(
 )
 async def promote_reflection_candidate(
     request: ReflectionPromotionRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
 ) -> ReflectionPromotionResponse:
@@ -618,6 +636,7 @@ async def promote_reflection_candidate(
         accessible_projects = await _accessible_projects_for_promotion(
             ctx=ctx,
             request=request,
+            http_request=http_request,
         )
         result = await promote_reflection_candidate_review(
             candidate_id=request.candidate_id,
@@ -633,6 +652,7 @@ async def promote_reflection_candidate(
         await _log_memory_audit(
             action="memory.reflect.promote",
             ctx=ctx,
+            request=http_request,
             memory_scope=result.memory_scope.value
             if result.memory_scope
             else request.promote_to_scope,

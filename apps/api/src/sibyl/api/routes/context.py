@@ -1,7 +1,9 @@
 """Agent context pack endpoints."""
 
+from typing import cast
+
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from sibyl.api.context_audit import log_context_pack_audit, log_reflection_audit
 from sibyl.api.schemas import (
@@ -29,6 +31,7 @@ router = APIRouter(
     tags=["context"],
     dependencies=[Depends(require_org_role(*_READ_ROLES))],
 )
+_REQUEST_AUTO_INJECT_SENTINEL: Request = cast("Request", None)
 
 
 def _append_unique_ids(existing: list[str] | None, additions: list[str] | None) -> list[str] | None:
@@ -99,6 +102,7 @@ async def _resolve_reflection_links(
 @router.post("/pack", response_model=ContextPackResponse)
 async def context_pack(
     request: ContextPackRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
 ) -> ContextPackResponse:
@@ -135,6 +139,7 @@ async def context_pack(
         await log_context_pack_audit(
             user_id=ctx.user_id,
             organization_id=str(org.id),
+            request=http_request,
             pack=pack,
             project=request.project,
             accessible_projects=accessible_projects,
@@ -161,6 +166,7 @@ async def context_pack(
 @router.post("/reflect", response_model=ReflectionResponse)
 async def reflect_context(
     request: ReflectionRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
 ) -> ReflectionResponse:
@@ -207,6 +213,7 @@ async def reflect_context(
         await log_reflection_audit(
             user_id=ctx.user_id,
             organization_id=str(org.id),
+            request=http_request,
             pack=pack,
             project=request.project,
             accessible_projects=accessible_projects,

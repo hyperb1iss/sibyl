@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -37,6 +38,13 @@ def _ctx() -> MagicMock:
     return ctx
 
 
+def _http_request() -> SimpleNamespace:
+    return SimpleNamespace(
+        client=SimpleNamespace(host="10.0.0.5"),
+        headers={"user-agent": "SibylTest/1.0"},
+    )
+
+
 def _memory(**overrides: object) -> RawMemory:
     values = {
         "id": "memory-1",
@@ -62,6 +70,7 @@ def _memory(**overrides: object) -> RawMemory:
 @pytest.mark.asyncio
 async def test_remember_raw_uses_current_org_and_principal() -> None:
     org = _org()
+    http_request = _http_request()
     with (
         patch(
             "sibyl.api.routes.memory.remember_raw_memory",
@@ -78,6 +87,7 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
                 provenance={"message_id": "msg-1"},
                 capture_surface="cli",
             ),
+            http_request=http_request,
             org=org,
             ctx=_ctx(),
         )
@@ -99,7 +109,7 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
         action="memory.remember",
         user_id="user-123",
         organization_id="org-1",
-        request=None,
+        request=http_request,
         memory_scope="private",
         scope_key=None,
         project_id=None,
@@ -120,6 +130,7 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
 async def test_remember_raw_audits_project_filter_denial() -> None:
     org = _org()
     ctx = _ctx()
+    http_request = _http_request()
     denial = HTTPException(status_code=403, detail="project_access_denied")
     with (
         patch(
@@ -136,6 +147,7 @@ async def test_remember_raw_audits_project_filter_denial() -> None:
                 raw_content="Should not write without project access.",
                 project_id="project_123",
             ),
+            http_request=http_request,
             org=org,
             ctx=ctx,
         )
@@ -153,7 +165,7 @@ async def test_remember_raw_audits_project_filter_denial() -> None:
         action="memory.policy_deny",
         user_id="user-123",
         organization_id="org-1",
-        request=None,
+        request=http_request,
         memory_scope="private",
         scope_key=None,
         project_id="project_123",
@@ -329,6 +341,7 @@ async def test_remember_raw_uses_shared_policy_for_project_scope_write() -> None
 
 @pytest.mark.asyncio
 async def test_remember_raw_denies_project_scope_without_policy_membership() -> None:
+    http_request = _http_request()
     with (
         patch(
             "sibyl.api.routes.memory.list_accessible_project_graph_ids",
@@ -345,6 +358,7 @@ async def test_remember_raw_denies_project_scope_without_policy_membership() -> 
                 memory_scope="project",
                 scope_key="project_123",
             ),
+            http_request=http_request,
             org=_org(),
             ctx=_ctx(),
         )
@@ -355,7 +369,7 @@ async def test_remember_raw_denies_project_scope_without_policy_membership() -> 
         action="memory.policy_deny",
         user_id="user-123",
         organization_id="org-1",
-        request=None,
+        request=http_request,
         memory_scope="project",
         scope_key="project_123",
         project_id=None,
@@ -383,6 +397,7 @@ async def test_remember_raw_denies_project_scope_without_policy_membership() -> 
 @pytest.mark.asyncio
 async def test_recall_raw_returns_scoped_memories() -> None:
     org = _org()
+    http_request = _http_request()
     with (
         patch(
             "sibyl.api.routes.memory.recall_raw_memory",
@@ -392,6 +407,7 @@ async def test_recall_raw_returns_scoped_memories() -> None:
     ):
         response = await recall_raw(
             RawMemoryRecallRequest(query="raw memory", limit=5),
+            http_request=http_request,
             org=org,
             ctx=_ctx(),
         )
@@ -410,7 +426,7 @@ async def test_recall_raw_returns_scoped_memories() -> None:
         action="memory.recall",
         user_id="user-123",
         organization_id="org-1",
-        request=None,
+        request=http_request,
         memory_scope="private",
         scope_key=None,
         project_id=None,
@@ -657,6 +673,7 @@ async def test_list_memory_audit_rejects_non_memory_action() -> None:
 async def test_promote_reflection_candidate_verifies_project_target() -> None:
     org = _org()
     ctx = _ctx()
+    http_request = _http_request()
     result = NativeReflectionPromotionResult(
         success=True,
         candidate_id="candidate-1",
@@ -690,6 +707,7 @@ async def test_promote_reflection_candidate_verifies_project_target() -> None:
                 domain="sibyl",
                 related_to=["task_123"],
             ),
+            http_request=http_request,
             org=org,
             ctx=ctx,
         )
@@ -716,7 +734,7 @@ async def test_promote_reflection_candidate_verifies_project_target() -> None:
         action="memory.reflect.promote",
         user_id="user-123",
         organization_id="org-1",
-        request=None,
+        request=http_request,
         memory_scope="project",
         scope_key="project_123",
         project_id="project_123",

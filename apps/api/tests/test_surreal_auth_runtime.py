@@ -621,6 +621,28 @@ async def test_log_memory_audit_event_records_bounded_receipt(
 
 
 @pytest.mark.asyncio
+async def test_log_audit_event_records_request_attribution() -> None:
+    client = SimpleNamespace(execute_query=AsyncMock())
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="10.0.0.5"),
+        headers={"user-agent": "SibylTest/1.0"},
+    )
+
+    await surreal_auth_runtime._log_audit_event(
+        client,
+        action="memory.recall",
+        user_id=None,
+        organization_id=None,
+        request=request,
+        details={},
+    )
+
+    record = client.execute_query.await_args.kwargs["record"]
+    assert record["ip_address"] == "10.0.0.5"
+    assert record["user_agent"] == "SibylTest/1.0"
+
+
+@pytest.mark.asyncio
 async def test_list_memory_audit_events_filters_memory_receipts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

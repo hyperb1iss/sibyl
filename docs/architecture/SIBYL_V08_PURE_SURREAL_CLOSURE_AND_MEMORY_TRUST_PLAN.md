@@ -1347,6 +1347,68 @@ B4.4 receipt, 2026-05-13:
   project access still fails before render and does not emit `memory.reflect`; project filter denies
   are already audited on raw memory routes.
 
+### Packet B4.5: REST Audit Request Attribution
+
+Purpose: close the B4.1 REST attribution gap by threading the FastAPI request object into memory
+audit receipts so the Surreal audit writer can capture IP address and user-agent metadata.
+
+Files:
+
+- `apps/api/src/sibyl/api/context_audit.py`
+- `apps/api/src/sibyl/api/routes/context.py`
+- `apps/api/src/sibyl/api/routes/memory.py`
+- `apps/api/tests/test_routes_context.py`
+- `apps/api/tests/test_routes_memory.py`
+- `apps/api/tests/test_surreal_auth_runtime.py`
+
+Implementation:
+
+- Add a typed request auto-inject sentinel for direct route-function calls while keeping FastAPI
+  route annotations as `Request`.
+- Thread REST request attribution through raw remember, raw recall, reflection promotion, memory
+  policy-deny, project-filter-deny, context pack, and reflection audit receipts.
+- Keep MCP audit receipts requestless until FastMCP exposes a trustworthy request object to the tool
+  layer.
+- Leave audit `details` content-only metadata unchanged; IP address and user-agent remain top-level
+  audit-log fields owned by the backend writer.
+
+Verify:
+
+- `moon run api:test -- tests/test_routes_memory.py tests/test_routes_context.py tests/test_surreal_auth_runtime.py`
+- `moon run api:lint api:typecheck`
+- `moon run docs:format`
+- `moon run docs:lint`
+- `git diff --check`
+
+Exit criteria:
+
+- REST memory and context audit receipts can carry backend-extracted IP address and user-agent.
+- Existing direct route tests can still call route functions without constructing FastAPI request
+  objects.
+- Audit receipt details remain bounded, inspectable, and free of hidden memory text.
+
+B4.5 receipt, 2026-05-13:
+
+- REST raw memory routes now pass request attribution into `memory.remember`, `memory.recall`,
+  `memory.reflect.promote`, and deny receipts emitted before the operation runs.
+- REST `/context/pack` and `/context/reflect` now pass the FastAPI request into their shared audit
+  helpers, and those helpers forward it to `log_memory_audit_event`.
+- The Surreal audit writer already stores request client IP and `user-agent` as top-level audit-log
+  fields; tests now prove that extraction path directly.
+- `moon run api:test -- tests/test_routes_memory.py tests/test_routes_context.py tests/test_surreal_auth_runtime.py`:
+  87 passed in 1.48s.
+- `moon run api:lint api:typecheck`: lint passed; typecheck exited 0 with the existing 63 ty
+  diagnostics.
+- Independent review passed at `/tmp/claude-review-b45-request-attribution-20260513175105.txt`;
+  minor notes were either clarified in code or recorded as follow-up risk.
+- Sibyl memory captured as `procedure_f2898d799f05` with raw source
+  `44afec97-002b-4b3c-be7e-66df4bab48a6`.
+- Remaining B4 risk: MCP memory/context audit receipts still do not include request attribution
+  because the current tool layer does not provide a request object. Denied context and reflection
+  project access can still fail before action-specific render receipts are emitted. Deployments
+  behind a reverse proxy still need proxy-header handling if audit IPs should represent the original
+  client instead of the proxy.
+
 ## 14. Evidence Ledger
 
 Every wave should leave a receipt block in this document or in the corresponding audit doc. Use this

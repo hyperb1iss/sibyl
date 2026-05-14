@@ -84,6 +84,13 @@ def _ctx() -> SimpleNamespace:
     return SimpleNamespace(user_id="user-123")
 
 
+def _http_request() -> SimpleNamespace:
+    return SimpleNamespace(
+        client=SimpleNamespace(host="10.0.0.5"),
+        headers={"user-agent": "SibylTest/1.0"},
+    )
+
+
 class TestContextPackRoute:
     @pytest.mark.asyncio
     async def test_context_pack_scopes_to_accessible_projects(self) -> None:
@@ -227,6 +234,7 @@ class TestContextPackRoute:
                 ),
             ),
         ):
+            http_request = _http_request()
             response = await context_pack(
                 request=ContextPackRequest(
                     goal="ship faster",
@@ -237,6 +245,7 @@ class TestContextPackRoute:
                     include_related=False,
                     related_limit=0,
                 ),
+                http_request=http_request,
                 org=org,
                 ctx=ctx,
             )
@@ -247,7 +256,7 @@ class TestContextPackRoute:
         assert kwargs["action"] == "memory.context_pack"
         assert kwargs["user_id"] == "user-123"
         assert kwargs["organization_id"] == "00000000-0000-0000-0000-000000000111"
-        assert kwargs["request"] is None
+        assert kwargs["request"] is http_request
         assert kwargs["memory_scope"] == "project"
         assert kwargs["scope_key"] == "proj_1"
         assert kwargs["project_id"] == "proj_1"
@@ -557,6 +566,7 @@ class TestReflectRoute:
         from sibyl.api.routes.context import reflect_context
 
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        http_request = _http_request()
 
         with (
             patch(
@@ -590,6 +600,7 @@ class TestReflectRoute:
                     persist=True,
                     persist_review=True,
                 ),
+                http_request=http_request,
                 org=org,
                 ctx=_ctx(),
             )
@@ -600,6 +611,7 @@ class TestReflectRoute:
         assert kwargs["action"] == "memory.reflect"
         assert kwargs["user_id"] == "user-123"
         assert kwargs["organization_id"] == "00000000-0000-0000-0000-000000000111"
+        assert kwargs["request"] is http_request
         assert kwargs["memory_scope"] == "project"
         assert kwargs["scope_key"] == "proj_1"
         assert kwargs["project_id"] == "proj_1"
