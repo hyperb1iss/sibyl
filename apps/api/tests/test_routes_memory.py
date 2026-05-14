@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from sibyl.api.routes.memory import (
+    inspect_memory_source,
     list_memory_audit,
     preview_memory_share_route,
     preview_reflection_promotion,
@@ -37,11 +38,15 @@ def _org() -> MagicMock:
     return org
 
 
-def _ctx() -> MagicMock:
+def _ctx(
+    *,
+    user_id: str = "user-123",
+    org_role: OrganizationRole = OrganizationRole.MEMBER,
+) -> MagicMock:
     ctx = MagicMock()
-    ctx.user_id = "user-123"
+    ctx.user_id = user_id
     ctx.organization_id = "org-1"
-    ctx.org_role = OrganizationRole.MEMBER
+    ctx.org_role = org_role
     return ctx
 
 
@@ -674,6 +679,246 @@ async def test_list_memory_audit_rejects_non_memory_action() -> None:
 
     assert exc.value.status_code == 400
     assert exc.value.detail == "invalid_memory_audit_action"
+
+
+@pytest.mark.asyncio
+async def test_inspect_memory_source_returns_metadata_and_visible_content() -> None:
+    org = _org()
+    remember_created_at = datetime(2026, 5, 13, 12, 0, 0, tzinfo=UTC)
+    promote_created_at = datetime(2026, 5, 13, 12, 1, 0, tzinfo=UTC)
+    memory = _memory(
+        id="memory-1",
+        organization_id=str(org.id),
+        source_id="source-1",
+        entity_type="procedure",
+        review_state="promoted",
+        project_id="project_123",
+    )
+    remember_event = {
+        "uuid": "audit-1",
+        "organization_id": str(org.id),
+        "user_id": "user-123",
+        "action": "memory.remember",
+        "details": {
+            "memory_scope": "private",
+            "source_ids": ["source-1"],
+            "derived_ids": ["memory-1"],
+            "policy_allowed": True,
+            "policy_reason": "private_principal_bound",
+        },
+        "created_at": remember_created_at,
+    }
+    promote_event = {
+        "uuid": "audit-2",
+        "organization_id": str(org.id),
+        "user_id": "user-123",
+        "action": "memory.reflect.promote",
+        "details": {
+            "memory_scope": "project",
+            "source_ids": ["memory-1"],
+            "derived_ids": ["entity-1"],
+            "policy_allowed": True,
+            "policy_reason": "promotion_allowed",
+        },
+        "created_at": promote_created_at,
+    }
+
+    async def list_events(**kwargs: object) -> list[dict[str, object]]:
+        if kwargs.get("source_id") == "memory-1":
+            return [promote_event]
+        if kwargs.get("source_id") == "source-1":
+            return [remember_event]
+        if kwargs.get("derived_id") == "memory-1":
+            return [remember_event]
+        return []
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)) as get_raw,
+        patch(
+            "sibyl.api.routes.memory.get_raw_memory_by_source_id",
+            AsyncMock(),
+        ) as get_by_source,
+        patch(
+            "sibyl.api.routes.memory.list_memory_audit_events",
+            AsyncMock(side_effect=list_events),
+        ) as audit_events,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        response = await inspect_memory_source(
+            "memory-1",
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    get_raw.assert_awaited_once_with(organization_id=str(org.id), memory_id="memory-1")
+    get_by_source.assert_not_awaited()
+    assert audit_events.await_count == 3
+    assert response.id == "memory-1"
+    assert response.source_id == "source-1"
+    assert response.project_id == "project_123"
+    assert response.raw_content == "Sibyl stores raw memory before reflection."
+    assert response.content_redacted is False
+    assert response.policy_allowed is True
+    assert response.policy_reason == "private_principal_bound"
+    assert response.derived_ids == ["entity-1", "memory-1"]
+    assert response.derived_types == ["graph_entity", "raw_memory"]
+    assert response.audit_event_count == 2
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["action"] == "memory.inspect"
+    assert audit.await_args.kwargs["policy_allowed"] is True
+
+
+@pytest.mark.asyncio
+async def test_inspect_memory_source_redacts_project_content_without_access() -> None:
+    org = _org()
+    memory = _memory(
+        id="memory-1",
+        organization_id=str(org.id),
+        memory_scope=MemoryScope.PROJECT,
+        scope_key="project_hidden",
+        project_id="project_hidden",
+        raw_content="Private project detail.",
+    )
+    event = {
+        "uuid": "audit-1",
+        "organization_id": str(org.id),
+        "user_id": "user-123",
+        "action": "memory.recall",
+        "details": {
+            "memory_scope": "project",
+            "source_ids": ["cli:manual"],
+            "derived_ids": ["memory-1"],
+            "policy_allowed": True,
+            "details": {"content_preview": "Private project detail."},
+        },
+        "created_at": datetime(2026, 5, 13, 12, 0, 0, tzinfo=UTC),
+    }
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            AsyncMock(return_value=set()),
+        ) as accessible_projects,
+        patch(
+            "sibyl.api.routes.memory.list_memory_audit_events",
+            AsyncMock(return_value=[event]),
+        ),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        response = await inspect_memory_source(
+            "memory-1",
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.ADMIN),
+        )
+
+    accessible_projects.assert_awaited_once()
+    assert response.raw_content is None
+    assert response.content_redacted is True
+    assert response.raw_content_length == len("Private project detail.")
+    assert response.policy_allowed is False
+    assert response.policy_reason == "unverified_membership"
+    assert response.metadata == {"domain": "sibyl"}
+    assert response.recent_audit_events[0].details == {}
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["policy_allowed"] is False
+    assert audit.await_args.kwargs["policy_reason"] == "unverified_membership"
+
+
+@pytest.mark.asyncio
+async def test_inspect_memory_source_redacts_other_private_principal() -> None:
+    org = _org()
+    memory = _memory(
+        id="memory-1",
+        organization_id=str(org.id),
+        principal_id="other-user",
+        raw_content="Another user's private note.",
+    )
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory.list_memory_audit_events",
+            AsyncMock(return_value=[]),
+        ),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        response = await inspect_memory_source(
+            "memory-1",
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(user_id="user-123", org_role=OrganizationRole.OWNER),
+        )
+
+    assert response.raw_content is None
+    assert response.content_redacted is True
+    assert response.policy_allowed is False
+    assert response.policy_reason == "principal_mismatch"
+    audit.assert_awaited_once()
+    assert audit.await_args.kwargs["policy_reason"] == "principal_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_inspect_memory_source_can_lookup_by_provenance_source_id() -> None:
+    org = _org()
+    memory = _memory(
+        id="memory-1",
+        organization_id=str(org.id),
+        source_id="source/provenance",
+    )
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=None)) as get_raw,
+        patch(
+            "sibyl.api.routes.memory.get_raw_memory_by_source_id",
+            AsyncMock(return_value=memory),
+        ) as get_by_source,
+        patch(
+            "sibyl.api.routes.memory.list_memory_audit_events",
+            AsyncMock(return_value=[]),
+        ),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+    ):
+        response = await inspect_memory_source(
+            "source/provenance",
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    get_raw.assert_awaited_once_with(
+        organization_id=str(org.id),
+        memory_id="source/provenance",
+    )
+    get_by_source.assert_awaited_once_with(
+        organization_id=str(org.id),
+        source_id="source/provenance",
+    )
+    assert response.id == "memory-1"
+    assert response.source_id == "source/provenance"
+
+
+@pytest.mark.asyncio
+async def test_inspect_memory_source_returns_404_for_missing_source() -> None:
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=None)),
+        patch(
+            "sibyl.api.routes.memory.get_raw_memory_by_source_id",
+            AsyncMock(return_value=None),
+        ),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await inspect_memory_source(
+            "missing-memory",
+            http_request=_http_request(),
+            org=_org(),
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "memory_source_not_found"
 
 
 @pytest.mark.asyncio

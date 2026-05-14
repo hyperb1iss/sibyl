@@ -310,6 +310,36 @@ def _print_memory_audit_events(events: list[object]) -> None:
     console.print(table)
 
 
+def _print_memory_source_inspect(data: dict[str, object]) -> None:
+    console.print("\n[bold]Memory source[/bold]\n")
+    scope = str(data.get("memory_scope") or "")
+    if scope_key := data.get("scope_key"):
+        scope = f"{scope}:{scope_key}" if scope else str(scope_key)
+    policy = _format_policy_state(data.get("policy_allowed"))
+    if reason := data.get("policy_reason"):
+        policy = f"{policy} ({reason})"
+    content_state = "redacted" if data.get("content_redacted") else "visible"
+
+    table = create_table(None, "Field", "Value", expand=False)
+    table.add_row("ID", str(data.get("id") or ""))
+    table.add_row("Source", str(data.get("source_id") or ""))
+    table.add_row("Title", str(data.get("title") or ""))
+    table.add_row("Scope", scope)
+    table.add_row("Project", str(data.get("project_id") or ""))
+    table.add_row("Review", str(data.get("review_state") or ""))
+    table.add_row("Entity type", str(data.get("entity_type") or ""))
+    table.add_row("Policy", policy)
+    table.add_row("Content", content_state)
+    table.add_row("Derived", _audit_id_summary(data.get("derived_ids")))
+    table.add_row("Audits", str(data.get("audit_event_count") or 0))
+    console.print(table)
+
+    raw_content = data.get("raw_content")
+    if isinstance(raw_content, str) and raw_content:
+        console.print()
+        console.print(_format_search_preview(raw_content), soft_wrap=True)
+
+
 def _preview_state(value: object) -> str:
     return "allowed" if value is True else "denied"
 
@@ -827,6 +857,28 @@ def memory_audit(
             _handle_client_error(e)
 
     run_memory_audit()
+
+
+@app.command("memory-inspect")
+def memory_inspect(
+    source_id: str = typer.Argument(..., help="Raw memory source ID"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Inspect a memory source and its audit trail."""
+
+    @run_async
+    async def run_memory_inspect() -> None:
+        try:
+            async with get_client() as client:
+                data = await client.memory_inspect(source_id)
+            if json_output:
+                print_json(data)
+                return
+            _print_memory_source_inspect(cast("dict[str, object]", data))
+        except SibylClientError as e:
+            _handle_client_error(e)
+
+    run_memory_inspect()
 
 
 @app.command("memory-promote")

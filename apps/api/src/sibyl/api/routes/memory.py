@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import cast
 
 import structlog
@@ -11,10 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sibyl.api.schemas import (
     MemoryAuditEventResponse,
     MemoryAuditListResponse,
+    MemoryDerivedRecordResponse,
     MemoryScopeInputResponse,
     MemoryScopeLiteral,
     MemorySharePreviewRequest,
     MemorySharePreviewResponse,
+    MemorySourceInspectResponse,
     RawMemoryRecallRequest,
     RawMemoryRecallResponse,
     RawMemoryRememberRequest,
@@ -49,6 +51,8 @@ from sibyl_core.services.native_memory import (
 from sibyl_core.services.surreal_content import (
     AGENT_DIARY_CAPTURE_SURFACE,
     RawMemory,
+    get_raw_memory,
+    get_raw_memory_by_source_id,
     recall_raw_memory,
     remember_raw_memory,
 )
@@ -431,6 +435,204 @@ def _audit_event_response(row: dict[str, object]) -> MemoryAuditEventResponse:
     )
 
 
+def _memory_metadata_str(memory: RawMemory, key: str) -> str | None:
+    value = memory.metadata.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _memory_project_id(memory: RawMemory) -> str | None:
+    return memory.project_id or _memory_metadata_str(memory, "project_id")
+
+
+async def _inspect_content_policy(
+    *,
+    ctx: AuthContext,
+    memory: RawMemory,
+) -> MemoryPolicyDecision:
+    project_id = _memory_project_id(memory)
+    accessible_projects = await _project_accessible_for_policy(
+        ctx=ctx,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+    )
+    policy_context = MemoryPolicyContext(
+        actor_user_id=ctx.user_id,
+        organization_id=ctx.organization_id,
+        organization_role=ctx.org_role,
+        memory_space=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+        project_id=project_id,
+        accessible_projects=accessible_projects,
+        agent_id=memory.agent_id,
+        source_surface="memory_inspect",
+    )
+    decision = authorize_memory_read(policy_context=policy_context)
+    if memory.memory_scope.value == "private" and memory.principal_id != ctx.user_id:
+        decision = MemoryPolicyDecision(
+            action=MemoryPolicyAction.READ,
+            allowed=False,
+            reason="principal_mismatch",
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+            policy_context=policy_context,
+        )
+    _log_policy_decision(ctx=ctx, decision=decision, surface="memory_inspect")
+    return decision
+
+
+def _dedupe_audit_rows(rows: list[dict[str, object]], *, limit: int) -> list[dict[str, object]]:
+    seen: set[str] = set()
+    deduped: list[dict[str, object]] = []
+    for row in rows:
+        key = str(row.get("uuid") or row.get("id") or id(row))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    fallback = datetime.min.replace(tzinfo=UTC)
+    deduped.sort(
+        key=lambda row: row.get("created_at")
+        if isinstance(row.get("created_at"), datetime)
+        else fallback,
+        reverse=True,
+    )
+    return deduped[:limit]
+
+
+async def _source_audit_events(
+    *,
+    organization_id: str,
+    source_id: str,
+    memory: RawMemory,
+    limit: int = 20,
+) -> list[MemoryAuditEventResponse]:
+    rows: list[dict[str, object]] = []
+    source_filters = list(dict.fromkeys([source_id, memory.id, memory.source_id]))
+    for value in source_filters:
+        rows.extend(
+            await list_memory_audit_events(
+                organization_id=organization_id,
+                source_id=value,
+                limit=limit,
+            )
+        )
+    rows.extend(
+        await list_memory_audit_events(
+            organization_id=organization_id,
+            derived_id=memory.id,
+            limit=limit,
+        )
+    )
+    return [_audit_event_response(row) for row in _dedupe_audit_rows(rows, limit=limit)]
+
+
+def _derived_record_type(
+    *,
+    source_action: str,
+    derived_id: str,
+    memory: RawMemory,
+) -> str:
+    if derived_id == memory.id:
+        return "raw_memory"
+    if "promote" in source_action:
+        return "graph_entity"
+    if "reflect" in source_action:
+        return "reflection"
+    if "context" in source_action:
+        return "context_render"
+    return source_action.removeprefix("memory.").replace(".", "_") or "memory_record"
+
+
+def _derived_records_from_audit(
+    *,
+    events: list[MemoryAuditEventResponse],
+    memory: RawMemory,
+) -> list[MemoryDerivedRecordResponse]:
+    records: dict[str, MemoryDerivedRecordResponse] = {}
+    for event in events:
+        for derived_id in event.derived_ids:
+            if derived_id in records:
+                continue
+            records[derived_id] = MemoryDerivedRecordResponse(
+                id=derived_id,
+                record_type=_derived_record_type(
+                    source_action=event.action,
+                    derived_id=derived_id,
+                    memory=memory,
+                ),
+                source_action=event.action,
+            )
+    return list(records.values())
+
+
+def _audit_events_for_visibility(
+    events: list[MemoryAuditEventResponse],
+    *,
+    content_visible: bool,
+) -> list[MemoryAuditEventResponse]:
+    if content_visible:
+        return events
+    return [event.model_copy(update={"details": {}}) for event in events]
+
+
+def _memory_source_inspect_response(
+    *,
+    memory: RawMemory,
+    policy_decision: MemoryPolicyDecision,
+    audit_events: list[MemoryAuditEventResponse],
+) -> MemorySourceInspectResponse:
+    content_redacted = not policy_decision.allowed
+    visible_audit_events = _audit_events_for_visibility(
+        audit_events,
+        content_visible=policy_decision.allowed,
+    )
+    derived_records = _derived_records_from_audit(events=visible_audit_events, memory=memory)
+    derived_ids = [record.id for record in derived_records]
+    derived_types = list(dict.fromkeys(record.record_type for record in derived_records))
+    project_id = _memory_project_id(memory)
+    return MemorySourceInspectResponse(
+        id=memory.id,
+        organization_id=memory.organization_id,
+        source_id=memory.source_id,
+        principal_id=memory.principal_id,
+        agent_id=memory.agent_id,
+        project_id=project_id,
+        memory_scope=memory.memory_scope.value,
+        scope_key=memory.scope_key,
+        review_state=memory.review_state,
+        entity_type=memory.entity_type,
+        title=memory.title,
+        raw_content=None if content_redacted else memory.raw_content,
+        content_redacted=content_redacted,
+        raw_content_length=len(memory.raw_content),
+        tags=memory.tags,
+        metadata=memory.metadata,
+        provenance=memory.provenance,
+        capture_surface=memory.capture_surface,
+        captured_at=memory.captured_at,
+        created_at=memory.created_at,
+        freshness_timestamps={
+            "captured_at": memory.captured_at,
+            "created_at": memory.created_at,
+        },
+        policy_allowed=policy_decision.allowed,
+        policy_reason=policy_decision.reason,
+        policy_metadata={
+            "policy_action": policy_decision.action.value,
+            "content_redacted": content_redacted,
+            "source_surface": "memory_inspect",
+        },
+        derived_ids=derived_ids,
+        derived_types=derived_types,
+        derived_records=derived_records,
+        recent_audit_events=visible_audit_events,
+        audit_event_count=len(visible_audit_events),
+    )
+
+
 def _validate_memory_audit_action(action: str | None) -> None:
     if action and not action.startswith("memory."):
         raise HTTPException(status_code=400, detail="invalid_memory_audit_action")
@@ -719,6 +921,71 @@ async def list_memory_audit(
         events=[_audit_event_response(row) for row in rows],
         limit=limit,
     )
+
+
+@router.get(
+    "/inspect/{source_id:path}",
+    response_model=MemorySourceInspectResponse,
+    dependencies=[Depends(require_org_role(*_ADMIN_ROLES))],
+)
+async def inspect_memory_source(
+    source_id: str,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> MemorySourceInspectResponse:
+    """Inspect a raw memory source and its audit-derived records."""
+    principal_id = ctx.user_id
+    if not principal_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        memory = await get_raw_memory(
+            organization_id=str(org.id),
+            memory_id=source_id,
+        )
+        if memory is None:
+            memory = await get_raw_memory_by_source_id(
+                organization_id=str(org.id),
+                source_id=source_id,
+            )
+        if memory is None:
+            raise HTTPException(status_code=404, detail="memory_source_not_found")
+
+        policy_decision = await _inspect_content_policy(ctx=ctx, memory=memory)
+        audit_events = await _source_audit_events(
+            organization_id=str(org.id),
+            source_id=source_id,
+            memory=memory,
+        )
+        response = _memory_source_inspect_response(
+            memory=memory,
+            policy_decision=policy_decision,
+            audit_events=audit_events,
+        )
+        await _log_memory_audit(
+            action="memory.inspect",
+            ctx=ctx,
+            request=http_request,
+            memory_scope=memory.memory_scope.value,
+            scope_key=memory.scope_key,
+            project_id=response.project_id,
+            source_surface="memory_inspect",
+            source_ids=[memory.id, memory.source_id],
+            derived_ids=response.derived_ids,
+            policy_allowed=policy_decision.allowed,
+            policy_reason=policy_decision.reason,
+            details={
+                "audit_event_count": response.audit_event_count,
+                "content_redacted": response.content_redacted,
+            },
+        )
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception("inspect_memory_source_failed", error=str(e), source_id=source_id)
+        raise HTTPException(status_code=500, detail="Failed to inspect memory source.") from e
 
 
 @router.post(

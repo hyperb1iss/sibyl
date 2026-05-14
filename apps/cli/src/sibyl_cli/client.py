@@ -6,6 +6,7 @@ ensuring consistent event broadcasting and state management.
 
 import os
 from typing import Any, cast
+from urllib.parse import quote
 
 import httpx
 
@@ -881,6 +882,11 @@ class SibylClient:
         if policy_allowed is not None:
             params["policy_allowed"] = policy_allowed
         return await self._request("GET", "/memory/audit", params=params)
+
+    async def memory_inspect(self, source_id: str) -> dict[str, Any]:
+        """Inspect a raw memory source."""
+        encoded_source_id = quote(source_id, safe="")
+        return await self._request("GET", f"/memory/inspect/{encoded_source_id}")
 
     async def preview_reflection_promotion(
         self,

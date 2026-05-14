@@ -1615,6 +1615,39 @@ Exit criteria:
 - Hidden or project-private content stays redacted for actors without read permission.
 - Inspect output includes enough source and policy metadata for release evidence.
 
+B4.6 receipt, 2026-05-14:
+
+- Added owner/admin `GET /memory/inspect/{source_id:path}` for source-level memory inspection.
+- The endpoint scopes raw memory lookup to the current organization, tries raw memory UUID first,
+  and falls back to the indexed raw `source_id` provenance field.
+- Inspect responses include raw source metadata, memory scope, scope key, project ID, review state,
+  entity type, freshness timestamps, policy state, derived IDs, derived types, derived record
+  summaries, and recent audit receipt summaries.
+- Raw content is returned only when normal memory read policy allows the actor to read the source.
+  Cross-principal private memory and project memory without verified project access are redacted.
+- Redacted inspect responses also scrub nested audit receipt `details` while preserving audit IDs,
+  actions, policy reasons, source IDs, and derived IDs.
+- Inspect emits a metadata-only `memory.inspect` audit receipt with request attribution, policy
+  state, source IDs, derived IDs, and redaction state.
+- Added `sibyl memory-inspect <source-id>` table and JSON output. The CLI URL-encodes source IDs so
+  provenance IDs containing `/`, `:`, or `%` route correctly.
+- Added `get_raw_memory_by_source_id` as a static Surreal lookup using `source_id`,
+  `organization_id`, `ORDER BY captured_at DESC`, and `LIMIT 1`.
+- `moon run api:test -- tests/test_routes_memory.py tests/test_surreal_auth_runtime.py`: 78 passed
+  in 1.44s.
+- `moon run cli:test -- tests/test_main_capture.py`: 165 passed in 1.14s.
+- `moon run api:lint api:typecheck cli:lint cli:typecheck core:lint core:typecheck`: lint passed;
+  typecheck exited 0 with the existing 62 API and 25 core ty diagnostics.
+- `moon run memory-trust-gate`: PASS with 6 checks, 0 failed.
+- `moon run docs:lint`: passed after Prettier formatting.
+- `moon run :check`: 34 tasks completed; API reported 1413 passed, 1 skipped, and 16 deselected.
+- Independent review passed at `/tmp/claude-review-b46-source-inspect.e74jNf`. Follow-up review
+  passed at `/tmp/claude-review-b46-source-inspect-followup.ENhCmS` after source-ID fallback, audit
+  detail redaction, CLI URL encoding, and private-principal coverage were added.
+- Residual accepted risk: metadata remains inspectable even when raw content is redacted, matching
+  the current content-vs-metadata contract. Delegated scope content remains redacted until delegated
+  membership lists are wired into the REST memory policy context.
+
 ### Packet B4.7: Denied Render Audit
 
 Purpose: close the remaining B4 gap where project access can fail before context or reflection
@@ -1676,8 +1709,8 @@ B4.7 receipt, 2026-05-14:
 - Independent review initially found that the handler missed the deprecated production
   `ProjectAuthorizationError`; the follow-up review passed at
   `/tmp/claude-review-b47-denied-render-followup.zKY7ME`.
-- Remaining B4 risk: source-level memory inspect is still missing from B4.6, and MCP denied render
-  receipts remain requestless until the MCP tool layer exposes a trustworthy request object.
+- Remaining B4 risk: MCP denied render receipts remain requestless until the MCP tool layer exposes
+  a trustworthy request object.
 
 ### Packet B5.1: Reflection Promotion Preview
 

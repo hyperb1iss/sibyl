@@ -227,6 +227,60 @@ class MemoryAuditListResponse(BaseModel):
     limit: int
 
 
+class MemoryDerivedRecordResponse(BaseModel):
+    """Derived memory record summarized from audit receipts."""
+
+    id: str = Field(..., description="Derived record ID")
+    record_type: str = Field(..., description="Derived record type")
+    source_action: str = Field(..., description="Audit action that exposed the record")
+
+
+class MemorySourceInspectResponse(BaseModel):
+    """Owner/admin memory source inspection response."""
+
+    id: str = Field(..., description="Raw memory record ID")
+    organization_id: str = Field(..., description="Organization ID")
+    source_id: str = Field(..., description="Source/provenance ID")
+    principal_id: str = Field(..., description="Principal who captured or owns the memory")
+    agent_id: str | None = Field(default=None, description="Agent identity for diary memory")
+    project_id: str | None = Field(default=None, description="Associated project ID")
+    memory_scope: MemoryScopeLiteral = Field(..., description="Retrieval scope")
+    scope_key: str | None = Field(default=None, description="Project/team/shared scope key")
+    review_state: str = Field(..., description="Review queue state")
+    entity_type: str = Field(..., description="Memory entity type")
+    title: str = Field(default="", description="Human title")
+    raw_content: str | None = Field(default=None, description="Verbatim memory when readable")
+    content_redacted: bool = Field(..., description="Whether raw content was redacted")
+    raw_content_length: int = Field(..., description="Length of the raw memory content")
+    tags: list[str] = Field(default_factory=list, description="Searchable tags")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Auxiliary metadata")
+    provenance: dict[str, Any] = Field(default_factory=dict, description="Source provenance")
+    capture_surface: str | None = Field(default=None, description="Capture surface")
+    captured_at: datetime | None = Field(default=None, description="Capture timestamp")
+    created_at: datetime | None = Field(default=None, description="Creation timestamp")
+    freshness_timestamps: dict[str, datetime | None] = Field(
+        default_factory=dict,
+        description="Named source freshness timestamps",
+    )
+    policy_allowed: bool = Field(..., description="Whether content was readable by policy")
+    policy_reason: str = Field(..., description="Policy reason for content visibility")
+    policy_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Inspectable policy metadata",
+    )
+    derived_ids: list[str] = Field(default_factory=list, description="Derived record IDs")
+    derived_types: list[str] = Field(default_factory=list, description="Derived record types")
+    derived_records: list[MemoryDerivedRecordResponse] = Field(
+        default_factory=list,
+        description="Derived records summarized from audit receipts",
+    )
+    recent_audit_events: list[MemoryAuditEventResponse] = Field(
+        default_factory=list,
+        description="Recent memory audit receipts mentioning this source",
+    )
+    audit_event_count: int = Field(..., description="Number of included audit receipts")
+
+
 class ReflectionPromotionRequest(BaseModel):
     """Request to promote a reviewed reflection candidate into native memory."""
 

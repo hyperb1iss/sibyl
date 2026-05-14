@@ -2,9 +2,10 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
-from sibyl_cli.client import SibylClientError
+from sibyl_cli.client import SibylClient, SibylClientError
 from sibyl_cli.main import _derive_capture_title, _parse_id_args, app
 
 
@@ -33,6 +34,20 @@ def test_parse_id_args_accepts_csv_and_positional_values() -> None:
         "raw-2",
         "raw-3",
     ]
+
+
+@pytest.mark.asyncio
+async def test_memory_inspect_client_url_encodes_source_id() -> None:
+    client = SibylClient(base_url="http://example.test/api", auth_token="token")
+    client._request = AsyncMock(return_value={"id": "memory-1"})  # type: ignore[method-assign]
+
+    data = await client.memory_inspect("source/provenance:1")
+
+    assert data == {"id": "memory-1"}
+    client._request.assert_awaited_once_with(  # type: ignore[attr-defined]
+        "GET",
+        "/memory/inspect/source%2Fprovenance%3A1",
+    )
 
 
 @patch("sibyl_cli.main.get_client")
@@ -694,6 +709,64 @@ def test_memory_audit_command_lists_events(mock_get_client: MagicMock) -> None:
         policy_allowed=True,
         limit=5,
     )
+
+
+@patch("sibyl_cli.main.get_client")
+def test_memory_inspect_command_renders_source_summary(mock_get_client: MagicMock) -> None:
+    mock_client = MagicMock()
+    mock_client.memory_inspect = AsyncMock(
+        return_value={
+            "id": "memory-1",
+            "source_id": "source-1",
+            "title": "Raw source",
+            "memory_scope": "project",
+            "scope_key": "project_123",
+            "project_id": "project_123",
+            "review_state": "promoted",
+            "entity_type": "procedure",
+            "policy_allowed": False,
+            "policy_reason": "unverified_membership",
+            "content_redacted": True,
+            "derived_ids": ["entity-1", "entity-2", "entity-3"],
+            "audit_event_count": 2,
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["memory-inspect", "memory-1"])
+
+    assert result.exit_code == 0
+    assert "Memory source" in result.stdout
+    assert "memory-1" in result.stdout
+    assert "source-1" in result.stdout
+    assert "redacted" in result.stdout
+    assert "+1" in result.stdout
+    mock_client.memory_inspect.assert_awaited_once_with("memory-1")
+
+
+@patch("sibyl_cli.main.get_client")
+def test_memory_inspect_command_outputs_json(mock_get_client: MagicMock) -> None:
+    mock_client = MagicMock()
+    mock_client.memory_inspect = AsyncMock(
+        return_value={
+            "id": "memory-1",
+            "source_id": "source-1",
+            "content_redacted": False,
+            "raw_content": "visible content",
+            "derived_ids": [],
+            "audit_event_count": 0,
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["memory-inspect", "memory-1", "--json"])
+
+    assert result.exit_code == 0
+    assert '"id": "memory-1"' in result.stdout
+    assert '"raw_content": "visible content"' in result.stdout
+    mock_client.memory_inspect.assert_awaited_once_with("memory-1")
 
 
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")

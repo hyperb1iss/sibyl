@@ -820,6 +820,23 @@ async def get_raw_memory(
     return _raw_memory_from_record(record) if record is not None else None
 
 
+async def get_raw_memory_by_source_id(
+    *,
+    organization_id: str,
+    source_id: str,
+) -> RawMemory | None:
+    async with surreal_content_client() as client:
+        record = await _select_one(
+            client,
+            "SELECT * FROM raw_captures "
+            "WHERE source_id = $source_id AND organization_id = $organization_id "
+            "ORDER BY captured_at DESC LIMIT 1;",
+            source_id=source_id,
+            organization_id=organization_id,
+        )
+    return _raw_memory_from_record(record) if record is not None else None
+
+
 async def save_raw_memory(memory: RawMemory) -> RawMemory:
     async with surreal_content_client() as client:
         record = await _replace_record(
@@ -1278,6 +1295,7 @@ __all__ = [
     "close_shared_surreal_content_client",
     "get_or_create_source",
     "get_raw_memory",
+    "get_raw_memory_by_source_id",
     "get_shared_surreal_content_client",
     "lexical_score",
     "lexical_score_from_tokens",
