@@ -1275,9 +1275,9 @@ Exit criteria:
 
 Receipt, 2026-05-15:
 
-- Local release-audit candidate: current local `main`, ahead of `origin/main` by 25 commits. The
-  tracked worktree was clean after the gate repairs; local untracked scratch files were left
-  untouched.
+- Local release-audit candidate: current local `main`, ahead of `origin/main` by the v0.9 commit
+  stack. The tracked worktree was clean after the gate repairs; local untracked scratch files were
+  left untouched.
 - Product surface delivered:
   - Source-grounded synthesis across service, CLI, MCP, API, and web with section source IDs,
     unresolved-gap reporting, hidden-source filtering, artifact provenance, and remember provenance.
