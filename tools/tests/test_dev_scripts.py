@@ -73,7 +73,7 @@ def _run_detector(
     return subprocess.run(  # noqa: S603
         [
             bash,
-            "-lc",
+            "-c",
             detector,
         ],
         cwd=REPO_ROOT,
