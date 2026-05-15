@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { SettingsPageHeader } from '@/components/settings/primitives';
 import { Button, IconButton } from '@/components/ui/button';
 import { Check, Edit, Plus, Trash, User, Users } from '@/components/ui/icons';
 import { Input } from '@/components/ui/input';
@@ -403,21 +404,27 @@ export default function OrganizationsPage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Users width={20} height={20} className="text-sc-purple" />
-            <h2 className="text-lg font-semibold text-sc-fg-primary">Organizations</h2>
-          </div>
-          <OrgSkeleton />
-        </div>
+        <SettingsPageHeader
+          icon={Users}
+          title="Organizations"
+          description="Switch between organizations or create new ones."
+        />
+        <OrgSkeleton />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-sc-bg-base rounded-lg border border-sc-red/20 p-6">
-        <p className="text-sc-red">Failed to load organizations. Please try again.</p>
+      <div className="space-y-6">
+        <SettingsPageHeader
+          icon={Users}
+          title="Organizations"
+          description="Switch between organizations or create new ones."
+        />
+        <div className="rounded-lg border border-sc-red/20 bg-sc-red/5 p-4 text-sm text-sc-red">
+          Failed to load organizations. Please try again.
+        </div>
       </div>
     );
   }
@@ -427,14 +434,12 @@ export default function OrganizationsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <Users width={20} height={20} className="text-sc-purple" />
-            <h2 className="text-lg font-semibold text-sc-fg-primary">Organizations</h2>
-          </div>
-          {!showCreate && (
+      <SettingsPageHeader
+        icon={Users}
+        title="Organizations"
+        description="Each organization has its own knowledge graph and team."
+        actions={
+          !showCreate && (
             <Button
               variant="secondary"
               size="sm"
@@ -443,47 +448,40 @@ export default function OrganizationsPage() {
             >
               New Organization
             </Button>
-          )}
+          )
+        }
+      />
+
+      {showCreate && (
+        <div className="rounded-lg border border-sc-fg-subtle/10 bg-sc-bg-base p-5">
+          <h3 className="mb-4 text-sm font-medium text-sc-fg-primary">Create new organization</h3>
+          <CreateOrgForm
+            onSuccess={() => setShowCreate(false)}
+            onCancel={() => setShowCreate(false)}
+          />
         </div>
+      )}
 
-        <p className="text-sc-fg-muted mb-6">
-          Manage your organizations and switch between them. Each organization has its own knowledge
-          graph and team members.
-        </p>
-
-        {/* Create form */}
-        {showCreate && (
-          <div className="mb-6 p-4 bg-sc-bg-highlight rounded-lg border border-sc-fg-subtle/10">
-            <h3 className="text-sm font-medium text-sc-fg-primary mb-4">Create New Organization</h3>
-            <CreateOrgForm
-              onSuccess={() => setShowCreate(false)}
-              onCancel={() => setShowCreate(false)}
+      {orgs.length === 0 ? (
+        <div className="rounded-lg border border-sc-fg-subtle/10 bg-sc-bg-base p-10 text-center">
+          <Users width={32} height={32} className="mx-auto mb-3 text-sc-fg-muted" />
+          <p className="text-sc-fg-muted">No organizations yet.</p>
+          <p className="mt-1 text-sm text-sc-fg-subtle">
+            Create your first organization to get started.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {orgs.map(org => (
+            <OrgCard
+              key={org.id}
+              org={org}
+              isCurrent={org.id === currentOrgId}
+              currentUserId={me?.user?.id || ''}
             />
-          </div>
-        )}
-
-        {/* Org list */}
-        {orgs.length === 0 ? (
-          <div className="text-center py-8">
-            <Users width={32} height={32} className="mx-auto text-sc-fg-muted mb-3" />
-            <p className="text-sc-fg-muted">No organizations yet.</p>
-            <p className="text-sm text-sc-fg-subtle mt-1">
-              Create your first organization to get started.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {orgs.map(org => (
-              <OrgCard
-                key={org.id}
-                org={org}
-                isCurrent={org.id === currentOrgId}
-                currentUserId={me?.user?.id || ''}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

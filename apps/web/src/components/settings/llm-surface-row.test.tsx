@@ -3,14 +3,13 @@ import type {
   AIModelEntry,
   LLMConfigSource,
   LLMProviderName,
-  LLMSettingsResponse,
   LLMSurface,
+  LLMSurfaceSettings,
 } from '@/lib/api';
 import { render, screen } from '@/test/utils';
+import { LLMSurfaceRow } from './llm-surface-row';
 
 const hooks = vi.hoisted(() => ({
-  useLLMRegistry: vi.fn(),
-  useLLMSettings: vi.fn(),
   useTestLLMSurface: vi.fn(),
   useUpdateLLMSurface: vi.fn(),
 }));
@@ -23,8 +22,6 @@ const toast = vi.hoisted(() => ({
 
 vi.mock('@/lib/hooks', () => hooks);
 vi.mock('sonner', () => ({ toast }));
-
-import { LLMConfigCard } from './llm-config-card';
 
 function valueField(value: string | number | null, source: LLMConfigSource = 'default') {
   return {
@@ -50,7 +47,7 @@ function surface(
   provider: LLMProviderName,
   model: string,
   modelSource: LLMConfigSource = 'default'
-) {
+): LLMSurfaceSettings {
   return {
     surface: id,
     provider: valueField(provider),
@@ -60,17 +57,6 @@ function surface(
     timeout_seconds: valueField(60),
     api_key: secretField(true),
     cached_at: null,
-  };
-}
-
-function settings(): LLMSettingsResponse {
-  return {
-    scope: 'instance_wide',
-    surfaces: {
-      default: surface('default', 'anthropic', 'claude-haiku-4-5'),
-      crawler: surface('crawler', 'anthropic', 'claude-haiku-4-5'),
-      synthesis: surface('synthesis', 'anthropic', 'claude-sonnet-4-6'),
-    },
   };
 }
 
@@ -96,14 +82,33 @@ function model(alias: string, provider: LLMProviderName, useCases: string[]): AI
   };
 }
 
-describe('LLMConfigCard', () => {
+const entries = [
+  model('claude-haiku-4-5', 'anthropic', ['default', 'extraction']),
+  model('claude-sonnet-4-6', 'anthropic', ['synthesis']),
+  model('gemini-3-flash', 'gemini', ['extraction']),
+];
+
+function renderCrawler(testSurface = surface('crawler', 'anthropic', 'claude-haiku-4-5')) {
+  return render(
+    <LLMSurfaceRow
+      id="crawler"
+      label="Crawler"
+      description="Structured entity extraction for crawled documents."
+      useCase="extraction"
+      surface={testSurface}
+      entries={entries}
+    />
+  );
+}
+
+describe('LLMSurfaceRow', () => {
   let updateMutateAsync: ReturnType<typeof vi.fn>;
   let testMutateAsync: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     updateMutateAsync = vi.fn().mockResolvedValue({
       warning: null,
-      surface: settings().surfaces.crawler,
+      surface: surface('crawler', 'gemini', 'gemini-3-flash'),
     });
     testMutateAsync = vi.fn().mockResolvedValue({
       surface: 'crawler',
@@ -118,17 +123,6 @@ describe('LLMConfigCard', () => {
       error: null,
     });
 
-    hooks.useLLMSettings.mockReturnValue({ data: settings(), isLoading: false });
-    hooks.useLLMRegistry.mockReturnValue({
-      data: {
-        entries: [
-          model('claude-haiku-4-5', 'anthropic', ['default', 'extraction']),
-          model('claude-sonnet-4-6', 'anthropic', ['synthesis']),
-          model('gemini-3-flash', 'gemini', ['extraction']),
-        ],
-      },
-      isLoading: false,
-    });
     hooks.useUpdateLLMSurface.mockReturnValue({
       mutateAsync: updateMutateAsync,
       isPending: false,
@@ -142,26 +136,27 @@ describe('LLMConfigCard', () => {
     toast.warning.mockReset();
   });
 
-  it('renders instance-wide language model rows', () => {
-    render(<LLMConfigCard />);
+  it('renders a configured language model surface', () => {
+    renderCrawler();
 
-    expect(screen.getByText('Language Models')).toBeInTheDocument();
-    expect(screen.getByText(/every organization/i)).toBeInTheDocument();
-    expect(screen.getByText('Default')).toBeInTheDocument();
     expect(screen.getByText('Crawler')).toBeInTheDocument();
-    expect(screen.getByText('Synthesis')).toBeInTheDocument();
+    expect(screen.getByText('Key ready')).toBeInTheDocument();
+    expect(
+      screen.getByText('Structured entity extraction for crawled documents.')
+    ).toBeInTheDocument();
   });
 
-  it('saves the crawler surface through the LLM settings mutation', async () => {
-    const { user } = render(<LLMConfigCard />);
+  it('saves changed routing through the LLM settings mutation', async () => {
+    const { user } = renderCrawler();
 
-    await user.click(screen.getByRole('button', { name: 'Save Crawler' }));
+    await user.selectOptions(screen.getAllByRole('combobox')[0], 'gemini');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(updateMutateAsync).toHaveBeenCalledWith({
       surface: 'crawler',
       request: {
-        provider: 'anthropic',
-        model: 'claude-haiku-4-5',
+        provider: 'gemini',
+        model: 'gemini-3-flash',
         temperature: 0,
         timeout_seconds: 60,
       },
@@ -169,7 +164,7 @@ describe('LLMConfigCard', () => {
   });
 
   it('runs a surface test and renders latency plus token counts', async () => {
-    const { user } = render(<LLMConfigCard />);
+    const { user } = renderCrawler();
 
     await user.click(screen.getByRole('button', { name: 'Test Crawler' }));
 
@@ -179,14 +174,9 @@ describe('LLMConfigCard', () => {
     expect(screen.getByText('3 in / 4 out')).toBeInTheDocument();
   });
 
-  it('shows environment-locked fields as disabled', () => {
-    const locked = settings();
-    locked.surfaces.crawler = surface('crawler', 'anthropic', 'claude-haiku-4-5', 'env');
-    hooks.useLLMSettings.mockReturnValue({ data: locked, isLoading: false });
+  it('disables environment-locked fields', () => {
+    renderCrawler(surface('crawler', 'anthropic', 'claude-haiku-4-5', 'env'));
 
-    render(<LLMConfigCard />);
-
-    const selects = screen.getAllByRole('combobox');
-    expect(selects[3]).toBeDisabled();
+    expect(screen.getAllByRole('combobox')[1]).toBeDisabled();
   });
 });

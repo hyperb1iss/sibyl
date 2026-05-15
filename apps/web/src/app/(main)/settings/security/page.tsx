@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { SettingsPageHeader } from '@/components/settings/primitives';
 import { Button, IconButton } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -11,6 +12,7 @@ import {
   Copy,
   Eye,
   Github,
+  Key,
   Plus,
   Settings,
   Trash,
@@ -574,16 +576,11 @@ function OAuthConnectionsSection() {
 export default function SecurityPage() {
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <Settings width={20} height={20} className="text-sc-purple" />
-          <h2 className="text-lg font-semibold text-sc-fg-primary">Security</h2>
-        </div>
-        <p className="text-sc-fg-muted">
-          Manage your password, active sessions, API keys, and connected accounts.
-        </p>
-      </div>
+      <SettingsPageHeader
+        icon={Key}
+        title="Security"
+        description="Password, active sessions, API keys, and connected accounts."
+      />
 
       <PasswordSection />
       <SessionsSection />

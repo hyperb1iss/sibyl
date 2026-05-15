@@ -1,24 +1,46 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import type { FormEvent, ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { LLMConfigCard } from '@/components/settings/llm-config-card';
+import { LLMSurfaceRow } from '@/components/settings/llm-surface-row';
+import {
+  HelpNote,
+  SettingsField,
+  SettingsPageHeader,
+  SettingsSection,
+  StatusPill,
+} from '@/components/settings/primitives';
+import { Button } from '@/components/ui/button';
 import {
   Check,
   Database,
   EditPencil,
+  Eye,
   Flash,
   Globe,
   InfoCircle,
   RefreshDouble,
-  Settings as SettingsIcon,
   Trash,
   WarningTriangle,
   Xmark,
 } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
-import type { SettingInfo, SettingsResponse, UpdateSettingsRequest } from '@/lib/api';
-import { useDeleteSetting, useSettings, useUpdateSettings, useValidateApiKeys } from '@/lib/hooks';
+import type {
+  AIModelEntry,
+  LLMSurface,
+  SettingInfo,
+  SettingsResponse,
+  UpdateSettingsRequest,
+} from '@/lib/api';
+import {
+  useDeleteSetting,
+  useLLMRegistry,
+  useLLMSettings,
+  useSettings,
+  useUpdateSettings,
+  useValidateApiKeys,
+} from '@/lib/hooks';
 
 type ApiKeySettingKey = 'openai_api_key' | 'anthropic_api_key' | 'gemini_api_key';
 type EmbeddingProvider = 'openai' | 'gemini';
@@ -44,6 +66,58 @@ const DEFAULT_EMBEDDING_CONFIG: EmbeddingConfigState = {
   graph_embedding_dimensions: '1024',
 };
 
+const SURFACES: Array<{
+  id: LLMSurface;
+  label: string;
+  description: string;
+  useCase: string;
+}> = [
+  {
+    id: 'default',
+    label: 'Default',
+    description: 'Fallback surface for shared LLM consumers.',
+    useCase: 'default',
+  },
+  {
+    id: 'crawler',
+    label: 'Crawler',
+    description: 'Structured entity extraction for crawled documents.',
+    useCase: 'extraction',
+  },
+  {
+    id: 'synthesis',
+    label: 'Synthesis',
+    description: 'Long-form generation and memory synthesis.',
+    useCase: 'synthesis',
+  },
+];
+
+const API_KEYS: Array<{
+  key: ApiKeySettingKey;
+  name: string;
+  description: string;
+  placeholder: string;
+}> = [
+  {
+    key: 'openai_api_key',
+    name: 'OpenAI',
+    description: 'Used when OpenAI is the selected embedding or LLM provider.',
+    placeholder: 'sk-...',
+  },
+  {
+    key: 'gemini_api_key',
+    name: 'Gemini',
+    description: 'Used when Gemini is the selected embedding or LLM provider.',
+    placeholder: 'AIza...',
+  },
+  {
+    key: 'anthropic_api_key',
+    name: 'Anthropic',
+    description: 'Used for Claude-powered extraction and synthesis.',
+    placeholder: 'sk-ant-...',
+  },
+];
+
 function defaultModelForProvider(provider: EmbeddingProvider): string {
   return provider === 'gemini' ? GEMINI_EMBEDDING_MODEL : OPENAI_EMBEDDING_MODEL;
 }
@@ -67,12 +141,11 @@ function keyDisplayName(key: ApiKeySettingKey) {
 }
 
 function keyPlaceholder(key: ApiKeySettingKey) {
-  if (key === 'openai_api_key') return 'sk-...';
-  if (key === 'anthropic_api_key') return 'sk-ant-...';
-  return 'AIza...';
+  const config = API_KEYS.find(k => k.key === key);
+  return config?.placeholder ?? '';
 }
 
-interface ApiKeyCardProps {
+interface ApiKeyRowProps {
   name: string;
   description: string;
   setting: SettingInfo | undefined;
@@ -84,7 +157,7 @@ interface ApiKeyCardProps {
   isDeleting: boolean;
 }
 
-function ApiKeyCard({
+function ApiKeyRow({
   name,
   description,
   setting,
@@ -94,124 +167,99 @@ function ApiKeyCard({
   onEdit,
   onDelete,
   isDeleting,
-}: ApiKeyCardProps) {
+}: ApiKeyRowProps) {
   const configured = setting?.configured ?? false;
   const source = setting?.source ?? 'none';
 
-  let statusIcon: React.ReactNode;
-  let statusColor: string;
-  let statusBg: string;
-  let statusText: string;
-
+  let pill: ReactNode;
   if (!configured) {
-    statusIcon = <Xmark width={16} height={16} />;
-    statusColor = 'text-sc-red';
-    statusBg = 'bg-sc-red/10 border-sc-red/20';
-    statusText = 'Not configured';
+    pill = (
+      <StatusPill tone="neutral" icon={Xmark}>
+        Not configured
+      </StatusPill>
+    );
   } else if (isValidating) {
-    statusIcon = <Spinner size="sm" color="cyan" />;
-    statusColor = 'text-sc-cyan';
-    statusBg = 'bg-sc-cyan/10 border-sc-cyan/20';
-    statusText = 'Validating...';
+    pill = (
+      <StatusPill tone="info" icon={RefreshDouble}>
+        Validating
+      </StatusPill>
+    );
   } else if (valid === true) {
-    statusIcon = <Check width={16} height={16} />;
-    statusColor = 'text-sc-green';
-    statusBg = 'bg-sc-green/10 border-sc-green/20';
-    statusText = 'Active';
+    pill = (
+      <StatusPill tone="success" icon={Check}>
+        Active
+      </StatusPill>
+    );
   } else if (valid === false) {
-    statusIcon = <WarningTriangle width={16} height={16} />;
-    statusColor = 'text-sc-red';
-    statusBg = 'bg-sc-red/10 border-sc-red/20';
-    statusText = error || 'Invalid';
+    pill = (
+      <StatusPill tone="danger" icon={WarningTriangle}>
+        Invalid
+      </StatusPill>
+    );
   } else {
-    statusIcon = <RefreshDouble width={16} height={16} />;
-    statusColor = 'text-sc-fg-muted';
-    statusBg = 'bg-sc-bg-highlight border-sc-fg-subtle/10';
-    statusText = 'Not validated';
+    pill = (
+      <StatusPill tone="neutral" icon={Check}>
+        Ready
+      </StatusPill>
+    );
   }
 
-  // Source indicator
-  const SourceIcon = source === 'database' ? Database : Globe;
-  const sourceLabel =
-    source === 'database' ? 'Database' : source === 'environment' ? 'Environment' : '';
-
   return (
-    <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <h3 className="font-semibold text-sc-fg-primary mb-1">{name}</h3>
-          <p className="text-sm text-sc-fg-muted">{description}</p>
-        </div>
-        <div
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium ${statusBg} ${statusColor}`}
-        >
-          {statusIcon}
-          <span>{statusText}</span>
-        </div>
-      </div>
-
-      {/* Source and masked value */}
-      {configured && (
-        <div className="mt-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5 text-xs text-sc-fg-muted">
-              <SourceIcon width={14} height={14} />
-              <span>{sourceLabel}</span>
-            </div>
-            {setting?.masked && (
-              <code className="text-xs font-mono text-sc-fg-secondary bg-sc-bg-highlight px-2 py-1 rounded">
-                {setting.masked}
-              </code>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onEdit}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sc-fg-secondary hover:bg-sc-bg-highlight transition-colors"
+    <div className="flex flex-col gap-3 border-b border-sc-fg-subtle/5 px-6 py-4 last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold text-sc-fg-primary">{name}</h3>
+          {pill}
+          {configured && source === 'environment' && (
+            <span
+              className="inline-flex items-center gap-1 text-[11px] text-sc-fg-subtle"
+              title="Value set via environment variable"
             >
-              <EditPencil width={14} height={14} />
-              Update
-            </button>
-            {source === 'database' && (
-              <button
-                type="button"
-                onClick={onDelete}
-                disabled={isDeleting}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sc-red hover:bg-sc-red/10 transition-colors disabled:opacity-50"
-              >
-                {isDeleting ? (
-                  <Spinner size="sm" color="current" />
-                ) : (
-                  <Trash width={14} height={14} />
-                )}
-                Remove
-              </button>
-            )}
-          </div>
+              <Globe width={11} height={11} className="text-sc-purple" />
+              env
+            </span>
+          )}
+          {configured && source === 'database' && (
+            <span
+              className="inline-flex items-center gap-1 text-[11px] text-sc-fg-subtle"
+              title="Value stored in the database"
+            >
+              <Database width={11} height={11} className="text-sc-cyan" />
+              db
+            </span>
+          )}
         </div>
-      )}
-
-      {/* Not configured - show edit button */}
-      {!configured && (
-        <div className="mt-4">
-          <button
-            type="button"
-            onClick={onEdit}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-sc-cyan text-sc-bg-dark text-sm font-medium hover:bg-sc-cyan/90 transition-colors"
+        <p className="mt-0.5 text-xs text-sc-fg-muted">{description}</p>
+        {configured && setting?.masked && (
+          <code className="mt-1.5 inline-block rounded bg-sc-bg-highlight/60 px-2 py-0.5 text-[11px] font-mono text-sc-fg-secondary">
+            {setting.masked}
+          </code>
+        )}
+        {valid === false && error && <p className="mt-1 text-xs text-sc-red">{error}</p>}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<EditPencil width={14} height={14} />}
+          onClick={onEdit}
+        >
+          {configured ? 'Update' : 'Configure'}
+        </Button>
+        {configured && source === 'database' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onDelete}
+            disabled={isDeleting}
+            icon={
+              isDeleting ? <Spinner size="sm" color="current" /> : <Trash width={14} height={14} />
+            }
           >
-            <EditPencil width={14} height={14} />
-            Configure API Key
-          </button>
-        </div>
-      )}
-
-      {/* Error details */}
-      {valid === false && error && (
-        <div className="mt-4 p-3 rounded-lg bg-sc-red/5 border border-sc-red/10">
-          <p className="text-xs text-sc-red">{error}</p>
-        </div>
-      )}
+            Remove
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -236,7 +284,7 @@ function EditModal({
   const [value, setValue] = useState('');
   const [showValue, setShowValue] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!value.trim()) return;
     await onSave(value.trim());
@@ -244,93 +292,52 @@ function EditModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-
-      {/* Modal */}
-      <div className="relative w-full max-w-md bg-sc-bg-dark rounded-xl border border-sc-fg-subtle/20 shadow-2xl">
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+      />
+      <div className="relative w-full max-w-md rounded-xl border border-sc-fg-subtle/15 bg-sc-bg-dark shadow-2xl">
         <div className="p-6">
-          <h3 className="text-lg font-semibold text-sc-fg-primary mb-2">Update {name} API Key</h3>
-          <p className="text-sm text-sc-fg-muted mb-4">
+          <h3 className="text-lg font-semibold text-sc-fg-primary">{name} API key</h3>
+          <p className="mt-1 text-sm text-sc-fg-muted">
             {currentMasked
-              ? `Current key: ${currentMasked}. Enter a new key to replace it.`
-              : 'Enter your API key to configure this service.'}
+              ? `Replacing ${currentMasked}.`
+              : 'Configure this provider to enable its routes.'}
           </p>
-
-          <form onSubmit={handleSubmit}>
-            <div className="relative mb-4">
+          <form onSubmit={handleSubmit} className="mt-4">
+            <div className="relative">
               <input
                 type={showValue ? 'text' : 'password'}
                 value={value}
                 onChange={e => setValue(e.target.value)}
                 placeholder={placeholder}
-                className="w-full px-3 py-2.5 pr-10 rounded-lg bg-sc-bg-base border border-sc-fg-subtle/20 text-sc-fg-primary text-sm placeholder:text-sc-fg-subtle focus:outline-none focus:border-sc-cyan/50 focus:ring-1 focus:ring-sc-cyan/20"
+                className="w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-base px-3 py-2.5 pr-10 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-cyan/50 focus:outline-none focus:ring-1 focus:ring-sc-cyan/20"
               />
               <button
                 type="button"
-                onClick={() => setShowValue(!showValue)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-sc-fg-subtle hover:text-sc-fg-secondary transition-colors"
+                onClick={() => setShowValue(v => !v)}
+                aria-label={showValue ? 'Hide value' : 'Show value'}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-sc-fg-subtle transition-colors hover:text-sc-fg-secondary"
               >
-                {showValue ? (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    role="img"
-                  >
-                    <title>Hide</title>
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                    <line x1="1" y1="1" x2="23" y2="23" />
-                  </svg>
-                ) : (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    role="img"
-                  >
-                    <title>Show</title>
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                )}
+                {showValue ? <Xmark width={16} height={16} /> : <Eye width={16} height={16} />}
               </button>
             </div>
-
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex-1 py-2.5 px-4 rounded-lg border border-sc-fg-subtle/20 text-sc-fg-secondary font-medium text-sm transition-colors hover:bg-sc-bg-base"
-              >
+            <div className="mt-4 flex gap-3">
+              <Button variant="secondary" size="md" onClick={onClose} className="flex-1">
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
-                disabled={!value.trim() || isSaving}
-                className="flex-1 py-2.5 px-4 rounded-lg bg-sc-cyan text-sc-bg-dark font-medium text-sm transition-all hover:bg-sc-cyan/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                variant="primary"
+                size="md"
+                disabled={!value.trim()}
+                loading={isSaving}
+                className="flex-1"
               >
-                {isSaving ? (
-                  <>
-                    <Spinner size="sm" color="current" />
-                    Saving...
-                  </>
-                ) : (
-                  'Save'
-                )}
-              </button>
+                Save key
+              </Button>
             </div>
           </form>
         </div>
@@ -339,7 +346,7 @@ function EditModal({
   );
 }
 
-interface EmbeddingConfigPanelProps {
+interface EmbeddingPanelProps {
   title: string;
   description: string;
   provider: EmbeddingProvider;
@@ -350,7 +357,7 @@ interface EmbeddingConfigPanelProps {
   onDimensionsChange: (dimensions: string) => void;
 }
 
-function EmbeddingConfigPanel({
+function EmbeddingPanel({
   title,
   description,
   provider,
@@ -359,45 +366,33 @@ function EmbeddingConfigPanel({
   onProviderChange,
   onModelChange,
   onDimensionsChange,
-}: EmbeddingConfigPanelProps) {
+}: EmbeddingPanelProps) {
   return (
-    <div className="rounded-lg border border-sc-fg-subtle/10 bg-sc-bg-dark/40 p-4">
-      <div className="mb-4">
-        <h4 className="font-medium text-sc-fg-primary">{title}</h4>
-        <p className="text-sm text-sc-fg-muted">{description}</p>
+    <div className="border-b border-sc-fg-subtle/5 px-6 py-5 last:border-b-0">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold text-sc-fg-primary">{title}</h3>
+        <p className="mt-0.5 text-xs text-sc-fg-muted">{description}</p>
       </div>
-
-      <div className="grid gap-4 md:grid-cols-[160px_1fr_140px]">
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-medium uppercase tracking-[0.08em] text-sc-fg-subtle">
-            Provider
-          </span>
+      <div className="grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)_140px]">
+        <SettingsField label="Provider">
           <select
             value={provider}
             onChange={e => onProviderChange(e.target.value as EmbeddingProvider)}
-            className="w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-base px-3 py-2.5 text-sm text-sc-fg-primary focus:border-sc-cyan/50 focus:outline-none focus:ring-1 focus:ring-sc-cyan/20"
+            className="w-full rounded-lg border border-sc-fg-subtle/15 bg-sc-bg-highlight/40 px-3 py-2 text-sm text-sc-fg-primary focus:border-sc-cyan/50 focus:outline-none focus:ring-1 focus:ring-sc-cyan/20"
           >
             <option value="openai">OpenAI</option>
             <option value="gemini">Gemini</option>
           </select>
-        </label>
-
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-medium uppercase tracking-[0.08em] text-sc-fg-subtle">
-            Model
-          </span>
+        </SettingsField>
+        <SettingsField label="Model">
           <input
             type="text"
             value={model}
             onChange={e => onModelChange(e.target.value)}
-            className="w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-base px-3 py-2.5 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-cyan/50 focus:outline-none focus:ring-1 focus:ring-sc-cyan/20"
+            className="w-full rounded-lg border border-sc-fg-subtle/15 bg-sc-bg-highlight/40 px-3 py-2 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-cyan/50 focus:outline-none focus:ring-1 focus:ring-sc-cyan/20"
           />
-        </label>
-
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-medium uppercase tracking-[0.08em] text-sc-fg-subtle">
-            Dimensions
-          </span>
+        </SettingsField>
+        <SettingsField label="Dimensions">
           <input
             type="number"
             min={128}
@@ -405,9 +400,9 @@ function EmbeddingConfigPanel({
             step={1}
             value={dimensions}
             onChange={e => onDimensionsChange(e.target.value)}
-            className="w-full rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-base px-3 py-2.5 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-cyan/50 focus:outline-none focus:ring-1 focus:ring-sc-cyan/20"
+            className="w-full rounded-lg border border-sc-fg-subtle/15 bg-sc-bg-highlight/40 px-3 py-2 text-sm text-sc-fg-primary placeholder:text-sc-fg-subtle focus:border-sc-cyan/50 focus:outline-none focus:ring-1 focus:ring-sc-cyan/20"
           />
-        </label>
+        </SettingsField>
       </div>
     </div>
   );
@@ -415,6 +410,8 @@ function EmbeddingConfigPanel({
 
 export default function AIServicesPage() {
   const { data: settings, isLoading } = useSettings();
+  const { data: llmSettings, isLoading: isLLMLoading } = useLLMSettings();
+  const { data: registry } = useLLMRegistry('llm');
   const {
     data: validation,
     refetch: revalidate,
@@ -423,6 +420,8 @@ export default function AIServicesPage() {
   const updateSettings = useUpdateSettings();
   const deleteSetting = useDeleteSetting();
 
+  const entries: AIModelEntry[] = useMemo(() => registry?.entries ?? [], [registry]);
+
   const [isValidating, setIsValidating] = useState(false);
   const [editingKey, setEditingKey] = useState<ApiKeySettingKey | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
@@ -430,7 +429,6 @@ export default function AIServicesPage() {
 
   useEffect(() => {
     if (!settings) return;
-
     const embeddingProvider = parseProvider(
       readSetting(settings, 'embedding_provider', DEFAULT_EMBEDDING_CONFIG.embedding_provider),
       DEFAULT_EMBEDDING_CONFIG.embedding_provider
@@ -443,7 +441,6 @@ export default function AIServicesPage() {
       ),
       DEFAULT_EMBEDDING_CONFIG.graph_embedding_provider
     );
-
     setEmbeddingConfig({
       embedding_provider: embeddingProvider,
       embedding_model: readSetting(
@@ -523,7 +520,6 @@ export default function AIServicesPage() {
   const handleSaveEmbeddingConfig = useCallback(async () => {
     const embeddingDimensions = Number.parseInt(embeddingConfig.embedding_dimensions, 10);
     const graphDimensions = Number.parseInt(embeddingConfig.graph_embedding_dimensions, 10);
-
     if (
       !Number.isInteger(embeddingDimensions) ||
       embeddingDimensions < 128 ||
@@ -535,7 +531,6 @@ export default function AIServicesPage() {
       toast.error('Embedding dimensions must be whole numbers from 128 to 3072');
       return;
     }
-
     const request: UpdateSettingsRequest = {
       embedding_provider: embeddingConfig.embedding_provider,
       embedding_model: embeddingConfig.embedding_model.trim(),
@@ -544,12 +539,10 @@ export default function AIServicesPage() {
       graph_embedding_model: embeddingConfig.graph_embedding_model.trim(),
       graph_embedding_dimensions: graphDimensions,
     };
-
     if (!request.embedding_model || !request.graph_embedding_model) {
       toast.error('Embedding models cannot be blank');
       return;
     }
-
     try {
       await updateSettings.mutateAsync(request);
       toast.success('Embedding configuration saved');
@@ -558,7 +551,6 @@ export default function AIServicesPage() {
     }
   }, [embeddingConfig, updateSettings]);
 
-  // Use validation results if available, otherwise fall back to update results, then settings
   const openaiValid =
     validation?.openai_valid ?? updateSettings.data?.validation?.openai_api_key?.valid ?? null;
   const anthropicValid =
@@ -578,202 +570,167 @@ export default function AIServicesPage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Flash width={20} height={20} className="text-sc-yellow" />
-            <h2 className="text-lg font-semibold text-sc-fg-primary">AI Services</h2>
-          </div>
-          <div className="flex items-center justify-center py-8">
-            <Spinner size="md" color="purple" />
-          </div>
+        <SettingsPageHeader
+          icon={Flash}
+          iconColor="text-sc-yellow"
+          title="AI Services"
+          description="API keys, model routing, and embeddings."
+        />
+        <div className="flex items-center justify-center py-12">
+          <Spinner size="md" color="purple" />
         </div>
       </div>
     );
   }
 
+  const keyValidByKey: Record<ApiKeySettingKey, boolean | null | undefined> = {
+    openai_api_key: openaiValid,
+    gemini_api_key: geminiValid,
+    anthropic_api_key: anthropicValid,
+  };
+
+  const keyErrorByKey: Record<ApiKeySettingKey, string | null | undefined> = {
+    openai_api_key:
+      validation?.openai_error ?? updateSettings.data?.validation?.openai_api_key?.error,
+    gemini_api_key:
+      validation?.gemini_error ?? updateSettings.data?.validation?.gemini_api_key?.error,
+    anthropic_api_key:
+      validation?.anthropic_error ?? updateSettings.data?.validation?.anthropic_api_key?.error,
+  };
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <Flash width={20} height={20} className="text-sc-yellow" />
-            <h2 className="text-lg font-semibold text-sc-fg-primary">AI Services</h2>
-          </div>
-          <button
-            type="button"
+      <SettingsPageHeader
+        icon={Flash}
+        iconColor="text-sc-yellow"
+        title="AI Services"
+        description="API keys, model routing, and embeddings. Apply across every organization in this deployment."
+        actions={
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={handleValidate}
-            disabled={isValidating || isValidateLoading}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sc-bg-highlight border border-sc-fg-subtle/20 text-sm font-medium text-sc-fg-secondary hover:bg-sc-bg-base transition-colors disabled:opacity-50"
+            loading={isValidating || isValidateLoading}
+            icon={<RefreshDouble width={14} height={14} />}
           >
-            {isValidating || isValidateLoading ? (
-              <>
-                <Spinner size="sm" color="current" />
-                Validating...
-              </>
-            ) : (
-              <>
-                <RefreshDouble width={14} height={14} />
-                Validate All
-              </>
-            )}
-          </button>
-        </div>
-        <p className="text-sc-fg-muted">
-          Sibyl routes language models and embeddings through configurable provider surfaces. API
-          keys can be configured here or via environment variables.
-        </p>
-      </div>
+            Validate all
+          </Button>
+        }
+      />
 
-      <LLMConfigCard />
+      <SettingsSection
+        title="Provider keys"
+        description="Configure here, or set environment variables for deployment-wide overrides."
+        flush
+      >
+        {API_KEYS.map(config => (
+          <ApiKeyRow
+            key={config.key}
+            name={config.name}
+            description={config.description}
+            setting={settings?.settings?.[config.key]}
+            valid={keyValidByKey[config.key]}
+            error={keyErrorByKey[config.key]}
+            isValidating={isValidating}
+            onEdit={() => setEditingKey(config.key)}
+            onDelete={() => handleDeleteKey(config.key)}
+            isDeleting={deletingKey === config.key}
+          />
+        ))}
+      </SettingsSection>
 
-      {/* API Key Cards */}
-      <div className="grid gap-4">
-        <ApiKeyCard
-          name="OpenAI"
-          description="Powers semantic search when OpenAI is selected as an embedding provider."
-          setting={settings?.settings?.openai_api_key}
-          valid={openaiValid}
-          error={validation?.openai_error ?? updateSettings.data?.validation?.openai_api_key?.error}
-          isValidating={isValidating}
-          onEdit={() => setEditingKey('openai_api_key')}
-          onDelete={() => handleDeleteKey('openai_api_key')}
-          isDeleting={deletingKey === 'openai_api_key'}
-        />
-        <ApiKeyCard
-          name="Gemini"
-          description="Powers semantic search when Gemini is selected as an embedding provider."
-          setting={settings?.settings?.gemini_api_key}
-          valid={geminiValid}
-          error={validation?.gemini_error ?? updateSettings.data?.validation?.gemini_api_key?.error}
-          isValidating={isValidating}
-          onEdit={() => setEditingKey('gemini_api_key')}
-          onDelete={() => handleDeleteKey('gemini_api_key')}
-          isDeleting={deletingKey === 'gemini_api_key'}
-        />
-        <ApiKeyCard
-          name="Anthropic"
-          description="Powers entity extraction workflows. Uses Claude Haiku for extraction."
-          setting={settings?.settings?.anthropic_api_key}
-          valid={anthropicValid}
-          error={
-            validation?.anthropic_error ?? updateSettings.data?.validation?.anthropic_api_key?.error
-          }
-          isValidating={isValidating}
-          onEdit={() => setEditingKey('anthropic_api_key')}
-          onDelete={() => handleDeleteKey('anthropic_api_key')}
-          isDeleting={deletingKey === 'anthropic_api_key'}
-        />
-      </div>
-
-      <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <SettingsIcon width={20} height={20} className="mt-0.5 text-sc-cyan" />
-            <div>
-              <h3 className="font-semibold text-sc-fg-primary">Embedding Configuration</h3>
-              <p className="mt-1 text-sm text-sc-fg-muted">
-                Choose the provider, model, and vector dimensions used for document chunks and graph
-                memory.
-              </p>
-            </div>
+      <SettingsSection
+        title="Model routing"
+        description="Each surface picks a provider and model. Test before saving."
+        flush
+      >
+        {isLLMLoading || !llmSettings ? (
+          <div className="flex items-center justify-center py-10">
+            <Spinner size="md" color="purple" />
           </div>
-          <button
-            type="button"
+        ) : (
+          SURFACES.map(surface => (
+            <LLMSurfaceRow
+              key={surface.id}
+              id={surface.id}
+              label={surface.label}
+              description={surface.description}
+              useCase={surface.useCase}
+              surface={llmSettings.surfaces[surface.id]}
+              entries={entries}
+            />
+          ))
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        title="Embeddings"
+        description="Vector spaces for document chunks and graph memory."
+        flush
+        actions={
+          <Button
+            variant="primary"
+            size="sm"
             onClick={handleSaveEmbeddingConfig}
-            disabled={updateSettings.isPending}
-            className="flex items-center gap-2 rounded-lg bg-sc-cyan px-3 py-2 text-sm font-medium text-sc-bg-dark transition-colors hover:bg-sc-cyan/90 disabled:cursor-not-allowed disabled:opacity-50"
+            loading={updateSettings.isPending}
           >
-            {updateSettings.isPending ? (
-              <>
-                <Spinner size="sm" color="current" />
-                Saving...
-              </>
-            ) : (
-              'Save Config'
-            )}
-          </button>
+            Save embeddings
+          </Button>
+        }
+      >
+        <div className="px-6 pt-4">
+          <HelpNote tone="warning" icon={WarningTriangle}>
+            Changing provider, model, or dimensions changes the vector space. Re-crawl document
+            sources and rebuild graph indexes before trusting mixed search results.
+          </HelpNote>
         </div>
+        <EmbeddingPanel
+          title="Document embeddings"
+          description="Used by crawled sources, chunks, and semantic document search."
+          provider={embeddingConfig.embedding_provider}
+          model={embeddingConfig.embedding_model}
+          dimensions={embeddingConfig.embedding_dimensions}
+          onProviderChange={provider =>
+            setEmbeddingConfig(current => ({
+              ...current,
+              embedding_provider: provider,
+              embedding_model: defaultModelForProvider(provider),
+            }))
+          }
+          onModelChange={model => updateEmbeddingConfig('embedding_model', model)}
+          onDimensionsChange={dimensions =>
+            updateEmbeddingConfig('embedding_dimensions', dimensions)
+          }
+        />
+        <EmbeddingPanel
+          title="Graph embeddings"
+          description="Used by Graphiti entities, relationships, and graph similarity search."
+          provider={embeddingConfig.graph_embedding_provider}
+          model={embeddingConfig.graph_embedding_model}
+          dimensions={embeddingConfig.graph_embedding_dimensions}
+          onProviderChange={provider =>
+            setEmbeddingConfig(current => ({
+              ...current,
+              graph_embedding_provider: provider,
+              graph_embedding_model: defaultModelForProvider(provider),
+            }))
+          }
+          onModelChange={model => updateEmbeddingConfig('graph_embedding_model', model)}
+          onDimensionsChange={dimensions =>
+            updateEmbeddingConfig('graph_embedding_dimensions', dimensions)
+          }
+        />
+      </SettingsSection>
 
-        <div className="mb-5 rounded-lg border border-sc-yellow/20 bg-sc-yellow/10 p-4">
-          <div className="flex gap-3">
-            <InfoCircle width={18} height={18} className="mt-0.5 flex-shrink-0 text-sc-yellow" />
-            <p className="text-sm text-sc-fg-secondary">
-              Changing provider, model, or dimensions changes the vector space. Re-crawl document
-              sources and rebuild graph indexes before trusting mixed search results.
-            </p>
-          </div>
-        </div>
+      <HelpNote tone="muted" icon={InfoCircle}>
+        Environment variables take precedence over database settings for the same field. Gemini also
+        checks <code className="font-mono text-sc-fg-secondary">GEMINI_API_KEY</code> and{' '}
+        <code className="font-mono text-sc-fg-secondary">GOOGLE_API_KEY</code>; embedding providers
+        can be set with{' '}
+        <code className="font-mono text-sc-fg-secondary">SIBYL_EMBEDDING_PROVIDER</code> and{' '}
+        <code className="font-mono text-sc-fg-secondary">SIBYL_GRAPH_EMBEDDING_PROVIDER</code>.
+      </HelpNote>
 
-        <div className="grid gap-4">
-          <EmbeddingConfigPanel
-            title="Document Embeddings"
-            description="Used by crawled sources, chunks, and semantic document search."
-            provider={embeddingConfig.embedding_provider}
-            model={embeddingConfig.embedding_model}
-            dimensions={embeddingConfig.embedding_dimensions}
-            onProviderChange={provider =>
-              setEmbeddingConfig(current => ({
-                ...current,
-                embedding_provider: provider,
-                embedding_model: defaultModelForProvider(provider),
-              }))
-            }
-            onModelChange={model => updateEmbeddingConfig('embedding_model', model)}
-            onDimensionsChange={dimensions =>
-              updateEmbeddingConfig('embedding_dimensions', dimensions)
-            }
-          />
-          <EmbeddingConfigPanel
-            title="Graph Embeddings"
-            description="Used by Graphiti entities, relationships, and graph similarity search."
-            provider={embeddingConfig.graph_embedding_provider}
-            model={embeddingConfig.graph_embedding_model}
-            dimensions={embeddingConfig.graph_embedding_dimensions}
-            onProviderChange={provider =>
-              setEmbeddingConfig(current => ({
-                ...current,
-                graph_embedding_provider: provider,
-                graph_embedding_model: defaultModelForProvider(provider),
-              }))
-            }
-            onModelChange={model => updateEmbeddingConfig('graph_embedding_model', model)}
-            onDimensionsChange={dimensions =>
-              updateEmbeddingConfig('graph_embedding_dimensions', dimensions)
-            }
-          />
-        </div>
-      </div>
-
-      {/* Configuration Info */}
-      <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-        <h3 className="font-semibold text-sc-fg-primary mb-3">Configuration Priority</h3>
-        <div className="space-y-3 text-sm text-sc-fg-muted">
-          <p>API keys and model settings show their active source beside each field.</p>
-          <ol className="list-decimal list-inside space-y-2 pl-2">
-            <li>
-              <span className="inline-flex items-center gap-1.5">
-                <Globe width={14} height={14} className="text-sc-purple" />
-                <strong className="text-sc-fg-secondary">Environment</strong> - Deployment overrides
-                for language model fields and provider keys.
-              </span>
-            </li>
-            <li>
-              <span className="inline-flex items-center gap-1.5">
-                <Database width={14} height={14} className="text-sc-cyan" />
-                <strong className="text-sc-fg-secondary">Database</strong> - Values saved via this
-                UI when no environment override is active.
-              </span>
-            </li>
-          </ol>
-          <p className="mt-4 text-xs">
-            Gemini also checks GEMINI_API_KEY and GOOGLE_API_KEY. Embedding provider settings can be
-            supplied with SIBYL_EMBEDDING_PROVIDER and SIBYL_GRAPH_EMBEDDING_PROVIDER.
-          </p>
-        </div>
-      </div>
-
-      {/* Edit Modal */}
       {editingKey && (
         <EditModal
           name={keyDisplayName(editingKey)}

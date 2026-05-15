@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { SettingsPageHeader, SettingsRow, SettingsSection } from '@/components/settings/primitives';
 import { Eye, Flash, Globe, Network, Settings } from '@/components/ui/icons';
 import type { UserPreferences } from '@/lib/api';
 import { usePreferences, useUpdatePreferences } from '@/lib/hooks';
@@ -140,27 +141,20 @@ function AppearanceSection({ backendTheme, onBackendUpdate, isUpdating }: Appear
   ];
 
   return (
-    <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-      <div className="flex items-center gap-3 mb-4">
-        <Eye width={18} height={18} className="text-sc-purple" />
-        <h3 className="font-semibold text-sc-fg-primary">Appearance</h3>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-sc-fg-primary">Theme</p>
-            <p className="text-xs text-sc-fg-muted">Choose your preferred color theme</p>
-          </div>
+    <SettingsSection title="Appearance" icon={Eye} iconColor="text-sc-purple">
+      <SettingsRow
+        label="Theme"
+        description="Choose your preferred color theme"
+        control={
           <Select
             value={toDisplayValue(preference)}
             onChange={handleThemeChange}
             options={themes}
             disabled={isUpdating}
           />
-        </div>
-      </div>
-    </div>
+        }
+      />
+    </SettingsSection>
   );
 }
 
@@ -192,40 +186,33 @@ function LocaleSection({ prefs, onUpdate, isUpdating }: SectionProps) {
   ];
 
   return (
-    <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-      <div className="flex items-center gap-3 mb-4">
-        <Globe width={18} height={18} className="text-sc-cyan" />
-        <h3 className="font-semibold text-sc-fg-primary">Language & Region</h3>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-sc-fg-primary">Language</p>
-            <p className="text-xs text-sc-fg-muted">Select your preferred language</p>
-          </div>
+    <SettingsSection title="Language & Region" icon={Globe} iconColor="text-sc-cyan">
+      <SettingsRow
+        label="Language"
+        description="Select your preferred language"
+        divider
+        control={
           <Select
             value={prefs.locale || 'en'}
             onChange={v => onUpdate({ locale: v })}
             options={locales}
             disabled={isUpdating}
           />
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-sc-fg-primary">Timezone</p>
-            <p className="text-xs text-sc-fg-muted">Used for displaying dates and times</p>
-          </div>
+        }
+      />
+      <SettingsRow
+        label="Timezone"
+        description="Used for displaying dates and times"
+        control={
           <Select
             value={prefs.timezone || 'auto'}
             onChange={v => onUpdate({ timezone: v })}
             options={timezones}
             disabled={isUpdating}
           />
-        </div>
-      </div>
-    </div>
+        }
+      />
+    </SettingsSection>
   );
 }
 
@@ -235,30 +222,24 @@ function LocaleSection({ prefs, onUpdate, isUpdating }: SectionProps) {
 
 function GraphSection({ prefs, onUpdate, isUpdating }: SectionProps) {
   return (
-    <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-      <div className="flex items-center gap-3 mb-4">
-        <Network width={18} height={18} className="text-sc-coral" />
-        <h3 className="font-semibold text-sc-fg-primary">Knowledge Graph</h3>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-sc-fg-primary">Show Labels</p>
-            <p className="text-xs text-sc-fg-muted">Display labels on graph nodes by default</p>
-          </div>
+    <SettingsSection title="Knowledge Graph" icon={Network} iconColor="text-sc-coral">
+      <SettingsRow
+        label="Show Labels"
+        description="Display labels on graph nodes by default"
+        divider
+        control={
           <Toggle
             checked={prefs.graphShowLabels ?? true}
             onChange={v => onUpdate({ graphShowLabels: v })}
             disabled={isUpdating}
           />
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-sc-fg-primary">Default Zoom Level</p>
-            <p className="text-xs text-sc-fg-muted">Initial zoom when opening the graph</p>
-          </div>
+        }
+      />
+      <SettingsRow
+        label="Default Zoom Level"
+        description="Initial zoom when opening the graph"
+        divider
+        control={
           <Select
             value={String(prefs.graphDefaultZoom || 1)}
             onChange={v => onUpdate({ graphDefaultZoom: parseFloat(v) })}
@@ -271,13 +252,12 @@ function GraphSection({ prefs, onUpdate, isUpdating }: SectionProps) {
             ]}
             disabled={isUpdating}
           />
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-sc-fg-primary">Default Dashboard View</p>
-            <p className="text-xs text-sc-fg-muted">Layout for dashboard and entity lists</p>
-          </div>
+        }
+      />
+      <SettingsRow
+        label="Default Dashboard View"
+        description="Layout for dashboard and entity lists"
+        control={
           <Select
             value={prefs.dashboardDefaultView || 'grid'}
             onChange={v => onUpdate({ dashboardDefaultView: v as 'grid' | 'list' })}
@@ -287,9 +267,9 @@ function GraphSection({ prefs, onUpdate, isUpdating }: SectionProps) {
             ]}
             disabled={isUpdating}
           />
-        </div>
-      </div>
-    </div>
+        }
+      />
+    </SettingsSection>
   );
 }
 
@@ -299,38 +279,31 @@ function GraphSection({ prefs, onUpdate, isUpdating }: SectionProps) {
 
 function NotificationsSection({ prefs, onUpdate, isUpdating }: SectionProps) {
   return (
-    <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-      <div className="flex items-center gap-3 mb-4">
-        <Flash width={18} height={18} className="text-sc-yellow" />
-        <h3 className="font-semibold text-sc-fg-primary">Notifications</h3>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-sc-fg-primary">Task Assignments</p>
-            <p className="text-xs text-sc-fg-muted">Notify when tasks are assigned to you</p>
-          </div>
+    <SettingsSection title="Notifications" icon={Flash} iconColor="text-sc-yellow">
+      <SettingsRow
+        label="Task Assignments"
+        description="Notify when tasks are assigned to you"
+        divider
+        control={
           <Toggle
             checked={prefs.notifyOnTaskAssigned ?? true}
             onChange={v => onUpdate({ notifyOnTaskAssigned: v })}
             disabled={isUpdating}
           />
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-sc-fg-primary">Mentions</p>
-            <p className="text-xs text-sc-fg-muted">Notify when you are mentioned</p>
-          </div>
+        }
+      />
+      <SettingsRow
+        label="Mentions"
+        description="Notify when you are mentioned"
+        control={
           <Toggle
             checked={prefs.notifyOnMention ?? true}
             onChange={v => onUpdate({ notifyOnMention: v })}
             disabled={isUpdating}
           />
-        </div>
-      </div>
-    </div>
+        }
+      />
+    </SettingsSection>
   );
 }
 
@@ -369,13 +342,12 @@ export default function PreferencesPage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Settings width={20} height={20} className="text-sc-purple" />
-            <h2 className="text-lg font-semibold text-sc-fg-primary">Preferences</h2>
-          </div>
-          <SectionSkeleton />
-        </div>
+        <SettingsPageHeader
+          icon={Settings}
+          title="Preferences"
+          description="Customize your display, language, and behavior."
+        />
+        <SectionSkeleton />
       </div>
     );
   }
@@ -383,8 +355,13 @@ export default function PreferencesPage() {
   if (error) {
     return (
       <div className="space-y-6">
-        <div className="bg-sc-bg-base rounded-lg border border-sc-red/20 p-6">
-          <p className="text-sc-red">Failed to load preferences. Please try again.</p>
+        <SettingsPageHeader
+          icon={Settings}
+          title="Preferences"
+          description="Customize your display, language, and behavior."
+        />
+        <div className="rounded-lg border border-sc-red/20 bg-sc-red/5 p-4 text-sm text-sc-red">
+          Failed to load preferences. Please try again.
         </div>
       </div>
     );
@@ -392,17 +369,11 @@ export default function PreferencesPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <Settings width={20} height={20} className="text-sc-purple" />
-          <h2 className="text-lg font-semibold text-sc-fg-primary">Preferences</h2>
-        </div>
-        <p className="text-sc-fg-muted">
-          Customize your display preferences, language, and behavior settings.
-        </p>
-      </div>
-
+      <SettingsPageHeader
+        icon={Settings}
+        title="Preferences"
+        description="Customize your display, language, and behavior."
+      />
       <AppearanceSection
         backendTheme={localPrefs.theme}
         onBackendUpdate={theme => handleUpdate({ theme })}
