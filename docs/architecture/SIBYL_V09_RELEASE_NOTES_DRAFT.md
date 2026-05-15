@@ -1,7 +1,7 @@
 # Sibyl v0.9 Release Notes Draft
 
-Status: HOLD. This draft is not publishable until CI, docs deploy, and nightly regression are green
-on the final v0.9 candidate head.
+Status: HOLD. CI is green on the CI-only PR for the current candidate, but this draft is not
+publishable until docs deploy and nightly regression are green on the final v0.9 candidate head.
 
 ## Highlights
 
@@ -35,14 +35,22 @@ on the final v0.9 candidate head.
 - `moon run api:test` -> 1467 passed, 1 skipped, 16 deselected.
 - `moon run cli:test` -> 174 passed.
 - `moon run web:test` -> 26 files passed, 102 tests passed.
+- `moon run web:test-cov` -> 26 files passed, 102 tests passed after the synthesis runner coverage
+  test was stabilized.
 - Post-unified-UX update: `moon run web:lint web:typecheck docs:lint` -> 3 tasks completed, 1
   cached.
 - `moon run docs:lint` -> all matched files use Prettier code style.
 - `moon run :check` -> 40 tasks completed, 26 cache hits before the receipt docs were written;
   post-doc rerun completed 36 tasks with 33 cache hits.
 
+## GitHub Evidence
+
+- CI-only PR #7 (`codex/v09-ci`) succeeded on candidate head
+  `e944a1d3a81dc0f1c840a053394d59c9c61bce30` in run `25898456003`.
+- Passing checks: Detect Changes, Static Checks, Build, Package Tests, E2E, Storybook, and
+  CodeRabbit.
+
 ## Release Hold
 
-The local branch is ahead of `origin/main`; no GitHub CI, docs deploy, or nightly regression receipt
-covers the local v0.9 candidate yet. Ship only after those receipts are green on the exact candidate
-head.
+The local branch is ahead of `origin/main`; no docs deploy or nightly regression receipt covers the
+local v0.9 candidate yet. Ship only after those receipts are green on the exact candidate head.

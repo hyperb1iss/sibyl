@@ -1275,7 +1275,7 @@ Exit criteria:
 
 Receipt, 2026-05-15:
 
-- Local release-audit candidate: current local `main`, ahead of `origin/main` by 21 commits. The
+- Local release-audit candidate: current local `main`, ahead of `origin/main` by 22 commits. The
   tracked worktree was clean after the gate repairs; local untracked scratch files were left
   untouched.
 - Product surface delivered:
@@ -1301,6 +1301,8 @@ Receipt, 2026-05-15:
   - `moon run api:test` -> 1467 passed, 1 skipped, 16 deselected in 14.53s.
   - `moon run cli:test` -> 174 passed in 8.70s.
   - `moon run web:test` -> 26 files passed, 102 tests passed.
+  - `moon run web:test-cov` -> 26 files passed, 102 tests passed after the synthesis runner coverage
+    test was stabilized.
   - Post-unified-UX update: `moon run web:lint web:typecheck docs:lint` -> 3 tasks completed, 1
     cached.
   - `moon run docs:lint` -> all matched files use Prettier code style.
@@ -1322,12 +1324,13 @@ Receipt, 2026-05-15:
   - Release run `25891107401` succeeded on `f8d23e6450ec86dfd8251f0c94e6804cdbcc4f76`.
   - Latest nightly regression receipt is run `25877971585`, successful on
     `4855ba8ad8be6be958ba720e81b3459e727a973b`.
-  - No CI, docs deploy, or nightly regression receipt covers the current local release-audit
-    candidate.
-- Binary recommendation: HOLD for tag or public release until the local 0.9 candidate is pushed to a
-  CI-covered branch and CI, docs deploy, and nightly regression are green on that exact head. The
-  local product gate evidence supports the source-grounded synthesis, inspectable/correctable
-  memory, source-preserving ingest, and usable cockpit claims once that external verification lands.
+  - CI-only PR #7 (`codex/v09-ci`) succeeded on candidate head
+    `e944a1d3a81dc0f1c840a053394d59c9c61bce30` in run `25898456003`. Checks passed: Detect Changes,
+    Static Checks, Build, Package Tests, E2E, Storybook, and CodeRabbit.
+  - No docs deploy or nightly regression receipt covers the current release-audit candidate.
+- Binary recommendation: HOLD for tag or public release until the local 0.9 candidate reaches the
+  final branch and docs deploy plus nightly regression are green on the exact candidate head. The
+  product, local verification, and CI-only PR are green; release is not yet publishable.
 
 ## 13. Verification Matrix
 
