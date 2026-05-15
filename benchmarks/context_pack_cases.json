@@ -1,4 +1,18 @@
 {
+  "gate": {
+    "name": "context-pack",
+    "command": "moon run core:bench-context -- --cases benchmarks/context_pack_cases.json --repeat 20 --label retrieval-native --metadata retrieval_mode=native",
+    "profile": "context-pack",
+    "artifact_dir": ".moon/cache/evals/",
+    "release_artifact_dir": "benchmarks/results/context-pack/",
+    "surfaces": [
+      "source metadata coverage",
+      "facet order",
+      "private leak negatives",
+      "stale decision replacement",
+      "source grounding"
+    ]
+  },
   "cases": [
     {
       "name": "coding-handoff",

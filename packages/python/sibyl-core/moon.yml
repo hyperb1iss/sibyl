@@ -97,6 +97,31 @@ tasks:
     - '@group(sources)'
     - tests/test_context_pack.py
     - tests/test_session_bundle.py
+  synthesis-gate-test:
+    command: uv run pytest tests/test_synthesis.py -v
+    inputs:
+    - '@group(sources)'
+    - tests/test_synthesis.py
+  synthesis-tool-gate-test:
+    command:
+      uv run pytest
+      tests/test_tools.py::test_synthesis_plan_tool_materializes_section_sources
+      tests/test_tools.py::test_synthesis_draft_tool_can_remember_artifact
+      tests/test_tools.py::test_synthesis_verify_tool_reports_gaps_without_artifact
+      -v
+    inputs:
+    - '@group(sources)'
+    - tests/test_tools.py
+  adapter-ingest-contract-test:
+    command: uv run pytest tests/test_source_adapters.py -v
+    inputs:
+    - '@group(sources)'
+    - tests/test_source_adapters.py
+  adapter-ingest-mailbox-test:
+    command: uv run pytest tests/test_mailbox_adapter.py -v
+    inputs:
+    - '@group(sources)'
+    - tests/test_mailbox_adapter.py
   no-graphiti-smoke:
     command: uv run pytest tests/test_no_graphiti_default_loop.py -v
     inputs:

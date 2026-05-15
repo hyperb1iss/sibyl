@@ -222,6 +222,8 @@ tasks:
       - ~:storage-access-test
       - ~:baseline-test
       - ~:memory-trust-gate-test
+      - ~:synthesis-gate-test
+      - ~:adapter-ingest-gate-test
       - core:check
       - api:check
       - cli:check
@@ -240,6 +242,8 @@ tasks:
       - ~:storage-access-test
       - ~:baseline-test
       - ~:memory-trust-gate-test
+      - ~:synthesis-gate-test
+      - ~:adapter-ingest-gate-test
       - core:test
       - api:test
       - cli:test
@@ -605,6 +609,36 @@ tasks:
       - tools/tests/test_memory_trust_gate.py
       - pyproject.toml
       - moon.yml
+
+  synthesis-gate:
+    command: uv run python -m tools.trust.synthesis_gate
+    options:
+      cache: false
+
+  synthesis-gate-test:
+    command: uv run pytest tools/tests/test_synthesis_gate.py -v
+    inputs:
+      - tools/trust/**/*.py
+      - tools/tests/conftest.py
+      - tools/tests/test_synthesis_gate.py
+      - pyproject.toml
+      - moon.yml
+      - packages/python/sibyl-core/moon.yml
+
+  adapter-ingest-gate:
+    command: uv run python -m tools.trust.adapter_ingest_gate
+    options:
+      cache: false
+
+  adapter-ingest-gate-test:
+    command: uv run pytest tools/tests/test_adapter_ingest_gate.py -v
+    inputs:
+      - tools/trust/**/*.py
+      - tools/tests/conftest.py
+      - tools/tests/test_adapter_ingest_gate.py
+      - pyproject.toml
+      - moon.yml
+      - packages/python/sibyl-core/moon.yml
 
   migrate-rehearse:
     command: uv run sibyld migrate rehearse

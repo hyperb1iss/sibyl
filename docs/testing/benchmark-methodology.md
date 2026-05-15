@@ -148,6 +148,30 @@ Use `--require-metadata store=surreal` or other metadata filters when you need t
 produced the artifact. Use `--min-metric` and `--max-metric` to tighten a gate for a specific run
 without forking the script.
 
+## Product Gates
+
+Post-v0.8 release claims use small product gates alongside benchmark gates. These do not replace the
+broad package suites; they make the claim boundary repeatable from a clean checkout.
+
+`moon run synthesis-gate` is the source-grounded synthesis gate. It delegates to focused
+`sibyl-core` slices that require section-level source IDs, hidden-scope absence, unresolved-gap
+reporting, artifact provenance, and remember provenance. Saved synthesis artifacts that support a
+release note should live under `benchmarks/results/synthesis/`; local scratch artifacts can use
+`.moon/cache/evals/synthesis/`.
+
+`moon run adapter-ingest-gate` is the source-preserving ingest gate. It delegates to adapter
+contract and mailbox ingest slices that require stable adapter identity, import resumability, dedupe
+correctness, private scope enforcement, and source-preserving payload metadata. Saved ingest
+receipts or import manifests that support a release note should live under
+`benchmarks/results/source-ingest/`; local scratch artifacts can use
+`.moon/cache/evals/source-ingest/`.
+
+`benchmarks/context_pack_cases.json` carries the frozen context-pack case suite plus the gate
+metadata for the default release run. Local reports from `core:bench-context` are written under
+`.moon/cache/evals/`; promoted release artifacts should be copied to
+`benchmarks/results/context-pack/` and then gated with
+`moon run bench-gate -- <report.json> --profile context-pack`.
+
 ## Reporting Rules
 
 - Lead with `bench-live` when describing Sibyl’s current runtime behavior.
