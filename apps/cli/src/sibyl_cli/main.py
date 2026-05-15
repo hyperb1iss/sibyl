@@ -45,6 +45,7 @@ from sibyl_cli.org import app as org_app
 from sibyl_cli.project import app as project_app
 from sibyl_cli.project_refs import resolve_project_reference
 from sibyl_cli.session import app as session_app
+from sibyl_cli.skill import app as skill_app
 from sibyl_cli.state import set_context_override
 from sibyl_cli.task import app as task_app
 from sibyl_cli.task import list_tasks
@@ -96,6 +97,7 @@ app.add_typer(context_app, name="context")
 app.add_typer(local_app, name="local")
 app.add_typer(logs_app, name="logs")
 app.add_typer(update_app, name="update")
+app.add_typer(skill_app, name="skill")
 app.add_typer(memory_space_app, name="memory-space")
 app.add_typer(memory_review_app, name="memory-review")
 app.add_typer(synthesis_app, name="synthesis")

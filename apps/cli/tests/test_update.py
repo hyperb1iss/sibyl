@@ -3,8 +3,6 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from sibyl_cli.update import (
     cli_update_available,
     get_current_cli_version,
@@ -146,7 +144,7 @@ class TestVersionChecking:
             patch("sibyl_cli.update.get_current_cli_version", return_value="0.1.0"),
             patch("sibyl_cli.update.get_latest_cli_version", return_value="0.2.0a1"),
         ):
-            current, latest, available = cli_update_available()
+            _current, _latest, available = cli_update_available()
             # 0.2.0a1 > 0.1.0 according to PEP 440
             assert available is True
 
@@ -209,8 +207,12 @@ class TestUpdateFunctions:
         with (
             patch("sibyl_cli.update.subprocess.run", return_value=mock_result),
             patch("sibyl_cli.update.get_current_cli_version", return_value="0.2.0"),
+            patch(
+                "sibyl_cli.update.sync_skills_after_cli_update", return_value=True
+            ) as mock_sync_skills,
         ):
             assert update_cli() is True
+            mock_sync_skills.assert_called_once_with()
 
     def test_update_cli_failure(self) -> None:
         """update_cli returns False on failed upgrade."""

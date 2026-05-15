@@ -221,12 +221,30 @@ def update_cli() -> bool:
         # Get new version
         new_version = get_current_cli_version()
         success(f"CLI updated to {new_version}")
+        sync_skills_after_cli_update()
         return True
     else:
         error("Failed to update CLI")
         if result.stderr:
             console.print(f"[dim]{result.stderr.strip()}[/dim]")
         return False
+
+
+def sync_skills_after_cli_update() -> bool:
+    """Refresh skills by invoking the upgraded CLI entrypoint."""
+    result = subprocess.run(
+        ["sibyl", "skill", "--install", "--quiet"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return True
+
+    warn("CLI updated, but skill refresh failed")
+    if result.stderr:
+        console.print(f"[dim]{result.stderr.strip()}[/dim]")
+    return False
 
 
 def update_containers(restart: bool = True) -> bool:

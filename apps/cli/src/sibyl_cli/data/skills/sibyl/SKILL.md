@@ -24,6 +24,8 @@ These rules exist because real agent sessions consistently fail without them.
    a replacement for full context or recall. If context shows `Project: none` or
    `Project: not linked`, you MUST run `sibyl project link <id>` before searching or listing tasks.
    Without a link, searches return results from unrelated projects and task lists show global noise.
+   Use `sibyl skill` when you need to read this canonical skill contract instead of guessing a
+   filesystem path.
 
 3. **Always complete the retrieval pattern.** Search returns truncated previews. When you need
    details, follow up with `sibyl entity show <id>` using the ID from the search result. Working
