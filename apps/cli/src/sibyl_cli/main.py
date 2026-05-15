@@ -549,6 +549,31 @@ def _print_promotion_preview(data: dict[str, object]) -> None:
     console.print(table)
 
 
+def _print_promotion_autonomy(data: dict[str, object]) -> None:
+    console.print("\n[bold]Automatic memory review[/bold]\n")
+    table = create_table(None, "Field", "Value", expand=False)
+    table.add_row("Outcome", str(data.get("outcome") or ""))
+    table.add_row("Action", str(data.get("recommended_action") or ""))
+    table.add_row("Applied", "yes" if data.get("applied") is True else "no")
+    table.add_row("Reason", str(data.get("reason") or ""))
+    table.add_row("Candidate", str(data.get("candidate_id") or ""))
+    table.add_row("Review", str(data.get("review_state") or ""))
+    table.add_row(
+        "Target",
+        _preview_target(data.get("promote_to_scope"), data.get("promote_to_scope_key")),
+    )
+    table.add_row("Sources", _preview_id_summary(data.get("raw_source_ids")))
+    table.add_row("Exceptions", _preview_id_summary(data.get("exception_reasons")))
+    table.add_row("Policy", _preview_id_summary(data.get("policy_reasons")))
+    if promoted_id := data.get("promoted_id"):
+        table.add_row("Promoted", str(promoted_id))
+    if data.get("dry_run") is True:
+        table.add_row("Dry run", "yes")
+    if audit_id := _preview_audit_id(data):
+        table.add_row("Audit", audit_id)
+    console.print(table)
+
+
 def _print_share_preview(data: dict[str, object]) -> None:
     console.print("\n[bold]Share preview[/bold]\n")
     table = create_table(None, "Field", "Value", expand=False)
@@ -1332,6 +1357,15 @@ def memory_inspect(
 def memory_promote(
     candidate_id: str = typer.Argument(..., help="Raw reflection candidate ID"),
     preview: bool = typer.Option(False, "--preview", help="Preview without promoting"),
+    auto: bool = typer.Option(False, "--auto", help="Auto-review and promote when safe"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Evaluate auto-review without applying"),
+    confidence_threshold: float | None = typer.Option(
+        None,
+        "--confidence-threshold",
+        min=0.0,
+        max=1.0,
+        help="Override the auto-review confidence threshold",
+    ),
     promote_to_scope: str | None = typer.Option(None, "--scope", help="Target memory scope"),
     promote_to_scope_key: str | None = typer.Option(None, "--scope-key", help="Target scope key"),
     domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
@@ -1353,9 +1387,18 @@ def memory_promote(
     ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ) -> None:
-    """Preview reflection candidate promotion."""
-    if not preview:
-        error("memory-promote currently only supports --preview.")
+    """Preview or auto-review reflection candidate promotion."""
+    if preview and auto:
+        error("Choose either --preview or --auto.")
+        raise typer.Exit(code=1)
+    if dry_run and not auto:
+        error("--dry-run is only available with --auto.")
+        raise typer.Exit(code=1)
+    if confidence_threshold is not None and not auto:
+        error("--confidence-threshold is only available with --auto.")
+        raise typer.Exit(code=1)
+    if not preview and not auto:
+        error("memory-promote currently supports --preview or --auto.")
         raise typer.Exit(code=1)
 
     effective_project = project or (None if all_projects else resolve_project_from_cwd())
@@ -1368,18 +1411,34 @@ def memory_promote(
     async def run_memory_promote() -> None:
         try:
             async with get_client() as client:
-                data = await client.preview_reflection_promotion(
-                    candidate_id=candidate_id,
-                    promote_to_scope=promote_to_scope,
-                    promote_to_scope_key=target_scope_key,
-                    domain=domain,
-                    project=effective_project,
-                    related_to=related_ids,
-                )
+                if auto:
+                    data = await client.auto_review_reflection_promotion(
+                        candidate_id=candidate_id,
+                        promote_to_scope=promote_to_scope,
+                        promote_to_scope_key=target_scope_key,
+                        domain=domain,
+                        project=effective_project,
+                        related_to=related_ids,
+                        dry_run=dry_run,
+                        confidence_threshold=confidence_threshold,
+                    )
+                else:
+                    data = await client.preview_reflection_promotion(
+                        candidate_id=candidate_id,
+                        promote_to_scope=promote_to_scope,
+                        promote_to_scope_key=target_scope_key,
+                        domain=domain,
+                        project=effective_project,
+                        related_to=related_ids,
+                    )
             if json_output:
                 print_json(data)
                 return
-            _print_promotion_preview(cast("dict[str, object]", data))
+            payload = cast("dict[str, object]", data)
+            if auto:
+                _print_promotion_autonomy(payload)
+            else:
+                _print_promotion_preview(payload)
         except SibylClientError as e:
             _handle_client_error(e)
 

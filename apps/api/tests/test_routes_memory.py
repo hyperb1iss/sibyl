@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from sibyl.api.routes.memory import (
     add_memory_space_member_record,
     apply_memory_correction_route,
+    auto_review_reflection_candidate,
     create_memory_space_record,
     get_memory_source_import_status,
     get_memory_space_record,
@@ -36,6 +37,7 @@ from sibyl.api.schemas import (
     MemorySpaceUpdateRequest,
     RawMemoryRecallRequest,
     RawMemoryRememberRequest,
+    ReflectionAutonomyRequest,
     ReflectionPromotionRequest,
 )
 from sibyl.jobs import source_imports
@@ -455,6 +457,7 @@ async def test_remember_raw_uses_shared_policy_for_project_scope_write() -> None
 async def test_remember_raw_denies_project_scope_without_policy_membership() -> None:
     http_request = _http_request()
     with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
         patch(
             "sibyl.api.routes.memory.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_other"}),
@@ -1611,6 +1614,233 @@ async def test_preview_reflection_promotion_verifies_project_target() -> None:
         "same_scope_write_allowed",
     ]
     assert response.input_scopes[0].id == "candidate-1"
+
+
+@pytest.mark.asyncio
+async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> None:
+    org = _org()
+    ctx = _ctx()
+    http_request = _http_request()
+    preview = NativeReflectionPromotionPreview(
+        allowed=True,
+        candidate_id="candidate-1",
+        reason="promotion_preview_allowed",
+        review_state="pending",
+        memory_scope=MemoryScope.PROJECT,
+        scope_key="project_123",
+        raw_source_ids=["source-1"],
+        metadata={
+            "policy_reasons": [
+                "same_scope_reflect_allowed",
+                "same_scope_write_allowed",
+            ],
+            "reflection_confidence": 0.91,
+            "source_count": 1,
+        },
+    )
+    promotion = NativeReflectionPromotionResult(
+        success=True,
+        candidate_id="candidate-1",
+        promoted_id="decision_123",
+        reason="promoted",
+        review_state="promoted",
+        memory_scope=MemoryScope.PROJECT,
+        scope_key="project_123",
+        raw_source_ids=["source-1"],
+        metadata={
+            "policy_reasons": [
+                "same_scope_reflect_allowed",
+                "same_scope_write_allowed",
+            ],
+        },
+    )
+    with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch(
+            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            AsyncMock(return_value=preview),
+        ) as preview_call,
+        patch(
+            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            AsyncMock(return_value=promotion),
+        ) as promote,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        response = await auto_review_reflection_candidate(
+            ReflectionAutonomyRequest(
+                candidate_id="candidate-1",
+                promote_to_scope="project",
+                promote_to_scope_key="project_123",
+                project="project_123",
+                domain="sibyl",
+                related_to=["task_123"],
+            ),
+            http_request=http_request,
+            org=org,
+            ctx=ctx,
+        )
+
+    verify.assert_awaited_once_with(
+        None,
+        ctx,
+        "project_123",
+        required_role=ProjectRole.CONTRIBUTOR,
+        require_existing_project=True,
+    )
+    preview_call.assert_awaited_once_with(
+        candidate_id="candidate-1",
+        organization_id=str(org.id),
+        principal_id="user-123",
+        promote_to_scope="project",
+        promote_to_scope_key="project_123",
+        domain="sibyl",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+    promote.assert_awaited_once_with(
+        candidate_id="candidate-1",
+        organization_id=str(org.id),
+        principal_id="user-123",
+        promote_to_scope="project",
+        promote_to_scope_key="project_123",
+        domain="sibyl",
+        project="project_123",
+        related_to=["task_123"],
+        accessible_projects={"project_123"},
+    )
+    audit.assert_awaited_once_with(
+        action="memory.reflect.auto_promote",
+        user_id="user-123",
+        organization_id="org-1",
+        request=http_request,
+        memory_scope="project",
+        scope_key="project_123",
+        project_id="project_123",
+        source_surface="reflection_auto_review",
+        source_ids=["candidate-1", "source-1"],
+        derived_ids=["decision_123"],
+        policy_allowed=True,
+        policy_reason="auto_promote_candidate",
+        details={
+            "action_succeeded": True,
+            "confidence": 0.91,
+            "confidence_threshold": 0.8,
+            "domain": "sibyl",
+            "dry_run": False,
+            "exception_reasons": [],
+            "outcome": "auto_promote",
+            "recommended_action": "promote",
+            "related_to_count": 1,
+            "review_state": "promoted",
+            "source_count": 1,
+        },
+    )
+    assert response.outcome == "auto_promote"
+    assert response.applied is True
+    assert response.promoted_id == "decision_123"
+    assert response.promotion is not None
+    assert response.promotion.promoted_id == "decision_123"
+
+
+@pytest.mark.asyncio
+async def test_auto_review_reflection_candidate_dry_run_does_not_promote() -> None:
+    preview = NativeReflectionPromotionPreview(
+        allowed=True,
+        candidate_id="candidate-1",
+        reason="promotion_preview_allowed",
+        review_state="pending",
+        memory_scope=MemoryScope.PRIVATE,
+        scope_key=None,
+        raw_source_ids=["source-1"],
+        metadata={
+            "policy_reasons": [
+                "same_scope_reflect_allowed",
+                "same_scope_write_allowed",
+            ],
+            "reflection_confidence": 0.9,
+        },
+    )
+    with (
+        patch(
+            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            AsyncMock(return_value=set()),
+        ),
+        patch(
+            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            AsyncMock(return_value=preview),
+        ),
+        patch(
+            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            AsyncMock(),
+        ) as promote,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+    ):
+        response = await auto_review_reflection_candidate(
+            ReflectionAutonomyRequest(
+                candidate_id="candidate-1",
+                promote_to_scope="private",
+                dry_run=True,
+            ),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    promote.assert_not_awaited()
+    assert response.outcome == "auto_promote"
+    assert response.recommended_action == "promote"
+    assert response.applied is False
+    assert response.dry_run is True
+    assert response.promoted_id is None
+
+
+@pytest.mark.asyncio
+async def test_auto_review_reflection_candidate_routes_exceptions() -> None:
+    preview = NativeReflectionPromotionPreview(
+        allowed=False,
+        candidate_id="candidate-1",
+        reason="unverified_membership",
+        review_state="pending",
+        memory_scope=MemoryScope.PROJECT,
+        scope_key="project_123",
+        raw_source_ids=["source-1"],
+        metadata={
+            "policy_reasons": ["unverified_membership"],
+            "reflection_confidence": 0.9,
+        },
+    )
+    with (
+        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_other"}),
+        ),
+        patch(
+            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            AsyncMock(return_value=preview),
+        ),
+        patch(
+            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            AsyncMock(),
+        ) as promote,
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+    ):
+        response = await auto_review_reflection_candidate(
+            ReflectionAutonomyRequest(
+                candidate_id="candidate-1",
+                promote_to_scope="project",
+                promote_to_scope_key="project_123",
+            ),
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    promote.assert_not_awaited()
+    assert response.outcome == "exception"
+    assert response.recommended_action == "route_to_review"
+    assert response.applied is False
+    assert response.reason == "policy_denied"
+    assert response.exception_reasons == ["policy_denied"]
+    audit.assert_awaited_once()
 
 
 @pytest.mark.asyncio

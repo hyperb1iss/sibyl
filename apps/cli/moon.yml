@@ -45,6 +45,14 @@ tasks:
     - tests/test_context_pack.py
     - tests/test_session.py
     - tests/test_user_prompt_hook.py
+  autonomy-test:
+    command:
+      uv run pytest
+      tests/test_main_capture.py::test_memory_promote_auto_command_renders_decision
+      -v
+    inputs:
+    - '@group(sources)'
+    - tests/test_main_capture.py
   test-cov:
     command: uv run pytest tests/ --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml
     inputs:

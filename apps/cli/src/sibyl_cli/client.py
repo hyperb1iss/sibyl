@@ -946,6 +946,36 @@ class SibylClient:
             data["project"] = project
         return await self._request("POST", "/memory/reflection/promote/preview", json=data)
 
+    async def auto_review_reflection_promotion(
+        self,
+        *,
+        candidate_id: str,
+        promote_to_scope: str | None = None,
+        promote_to_scope_key: str | None = None,
+        domain: str | None = None,
+        project: str | None = None,
+        related_to: list[str] | None = None,
+        dry_run: bool = False,
+        confidence_threshold: float | None = None,
+    ) -> dict[str, Any]:
+        """Auto-review a reflection candidate and promote it when safe."""
+        data: dict[str, Any] = {
+            "candidate_id": candidate_id,
+            "dry_run": dry_run,
+            "related_to": related_to or [],
+        }
+        if promote_to_scope:
+            data["promote_to_scope"] = promote_to_scope
+        if promote_to_scope_key:
+            data["promote_to_scope_key"] = promote_to_scope_key
+        if domain:
+            data["domain"] = domain
+        if project:
+            data["project"] = project
+        if confidence_threshold is not None:
+            data["confidence_threshold"] = confidence_threshold
+        return await self._request("POST", "/memory/reflection/review/auto", json=data)
+
     async def preview_memory_share(
         self,
         *,

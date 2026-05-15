@@ -474,6 +474,21 @@ class ReflectionPromotionRequest(BaseModel):
     )
 
 
+class ReflectionAutonomyRequest(ReflectionPromotionRequest):
+    """Request to let the autonomy engine review a reflection candidate."""
+
+    dry_run: bool = Field(
+        default=False,
+        description="Return the automatic decision without applying a safe promotion",
+    )
+    confidence_threshold: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Optional confidence threshold override for rollout gates",
+    )
+
+
 class ReflectionPromotionResponse(BaseModel):
     """Promotion outcome with stable policy deny reasons."""
 
@@ -510,6 +525,29 @@ class ReflectionPromotionPreviewResponse(BaseModel):
     policy_reasons: list[str] = Field(default_factory=list)
     input_scopes: list[MemoryScopeInputResponse] = Field(default_factory=list)
     source_count: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReflectionAutonomyResponse(BaseModel):
+    """Automatic review decision and optional promotion receipt."""
+
+    outcome: Literal["auto_promote", "exception", "skip"]
+    recommended_action: Literal["promote", "route_to_review", "skip"]
+    applied: bool = False
+    dry_run: bool = False
+    candidate_id: str
+    reason: str
+    review_state: str
+    promote_to_scope: MemoryScopeLiteral | None = None
+    promote_to_scope_key: str | None = None
+    promoted_id: str | None = None
+    raw_source_ids: list[str] = Field(default_factory=list)
+    policy_reasons: list[str] = Field(default_factory=list)
+    exception_reasons: list[str] = Field(default_factory=list)
+    confidence: float | None = None
+    confidence_threshold: float
+    preview: ReflectionPromotionPreviewResponse
+    promotion: ReflectionPromotionResponse | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

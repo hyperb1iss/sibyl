@@ -610,6 +610,23 @@ tasks:
       - pyproject.toml
       - moon.yml
 
+  autonomy-gate:
+    command: uv run python -m tools.trust.autonomy_gate
+    options:
+      cache: false
+
+  autonomy-gate-test:
+    command: uv run pytest tools/tests/test_autonomy_gate.py -v
+    inputs:
+      - tools/trust/**/*.py
+      - tools/tests/conftest.py
+      - tools/tests/test_autonomy_gate.py
+      - pyproject.toml
+      - moon.yml
+      - apps/api/moon.yml
+      - apps/cli/moon.yml
+      - packages/python/sibyl-core/moon.yml
+
   synthesis-gate:
     command: uv run python -m tools.trust.synthesis_gate
     options:

@@ -33,6 +33,8 @@ from sibyl.api.schemas import (
     RawMemoryRecallResponse,
     RawMemoryRememberRequest,
     RawMemoryResponse,
+    ReflectionAutonomyRequest,
+    ReflectionAutonomyResponse,
     ReflectionPromotionPreviewResponse,
     ReflectionPromotionRequest,
     ReflectionPromotionResponse,
@@ -59,6 +61,12 @@ from sibyl_core.auth.memory_policy import (
     MemoryPolicyDecision,
     authorize_memory_read,
     authorize_memory_write,
+)
+from sibyl_core.services.memory_autonomy import (
+    ReflectionAutonomyDecision,
+    ReflectionAutonomyOutcome,
+    ReflectionAutonomyPolicy,
+    decide_reflection_candidate_autonomy,
 )
 from sibyl_core.services.native_memory import (
     NativeMemoryAccessPreview,
@@ -418,6 +426,40 @@ def _promotion_preview_response(
             for item in _metadata_dict_list(metadata.get("input_scopes"))
         ],
         source_count=source_count if isinstance(source_count, int) else 0,
+        metadata=metadata,
+    )
+
+
+def _autonomy_response(
+    *,
+    decision: ReflectionAutonomyDecision,
+    preview: NativeReflectionPromotionPreview,
+    promotion: NativeReflectionPromotionResult | None = None,
+) -> ReflectionAutonomyResponse:
+    promotion_response = _promotion_response(promotion) if promotion is not None else None
+    promoted_id = promotion.promoted_id if promotion and promotion.success else None
+    metadata = dict(decision.metadata or {})
+    if promotion is not None:
+        metadata["promotion_reason"] = promotion.reason
+        metadata["promotion_success"] = promotion.success
+    return ReflectionAutonomyResponse(
+        outcome=decision.outcome.value,
+        recommended_action=decision.recommended_action.value,
+        applied=promotion is not None and promotion.success,
+        dry_run=decision.dry_run,
+        candidate_id=decision.candidate_id,
+        reason=decision.reason,
+        review_state=promotion.review_state if promotion else decision.review_state,
+        promote_to_scope=decision.memory_scope.value if decision.memory_scope else None,
+        promote_to_scope_key=decision.scope_key,
+        promoted_id=promoted_id,
+        raw_source_ids=list(decision.raw_source_ids),
+        policy_reasons=list(decision.policy_reasons),
+        exception_reasons=list(decision.exception_reasons),
+        confidence=decision.confidence,
+        confidence_threshold=decision.confidence_threshold,
+        preview=_promotion_preview_response(preview),
+        promotion=promotion_response,
         metadata=metadata,
     )
 
@@ -1729,6 +1771,117 @@ async def preview_reflection_promotion(
         raise HTTPException(
             status_code=500,
             detail="Failed to preview reflection promotion.",
+        ) from e
+
+
+@router.post(
+    "/reflection/review/auto",
+    response_model=ReflectionAutonomyResponse,
+    dependencies=[Depends(require_org_role(*_WRITE_ROLES))],
+)
+async def auto_review_reflection_candidate(
+    request: ReflectionAutonomyRequest,
+    http_request: Request = _REQUEST_AUTO_INJECT_SENTINEL,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> ReflectionAutonomyResponse:
+    """Automatically review and promote safe reflection candidates."""
+    principal_id = ctx.user_id
+    if not principal_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        accessible_projects = await _accessible_projects_for_promotion(
+            ctx=ctx,
+            request=request,
+            http_request=http_request,
+        )
+        preview = await preview_reflection_candidate_promotion(
+            candidate_id=request.candidate_id,
+            organization_id=str(org.id),
+            principal_id=principal_id,
+            promote_to_scope=request.promote_to_scope,
+            promote_to_scope_key=request.promote_to_scope_key,
+            domain=request.domain,
+            project=request.project,
+            accessible_projects=accessible_projects,
+        )
+        confidence_threshold = (
+            request.confidence_threshold
+            if request.confidence_threshold is not None
+            else ReflectionAutonomyPolicy().confidence_threshold
+        )
+        decision = decide_reflection_candidate_autonomy(
+            preview,
+            policy=ReflectionAutonomyPolicy(confidence_threshold=confidence_threshold),
+            dry_run=request.dry_run,
+        )
+        promotion: NativeReflectionPromotionResult | None = None
+        if decision.should_promote:
+            promotion = await promote_reflection_candidate_review(
+                candidate_id=request.candidate_id,
+                organization_id=str(org.id),
+                principal_id=principal_id,
+                promote_to_scope=request.promote_to_scope,
+                promote_to_scope_key=request.promote_to_scope_key,
+                domain=request.domain,
+                project=request.project,
+                related_to=request.related_to,
+                accessible_projects=accessible_projects,
+            )
+
+        audit_action = (
+            "memory.reflect.auto_promote"
+            if decision.outcome is ReflectionAutonomyOutcome.AUTO_PROMOTE
+            else "memory.reflect.auto_review"
+        )
+        audit_scope = decision.memory_scope.value if decision.memory_scope else request.promote_to_scope
+        audit_scope_key = decision.scope_key or request.promote_to_scope_key
+        await _log_memory_audit(
+            action=audit_action,
+            ctx=ctx,
+            request=http_request,
+            memory_scope=audit_scope,
+            scope_key=audit_scope_key,
+            project_id=request.project,
+            source_surface="reflection_auto_review",
+            source_ids=[request.candidate_id, *decision.raw_source_ids],
+            derived_ids=[promotion.promoted_id] if promotion and promotion.promoted_id else [],
+            policy_allowed=preview.allowed,
+            policy_reason=decision.reason,
+            details={
+                "action_succeeded": promotion.success if promotion else False,
+                "confidence": decision.confidence,
+                "confidence_threshold": decision.confidence_threshold,
+                "domain": request.domain,
+                "dry_run": request.dry_run,
+                "exception_reasons": decision.exception_reasons,
+                "outcome": decision.outcome.value,
+                "recommended_action": decision.recommended_action.value,
+                "related_to_count": len(request.related_to),
+                "review_state": promotion.review_state if promotion else decision.review_state,
+                "source_count": len(decision.raw_source_ids),
+            },
+        )
+        if preview.reason == "candidate_not_found":
+            raise HTTPException(
+                status_code=404,
+                detail="reflection_candidate_not_found",
+            )
+        return _autonomy_response(decision=decision, preview=preview, promotion=promotion)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        log.exception(
+            "auto_review_reflection_candidate_failed",
+            candidate_id=request.candidate_id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to auto-review reflection candidate.",
         ) from e
 
 

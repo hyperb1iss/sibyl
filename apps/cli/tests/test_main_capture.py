@@ -1073,13 +1073,77 @@ def test_memory_promote_preview_command_renders_decision(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_memory_promote_auto_command_renders_decision(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.auto_review_reflection_promotion = AsyncMock(
+        return_value={
+            "outcome": "auto_promote",
+            "recommended_action": "promote",
+            "applied": True,
+            "dry_run": False,
+            "candidate_id": "candidate-1",
+            "reason": "auto_promote_candidate",
+            "review_state": "promoted",
+            "promote_to_scope": "project",
+            "promote_to_scope_key": "project_123",
+            "promoted_id": "decision_123",
+            "raw_source_ids": ["source-1"],
+            "policy_reasons": [
+                "same_scope_reflect_allowed",
+                "same_scope_write_allowed",
+            ],
+            "exception_reasons": [],
+        }
+    )
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "memory-promote",
+            "candidate-1",
+            "--auto",
+            "--scope",
+            "project",
+            "--domain",
+            "sibyl",
+            "--related-to",
+            "plan_1",
+            "--task",
+            "task_1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Automatic memory review" in result.stdout
+    assert "auto_promote" in result.stdout
+    assert "decision_123" in result.stdout
+    mock_client.auto_review_reflection_promotion.assert_awaited_once_with(
+        candidate_id="candidate-1",
+        promote_to_scope="project",
+        promote_to_scope_key="project_123",
+        domain="sibyl",
+        project="project_123",
+        related_to=["plan_1", "task_1"],
+        dry_run=False,
+        confidence_threshold=None,
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
 @patch("sibyl_cli.main.get_client")
 def test_memory_promote_without_preview_is_denied(mock_get_client: MagicMock) -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["memory-promote", "candidate-1"])
 
     assert result.exit_code == 1
-    assert "only supports --preview" in result.stdout
+    assert "supports --preview or --auto" in result.stdout
     mock_get_client.assert_not_called()
 
 

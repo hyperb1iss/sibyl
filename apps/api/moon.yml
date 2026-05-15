@@ -102,6 +102,19 @@ tasks:
     options:
       envFile: .env
 
+  autonomy-test:
+    command:
+      uv run pytest
+      tests/test_routes_memory.py::test_auto_review_reflection_candidate_promotes_safe_candidate
+      tests/test_routes_memory.py::test_auto_review_reflection_candidate_dry_run_does_not_promote
+      tests/test_routes_memory.py::test_auto_review_reflection_candidate_routes_exceptions
+      -v
+    inputs:
+      - "@group(sources)"
+      - tests/test_routes_memory.py
+    options:
+      envFile: .env
+
   memory-trust-context-test:
     command: uv run pytest tests/test_routes_context.py tests/test_routes_session.py -v
     inputs:

@@ -19,6 +19,7 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.reflection import ReflectionCandidate
+from sibyl_core.services.memory_autonomy import reflection_autonomy_candidate_metadata
 from sibyl_core.services.native_graph import get_native_graph_runtime
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -423,6 +424,7 @@ async def preview_reflection_candidate_promotion(
     )
     metadata = {
         **_policy_metadata(policy_decisions),
+        **reflection_autonomy_candidate_metadata(plan.candidate_memory),
         "input_scopes": _scope_metadata(plan.input_memories),
         "source_count": len(plan.raw_source_ids),
         "target_project": plan.target_project,
