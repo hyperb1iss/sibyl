@@ -299,6 +299,118 @@ async def _resolve_capture_links(
     return _append_unique_ids(links, [str(task_id)])
 
 
+async def _write_memory_capture(
+    client: Any,
+    *,
+    title: str,
+    content: str,
+    kind: str,
+    domain: str | None,
+    tags: list[str] | None,
+    related_ids: list[str],
+    task_ids: list[str],
+    active_task: bool,
+    effective_project: str | None,
+    capture_mode: str,
+    surface: str,
+    wait_searchable: bool,
+    memory_scope: str = "private",
+    scope_key: str | None = None,
+    source_id: str | None = None,
+    skip_conflicts: bool = False,
+    languages: list[str] | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "capture_mode": capture_mode,
+        "capture_surface": surface,
+        "remember_kind": kind,
+    }
+    if domain:
+        metadata["domain"] = domain
+    if languages:
+        metadata["languages"] = languages
+
+    resolved_project = (
+        await resolve_project_reference(client, effective_project) if effective_project else None
+    )
+    if resolved_project:
+        metadata["project_id"] = resolved_project
+
+    resolved_links = await _resolve_capture_links(
+        client=client,
+        project=resolved_project,
+        related_ids=related_ids,
+        task_ids=task_ids,
+        active_task=active_task,
+    )
+    raw_scope_key = scope_key
+    if memory_scope == "project" and raw_scope_key is None:
+        raw_scope_key = resolved_project
+    raw_memory = await client.remember_raw_memory(
+        title=title,
+        raw_content=content,
+        source_id=source_id,
+        memory_scope=memory_scope,
+        scope_key=raw_scope_key,
+        diary=False,
+        agent_id=None,
+        project_id=None,
+        tags=tags,
+        metadata=metadata,
+        provenance={
+            "remember_kind": kind,
+            "related_to": resolved_links or [],
+        },
+        capture_surface=surface,
+    )
+    raw_memory_id = raw_memory.get("id")
+    raw_source_id = raw_memory.get("source_id")
+    raw_policy_reason = raw_memory.get("policy_reason")
+    graph_metadata = dict(metadata)
+    if raw_memory_id:
+        graph_metadata["raw_memory_id"] = raw_memory_id
+    if raw_source_id:
+        graph_metadata["raw_source_id"] = raw_source_id
+    if raw_policy_reason:
+        graph_metadata["raw_policy_reason"] = raw_policy_reason
+
+    data = await client.create_entity(
+        name=title,
+        content=content,
+        entity_type=kind,
+        category=domain,
+        languages=languages,
+        tags=tags,
+        related_to=resolved_links,
+        metadata=graph_metadata,
+        sync=wait_searchable,
+        skip_conflicts=skip_conflicts,
+    )
+    data["raw_memory_id"] = raw_memory_id
+    data["raw_source_id"] = raw_source_id
+    data["raw_policy_reason"] = raw_policy_reason
+    return data
+
+
+def _print_memory_capture_result(
+    *,
+    title: str,
+    kind: str,
+    data: dict[str, Any],
+    wait_searchable: bool,
+) -> None:
+    entity_id = data.get("id", "unknown")
+    if wait_searchable:
+        success(f"Remembered {kind}: {title}")
+    else:
+        info(f"Queued {kind}: {title}")
+    console.print(f"  [dim]ID: {entity_id}[/dim]")
+    if raw_memory_id := data.get("raw_memory_id"):
+        console.print(f"  [dim]Raw: {raw_memory_id}[/dim]")
+    if raw_policy_reason := data.get("raw_policy_reason"):
+        console.print(f"  [dim]Policy: {raw_policy_reason}[/dim]")
+
+
 def _print_reflection_persistence_summary(
     data: dict[str, object], *, persist: bool, persist_source: bool
 ) -> None:
@@ -1059,6 +1171,27 @@ def add_knowledge(
     category: str | None = typer.Option(None, "--category", "-c", help="Category"),
     language: str | None = typer.Option(None, "--language", "-l", help="Language"),
     tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    all_projects: bool = typer.Option(
+        False,
+        "--all-projects",
+        help="Do not auto-scope to the linked project",
+    ),
+    related_to: str | None = typer.Option(
+        None,
+        "--related-to",
+        help="Comma-separated entity IDs to connect with RELATED_TO edges",
+    ),
+    task: str | None = typer.Option(
+        None,
+        "--task",
+        help="Comma-separated task IDs to connect with RELATED_TO edges",
+    ),
+    active_task: bool = typer.Option(
+        True,
+        "--active-task/--no-active-task",
+        help="Auto-link to the single active task in the current project",
+    ),
     wait_searchable: bool = typer.Option(
         False,
         "--wait-searchable",
@@ -1093,35 +1226,48 @@ def add_knowledge(
     if not resolved_content:
         error("Provide content as an argument, via stdin, or with --content-file.")
         raise typer.Exit(code=1)
+    parsed_tags = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+    related_ids = _parse_csv_ids(related_to)
+    task_ids = _parse_csv_ids(task)
+    effective_project = project or (None if all_projects else resolve_project_from_cwd())
 
     @run_async
     async def run_add() -> None:
         try:
             async with get_client() as client:
-                data = await client.create_entity(
-                    name=resolved_title,
+                data = await _write_memory_capture(
+                    client,
+                    title=resolved_title,
                     content=resolved_content,
-                    entity_type=entity_type,
-                    category=category,
-                    languages=[language] if language else None,
-                    tags=[t.strip() for t in tags.split(",")] if tags else None,
-                    sync=wait_searchable,
+                    kind=entity_type,
+                    domain=category,
+                    tags=parsed_tags,
+                    related_ids=related_ids,
+                    task_ids=task_ids,
+                    active_task=active_task,
+                    effective_project=effective_project,
+                    capture_mode="add",
+                    surface="cli",
+                    wait_searchable=wait_searchable,
                     skip_conflicts=skip_conflicts,
+                    languages=[language] if language else None,
                 )
-
-                entity_id = data.get("id", "unknown")
 
                 if json_output:
                     print_json(data)
                     return
 
-                if wait_searchable:
-                    success(f"Added {entity_type}: {resolved_title}")
-                else:
-                    info(f"Queued {entity_type}: {resolved_title}")
-                console.print(f"  [dim]ID: {entity_id}[/dim]")
+                _print_memory_capture_result(
+                    title=resolved_title,
+                    kind=entity_type,
+                    data=data,
+                    wait_searchable=wait_searchable,
+                )
         except SibylClientError as e:
             _handle_client_error(e)
+        except ValueError as e:
+            error(str(e))
+            raise typer.Exit(code=1) from e
 
     run_add()
 
@@ -1145,6 +1291,27 @@ def capture_memory(
         help=ENTITY_TYPE_HELP,
     ),
     tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    all_projects: bool = typer.Option(
+        False,
+        "--all-projects",
+        help="Do not auto-scope to the linked project",
+    ),
+    related_to: str | None = typer.Option(
+        None,
+        "--related-to",
+        help="Comma-separated entity IDs to connect with RELATED_TO edges",
+    ),
+    task: str | None = typer.Option(
+        None,
+        "--task",
+        help="Comma-separated task IDs to connect with RELATED_TO edges",
+    ),
+    active_task: bool = typer.Option(
+        True,
+        "--active-task/--no-active-task",
+        help="Auto-link to the single active task in the current project",
+    ),
     content_file: str | None = typer.Option(None, "--content-file", help="Read content from file"),
     max_size: int = typer.Option(
         1_048_576,
@@ -1184,33 +1351,46 @@ def capture_memory(
         raise typer.Exit(code=1)
 
     resolved_title = (title or "").strip() or _derive_capture_title(resolved_content)
+    parsed_tags = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+    related_ids = _parse_csv_ids(related_to)
+    task_ids = _parse_csv_ids(task)
+    effective_project = project or (None if all_projects else resolve_project_from_cwd())
 
     @run_async
     async def run_capture() -> None:
         try:
             async with get_client() as client:
-                data = await client.create_entity(
-                    name=resolved_title,
+                data = await _write_memory_capture(
+                    client,
+                    title=resolved_title,
                     content=resolved_content,
-                    entity_type=entity_type,
-                    tags=[t.strip() for t in tags.split(",") if t.strip()] if tags else None,
-                    metadata={"capture_mode": "quick", "capture_surface": "cli"},
-                    sync=wait_searchable,
+                    kind=entity_type,
+                    domain=None,
+                    tags=parsed_tags,
+                    related_ids=related_ids,
+                    task_ids=task_ids,
+                    active_task=active_task,
+                    effective_project=effective_project,
+                    capture_mode="quick",
+                    surface="cli",
+                    wait_searchable=wait_searchable,
                 )
-
-                entity_id = data.get("id", "unknown")
 
                 if json_output:
                     print_json(data)
                     return
 
-                if wait_searchable:
-                    success(f"Captured {entity_type}: {resolved_title}")
-                else:
-                    info(f"Queued {entity_type}: {resolved_title}")
-                console.print(f"  [dim]ID: {entity_id}[/dim]")
+                _print_memory_capture_result(
+                    title=resolved_title,
+                    kind=entity_type,
+                    data=data,
+                    wait_searchable=wait_searchable,
+                )
         except SibylClientError as e:
             _handle_client_error(e)
+        except ValueError as e:
+            error(str(e))
+            raise typer.Exit(code=1) from e
 
     run_capture()
 
@@ -2130,17 +2310,17 @@ def remember_memory(
     async def run_remember() -> None:
         try:
             async with get_client() as client:
-                resolved_project = (
-                    await resolve_project_reference(client, effective_project)
-                    if effective_project
-                    else None
-                )
-                if resolved_project:
-                    metadata["project_id"] = resolved_project
                 if diary and not agent:
                     error("Provide --agent when using --diary.")
                     raise typer.Exit(code=1)
                 if raw or diary:
+                    resolved_project = (
+                        await resolve_project_reference(client, effective_project)
+                        if effective_project
+                        else None
+                    )
+                    if resolved_project:
+                        metadata["project_id"] = resolved_project
                     data = await client.remember_raw_memory(
                         title=title,
                         raw_content=resolved_content,
@@ -2168,72 +2348,35 @@ def remember_memory(
                         console.print(f"  [dim]Policy: {policy_reason}[/dim]")
                     return
 
-                resolved_links = await _resolve_capture_links(
-                    client=client,
-                    project=resolved_project,
+                data = await _write_memory_capture(
+                    client,
+                    title=title,
+                    content=resolved_content,
+                    kind=kind,
+                    domain=domain,
+                    tags=parsed_tags,
                     related_ids=related_ids,
                     task_ids=task_ids,
                     active_task=active_task,
-                )
-                raw_scope_key = scope_key
-                if memory_scope == "project" and raw_scope_key is None:
-                    raw_scope_key = resolved_project
-                raw_memory = await client.remember_raw_memory(
-                    title=title,
-                    raw_content=resolved_content,
-                    source_id=source_id,
+                    effective_project=effective_project,
+                    capture_mode="remember",
+                    surface=surface,
+                    wait_searchable=wait_searchable,
                     memory_scope=memory_scope,
-                    scope_key=raw_scope_key,
-                    diary=False,
-                    agent_id=None,
-                    project_id=None,
-                    tags=parsed_tags,
-                    metadata=metadata,
-                    provenance={
-                        "remember_kind": kind,
-                        "related_to": resolved_links or [],
-                    },
-                    capture_surface=surface,
+                    scope_key=scope_key,
+                    source_id=source_id,
                 )
-                raw_memory_id = raw_memory.get("id")
-                raw_source_id = raw_memory.get("source_id")
-                raw_policy_reason = raw_memory.get("policy_reason")
-                graph_metadata = dict(metadata)
-                if raw_memory_id:
-                    graph_metadata["raw_memory_id"] = raw_memory_id
-                if raw_source_id:
-                    graph_metadata["raw_source_id"] = raw_source_id
-                if raw_policy_reason:
-                    graph_metadata["raw_policy_reason"] = raw_policy_reason
-                data = await client.create_entity(
-                    name=title,
-                    content=resolved_content,
-                    entity_type=kind,
-                    category=domain,
-                    tags=parsed_tags,
-                    related_to=resolved_links,
-                    metadata=graph_metadata,
-                    sync=wait_searchable,
-                )
-
-                entity_id = data.get("id", "unknown")
 
                 if json_output:
-                    data["raw_memory_id"] = raw_memory_id
-                    data["raw_source_id"] = raw_source_id
-                    data["raw_policy_reason"] = raw_policy_reason
                     print_json(data)
                     return
 
-                if wait_searchable:
-                    success(f"Remembered {kind}: {title}")
-                else:
-                    info(f"Queued {kind}: {title}")
-                console.print(f"  [dim]ID: {entity_id}[/dim]")
-                if raw_memory_id:
-                    console.print(f"  [dim]Raw: {raw_memory_id}[/dim]")
-                if raw_policy_reason:
-                    console.print(f"  [dim]Policy: {raw_policy_reason}[/dim]")
+                _print_memory_capture_result(
+                    title=title,
+                    kind=kind,
+                    data=data,
+                    wait_searchable=wait_searchable,
+                )
         except SibylClientError as e:
             _handle_client_error(e)
         except ValueError as e:

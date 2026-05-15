@@ -21,6 +21,16 @@ class _FakeClientContext:
         return None
 
 
+def _mock_capture_client(entity_id: str = "entity_123") -> MagicMock:
+    mock_client = MagicMock()
+    mock_client.remember_raw_memory = AsyncMock(
+        return_value={"id": "raw_123", "source_id": "cli:manual"}
+    )
+    mock_client.create_entity = AsyncMock(return_value={"id": entity_id})
+    mock_client.explore = AsyncMock(return_value={"entities": []})
+    return mock_client
+
+
 def test_derive_capture_title_truncates_cleanly() -> None:
     title = _derive_capture_title("  shipped   a fix for the archived paging bug " * 3)
 
@@ -252,31 +262,37 @@ async def test_synthesis_draft_client_posts_remember_contract() -> None:
     assert payload["tags"] == ["roadmap"]
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
 @patch("sibyl_cli.main.get_client")
-def test_capture_command_derives_title_and_marks_quick_capture(mock_get_client: MagicMock) -> None:
-    mock_client = MagicMock()
-    mock_client.create_entity = AsyncMock(return_value={"id": "entity_123"})
+def test_capture_command_derives_title_and_marks_quick_capture(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client()
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
     result = runner.invoke(app, ["capture", "Shipped the link-graph fix after tracing org scope."])
 
     assert result.exit_code == 0
-    mock_client.create_entity.assert_awaited_once_with(
-        name="Shipped the link-graph fix after tracing org scope.",
-        content="Shipped the link-graph fix after tracing org scope.",
-        entity_type="episode",
-        tags=None,
-        metadata={"capture_mode": "quick", "capture_surface": "cli"},
-        sync=False,
-    )
+    mock_client.remember_raw_memory.assert_awaited_once()
+    payload = mock_client.create_entity.await_args.kwargs
+    assert payload["name"] == "Shipped the link-graph fix after tracing org scope."
+    assert payload["content"] == "Shipped the link-graph fix after tracing org scope."
+    assert payload["entity_type"] == "episode"
+    assert payload["metadata"]["capture_mode"] == "quick"
+    assert payload["metadata"]["raw_memory_id"] == "raw_123"
     assert "Queued episode" in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
 @patch("sibyl_cli.main.get_client")
-def test_capture_command_title_override_wins(mock_get_client: MagicMock) -> None:
-    mock_client = MagicMock()
-    mock_client.create_entity = AsyncMock(return_value={"id": "entity_456"})
+def test_capture_command_title_override_wins(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client("entity_456")
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
@@ -286,21 +302,22 @@ def test_capture_command_title_override_wins(mock_get_client: MagicMock) -> None
     )
 
     assert result.exit_code == 0
-    mock_client.create_entity.assert_awaited_once_with(
-        name="Manual title",
-        content="Longer memory body",
-        entity_type="pattern",
-        tags=None,
-        metadata={"capture_mode": "quick", "capture_surface": "cli"},
-        sync=False,
-    )
+    payload = mock_client.create_entity.await_args.kwargs
+    assert payload["name"] == "Manual title"
+    assert payload["content"] == "Longer memory body"
+    assert payload["entity_type"] == "pattern"
+    assert payload["metadata"]["capture_mode"] == "quick"
     assert "Queued pattern" in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
 @patch("sibyl_cli.main.get_client")
-def test_add_command_waits_for_direct_readiness(mock_get_client: MagicMock) -> None:
-    mock_client = MagicMock()
-    mock_client.create_entity = AsyncMock(return_value={"id": "pattern_123"})
+def test_add_command_waits_for_direct_readiness(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client("pattern_123")
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
@@ -310,24 +327,24 @@ def test_add_command_waits_for_direct_readiness(mock_get_client: MagicMock) -> N
     )
 
     assert result.exit_code == 0
-    mock_client.create_entity.assert_awaited_once_with(
-        name="Waitable Pattern",
-        content="Pattern body",
-        entity_type="pattern",
-        category=None,
-        languages=None,
-        tags=None,
-        sync=True,
-        skip_conflicts=False,
-    )
-    mock_client.search.assert_not_called()
-    assert "Added pattern" in result.stdout
+    mock_client.remember_raw_memory.assert_awaited_once()
+    payload = mock_client.create_entity.await_args.kwargs
+    assert payload["name"] == "Waitable Pattern"
+    assert payload["content"] == "Pattern body"
+    assert payload["entity_type"] == "pattern"
+    assert payload["sync"] is True
+    assert payload["metadata"]["capture_mode"] == "add"
+    assert "Remembered pattern" in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
 @patch("sibyl_cli.main.get_client")
-def test_add_command_can_skip_conflict_detection(mock_get_client: MagicMock) -> None:
-    mock_client = MagicMock()
-    mock_client.create_entity = AsyncMock(return_value={"id": "pattern_123"})
+def test_add_command_can_skip_conflict_detection(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client("pattern_123")
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
@@ -338,35 +355,38 @@ def test_add_command_can_skip_conflict_detection(mock_get_client: MagicMock) -> 
 
     assert result.exit_code == 0
     assert mock_client.create_entity.await_args.kwargs["skip_conflicts"] is True
+    mock_resolve_project_from_cwd.assert_called_once_with()
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
 @patch("sibyl_cli.main.get_client")
-def test_add_command_accepts_title_and_content_options(mock_get_client: MagicMock) -> None:
-    mock_client = MagicMock()
-    mock_client.create_entity = AsyncMock(return_value={"id": "episode_123"})
+def test_add_command_accepts_title_and_content_options(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client("episode_123")
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
     result = runner.invoke(app, ["add", "--title", "Option title", "--content", "Option body"])
 
     assert result.exit_code == 0
-    mock_client.create_entity.assert_awaited_once_with(
-        name="Option title",
-        content="Option body",
-        entity_type="episode",
-        category=None,
-        languages=None,
-        tags=None,
-        sync=False,
-        skip_conflicts=False,
-    )
+    payload = mock_client.create_entity.await_args.kwargs
+    assert payload["name"] == "Option title"
+    assert payload["content"] == "Option body"
+    assert payload["entity_type"] == "episode"
+    assert payload["metadata"]["raw_memory_id"] == "raw_123"
     assert "Queued episode" in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
 @patch("sibyl_cli.main.get_client")
-def test_add_command_reads_content_from_stdin(mock_get_client: MagicMock) -> None:
-    mock_client = MagicMock()
-    mock_client.create_entity = AsyncMock(return_value={"id": "episode_123"})
+def test_add_command_reads_content_from_stdin(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client("episode_123")
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
@@ -375,6 +395,42 @@ def test_add_command_reads_content_from_stdin(mock_get_client: MagicMock) -> Non
     assert result.exit_code == 0
     mock_client.create_entity.assert_awaited_once()
     assert mock_client.create_entity.await_args.kwargs["content"] == "Stdin body"
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_add_command_uses_full_memory_pipeline_with_active_task_link(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client("decision_123")
+    mock_client.explore = AsyncMock(return_value={"entities": [{"id": "task_active"}]})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["add", "Capture active task", "Write raw and graph memory.", "--type", "decision"],
+    )
+
+    assert result.exit_code == 0
+    raw_payload = mock_client.remember_raw_memory.await_args.kwargs
+    graph_payload = mock_client.create_entity.await_args.kwargs
+    assert raw_payload["raw_content"] == "Write raw and graph memory."
+    assert raw_payload["metadata"]["project_id"] == "project_123"
+    assert raw_payload["provenance"]["related_to"] == ["task_active"]
+    assert graph_payload["metadata"]["project_id"] == "project_123"
+    assert graph_payload["metadata"]["raw_memory_id"] == "raw_123"
+    assert graph_payload["related_to"] == ["task_active"]
+    mock_client.explore.assert_awaited_once_with(
+        mode="list",
+        types=["task"],
+        status="doing",
+        project="project_123",
+        limit=2,
+    )
+    mock_resolve_project_from_cwd.assert_called_once_with()
 
 
 @patch("sibyl_cli.main.get_client")
@@ -398,10 +454,13 @@ def test_capture_command_rejects_symlink_content_file(
     mock_client.create_entity.assert_not_called()
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
 @patch("sibyl_cli.main.get_client")
-def test_capture_command_waits_for_direct_readiness(mock_get_client: MagicMock) -> None:
-    mock_client = MagicMock()
-    mock_client.create_entity = AsyncMock(return_value={"id": "episode_123"})
+def test_capture_command_waits_for_direct_readiness(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client("episode_123")
     mock_get_client.return_value = _FakeClientContext(mock_client)
 
     runner = CliRunner()
@@ -417,16 +476,45 @@ def test_capture_command_waits_for_direct_readiness(mock_get_client: MagicMock) 
     )
 
     assert result.exit_code == 0
-    mock_client.create_entity.assert_awaited_once_with(
-        name="Manual title",
-        content="Longer memory body",
-        entity_type="episode",
-        tags=None,
-        metadata={"capture_mode": "quick", "capture_surface": "cli"},
-        sync=True,
+    payload = mock_client.create_entity.await_args.kwargs
+    assert payload["name"] == "Manual title"
+    assert payload["sync"] is True
+    assert payload["metadata"]["capture_mode"] == "quick"
+    assert "Remembered episode" in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_capture_command_uses_full_memory_pipeline_with_task_flags(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client("episode_123")
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "capture",
+            "Capture the exact operational breadcrumb.",
+            "--task",
+            "task_1,task_2",
+            "--no-active-task",
+        ],
     )
-    mock_client.search.assert_not_called()
-    assert "Captured episode" in result.stdout
+
+    assert result.exit_code == 0
+    raw_payload = mock_client.remember_raw_memory.await_args.kwargs
+    graph_payload = mock_client.create_entity.await_args.kwargs
+    assert raw_payload["metadata"]["project_id"] == "project_123"
+    assert raw_payload["provenance"]["related_to"] == ["task_1", "task_2"]
+    assert graph_payload["metadata"]["project_id"] == "project_123"
+    assert graph_payload["metadata"]["capture_mode"] == "quick"
+    assert graph_payload["related_to"] == ["task_1", "task_2"]
+    mock_client.explore.assert_not_awaited()
+    mock_resolve_project_from_cwd.assert_called_once_with()
 
 
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
@@ -494,6 +582,7 @@ def test_remember_command_records_domain_memory_with_links(
         content="Agents should receive grouped memory before building.",
         entity_type="decision",
         category="agent-memory",
+        languages=None,
         tags=["agents", "context"],
         related_to=["plan_1", "idea_2"],
         metadata={
@@ -507,6 +596,7 @@ def test_remember_command_records_domain_memory_with_links(
             "raw_policy_reason": "private_principal_bound",
         },
         sync=False,
+        skip_conflicts=False,
     )
     mock_client.explore.assert_awaited_once_with(
         mode="list",
@@ -644,6 +734,7 @@ def test_remember_command_reads_body_from_stdin(
         content="Body",
         entity_type="idea",
         category=None,
+        languages=None,
         tags=None,
         related_to=None,
         metadata={
@@ -654,6 +745,7 @@ def test_remember_command_reads_body_from_stdin(
             "raw_source_id": "cli:manual",
         },
         sync=False,
+        skip_conflicts=False,
     )
     mock_client.explore.assert_not_called()
     mock_resolve_project_from_cwd.assert_called_once_with()
