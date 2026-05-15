@@ -12,6 +12,7 @@ import sys
 from importlib.metadata import version as pkg_version
 from os import environ
 from typing import Annotated, Any, cast
+from uuid import UUID
 
 import typer
 
@@ -41,7 +42,7 @@ from sibyl_cli.dev import app as dev_app
 from sibyl_cli.entity import app as entity_app
 from sibyl_cli.epic import app as epic_app
 from sibyl_cli.explore import app as explore_app
-from sibyl_cli.id_resolution import resolve_raw_memory_id_prefix
+from sibyl_cli.id_resolution import resolve_id_prefix, resolve_raw_memory_id_prefix
 from sibyl_cli.local import app as local_app
 from sibyl_cli.logs import app as logs_app
 from sibyl_cli.org import app as org_app
@@ -147,6 +148,17 @@ def _normalize_context_intent(value: str) -> str:
         return normalized
     choices = ", ".join(CONTEXT_INTENT_VALUES)
     raise typer.BadParameter(f"{value!r} is not one of: {choices}")
+
+
+def _looks_like_task_id(value: str) -> bool:
+    candidate = value.strip()
+    if candidate.startswith("task_"):
+        return True
+    try:
+        UUID(candidate)
+    except ValueError:
+        return False
+    return True
 
 
 def _format_search_preview(content: str, max_chars: int = SEARCH_PREVIEW_CHARS) -> str:
@@ -1393,6 +1405,144 @@ def capture_memory(
             raise typer.Exit(code=1) from e
 
     run_capture()
+
+
+@app.command("note")
+def note_alias(
+    subject: str = typer.Argument(..., help="Task ID for task notes, or free note content"),
+    content: str | None = typer.Argument(None, help="Note body or '-' for stdin"),
+    content_file: str | None = typer.Option(
+        None, "--content-file", help="Read note content from file"
+    ),
+    max_size: int = typer.Option(
+        1_048_576,
+        "--max-size",
+        min=1,
+        help="Maximum content file size in bytes",
+    ),
+    follow_symlinks: bool = typer.Option(
+        False,
+        "--follow-symlinks",
+        help="Allow --content-file to read through symlinks",
+    ),
+    project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
+    all_projects: bool = typer.Option(
+        False,
+        "--all-projects",
+        help="Do not auto-scope to the linked project",
+    ),
+    tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
+    related_to: str | None = typer.Option(
+        None,
+        "--related-to",
+        help="Comma-separated entity IDs to connect with RELATED_TO edges",
+    ),
+    task: str | None = typer.Option(
+        None,
+        "--task",
+        help="Comma-separated task IDs to connect with RELATED_TO edges",
+    ),
+    active_task: bool = typer.Option(
+        True,
+        "--active-task/--no-active-task",
+        help="Auto-link free notes to the single active task in the current project",
+    ),
+    assistant: bool = typer.Option(
+        False,
+        "--assistant",
+        "--agent",
+        help="Mark task note as assistant-authored",
+    ),
+    author: str | None = typer.Option(None, "--author", "-a", help="Task note author"),
+    wait_searchable: bool = typer.Option(
+        False,
+        "--wait-searchable",
+        help="Wait until free notes are persisted and ready for direct retrieval",
+    ),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Add a task note or capture a free note memory."""
+    task_note = _looks_like_task_id(subject)
+
+    try:
+        resolved_content = (
+            resolve_content_input(
+                content if content is not None else (None if task_note else subject),
+                content_file=content_file,
+                max_size=max_size,
+                follow_symlinks=follow_symlinks,
+            )
+            or ""
+        ).strip()
+    except ValueError as e:
+        error(str(e))
+        raise typer.Exit(code=1) from e
+
+    if not resolved_content:
+        error("Provide note content as an argument, via stdin, or with --content-file.")
+        raise typer.Exit(code=1)
+
+    @run_async
+    async def run_note() -> None:
+        try:
+            async with get_client() as client:
+                if task_note:
+                    resolved_id = await resolve_id_prefix(client, subject, entity_type="task")
+                    response = await client.create_note(
+                        resolved_id,
+                        resolved_content,
+                        "agent" if assistant else "user",
+                        author or "",
+                    )
+                    if json_output:
+                        print_json(response)
+                        return
+                    note_id = response.get("id")
+                    if note_id:
+                        success(f"Note added: {note_id}")
+                    elif response.get("success"):
+                        success(f"Note added to task: {resolved_id}")
+                    else:
+                        error("Failed to add note")
+                    return
+
+                parsed_tags = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+                data = await _write_memory_capture(
+                    client,
+                    title=subject
+                    if content is not None
+                    else _derive_capture_title(resolved_content),
+                    content=resolved_content,
+                    kind=EntityType.NOTE.value,
+                    domain=None,
+                    tags=parsed_tags,
+                    related_ids=_parse_csv_ids(related_to),
+                    task_ids=_parse_csv_ids(task),
+                    active_task=active_task,
+                    effective_project=project
+                    or (None if all_projects else resolve_project_from_cwd()),
+                    capture_mode="remember",
+                    surface="cli",
+                    wait_searchable=wait_searchable,
+                )
+                if json_output:
+                    print_json(data)
+                    return
+                _print_memory_capture_result(
+                    title=subject
+                    if content is not None
+                    else _derive_capture_title(resolved_content),
+                    kind=EntityType.NOTE.value,
+                    data=data,
+                    wait_searchable=wait_searchable,
+                )
+        except SibylClientError as e:
+            _handle_client_error(e)
+        except ValueError as e:
+            error(str(e))
+            raise typer.Exit(code=1) from e
+
+    run_note()
 
 
 @synthesis_app.command("plan")

@@ -517,6 +517,51 @@ def test_capture_command_uses_full_memory_pipeline_with_task_flags(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
+@patch("sibyl_cli.main.get_client")
+def test_note_alias_routes_task_ids_to_task_notes(mock_get_client: MagicMock) -> None:
+    mock_client = MagicMock()
+    mock_client.create_note = AsyncMock(return_value={"id": "note_123"})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["note", "task_123456789abc", "Found the root cause", "--assistant", "--author", "Nova"],
+    )
+
+    assert result.exit_code == 0
+    mock_client.create_note.assert_awaited_once_with(
+        "task_123456789abc",
+        "Found the root cause",
+        "agent",
+        "Nova",
+    )
+    assert "Note added: note_123" in result.stdout
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.main.get_client")
+def test_note_alias_routes_free_notes_to_remember_note(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = _mock_capture_client("note_123")
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["note", "Saw an interesting pattern"])
+
+    assert result.exit_code == 0
+    mock_client.remember_raw_memory.assert_awaited_once()
+    payload = mock_client.create_entity.await_args.kwargs
+    assert payload["entity_type"] == "note"
+    assert payload["content"] == "Saw an interesting pattern"
+    assert payload["metadata"]["capture_mode"] == "remember"
+    assert payload["metadata"]["raw_memory_id"] == "raw_123"
+    assert "Queued note" in result.stdout
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
 @patch("sibyl_cli.main.get_client")
 def test_remember_command_records_domain_memory_with_links(
