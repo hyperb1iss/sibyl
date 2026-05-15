@@ -7,7 +7,6 @@ import { useCaptureMemory } from '@/components/layout/capture-memory-context';
 import { VelocityLineChart } from '@/components/metrics/charts';
 import {
   Activity,
-  Archive,
   ArrowRight,
   BarChart3,
   BookOpen,
@@ -16,6 +15,7 @@ import {
   Clock,
   Database,
   EditPencil,
+  FileText,
   FolderKanban,
   Layers,
   LayoutDashboard,
@@ -593,7 +593,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-yellow/30 hover:bg-sc-bg-highlight transition-all group"
               >
                 <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-yellow/10 flex items-center justify-center shrink-0">
-                  <Archive
+                  <FileText
                     width={16}
                     height={16}
                     className="text-sc-yellow sm:w-[18px] sm:h-[18px]"

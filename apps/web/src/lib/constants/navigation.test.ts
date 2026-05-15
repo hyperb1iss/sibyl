@@ -12,8 +12,11 @@ describe('navigation constants', () => {
     expect(NAVIGATION.map(item => item.href)).toContain('/epics');
   });
 
-  it('keeps the raw archive as a hidden redirect route', () => {
-    expect(ROUTE_CONFIG.archive.href).toBe('/archive');
+  it('keeps the legacy archive path as a hidden memory captures redirect', () => {
+    expect(ROUTE_CONFIG.archive).toMatchObject({
+      label: 'Memory Captures',
+      href: '/archive',
+    });
     expect(NAVIGATION.map(item => item.href)).not.toContain('/archive');
   });
 

@@ -10,10 +10,10 @@ import { EntityBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EnhancedEmptyState } from '@/components/ui/empty-state';
 import {
-  Archive,
   Calendar,
   Command,
   ExternalLink,
+  FileText,
   Hash,
   type IconComponent,
   LayoutDashboard,
@@ -73,7 +73,7 @@ function surfaceLabel(surface: string | null): string {
 }
 
 function SurfaceBadge({ surface }: { surface: string | null }) {
-  const Icon = surface === 'dashboard' ? LayoutDashboard : surface === 'cli' ? Command : Archive;
+  const Icon = surface === 'dashboard' ? LayoutDashboard : surface === 'cli' ? Command : FileText;
 
   return (
     <span className="inline-flex items-center gap-1 rounded border border-sc-cyan/20 bg-sc-cyan/10 px-2 py-0.5 text-xs font-medium text-sc-cyan">
@@ -83,7 +83,7 @@ function SurfaceBadge({ surface }: { surface: string | null }) {
   );
 }
 
-function archiveMeta(capturesCount: number, filteredCount: number, hasMore: boolean): string {
+function captureListMeta(capturesCount: number, filteredCount: number, hasMore: boolean): string {
   const countLabel =
     filteredCount === capturesCount
       ? `${capturesCount} captures`
@@ -204,7 +204,7 @@ export function RawCaptureReview({
     enabled: Boolean(activeCaptureId),
   });
 
-  const replaceArchiveParams = useCallback(
+  const replaceCaptureParams = useCallback(
     (updates: Record<string, string | null>) => {
       const params = new URLSearchParams(searchParams.toString());
       for (const [key, value] of Object.entries(updates)) {
@@ -222,9 +222,9 @@ export function RawCaptureReview({
 
   const updateSelection = useCallback(
     (captureId: string | null) => {
-      replaceArchiveParams({ id: captureId });
+      replaceCaptureParams({ id: captureId });
     },
-    [replaceArchiveParams]
+    [replaceCaptureParams]
   );
 
   const clearFilters = useCallback(() => {
@@ -233,28 +233,28 @@ export function RawCaptureReview({
     setTypeFilter('all');
     setLinkFilter('all');
     setReviewFilter('all');
-    replaceArchiveParams({ link: null, review: null });
-  }, [replaceArchiveParams]);
+    replaceCaptureParams({ link: null, review: null });
+  }, [replaceCaptureParams]);
 
   const updateLinkFilter = useCallback(
     (next: LinkFilter) => {
       setLinkFilter(next);
       const nextReview = next === 'unlinked' && reviewFilter === 'all' ? 'pending' : reviewFilter;
       setReviewFilter(nextReview);
-      replaceArchiveParams({
+      replaceCaptureParams({
         link: next === 'all' ? null : next,
         review: nextReview === 'all' ? null : nextReview,
       });
     },
-    [replaceArchiveParams, reviewFilter]
+    [replaceCaptureParams, reviewFilter]
   );
 
   const updateReviewFilter = useCallback(
     (next: ReviewFilter) => {
       setReviewFilter(next);
-      replaceArchiveParams({ review: next === 'all' ? null : next });
+      replaceCaptureParams({ review: next === 'all' ? null : next });
     },
-    [replaceArchiveParams]
+    [replaceCaptureParams]
   );
 
   useEffect(() => {
@@ -333,7 +333,7 @@ export function RawCaptureReview({
         <Breadcrumb items={breadcrumbItems} />
         <PageHeader title={title} description={description} />
         <EnhancedEmptyState
-          icon={<Archive width={40} height={40} className="text-sc-cyan" />}
+          icon={<FileText width={40} height={40} className="text-sc-cyan" />}
           title="No raw captures yet"
           description="Quick captures will appear here verbatim so you can audit what Sibyl kept before graph compression."
           actions={[{ label: 'Browse Entities', href: '/entities', variant: 'secondary' }]}
@@ -349,7 +349,7 @@ export function RawCaptureReview({
       <PageHeader
         title={title}
         description={description}
-        meta={archiveMeta(captures.length, filteredCaptures.length, Boolean(data?.has_more))}
+        meta={captureListMeta(captures.length, filteredCaptures.length, Boolean(data?.has_more))}
       />
 
       {data?.has_more && (
@@ -491,7 +491,7 @@ export function RawCaptureReview({
 
           {filteredCaptures.length === 0 ? (
             <EnhancedEmptyState
-              icon={<Archive width={40} height={40} className="text-sc-yellow" />}
+              icon={<FileText width={40} height={40} className="text-sc-yellow" />}
               title="No captures match"
               description="Try a different search term or reset your filters to widen the list."
               variant="filtered"
@@ -563,7 +563,7 @@ export function RawCaptureReview({
         <section className="rounded-2xl border border-sc-fg-subtle/20 bg-sc-bg-base p-4 shadow-card">
           {!activeCaptureId ? (
             <EnhancedEmptyState
-              icon={<Archive width={40} height={40} className="text-sc-fg-subtle" />}
+              icon={<FileText width={40} height={40} className="text-sc-fg-subtle" />}
               title="Pick a capture"
               description="Select a capture to inspect the exact saved content."
             />
@@ -576,7 +576,7 @@ export function RawCaptureReview({
             />
           ) : !selectedCapture ? (
             <EnhancedEmptyState
-              icon={<Archive width={40} height={40} className="text-sc-fg-subtle" />}
+              icon={<FileText width={40} height={40} className="text-sc-fg-subtle" />}
               title="Capture not found"
               description="This capture may have been removed or is outside the current filter view."
             />
