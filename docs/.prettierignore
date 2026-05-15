@@ -1,4 +1,9 @@
 .vitepress/cache
 .vitepress/dist
 node_modules
+research/*
+!research/rust-port/
+research/rust-port/*
+!research/rust-port/INVENTORY.md
 research/rust-port/INVENTORY.md
+architecture/GRADIAL_BRAINSTORM_*.md
