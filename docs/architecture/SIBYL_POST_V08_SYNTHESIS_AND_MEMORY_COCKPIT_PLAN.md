@@ -1275,7 +1275,7 @@ Exit criteria:
 
 Receipt, 2026-05-15:
 
-- Local release-audit candidate: current local `main`, ahead of `origin/main` by 20 commits. The
+- Local release-audit candidate: current local `main`, ahead of `origin/main` by 21 commits. The
   tracked worktree was clean after the gate repairs; local untracked scratch files were left
   untouched.
 - Product surface delivered:
@@ -1285,8 +1285,8 @@ Receipt, 2026-05-15:
     receipts, and unified Memory cockpit capture review.
   - Source-preserving ingest through adapter contracts, mailbox import, resumable jobs, dedupe keys,
     private-memory defaults, and import progress UI.
-  - Unified cockpit UX: Memory owns captures, imports, synthesis, review, and source inspection;
-    Archive remains a hidden compatibility wrapper.
+  - Unified cockpit UX: Memory owns captures, imports, synthesis, review, and source inspection; the
+    legacy Archive route redirects into Memory Captures with query parameters preserved.
 - Local verification:
   - `moon run memory-trust-gate` -> PASS, 7 checks and 0 failed. Covered surfaces: audit, CLI,
     context pack, inspect, jobs, MCP, memory policy, promotion preview, prompt hook, raw memory,
@@ -1300,7 +1300,9 @@ Receipt, 2026-05-15:
   - `moon run core:test` -> 932 passed, 14 skipped, 20 deselected in 7.19s.
   - `moon run api:test` -> 1467 passed, 1 skipped, 16 deselected in 14.53s.
   - `moon run cli:test` -> 174 passed in 8.70s.
-  - `moon run web:test` -> 25 files passed, 101 tests passed.
+  - `moon run web:test` -> 26 files passed, 102 tests passed.
+  - Post-unified-UX update: `moon run web:lint web:typecheck docs:lint` -> 3 tasks completed, 1
+    cached.
   - `moon run docs:lint` -> all matched files use Prettier code style.
   - `moon run :check` -> 40 tasks completed, 26 cache hits before the receipt docs were written;
     post-doc rerun completed 36 tasks with 33 cache hits.

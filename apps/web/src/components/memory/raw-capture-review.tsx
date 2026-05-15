@@ -34,7 +34,8 @@ import { formatDateTime, formatDistanceToNow } from '@/lib/constants';
 import { useRawCapture, useRawCaptures, useUpdateRawCaptureReviewState } from '@/lib/hooks';
 
 const MAX_CAPTURE_RESULTS = 200;
-const DEFAULT_DESCRIPTION = 'Review verbatim quick captures before and after graph extraction';
+const DEFAULT_TITLE = 'Memory Captures';
+const DEFAULT_DESCRIPTION = 'Review raw captures, graph linkage, and queued memory actions';
 type LinkFilter = 'all' | 'linked' | 'unlinked';
 type ReviewFilter = 'all' | 'pending' | 'deferred' | 'archived';
 
@@ -110,9 +111,9 @@ function reviewStateLabel(value: ReviewFilter | 'pending' | 'deferred' | 'archiv
 }
 
 export function RawCaptureReview({
-  basePath = '/archive',
+  basePath = '/memory/captures',
   breadcrumbItems,
-  title,
+  title = DEFAULT_TITLE,
   description = DEFAULT_DESCRIPTION,
 }: RawCaptureReviewProps) {
   const router = useRouter();

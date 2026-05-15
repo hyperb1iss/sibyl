@@ -15,8 +15,8 @@ on the final v0.9 candidate head.
   defaults, stable dedupe keys, resumable checkpoints, skipped-record accounting, and progress
   visibility.
 - The web Memory cockpit is now the primary product surface for review, captures, imports,
-  synthesis, and source inspection. The old Archive route remains as a hidden compatibility wrapper
-  around raw capture review.
+  synthesis, and source inspection. The old Archive route redirects into Memory Captures so legacy
+  links land in the unified flow.
 
 ## Trust Boundary
 
@@ -34,7 +34,9 @@ on the final v0.9 candidate head.
 - `moon run core:test` -> 932 passed, 14 skipped, 20 deselected.
 - `moon run api:test` -> 1467 passed, 1 skipped, 16 deselected.
 - `moon run cli:test` -> 174 passed.
-- `moon run web:test` -> 25 files passed, 101 tests passed.
+- `moon run web:test` -> 26 files passed, 102 tests passed.
+- Post-unified-UX update: `moon run web:lint web:typecheck docs:lint` -> 3 tasks completed, 1
+  cached.
 - `moon run docs:lint` -> all matched files use Prettier code style.
 - `moon run :check` -> 40 tasks completed, 26 cache hits before the receipt docs were written;
   post-doc rerun completed 36 tasks with 33 cache hits.

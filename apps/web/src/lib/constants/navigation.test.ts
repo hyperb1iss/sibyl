@@ -12,7 +12,7 @@ describe('navigation constants', () => {
     expect(NAVIGATION.map(item => item.href)).toContain('/epics');
   });
 
-  it('keeps the raw archive as a hidden compatibility route', () => {
+  it('keeps the raw archive as a hidden redirect route', () => {
     expect(ROUTE_CONFIG.archive.href).toBe('/archive');
     expect(NAVIGATION.map(item => item.href)).not.toContain('/archive');
   });
