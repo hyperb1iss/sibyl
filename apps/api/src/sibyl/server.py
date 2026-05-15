@@ -773,6 +773,9 @@ async def _add_mcp_entity(
     technologies: list[str] | None,
     depends_on: list[str] | None,
     repository_url: str | None,
+    check_conflicts: bool = True,
+    skip_conflicts: bool = False,
+    conflict_threshold: float = 0.85,
 ) -> dict[str, Any]:
     from sibyl_core.tools.core import add
 
@@ -811,6 +814,9 @@ async def _add_mcp_entity(
         technologies=technologies,
         depends_on=depends_on,
         repository_url=repository_url,
+        check_conflicts=check_conflicts,
+        skip_conflicts=skip_conflicts,
+        conflict_threshold=conflict_threshold,
     )
     payload = _to_dict(result)
     payload["policy_reason"] = write_decision.reason
@@ -1419,6 +1425,10 @@ def _register_tools(mcp: FastMCP) -> None:
         depends_on: list[str] | None = None,
         # Project-specific parameters
         repository_url: str | None = None,
+        # Conflict detection
+        check_conflicts: bool = True,
+        skip_conflicts: bool = False,
+        conflict_threshold: float = 0.85,
     ) -> dict[str, Any]:
         """Add new knowledge to the graph.
 
@@ -1459,6 +1469,9 @@ def _register_tools(mcp: FastMCP) -> None:
             technologies: Technologies involved (for tasks)
             depends_on: Task IDs this depends on (creates DEPENDS_ON edges)
             repository_url: Repository URL for projects
+            check_conflicts: Check for semantically similar existing knowledge
+            skip_conflicts: Skip conflict detection for latency-sensitive captures
+            conflict_threshold: Similarity score required to flag a conflict
 
         Returns:
             Result with success status, entity ID, and message
@@ -1492,6 +1505,9 @@ def _register_tools(mcp: FastMCP) -> None:
             technologies=technologies,
             depends_on=depends_on,
             repository_url=repository_url,
+            check_conflicts=check_conflicts,
+            skip_conflicts=skip_conflicts,
+            conflict_threshold=conflict_threshold,
         )
 
     # =========================================================================

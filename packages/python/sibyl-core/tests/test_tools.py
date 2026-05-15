@@ -2571,6 +2571,61 @@ class TestAddTool:
             assert response.id is not None
             assert response.id.startswith("episode_")
 
+    @pytest.mark.asyncio
+    async def test_add_uses_higher_default_conflict_threshold(self) -> None:
+        from sibyl_core.tools.add import add
+
+        mock_entity_manager = MagicMock()
+        mock_entity_manager.create_direct = AsyncMock(return_value="pattern_123")
+        detect_conflicts = AsyncMock(return_value=[])
+
+        with (
+            patch(
+                "sibyl_core.tools.add.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=mock_entity_manager)),
+            ),
+            patch("sibyl_core.tools.conflicts.detect_conflicts", detect_conflicts),
+            patch("sibyl_core.tools.add._auto_discover_links", return_value=[]),
+        ):
+            response = await add(
+                title="Cache embeddings",
+                content="Reuse title embeddings inside one add call.",
+                entity_type="pattern",
+                metadata={"organization_id": "org_123"},
+                sync=True,
+            )
+
+        assert response.success is True
+        assert detect_conflicts.await_args.kwargs["min_similarity"] == 0.85
+
+    @pytest.mark.asyncio
+    async def test_add_skip_conflicts_bypasses_conflict_detection(self) -> None:
+        from sibyl_core.tools.add import add
+
+        mock_entity_manager = MagicMock()
+        mock_entity_manager.create_direct = AsyncMock(return_value="pattern_123")
+        detect_conflicts = AsyncMock(return_value=[])
+
+        with (
+            patch(
+                "sibyl_core.tools.add.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=mock_entity_manager)),
+            ),
+            patch("sibyl_core.tools.conflicts.detect_conflicts", detect_conflicts),
+            patch("sibyl_core.tools.add._auto_discover_links", return_value=[]),
+        ):
+            response = await add(
+                title="Fast capture",
+                content="Skip duplicate checks when latency matters.",
+                entity_type="pattern",
+                metadata={"organization_id": "org_123"},
+                skip_conflicts=True,
+                sync=True,
+            )
+
+        assert response.success is True
+        detect_conflicts.assert_not_awaited()
+
 
 class TestAddEntityTypes:
     """Test add tool with different entity types."""

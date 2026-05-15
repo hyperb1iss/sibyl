@@ -546,6 +546,9 @@ async def test_add_mcp_entity_scopes_project_metadata() -> None:
         technologies=["python"],
         depends_on=["task_1"],
         repository_url=None,
+        check_conflicts=True,
+        skip_conflicts=False,
+        conflict_threshold=0.85,
     )
 
 

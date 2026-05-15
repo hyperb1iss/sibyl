@@ -109,7 +109,8 @@ async def add(
     sync: bool = False,
     # Conflict detection - check for contradicting/duplicate knowledge
     check_conflicts: bool = True,
-    conflict_threshold: float = 0.70,
+    skip_conflicts: bool = False,
+    conflict_threshold: float = 0.85,
 ) -> AddResponse:
     """Add new knowledge to the Sibyl knowledge graph.
 
@@ -155,8 +156,9 @@ async def add(
               If False (default), return immediately and process in background.
         check_conflicts: If True (default), check for semantically similar existing entities
               that may contradict or duplicate this knowledge. Warnings returned in response.
+        skip_conflicts: If True, skip conflict detection even when check_conflicts is True.
         conflict_threshold: Minimum similarity score (0.0-1.0) to flag as potential conflict.
-              Default 0.70. Higher = fewer false positives, lower = catch more conflicts.
+              Default 0.85. Higher = fewer false positives, lower = catch more conflicts.
 
     Returns:
         AddResponse with created entity ID, auto-discovered links, conflicts, and timestamp.
@@ -224,6 +226,9 @@ async def add(
 
         # Generate deterministic ID
         entity_id = _generate_id(entity_type, title, category or "general")
+
+        if skip_conflicts:
+            check_conflicts = False
 
         # Detect potential conflicts (duplicates, contradictions) before creating
         conflicts: list[ConflictWarning] = []

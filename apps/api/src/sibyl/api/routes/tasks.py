@@ -215,34 +215,38 @@ async def create_task(
         # Create in graph
         task_id = await runtime.entity_manager.create_direct(task)
 
-        # Create BELONGS_TO relationship with project
-        belongs_to = Relationship(
-            id=f"rel_{task_id}_belongs_to_{request.project_id}",
-            source_id=task_id,
-            target_id=request.project_id,
-            relationship_type=RelationshipType.BELONGS_TO,
-        )
-        await runtime.relationship_manager.create(belongs_to)
-
-        # Create BELONGS_TO relationship with epic (if provided)
-        if request.epic_id:
-            belongs_to_epic = Relationship(
-                id=f"rel_{task_id}_belongs_to_{request.epic_id}",
+        relationships = [
+            Relationship(
+                id=f"rel_{task_id}_belongs_to_{request.project_id}",
                 source_id=task_id,
-                target_id=request.epic_id,
+                target_id=request.project_id,
                 relationship_type=RelationshipType.BELONGS_TO,
             )
-            await runtime.relationship_manager.create(belongs_to_epic)
+        ]
 
-        # Create DEPENDS_ON relationships
-        for dep_id in request.depends_on:
-            depends_on = Relationship(
+        if request.epic_id:
+            relationships.append(
+                Relationship(
+                    id=f"rel_{task_id}_belongs_to_{request.epic_id}",
+                    source_id=task_id,
+                    target_id=request.epic_id,
+                    relationship_type=RelationshipType.BELONGS_TO,
+                )
+            )
+
+        relationships.extend(
+            Relationship(
                 id=f"rel_{task_id}_depends_on_{dep_id}",
                 source_id=task_id,
                 target_id=dep_id,
                 relationship_type=RelationshipType.DEPENDS_ON,
             )
-            await runtime.relationship_manager.create(depends_on)
+            for dep_id in request.depends_on
+        )
+
+        await asyncio.gather(
+            *(runtime.relationship_manager.create(relationship) for relationship in relationships)
+        )
 
         log.info(
             "create_task_success",

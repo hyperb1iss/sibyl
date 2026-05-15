@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -51,6 +52,49 @@ async def test_create_task_requires_registered_project_before_runtime() -> None:
         require_existing_project=True,
     )
     runtime.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_task_writes_relationships_concurrently() -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    user = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222"))
+    auth = SimpleNamespace()
+    all_started = asyncio.Event()
+    started: list[str] = []
+    completed: list[str] = []
+
+    async def create_relationship(relationship):
+        started.append(relationship.target_id)
+        if len(started) == 3:
+            all_started.set()
+        await asyncio.wait_for(all_started.wait(), timeout=0.5)
+        completed.append(relationship.target_id)
+        return relationship.id
+
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(create_direct=AsyncMock(return_value="task-123")),
+        relationship_manager=SimpleNamespace(create=create_relationship),
+    )
+
+    with (
+        patch("sibyl.api.routes.tasks.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.tasks.get_task_graph_runtime", AsyncMock(return_value=runtime)),
+        patch("sibyl.api.routes.tasks.broadcast_event", AsyncMock()),
+    ):
+        response = await create_task(
+            request=CreateTaskRequest(
+                title="Parallel task",
+                project_id="project-1",
+                depends_on=["task-a", "task-b"],
+            ),
+            org=org,
+            user=user,
+            auth=auth,
+        )
+
+    assert response.task_id == "task-123"
+    assert started == ["project-1", "task-a", "task-b"]
+    assert set(completed) == {"project-1", "task-a", "task-b"}
 
 
 class TestCompleteTaskRoute:
