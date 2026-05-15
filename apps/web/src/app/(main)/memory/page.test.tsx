@@ -203,10 +203,10 @@ describe('MemoryContent', () => {
     hooks.useMemorySpaces.mockReturnValue({ data: spaces, isLoading: false, error: null });
   });
 
-  it('renders the memory cockpit home panels', () => {
+  it('renders the memory workspace home panels', () => {
     render(<MemoryContent />);
 
-    expect(screen.getByText('Memory Cockpit')).toBeInTheDocument();
+    expect(screen.getByText('Memory Workspace')).toBeInTheDocument();
     expect(screen.getByText('Recent Captures')).toBeInTheDocument();
     expect(screen.getByText('Review Actions')).toBeInTheDocument();
     expect(screen.getByText('Recent Imports')).toBeInTheDocument();
@@ -218,7 +218,7 @@ describe('MemoryContent', () => {
     expect(screen.getByText('agent:codex')).toBeInTheDocument();
   });
 
-  it('filters cockpit panels by memory scope', async () => {
+  it('filters workspace panels by memory scope', async () => {
     const { user } = render(<MemoryContent />);
 
     await user.click(screen.getByRole('button', { name: /project/i }));

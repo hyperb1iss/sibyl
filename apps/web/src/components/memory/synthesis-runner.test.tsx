@@ -52,7 +52,7 @@ const planResponse = {
           id: 'raw-1',
           type: 'episode',
           name: 'Roadmap assessment',
-          content_preview: 'Memory cockpit comes before release gates.',
+          content_preview: 'Memory workspace comes before release gates.',
           score: 0.92,
           source: 'memory',
           origin: 'raw',
@@ -81,7 +81,7 @@ const draftResponse = {
     artifact_id: 'artifact-1',
     format: 'markdown' as const,
     title: 'Roadmap Synthesis',
-    markdown: '## Roadmap\n\nShip the unified memory cockpit.',
+    markdown: '## Roadmap\n\nShip the unified memory workspace.',
     json_payload: {},
     source_ids: ['raw-1', 'raw-2'],
     section_source_ids: { 'section-1': ['raw-1', 'raw-2'] },
@@ -171,7 +171,7 @@ describe('SynthesisRunner', () => {
         ],
       })
     );
-    expect(await screen.findByText(/Ship the unified memory cockpit/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Ship the unified memory workspace/i)).toBeInTheDocument();
     expect(screen.getByText('remembered')).toBeInTheDocument();
   });
 });

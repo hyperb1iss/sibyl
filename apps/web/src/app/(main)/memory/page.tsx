@@ -6,12 +6,12 @@ import { MemoryContent } from './memory-content';
 
 export const metadata: Metadata = {
   title: 'Memory',
-  description: 'Memory cockpit for captures, review actions, recalls, and agent access',
+  description: 'Memory workspace for captures, review actions, recalls, and agent access',
 };
 
 export default function MemoryPage() {
   return (
-    <Suspense fallback={<LoadingState message="Loading memory cockpit..." />}>
+    <Suspense fallback={<LoadingState message="Loading memory workspace..." />}>
       <MemoryContent />
     </Suspense>
   );

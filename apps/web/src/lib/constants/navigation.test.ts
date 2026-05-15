@@ -20,7 +20,7 @@ describe('navigation constants', () => {
     expect(NAVIGATION.map(item => item.href)).not.toContain('/archive');
   });
 
-  it('surfaces the memory cockpit in shared navigation', () => {
+  it('surfaces the memory workspace in shared navigation', () => {
     expect(ROUTE_CONFIG.memory.label).toBe('Memory');
     expect(NAVIGATION.map(item => item.href)).toContain('/memory');
   });

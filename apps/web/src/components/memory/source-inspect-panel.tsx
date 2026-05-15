@@ -250,7 +250,7 @@ export function SourceInspectPanel({ sourceId, initialData }: SourceInspectPanel
             className="inline-flex items-center gap-1.5 text-sm text-sc-fg-muted transition-colors hover:text-sc-purple"
           >
             <ExternalLink width={14} height={14} />
-            Memory Cockpit
+            Memory Workspace
           </Link>
         </div>
         <SourceCorrectionDialog source={source} onApplied={() => void refetch()} />

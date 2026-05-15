@@ -83,7 +83,7 @@ async def test_plan_synthesis_builds_deterministic_source_aware_outline() -> Non
                 "artifact:post-v08-plan",
                 "artifact",
                 "Post v0.8 synthesis plan",
-                content="The roadmap moves from ingest into synthesis and cockpit work.",
+                content="The roadmap moves from ingest into synthesis and workspace work.",
                 score=0.85,
             )
         ],

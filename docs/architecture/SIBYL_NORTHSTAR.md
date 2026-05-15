@@ -19,8 +19,8 @@ Executable plans:
   [`SURREALDB_NATIVE_MEMORY_CORE_SPEC.md`](SURREALDB_NATIVE_MEMORY_CORE_SPEC.md)
 - v0.8 pure Surreal closure and memory trust:
   [`SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`](SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md)
-- Post-v0.8 synthesis and memory cockpit:
-  [`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_COCKPIT_PLAN.md`](SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_COCKPIT_PLAN.md)
+- Post-v0.8 synthesis and memory workspace:
+  [`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`](SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md)
 
 ## Northstar
 
@@ -523,7 +523,7 @@ UX principles:
 
 The existing Sibyl UX is a strong foundation: dashboard, tasks, graph, search, sources, settings,
 and SilkCircuit visual language already give the app a real product shape. The northstar is to turn
-that into a warm, high-trust memory cockpit where humans can comfortably manage deeply personal
+that into a warm, high-trust memory workspace where humans can comfortably manage deeply personal
 context while agents do the repetitive retrieval work.
 
 ### 10. Benchmark and Evaluation Harness

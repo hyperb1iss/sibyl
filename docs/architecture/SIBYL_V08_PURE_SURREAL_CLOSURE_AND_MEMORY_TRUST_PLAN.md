@@ -93,7 +93,7 @@ v0.8 is ready when all of these are true:
 - Persisted `MemorySpace` CRUD and membership tables are not a v0.8 release claim. v0.8 claims the
   `MemoryScope`/`MemoryPolicyContext` policy primitive for private, delegated, and project memory;
   team, organization, shared, and public scopes remain disabled with stable deny reasons until the
-  post-v0.8 memory cockpit work.
+  post-v0.8 memory workspace work.
 
 Required release gates:
 
@@ -464,7 +464,7 @@ Exit criteria:
 ### Wave B1: Memory Scope Policy Boundary
 
 Purpose: install the memory-scope policy primitive needed for v0.8 and defer first-class persisted
-memory-space administration to the post-v0.8 memory cockpit work.
+memory-space administration to the post-v0.8 memory workspace work.
 
 Implementation:
 
@@ -475,7 +475,7 @@ Implementation:
   cases are implemented.
 - Resolve project graph memory through the canonical project ID and policy scope key.
 - Defer persisted `memory_spaces` and `memory_space_members` tables, CRUD, and graph projections to
-  `docs/architecture/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_COCKPIT_PLAN.md`.
+  `docs/architecture/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`.
 
 Files:
 
@@ -510,7 +510,7 @@ B1 scope correction receipt, 2026-05-14:
 - Private, delegated, and project policy decisions are covered by `moon run core:test` and
   `moon run memory-trust-gate`; team, organization, shared, and public scopes fail closed with
   `scope_not_enabled`.
-- Post-v0.8 `SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_COCKPIT_PLAN.md` owns the persisted memory-space
+- Post-v0.8 `SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md` owns the persisted memory-space
   control plane, membership UI/API/CLI, and agent access preview work.
 
 ### Wave B2: Project RBAC Hardening
@@ -838,14 +838,14 @@ v0.8 should leave the system ready for:
 - Human trust UI: inspect, correct, hide, promote, redact, export, and delete memory.
 - Team/shared memory spaces: deliberate sharing with previews and audit trail.
 - Personal corpus ingestion: staged import for email, chat, notes, docs, and home-assistant memory.
-- Live memory cockpit: live capture feed, reflection progress, context-pack preview, and
+- Live memory workspace: live capture feed, reflection progress, context-pack preview, and
   permission-change invalidation.
 
 The sequencing matters. `synthesize` and sharing become powerful only after policy, provenance,
 audit, and inspection are boring.
 
 The executable post-v0.8 plan lives in
-[`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_COCKPIT_PLAN.md`](SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_COCKPIT_PLAN.md).
+[`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`](SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md).
 
 ## 12. Execution Operating Model
 

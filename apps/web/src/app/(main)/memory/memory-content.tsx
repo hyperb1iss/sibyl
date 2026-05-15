@@ -9,7 +9,7 @@ export function MemoryContent() {
     <div className="space-y-4 animate-fade-in">
       <Breadcrumb />
       <PageHeader
-        title="Memory Cockpit"
+        title="Memory Workspace"
         description="Operate captures, reviews, recalls, imports, and agent access from one control surface"
       />
       <MemoryHome />

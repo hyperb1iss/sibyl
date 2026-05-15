@@ -221,7 +221,7 @@ export function SynthesisRunner() {
                 {...field}
                 value={seedQuery}
                 onChange={event => setSeedQuery(event.target.value)}
-                placeholder="roadmap synthesis memory cockpit"
+                placeholder="roadmap synthesis memory workspace"
               />
             )}
           </FormField>

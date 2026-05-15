@@ -14,7 +14,7 @@ it is pushed to `main` and docs deploy is green on the final v0.9 candidate head
 - Source import is source-preserving. The adapter contract and mailbox import path prove private
   defaults, stable dedupe keys, resumable checkpoints, skipped-record accounting, and progress
   visibility.
-- The web Memory cockpit is now the primary product surface for review, captures, imports,
+- The web Memory workspace is now the primary product surface for review, captures, imports,
   synthesis, and source inspection. The old Archive route redirects into Memory Captures so legacy
   links land in the unified flow.
 

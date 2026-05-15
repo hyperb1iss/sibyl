@@ -334,7 +334,7 @@ export function MemoryHome() {
   ].filter(Boolean);
 
   if (isLoading) {
-    return <LoadingState message="Loading memory cockpit..." />;
+    return <LoadingState message="Loading memory workspace..." />;
   }
 
   return (

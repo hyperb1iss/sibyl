@@ -1,4 +1,4 @@
-# Sibyl Post-v0.8 Synthesis and Memory Cockpit Plan
+# Sibyl Post-v0.8 Synthesis and Memory Workspace Plan
 
 - Status: full execution plan draft, anchored to the v0.8 evidence baseline at `4855ba8a`
 - Target release: v0.9 candidate
@@ -8,7 +8,7 @@
   - `docs/architecture/SIBYL_NORTHSTAR.md`
 - Primary outcome: turn the v0.8 trust substrate into a human-usable and agent-usable memory product
   with source-grounded synthesis, source inspection, correction, source adapters, and a memory
-  cockpit.
+  workspace.
 
 v0.8 should leave Sibyl with a Surreal-only default runtime, policy-backed memory access, audit
 receipts, promotion and share previews, and release gates that prove Graphiti is no longer on the
@@ -53,15 +53,15 @@ Post-v0.8 is ready when all of these are true:
   requiring graph vocabulary.
 - Promotion and share preview results are visible in CLI and web without enabling uncontrolled broad
   sharing.
-- The memory cockpit gives users one place to see recent captures, imports, reflections, recalls,
+- The memory workspace gives users one place to see recent captures, imports, reflections, recalls,
   agent access, source inspections, and suggested follow-up.
 - MCP, CLI, API, jobs, and prompt hooks reuse the same policy context and audit receipts for read,
   write, inspect, correction, promotion, sharing preview, and synthesis.
 - New release gates catch source-grounding regressions, permission leaks, synthesis citation gaps,
   adapter ingest drift, and UI trust-flow regressions.
 
-The first shippable product cut does not need every adapter, every cockpit panel, or broad sharing.
-It does need one vertical path that proves the loop end to end:
+The first shippable product cut does not need every adapter, every workspace panel, or broad
+sharing. It does need one vertical path that proves the loop end to end:
 
 1. A user can inspect an authorized source and see derived memory, visibility, policy, and audit
    context.
@@ -81,9 +81,9 @@ It does need one vertical path that proves the loop end to end:
   rather than bypass it.
 - Do not let synthesis invent unsupported claims. Missing sources are output gaps, not model
   creativity opportunities.
-- Do not make the cockpit a marketing dashboard. It is a working surface for inspection, correction,
-  import progress, agent access, and memory confidence.
-- Do not require live queries for the first cockpit. Polling or normal query invalidation is
+- Do not make the workspace a marketing dashboard. It is a working surface for inspection,
+  correction, import progress, agent access, and memory confidence.
+- Do not require live queries for the first workspace. Polling or normal query invalidation is
   acceptable until Surreal live-query behavior has explicit permission tests.
 
 ## 4. Product Stories
@@ -274,7 +274,7 @@ Exit criteria:
 - Unsupported claims are listed as gaps rather than written as facts.
 - The generated artifact can be remembered with provenance.
 
-### Track E: Human Memory Cockpit
+### Track E: Human Memory Workspace
 
 Purpose: make memory visible, understandable, and controllable in the web UI.
 
@@ -448,7 +448,7 @@ Primary components:
 - `SynthesisSectionSources`
 - `SynthesisVerificationPanel`
 
-The first screen should be the working memory cockpit, not a landing page. It should show recent
+The first screen should be the working memory workspace, not a landing page. It should show recent
 memory activity, pending review, import progress, and quick actions for inspect, import, and
 synthesize.
 
@@ -711,9 +711,9 @@ Generated artifacts are memory. Persisted artifacts must include:
 - freshness timestamp
 - output type and audience
 
-### 11.7 Cockpit Contract
+### 11.7 Workspace Contract
 
-The cockpit is a working surface for memory trust. The default screen prioritizes action over
+The workspace is a working surface for memory trust. The default screen prioritizes action over
 analytics:
 
 - recent captures and imports
@@ -724,9 +724,9 @@ analytics:
 - synthesis drafts and verification gaps
 - import progress and skipped records
 
-Every cockpit action that changes visibility, lifecycle, promotion, sharing, deletion, or generated
-artifact persistence must use preview before apply. The UI can make happy paths fast, but the server
-remains the source of truth for policy and consequences.
+Every workspace action that changes visibility, lifecycle, promotion, sharing, deletion, or
+generated artifact persistence must use preview before apply. The UI can make happy paths fast, but
+the server remains the source of truth for policy and consequences.
 
 ### 11.8 Release Cut Lines
 
@@ -745,9 +745,9 @@ The post-v0.8 work should ship in visible cuts:
 - CLI and MCP synthesis surfaces.
 - `synthesis-gate` blocks missing citations, hidden source text, and unsupported claims.
 
-#### Cut 3: Memory Cockpit
+#### Cut 3: Memory Workspace
 
-- Working `/memory` cockpit.
+- Working `/memory` workspace.
 - Inspect, correction, import progress, and synthesis UI.
 - Component and browser checks cover the trust flows.
 
@@ -780,7 +780,7 @@ Depends on:
 Files:
 
 - `docs/architecture/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`
-- `docs/architecture/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_COCKPIT_PLAN.md`
+- `docs/architecture/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`
 
 Implementation:
 
@@ -805,7 +805,7 @@ Receipt, 2026-05-14:
 - v0.8 claim boundary: Surreal-only default runtime, optional Graphiti compatibility, policy-backed
   inspectable memory, promotion preview, share preview, and the `memory-trust-gate`.
 - Post-v0.8 owns persisted MemorySpace CRUD, source lifecycle and correction, source adapters,
-  `synthesize`, mailbox import, and the memory cockpit.
+  `synthesize`, mailbox import, and the memory workspace.
 
 ### Packet A1: Memory Space Records
 
@@ -1125,7 +1125,7 @@ Exit criteria:
 
 - Agents can synthesize through MCP without bypassing policy context.
 
-### Packet E1: Memory Cockpit Foundation
+### Packet E1: Memory Workspace Foundation
 
 Files:
 
@@ -1244,7 +1244,7 @@ Exit criteria:
 
 Files:
 
-- `docs/architecture/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_COCKPIT_PLAN.md`
+- `docs/architecture/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`
 - release notes draft
 
 Implementation:
@@ -1271,7 +1271,7 @@ Verify:
 Exit criteria:
 
 - The release can claim source-grounded synthesis, inspectable and correctable memory,
-  source-preserving ingest, and a usable memory cockpit.
+  source-preserving ingest, and a usable memory workspace.
 
 Receipt, 2026-05-15:
 
@@ -1282,11 +1282,11 @@ Receipt, 2026-05-15:
   - Source-grounded synthesis across service, CLI, MCP, API, and web with section source IDs,
     unresolved-gap reporting, hidden-source filtering, artifact provenance, and remember provenance.
   - Inspectable and correctable memory through source inspection, correction preview/apply, audit
-    receipts, and unified Memory cockpit capture review.
+    receipts, and unified Memory workspace capture review.
   - Source-preserving ingest through adapter contracts, mailbox import, resumable jobs, dedupe keys,
     private-memory defaults, and import progress UI.
-  - Unified cockpit UX: Memory owns captures, imports, synthesis, review, and source inspection; the
-    legacy Archive route redirects into Memory Captures with query parameters preserved.
+  - Unified workspace UX: Memory owns captures, imports, synthesis, review, and source inspection;
+    the legacy Archive route redirects into Memory Captures with query parameters preserved.
 - Local verification:
   - `moon run memory-trust-gate` -> PASS, 7 checks and 0 failed. Covered surfaces: audit, CLI,
     context pack, inspect, jobs, MCP, memory policy, promotion preview, prompt hook, raw memory,
@@ -1353,7 +1353,7 @@ Receipt, 2026-05-15:
 | Synthesis            | `moon run synthesis-gate`                             | F2              |
 | CLI                  | `moon run cli:test`                                   | D4, F2          |
 | MCP                  | `moon run api:test -- tests/test_mcp_auth.py`         | D4, F2          |
-| Web cockpit          | `moon run web:test`                                   | E3, F2          |
+| Web workspace        | `moon run web:test`                                   | E3, F2          |
 | Full release         | `moon run :check`                                     | F2              |
 
 ## 14. Risk Register
@@ -1364,7 +1364,7 @@ Receipt, 2026-05-15:
 | Inspect leaks hidden source text    | Trust UI becomes a privacy bug           | Server-side redaction and negative tests              |
 | Source adapters become one-offs     | Ingest complexity fragments quickly      | Contract-first fake adapter before mailbox adapter    |
 | Corrections delete source truth     | Future audits lose provenance            | Lifecycle metadata over destructive delete by default |
-| Memory cockpit becomes ornamental   | Users still cannot fix memory            | Build inspect/correct/import/synthesize flows first   |
+| Memory workspace becomes ornamental | Users still cannot fix memory            | Build inspect/correct/import/synthesize flows first   |
 | Broad sharing ships too early       | Policy surface expands before trust      | Keep sharing preview-only until explicit enablement   |
 | Live UI outruns permission tests    | Realtime can leak state changes          | Defer live queries until permission fixtures pass     |
 | Import jobs bypass actor policy     | Background workers become a side channel | Serialize policy context into job payloads            |
@@ -1382,7 +1382,7 @@ Receipt, 2026-05-15:
 - How much redacted hidden-context signal should synthesis expose without overemphasizing
   unavailable context?
 - Should organization and team memory remain preview-only for the entire post-v0.8 release?
-- What exact UI test runner should own cockpit end-to-end flows if component tests are not enough?
+- What exact UI test runner should own workspace end-to-end flows if component tests are not enough?
 - Which source adapter should follow mailbox import: repo snapshot, chat export, docs crawl,
   calendar export, or Haven event history?
 
@@ -1393,10 +1393,10 @@ Start with Track B and Track D in a narrow vertical slice:
 1. Build source inspect and correction primitives.
 2. Build deterministic synthesis planning and section packs.
 3. Add draft, verification, and artifact remember.
-4. Add the minimum cockpit UI around those flows.
+4. Add the minimum workspace UI around those flows.
 
 This sequence makes the product immediately more useful while preserving the trust model. Source
-inspect gives humans confidence. Synthesis gives agents a powerful large-read primitive. The cockpit
-turns both into a visible product. Mailbox import should follow once inspect and lifecycle controls
-are solid, because large personal corpora are only safe after people can see and correct what Sibyl
-remembered.
+inspect gives humans confidence. Synthesis gives agents a powerful large-read primitive. The
+workspace turns both into a visible product. Mailbox import should follow once inspect and lifecycle
+controls are solid, because large personal corpora are only safe after people can see and correct
+what Sibyl remembered.
