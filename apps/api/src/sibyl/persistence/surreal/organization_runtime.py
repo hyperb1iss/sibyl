@@ -521,7 +521,12 @@ async def _load_invitation_accept_records(
     *,
     token: str,
     user_id: UUID,
-) -> tuple[SurrealRecord | None, SurrealRecord | None, SurrealRecord | None]:
+) -> tuple[
+    SurrealRecord | None,
+    SurrealRecord | None,
+    SurrealRecord | None,
+    SurrealRecord | None,
+]:
     payload = await client.execute_query(
         """
             RETURN {
@@ -549,6 +554,20 @@ async def _load_invitation_accept_records(
                         AND user_id = $user_id
                     LIMIT 1
                 )[0],
+                creator_membership: (
+                    SELECT * FROM organization_members
+                    WHERE organization_id IN (
+                        SELECT VALUE organization_id FROM organization_invitations
+                        WHERE token = $token
+                        LIMIT 1
+                    )
+                        AND user_id IN (
+                            SELECT VALUE created_by_user_id FROM organization_invitations
+                            WHERE token = $token
+                            LIMIT 1
+                        )
+                    LIMIT 1
+                )[0],
             };
         """,
         token=token,
@@ -559,6 +578,7 @@ async def _load_invitation_accept_records(
         _normalize_record(payload.get("invitation")),
         _normalize_record(payload.get("organization")),
         _normalize_record(payload.get("membership")),
+        _normalize_record(payload.get("creator_membership")),
     )
 
 
@@ -1298,7 +1318,8 @@ async def create_org_invitation(
     expires_days: int,
     request: Request,
 ) -> InvitationRecord:
-    organization, _membership = await _require_org_admin(slug=slug, user_id=actor_id)
+    organization, membership = await _require_org_admin(slug=slug, user_id=actor_id)
+    _enforce_owner_role_boundary(actor_role=membership.role, requested_role=role)
     async with _auth_client_scope() as client:
         now = _utcnow()
         record = {
@@ -1366,10 +1387,12 @@ async def accept_org_invitation(
     request: Request,
 ) -> InvitationAcceptance:
     async with _auth_client_scope() as client:
-        invite, organization, membership = await _load_invitation_accept_records(
-            client,
-            token=token,
-            user_id=user.id,
+        invite, organization, membership, creator_membership = (
+            await _load_invitation_accept_records(
+                client,
+                token=token,
+                user_id=user.id,
+            )
         )
         if invite is None:
             raise HTTPException(
@@ -1401,6 +1424,17 @@ async def accept_org_invitation(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
         role = OrganizationRole(str(invite.get("invited_role") or OrganizationRole.MEMBER.value))
+        if role is OrganizationRole.OWNER:
+            creator_role = OrganizationRole(
+                str(
+                    (creator_membership or {}).get("role")
+                    or OrganizationRole.MEMBER.value
+                )
+            )
+            _enforce_owner_role_boundary(
+                actor_role=creator_role,
+                requested_role=OrganizationRole.OWNER,
+            )
         now = _utcnow()
         if membership is None:
             member_write_result = await client.execute_query(

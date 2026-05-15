@@ -1431,6 +1431,98 @@ async def test_surreal_list_org_invitations_filters_accepted_rows(
 
 
 @pytest.mark.asyncio
+async def test_surreal_create_org_invitation_rejects_admin_owner_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    organization = SimpleNamespace(id=uuid4(), slug="electric-coven")
+
+    monkeypatch.setattr(
+        surreal_organization_runtime,
+        "_require_org_admin",
+        AsyncMock(return_value=(organization, SimpleNamespace(role=OrganizationRole.ADMIN))),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_organization_runtime.create_org_invitation(
+            slug="electric-coven",
+            actor_id=uuid4(),
+            email="ember@example.com",
+            role=OrganizationRole.OWNER,
+            expires_days=7,
+            request=_request(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Only organization owners can manage owner roles"
+
+
+@pytest.mark.asyncio
+async def test_surreal_accept_org_invitation_rejects_admin_created_owner_invite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000111"),
+        email="ember@example.com",
+    )
+    organization = SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000333"),
+        slug="electric-coven",
+        name="Electric Coven",
+    )
+    invite_record = {
+        "uuid": str(UUID("00000000-0000-0000-0000-000000000222")),
+        "organization_id": str(organization.id),
+        "invited_email": "ember@example.com",
+        "invited_role": OrganizationRole.OWNER.value,
+        "token": "invite-token",
+        "created_by_user_id": str(uuid4()),
+        "expires_at": datetime.now(UTC) + timedelta(days=7),
+        "accepted_at": None,
+        "accepted_by_user_id": None,
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
+    }
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            if "RETURN" in query:
+                return {
+                    "invitation": invite_record,
+                    "organization": {
+                        "uuid": str(organization.id),
+                        "slug": organization.slug,
+                        "name": organization.name,
+                    },
+                    "membership": None,
+                    "creator_membership": {"role": OrganizationRole.ADMIN.value},
+                }
+            raise AssertionError(query)
+
+    fake_client = FakeClient()
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_organization_runtime.accept_org_invitation(
+            token="invite-token",
+            user=user,
+            request=_request(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Only organization owners can manage owner roles"
+    assert len(fake_client.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_surreal_accept_org_invitation_creates_session_and_marks_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
