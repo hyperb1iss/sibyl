@@ -28,6 +28,7 @@ def _entity(
     entity_type: EntityType = EntityType.TASK,
     archived: bool = False,
     status: str | None = None,
+    content: str = "",
 ) -> SimpleNamespace:
     metadata = {"project_id": project_id} if project_id else {}
     if archived:
@@ -39,7 +40,7 @@ def _entity(
         entity_type=entity_type,
         name=name,
         description="",
-        content="",
+        content=content,
         metadata=metadata,
         languages=[],
         tags=[],
@@ -339,6 +340,60 @@ class TestListEntitiesRoute:
         assert [entity.id for entity in response.entities] == ["ent-1"]
         assert response.total == 2
         assert response.has_more is True
+
+    @pytest.mark.asyncio
+    async def test_native_entity_list_uses_lightweight_payloads(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        manager = MagicMock()
+        manager.supports_lightweight_entity_list = True
+        manager._surreal_entity_node_ops.return_value = object()
+        manager.list_by_type = AsyncMock(
+            return_value=[
+                _entity(
+                    "ent-1",
+                    project_id="proj-1",
+                    name="One",
+                    content="x" * 10000,
+                )
+            ]
+        )
+        manager.list_all = AsyncMock()
+        runtime = SimpleNamespace(entity_manager=manager)
+
+        with (
+            patch.object(entities_routes, "LIST_BY_TYPE_PAGE_SIZE", 2),
+            patch(
+                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch(
+                "sibyl.api.routes.entities.verify_entity_project_access",
+                AsyncMock(),
+            ),
+        ):
+            response = await list_entities(
+                org=org,
+                ctx=_ctx(),
+                entity_type=EntityType.TASK,
+                language=None,
+                category=None,
+                search=None,
+                project_ids=["proj-1"],
+                page=1,
+                page_size=1,
+                sort_by=SortField.UPDATED_AT,
+                sort_order=SortOrder.DESC,
+            )
+
+        manager.list_by_type.assert_awaited_once_with(
+            EntityType.TASK,
+            limit=2,
+            offset=0,
+            include_archived=True,
+            include_content=False,
+            project_id="proj-1",
+        )
+        assert response.entities[0].content == ""
 
     @pytest.mark.asyncio
     async def test_default_legacy_entity_query_keeps_exhaustive_sorting(self) -> None:

@@ -369,6 +369,39 @@ async def test_native_entity_lists_order_by_updated_at_before_created_at() -> No
 
 
 @pytest.mark.asyncio
+async def test_native_entity_lists_can_omit_heavy_content_fields() -> None:
+    client = NativeSurrealGraphClient(group_id="org-native-light-list", url="memory://")
+    try:
+        await prepare_native_graph_schema(client)
+        entity_manager = NativeEntityManager(client, group_id=client.group_id)
+
+        await entity_manager.create_direct(
+            Entity(
+                id="task_heavy",
+                entity_type=EntityType.TASK,
+                name="Heavy task",
+                description="Small preview",
+                content="x" * 10000,
+                organization_id=client.group_id,
+                embedding=[0.2] * EMBEDDING_DIM,
+                created_at=datetime(2026, 5, 14, tzinfo=UTC),
+            )
+        )
+
+        entities = await entity_manager.list_by_type(
+            EntityType.TASK,
+            include_archived=True,
+            include_content=False,
+            limit=1,
+        )
+
+        assert entities[0].content == "Small preview"
+        assert entities[0].embedding is None
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_native_graph_filters_recheck_metadata_only_denormalized_fields() -> None:
     client = NativeSurrealGraphClient(group_id="org-native-legacy-filters", url="memory://")
     try:

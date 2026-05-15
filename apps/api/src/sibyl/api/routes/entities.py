@@ -100,6 +100,7 @@ LIST_BY_TYPE_PAGE_SIZE = 1000
 GRAPH_ENTITY_ID_PREFIXES = frozenset(
     {entity_type.value for entity_type in EntityType if entity_type is not EntityType.DOCUMENT}
 )
+LIST_RESPONSE_CONTENT = ""
 
 
 # =============================================================================
@@ -189,10 +190,14 @@ async def _list_all_entities_paginated(
     offset = 0
 
     while True:
+        list_kwargs: dict[str, Any] = {
+            "limit": batch_size,
+            "offset": offset,
+            "include_archived": True,
+            **_lightweight_entity_list_kwargs(entity_manager),
+        }
         batch = await entity_manager.list_all(
-            limit=batch_size,
-            offset=offset,
-            include_archived=True,
+            **list_kwargs,
         )
         if not batch:
             break
@@ -219,6 +224,7 @@ async def _list_entities_by_type_paginated(
             "limit": batch_size,
             "offset": offset,
             "include_archived": True,
+            **_lightweight_entity_list_kwargs(entity_manager),
         }
         if project_id:
             list_kwargs["project_id"] = project_id
@@ -243,6 +249,12 @@ def _entity_type_value(entity: Any) -> str:
     entity_type = getattr(entity, "entity_type", None)
     value = getattr(entity_type, "value", entity_type)
     return str(value or "")
+
+
+def _lightweight_entity_list_kwargs(entity_manager: Any) -> dict[str, bool]:
+    if getattr(entity_manager, "supports_lightweight_entity_list", False) is True:
+        return {"include_content": False}
+    return {}
 
 
 def _entity_read_project_id(entity: Any) -> str | None:
@@ -413,6 +425,7 @@ async def _list_entities_bounded(
                 "limit": batch_size,
                 "offset": offset,
                 "include_archived": True,
+                **_lightweight_entity_list_kwargs(entity_manager),
             }
             if single_project_id:
                 list_kwargs["project_id"] = single_project_id
@@ -422,6 +435,7 @@ async def _list_entities_bounded(
                 limit=batch_size,
                 offset=offset,
                 include_archived=True,
+                **_lightweight_entity_list_kwargs(entity_manager),
             )
         if not batch:
             exhausted = True
@@ -840,7 +854,7 @@ async def list_entities(
                 entity_type=entity.entity_type,
                 name=entity.name,
                 description=entity.description or "",
-                content=(entity.content or "")[:50000],  # Truncate for list view
+                content=LIST_RESPONSE_CONTENT,
                 category=getattr(entity, "category", None) or entity.metadata.get("category"),
                 languages=getattr(entity, "languages", None)
                 or entity.metadata.get("languages", [])

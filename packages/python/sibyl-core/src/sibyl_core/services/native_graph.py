@@ -44,6 +44,7 @@ _prepared_groups: set[str] = set()
 _prepare_lock = asyncio.Lock()
 _client_lock = asyncio.Lock()
 _clients: dict[str, NativeSurrealGraphClient] = {}
+_ENTITY_LIST_FIELDS = "* OMIT content, embedding, name_embedding, attributes.content"
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +86,7 @@ class NativeSurrealGraphClient(DedicatedSurrealClient):
 
 class NativeEntityManager:
     supports_bounded_entity_list = True
+    supports_lightweight_entity_list = True
 
     def __init__(
         self,
@@ -486,6 +488,7 @@ class NativeEntityManager:
         tags: Sequence[str] | None = None,
         include_archived: bool = False,
         enrich_epic_progress: bool = False,
+        include_content: bool = True,
     ) -> list[Entity]:
         if limit <= 0:
             return []
@@ -548,12 +551,13 @@ class NativeEntityManager:
             query_params["feature"] = feature.lower()
         if not include_archived:
             where_clauses.append("(status IS NONE OR status = '' OR status != 'archived')")
+        select_fields = _entity_select_fields(include_content)
 
         while len(entities) < target_count:
             rows = normalize_records(
                 await self._client.execute_query(
                     f"""
-                    SELECT *
+                    SELECT {select_fields}
                     FROM entity
                     WHERE {" AND ".join(where_clauses)}
                     ORDER BY updated_at DESC, created_at DESC, uuid DESC
@@ -617,6 +621,7 @@ class NativeEntityManager:
         limit: int = 100,
         offset: int = 0,
         include_archived: bool = False,
+        include_content: bool = True,
     ) -> list[Entity]:
         if limit <= 0:
             return []
@@ -631,12 +636,13 @@ class NativeEntityManager:
             where_clauses.append(
                 "string::lowercase(status ?? attributes.status ?? '') != 'archived'"
             )
+        select_fields = _entity_select_fields(include_content)
 
         while len(entities) < target_count:
             rows = normalize_records(
                 await self._client.execute_query(
                     f"""
-                    SELECT *
+                    SELECT {select_fields}
                     FROM entity
                     WHERE {" AND ".join(where_clauses)}
                     ORDER BY updated_at DESC, created_at DESC, uuid DESC
@@ -1333,6 +1339,10 @@ def _entity_from_row(row: SurrealRecord) -> Entity:
     return entity_from_surreal_row(row)
 
 
+def _entity_select_fields(include_content: bool) -> str:
+    return "*" if include_content else _ENTITY_LIST_FIELDS
+
+
 def _entity_type_from_row(
     row: Mapping[str, object],
     *,
@@ -2001,7 +2011,6 @@ def _entity_record(entity: Entity, *, group_id: str) -> SurrealRecord:
     attributes: dict[str, object] = {
         **metadata,
         "description": entity.description or "",
-        "content": entity.content or "",
         "source_file": entity.source_file or "",
         "updated_at": updated_at,
         "_direct_insert": True,
