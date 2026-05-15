@@ -5,6 +5,11 @@ ensuring consistent event broadcasting and state management.
 """
 
 import os
+import random
+import sys
+import time
+from collections import deque
+from dataclasses import dataclass
 from typing import Any, cast
 from urllib.parse import quote
 
@@ -22,6 +27,18 @@ from sibyl_cli.auth_store import (
 
 # Default server port (matches sibyl-server default)
 DEFAULT_SERVER_PORT = 3334
+FAILURE_WINDOW_SECONDS = 10.0
+FAILURE_THRESHOLD = 3
+_FAILURE_WINDOWS: dict[tuple[str, str], deque[float]] = {}
+
+
+@dataclass
+class ErrorPayload:
+    message: str
+    error: str | None = None
+    request_id: str | None = None
+    remediation: str | None = None
+    details: dict[str, object] | None = None
 
 
 def _get_default_api_url(context_name: str | None = None) -> str:
@@ -84,10 +101,47 @@ def _load_default_auth_token(api_base_url: str) -> str | None:
 class SibylClientError(Exception):
     """Error from Sibyl API."""
 
-    def __init__(self, message: str, status_code: int | None = None, detail: str | None = None):
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        detail: str | None = None,
+        *,
+        error_code: str | None = None,
+        request_id: str | None = None,
+        remediation: str | None = None,
+        details: dict[str, object] | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.detail = detail
+        self.error_code = error_code
+        self.request_id = request_id
+        self.remediation = remediation
+        self.details = details or {}
+
+
+def _parse_error_payload(data: object) -> ErrorPayload:
+    if isinstance(data, dict):
+        payload = cast("dict[str, object]", data)
+        detail = payload.get("detail")
+        if isinstance(detail, dict):
+            payload = cast("dict[str, object]", detail)
+
+        if payload.get("error") or payload.get("message"):
+            details = payload.get("details")
+            return ErrorPayload(
+                message=str(payload.get("message") or payload.get("error") or "Request failed"),
+                error=str(payload["error"]) if payload.get("error") else None,
+                request_id=str(payload["request_id"]) if payload.get("request_id") else None,
+                remediation=str(payload["remediation"]) if payload.get("remediation") else None,
+                details=cast("dict[str, object]", details) if isinstance(details, dict) else None,
+            )
+
+        if detail is not None:
+            return ErrorPayload(message=_format_error_detail(detail))
+
+    return ErrorPayload(message=_format_error_detail(data))
 
 
 def _format_error_detail(detail: object) -> str:
@@ -112,6 +166,47 @@ def _format_error_detail(detail: object) -> str:
         if parts:
             return " ".join(parts)
     return str(detail)
+
+
+def _subcommand_key() -> str:
+    parts = [arg for arg in sys.argv[1:3] if arg and not arg.startswith("-")]
+    return " ".join(parts) or "sibyl"
+
+
+def _failure_key(base_url: str) -> tuple[str, str]:
+    return (_subcommand_key(), base_url)
+
+
+def _prune_failures(window: deque[float], now: float) -> None:
+    while window and now - window[0] > FAILURE_WINDOW_SECONDS:
+        window.popleft()
+
+
+async def _maybe_wait_for_circuit_breaker(key: tuple[str, str]) -> None:
+    window = _FAILURE_WINDOWS.get(key)
+    if not window:
+        return
+    now = time.monotonic()
+    _prune_failures(window, now)
+    if len(window) >= FAILURE_THRESHOLD:
+        await anyio_sleep(1.0 + random.random())
+
+
+def _record_failure(key: tuple[str, str]) -> None:
+    now = time.monotonic()
+    window = _FAILURE_WINDOWS.setdefault(key, deque())
+    _prune_failures(window, now)
+    window.append(now)
+
+
+def _record_success(key: tuple[str, str]) -> None:
+    _FAILURE_WINDOWS.pop(key, None)
+
+
+async def anyio_sleep(delay: float) -> None:
+    import asyncio
+
+    await asyncio.sleep(delay)
 
 
 class SibylClient:
@@ -312,6 +407,8 @@ class SibylClient:
             _, refresh_failure = await self._refresh_token()
 
         client = await self._get_client()
+        breaker_key = _failure_key(self.base_url)
+        await _maybe_wait_for_circuit_breaker(breaker_key)
 
         try:
             response = await client.request(
@@ -332,39 +429,51 @@ class SibylClient:
             # Handle error responses
             if response.status_code >= 400:
                 try:
-                    error_data = response.json()
-                    detail = _format_error_detail(error_data.get("detail", response.text))
+                    payload = _parse_error_payload(response.json())
                 except Exception:
-                    detail = response.text
+                    payload = ErrorPayload(message=response.text)
+
+                detail = payload.message
 
                 if response.status_code == 401:
                     if refresh_failure:
                         detail = f"{detail}\n\nAutomatic token refresh failed: {refresh_failure}"
-                    detail = (
-                        f"{detail}\n\n"
-                        "Auth required. Run 'sibyl auth login' or set SIBYL_AUTH_TOKEN."
-                    )
+                    if not payload.remediation:
+                        payload.remediation = (
+                            "Auth required. Run 'sibyl auth login' or set SIBYL_AUTH_TOKEN."
+                        )
                 elif response.status_code == 403:
-                    detail = f"{detail}\n\nAccess denied. Check org and project permissions."
+                    if not payload.remediation:
+                        payload.remediation = "Access denied. Check org and project permissions."
 
+                _record_failure(breaker_key)
                 raise SibylClientError(
-                    f"API error: {detail}",
+                    f"API error: {payload.error or detail}: {detail}",
                     status_code=response.status_code,
                     detail=detail,
+                    error_code=payload.error,
+                    request_id=payload.request_id,
+                    remediation=payload.remediation,
+                    details=payload.details,
                 )
 
             # Return empty dict for 204 No Content
             if response.status_code == 204:
+                _record_success(breaker_key)
                 return {}
 
-            return response.json()
+            data = response.json()
+            _record_success(breaker_key)
+            return data
 
         except httpx.ConnectError as e:
+            _record_failure(breaker_key)
             raise SibylClientError(
                 f"Cannot connect to Sibyl API at {self.base_url}. Is the server running?",
                 detail=str(e),
             ) from e
         except httpx.TimeoutException as e:
+            _record_failure(breaker_key)
             raise SibylClientError(
                 f"Request timed out after {self.timeout}s",
                 detail=str(e),

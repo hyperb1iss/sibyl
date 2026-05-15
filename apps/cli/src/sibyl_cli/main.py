@@ -772,7 +772,9 @@ def _print_access_preview(data: dict[str, object]) -> None:
 
 def _handle_client_error(e: SibylClientError) -> None:
     """Handle client errors with helpful messages and exit with code 1."""
-    if "Cannot connect" in str(e):
+    if e.error_code or e.request_id or e.remediation:
+        handle_client_error(e)
+    elif "Cannot connect" in str(e):
         console.print()
         console.print(f"  [{CORAL}]×[/{CORAL}] [bold]Cannot connect to Sibyl server[/bold]")
         console.print()

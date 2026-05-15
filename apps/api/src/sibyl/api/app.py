@@ -4,19 +4,27 @@ Creates the REST API app that gets mounted alongside MCP.
 """
 
 import time
-import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.routing import WebSocketRoute
 
+from sibyl.api.errors import (
+    REQUEST_ID_HEADER,
+    generate_request_id,
+    get_request_id,
+    http_exception_payload,
+    internal_error_payload,
+    safe_error_payload,
+    validation_error_payload,
+)
 from sibyl.api.rate_limit import limiter
 from sibyl.api.routes import (
     admin_router,
@@ -59,12 +67,15 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         start = time.perf_counter()
+        request_id = get_request_id(request)
+        request.state.request_id = request_id
         response = await call_next(request)
         duration_ms = (time.perf_counter() - start) * 1000
+        response.headers[REQUEST_ID_HEADER] = request_id
 
-        # Log request details
         log.info(
             "request",
+            request_id=request_id,
             method=request.method,
             path=request.url.path,
             status=response.status_code,
@@ -72,6 +83,22 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             client=request.client.host if request.client else None,
         )
         return response
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """Attach a request ID to request state, response headers, and structlog."""
+
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get(REQUEST_ID_HEADER) or generate_request_id()
+        request.state.request_id = request_id
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(request_id=request_id)
+        try:
+            response = await call_next(request)
+            response.headers[REQUEST_ID_HEADER] = request_id
+            return response
+        finally:
+            structlog.contextvars.clear_contextvars()
 
 
 async def _bootstrap_surreal_runtime_schemas() -> bool:
@@ -235,9 +262,54 @@ def create_api_app() -> FastAPI:
     # Rate limiting
     if settings.rate_limit_enabled:
         app.state.limiter = limiter
-        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-    # Global exception handler - sanitize all unhandled exceptions
+        @app.exception_handler(RateLimitExceeded)
+        async def rate_limit_handler(request: Request, _exc: RateLimitExceeded) -> JSONResponse:
+            request_id = get_request_id(request)
+            log.warning(
+                "rate_limit_exceeded",
+                request_id=request_id,
+                path=request.url.path,
+                method=request.method,
+            )
+            return JSONResponse(
+                status_code=429,
+                content=safe_error_payload(
+                    error="rate_limited",
+                    message="Too many requests.",
+                    request_id=request_id,
+                    remediation="Wait briefly, then retry the command.",
+                ),
+            )
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        request_id = get_request_id(request)
+        payload = http_exception_payload(exc, request_id)
+        log.warning(
+            "http_exception",
+            request_id=request_id,
+            path=request.url.path,
+            method=request.method,
+            status_code=exc.status_code,
+            error=payload["error"],
+        )
+        return JSONResponse(status_code=exc.status_code, content=payload)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        request_id = get_request_id(request)
+        payload = validation_error_payload(exc.errors(), request_id=request_id)
+        log.warning(
+            "request_validation_error",
+            request_id=request_id,
+            path=request.url.path,
+            method=request.method,
+        )
+        return JSONResponse(status_code=422, content=payload)
+
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         """Catch unhandled exceptions and return safe error messages.
@@ -245,11 +317,11 @@ def create_api_app() -> FastAPI:
         Never expose internal exception details to clients. Log full
         details for debugging, return generic message to client.
         """
-        error_id = str(uuid.uuid4())[:8]
+        request_id = get_request_id(request)
 
         log.error(
             "unhandled_exception",
-            error_id=error_id,
+            request_id=request_id,
             path=request.url.path,
             method=request.method,
             error_type=type(exc).__name__,
@@ -258,9 +330,7 @@ def create_api_app() -> FastAPI:
 
         return JSONResponse(
             status_code=500,
-            content={
-                "detail": f"An internal error occurred. Please try again later. (ref: {error_id})"
-            },
+            content=internal_error_payload(request_id),
         )
 
     # CORS - derive allowed origins from public_url
@@ -283,6 +353,7 @@ def create_api_app() -> FastAPI:
 
     # Access logging
     app.add_middleware(AccessLogMiddleware)
+    app.add_middleware(RequestIdMiddleware)
 
     # Register routers
     app.include_router(backups_router)

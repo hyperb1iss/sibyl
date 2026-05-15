@@ -226,7 +226,14 @@ def handle_client_error(
     This is the centralized error handler for all CLI commands.
     Import and use: `from sibyl_cli.common import handle_client_error`
     """
-    if "Cannot connect" in str(e):
+    if e.error_code or e.request_id or e.remediation:
+        label = e.error_code or "api_error"
+        error(f"{label}: {e.detail or str(e)}")
+        if e.request_id:
+            console.print(f"  [{NEON_CYAN}]→[/{NEON_CYAN}] request_id: {e.request_id}")
+        if e.remediation:
+            console.print(f"  [{NEON_CYAN}]→[/{NEON_CYAN}] {e.remediation}")
+    elif "Cannot connect" in str(e):
         error(str(e))
     elif e.status_code == 404:
         error(f"{not_found_label}: {e.detail}")

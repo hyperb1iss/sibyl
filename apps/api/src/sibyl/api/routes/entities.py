@@ -13,6 +13,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from sibyl.api.dependencies import get_knowledge_read_service
+from sibyl.api.errors import constraint_violation, sanitize_error_text
 from sibyl.api.event_types import WSEvent
 from sibyl.api.schemas import (
     EntityCreate,
@@ -1144,7 +1145,17 @@ async def create_entity(
         )
 
         if not result.success or not result.id:
-            raise HTTPException(status_code=400, detail=result.message)
+            message = sanitize_error_text(str(result.message or "Entity creation failed"))
+            if "duplicate" in message.lower() or "already exists" in message.lower():
+                raise constraint_violation(
+                    "duplicate entity name in scope",
+                    remediation="Use a different title or update the existing entity.",
+                    details={
+                        "field": "name",
+                        "entity_type": entity.entity_type.value,
+                    },
+                )
+            raise HTTPException(status_code=400, detail=message)
 
         if request_metadata.get("capture_mode") in {"quick", "remember"}:
             await _archive_raw_capture(
