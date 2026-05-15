@@ -1273,6 +1273,60 @@ Exit criteria:
 - The release can claim source-grounded synthesis, inspectable and correctable memory,
   source-preserving ingest, and a usable memory cockpit.
 
+Receipt, 2026-05-15:
+
+- Local release-audit candidate: current local `main`, ahead of `origin/main` by 20 commits. The
+  tracked worktree was clean after the gate repairs; local untracked scratch files were left
+  untouched.
+- Product surface delivered:
+  - Source-grounded synthesis across service, CLI, MCP, API, and web with section source IDs,
+    unresolved-gap reporting, hidden-source filtering, artifact provenance, and remember provenance.
+  - Inspectable and correctable memory through source inspection, correction preview/apply, audit
+    receipts, and unified Memory cockpit capture review.
+  - Source-preserving ingest through adapter contracts, mailbox import, resumable jobs, dedupe keys,
+    private-memory defaults, and import progress UI.
+  - Unified cockpit UX: Memory owns captures, imports, synthesis, review, and source inspection;
+    Archive remains a hidden compatibility wrapper.
+- Local verification:
+  - `moon run memory-trust-gate` -> PASS, 7 checks and 0 failed. Covered surfaces: audit, CLI,
+    context pack, inspect, jobs, MCP, memory policy, promotion preview, prompt hook, raw memory,
+    recall, reflect, share preview, task learning, and wake.
+  - `moon run synthesis-gate` -> PASS, 2 checks and 0 failed. Covered surfaces: artifact provenance,
+    hidden-scope absence, remember provenance, source IDs per section, and unresolved-gap reporting.
+  - `moon run adapter-ingest-gate` -> PASS, 2 checks and 0 failed. Covered surfaces: dedupe
+    correctness, import resumability, private scope enforcement, source adapter contract, and
+    source-preserving ingest.
+  - `moon run bench-gate` -> Gate passed for `benchmarks/results/ai-memory/manifest.json`.
+  - `moon run core:test` -> 932 passed, 14 skipped, 20 deselected in 7.19s.
+  - `moon run api:test` -> 1467 passed, 1 skipped, 16 deselected in 14.53s.
+  - `moon run cli:test` -> 174 passed in 8.70s.
+  - `moon run web:test` -> 25 files passed, 101 tests passed.
+  - `moon run docs:lint` -> all matched files use Prettier code style.
+  - `moon run :check` -> 40 tasks completed, 26 cache hits before the receipt docs were written;
+    post-doc rerun completed 36 tasks with 33 cache hits.
+  - `git diff --check` -> clean.
+- Gate repairs made during audit:
+  - `docs/.prettierignore` now ignores generated `docs/research/*` dumps and local Gradial
+    brainstorm scratch notes so docs lint evaluates tracked documentation rather than ignored local
+    artifacts.
+  - `docs/research/rust-port/INVENTORY.md` and its guard constants now include the synthesis REST
+    router and the three MCP synthesis tools.
+  - `tools/tests/test_dev_scripts.py` now uses non-login bash for the legacy detector test so the
+    docker stub remains on `PATH` and `moon run :check` does not hang on real local Docker.
+- GitHub receipts:
+  - Latest pushed `origin/main` is `f8d23e6450ec86dfd8251f0c94e6804cdbcc4f76`.
+  - CI run `25879991056` succeeded on `f8d23e6450ec86dfd8251f0c94e6804cdbcc4f76`.
+  - Docs deploy run `25879991026` succeeded on `f8d23e6450ec86dfd8251f0c94e6804cdbcc4f76`.
+  - Release run `25891107401` succeeded on `f8d23e6450ec86dfd8251f0c94e6804cdbcc4f76`.
+  - Latest nightly regression receipt is run `25877971585`, successful on
+    `4855ba8ad8be6be958ba720e81b3459e727a973b`.
+  - No CI, docs deploy, or nightly regression receipt covers the current local release-audit
+    candidate.
+- Binary recommendation: HOLD for tag or public release until the local 0.9 candidate is pushed to a
+  CI-covered branch and CI, docs deploy, and nightly regression are green on that exact head. The
+  local product gate evidence supports the source-grounded synthesis, inspectable/correctable
+  memory, source-preserving ingest, and usable cockpit claims once that external verification lands.
+
 ## 13. Verification Matrix
 
 | Surface              | Gate                                                  | Required before |
