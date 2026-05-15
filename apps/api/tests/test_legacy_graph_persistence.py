@@ -15,6 +15,7 @@ from sibyl.persistence.graph_runtime import (
     GraphRelationshipStore,
     _surreal_driver_for,
     delete_graph_data,
+    get_graph_stats_payload as get_active_graph_stats_payload,
 )
 from sibyl.persistence.legacy.graph import (
     LegacyEntityStore,
@@ -461,6 +462,39 @@ def test_graph_stats_payload_initializes_missing_entity_types() -> None:
     entity_counts = payload["entity_counts"]
     assert entity_counts["pattern"] == 2
     assert entity_counts["task"] == 0
+
+
+@pytest.mark.asyncio
+async def test_active_graph_stats_payload_uses_entity_only_native_query() -> None:
+    client = SimpleNamespace(
+        execute_query=AsyncMock(
+            return_value={
+                "entity_types": [
+                    {"entity_type": "task", "cnt": 3},
+                    {"entity_type": "pattern", "cnt": 2},
+                ],
+                "episode_count": [{"cnt": 4}],
+                "community_count": [{"cnt": 1}],
+                "saga_count": [],
+            }
+        )
+    )
+
+    with patch(
+        "sibyl.persistence.graph_runtime._get_graph_runtime",
+        AsyncMock(return_value=SimpleNamespace(client=client)),
+    ):
+        payload = await get_active_graph_stats_payload("org-1")
+
+    client.execute_query.assert_awaited_once()
+    query = client.execute_query.await_args.args[0]
+    assert "relates_to" not in query
+    assert "mentions" not in query
+    assert payload["total_entities"] == 10
+    assert payload["entity_counts"]["task"] == 3
+    assert payload["entity_counts"]["pattern"] == 2
+    assert payload["entity_counts"]["episode"] == 4
+    assert payload["entity_counts"]["community"] == 1
 
 
 @pytest.mark.asyncio

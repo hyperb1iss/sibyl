@@ -52,12 +52,17 @@ def _normalize_result(result: object) -> list[dict[str, object]]:
         payload = {str(key): value for key, value in result.items()}
         if "result" not in payload or not {"status", "time"} & payload.keys():
             return [payload]
-    if isinstance(result, list) and all(
-        isinstance(item, dict)
-        and ("result" not in item or not {"status", "time"} & {str(key) for key in item})
-        for item in result
-    ):
-        return [{str(key): value for key, value in item.items()} for item in result]
+    if isinstance(result, list):
+        rows: list[dict[str, object]] = []
+        for item in result:
+            if not isinstance(item, dict):
+                break
+            payload = {str(key): value for key, value in item.items()}
+            if "result" in payload and {"status", "time"} & payload.keys():
+                break
+            rows.append(payload)
+        else:
+            return rows
     return normalize_records(result)
 
 
@@ -163,6 +168,36 @@ async def _surreal_group_count(driver: Any, table: str, group_id: str) -> int:
         group_id=group_id,
     )
     return int(rows[0].get("cnt", 0)) if rows else 0
+
+
+def _surreal_nested_rows(value: object) -> list[dict[str, object]]:
+    if isinstance(value, dict):
+        return [{str(key): item for key, item in value.items()}]
+    if isinstance(value, list):
+        return [
+            {str(key): item for key, item in row.items()}
+            for row in value
+            if isinstance(row, dict)
+        ]
+    return []
+
+
+def _surreal_count_number(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int | float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
+def _surreal_count_value(value: object) -> int:
+    rows = _surreal_nested_rows(value)
+    return _surreal_count_number(rows[0].get("cnt", 0)) if rows else 0
 
 
 def _is_surreal_missing_table_error(exc: Exception) -> bool:
@@ -1270,10 +1305,70 @@ def graph_stats_payload(stats: GraphStats) -> dict[str, object]:
     }
 
 
+async def _native_graph_stats_payload(group_id: str) -> dict[str, object]:
+    from sibyl_core.backends.surreal.schema import GRAPH_TABLES
+
+    runtime = await _get_graph_runtime(group_id)
+    rows = normalize_records(
+        await runtime.client.execute_query(
+            """
+            RETURN {
+                entity_types: (
+                    SELECT entity_type, count() AS cnt
+                    FROM entity
+                    WHERE group_id = $group_id
+                    GROUP BY entity_type
+                ),
+                episode_count: (
+                    SELECT count() AS cnt
+                    FROM episode
+                    WHERE group_id = $group_id
+                    GROUP ALL
+                ),
+                community_count: (
+                    SELECT count() AS cnt
+                    FROM community
+                    WHERE group_id = $group_id
+                    GROUP ALL
+                ),
+                saga_count: (
+                    SELECT count() AS cnt
+                    FROM saga
+                    WHERE group_id = $group_id
+                    GROUP ALL
+                ),
+            };
+            """,
+            group_id=group_id,
+        )
+    )
+    row = rows[0] if rows else {}
+    entity_counts = {entity_type.value: 0 for entity_type in EntityType}
+    for entity_row in _surreal_nested_rows(row.get("entity_types")):
+        entity_type = entity_row.get("entity_type")
+        if entity_type:
+            entity_counts[str(entity_type)] = _surreal_count_number(entity_row.get("cnt", 0))
+    for table in GRAPH_TABLES:
+        if table == "entity":
+            continue
+        count = _surreal_count_value(row.get(f"{table}_count"))
+        if count:
+            entity_counts[table] = count
+    return {
+        "entity_counts": entity_counts,
+        "total_entities": sum(entity_counts.values()),
+    }
+
+
 async def get_graph_stats_payload(group_id: str) -> dict[str, object]:
-    service = await get_knowledge_read_adapter(group_id)
-    stats = await service.stats()
-    return graph_stats_payload(stats)
+    try:
+        return await _native_graph_stats_payload(group_id)
+    except Exception as exc:
+        if not _is_surreal_missing_table_error(exc):
+            log.warning("native_graph_stats_payload_failed", group_id=group_id, error=str(exc))
+        service = await get_knowledge_read_adapter(group_id)
+        stats = await service.stats()
+        return graph_stats_payload(stats)
 
 
 async def ensure_graph_indexes(group_id: str) -> None:
