@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from sibyl.persistence.content_common import (
+        ApiIdempotencyRecord,
         CodeExampleSearchRow,
         ContentSession,
         CrawledDocumentRecord,
@@ -233,6 +234,23 @@ if TYPE_CHECKING:
             review_state: str,
         ) -> Awaitable[RawCaptureRecord | None]: ...
 
+    class GetApiIdempotencyRecord(Protocol):
+        def __call__(
+            self,
+            session: ContentSession,
+            *,
+            organization_id: UUID,
+            principal_id: str,
+            idempotency_key: str,
+            method: str,
+            path: str,
+        ) -> Awaitable[ApiIdempotencyRecord | None]: ...
+
+    class SaveApiIdempotencyRecord(Protocol):
+        def __call__(
+            self, session: ContentSession, *, record: ApiIdempotencyRecord
+        ) -> Awaitable[ApiIdempotencyRecord]: ...
+
     class ResolveDocumentEntity(Protocol):
         def __call__(
             self, session: ContentSession, *, organization_id: UUID, entity_id: str
@@ -299,6 +317,7 @@ if TYPE_CHECKING:
     get_link_graph_status_payload: GetLinkGraphStatusPayload
     get_org_crawl_source: GetOrgCrawlSource
     get_raw_capture: GetRawCapture
+    get_api_idempotency_record: GetApiIdempotencyRecord
     get_source_sync_counts: GetSourceSyncCounts
     hybrid_search_chunks: HybridSearchChunks
     list_crawl_sources: ListCrawlSources
@@ -317,6 +336,7 @@ if TYPE_CHECKING:
     save_crawled_document_record: SaveCrawledDocumentRecord
     save_document_chunks: SaveDocumentChunks
     save_raw_capture_record: SaveRawCaptureRecord
+    save_api_idempotency_record: SaveApiIdempotencyRecord
     search_code_example_chunks: SearchCodeExampleChunks
     search_rag_chunks: SearchRAGChunks
     update_raw_capture_review_state: UpdateRawCaptureReviewState
@@ -336,6 +356,7 @@ _BACKEND_EXPORTS = [
     "get_document_by_url_for_org",
     "get_link_graph_status_payload",
     "get_raw_capture",
+    "get_api_idempotency_record",
     "get_org_crawl_source",
     "get_source_sync_counts",
     "hybrid_search_chunks",
@@ -355,6 +376,7 @@ _BACKEND_EXPORTS = [
     "save_crawled_document_record",
     "save_document_chunks",
     "save_raw_capture_record",
+    "save_api_idempotency_record",
     "search_code_example_chunks",
     "search_rag_chunks",
     "update_raw_capture_review_state",
@@ -375,6 +397,7 @@ __all__ = [
     "get_document_by_url_for_org",
     "get_link_graph_status_payload",
     "get_raw_capture",
+    "get_api_idempotency_record",
     "get_org_crawl_source",
     "get_source_sync_counts",
     "hybrid_search_chunks",
@@ -394,6 +417,7 @@ __all__ = [
     "save_crawled_document_record",
     "save_document_chunks",
     "save_raw_capture_record",
+    "save_api_idempotency_record",
     "search_code_example_chunks",
     "search_rag_chunks",
     "update_raw_capture_review_state",

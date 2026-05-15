@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 from sibyl import config as config_module
 from sibyl.persistence.content_common import (
+    ApiIdempotencyRecord,
     ContentConflictError,
     CrawledDocumentRecord as CrawledDocument,
     CrawlSourceRecord as CrawlSource,
@@ -31,6 +32,7 @@ _DELETE_BY_UUID = {
     "crawled_documents": "DELETE FROM crawled_documents WHERE uuid = $uuid;",
     "document_chunks": "DELETE FROM document_chunks WHERE uuid = $uuid;",
     "raw_captures": "DELETE FROM raw_captures WHERE uuid = $uuid;",
+    "api_idempotency_records": "DELETE FROM api_idempotency_records WHERE uuid = $uuid;",
     "source_imports": "DELETE FROM source_imports WHERE uuid = $uuid;",
 }
 _UPSERT_RECORD = {
@@ -38,6 +40,9 @@ _UPSERT_RECORD = {
     "crawled_documents": "UPSERT crawled_documents CONTENT $record WHERE uuid = $uuid;",
     "document_chunks": "UPSERT document_chunks CONTENT $record WHERE uuid = $uuid;",
     "raw_captures": "UPSERT raw_captures CONTENT $record WHERE uuid = $uuid;",
+    "api_idempotency_records": (
+        "UPSERT api_idempotency_records CONTENT $record WHERE uuid = $uuid;"
+    ),
     "source_imports": "UPSERT source_imports CONTENT $record WHERE uuid = $uuid;",
 }
 type SurrealRecord = dict[str, object]
@@ -46,6 +51,8 @@ type SurrealRecord = dict[str, object]
 def _is_uniqueness_error(error: str) -> bool:
     lowered = error.lower()
     return "unique" in lowered or "already contains" in lowered
+
+
 type RagSearchRow = tuple[DocumentChunk, CrawledDocument, str, UUID, float]
 type CodeSearchRow = tuple[DocumentChunk, CrawledDocument, UUID, str, float]
 type HybridSearchRow = tuple[DocumentChunk, CrawledDocument, str, UUID, float, float]
@@ -522,6 +529,40 @@ def _raw_capture_record(capture: RawCaptureRecord) -> SurrealRecord:
     }
 
 
+def _api_idempotency_from_record(record: Mapping[str, object]) -> ApiIdempotencyRecord:
+    now = datetime.now(UTC).replace(tzinfo=None)
+    return ApiIdempotencyRecord(
+        id=_coerce_uuid(record.get("uuid"), field_name="api_idempotency_records.uuid"),
+        organization_id=_coerce_uuid(
+            record.get("organization_id"),
+            field_name="api_idempotency_records.organization_id",
+        ),
+        principal_id=_coerce_str(record.get("principal_id")),
+        idempotency_key=_coerce_str(record.get("idempotency_key")),
+        method=_coerce_str(record.get("method")),
+        path=_coerce_str(record.get("path")),
+        request_hash=_coerce_str(record.get("request_hash")),
+        response_status_code=_coerce_int(record.get("response_status_code")),
+        response_body=_coerce_dict(record.get("response_body")),
+        created_at=_coerce_datetime(record.get("created_at")) or now,
+    )
+
+
+def _api_idempotency_record(record: ApiIdempotencyRecord) -> SurrealRecord:
+    return {
+        "uuid": str(record.id),
+        "organization_id": str(record.organization_id),
+        "principal_id": record.principal_id,
+        "idempotency_key": record.idempotency_key,
+        "method": record.method,
+        "path": record.path,
+        "request_hash": record.request_hash,
+        "response_status_code": record.response_status_code,
+        "response_body": dict(record.response_body),
+        "created_at": record.created_at,
+    }
+
+
 def _page[T](items: Sequence[T], *, limit: int, offset: int) -> tuple[list[T], int]:
     total = len(items)
     return list(items[offset : offset + limit]), total
@@ -588,7 +629,9 @@ async def _select_many(
     return _normalize_records(result)
 
 
-def _normalize_raw_statement_records(result: object, *, statement_index: int) -> list[SurrealRecord]:
+def _normalize_raw_statement_records(
+    result: object, *, statement_index: int
+) -> list[SurrealRecord]:
     if isinstance(result, dict):
         payload = {str(key): value for key, value in result.items()}
         statements = payload.get("result")
@@ -1359,6 +1402,48 @@ async def update_raw_capture_review_state(
     return _raw_capture_from_record(rows[0]) if rows else None
 
 
+async def get_api_idempotency_record(
+    _session: object,
+    *,
+    organization_id: UUID,
+    principal_id: str,
+    idempotency_key: str,
+    method: str,
+    path: str,
+) -> ApiIdempotencyRecord | None:
+    async with surreal_content_client() as client:
+        record = await _select_one(
+            client,
+            "SELECT * FROM api_idempotency_records "
+            "WHERE organization_id = $organization_id "
+            "AND principal_id = $principal_id "
+            "AND idempotency_key = $idempotency_key "
+            "AND method = $method "
+            "AND path = $path LIMIT 1;",
+            organization_id=str(organization_id),
+            principal_id=principal_id,
+            idempotency_key=idempotency_key,
+            method=method,
+            path=path,
+        )
+    return _api_idempotency_from_record(record) if record is not None else None
+
+
+async def save_api_idempotency_record(
+    _session: object,
+    *,
+    record: ApiIdempotencyRecord,
+) -> ApiIdempotencyRecord:
+    async with surreal_content_client() as client:
+        saved = await _replace_record(
+            client,
+            "api_idempotency_records",
+            uuid=record.id,
+            record=_api_idempotency_record(record),
+        )
+    return _api_idempotency_from_record(saved)
+
+
 async def resolve_document_entity(
     _session: object,
     *,
@@ -1812,12 +1897,8 @@ async def hybrid_search_chunks(
         documents = await _load_search_documents_by_ids(client, document_ids)
         documents_by_id = {str(document.id): document for document in documents}
 
-    vector_ranks = {
-        str(row.get("uuid")): index for index, row in enumerate(vector_rows, start=1)
-    }
-    lexical_ranks = {
-        str(row.get("uuid")): index for index, row in enumerate(lexical_rows, start=1)
-    }
+    vector_ranks = {str(row.get("uuid")): index for index, row in enumerate(vector_rows, start=1)}
+    lexical_ranks = {str(row.get("uuid")): index for index, row in enumerate(lexical_rows, start=1)}
     vector_by_id = {str(row.get("uuid")): row for row in vector_rows}
     lexical_by_id = {str(row.get("uuid")): row for row in lexical_rows}
 

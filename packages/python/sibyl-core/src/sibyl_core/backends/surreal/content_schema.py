@@ -23,6 +23,7 @@ CONTENT_TABLES = (
     "crawled_documents",
     "document_chunks",
     "raw_captures",
+    "api_idempotency_records",
     "source_imports",
     "system_settings",
     "backup_settings",

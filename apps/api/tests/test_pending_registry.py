@@ -381,6 +381,8 @@ class TestCreateNoteChecksPending:
         mock_user.id = "user_789"
 
         mock_auth = MagicMock()
+        http_request = MagicMock()
+        http_request.headers = {}
 
         with (
             patch("sibyl.jobs.pending.get_pending", return_value=mock_registry),
@@ -393,6 +395,7 @@ class TestCreateNoteChecksPending:
 
             result = await create_note(
                 task_id="task_123",
+                http_request=http_request,
                 request=request,
                 org=mock_org,
                 user=mock_user,

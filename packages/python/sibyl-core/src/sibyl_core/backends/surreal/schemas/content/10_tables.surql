@@ -126,6 +126,24 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_content_ft ON raw_captures FIELDS ra
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_captured_at ON raw_captures FIELDS captured_at;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_created_at ON raw_captures FIELDS created_at;
 
+DEFINE TABLE IF NOT EXISTS api_idempotency_records SCHEMAFULL;
+ALTER TABLE IF EXISTS api_idempotency_records SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS uuid ON api_idempotency_records TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON api_idempotency_records TYPE string;
+DEFINE FIELD IF NOT EXISTS principal_id ON api_idempotency_records TYPE string;
+DEFINE FIELD IF NOT EXISTS idempotency_key ON api_idempotency_records TYPE string;
+DEFINE FIELD IF NOT EXISTS method ON api_idempotency_records TYPE string;
+DEFINE FIELD IF NOT EXISTS path ON api_idempotency_records TYPE string;
+DEFINE FIELD IF NOT EXISTS request_hash ON api_idempotency_records TYPE string;
+DEFINE FIELD IF NOT EXISTS response_status_code ON api_idempotency_records TYPE int;
+DEFINE FIELD IF NOT EXISTS response_body ON api_idempotency_records TYPE object FLEXIBLE DEFAULT {{}};
+DEFINE FIELD IF NOT EXISTS created_at ON api_idempotency_records TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS idx_api_idempotency_records_uuid ON api_idempotency_records FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_api_idempotency_records_scope ON api_idempotency_records
+    FIELDS organization_id, principal_id, method, path, idempotency_key UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_api_idempotency_records_created_at ON api_idempotency_records FIELDS created_at;
+
 DEFINE TABLE IF NOT EXISTS source_imports SCHEMAFULL;
 ALTER TABLE IF EXISTS source_imports SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON source_imports TYPE string;

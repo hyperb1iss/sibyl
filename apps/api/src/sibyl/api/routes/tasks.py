@@ -8,11 +8,12 @@ import uuid
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.event_types import WSEvent
+from sibyl.api.idempotency import replay_idempotent_response, save_idempotent_response
 from sibyl.api.websocket import broadcast_event
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
@@ -171,6 +172,7 @@ class CreateTaskRequest(BaseModel):
 
 @router.post("", response_model=TaskActionResponse)
 async def create_task(
+    http_request: Request,
     request: CreateTaskRequest,
     org: AuthOrganization = Depends(get_current_organization),
     user: AuthUser = Depends(get_current_user),
@@ -189,6 +191,20 @@ async def create_task(
     )
 
     try:
+        idempotency_payload = {"body": request.model_dump(mode="json")}
+        replayed = await replay_idempotent_response(
+            http_request,
+            organization_id=org.id,
+            principal_id=str(user.id),
+            method="POST",
+            path="/tasks",
+            payload=idempotency_payload,
+            response_model=TaskActionResponse,
+            content_session=None,
+        )
+        if replayed is not None:
+            return replayed
+
         runtime = await get_task_graph_runtime(str(org.id))
 
         if request.epic_id:
@@ -260,14 +276,28 @@ async def create_task(
             org_id=str(org.id),
         )
 
-        return TaskActionResponse(
+        response = TaskActionResponse(
             success=True,
             action="create",
             task_id=task_id,
             message="Task created successfully",
             data={"project_id": request.project_id},
         )
+        await save_idempotent_response(
+            http_request,
+            organization_id=org.id,
+            principal_id=str(user.id),
+            method="POST",
+            path="/tasks",
+            payload=idempotency_payload,
+            response=response,
+            status_code=200,
+            content_session=None,
+        )
+        return response
 
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception("create_task_failed", error=str(e))
         raise HTTPException(
@@ -529,6 +559,7 @@ async def submit_review(
 @handle_workflow_errors("complete_task")
 async def complete_task(
     task_id: str,
+    http_request: Request,
     org: AuthOrganization = Depends(get_current_organization),
     auth: AuthContext = Depends(get_auth_context),
     request: CompleteTaskRequest | None = None,
@@ -540,6 +571,24 @@ async def complete_task(
     )
 
     verified_task = await _verify_task_access(task_id, org, auth)
+    idempotency_path = f"/tasks/{task_id}/complete"
+    idempotency_payload = {"body": request.model_dump(mode="json") if request else None}
+    principal_id = str(
+        getattr(auth, "user_id", None) or getattr(getattr(auth, "user", None), "id", "unknown")
+    )
+    replayed = await replay_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=principal_id,
+        method="POST",
+        path=idempotency_path,
+        payload=idempotency_payload,
+        response_model=TaskActionResponse,
+        content_session=None,
+    )
+    if replayed is not None:
+        return replayed
+
     project_id = _project_id_for_policy(verified_task)
     accessible_projects = None
     if project_id:
@@ -595,13 +644,25 @@ async def complete_task(
         org_id=group_id,
     )
 
-    return TaskActionResponse(
+    response = TaskActionResponse(
         success=True,
         action="complete_task",
         task_id=task_id,
         message="Task completed" + (" with learnings captured" if learnings else ""),
         data={"status": task.status.value, "learnings": learnings},
     )
+    await save_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=principal_id,
+        method="POST",
+        path=idempotency_path,
+        payload=idempotency_payload,
+        response=response,
+        status_code=200,
+        content_session=None,
+    )
+    return response
 
 
 @router.post("/{task_id}/archive", response_model=TaskActionResponse)
@@ -829,6 +890,7 @@ class NotesListResponse(BaseModel):
 @router.post("/{task_id}/notes", response_model=NoteResponse)
 async def create_note(
     task_id: str,
+    http_request: Request,
     request: CreateNoteRequest,
     org: AuthOrganization = Depends(get_current_organization),
     user: AuthUser = Depends(get_current_user),
@@ -848,6 +910,21 @@ async def create_note(
 
     try:
         group_id = str(org.id)
+        idempotency_path = f"/tasks/{task_id}/notes"
+        idempotency_payload = {"body": request.model_dump(mode="json")}
+        replayed = await replay_idempotent_response(
+            http_request,
+            organization_id=org.id,
+            principal_id=str(user.id),
+            method="POST",
+            path=idempotency_path,
+            payload=idempotency_payload,
+            response_model=NoteResponse,
+            content_session=None,
+        )
+        if replayed is not None:
+            return replayed
+
         note_id = f"note_{uuid.uuid4()}"
         created_at = datetime.now(UTC)
 
@@ -882,7 +959,7 @@ async def create_note(
                 org_id=group_id,
             )
 
-            return NoteResponse(
+            response = NoteResponse(
                 id=note_id,
                 task_id=task_id,
                 content=request.content,
@@ -891,6 +968,18 @@ async def create_note(
                 created_at=created_at.isoformat(),
                 status="pending",
             )
+            await save_idempotent_response(
+                http_request,
+                organization_id=org.id,
+                principal_id=str(user.id),
+                method="POST",
+                path=idempotency_path,
+                payload=idempotency_payload,
+                response=response,
+                status_code=200,
+                content_session=None,
+            )
+            return response
 
         # Task exists - create note synchronously
         runtime = await get_task_graph_runtime(group_id)
@@ -936,7 +1025,7 @@ async def create_note(
             org_id=group_id,
         )
 
-        return NoteResponse(
+        response = NoteResponse(
             id=note_id,
             task_id=task_id,
             content=request.content,
@@ -944,6 +1033,18 @@ async def create_note(
             author_name=request.author_name,
             created_at=created_at.isoformat(),
         )
+        await save_idempotent_response(
+            http_request,
+            organization_id=org.id,
+            principal_id=str(user.id),
+            method="POST",
+            path=idempotency_path,
+            payload=idempotency_payload,
+            response=response,
+            status_code=200,
+            content_session=None,
+        )
+        return response
 
     except HTTPException:
         raise

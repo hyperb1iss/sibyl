@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sibyl.api.dependencies import get_knowledge_read_service
 from sibyl.api.errors import constraint_violation, sanitize_error_text
 from sibyl.api.event_types import WSEvent
+from sibyl.api.idempotency import replay_idempotent_response, save_idempotent_response
 from sibyl.api.schemas import (
     EntityCreate,
     EntityListResponse,
@@ -1117,6 +1118,24 @@ async def create_entity(
         # Use description as content fallback (frontend sends description, add() needs content)
         content = entity.content or entity.description or entity.name
         request_metadata: dict[str, object] = dict(entity.metadata or {})
+        idempotency_payload = {
+            "body": entity.model_dump(mode="json"),
+            "query": {"sync": sync},
+        }
+
+        if ctx.user is not None:
+            replayed = await replay_idempotent_response(
+                request,
+                organization_id=org.id,
+                principal_id=str(ctx.user.id),
+                method="POST",
+                path="/entities",
+                payload=idempotency_payload,
+                response_model=EntityResponse,
+                content_session=content_session,
+            )
+            if replayed is not None:
+                return replayed
 
         merged_metadata: dict[str, Any] = {**request_metadata, "organization_id": group_id}
 
@@ -1192,6 +1211,18 @@ async def create_entity(
             await broadcast_event(
                 WSEvent.ENTITY_PENDING, response.model_dump(mode="json"), org_id=str(org.id)
             )
+            if ctx.user is not None:
+                await save_idempotent_response(
+                    request,
+                    organization_id=org.id,
+                    principal_id=str(ctx.user.id),
+                    method="POST",
+                    path="/entities",
+                    payload=idempotency_payload,
+                    response=response,
+                    status_code=201,
+                    content_session=content_session,
+                )
             return response
 
         # Sync creation - fetch the created entity
@@ -1237,6 +1268,19 @@ async def create_entity(
                 organization_id=org.id,
                 request=request,
                 details={"project_id": created.id, "name": created.name},
+            )
+
+        if ctx.user is not None:
+            await save_idempotent_response(
+                request,
+                organization_id=org.id,
+                principal_id=str(ctx.user.id),
+                method="POST",
+                path="/entities",
+                payload=idempotency_payload,
+                response=response,
+                status_code=201,
+                content_session=content_session,
             )
 
         return response

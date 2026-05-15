@@ -94,9 +94,7 @@ class DocumentChunkRecord:
 
 type RAGSearchRow = tuple[DocumentChunkRecord, CrawledDocumentRecord, str, UUID, float]
 type CodeExampleSearchRow = tuple[DocumentChunkRecord, CrawledDocumentRecord, UUID, str, float]
-type HybridSearchRow = tuple[
-    DocumentChunkRecord, CrawledDocumentRecord, str, UUID, float, float
-]
+type HybridSearchRow = tuple[DocumentChunkRecord, CrawledDocumentRecord, str, UUID, float, float]
 
 
 @dataclass(frozen=True)
@@ -124,6 +122,20 @@ class RawCaptureRecord:
 
 
 @dataclass(frozen=True)
+class ApiIdempotencyRecord:
+    organization_id: UUID
+    principal_id: str
+    idempotency_key: str
+    method: str
+    path: str
+    request_hash: str
+    response_status_code: int
+    response_body: dict[str, object]
+    id: UUID = field(default_factory=uuid4)
+    created_at: datetime = field(default_factory=utcnow_naive)
+
+
+@dataclass(frozen=True)
 class DocumentEntityRecord:
     """Resolved document-backed entity payload for entity routes."""
 
@@ -144,6 +156,7 @@ class DocumentEntityRecord:
 
 
 __all__ = [
+    "ApiIdempotencyRecord",
     "CodeExampleSearchRow",
     "ContentConflictError",
     "ContentSession",

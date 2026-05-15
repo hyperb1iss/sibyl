@@ -11,7 +11,11 @@ import pytest_asyncio
 from sibyl.persistence import content_archive
 from sibyl.persistence.backups_common import BackupRecord, BackupSettingsRecord
 from sibyl.persistence.content_archive import restore_content_archive_payload
-from sibyl.persistence.content_common import CrawledDocumentRecord, RawCaptureRecord
+from sibyl.persistence.content_common import (
+    ApiIdempotencyRecord,
+    CrawledDocumentRecord,
+    RawCaptureRecord,
+)
 from sibyl.persistence.settings_types import SystemSettingRecord
 from sibyl.persistence.surreal import (
     backups as surreal_backups,
@@ -35,6 +39,7 @@ from sibyl.persistence.surreal.content import (
     delete_crawl_source_record,
     delete_crawled_document_record,
     get_link_graph_status_payload,
+    save_api_idempotency_record,
     save_crawl_source_record,
     save_crawled_document_record,
     save_raw_capture_record,
@@ -130,6 +135,38 @@ async def test_surreal_content_replace_record_uses_single_upsert_statement() -> 
     assert "UPSERT crawl_sources CONTENT $record WHERE uuid = $uuid" in query
     assert "DELETE FROM crawl_sources" not in query
     assert params == {"uuid": str(source_id), "record": record}
+
+
+@pytest.mark.asyncio
+async def test_api_idempotency_record_round_trips_through_surreal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    record = ApiIdempotencyRecord(
+        organization_id=org_id,
+        principal_id="user-123",
+        idempotency_key="idem-123",
+        method="POST",
+        path="/entities",
+        request_hash="hash-123",
+        response_status_code=201,
+        response_body={"id": "episode_123"},
+    )
+    client = _SequencedContentClient([])
+
+    @asynccontextmanager
+    async def client_scope():
+        yield client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", client_scope)
+
+    saved = await save_api_idempotency_record(None, record=record)
+
+    assert saved == record
+    query, params = client.calls[0]
+    assert "UPSERT api_idempotency_records CONTENT $record WHERE uuid = $uuid" in query
+    assert params["uuid"] == str(record.id)
+    assert params["record"]["response_body"] == {"id": "episode_123"}
 
 
 @pytest.mark.asyncio

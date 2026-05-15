@@ -37,6 +37,7 @@ def test_content_runtime_maps_surreal_exports() -> None:
 
 def test_content_runtime_exports_neutral_runtime_surface() -> None:
     assert content_common.__all__ == [
+        "ApiIdempotencyRecord",
         "CodeExampleSearchRow",
         "ContentConflictError",
         "ContentSession",
