@@ -1275,7 +1275,7 @@ Exit criteria:
 
 Receipt, 2026-05-15:
 
-- Local release-audit candidate: current local `main`, ahead of `origin/main` by 23 commits. The
+- Local release-audit candidate: current local `main`, ahead of `origin/main` by 25 commits. The
   tracked worktree was clean after the gate repairs; local untracked scratch files were left
   untouched.
 - Product surface delivered:
@@ -1303,8 +1303,8 @@ Receipt, 2026-05-15:
   - `moon run web:test` -> 26 files passed, 102 tests passed.
   - `moon run web:test-cov` -> 26 files passed, 102 tests passed after the synthesis runner coverage
     test was stabilized.
-  - Post-unified-UX update: `moon run web:lint web:typecheck docs:lint` -> 3 tasks completed, 1
-    cached.
+  - Post-unified-UX update: `moon run web:lint web:typecheck web:test` -> 3 tasks completed, 102
+    tests passed.
   - `moon run docs:lint` -> all matched files use Prettier code style.
   - `moon run :check` -> 40 tasks completed, 26 cache hits before the receipt docs were written;
     post-doc rerun completed 36 tasks with 33 cache hits.
@@ -1328,14 +1328,17 @@ Receipt, 2026-05-15:
     `e944a1d3a81dc0f1c840a053394d59c9c61bce30` in run `25898456003` and
     `bc5bf7c33e5459c60819a7fa00880cf39e1cca0e` in run `25898597780`.
   - Nightly Regression run `25898704879` succeeded on `bc5bf7c33e5459c60819a7fa00880cf39e1cca0e`.
+  - CI-only PR #7 (`codex/v09-ci`) succeeded after the v0.8.1 rebase and unified captures polish on
+    `e05a52c01a183876c4b9247203e329856edc293c`; run `25899235827` passed Build, Static Checks,
+    Package Tests, E2E, Storybook, and Detect Changes.
+  - Nightly Regression run `25899328897` succeeded on `e05a52c01a183876c4b9247203e329856edc293c`.
   - `origin/main` later advanced to the v0.8.1 release bump
-    `f11bfede36b4a02df2b4a514bd2ffb2be555ebb2`; the v0.9 candidate was rebased on top of that
-    commit. CI, docs deploy, and nightly regression must rerun on the rebased candidate before
-    release.
+    `f11bfede36b4a02df2b4a514bd2ffb2be555ebb2`; the v0.9 candidate was rebased on top of that commit
+    and rerun through CI-only plus nightly evidence.
 - Binary recommendation: HOLD for tag or public release until the local 0.9 candidate reaches the
-  final branch and docs deploy plus nightly regression are green on the exact candidate head. The
-  product and local verification are ready for exact-head external verification; release is not yet
-  publishable.
+  final branch and docs deploy is green on the exact candidate head. The product and local
+  verification are ready; release is not yet publishable without Bliss approval to push `main` and
+  deploy docs.
 
 ## 13. Verification Matrix
 
