@@ -402,6 +402,49 @@ async def test_native_entity_lists_can_omit_heavy_content_fields() -> None:
 
 
 @pytest.mark.asyncio
+async def test_native_entity_manager_counts_by_type_without_listing_entities() -> None:
+    client = NativeSurrealGraphClient(group_id="org-native-counts", url="memory://")
+    try:
+        await prepare_native_graph_schema(client)
+        entity_manager = NativeEntityManager(client, group_id=client.group_id)
+
+        await entity_manager.create_direct(
+            Entity(
+                id="pattern_count",
+                entity_type=EntityType.PATTERN,
+                name="Pattern count",
+                organization_id=client.group_id,
+            )
+        )
+        await entity_manager.create_direct(
+            Entity(
+                id="task_count",
+                entity_type=EntityType.TASK,
+                name="Task count",
+                organization_id=client.group_id,
+            )
+        )
+        await entity_manager.create_direct(
+            Entity(
+                id="task_count_archived",
+                entity_type=EntityType.TASK,
+                name="Archived task count",
+                organization_id=client.group_id,
+                metadata={"status": "archived"},
+            )
+        )
+
+        active_counts = await entity_manager.count_by_type()
+        all_counts = await entity_manager.count_by_type(include_archived=True)
+
+        assert active_counts["pattern"] == 1
+        assert active_counts["task"] == 1
+        assert all_counts["task"] == 2
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_hierarchical_graph_uses_native_managers_without_graphiti(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

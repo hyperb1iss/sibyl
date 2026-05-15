@@ -600,6 +600,28 @@ class TestGetHealth:
             ]
 
     @pytest.mark.asyncio
+    async def test_health_uses_native_count_by_type_when_available(self) -> None:
+        """Health should use native aggregate counts instead of paging entities."""
+
+        async with mock_tools() as ctx:
+            ctx.entity_manager.count_by_type = AsyncMock(
+                return_value={
+                    "pattern": 7,
+                    "rule": 3,
+                    "episode": 2,
+                }
+            )
+            ctx.entity_manager.list_all = AsyncMock()
+
+            result = await get_health(organization_id=TEST_ORG_ID)
+
+            assert result["entity_counts"]["pattern"] == 7
+            assert result["entity_counts"]["rule"] == 3
+            assert result["entity_counts"]["episode"] == 2
+            ctx.entity_manager.count_by_type.assert_awaited_once_with(include_archived=False)
+            ctx.entity_manager.list_all.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_health_handles_connection_failure(self) -> None:
         """Health should report unhealthy on connection failure."""
 
@@ -614,6 +636,19 @@ class TestGetHealth:
 
 
 class TestCountEntitiesByType:
+    @pytest.mark.asyncio
+    async def test_prefers_native_count_by_type_when_available(self) -> None:
+        entity_manager = SimpleNamespace(
+            count_by_type=AsyncMock(return_value={"pattern": 4, "task": 9}),
+            list_all=AsyncMock(),
+        )
+
+        counts = await count_entities_by_type(entity_manager)
+
+        assert counts == {"pattern": 4, "task": 9}
+        entity_manager.count_by_type.assert_awaited_once_with(include_archived=False)
+        entity_manager.list_all.assert_not_awaited()
+
     @pytest.mark.asyncio
     async def test_prefers_driver_aggregation_when_available(self) -> None:
         driver = AsyncMock()

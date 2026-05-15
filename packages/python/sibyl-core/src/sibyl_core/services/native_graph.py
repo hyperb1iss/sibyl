@@ -686,6 +686,30 @@ class NativeEntityManager:
             return entities[start : start + max(int(limit), 1)]
         return entities[: max(int(limit), 1)]
 
+    async def count_by_type(self, *, include_archived: bool = False) -> dict[str, int]:
+        where_clauses = ["group_id = $group_id"]
+        if not include_archived:
+            where_clauses.append("(status IS NONE OR status = '' OR status != 'archived')")
+        rows = normalize_records(
+            await self._client.execute_query(
+                """
+                SELECT entity_type, count() AS entity_count
+                FROM entity
+                WHERE """
+                + " AND ".join(where_clauses)
+                + """
+                GROUP BY entity_type;
+                """,
+                group_id=self._group_id,
+            )
+        )
+        counts = {entity_type.value: 0 for entity_type in EntityType}
+        for row in rows:
+            entity_type = row.get("entity_type")
+            if isinstance(entity_type, str) and entity_type:
+                counts[entity_type] = _int_value(row.get("entity_count"))
+        return counts
+
     async def _with_epic_progress(
         self, epics: list[Entity], *, project_id: str | None = None
     ) -> list[Entity]:

@@ -460,8 +460,18 @@ class TestHierarchicalGraph:
 
         assert {node["id"] for node in data.nodes} == {"core-1", "core-2", "core-3"}
         assert data.displayed_edges == 2
-        list_entities.assert_awaited_once_with(mock_client, TEST_ORG_ID)
-        list_relationships.assert_awaited_once_with(mock_client, TEST_ORG_ID)
+        list_entities.assert_awaited_once_with(
+            mock_client,
+            TEST_ORG_ID,
+            batch_size=3,
+            max_items=3,
+        )
+        list_relationships.assert_awaited_once_with(
+            mock_client,
+            TEST_ORG_ID,
+            batch_size=10,
+            max_items=10,
+        )
 
     @pytest.mark.asyncio
     async def test_honors_type_filters_in_totals_and_clusters(

@@ -76,6 +76,7 @@ DEFINE INDEX IF NOT EXISTS idx_entity_epic ON entity FIELDS epic_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_task ON entity FIELDS task_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_status ON entity FIELDS status;
 DEFINE INDEX IF NOT EXISTS idx_entity_priority ON entity FIELDS priority;
+DEFINE INDEX IF NOT EXISTS idx_entity_group_updated ON entity FIELDS group_id, updated_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_group_type_updated ON entity FIELDS group_id, entity_type, updated_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_group_type_project_updated ON entity FIELDS group_id, entity_type, project_id, updated_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_group_type_epic_updated ON entity FIELDS group_id, entity_type, epic_id, updated_at, created_at, uuid;
@@ -168,6 +169,7 @@ DEFINE INDEX IF NOT EXISTS idx_relates_group_target ON relates_to FIELDS group_i
 DEFINE INDEX IF NOT EXISTS idx_relates_group_name_source ON relates_to FIELDS group_id, name, source_id;
 DEFINE INDEX IF NOT EXISTS idx_relates_group_name_target ON relates_to FIELDS group_id, name, target_id;
 DEFINE INDEX IF NOT EXISTS idx_relates_group_source_target_name ON relates_to FIELDS group_id, source_id, target_id, name;
+DEFINE INDEX IF NOT EXISTS idx_relates_group_created ON relates_to FIELDS group_id, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_relates_fact_ft ON relates_to FIELDS fact FULLTEXT ANALYZER content_analyzer BM25;
 DEFINE INDEX IF NOT EXISTS idx_relates_fact_embedding ON relates_to FIELDS fact_embedding
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;

@@ -121,6 +121,10 @@ async def count_entities_by_type(
     include_archived: bool = False,
     page_size: int = 1000,
 ) -> dict[str, int]:
+    native_counter = getattr(entity_manager, "count_by_type", None)
+    if callable(native_counter):
+        return await native_counter(include_archived=include_archived)
+
     counts = {entity_type.value: 0 for entity_type in EntityType}
     offset = 0
 

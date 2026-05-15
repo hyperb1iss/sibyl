@@ -207,3 +207,43 @@ async def test_get_graph_snapshot_fetches_entities_and_edges_concurrently(
     )
 
     assert [entity.id for entity in snapshot.entities] == ["task-1"]
+
+
+@pytest.mark.asyncio
+async def test_get_graph_snapshot_joins_concurrent_loads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    load_count = 0
+
+    async def fake_list_all_entities(*args, **kwargs) -> list[Entity]:
+        nonlocal load_count
+        load_count += 1
+        await asyncio.sleep(0)
+        return [_entity("task-1", EntityType.TASK)]
+
+    async def fake_list_all_relationships(*args, **kwargs) -> list[Relationship]:
+        await asyncio.sleep(0)
+        return []
+
+    communities.GRAPH_SNAPSHOT_CACHE.clear()
+    communities.GRAPH_SNAPSHOT_LOADS.clear()
+    monkeypatch.setattr(communities, "_list_all_entities", fake_list_all_entities)
+    monkeypatch.setattr(communities, "_list_all_relationships", fake_list_all_relationships)
+
+    first, second = await asyncio.gather(
+        communities._get_graph_snapshot(
+            object(),
+            "org-single-flight",
+            max_entities=100,
+            max_relationships=200,
+        ),
+        communities._get_graph_snapshot(
+            object(),
+            "org-single-flight",
+            max_entities=100,
+            max_relationships=200,
+        ),
+    )
+
+    assert first is second
+    assert load_count == 1

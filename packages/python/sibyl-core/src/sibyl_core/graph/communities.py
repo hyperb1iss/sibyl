@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from sibyl_core.graph.client import GraphClient
 
 log = structlog.get_logger()
+EntityManager: Any = None
+RelationshipManager: Any = None
 
 # =============================================================================
 # Cluster Cache for Visualization
@@ -33,8 +35,9 @@ CLUSTER_CACHE_TTL = timedelta(minutes=5)
 # Cache for hierarchical graph community detection (expensive operation)
 HIERARCHICAL_CACHE: dict[str, tuple[datetime, dict[str, str], list[dict]]] = {}
 HIERARCHICAL_CACHE_TTL = timedelta(minutes=5)
-GRAPH_SNAPSHOT_CACHE: dict[str, tuple[datetime, GraphSnapshot]] = {}
+GRAPH_SNAPSHOT_CACHE: dict[tuple[str, int | None, int | None], tuple[datetime, GraphSnapshot]] = {}
 GRAPH_SNAPSHOT_CACHE_TTL = timedelta(minutes=5)
+GRAPH_SNAPSHOT_LOADS: dict[tuple[str, int | None, int | None], asyncio.Task[GraphSnapshot]] = {}
 GRAPH_LOD_CACHE: dict[tuple[Any, ...], tuple[datetime, HierarchicalGraphData]] = {}
 GRAPH_LOD_CACHE_TTL = timedelta(minutes=2)
 _COMMUNITY_PAGE_SIZE = 500
@@ -123,7 +126,11 @@ def _entity_manager_for_client(client: GraphClient, organization_id: str) -> Any
     if isinstance(client, NativeSurrealGraphClient):
         return NativeEntityManager(client, group_id=organization_id)
 
-    from sibyl_core.graph.entities import EntityManager
+    global EntityManager
+    if EntityManager is None:
+        from sibyl_core.graph.entities import EntityManager as LegacyEntityManager
+
+        EntityManager = LegacyEntityManager
 
     return EntityManager(client, group_id=organization_id)
 
@@ -134,7 +141,11 @@ def _relationship_manager_for_client(client: GraphClient, organization_id: str) 
     if isinstance(client, NativeSurrealGraphClient):
         return NativeRelationshipManager(client, group_id=organization_id)
 
-    from sibyl_core.graph.relationships import RelationshipManager
+    global RelationshipManager
+    if RelationshipManager is None:
+        from sibyl_core.graph.relationships import RelationshipManager as LegacyRelationshipManager
+
+        RelationshipManager = LegacyRelationshipManager
 
     return RelationshipManager(client, group_id=organization_id)
 
@@ -144,14 +155,22 @@ async def _list_all_entities(
     organization_id: str,
     *,
     batch_size: int = 1000,
+    max_items: int | None = None,
 ) -> list[Entity]:
     manager = _entity_manager_for_client(client, organization_id)
     entities: list[Entity] = []
     offset = 0
 
     while True:
+        if max_items is not None and len(entities) >= max_items:
+            break
+        page_limit = batch_size
+        if max_items is not None:
+            page_limit = min(page_limit, max(max_items - len(entities), 0))
+        if page_limit <= 0:
+            break
         kwargs: dict[str, Any] = {
-            "limit": batch_size,
+            "limit": page_limit,
             "offset": offset,
             "include_archived": True,
         }
@@ -161,9 +180,9 @@ async def _list_all_entities(
         if not batch:
             break
         entities.extend(batch)
-        if len(batch) < batch_size:
+        if len(batch) < page_limit:
             break
-        offset += batch_size
+        offset += page_limit
 
     return entities
 
@@ -173,6 +192,7 @@ async def _list_all_relationships(
     organization_id: str,
     *,
     batch_size: int = 1000,
+    max_items: int | None = None,
     relationship_types: list[RelationshipType] | None = None,
 ) -> list[Relationship]:
     manager = _relationship_manager_for_client(client, organization_id)
@@ -180,17 +200,24 @@ async def _list_all_relationships(
     offset = 0
 
     while True:
+        if max_items is not None and len(relationships) >= max_items:
+            break
+        page_limit = batch_size
+        if max_items is not None:
+            page_limit = min(page_limit, max(max_items - len(relationships), 0))
+        if page_limit <= 0:
+            break
         batch = await manager.list_all(
             relationship_types=relationship_types,
-            limit=batch_size,
+            limit=page_limit,
             offset=offset,
         )
         if not batch:
             break
         relationships.extend(batch)
-        if len(batch) < batch_size:
+        if len(batch) < page_limit:
             break
-        offset += batch_size
+        offset += page_limit
 
     return relationships
 
@@ -261,17 +288,68 @@ async def _list_surreal_episodic_relationships(
 async def _get_graph_snapshot(
     client: GraphClient,
     organization_id: str,
+    *,
+    max_entities: int | None = None,
+    max_relationships: int | None = None,
 ) -> GraphSnapshot:
-    cached = GRAPH_SNAPSHOT_CACHE.get(organization_id)
+    cache_key = (organization_id, max_entities, max_relationships)
+    cached = GRAPH_SNAPSHOT_CACHE.get(cache_key)
     if cached is not None:
         cached_at, snapshot = cached
         if datetime.now(UTC) - cached_at < GRAPH_SNAPSHOT_CACHE_TTL:
-            log.debug("graph_snapshot_cache_hit", org_id=organization_id)
+            log.debug(
+                "graph_snapshot_cache_hit",
+                org_id=organization_id,
+                max_entities=max_entities,
+                max_relationships=max_relationships,
+            )
             return snapshot
 
+    in_flight = GRAPH_SNAPSHOT_LOADS.get(cache_key)
+    if in_flight is not None:
+        log.debug(
+            "graph_snapshot_load_joined",
+            org_id=organization_id,
+            max_entities=max_entities,
+            max_relationships=max_relationships,
+        )
+        return await asyncio.shield(in_flight)
+
+    task = asyncio.create_task(
+        _load_graph_snapshot(
+            client,
+            organization_id,
+            max_entities=max_entities,
+            max_relationships=max_relationships,
+        )
+    )
+    GRAPH_SNAPSHOT_LOADS[cache_key] = task
+    try:
+        return await asyncio.shield(task)
+    finally:
+        GRAPH_SNAPSHOT_LOADS.pop(cache_key, None)
+
+
+async def _load_graph_snapshot(
+    client: GraphClient,
+    organization_id: str,
+    *,
+    max_entities: int | None,
+    max_relationships: int | None,
+) -> GraphSnapshot:
     entities, relationships = await asyncio.gather(
-        _list_all_entities(client, organization_id),
-        _list_all_relationships(client, organization_id),
+        _list_all_entities(
+            client,
+            organization_id,
+            batch_size=max_entities or 1000,
+            max_items=max_entities,
+        ),
+        _list_all_relationships(
+            client,
+            organization_id,
+            batch_size=max_relationships or 1000,
+            max_items=max_relationships,
+        ),
     )
     entity_by_id = _entity_index(entities)
     episodic_relationships = await _list_surreal_episodic_relationships(
@@ -285,19 +363,74 @@ async def _get_graph_snapshot(
         relationships=relationships,
         entity_by_id=entity_by_id,
     )
-    GRAPH_SNAPSHOT_CACHE[organization_id] = (datetime.now(UTC), snapshot)
+    GRAPH_SNAPSHOT_CACHE[(organization_id, max_entities, max_relationships)] = (
+        datetime.now(UTC),
+        snapshot,
+    )
     log.info(
         "graph_snapshot_cache_updated",
         org_id=organization_id,
         entity_count=len(entities),
         relationship_count=len(relationships),
         episodic_relationship_count=len(episodic_relationships),
+        max_entities=max_entities,
+        max_relationships=max_relationships,
     )
     return snapshot
 
 
 def _entity_index(entities: list[Entity]) -> dict[str, Entity]:
     return {entity.id: entity for entity in entities if entity.id}
+
+
+def _count_int(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int | float | str):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+async def _native_graph_totals(
+    client: GraphClient,
+    organization_id: str,
+) -> tuple[int, int] | None:
+    from sibyl_core.services.native_graph import NativeSurrealGraphClient, normalize_records
+
+    if not isinstance(client, NativeSurrealGraphClient):
+        return None
+
+    try:
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                RETURN {
+                    total_nodes: count(
+                        SELECT VALUE uuid
+                        FROM entity
+                        WHERE group_id = $group_id
+                    ),
+                    total_edges: count(
+                        SELECT VALUE uuid
+                        FROM relates_to
+                        WHERE group_id = $group_id
+                    )
+                };
+                """,
+                group_id=organization_id,
+            )
+        )
+    except Exception as exc:
+        log.warning("native_graph_totals_failed", org_id=organization_id, error=str(exc))
+        return None
+
+    if not rows:
+        return None
+    row = rows[0]
+    return _count_int(row.get("total_nodes")), _count_int(row.get("total_edges"))
 
 
 def _normalized_cache_list(values: list[str] | None) -> tuple[str, ...]:
@@ -1120,12 +1253,18 @@ def invalidate_hierarchical_cache(organization_id: str | None = None) -> None:
     """
     if organization_id:
         HIERARCHICAL_CACHE.pop(organization_id, None)
-        GRAPH_SNAPSHOT_CACHE.pop(organization_id, None)
+        for cache_key in list(GRAPH_SNAPSHOT_CACHE):
+            if cache_key[0] == organization_id:
+                GRAPH_SNAPSHOT_CACHE.pop(cache_key, None)
+        for cache_key in list(GRAPH_SNAPSHOT_LOADS):
+            if cache_key[0] == organization_id:
+                GRAPH_SNAPSHOT_LOADS.pop(cache_key, None)
         GRAPH_LOD_CACHE.clear()
         log.debug("hierarchical_cache_invalidated", org_id=organization_id)
     else:
         HIERARCHICAL_CACHE.clear()
         GRAPH_SNAPSHOT_CACHE.clear()
+        GRAPH_SNAPSHOT_LOADS.clear()
         GRAPH_LOD_CACHE.clear()
         log.debug("hierarchical_cache_cleared")
 
@@ -1438,15 +1577,26 @@ async def get_hierarchical_graph(
             )
             return data
 
-    snapshot = await _get_graph_snapshot(client, organization_id)
+    snapshot = await _get_graph_snapshot(
+        client,
+        organization_id,
+        max_entities=max_nodes,
+        max_relationships=max_edges,
+    )
     entities = snapshot.entities
     relationships = snapshot.relationships
-    total_node_count, total_edge_count = _graph_totals_from_snapshot(
-        entities,
-        relationships,
-        project_ids=project_ids,
-        entity_types=entity_types,
-    )
+    native_totals = None
+    if not project_ids and not entity_types:
+        native_totals = await _native_graph_totals(client, organization_id)
+    if native_totals is None:
+        total_node_count, total_edge_count = _graph_totals_from_snapshot(
+            entities,
+            relationships,
+            project_ids=project_ids,
+            entity_types=entity_types,
+        )
+    else:
+        total_node_count, total_edge_count = native_totals
     log.info(
         "graph_totals_queried",
         total_nodes=total_node_count,
