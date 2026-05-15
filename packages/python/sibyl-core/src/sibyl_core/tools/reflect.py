@@ -7,6 +7,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
+import structlog
+
 from sibyl_core.auth.memory_policy import (
     MemoryPolicyDecision,
     authorize_memory_reflect,
@@ -17,15 +19,22 @@ from sibyl_core.services.reflection import (
     HeuristicReflectionExtractor,
     ReflectionExtractionRequest,
     ReflectionExtractor,
+    apply_reflection_lifecycle_decisions,
     ephemeral_reflection_source_id,
     ground_reflection_candidate,
     validate_reflection_candidates,
 )
-from sibyl_core.services.surreal_content import MemoryScope
+from sibyl_core.services.surreal_content import (
+    MemoryScope,
+    RawMemory,
+    list_raw_memories_for_scope,
+    raw_memory_recallable,
+)
 from sibyl_core.tools.add import add as default_add
 from sibyl_core.tools.responses import AddResponse
 
 AddFn = Callable[..., Awaitable[AddResponse]]
+log = structlog.get_logger()
 
 
 def _tags_for(kind: str, domain: str | None) -> list[str]:
@@ -195,6 +204,18 @@ async def reflect_memory(
         )
         for candidate in candidates
     ]
+    if persist:
+        prior_memories = await _load_reflection_decision_memories(
+            organization_id=str(organization_id),
+            principal_id=principal_id,
+            memory_scope=resolved_scope,
+            scope_key=resolved_scope_key,
+            project=project,
+        )
+        candidates = apply_reflection_lifecycle_decisions(
+            candidates,
+            prior_memories=prior_memories,
+        )
     validate_reflection_candidates(candidates, require_source_ids=persist)
 
     persisted: list[ReflectionCandidate] = []
@@ -421,6 +442,32 @@ def _reflect_policy_metadata(decisions: tuple[MemoryPolicyDecision, ...]) -> dic
         "policy_reasons": [decision.reason for decision in decisions],
         "policy_actions": [decision.action.value for decision in decisions],
     }
+
+
+async def _load_reflection_decision_memories(
+    *,
+    organization_id: str,
+    principal_id: str | None,
+    memory_scope: MemoryScope,
+    scope_key: str | None,
+    project: str | None,
+) -> list[RawMemory]:
+    if principal_id is None:
+        return []
+    try:
+        memories = await list_raw_memories_for_scope(
+            organization_id=organization_id,
+            principal_id=principal_id,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            project_id=project,
+            limit=100,
+            include_lifecycle_hidden=True,
+        )
+    except Exception as exc:
+        log.warning("reflection_decision_memory_lookup_failed", error=str(exc))
+        return []
+    return [memory for memory in memories if raw_memory_recallable(memory)]
 
 
 async def _persist_reflection_source_review(**kwargs: Any) -> AddResponse:

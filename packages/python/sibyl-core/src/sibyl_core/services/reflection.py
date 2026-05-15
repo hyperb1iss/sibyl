@@ -6,14 +6,18 @@ import hashlib
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Protocol
+from typing import Protocol, cast
 
 from sibyl_core.models.reflection import (
     ClaimRecord,
+    MemoryLifecycle,
+    MemoryLifecycleState,
     ReflectionCandidate,
     ReflectionFinding,
     ReflectionFindingKind,
     ReflectionRelationshipRecord,
+    with_memory_lifecycle_metadata,
+    with_reflection_finding_metadata,
 )
 
 SUPPORTED_REFLECTION_KINDS = frozenset(
@@ -129,6 +133,36 @@ _SENSITIVE_MARKERS = (
     "secret",
     "token",
 )
+_NEAR_DUPLICATE_THRESHOLD = 0.92
+_STALE_MARKERS = ("deprecated", "no longer", "obsolete", "outdated", "stale")
+_SUPERSESSION_PATTERN = re.compile(
+    r"(?i)\b(?:supersedes|replaces|obsoletes)\s+([A-Za-z0-9_./:-]+)"
+)
+_STALE_TARGET_PATTERN = re.compile(
+    r"(?i)\b([A-Za-z0-9_./:-]+)\s+(?:is|was|became)?\s*(?:stale|outdated|obsolete|deprecated)\b"
+)
+_POLARITY_PATTERNS = (
+    re.compile(
+        r"(?i)^(?P<subject>.+?)\s+(?:is|are|stays|stay)\s+"
+        r"(?P<polarity>enabled|disabled|allowed|blocked|required|forbidden)\b"
+    ),
+    re.compile(
+        r"(?i)^(?P<polarity>use|avoid|skip|disable|enable)\s+(?P<subject>.+)$"
+    ),
+)
+_POLARITY_VALUES = {
+    "allowed": True,
+    "enable": True,
+    "enabled": True,
+    "required": True,
+    "use": True,
+    "avoid": False,
+    "blocked": False,
+    "disable": False,
+    "disabled": False,
+    "forbidden": False,
+    "skip": False,
+}
 
 
 @dataclass(frozen=True)
@@ -189,6 +223,13 @@ class DeterministicFakeReflectionExtractor:
     async def extract(self, request: ReflectionExtractionRequest) -> list[ReflectionCandidate]:
         self.requests.append(request)
         return list(self._candidates[: request.limit])
+
+
+class ReflectionMemoryLike(Protocol):
+    id: str
+    raw_content: str
+    review_state: str
+    metadata: dict[str, object]
 
 
 def ephemeral_reflection_source_id(content: str) -> str:
@@ -269,6 +310,19 @@ def validate_reflection_candidates(
             if require_source_ids and not finding.source_ids:
                 msg = f"reflection finding lacks source_ids: {finding.id}"
                 raise ValueError(msg)
+
+
+def apply_reflection_lifecycle_decisions(
+    candidates: Sequence[ReflectionCandidate],
+    *,
+    prior_memories: Sequence[ReflectionMemoryLike],
+) -> list[ReflectionCandidate]:
+    prior = _prior_memory_snapshots(prior_memories)
+    return [_apply_reflection_lifecycle_decisions(candidate, prior) for candidate in candidates]
+
+
+def normalized_reflection_text_hash(text: str) -> str:
+    return hashlib.sha256(_normalize_reflection_text(text).encode("utf-8")).hexdigest()
 
 
 def _candidate_for_segment(
@@ -533,6 +587,266 @@ def _ground_relationship_records(
     ]
 
 
+def _apply_reflection_lifecycle_decisions(
+    candidate: ReflectionCandidate,
+    prior: Sequence[dict[str, object]],
+) -> ReflectionCandidate:
+    source_ids = list(candidate.raw_source_ids)
+    candidate_hash = normalized_reflection_text_hash(candidate.content)
+    metadata: dict[str, object] = {
+        **candidate.metadata,
+        "normalized_text_hash": candidate_hash,
+    }
+    findings = list(candidate.reflection_findings)
+    related_source_ids = [str(item["id"]) for item in _candidate_related_prior(candidate, prior)]
+    duplicate = _duplicate_prior(candidate, prior, candidate_hash)
+    if duplicate is not None:
+        reason = str(duplicate["reason"])
+        duplicate_id = str(duplicate["id"])
+        metadata["candidate_duplicate_of_source_id"] = duplicate_id
+        metadata["duplicate_of_source_id"] = duplicate_id
+        metadata["duplicate_reason"] = reason
+        metadata["duplicate_score"] = duplicate["score"]
+        metadata = with_memory_lifecycle_metadata(
+            metadata,
+            MemoryLifecycle(
+                state=MemoryLifecycleState.DUPLICATE,
+                source_id=source_ids[0] if source_ids else "",
+                action="mark_duplicate",
+                reason=reason,
+                duplicate_of_source_id=duplicate_id,
+                reversible=True,
+            ),
+        )
+        finding = _finding(
+            kind=ReflectionFindingKind.DUPLICATE,
+            candidate=candidate,
+            source_ids=source_ids,
+            related_source_ids=[duplicate_id],
+            reason=reason,
+            action="mark_duplicate",
+            lifecycle_state=MemoryLifecycleState.DUPLICATE,
+            confidence=cast("float", duplicate["score"]),
+        )
+        findings.append(finding)
+        metadata = with_reflection_finding_metadata(metadata, finding)
+        return replace(candidate, metadata=metadata, reflection_findings=findings)
+
+    superseded_ids = _explicit_superseded_ids(candidate, related_source_ids)
+    if superseded_ids:
+        metadata["supersedes_source_ids"] = superseded_ids
+        metadata["supersedes"] = superseded_ids
+        finding = _finding(
+            kind=ReflectionFindingKind.SUPERSESSION,
+            candidate=candidate,
+            source_ids=source_ids,
+            related_source_ids=superseded_ids,
+            reason="explicit_supersession_signal",
+            action="supersede",
+            confidence=0.9,
+        )
+        findings.append(finding)
+        metadata = with_reflection_finding_metadata(metadata, finding)
+        return replace(candidate, metadata=metadata, reflection_findings=findings)
+
+    stale_ids = _explicit_stale_source_ids(candidate, related_source_ids)
+    if stale_ids:
+        metadata["stale_source_ids"] = stale_ids
+        finding = _finding(
+            kind=ReflectionFindingKind.STALE,
+            candidate=candidate,
+            source_ids=source_ids,
+            related_source_ids=stale_ids,
+            reason="explicit_stale_signal",
+            action="mark_stale",
+            confidence=0.86,
+        )
+        findings.append(finding)
+        metadata = with_reflection_finding_metadata(metadata, finding)
+        return replace(candidate, metadata=metadata, reflection_findings=findings)
+
+    contradiction_ids = _contradiction_source_ids(candidate, prior)
+    if contradiction_ids:
+        metadata["contradiction_source_ids"] = contradiction_ids
+        metadata["conflicts_with_source_ids"] = contradiction_ids
+        finding = _finding(
+            kind=ReflectionFindingKind.CONTRADICTION,
+            candidate=candidate,
+            source_ids=source_ids,
+            related_source_ids=contradiction_ids,
+            reason="same_subject_opposite_polarity",
+            action="route_to_review",
+            confidence=0.82,
+        )
+        findings.append(finding)
+        metadata = with_reflection_finding_metadata(metadata, finding)
+    return replace(candidate, metadata=metadata, reflection_findings=findings)
+
+
+def _prior_memory_snapshots(memories: Sequence[ReflectionMemoryLike]) -> list[dict[str, object]]:
+    snapshots: list[dict[str, object]] = []
+    for memory in memories:
+        metadata = dict(memory.metadata or {})
+        content = str(memory.raw_content or "")
+        normalized_hash = str(
+            metadata.get("normalized_text_hash") or normalized_reflection_text_hash(content)
+        )
+        snapshots.append(
+            {
+                "id": memory.id,
+                "content": content,
+                "metadata": metadata,
+                "normalized_text_hash": normalized_hash,
+                "review_state": str(memory.review_state or ""),
+                "claim_signature": _claim_signature(content),
+            }
+        )
+    return snapshots
+
+
+def _candidate_related_prior(
+    candidate: ReflectionCandidate,
+    prior: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    candidate_sources = set(candidate.raw_source_ids)
+    return [memory for memory in prior if str(memory["id"]) not in candidate_sources]
+
+
+def _duplicate_prior(
+    candidate: ReflectionCandidate,
+    prior: Sequence[dict[str, object]],
+    candidate_hash: str,
+) -> dict[str, object] | None:
+    candidate_sources = set(candidate.raw_source_ids)
+    candidate_words = set(_normalize_reflection_text(candidate.content).split())
+    best: dict[str, object] | None = None
+    for memory in prior:
+        memory_id = str(memory["id"])
+        if memory_id in candidate_sources:
+            continue
+        if memory["normalized_text_hash"] == candidate_hash:
+            return {
+                "id": memory_id,
+                "reason": "exact_normalized_text_duplicate",
+                "score": 1.0,
+            }
+        memory_words = set(_normalize_reflection_text(str(memory["content"])).split())
+        score = _jaccard(candidate_words, memory_words)
+        if score >= _NEAR_DUPLICATE_THRESHOLD and (
+            best is None or score > cast("float", best["score"])
+        ):
+            best = {
+                "id": memory_id,
+                "reason": "near_normalized_text_duplicate",
+                "score": round(score, 4),
+            }
+    return best
+
+
+def _explicit_superseded_ids(
+    candidate: ReflectionCandidate,
+    prior_source_ids: Sequence[str],
+) -> list[str]:
+    matched = _ids_from_pattern(_SUPERSESSION_PATTERN, candidate.content)
+    known_ids = {source_id.lower() for source_id in prior_source_ids}
+    if known_ids:
+        matched = [source_id for source_id in matched if source_id.lower() in known_ids]
+    return list(dict.fromkeys(matched))
+
+
+def _explicit_stale_source_ids(
+    candidate: ReflectionCandidate,
+    prior_source_ids: Sequence[str],
+) -> list[str]:
+    matched = _ids_from_pattern(_STALE_TARGET_PATTERN, candidate.content)
+    content = candidate.content.lower()
+    for source_id in prior_source_ids:
+        if source_id.lower() in content and any(marker in content for marker in _STALE_MARKERS):
+            matched.append(source_id)
+    return list(dict.fromkeys(matched))
+
+
+def _contradiction_source_ids(
+    candidate: ReflectionCandidate,
+    prior: Sequence[dict[str, object]],
+) -> list[str]:
+    if candidate.kind != "claim":
+        return []
+    signature = _claim_signature(candidate.content)
+    if signature is None:
+        return []
+    subject, polarity = signature
+    candidate_sources = set(candidate.raw_source_ids)
+    conflicts: list[str] = []
+    for memory in prior:
+        memory_id = str(memory["id"])
+        if memory_id in candidate_sources:
+            continue
+        prior_signature = memory.get("claim_signature")
+        if not isinstance(prior_signature, tuple) or len(prior_signature) != 2:
+            continue
+        prior_subject, prior_polarity = prior_signature
+        if prior_subject == subject and prior_polarity is not polarity:
+            conflicts.append(memory_id)
+    return conflicts
+
+
+def _claim_signature(text: str) -> tuple[str, bool] | None:
+    normalized = _normalize_reflection_text(text)
+    for pattern in _POLARITY_PATTERNS:
+        match = pattern.search(normalized)
+        if match is None:
+            continue
+        polarity = _POLARITY_VALUES.get(match.group("polarity").lower())
+        if polarity is None:
+            continue
+        subject = _normalize_subject(match.group("subject"))
+        if subject:
+            return subject, polarity
+    return None
+
+
+def _finding(
+    *,
+    kind: ReflectionFindingKind,
+    candidate: ReflectionCandidate,
+    source_ids: Sequence[str],
+    related_source_ids: Sequence[str],
+    reason: str,
+    action: str,
+    confidence: float,
+    lifecycle_state: MemoryLifecycleState | None = None,
+) -> ReflectionFinding:
+    return ReflectionFinding(
+        kind=kind,
+        target_source_id=source_ids[0] if source_ids else "",
+        reason=reason,
+        action=action,
+        confidence=confidence,
+        lifecycle_state=lifecycle_state,
+        source_ids=list(source_ids),
+        related_source_ids=list(related_source_ids),
+    )
+
+
+def _ids_from_pattern(pattern: re.Pattern[str], text: str) -> list[str]:
+    return [match.group(1).rstrip(".,);]") for match in pattern.finditer(text)]
+
+
+def _normalize_subject(value: str) -> str:
+    return _normalize_reflection_text(value).removeprefix("the ").strip()
+
+
+def _normalize_reflection_text(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9_./:-]+", " ", text.lower()).split())
+
+
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
 def _candidate_source_ids(
     candidate: ReflectionCandidate,
     raw_source_ids: Sequence[str],
@@ -634,7 +948,9 @@ __all__ = [
     "HeuristicReflectionExtractor",
     "ReflectionExtractionRequest",
     "ReflectionExtractor",
+    "apply_reflection_lifecycle_decisions",
     "ephemeral_reflection_source_id",
     "ground_reflection_candidate",
+    "normalized_reflection_text_hash",
     "validate_reflection_candidates",
 ]
