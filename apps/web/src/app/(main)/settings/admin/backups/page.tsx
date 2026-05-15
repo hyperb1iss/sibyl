@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { SettingsPageHeader } from '@/components/settings/primitives';
 import { StatusBadge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Archive,
   Calendar,
@@ -476,14 +478,14 @@ export default function BackupsPage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Database width={20} height={20} className="text-sc-cyan" />
-            <h2 className="text-lg font-semibold text-sc-fg-primary">Backup Management</h2>
-          </div>
-          <div className="flex items-center justify-center py-8">
-            <Spinner size="md" color="purple" />
-          </div>
+        <SettingsPageHeader
+          icon={Archive}
+          iconColor="text-sc-coral"
+          title="Backups"
+          description="Schedule and manage data + graph archives."
+        />
+        <div className="flex items-center justify-center py-12">
+          <Spinner size="md" color="purple" />
         </div>
       </div>
     );
@@ -504,26 +506,22 @@ export default function BackupsPage() {
         lastBackupSize={lastCompletedBackup?.size_bytes}
       />
 
-      {/* Header + Create Button */}
-      <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <Database width={20} height={20} className="text-sc-cyan" />
-            <h2 className="text-lg font-semibold text-sc-fg-primary">Backup Management</h2>
-          </div>
-          <button
-            type="button"
+      <SettingsPageHeader
+        icon={Archive}
+        iconColor="text-sc-coral"
+        title="Backups"
+        description="Create and manage archives of your data and knowledge graph."
+        actions={
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<Play width={14} height={14} />}
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sc-purple text-white text-sm font-medium hover:bg-sc-purple/90 transition-colors"
           >
-            <Play width={14} height={14} />
-            Create Backup
-          </button>
-        </div>
-        <p className="text-sc-fg-muted text-sm">
-          Create and manage backup archives of your SurrealDB data and knowledge graph.
-        </p>
-      </div>
+            Create backup
+          </Button>
+        }
+      />
 
       {/* Scheduled Backup Configuration */}
       {settings && (

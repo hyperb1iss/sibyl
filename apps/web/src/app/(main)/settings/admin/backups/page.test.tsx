@@ -88,7 +88,7 @@ describe('BackupsPage', () => {
   it('renders tracked backup management controls and archive rows', () => {
     render(<BackupsPage />);
 
-    expect(screen.getByRole('heading', { name: 'Backup Management' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Backups' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /create backup/i })).toBeInTheDocument();
     expect(screen.getByText('Scheduled Backups')).toBeInTheDocument();
     expect(screen.getByText('Surreal Data Snapshot')).toBeInTheDocument();

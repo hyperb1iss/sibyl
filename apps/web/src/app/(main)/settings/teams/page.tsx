@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { SettingsPageHeader } from '@/components/settings/primitives';
 import { Button, IconButton } from '@/components/ui/button';
 import { Check, Eye, Settings, Star, Trash, User, Users } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
@@ -244,21 +245,27 @@ export default function TeamsPage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Users width={20} height={20} className="text-sc-purple" />
-            <h2 className="text-lg font-semibold text-sc-fg-primary">Teams</h2>
-          </div>
-          <TeamsSkeleton />
-        </div>
+        <SettingsPageHeader
+          icon={Users}
+          title="Teams"
+          description="Members and roles across your organizations."
+        />
+        <TeamsSkeleton />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-sc-bg-base rounded-lg border border-sc-red/20 p-6">
-        <p className="text-sc-red">Failed to load teams. Please try again.</p>
+      <div className="space-y-6">
+        <SettingsPageHeader
+          icon={Users}
+          title="Teams"
+          description="Members and roles across your organizations."
+        />
+        <div className="rounded-lg border border-sc-red/20 bg-sc-red/5 p-4 text-sm text-sc-red">
+          Failed to load teams. Please try again.
+        </div>
       </div>
     );
   }
@@ -266,59 +273,49 @@ export default function TeamsPage() {
   const orgs = orgsData?.orgs || [];
   const currentOrgId = me?.organization?.id;
   const currentUserId = me?.user?.id || '';
-
-  // Separate current org from others for better UX
   const currentOrg = orgs.find(o => o.id === currentOrgId);
   const otherOrgs = orgs.filter(o => o.id !== currentOrgId);
 
   return (
     <div className="space-y-6">
-      <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <Users width={20} height={20} className="text-sc-purple" />
-          <h2 className="text-lg font-semibold text-sc-fg-primary">Teams</h2>
+      <SettingsPageHeader
+        icon={Users}
+        title="Teams"
+        description="Members and roles across your organizations. Expand to manage."
+      />
+
+      {orgs.length === 0 ? (
+        <div className="rounded-lg border border-sc-fg-subtle/10 bg-sc-bg-base p-10 text-center">
+          <Users width={32} height={32} className="mx-auto mb-3 text-sc-fg-muted" />
+          <p className="text-sc-fg-muted">No organizations yet.</p>
+          <p className="mt-1 text-sm text-sc-fg-subtle">
+            Join or create an organization to collaborate with others.
+          </p>
         </div>
-        <p className="text-sc-fg-muted mb-6">
-          View and manage team members across your organizations. Expand each organization to see
-          members and manage roles.
-        </p>
-
-        {orgs.length === 0 ? (
-          <div className="text-center py-8">
-            <Users width={32} height={32} className="mx-auto text-sc-fg-muted mb-3" />
-            <p className="text-sc-fg-muted">No organizations yet.</p>
-            <p className="text-sm text-sc-fg-subtle mt-1">
-              Join or create an organization to collaborate with others.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Current org first */}
-            {currentOrg && (
-              <OrgMembersCard org={currentOrg} currentUserId={currentUserId} isCurrentOrg={true} />
-            )}
-
-            {/* Other orgs */}
-            {otherOrgs.length > 0 && (
-              <>
-                {currentOrg && (
-                  <div className="text-xs text-sc-fg-subtle uppercase tracking-wide pt-2">
-                    Other Organizations
-                  </div>
-                )}
-                {otherOrgs.map(org => (
-                  <OrgMembersCard
-                    key={org.id}
-                    org={org}
-                    currentUserId={currentUserId}
-                    isCurrentOrg={false}
-                  />
-                ))}
-              </>
-            )}
-          </div>
-        )}
-      </div>
+      ) : (
+        <div className="space-y-4">
+          {currentOrg && (
+            <OrgMembersCard org={currentOrg} currentUserId={currentUserId} isCurrentOrg={true} />
+          )}
+          {otherOrgs.length > 0 && (
+            <>
+              {currentOrg && (
+                <div className="px-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-sc-fg-subtle">
+                  Other organizations
+                </div>
+              )}
+              {otherOrgs.map(org => (
+                <OrgMembersCard
+                  key={org.id}
+                  org={org}
+                  currentUserId={currentUserId}
+                  isCurrentOrg={false}
+                />
+              ))}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

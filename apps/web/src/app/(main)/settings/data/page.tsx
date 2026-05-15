@@ -2,9 +2,10 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
+import { SettingsPageHeader } from '@/components/settings/primitives';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { AlertCircle, Archive, Check, Download, Upload } from '@/components/ui/icons';
+import { AlertCircle, Archive, Check, Database, Download, Upload } from '@/components/ui/icons';
 import { api, type BackupData, type BackupResponse } from '@/lib/api';
 
 export default function DataSettingsPage() {
@@ -69,15 +70,19 @@ export default function DataSettingsPage() {
   };
 
   return (
-    <div className="space-y-8">
-      {/* Backup Section */}
+    <div className="space-y-6">
+      <SettingsPageHeader
+        icon={Database}
+        title="Data"
+        description="Export and restore your graph as a JSON archive."
+      />
       <section className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
         <div className="flex items-start gap-4">
           <div className="p-3 rounded-lg bg-sc-cyan/10">
             <Download className="w-6 h-6 text-sc-cyan" />
           </div>
           <div className="flex-1">
-            <h2 className="text-lg font-semibold text-sc-fg-primary mb-1">Backup Graph Data</h2>
+            <h2 className="text-base font-semibold text-sc-fg-primary mb-1">Backup graph data</h2>
             <p className="text-sm text-sc-fg-muted mb-4">
               Export all entities and relationships to a JSON file. This backup can be used to
               restore your data or migrate to another organization.
@@ -118,7 +123,7 @@ export default function DataSettingsPage() {
             <Upload className="w-6 h-6 text-sc-purple" />
           </div>
           <div className="flex-1">
-            <h2 className="text-lg font-semibold text-sc-fg-primary mb-1">Restore from Backup</h2>
+            <h2 className="text-base font-semibold text-sc-fg-primary mb-1">Restore from backup</h2>
             <p className="text-sm text-sc-fg-muted mb-4">
               Import entities and relationships from a previously exported backup file. By default,
               existing entities are skipped to prevent duplicates.

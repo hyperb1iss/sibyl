@@ -1,6 +1,7 @@
 'use client';
 
 import { toast } from 'sonner';
+import { SettingsPageHeader } from '@/components/settings/primitives';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -104,14 +105,14 @@ export default function SystemStatusPage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Activity width={20} height={20} className="text-sc-cyan" />
-            <h2 className="text-lg font-semibold text-sc-fg-primary">System Status</h2>
-          </div>
-          <div className="flex items-center justify-center py-8">
-            <Spinner size="md" color="purple" />
-          </div>
+        <SettingsPageHeader
+          icon={Activity}
+          iconColor="text-sc-cyan"
+          title="System"
+          description="Real-time health and diagnostics."
+        />
+        <div className="flex items-center justify-center py-12">
+          <Spinner size="md" color="purple" />
         </div>
       </div>
     );
@@ -120,22 +121,24 @@ export default function SystemStatusPage() {
   if (healthError) {
     return (
       <div className="space-y-6">
-        <div className="bg-sc-bg-base rounded-lg border border-sc-red/20 p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <Activity width={20} height={20} className="text-sc-red" />
-            <h2 className="text-lg font-semibold text-sc-fg-primary">System Status</h2>
-          </div>
-          <p className="text-sc-red mb-4">
-            Failed to load system status. The server may be unavailable.
-          </p>
-          <button
-            type="button"
-            onClick={() => refetchHealth()}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sc-bg-highlight border border-sc-fg-subtle/20 text-sm font-medium text-sc-fg-secondary hover:bg-sc-bg-base transition-colors"
-          >
-            <RefreshDouble width={14} height={14} />
-            Retry
-          </button>
+        <SettingsPageHeader
+          icon={Activity}
+          iconColor="text-sc-red"
+          title="System"
+          description="Real-time health and diagnostics."
+          actions={
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => refetchHealth()}
+              icon={<RefreshDouble width={14} height={14} />}
+            >
+              Retry
+            </Button>
+          }
+        />
+        <div className="rounded-lg border border-sc-red/20 bg-sc-red/5 p-4 text-sm text-sc-red">
+          Failed to load system status. The server may be unavailable.
         </div>
       </div>
     );
@@ -143,18 +146,13 @@ export default function SystemStatusPage() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-sc-bg-base rounded-lg border border-sc-fg-subtle/10 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <Activity width={20} height={20} className="text-sc-cyan" />
-            <h2 className="text-lg font-semibold text-sc-fg-primary">System Status</h2>
-          </div>
-          <StatusBadge status={health?.status ?? 'unknown'} variant="chip" />
-        </div>
-        <p className="text-sc-fg-muted">
-          Real-time health and diagnostics for the Sibyl server and its connected services.
-        </p>
-      </div>
+      <SettingsPageHeader
+        icon={Activity}
+        iconColor="text-sc-cyan"
+        title="System"
+        description="Real-time health and diagnostics for the Sibyl server and its services."
+        actions={<StatusBadge status={health?.status ?? 'unknown'} variant="chip" />}
+      />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard
