@@ -74,6 +74,16 @@ ignore = [
     "SIM105",  # contextlib.suppress (explicit try-except is clearer here)
     "PLR2004", # magic numbers (thresholds are clear in context)
 ]
+# Skill utility scripts: CLI tools that print to stdout, tolerate malformed JSON
+"skills/*/scripts/*.py" = [
+    "T20",     # print statements (CLI output is the whole point)
+    "S112",    # try-except-continue (malformed transcript lines are expected)
+    "SIM102",  # nested if (intentional for branch clarity in classifiers)
+    "PLR0912", # too many branches (transcript-shape dispatchers are wide)
+    "PLR0915", # too many statements (single-pass scanners are long)
+    "PLW2901", # for loop var reassign (idiomatic line.strip())
+    "PLR2004", # magic numbers (sample/limit thresholds are clear in context)
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["sibyl", "sibyl_core", "sibyl_cli"]
