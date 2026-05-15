@@ -18,8 +18,8 @@ import {
   useUpdateOrgMemberRole,
 } from '@/lib/hooks';
 
-// Role options for member management
 const ROLES = ['owner', 'admin', 'member'] as const;
+const NON_OWNER_ROLES = ['admin', 'member'] as const;
 
 function OrgSkeleton() {
   return (
@@ -111,6 +111,7 @@ function OrgMembersList({ slug, currentUserId, userRole }: OrgMembersListProps) 
   const updateRole = useUpdateOrgMemberRole();
   const removeMember = useRemoveOrgMember();
   const canManage = userRole === 'owner' || userRole === 'admin';
+  const canManageOwnerRoles = userRole === 'owner';
 
   if (isLoading) {
     return (
@@ -167,14 +168,16 @@ function OrgMembersList({ slug, currentUserId, userRole }: OrgMembersListProps) 
             </p>
             <p className="text-xs text-sc-fg-muted truncate">{member.user.email}</p>
           </div>
-          {canManage && member.user.id !== currentUserId ? (
+          {canManage &&
+          member.user.id !== currentUserId &&
+          (canManageOwnerRoles || member.role !== 'owner') ? (
             <div className="flex items-center gap-2">
               <select
                 value={member.role}
                 onChange={e => handleRoleChange(member.user.id, e.target.value)}
                 className="text-xs bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded px-2 py-1 text-sc-fg-secondary"
               >
-                {ROLES.map(role => (
+                {(canManageOwnerRoles ? ROLES : NON_OWNER_ROLES).map(role => (
                   <option key={role} value={role}>
                     {role}
                   </option>

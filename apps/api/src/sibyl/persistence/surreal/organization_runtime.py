@@ -35,6 +35,7 @@ from sibyl_core.auth import AuthUser, OrganizationRole, ProjectRole
 
 log = structlog.get_logger()
 type SurrealRecord = dict[str, object]
+_OWNER_ROLE_DETAIL = "Only organization owners can manage owner roles"
 
 
 async def ensure_graph_indexes(group_id: str) -> None:
@@ -86,6 +87,18 @@ def _normalize_records(result: object) -> list[SurrealRecord]:
         if record is not None:
             records.append(record)
     return records
+
+
+def _enforce_owner_role_boundary(
+    *,
+    actor_role: OrganizationRole,
+    current_role: OrganizationRole | None = None,
+    requested_role: OrganizationRole | None = None,
+) -> None:
+    if actor_role is OrganizationRole.OWNER:
+        return
+    if current_role is OrganizationRole.OWNER or requested_role is OrganizationRole.OWNER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_OWNER_ROLE_DETAIL)
 
 
 def _record_payload(value: object) -> SurrealRecord:
@@ -319,6 +332,7 @@ async def _load_org_member_add_records(
     SurrealRecord | None,
     SurrealRecord | None,
     SurrealRecord | None,
+    list[SurrealRecord],
 ]:
     payload = await client.execute_query(
         """
@@ -341,11 +355,19 @@ async def _load_org_member_add_records(
                         AND user_id = $target_user_id
                     LIMIT 1
                 )[0],
+                owner_memberships: (
+                    SELECT uuid FROM organization_members
+                    WHERE organization_id IN (
+                        SELECT VALUE uuid FROM organizations WHERE slug = $slug LIMIT 1
+                    )
+                        AND role = $owner_role
+                ),
             };
         """,
         slug=slug,
         actor_id=str(actor_id),
         target_user_id=str(target_user_id),
+        owner_role=OrganizationRole.OWNER.value,
     )
     payload = _record_payload(payload)
     return (
@@ -353,6 +375,7 @@ async def _load_org_member_add_records(
         _normalize_record(payload.get("actor_membership")),
         _normalize_record(payload.get("target_user")),
         _normalize_record(payload.get("target_membership")),
+        _normalize_records(payload.get("owner_memberships")),
     )
 
 
@@ -1013,6 +1036,7 @@ async def add_org_member(
             actor_membership,
             target_user,
             target_membership,
+            owner_memberships,
         ) = await _load_org_member_add_records(
             client,
             slug=slug,
@@ -1028,12 +1052,27 @@ async def add_org_member(
         )
         if actor_role not in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        _enforce_owner_role_boundary(actor_role=actor_role, requested_role=role)
         if target_user is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
         now = _utcnow()
         if target_membership is not None:
+            target_role = OrganizationRole(
+                str(target_membership.get("role") or OrganizationRole.MEMBER.value)
+            )
+            _enforce_owner_role_boundary(
+                actor_role=actor_role,
+                current_role=target_role,
+                requested_role=role,
+            )
+            if target_role is OrganizationRole.OWNER and role is not OrganizationRole.OWNER:
+                if len(owner_memberships) <= 1:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Cannot demote the last organization owner",
+                    )
             write_result = await client.execute_query(
                 """
                     UPDATE organization_members
@@ -1121,6 +1160,11 @@ async def update_org_member_role(
         target_role = OrganizationRole(
             str(target_membership.get("role") or OrganizationRole.MEMBER.value)
         )
+        _enforce_owner_role_boundary(
+            actor_role=actor_role,
+            current_role=target_role,
+            requested_role=role,
+        )
         if target_role is OrganizationRole.OWNER and role is not OrganizationRole.OWNER:
             if len(owner_memberships) <= 1:
                 raise HTTPException(
@@ -1200,6 +1244,7 @@ async def remove_org_member(
             target_role = OrganizationRole(
                 str(target_membership.get("role") or OrganizationRole.MEMBER.value)
             )
+            _enforce_owner_role_boundary(actor_role=actor_role, current_role=target_role)
             if target_role is OrganizationRole.OWNER and len(owner_memberships) <= 1:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,

@@ -22,6 +22,7 @@ const ROLE_CONFIG = {
 } as const;
 
 const ROLES = ['owner', 'admin', 'member'] as const;
+const NON_OWNER_ROLES = ['admin', 'member'] as const;
 
 interface OrgMembersCardProps {
   org: {
@@ -43,6 +44,7 @@ function OrgMembersCard({ org, currentUserId, isCurrentOrg }: OrgMembersCardProp
   const switchOrg = useSwitchOrg();
 
   const canManage = org.role === 'owner' || org.role === 'admin';
+  const canManageOwnerRoles = org.role === 'owner';
   const roleConfig = ROLE_CONFIG[org.role as keyof typeof ROLE_CONFIG] ?? ROLE_CONFIG.member;
   const RoleIcon = roleConfig.icon;
 
@@ -186,14 +188,14 @@ function OrgMembersCard({ org, currentUserId, isCurrentOrg }: OrgMembersCardProp
                       </p>
                       <p className="text-xs text-sc-fg-muted truncate">{member.user.email}</p>
                     </div>
-                    {canManage && !isYou ? (
+                    {canManage && !isYou && (canManageOwnerRoles || member.role !== 'owner') ? (
                       <div className="flex items-center gap-2">
                         <select
                           value={member.role}
                           onChange={e => handleRoleChange(member.user.id, e.target.value)}
                           className="text-xs bg-sc-bg-highlight border border-sc-fg-subtle/20 rounded px-2 py-1 text-sc-fg-secondary"
                         >
-                          {ROLES.map(role => (
+                          {(canManageOwnerRoles ? ROLES : NON_OWNER_ROLES).map(role => (
                             <option key={role} value={role}>
                               {role}
                             </option>

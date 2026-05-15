@@ -841,6 +841,7 @@ async def test_surreal_add_org_member_batches_lookup_and_updates_existing(
         "slug": "electric-coven",
         "actor_id": str(actor_id),
         "target_user_id": str(target_user_id),
+        "owner_role": OrganizationRole.OWNER.value,
     }
     write_query, write_params = fake_client.calls[1]
     assert "UPDATE organization_members" in write_query
@@ -906,6 +907,114 @@ async def test_surreal_add_org_member_batches_lookup_and_creates_missing(
     assert "RETURN" in fake_client.calls[0][0]
     assert "CREATE organization_members CONTENT $record" in fake_client.calls[1][0]
     audit_log.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_surreal_add_org_member_rejects_admin_granting_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    actor_id = uuid4()
+    target_user_id = uuid4()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            if "RETURN" in query:
+                return {
+                    "organization": {"uuid": str(org_id), "slug": "electric-coven"},
+                    "actor_membership": {
+                        "uuid": str(uuid4()),
+                        "organization_id": str(org_id),
+                        "user_id": str(actor_id),
+                        "role": OrganizationRole.ADMIN.value,
+                    },
+                    "target_user": {"uuid": str(target_user_id)},
+                    "target_membership": None,
+                    "owner_memberships": [{"uuid": str(uuid4())}],
+                }
+            raise AssertionError(query)
+
+    fake_client = FakeClient()
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_organization_runtime.add_org_member(
+            slug="electric-coven",
+            actor_id=actor_id,
+            target_user_id=target_user_id,
+            role=OrganizationRole.OWNER,
+            request=_request(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Only organization owners can manage owner roles"
+    assert len(fake_client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_surreal_add_org_member_rejects_last_owner_demotion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    actor_id = uuid4()
+    target_user_id = uuid4()
+    membership_id = uuid4()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            if "RETURN" in query:
+                return {
+                    "organization": {"uuid": str(org_id), "slug": "electric-coven"},
+                    "actor_membership": {
+                        "uuid": str(uuid4()),
+                        "organization_id": str(org_id),
+                        "user_id": str(actor_id),
+                        "role": OrganizationRole.OWNER.value,
+                    },
+                    "target_user": {"uuid": str(target_user_id)},
+                    "target_membership": {
+                        "uuid": str(membership_id),
+                        "organization_id": str(org_id),
+                        "user_id": str(target_user_id),
+                        "role": OrganizationRole.OWNER.value,
+                    },
+                    "owner_memberships": [{"uuid": str(membership_id)}],
+                }
+            raise AssertionError(query)
+
+    fake_client = FakeClient()
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_organization_runtime.add_org_member(
+            slug="electric-coven",
+            actor_id=actor_id,
+            target_user_id=target_user_id,
+            role=OrganizationRole.ADMIN,
+            request=_request(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Cannot demote the last organization owner"
+    assert len(fake_client.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -1037,6 +1146,118 @@ async def test_surreal_update_org_member_role_rejects_last_owner_demotion(
 
 
 @pytest.mark.asyncio
+async def test_surreal_update_org_member_role_rejects_admin_owner_promotion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    actor_id = uuid4()
+    target_user_id = uuid4()
+    membership_id = uuid4()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            if "RETURN" in query:
+                return {
+                    "organization": {"uuid": str(org_id), "slug": "electric-coven"},
+                    "actor_membership": {
+                        "uuid": str(uuid4()),
+                        "organization_id": str(org_id),
+                        "user_id": str(actor_id),
+                        "role": OrganizationRole.ADMIN.value,
+                    },
+                    "target_membership": {
+                        "uuid": str(membership_id),
+                        "organization_id": str(org_id),
+                        "user_id": str(target_user_id),
+                        "role": OrganizationRole.MEMBER.value,
+                    },
+                    "owner_memberships": [{"uuid": str(uuid4())}],
+                }
+            raise AssertionError(query)
+
+    fake_client = FakeClient()
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_organization_runtime.update_org_member_role(
+            slug="electric-coven",
+            actor_id=actor_id,
+            target_user_id=target_user_id,
+            role=OrganizationRole.OWNER,
+            request=_request(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Only organization owners can manage owner roles"
+    assert len(fake_client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_surreal_update_org_member_role_rejects_admin_owner_demotion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    actor_id = uuid4()
+    target_user_id = uuid4()
+    membership_id = uuid4()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            if "RETURN" in query:
+                return {
+                    "organization": {"uuid": str(org_id), "slug": "electric-coven"},
+                    "actor_membership": {
+                        "uuid": str(uuid4()),
+                        "organization_id": str(org_id),
+                        "user_id": str(actor_id),
+                        "role": OrganizationRole.ADMIN.value,
+                    },
+                    "target_membership": {
+                        "uuid": str(membership_id),
+                        "organization_id": str(org_id),
+                        "user_id": str(target_user_id),
+                        "role": OrganizationRole.OWNER.value,
+                    },
+                    "owner_memberships": [{"uuid": str(membership_id)}, {"uuid": str(uuid4())}],
+                }
+            raise AssertionError(query)
+
+    fake_client = FakeClient()
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_organization_runtime.update_org_member_role(
+            slug="electric-coven",
+            actor_id=actor_id,
+            target_user_id=target_user_id,
+            role=OrganizationRole.ADMIN,
+            request=_request(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Only organization owners can manage owner roles"
+    assert len(fake_client.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_surreal_remove_org_member_batches_lookup_and_allows_self_service(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1096,6 +1317,61 @@ async def test_surreal_remove_org_member_batches_lookup_and_allows_self_service(
     assert "DELETE FROM organization_members" in fake_client.calls[1][0]
     assert fake_client.calls[1][1]["uuid"] == str(membership_id)
     audit_log.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_surreal_remove_org_member_rejects_admin_removing_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org_id = uuid4()
+    actor_id = uuid4()
+    target_user_id = uuid4()
+    membership_id = uuid4()
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query(self, query: str, **params):
+            self.calls.append((query, params))
+            if "RETURN" in query:
+                return {
+                    "organization": {"uuid": str(org_id), "slug": "electric-coven"},
+                    "actor_membership": {
+                        "uuid": str(uuid4()),
+                        "organization_id": str(org_id),
+                        "user_id": str(actor_id),
+                        "role": OrganizationRole.ADMIN.value,
+                    },
+                    "target_membership": {
+                        "uuid": str(membership_id),
+                        "organization_id": str(org_id),
+                        "user_id": str(target_user_id),
+                        "role": OrganizationRole.OWNER.value,
+                    },
+                    "owner_memberships": [{"uuid": str(membership_id)}, {"uuid": str(uuid4())}],
+                }
+            raise AssertionError(query)
+
+    fake_client = FakeClient()
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield fake_client
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_organization_runtime.remove_org_member(
+            slug="electric-coven",
+            actor_id=actor_id,
+            target_user_id=target_user_id,
+            request=_request(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Only organization owners can manage owner roles"
+    assert len(fake_client.calls) == 1
 
 
 @pytest.mark.asyncio
