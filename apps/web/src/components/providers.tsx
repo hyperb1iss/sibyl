@@ -11,7 +11,7 @@ import { ThemeProvider } from '@/lib/theme';
 
 function RealtimeProvider({ children }: { children: ReactNode }) {
   const { data: me, isSuccess } = useMe();
-  const isAuthenticated = isSuccess && !!me?.user;
+  const isAuthenticated = isSuccess ? !!me?.user : undefined;
   useRealtimeUpdates(isAuthenticated);
   return <>{children}</>;
 }

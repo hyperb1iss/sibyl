@@ -12,7 +12,7 @@ import { useProjectContext } from '@/lib/project-context';
 export function ProjectSelector() {
   const { selectedProjects, isAll, toggleProject, clearProjects, selectProject, contextEnabled } =
     useProjectContext();
-  const { data: projectsData } = useProjects();
+  const { data: projectsData } = useProjects({ enabled: contextEnabled });
 
   // Sort projects by recency (prefer last_activity_at, fall back to updated_at)
   const projects = [...(projectsData?.entities ?? [])].sort((a, b) => {

@@ -185,10 +185,12 @@ export const queryKeys = {
 function invalidateByEntityType(
   queryClient: ReturnType<typeof useQueryClient>,
   entityType: string | undefined,
-  entityId?: string
+  entityId?: string,
+  options?: { includeStats?: boolean }
 ) {
-  // Always invalidate stats on create/delete
-  queryClient.invalidateQueries({ queryKey: queryKeys.admin.stats });
+  if (options?.includeStats) {
+    queryClient.invalidateQueries({ queryKey: queryKeys.admin.stats });
+  }
 
   switch (entityType) {
     case 'task':
@@ -460,6 +462,8 @@ export function usePreferences() {
   return useQuery({
     queryKey: queryKeys.preferences,
     queryFn: () => api.preferences.get(),
+    staleTime: 5 * TIMING.STALE_TIME,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -521,6 +525,8 @@ export function useEntities(
     queryKey: queryKeys.entities.list(params),
     queryFn: () => api.entities.list(params),
     initialData,
+    staleTime: TIMING.STALE_TIME,
+    placeholderData: previousData => previousData,
   });
 }
 
@@ -759,7 +765,7 @@ export function useCreateEntity() {
     onSuccess: (data, variables) => {
       // Use entity type from response (most accurate) or input
       const entityType = data.entity_type || variables.entity_type;
-      invalidateByEntityType(queryClient, entityType, data.id);
+      invalidateByEntityType(queryClient, entityType, data.id, { includeStats: true });
     },
   });
 }
@@ -788,7 +794,7 @@ export function useDeleteEntity() {
         | { entity_type?: string }
         | undefined;
       const entityType = cachedEntity?.entity_type;
-      invalidateByEntityType(queryClient, entityType, id);
+      invalidateByEntityType(queryClient, entityType, id, { includeStats: true });
     },
   });
 }
@@ -957,6 +963,8 @@ export function useGraphStats() {
   return useQuery({
     queryKey: queryKeys.graph.stats,
     queryFn: () => api.graph.stats(),
+    staleTime: 5 * TIMING.STALE_TIME,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -995,6 +1003,8 @@ export function useStats(initialData?: import('./api').StatsResponse) {
     queryKey: queryKeys.admin.stats,
     queryFn: api.admin.stats,
     initialData,
+    staleTime: 5 * TIMING.STALE_TIME,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -1002,10 +1012,14 @@ export function useStats(initialData?: import('./api').StatsResponse) {
 // WebSocket Hook
 // =============================================================================
 
-export function useRealtimeUpdates(isAuthenticated = false) {
+export function useRealtimeUpdates(isAuthenticated?: boolean) {
   const queryClient = useQueryClient();
 
   useEffect(() => {
+    if (isAuthenticated === undefined) {
+      return;
+    }
+
     // Only connect when authenticated
     if (!isAuthenticated) {
       wsClient.disconnect();
@@ -1017,7 +1031,7 @@ export function useRealtimeUpdates(isAuthenticated = false) {
     // Entity created - smart invalidation based on entity type
     const unsubCreate = wsClient.on('entity_created', data => {
       const entityType = data.entity_type || data.type;
-      invalidateByEntityType(queryClient, entityType, data.id);
+      invalidateByEntityType(queryClient, entityType, data.id, { includeStats: true });
     });
 
     // Entity updated - smart invalidation based on entity type
@@ -1036,7 +1050,7 @@ export function useRealtimeUpdates(isAuthenticated = false) {
       queryClient.removeQueries({ queryKey: queryKeys.tasks.detail(data.id) });
       queryClient.removeQueries({ queryKey: queryKeys.projects.detail(data.id) });
       queryClient.removeQueries({ queryKey: queryKeys.sources.detail(data.id) });
-      invalidateByEntityType(queryClient, entityType, data.id);
+      invalidateByEntityType(queryClient, entityType, data.id, { includeStats: true });
     });
 
     // Health update
@@ -1288,13 +1302,14 @@ export function useAddTaskNote() {
 // =============================================================================
 
 export function useProjects(
-  options?: { includeArchived?: boolean },
+  options?: { includeArchived?: boolean; enabled?: boolean },
   initialData?: import('./api').TaskListResponse
 ) {
   const includeArchived = options?.includeArchived ?? false;
   return useQuery({
     queryKey: queryKeys.projects.list(includeArchived),
     queryFn: () => api.projects.list({ includeArchived }),
+    enabled: options?.enabled ?? true,
     staleTime: TIMING.STALE_TIME,
     initialData,
   });
