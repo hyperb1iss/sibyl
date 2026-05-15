@@ -322,6 +322,8 @@ First implementation slice landed:
 - `reflection-quality-gate` now runs core, API, CLI, and web reflection-quality slices
 - dogfood recall-improvement fixture covers decision, procedure, task learning, stale claim,
   duplicate suppression, supersession exclusion, and private sensitive-note exclusion
+- v0.12 release-matrix pass is green across reflection quality, autonomy, memory trust,
+  trust control, auth/session, synthesis, adapter ingest, and overview performance
 
 ### v0.13: Source And Synthesis Scale
 
