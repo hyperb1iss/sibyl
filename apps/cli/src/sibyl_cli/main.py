@@ -30,6 +30,7 @@ from sibyl_cli.common import (
     resolve_content_input,
     run_async,
     success,
+    warn,
 )
 from sibyl_cli.config_cmd import app as config_app
 from sibyl_cli.config_store import resolve_project_from_cwd
@@ -52,6 +53,8 @@ from sibyl_cli.state import set_context_override
 from sibyl_cli.task import app as task_app
 from sibyl_cli.task import list_tasks
 from sibyl_cli.update import app as update_app
+from sibyl_core.models.context import ContextIntent
+from sibyl_core.models.entities import EntityType
 
 
 def get_version() -> str:
@@ -109,6 +112,41 @@ app.command("tasks", hidden=True)(list_tasks)
 SEARCH_PREVIEW_CHARS = 220
 CAPTURE_TITLE_CHARS = 72
 QUIET_ENV_VALUES = {"1", "true", "yes", "on"}
+ENTITY_TYPE_ALIASES = {
+    "gotcha": EntityType.ERROR_PATTERN.value,
+    "learning": EntityType.NOTE.value,
+}
+ENTITY_TYPE_VALUES = [entity_type.value for entity_type in EntityType]
+CONTEXT_INTENT_VALUES = [intent.value for intent in ContextIntent]
+ENTITY_TYPE_HELP = f"Entity type: {', '.join(ENTITY_TYPE_VALUES)}"
+CONTEXT_INTENT_HELP = f"Agent intent: {', '.join(CONTEXT_INTENT_VALUES)}"
+
+
+def _normalize_entity_type(value: str, *, option_name: str) -> str:
+    normalized = value.strip().lower()
+    if alias := ENTITY_TYPE_ALIASES.get(normalized):
+        warn(f"{option_name}={normalized} is deprecated; using {alias}.")
+        return alias
+    if normalized in ENTITY_TYPE_VALUES:
+        return normalized
+    choices = ", ".join(ENTITY_TYPE_VALUES)
+    raise typer.BadParameter(f"{value!r} is not one of: {choices}")
+
+
+def _normalize_add_type(value: str) -> str:
+    return _normalize_entity_type(value, option_name="--type")
+
+
+def _normalize_memory_kind(value: str) -> str:
+    return _normalize_entity_type(value, option_name="--kind")
+
+
+def _normalize_context_intent(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized in CONTEXT_INTENT_VALUES:
+        return normalized
+    choices = ", ".join(CONTEXT_INTENT_VALUES)
+    raise typer.BadParameter(f"{value!r} is not one of: {choices}")
 
 
 def _format_search_preview(content: str, max_chars: int = SEARCH_PREVIEW_CHARS) -> str:
@@ -1011,7 +1049,13 @@ def add_knowledge(
         "--follow-symlinks",
         help="Allow --content-file to read through symlinks",
     ),
-    entity_type: str = typer.Option("episode", "--type", "-t", help="Entity type"),
+    entity_type: str = typer.Option(
+        "episode",
+        "--type",
+        "-t",
+        callback=_normalize_add_type,
+        help=ENTITY_TYPE_HELP,
+    ),
     category: str | None = typer.Option(None, "--category", "-c", help="Category"),
     language: str | None = typer.Option(None, "--language", "-l", help="Language"),
     tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
@@ -1094,7 +1138,12 @@ def capture_memory(
         "-t",
         help="Optional title. Derived from content when omitted.",
     ),
-    entity_type: str = typer.Option("episode", "--type", help="Entity type for the capture"),
+    entity_type: str = typer.Option(
+        "episode",
+        "--type",
+        callback=_normalize_add_type,
+        help=ENTITY_TYPE_HELP,
+    ),
     tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
     content_file: str | None = typer.Option(None, "--content-file", help="Read content from file"),
     max_size: int = typer.Option(
@@ -1467,7 +1516,8 @@ def recall_context(
         "build",
         "--intent",
         "-i",
-        help="Agent intent: build, plan, ideate, research, debug, decide, learn, general",
+        callback=_normalize_context_intent,
+        help=CONTEXT_INTENT_HELP,
     ),
     layer: str = typer.Option(
         "recall",
@@ -2004,7 +2054,8 @@ def remember_memory(
         "episode",
         "--kind",
         "-k",
-        help="Memory type: decision, plan, idea, claim, artifact, session, procedure, pattern, episode",
+        callback=_normalize_memory_kind,
+        help=ENTITY_TYPE_HELP,
     ),
     domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
     project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
@@ -2203,7 +2254,8 @@ def reflect_memory(
         "general",
         "--intent",
         "-i",
-        help="Intent: build, plan, ideate, research, debug, decide, learn, general",
+        callback=_normalize_context_intent,
+        help=f"Intent: {', '.join(CONTEXT_INTENT_VALUES)}",
     ),
     domain: str | None = typer.Option(None, "--domain", "-d", help="Domain/category"),
     project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),

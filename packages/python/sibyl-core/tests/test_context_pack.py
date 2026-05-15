@@ -144,6 +144,59 @@ async def test_compile_context_groups_build_context_by_agent_facets() -> None:
 
 
 @pytest.mark.asyncio
+async def test_compile_context_supports_review_intent() -> None:
+    calls: list[dict[str, Any]] = []
+    responses = {
+        ("claim", "rule", "procedure"): [_result("claim-1", "claim", "Verify behavior")],
+        ("decision",): [_result("decision-1", "decision", "Use full fidelity")],
+        ("rule", "guide"): [_result("rule-1", "rule", "Preserve quality")],
+        ("error_pattern", "pattern"): [_result("error-1", "error_pattern", "Avoid shortcuts")],
+        ("artifact", "document", "source", "config_file"): [
+            _result("artifact-1", "artifact", "Audit doc")
+        ],
+        ("task", "epic", "project"): [_result("task-1", "task", "Review task")],
+        ("session", "episode", "note"): [_result("note-1", "note", "Prior note")],
+    }
+
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        calls.append(kwargs)
+        items = responses.get(tuple(kwargs["types"]), [])
+        return SearchResponse(
+            results=items,
+            total=len(items),
+            query=kwargs["query"],
+            filters={"types": kwargs["types"]},
+        )
+
+    pack = await _compile_context_compat(
+        "review the patch",
+        intent="review",
+        organization_id="org-123",
+        search_fn=fake_search,
+    )
+
+    assert pack.intent == ContextIntent.REVIEW
+    assert [section.facet for section in pack.sections] == [
+        ContextFacet.VERIFICATION,
+        ContextFacet.DECISIONS,
+        ContextFacet.CONSTRAINTS,
+        ContextFacet.GOTCHAS,
+        ContextFacet.ARTIFACTS,
+        ContextFacet.ACTIVE_WORK,
+        ContextFacet.RECENT_MEMORY,
+    ]
+    assert [call["types"] for call in calls] == [
+        ["claim", "rule", "procedure"],
+        ["decision"],
+        ["rule", "guide"],
+        ["error_pattern", "pattern"],
+        ["artifact", "document", "source", "config_file"],
+        ["task", "epic", "project"],
+        ["session", "episode", "note"],
+    ]
+
+
+@pytest.mark.asyncio
 async def test_compile_context_runs_facet_searches_concurrently() -> None:
     active_calls = 0
     max_active_calls = 0

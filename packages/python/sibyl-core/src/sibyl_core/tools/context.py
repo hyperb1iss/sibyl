@@ -102,6 +102,15 @@ INTENT_FACETS = {
         ContextFacet.DECISIONS,
         ContextFacet.CONSTRAINTS,
     ],
+    ContextIntent.REVIEW: [
+        ContextFacet.VERIFICATION,
+        ContextFacet.DECISIONS,
+        ContextFacet.CONSTRAINTS,
+        ContextFacet.GOTCHAS,
+        ContextFacet.ARTIFACTS,
+        ContextFacet.ACTIVE_WORK,
+        ContextFacet.RECENT_MEMORY,
+    ],
     ContextIntent.DEBUG: [
         ContextFacet.GOTCHAS,
         ContextFacet.PROCEDURES,

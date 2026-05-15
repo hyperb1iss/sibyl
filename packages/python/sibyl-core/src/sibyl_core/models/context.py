@@ -12,6 +12,7 @@ class ContextIntent(StrEnum):
     PLAN = "plan"
     IDEATE = "ideate"
     RESEARCH = "research"
+    REVIEW = "review"
     DEBUG = "debug"
     DECIDE = "decide"
     LEARN = "learn"

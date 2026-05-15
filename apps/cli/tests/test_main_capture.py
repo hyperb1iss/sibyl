@@ -659,6 +659,54 @@ def test_remember_command_reads_body_from_stdin(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.main.get_client")
+def test_remember_command_accepts_gotcha_alias(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.remember_raw_memory = AsyncMock(
+        return_value={"id": "raw_123", "source_id": "cli:manual"}
+    )
+    mock_client.create_entity = AsyncMock(return_value={"id": "error_pattern_123"})
+    mock_client.explore = AsyncMock()
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["remember", "Bad default", "Capture the gotcha.", "--kind", "gotcha"],
+    )
+
+    assert result.exit_code == 0
+    assert "--kind=gotcha is deprecated; using error_pattern." in result.stdout
+    assert mock_client.create_entity.await_args.kwargs["entity_type"] == "error_pattern"
+    mock_client.explore.assert_not_called()
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd")
+@patch("sibyl_cli.main.get_client")
+def test_remember_command_rejects_invalid_kind_before_api(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.remember_raw_memory = AsyncMock()
+    mock_client.create_entity = AsyncMock()
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["remember", "Bad type", "Nope.", "--kind", "foobar"])
+
+    assert result.exit_code == 2
+    assert "Invalid value for '--kind'" in result.stderr
+    mock_client.remember_raw_memory.assert_not_awaited()
+    mock_client.create_entity.assert_not_awaited()
+    mock_resolve_project_from_cwd.assert_not_called()
+
+
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
 @patch("sibyl_cli.main.get_client")
 def test_remember_command_can_store_raw_memory(
@@ -992,6 +1040,44 @@ def test_recall_command_outputs_markdown_context(
         related_limit=3,
     )
     mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_recall_command_accepts_review_intent(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.context_pack = AsyncMock(return_value={"markdown": "# Review Context"})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["recall", "audit the changes", "--intent", "review"])
+
+    assert result.exit_code == 0
+    mock_client.context_pack.assert_awaited_once()
+    assert mock_client.context_pack.await_args.kwargs["intent"] == "review"
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd")
+@patch("sibyl_cli.main.get_client")
+def test_recall_command_rejects_invalid_intent_before_api(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.context_pack = AsyncMock()
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["recall", "audit the changes", "--intent", "vibes"])
+
+    assert result.exit_code == 2
+    assert "Invalid value for '--intent'" in result.stderr
+    mock_client.context_pack.assert_not_awaited()
+    mock_resolve_project_from_cwd.assert_not_called()
 
 
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")

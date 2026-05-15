@@ -54,7 +54,7 @@ Sibyl is the agent's durable brain. Use it as a loop, not a lookup box:
    `sibyl entity show <id>` when a preview is not enough.
 3. **Remember while learning.** Run `sibyl remember "Title" "What matters" --kind <type>` whenever
    future agents should not rediscover a decision, plan, idea, claim, artifact, session, procedure,
-   or gotcha. In a linked repo, `remember` automatically scopes the memory to that project.
+   or error pattern. In a linked repo, `remember` automatically scopes the memory to that project.
 4. **Reflect at clean breakpoints.** Run `sibyl reflect "<raw notes>" --title "<session>"` to
    extract reviewable candidates. Add `--persist` to write candidates and preserve the raw session
    source as provenance. On task completion, still use `sibyl task complete --learnings "..."`.
@@ -744,7 +744,7 @@ Your directory is not linked. Run `sibyl context` — if `Project: none`, link i
 | `sibyl config`                       | `sibyl config show`                              |
 | `sibyl explore path A B`             | Not a real command — use `explore related`       |
 | `sibyl auth token`                   | Not a real command — use `sibyl auth status`     |
-| Using `--type rule` or `--type tool` | These types don't exist — use `pattern`/`note`   |
+| Using `--kind gotcha` or `learning`  | Use `error_pattern` or `note`                    |
 
 ### Notes vs Learnings
 
