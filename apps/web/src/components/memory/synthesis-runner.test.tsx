@@ -139,12 +139,18 @@ describe('SynthesisRunner', () => {
 
     const { user } = render(<SynthesisRunner />);
 
-    await user.type(screen.getByLabelText(/goal/i), 'Summarize the roadmap');
+    fireEvent.change(screen.getByLabelText(/goal/i), {
+      target: { value: 'Summarize the roadmap' },
+    });
     await user.click(screen.getByLabelText('Remember draft'));
-    await user.type(screen.getByLabelText('Scope Key'), 'project-sibyl');
+    fireEvent.change(screen.getByLabelText('Scope Key'), {
+      target: { value: 'project-sibyl' },
+    });
     await user.click(screen.getByRole('button', { name: /plan/i }));
     await user.clear(await screen.findByDisplayValue('Recommended Path'));
-    await user.type(screen.getByLabelText(/title/i), 'Unified Memory UX');
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: 'Unified Memory UX' },
+    });
     fireEvent.change(screen.getByLabelText(/required sources/i), {
       target: { value: 'raw-1, raw-2' },
     });
