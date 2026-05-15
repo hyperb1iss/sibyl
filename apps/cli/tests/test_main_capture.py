@@ -1,5 +1,6 @@
 """Tests for the root-level capture command."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -345,6 +346,41 @@ def test_add_command_accepts_title_and_content_options(mock_get_client: MagicMoc
 
 
 @patch("sibyl_cli.main.get_client")
+def test_add_command_reads_content_from_stdin(mock_get_client: MagicMock) -> None:
+    mock_client = MagicMock()
+    mock_client.create_entity = AsyncMock(return_value={"id": "episode_123"})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["add", "Stdin title", "-"], input="Stdin body\n")
+
+    assert result.exit_code == 0
+    mock_client.create_entity.assert_awaited_once()
+    assert mock_client.create_entity.await_args.kwargs["content"] == "Stdin body"
+
+
+@patch("sibyl_cli.main.get_client")
+def test_capture_command_rejects_symlink_content_file(
+    mock_get_client: MagicMock,
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "snippet.md"
+    target.write_text("Secret-ish content", encoding="utf-8")
+    link = tmp_path / "snippet-link.md"
+    link.symlink_to(target)
+    mock_client = MagicMock()
+    mock_client.create_entity = AsyncMock(return_value={"id": "episode_123"})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["capture", "--content-file", str(link)])
+
+    assert result.exit_code == 1
+    assert "Refusing to read symlink" in result.stdout
+    mock_client.create_entity.assert_not_called()
+
+
+@patch("sibyl_cli.main.get_client")
 def test_capture_command_waits_for_direct_readiness(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.create_entity = AsyncMock(return_value={"id": "episode_123"})
@@ -486,6 +522,33 @@ def test_remember_command_accepts_content_option(
     assert mock_client.remember_raw_memory.await_args.kwargs["raw_content"] == "Option body"
     mock_client.create_entity.assert_awaited_once()
     assert mock_client.create_entity.await_args.kwargs["content"] == "Option body"
+    mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.main.get_client")
+def test_remember_command_reads_content_file(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+    tmp_path: Path,
+) -> None:
+    content_file = tmp_path / "decision.md"
+    content_file.write_text("File decision body\n", encoding="utf-8")
+    mock_client = MagicMock()
+    mock_client.remember_raw_memory = AsyncMock(return_value={"id": "raw_123"})
+    mock_client.create_entity = AsyncMock(return_value={"id": "decision_123"})
+    mock_client.explore = AsyncMock(return_value={"entities": []})
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["remember", "File memory", "--content-file", str(content_file), "--kind", "decision"],
+    )
+
+    assert result.exit_code == 0
+    assert mock_client.remember_raw_memory.await_args.kwargs["raw_content"] == "File decision body"
+    assert mock_client.create_entity.await_args.kwargs["content"] == "File decision body"
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 

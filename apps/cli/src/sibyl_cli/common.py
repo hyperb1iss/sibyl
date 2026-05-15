@@ -6,9 +6,11 @@ Sibyl Design Language for consistent terminal output.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from collections.abc import Awaitable, Callable
 from functools import wraps
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
@@ -34,6 +36,8 @@ if TYPE_CHECKING:
 
 # Shared console instance (for styled output only, NOT for JSON)
 console = Console(width=160) if not sys.stdout.isatty() else Console()
+DEFAULT_CONTENT_FILE_MAX_SIZE = 1_048_576
+CONTENT_FILE_BINARY_CHECK_BYTES = 8192
 
 
 def _strip_embeddings(obj: object) -> object:
@@ -59,6 +63,60 @@ def print_json(data: object) -> None:
 
     clean_data = _strip_embeddings(data)
     print(json.dumps(clean_data, indent=2, default=str, ensure_ascii=False))
+
+
+def read_content_file(
+    path: str,
+    *,
+    max_size: int = DEFAULT_CONTENT_FILE_MAX_SIZE,
+    follow_symlinks: bool = False,
+) -> str:
+    file_path = Path(path).expanduser()
+    if file_path.is_symlink() and not follow_symlinks:
+        raise ValueError("Refusing to read symlink without --follow-symlinks.")
+    if not file_path.exists():
+        raise ValueError(f"Content file not found: {file_path}")
+    if not file_path.is_file():
+        raise ValueError(f"Content path is not a file: {file_path}")
+    try:
+        size = file_path.stat().st_size
+    except OSError as exc:
+        raise ValueError(f"Content file is not readable: {file_path}") from exc
+    if size > max_size:
+        raise ValueError(f"Content file is too large: {size} bytes exceeds {max_size}.")
+    if not os.access(file_path, os.R_OK):
+        raise ValueError(f"Content file is not readable: {file_path}")
+    try:
+        data = file_path.read_bytes()
+        data[:CONTENT_FILE_BINARY_CHECK_BYTES].decode("utf-8")
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("Content file appears to be binary or non-UTF-8.") from exc
+    except OSError as exc:
+        raise ValueError(f"Content file is not readable: {file_path}") from exc
+
+
+def resolve_content_input(
+    value: str | None,
+    *,
+    content_file: str | None = None,
+    max_size: int = DEFAULT_CONTENT_FILE_MAX_SIZE,
+    follow_symlinks: bool = False,
+    read_stdin_when_missing: bool = True,
+) -> str | None:
+    if content_file:
+        return read_content_file(
+            content_file,
+            max_size=max_size,
+            follow_symlinks=follow_symlinks,
+        )
+    if value == "-":
+        return sys.stdin.read()
+    if value is not None:
+        return value
+    if read_stdin_when_missing and not sys.stdin.isatty():
+        return sys.stdin.read()
+    return None
 
 
 def pagination_hint(

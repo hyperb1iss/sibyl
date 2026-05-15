@@ -29,6 +29,7 @@ from sibyl_cli.common import (
     info,
     pagination_hint,
     print_json,
+    resolve_content_input,
     run_async,
     success,
 )
@@ -691,6 +692,21 @@ def complete_task(
         str | None,
         typer.Option("--learnings", "-l", "--note", help="Key learnings (creates episode)"),
     ] = None,
+    learnings_file: Annotated[
+        str | None,
+        typer.Option("--learnings-file", help="Read learnings from file"),
+    ] = None,
+    max_size: Annotated[
+        int,
+        typer.Option("--max-size", min=1, help="Maximum learnings file size in bytes"),
+    ] = 1_048_576,
+    follow_symlinks: Annotated[
+        bool,
+        typer.Option(
+            "--follow-symlinks",
+            help="Allow --learnings-file to read through symlinks",
+        ),
+    ] = False,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,
@@ -702,9 +718,16 @@ def complete_task(
         client = get_client()
 
         try:
+            resolved_learnings = resolve_content_input(
+                learnings,
+                content_file=learnings_file,
+                max_size=max_size,
+                follow_symlinks=follow_symlinks,
+            )
+            resolved_learnings = (resolved_learnings or "").strip() or None
             resolved_id = await _resolve_task_id(client, task_id)
 
-            response = await client.complete_task(resolved_id, hours, learnings)
+            response = await client.complete_task(resolved_id, hours, resolved_learnings)
 
             if json_out:
                 print_json(response)
@@ -712,13 +735,16 @@ def complete_task(
 
             if response.get("success"):
                 success(f"Task completed: {task_id}")
-                if learnings:
+                if resolved_learnings:
                     info("Task learning capture queued")
             else:
                 error(f"Failed to complete task: {response.get('message', 'Unknown error')}")
 
         except SibylClientError as e:
             _handle_client_error(e)
+        except ValueError as e:
+            error(str(e))
+            raise typer.Exit(code=1) from e
 
     _complete()
 
@@ -1040,7 +1066,19 @@ def update_task(
 @app.command("note")
 def add_note(
     task_id: Annotated[str, typer.Argument(help="Task ID or unambiguous prefix")],
-    content: Annotated[str, typer.Argument(help="Note content")],
+    content: Annotated[str | None, typer.Argument(help="Note content or '-' for stdin")] = None,
+    content_file: Annotated[
+        str | None,
+        typer.Option("--content-file", help="Read note content from file"),
+    ] = None,
+    max_size: Annotated[
+        int,
+        typer.Option("--max-size", min=1, help="Maximum content file size in bytes"),
+    ] = 1_048_576,
+    follow_symlinks: Annotated[
+        bool,
+        typer.Option("--follow-symlinks", help="Allow --content-file to read through symlinks"),
+    ] = False,
     assistant: Annotated[
         bool,
         typer.Option(
@@ -1068,11 +1106,25 @@ def add_note(
         client = get_client()
 
         try:
+            resolved_content = (
+                resolve_content_input(
+                    content,
+                    content_file=content_file,
+                    max_size=max_size,
+                    follow_symlinks=follow_symlinks,
+                )
+                or ""
+            ).strip()
+            if not resolved_content:
+                error("Provide note content as an argument, via stdin, or with --content-file.")
+                raise typer.Exit(code=1)
             resolved_id = await _resolve_task_id(client, task_id)
             author_type = "agent" if assistant else "user"
             author_name = author or ""
 
-            response = await client.create_note(resolved_id, content, author_type, author_name)
+            response = await client.create_note(
+                resolved_id, resolved_content, author_type, author_name
+            )
 
             if json_out:
                 print_json(response)
@@ -1085,6 +1137,9 @@ def add_note(
 
         except SibylClientError as e:
             _handle_client_error(e)
+        except ValueError as e:
+            error(str(e))
+            raise typer.Exit(code=1) from e
 
     _note()
 

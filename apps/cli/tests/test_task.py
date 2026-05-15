@@ -1,6 +1,7 @@
 """Tests for task CLI commands."""
 
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
@@ -190,6 +191,95 @@ def test_task_complete_accepts_note_alias(mock_get_client: MagicMock) -> None:
         "task_123456789abc",
         None,
         "Alias lesson",
+    )
+
+
+@patch("sibyl_cli.task.get_client")
+def test_task_complete_reads_learnings_file(
+    mock_get_client: MagicMock,
+    tmp_path: Path,
+) -> None:
+    learnings_file = tmp_path / "learnings.md"
+    learnings_file.write_text("File-based lesson\n", encoding="utf-8")
+    mock_client = MagicMock()
+    mock_client.complete_task = AsyncMock(return_value={"success": True})
+    mock_get_client.return_value = mock_client
+
+    runner = CliRunner()
+    result = runner.invoke(
+        task.app,
+        [
+            "complete",
+            "task_123456789abc",
+            "--learnings-file",
+            str(learnings_file),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Task learning capture queued" in result.stdout
+    mock_client.complete_task.assert_awaited_once_with(
+        "task_123456789abc",
+        None,
+        "File-based lesson",
+    )
+
+
+@patch("sibyl_cli.task.get_client")
+def test_task_note_reads_content_file(
+    mock_get_client: MagicMock,
+    tmp_path: Path,
+) -> None:
+    content_file = tmp_path / "diag.md"
+    content_file.write_text("Root cause breadcrumb\n", encoding="utf-8")
+    mock_client = MagicMock()
+    mock_client.create_note = AsyncMock(return_value={"success": True})
+    mock_get_client.return_value = mock_client
+
+    runner = CliRunner()
+    result = runner.invoke(
+        task.app,
+        [
+            "note",
+            "task_123456789abc",
+            "--content-file",
+            str(content_file),
+            "--assistant",
+            "--author",
+            "Nova",
+        ],
+    )
+
+    assert result.exit_code == 0
+    mock_client.create_note.assert_awaited_once_with(
+        "task_123456789abc",
+        "Root cause breadcrumb",
+        "agent",
+        "Nova",
+    )
+
+
+@patch("sibyl_cli.task.get_client")
+def test_task_note_reads_content_from_stdin(
+    mock_get_client: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.create_note = AsyncMock(return_value={"success": True})
+    mock_get_client.return_value = mock_client
+
+    runner = CliRunner()
+    result = runner.invoke(
+        task.app,
+        ["note", "task_123456789abc", "-"],
+        input="Piped breadcrumb\n",
+    )
+
+    assert result.exit_code == 0
+    mock_client.create_note.assert_awaited_once_with(
+        "task_123456789abc",
+        "Piped breadcrumb",
+        "user",
+        "",
     )
 
 

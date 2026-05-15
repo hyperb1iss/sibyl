@@ -229,13 +229,18 @@ sibyl remember "Global guide" "Always cite current docs..." --kind rule --all-pr
 
 # Read the body from stdin
 echo "Exact session notes..." | sibyl remember "Planning session" --kind session
+
+# Read the body from a guarded file
+sibyl remember "Planning session" --content-file ./notes.md --kind session
+sibyl add "CSS diagnostic" --content-file ./snippet.css
 ```
 
 **When to use:** During work, whenever future agents should not have to rediscover a detail. Project
 scoping stores both `metadata.project_id` and a project edge, and `remember` links to the single
 active `doing` task when exactly one exists. Future recall can find the memory from structured
 search, graph traversal, or task context. Use `--no-active-task` when the memory belongs to the
-project but not the current task.
+project but not the current task. `--content-file` rejects symlinks, non-UTF-8 content, and files
+larger than 1 MiB by default; use `--max-size` or `--follow-symlinks` only when that is intentional.
 
 ---
 
@@ -323,6 +328,7 @@ sibyl task review task_a1b2c3d4e5f6 --pr "github.com/.../pull/42"
 # ⚠️ COMPLETE WITH LEARNINGS - always use this to finish tasks!
 # This marks done AND creates a searchable episode in the knowledge graph
 sibyl task complete task_a1b2c3d4e5f6 --hours 4.5 --learnings "Token refresh needs..."
+sibyl task complete task_a1b2c3d4e5f6 --learnings-file ./writeup.md
 
 # Archive single task
 sibyl task archive task_a1b2c3d4e5f6 --reason "Superseded by new approach"
@@ -333,6 +339,7 @@ sibyl task update task_a1b2c3d4e5f6 --status done --priority high
 # Add progress breadcrumbs, user clarifications, roadmap notes, or review context during work
 sibyl task note task_a1b2c3d4e5f6 "Found the root cause"
 sibyl task note task_a1b2c3d4e5f6 "Implemented fix" --assistant
+sibyl task note task_a1b2c3d4e5f6 --content-file ./diag.md
 
 # List notes for a task
 sibyl task notes task_a1b2c3d4e5f6

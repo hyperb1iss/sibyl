@@ -27,6 +27,7 @@ from sibyl_cli.common import (
     handle_client_error,
     info,
     print_json,
+    resolve_content_input,
     run_async,
     success,
 )
@@ -998,6 +999,18 @@ def add_knowledge(
     content: str | None = typer.Argument(None, help="Content/description"),
     title_option: str | None = typer.Option(None, "--title", help="Title/name of the knowledge"),
     content_option: str | None = typer.Option(None, "--content", help="Content/description"),
+    content_file: str | None = typer.Option(None, "--content-file", help="Read content from file"),
+    max_size: int = typer.Option(
+        1_048_576,
+        "--max-size",
+        min=1,
+        help="Maximum content file size in bytes",
+    ),
+    follow_symlinks: bool = typer.Option(
+        False,
+        "--follow-symlinks",
+        help="Allow --content-file to read through symlinks",
+    ),
     entity_type: str = typer.Option("episode", "--type", "-t", help="Entity type"),
     category: str | None = typer.Option(None, "--category", "-c", help="Category"),
     language: str | None = typer.Option(None, "--language", "-l", help="Language"),
@@ -1011,12 +1024,24 @@ def add_knowledge(
 ) -> None:
     """Add knowledge to the graph."""
     resolved_title = (title_option or title or "").strip()
-    resolved_content = (content_option or content or "").strip()
+    try:
+        resolved_content = (
+            resolve_content_input(
+                content_option if content_option is not None else content,
+                content_file=content_file,
+                max_size=max_size,
+                follow_symlinks=follow_symlinks,
+            )
+            or ""
+        ).strip()
+    except ValueError as e:
+        error(str(e))
+        raise typer.Exit(code=1) from e
     if not resolved_title:
         error("Provide a title as an argument or with --title.")
         raise typer.Exit(code=1)
     if not resolved_content:
-        error("Provide content as an argument or with --content.")
+        error("Provide content as an argument, via stdin, or with --content-file.")
         raise typer.Exit(code=1)
 
     @run_async
@@ -1064,6 +1089,18 @@ def capture_memory(
     ),
     entity_type: str = typer.Option("episode", "--type", help="Entity type for the capture"),
     tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
+    content_file: str | None = typer.Option(None, "--content-file", help="Read content from file"),
+    max_size: int = typer.Option(
+        1_048_576,
+        "--max-size",
+        min=1,
+        help="Maximum content file size in bytes",
+    ),
+    follow_symlinks: bool = typer.Option(
+        False,
+        "--follow-symlinks",
+        help="Allow --content-file to read through symlinks",
+    ),
     wait_searchable: bool = typer.Option(
         False,
         "--wait-searchable",
@@ -1073,13 +1110,21 @@ def capture_memory(
 ) -> None:
     """Capture a quick memory without separate title and content fields."""
 
-    resolved_content = content
-    if resolved_content is None and not sys.stdin.isatty():
-        resolved_content = sys.stdin.read()
-
-    resolved_content = (resolved_content or "").strip()
+    try:
+        resolved_content = (
+            resolve_content_input(
+                content,
+                content_file=content_file,
+                max_size=max_size,
+                follow_symlinks=follow_symlinks,
+            )
+            or ""
+        ).strip()
+    except ValueError as e:
+        error(str(e))
+        raise typer.Exit(code=1) from e
     if not resolved_content:
-        error("Provide capture content as an argument or via stdin.")
+        error("Provide capture content as an argument, via stdin, or with --content-file.")
         raise typer.Exit(code=1)
 
     resolved_title = (title or "").strip() or _derive_capture_title(resolved_content)
@@ -1936,6 +1981,18 @@ def remember_memory(
         help="Memory body. Reads stdin if omitted.",
     ),
     content_option: str | None = typer.Option(None, "--content", help="Memory body"),
+    content_file: str | None = typer.Option(None, "--content-file", help="Read content from file"),
+    max_size: int = typer.Option(
+        1_048_576,
+        "--max-size",
+        min=1,
+        help="Maximum content file size in bytes",
+    ),
+    follow_symlinks: bool = typer.Option(
+        False,
+        "--follow-symlinks",
+        help="Allow --content-file to read through symlinks",
+    ),
     kind: str = typer.Option(
         "episode",
         "--kind",
@@ -1981,13 +2038,21 @@ def remember_memory(
 ) -> None:
     """Remember a decision, plan, idea, claim, artifact, session, or learning."""
 
-    resolved_content = content_option if content_option is not None else content
-    if resolved_content is None and not sys.stdin.isatty():
-        resolved_content = sys.stdin.read()
-
-    resolved_content = (resolved_content or "").strip()
+    try:
+        resolved_content = (
+            resolve_content_input(
+                content_option if content_option is not None else content,
+                content_file=content_file,
+                max_size=max_size,
+                follow_symlinks=follow_symlinks,
+            )
+            or ""
+        ).strip()
+    except ValueError as e:
+        error(str(e))
+        raise typer.Exit(code=1) from e
     if not resolved_content:
-        error("Provide memory content as an argument or via stdin.")
+        error("Provide memory content as an argument, via stdin, or with --content-file.")
         raise typer.Exit(code=1)
 
     parsed_tags = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
