@@ -1,7 +1,9 @@
 # Sibyl Northstar
 
 - Status: living product and architecture spec
-- Last validated: 2026-05-11
+- Last validated: 2026-05-15
+- Current release floor: v0.9.0
+- Active 1.0 roadmap: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
 
 This document defines Sibyl's northstar: the product shape, architecture principles, and deletion
 gates for the next form of the system.
@@ -21,6 +23,7 @@ Executable plans:
   [`SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`](SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md)
 - Post-v0.8 synthesis and memory workspace:
   [`SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md`](SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md)
+- v1.0 automatic memory operating system: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
 
 ## Northstar
 
@@ -41,6 +44,11 @@ The product interface is small:
    relationships.
 5. `reflect` consolidates noisy traces into durable knowledge without destroying source truth.
 6. `synthesize` produces large source-grounded outputs from graph-guided memory slices.
+
+For 1.0, this loop is automatic-first. Sibyl should capture, consolidate, correct, promote, and
+refresh memory as routine background product behavior. Humans should mainly see exceptions:
+sensitive material, ambiguous contradictions, destructive actions, policy failures, and high-impact
+sharing decisions.
 
 That loop must work for a solo developer, a team of humans, a swarm of agents, or an organization
 with private and shared memory spaces. It must cover software projects, product strategy, home
@@ -198,7 +206,8 @@ automation.
 - No 20-plus MCP memory tools when a small primitive set can cover the workflow.
 - No lossy extraction path that discards raw sessions after summarization.
 - No hard dependency on a single hosted LLM for core recall.
-- No Graphiti deletion until native behavior is better, measured, and reversible.
+- No Graphiti deletion before native behavior is better, measured, and reversible. For 1.0, this is
+  now a deletion gate, not an argument for carrying a compatibility extra forever.
 - No indefinite dual-store product. FalkorDB and PostgreSQL are migration bridges, not permanent
   architecture.
 - No Cloud-only architecture. Local/server mode remains first-class.
@@ -208,8 +217,14 @@ automation.
 These pieces are part of the foundation and must not get lost while we push toward native SurrealDB:
 
 - `v0.6.0` established SurrealDB as the default storage direction for graph, content, and auth.
+- `v0.7` made the native memory loop and no-Graphiti default-loop proof real enough to gate.
+- `v0.8` closed the pure-Surreal default-runtime and memory-trust release gates.
+- `v0.9.0` shipped source-grounded synthesis, source inspect and correction, source-preserving
+  import, and the Memory Workspace as the primary product surface.
 - Legacy FalkorDB and PostgreSQL services are out of the default local, CI, and Helm paths. They
   remain migration/archive source surfaces only.
+- Default `sibyl-core` installs do not require `graphiti-core`; retained compatibility code is
+  optional, historical, migration, admin, or test scaffolding.
 - Graph archives can be exported, imported, verified, and dry-run merged.
 - Merge tooling can rewrite source org data into a target organization.
 - Surreal auth supports username/password sign-in plus optional token authentication.
@@ -222,9 +237,9 @@ These pieces are part of the foundation and must not get lost while we push towa
 - Context packs already include direct matches and one-hop related graph context.
 - Wake, recall, and deep-search layers exist on context packs and session wake bundles.
 - The Sibyl skill defines the agent memory contract: recall, act, remember, reflect.
-- Graphiti-on-Surreal is transition scaffolding, not northstar proof. Treat the current insertion
-  path as suspect until a native Surreal path proves raw memory, graph writes, and recall end to
-  end.
+- Remaining compatibility paths are not product truth. The 1.0 roadmap should keep pushing default
+  memory behavior toward native Surreal primitives, automatic reflection, and artifact-backed
+  quality gates.
 
 ## Target Architecture
 
@@ -635,7 +650,7 @@ Worse if we delete too early:
 - lose embedder/search abstractions without clean successors
 - rewrite many tests at once with no behavioral baseline
 
-Deletion gate:
+  1.0 deletion gate:
 
 - native entity, episode, edge, and search paths satisfy behavioral baseline tests
 - community detection is replaced, redesigned, or explicitly dropped based on context-pack quality
@@ -647,19 +662,27 @@ Deletion gate:
 - permission-aware retrieval and capture are proven before multi-user defaults
 - migration and rollback are rehearsed
 - legacy services are out of the default path
-- Graphiti security posture is known until the dependency is gone
+- the `graphiti-core` dependency is removed from package metadata, optional extras, dev dependency
+  groups, CI, Docker, Helm, and install docs
+- all `graphiti_core` imports are deleted from supported runtime and tests
+- legacy Graphiti-shaped archives are readable through Sibyl-owned projection/import code that does
+  not import Graphiti
+- benchmark baselines remain as archived artifacts, not live compatibility runtime paths
 
 ## Workstreams
 
-Workstreams are not strictly sequential. The `v0.6.0` release landed the first Surreal-default
-runtime slice plus the initial raw-memory, layered-context, reflection, and diary surfaces. The next
-wave should harden W1, W2, W2.5, W5, W6, and W9 with measured behavior before heavier tenancy,
-adapters, synthesis, or collaborative surfaces.
+Workstreams are not strictly sequential. The `v0.6.0` through `v0.9.0` releases landed the
+Surreal-first foundation, native memory trust, synthesis, source inspect, import, and Memory
+Workspace slices. The next execution map is the 1.0 roadmap: make those surfaces automatic,
+policy-backed, fast, explainable, and polished enough to trust without routine human review.
 
 ### W0. Northstar Tracking
 
 Keep this northstar current as decisions harden. When implementation branches land, update the
 "Current State Already Landed" section and remove stale gates.
+
+For 1.0, the Northstar stays product truth and [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md) owns
+execution order, gates, and release cut lines.
 
 ### W1. Native Memory Primitive
 
@@ -945,7 +968,8 @@ Remove legacy guts when migration gates are green. The destination is not "suppo
 is migrate existing users, verify the cutover, and let the old stack disappear.
 
 - FalkorDB removed from default dev/prod path, charts, docs, and runtime assumptions
-- Graphiti removed after native behavior and context quality pass
+- Graphiti removed entirely after native behavior and context quality pass; 1.0 does not retain a
+  Graphiti compatibility extra or live import island
 - PostgreSQL removed only after auth, content, raw captures, RAG, settings, and jobs are SurrealDB
   native
 - Redis removed only when Taskiq/job orchestration no longer needs it or a Surreal-backed queue is
@@ -968,19 +992,25 @@ The northstar is reached when:
 - delegated agents can recall and remember only within their authorized scope
 - `recall` returns precise project, planning, ideation, and domain context
 - `remember` captures every important session detail with provenance
-- `reflect` consolidates raw captures into durable graph memory
+- `reflect` automatically consolidates raw captures into durable graph memory, with humans handling
+  exceptions rather than routine approval
 - `synthesize` can produce source-backed documentation or reports from an authorized graph slice
 - context packs explain source, visibility, confidence, freshness, and redaction decisions
 - context packs improve agent build speed in real work
 - human users can inspect, correct, hide, promote, export, and delete personal memory from friendly
   product surfaces without understanding graph internals
+- routine memory review is exception-only, with rollback, correction, and audit receipts for every
+  automatic decision
 - users can preview what another user, teammate, or delegated agent would be able to recall before
   sharing access
 - coding workflows preserve decisions, code references, debugging evidence, review findings, test
   results, and handoff context across human and agent sessions
+- CLI authentication and API sessions are stable enough for long-running local work without surprise
+  re-login loops
+- overview, metrics, context, and memory routes have measured query and latency budgets
 - benchmark fixtures catch retrieval regressions, source-grounding loss, and permission leaks
 - SurrealDB is the only required data plane for default deployments
-- Graphiti is gone from core memory paths
+- Graphiti is gone from the supported runtime and dependency graph
 - FalkorDB and PostgreSQL are gone from supported northstar deployments after the migration window
 
 ## Open Questions

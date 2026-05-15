@@ -1,10 +1,16 @@
 # SurrealDB Graphiti Exit Inventory
 
-Status: Wave 6 inventory baseline.
+Status: v0.7/v0.8 inventory baseline; 1.0 deletion checklist.
 
 This document is hand-authored removal intent. The generated runtime source of truth remains
 `docs/research/rust-port/INVENTORY.md`, and `moon run inventory-check` fails when a generated
 Graphiti import is not classified here.
+
+2026-05-15 1.0 update: the target is no longer "Graphiti absent from the default loop but retained
+as an optional compatibility island." The 1.0 roadmap requires total supported-runtime deletion: no
+`graphiti-core` dependency, no `graphiti_core` imports, no compatibility extra, and no live Graphiti
+test surface. Legacy Graphiti-shaped archive data should remain readable through Sibyl-owned
+projection/import code that does not import Graphiti.
 
 ## A0 Baseline Receipt
 
@@ -420,13 +426,28 @@ default `remember`, `recall`, `context`, `wake`, `explore`, `temporal`, `health`
 `link_graph`, and `reflect` loops, and a no-Graphiti smoke test blocks Graphiti imports for those
 flows.
 
+## 1.0 Deletion Gate
+
+The v0.7/v0.8 exit gate proved Graphiti was out of the default loop. The v1.0 gate deletes the
+remaining supported Graphiti surface:
+
+- every allowlisted `graphiti_core` import is deleted or replaced with Sibyl-native code
+- `sibyl-core[compatibility]` no longer installs `graphiti-core`
+- dev dependency groups, CI, Docker, Helm, and docs no longer install Graphiti
+- compatibility tests are replaced with native archive/import regression tests
+- inventory checks fail if Graphiti appears outside historical docs or explicit migration-format
+  labels
+- the no-Graphiti smoke test becomes a deletion proof for the whole supported runtime, not only the
+  default loop
+
 ## Dependency Boundary
 
-Default `sibyl-core` installs do not depend on `graphiti-core`. Retained Graphiti code lives behind
-the `compatibility` optional extra plus the `sibyl-core` dev dependency group so migration, admin,
-and compatibility tests can still exercise the old contracts deliberately. The generated runtime
-inventory records dependency scope (`default`, `optional:compatibility`, or `dependency-group:dev`)
-and the inventory tests fail if `graphiti-core` appears in any default dependency set.
+Default `sibyl-core` installs do not depend on `graphiti-core`. Before 1.0, retained Graphiti code
+may still live behind the `compatibility` optional extra plus the `sibyl-core` dev dependency group.
+For 1.0, those retained surfaces must be deleted or replaced by native import/projection code. The
+generated runtime inventory records dependency scope (`default`, `optional:compatibility`, or
+`dependency-group:dev`) and the 1.0 inventory tests should fail if `graphiti-core` appears in any
+supported dependency set.
 
 Dependency files:
 

@@ -16,6 +16,12 @@ The old Postgres/FalkorDB wording below is retained as historical context, but t
 plane is now Surreal-backed. Treat this update and the trust-surface inventory as the current
 release-planning source of truth.
 
+Update (2026-05-15): this audit remains an active input for
+[`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md). v0.8 and v0.9 closed the main memory-trust release
+gates, but 1.0 still needs boring CLI session behavior, persisted memory-space control-plane
+records, agent delegation, stricter API-key and MCP policy coverage, job policy receipts, and
+complete inspect/audit parity.
+
 ## TL;DR (Highest-Risk Items)
 
 1. **Project RBAC is now Surreal-backed, but project records remain the critical control-plane

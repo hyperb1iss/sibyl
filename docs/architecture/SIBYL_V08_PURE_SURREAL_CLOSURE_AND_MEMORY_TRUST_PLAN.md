@@ -3,6 +3,9 @@
 - Status: v0.8 release evidence complete for pushed `main` commit `4855ba8a`; tag and release
   publication remain manual
 - Target release: v0.8
+- 1.0 update: this is now a release receipt and trust substrate reference. The active 1.0 roadmap
+  requires deleting the remaining Graphiti compatibility dependency and import island, not just
+  keeping Graphiti out of the default loop.
 - Planning source: `plan_e464fd1e7b11`
 - Plan-authoring task: `c64a358e-aef4-4b32-8735-28f03047a13e`
 - Tracking epics:

@@ -3,6 +3,9 @@
 - Status: Claude-reviewed execution plan
 - Target release: v0.7 hardening wave
 - Tracking epic: `epic_564b41ff89d6`
+- 1.0 update: this plan is historical default-loop exit work. The active 1.0 roadmap supersedes
+  "optional compatibility extra" as the endpoint: Graphiti should be deleted from the supported
+  runtime and dependency graph before v1.0.
 - Source docs:
   - `docs/architecture/SURREALDB_NATIVE_MEMORY_CORE_SPEC.md`
   - `docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md`

@@ -1,7 +1,9 @@
 # Sibyl Post-v0.8 Synthesis and Memory Workspace Plan
 
-- Status: full execution plan draft, anchored to the v0.8 evidence baseline at `4855ba8a`
-- Target release: v0.9 candidate
+- Status: shipped as the v0.9 product foundation; still active as 1.0 source, synthesis, inspect,
+  correction, import, and workspace design input.
+- Released in: `v0.9.0`
+- Current roadmap: [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md)
 - Depends on:
   - `docs/architecture/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md`
   - `docs/architecture/SIBYL_V08_PURE_SURREAL_CLOSURE_EXECUTION_PLAN.md`
@@ -9,6 +11,11 @@
 - Primary outcome: turn the v0.8 trust substrate into a human-usable and agent-usable memory product
   with source-grounded synthesis, source inspection, correction, source adapters, and a memory
   workspace.
+
+2026-05-15 update: read this document as the v0.9 execution plan plus the source of detailed
+contracts for the 1.0 roadmap. Any manual review language should now be interpreted as
+exception-only review. Safe, policy-backed memory decisions should become automatic; humans should
+handle sensitive, ambiguous, contradictory, destructive, or high-impact sharing cases.
 
 v0.8 should leave Sibyl with a Surreal-only default runtime, policy-backed memory access, audit
 receipts, promotion and share previews, and release gates that prove Graphiti is no longer on the
@@ -22,8 +29,8 @@ retrieval rather than a final output filter.
 
 ## 1. Release Thesis
 
-The post-v0.8 release should make Sibyl feel like a real second-brain product. The winning shape is
-not more storage plumbing. It is a compact loop:
+The post-v0.8 release made Sibyl feel like a real second-brain product. The winning shape is not
+more storage plumbing. It is a compact loop:
 
 1. Ingest source material into policy-scoped raw memory.
 2. Inspect what was remembered and why it is visible.

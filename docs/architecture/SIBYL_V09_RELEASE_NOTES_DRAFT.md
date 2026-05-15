@@ -1,7 +1,11 @@
-# Sibyl v0.9 Release Notes Draft
+# Sibyl v0.9 Release Notes
 
-Status: HOLD. The candidate has been rebased on the v0.8.1 release bump and is not publishable until
-it is pushed to `main` and docs deploy is green on the final v0.9 candidate head.
+Status: released as `v0.9.0`.
+
+- Release URL: <https://github.com/hyperb1iss/sibyl/releases/tag/v0.9.0>
+- Published: 2026-05-15 07:05:58 UTC
+- Release branch target: `main`
+- Released commit: `64c3c838`
 
 ## Highlights
 
@@ -52,7 +56,10 @@ it is pushed to `main` and docs deploy is green on the final v0.9 candidate head
   `bc5bf7c33e5459c60819a7fa00880cf39e1cca0e`; Nightly Regression run `25898704879` succeeded on
   `bc5bf7c33e5459c60819a7fa00880cf39e1cca0e`.
 
-## Release Hold
+## Release Receipt
 
-The local branch is ahead of `origin/main`. Ship only after Bliss explicitly approves pushing
-`main`, the final main CI run is green, and docs deploy succeeds on the exact candidate head.
+`v0.9.0` is published. Treat this document as the release receipt and claim boundary, not an active
+hold notice.
+
+Post-v0.9 planning moved to [`SIBYL_1_0_ROADMAP.md`](SIBYL_1_0_ROADMAP.md), which promotes the
+manual review and workspace work into the larger 1.0 automatic memory operating-system plan.
