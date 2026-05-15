@@ -46,6 +46,7 @@ from sibyl_cli.id_resolution import resolve_id_prefix, resolve_raw_memory_id_pre
 from sibyl_cli.local import app as local_app
 from sibyl_cli.logs import app as logs_app
 from sibyl_cli.org import app as org_app
+from sibyl_cli.pending import app as pending_writes_app
 from sibyl_cli.project import app as project_app
 from sibyl_cli.project_refs import resolve_project_reference
 from sibyl_cli.session import app as session_app
@@ -104,6 +105,7 @@ app.add_typer(local_app, name="local")
 app.add_typer(logs_app, name="logs")
 app.add_typer(update_app, name="update")
 app.add_typer(skill_app, name="skill")
+app.add_typer(pending_writes_app, name="pending-writes")
 app.add_typer(memory_space_app, name="memory-space")
 app.add_typer(memory_review_app, name="memory-review")
 app.add_typer(synthesis_app, name="synthesis")
