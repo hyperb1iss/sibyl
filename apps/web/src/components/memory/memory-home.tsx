@@ -169,11 +169,11 @@ function ToolLink({
 function CaptureRows({
   captures,
   emptyLabel,
-  linkToArchive = false,
+  linkToReview = false,
 }: {
   captures: RawCaptureSummary[];
   emptyLabel: string;
-  linkToArchive?: boolean;
+  linkToReview?: boolean;
 }) {
   if (captures.length === 0) {
     return <p className="px-4 py-6 text-sm text-sc-fg-muted">{emptyLabel}</p>;
@@ -192,11 +192,11 @@ function CaptureRows({
           </>
         );
 
-        if (linkToArchive) {
+        if (linkToReview) {
           return (
             <Link
               key={capture.id}
-              href={`/archive?id=${encodeURIComponent(capture.id)}`}
+              href={`/memory/captures?id=${encodeURIComponent(capture.id)}`}
               className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3 transition-colors hover:bg-sc-bg-highlight/60"
             >
               {body}
@@ -397,7 +397,7 @@ export function MemoryHome() {
           description="draft source-backed memory artifacts"
         />
         <ToolLink
-          href="/archive?link=unlinked"
+          href="/memory/captures?link=unlinked"
           icon={WarningCircle}
           label="Review Captures"
           description="clear raw memory review actions"
@@ -414,12 +414,12 @@ export function MemoryHome() {
               <CaptureRows
                 captures={pending.slice(0, 6)}
                 emptyLabel="No pending review actions"
-                linkToArchive
+                linkToReview
               />
               {pending.length > 0 && (
                 <div className="border-t border-sc-fg-subtle/10 px-4 py-3">
                   <Link
-                    href="/archive?link=unlinked"
+                    href="/memory/captures?link=unlinked"
                     className="inline-flex items-center rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-highlight px-3 py-1.5 text-sm font-medium text-sc-fg-primary transition-colors hover:border-sc-purple/50 hover:text-sc-purple"
                   >
                     Open Review Queue
@@ -437,7 +437,7 @@ export function MemoryHome() {
               <CaptureRows
                 captures={reflections.slice(0, 5)}
                 emptyLabel="No reflection candidates waiting"
-                linkToArchive
+                linkToReview
               />
             </Panel>
           </div>

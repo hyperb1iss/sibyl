@@ -1,5 +1,5 @@
 import { LoadingState } from '@/components/ui/spinner';
 
 export default function Loading() {
-  return <LoadingState message="Loading archive..." />;
+  return <LoadingState message="Loading captures..." />;
 }

@@ -25,6 +25,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/lib/hooks', () => hooks);
 vi.mock('sonner', () => ({ toast }));
 
+import { RawCaptureReview } from '@/components/memory/raw-capture-review';
 import ArchivePage from './page';
 
 const captureList = {
@@ -105,6 +106,14 @@ describe('ArchivePage', () => {
     await user.click(screen.getByRole('button', { name: /select capture deep thought/i }));
 
     expect(replace).toHaveBeenCalledWith('/archive?id=raw-2', { scroll: false });
+  });
+
+  it('uses the configured base path for memory capture review', async () => {
+    const { user } = render(<RawCaptureReview basePath="/memory/captures" />);
+
+    await user.click(screen.getByRole('button', { name: /select capture deep thought/i }));
+
+    expect(replace).toHaveBeenCalledWith('/memory/captures?id=raw-2', { scroll: false });
   });
 
   it('replaces a filtered-out selection with the visible capture id', async () => {

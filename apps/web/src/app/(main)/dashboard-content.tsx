@@ -589,7 +589,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
               </button>
 
               <Link
-                href="/archive?link=unlinked"
+                href="/memory/captures?link=unlinked"
                 className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-sc-bg-elevated rounded-lg sm:rounded-xl border border-sc-fg-subtle/10 hover:border-sc-yellow/30 hover:bg-sc-bg-highlight transition-all group"
               >
                 <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-sc-yellow/10 flex items-center justify-center shrink-0">
@@ -601,7 +601,7 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-xs sm:text-sm font-medium text-sc-fg-primary group-hover:text-sc-yellow transition-colors truncate">
-                    Review Archive
+                    Review Memory
                   </div>
                   <div className="text-[10px] sm:text-xs text-sc-fg-subtle truncate">
                     Triage captures waiting on graph linkage

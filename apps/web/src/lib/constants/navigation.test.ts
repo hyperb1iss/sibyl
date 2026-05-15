@@ -12,8 +12,9 @@ describe('navigation constants', () => {
     expect(NAVIGATION.map(item => item.href)).toContain('/epics');
   });
 
-  it('surfaces the raw archive in shared navigation', () => {
-    expect(NAVIGATION.map(item => item.href)).toContain('/archive');
+  it('keeps the raw archive as a hidden compatibility route', () => {
+    expect(ROUTE_CONFIG.archive.href).toBe('/archive');
+    expect(NAVIGATION.map(item => item.href)).not.toContain('/archive');
   });
 
   it('surfaces the memory cockpit in shared navigation', () => {

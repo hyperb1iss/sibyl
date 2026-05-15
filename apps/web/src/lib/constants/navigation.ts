@@ -40,7 +40,7 @@ export const ROUTE_CONFIG: Record<string, RouteConfigItem> = {
   epics: { label: 'Epics', href: '/epics', icon: Layers, showInNavigation: true },
   tasks: { label: 'Tasks', href: '/tasks', icon: ListTodo, showInNavigation: true },
   sources: { label: 'Sources', href: '/sources', icon: BookOpen, showInNavigation: true },
-  archive: { label: 'Archive', href: '/archive', icon: Archive, showInNavigation: true },
+  archive: { label: 'Archive', href: '/archive', icon: Archive },
   graph: { label: 'Graph', href: '/graph', icon: Network, showInNavigation: true },
   entities: { label: 'Entities', href: '/entities', icon: Boxes, showInNavigation: true },
   search: { label: 'Search', href: '/search', icon: Search, showInNavigation: true },
