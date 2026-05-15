@@ -3,7 +3,6 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { KanbanBoard } from '@/components/tasks/kanban-board';
 import { type QuickTaskData, QuickTaskModal } from '@/components/tasks/quick-task-modal';
 import { TaskListMobile } from '@/components/tasks/task-list-mobile';
@@ -148,8 +147,6 @@ function TasksPageContent() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <Breadcrumb />
-
       {/* Search + Filters */}
       <div className="space-y-2 sm:space-y-3">
         {/* Search Input - Full width on all sizes */}

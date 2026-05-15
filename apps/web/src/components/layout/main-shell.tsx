@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react';
 import { CaptureMemoryDialog } from '@/components/dashboard';
 import { AsyncBoundary } from '@/components/error-boundary';
 import { CommandPalette } from '@/components/ui/command-palette';
+import { Breadcrumb } from './breadcrumb';
+import { BreadcrumbProvider } from './breadcrumb-context';
 import { CaptureMemoryProvider, useCaptureMemory } from './capture-memory-context';
 import { Header } from './header';
 import { Sidebar } from './sidebar';
@@ -42,6 +44,9 @@ function MainShellContent({ children }: { children: ReactNode }) {
           className="flex-1 overflow-auto bg-sc-bg-dark p-3 sm:p-4 md:p-6"
           style={{ scrollbarGutter: 'stable' }}
         >
+          <div className="mb-4">
+            <Breadcrumb />
+          </div>
           <AsyncBoundary level="page">{children}</AsyncBoundary>
         </main>
       </div>
@@ -61,8 +66,10 @@ function MainShellContent({ children }: { children: ReactNode }) {
 
 export function MainShell({ children }: { children: ReactNode }) {
   return (
-    <CaptureMemoryProvider>
-      <MainShellContent>{children}</MainShellContent>
-    </CaptureMemoryProvider>
+    <BreadcrumbProvider>
+      <CaptureMemoryProvider>
+        <MainShellContent>{children}</MainShellContent>
+      </CaptureMemoryProvider>
+    </BreadcrumbProvider>
   );
 }

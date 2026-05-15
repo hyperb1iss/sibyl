@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { EditableTags, EditableText } from '@/components/editable';
-import { Breadcrumb, ROUTE_CONFIG } from '@/components/layout/breadcrumb';
+import { ROUTE_CONFIG, useSetBreadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { VelocityLineChart } from '@/components/metrics/charts';
 import { CreateProjectDialog } from '@/components/projects/create-project-dialog';
@@ -207,14 +207,17 @@ export function ProjectsContent({
     [router, searchParams]
   );
 
-  // Build breadcrumb items (only needed when viewing a specific project)
-  const breadcrumbItems = selectedProject
-    ? [
-        { label: ROUTE_CONFIG[''].label, href: '/', icon: ROUTE_CONFIG[''].icon },
-        { label: 'Projects', href: '/projects', icon: ROUTE_CONFIG.projects.icon },
-        { label: selectedProject.name },
-      ]
-    : undefined;
+  // Push breadcrumb items when viewing a specific project; otherwise let
+  // the layout breadcrumb auto-derive the trail.
+  useSetBreadcrumb(
+    selectedProject
+      ? [
+          { label: ROUTE_CONFIG[''].label, href: '/', icon: ROUTE_CONFIG[''].icon },
+          { label: 'Projects', href: '/projects', icon: ROUTE_CONFIG.projects.icon },
+          { label: selectedProject.name },
+        ]
+      : null
+  );
 
   const isLoading = projectsLoading || projectSummariesLoading;
   const detailLoading = Boolean(selectedProjectId) && selectedProjectTasksLoading;
@@ -233,7 +236,6 @@ export function ProjectsContent({
   if (projectsError) {
     return (
       <div className="space-y-4">
-        <Breadcrumb />
         <PageHeader description="Manage your development projects" />
         <ErrorState
           title="Failed to load projects"
@@ -247,7 +249,6 @@ export function ProjectsContent({
   if (!isLoading && projects.length === 0) {
     return (
       <div className="space-y-4">
-        <Breadcrumb />
         <PageHeader description="Manage your development projects" meta="0 projects" />
         <ProjectsEmptyState onCreateProject={() => setShowCreate(true)} />
         <CreateProjectDialog
@@ -261,8 +262,6 @@ export function ProjectsContent({
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <Breadcrumb items={breadcrumbItems} />
-
       <PageHeader
         description="Manage your development projects"
         meta={`${projects.length} projects | ${totalStats.tasks} tasks | ${totalStats.active} active`}

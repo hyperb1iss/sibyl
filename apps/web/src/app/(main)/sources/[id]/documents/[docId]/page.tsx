@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { use, useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Breadcrumb, ROUTE_CONFIG } from '@/components/layout/breadcrumb';
+import { ROUTE_CONFIG, useSetBreadcrumb } from '@/components/layout/breadcrumb';
 import {
   ArrowLeft,
   Calendar,
@@ -106,17 +106,16 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
     setIsEditingContent(false);
   }, [document]);
 
-  const breadcrumbItems = [
+  useSetBreadcrumb([
     { label: ROUTE_CONFIG[''].label, href: '/', icon: ROUTE_CONFIG[''].icon },
     { label: 'Sources', href: '/sources' },
     { label: document?.source_name || 'Source', href: `/sources/${sourceId}` },
-    { label: document?.title || 'Document', href: `/sources/${sourceId}/documents/${docId}` },
-  ];
+    { label: document?.title || 'Document' },
+  ]);
 
   if (error) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <Breadcrumb items={breadcrumbItems} />
         <div className="bg-sc-bg-base border border-sc-red/30 rounded-2xl p-8 text-center">
           <p className="text-sc-red font-medium">Failed to load document</p>
           <p className="text-sc-fg-subtle text-sm mt-2">
@@ -137,7 +136,6 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
   if (isLoading || !document) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <Breadcrumb items={breadcrumbItems} />
         <div className="bg-sc-bg-base border border-sc-fg-subtle/10 rounded-2xl p-8">
           <div className="animate-pulse space-y-4">
             <div className="h-8 bg-sc-bg-highlight rounded w-2/3" />
@@ -151,8 +149,6 @@ export default function DocumentDetailPage({ params }: DocumentDetailPageProps) 
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <Breadcrumb items={breadcrumbItems} />
-
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Main Content */}
         <div className="lg:col-span-3 space-y-6">

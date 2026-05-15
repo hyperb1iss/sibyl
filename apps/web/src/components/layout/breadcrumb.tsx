@@ -1,41 +1,26 @@
 'use client';
 
+import { AnimatePresence, motion } from 'motion/react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Fragment, memo, useCallback, useMemo } from 'react';
-import { ChevronRight, type IconComponent } from '@/components/ui/icons';
+import { memo, useCallback, useMemo } from 'react';
+import { ChevronRight } from '@/components/ui/icons';
 import { ROUTE_CONFIG, withProjectsContext } from '@/lib/constants/navigation';
+import { type BreadcrumbItem, useBreadcrumbOverride, useSetBreadcrumb } from './breadcrumb-context';
 
 export { ROUTE_CONFIG } from '@/lib/constants/navigation';
-
-interface BreadcrumbItem {
-  label: string;
-  href?: string;
-  icon?: IconComponent;
-}
+export type { BreadcrumbItem } from './breadcrumb-context';
+export { useSetBreadcrumb } from './breadcrumb-context';
 
 interface BreadcrumbProps {
-  /** Custom breadcrumb items - if provided, overrides auto-generation */
+  /** Custom breadcrumb items - if provided, overrides auto-generation. */
   items?: BreadcrumbItem[];
   /** Additional class names */
   className?: string;
 }
 
-function BreadcrumbInner({ items, className = '' }: BreadcrumbProps) {
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-
-  // Preserve project context in breadcrumb links
-  const withContext = useCallback(
-    (href: string) => withProjectsContext(href, searchParams.get('projects')),
-    [searchParams]
-  );
-
-  const breadcrumbs = useMemo(() => {
-    // Use custom items if provided
-    if (items) return items;
-
-    // Auto-generate from pathname
+function useAutoCrumbs(pathname: string): BreadcrumbItem[] {
+  return useMemo(() => {
     const segments = pathname.split('/').filter(Boolean);
     const crumbs: BreadcrumbItem[] = [
       { label: ROUTE_CONFIG[''].label, href: ROUTE_CONFIG[''].href, icon: ROUTE_CONFIG[''].icon },
@@ -47,13 +32,8 @@ function BreadcrumbInner({ items, className = '' }: BreadcrumbProps) {
       const route = ROUTE_CONFIG[segment];
 
       if (route) {
-        crumbs.push({
-          label: route.label,
-          href: currentPath,
-          icon: route.icon,
-        });
+        crumbs.push({ label: route.label, href: currentPath, icon: route.icon });
       } else {
-        // Dynamic segment (ID) - truncate if long
         crumbs.push({
           label: segment.length > 20 ? `${segment.slice(0, 8)}...` : segment,
         });
@@ -61,11 +41,26 @@ function BreadcrumbInner({ items, className = '' }: BreadcrumbProps) {
     }
 
     return crumbs;
-  }, [pathname, items]);
+  }, [pathname]);
+}
 
-  // On the home route the auto-generated crumbs collapse to just Home.
-  // Render it as the active item (no link) so every page reserves the
-  // same vertical space and the breadcrumb row never jumps in or out.
+function BreadcrumbInner({ items, className = '' }: BreadcrumbProps) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const override = useBreadcrumbOverride();
+
+  const withContext = useCallback(
+    (href: string) => withProjectsContext(href, searchParams.get('projects')),
+    [searchParams]
+  );
+
+  const auto = useAutoCrumbs(pathname);
+
+  // Precedence: explicit prop > context override > auto-derived from path.
+  const breadcrumbs = items ?? override ?? auto;
+
+  // On the home route the trail is just Home — keep it as the active item so
+  // the row always reserves the same vertical space.
   const renderable: BreadcrumbItem[] =
     breadcrumbs.length <= 1
       ? [{ label: ROUTE_CONFIG[''].label, icon: ROUTE_CONFIG[''].icon }]
@@ -77,48 +72,65 @@ function BreadcrumbInner({ items, className = '' }: BreadcrumbProps) {
       className={`flex h-6 items-center gap-1.5 overflow-hidden text-sm text-sc-fg-muted ${className}`}
       style={{ viewTransitionName: 'breadcrumb' }}
     >
-      {renderable.map((crumb, index) => {
-        const Icon = crumb.icon;
-        const isLast = index === renderable.length - 1;
-        return (
-          <Fragment key={crumb.href ?? crumb.label}>
-            {index > 0 && (
-              <ChevronRight
-                width={14}
-                height={14}
-                className="text-sc-fg-subtle/50 shrink-0"
-                aria-hidden="true"
-              />
-            )}
-            {crumb.href && !isLast ? (
-              <Link
-                href={withContext(crumb.href)}
-                className="flex items-center gap-1.5 hover:text-sc-purple transition-colors shrink-0"
-              >
-                {Icon && <Icon width={14} height={14} />}
-                <span className="hidden xs:inline">{crumb.label}</span>
-              </Link>
-            ) : (
-              <span
-                className={`flex items-center gap-1.5 text-sc-fg-primary font-medium ${isLast ? 'min-w-0 truncate' : 'shrink-0'}`}
-              >
-                {Icon && <Icon width={14} height={14} className="shrink-0" />}
-                <span className={isLast ? 'truncate' : ''}>{crumb.label}</span>
-              </span>
-            )}
-          </Fragment>
-        );
-      })}
+      <AnimatePresence initial={false} mode="popLayout">
+        {renderable.map((crumb, index) => {
+          const Icon = crumb.icon;
+          const isLast = index === renderable.length - 1;
+          // Stable key per logical position + identity so React preserves the
+          // DOM node across navigations whenever a crumb stays the same.
+          const key = `${index}:${crumb.href ?? crumb.label}`;
+          return (
+            <motion.span
+              key={key}
+              layout
+              initial={{ opacity: 0, x: -6 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 6 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              className="flex items-center gap-1.5"
+            >
+              {index > 0 && (
+                <ChevronRight
+                  width={14}
+                  height={14}
+                  className="text-sc-fg-subtle/50 shrink-0"
+                  aria-hidden="true"
+                />
+              )}
+              {crumb.href && !isLast ? (
+                <Link
+                  href={withContext(crumb.href)}
+                  className="flex items-center gap-1.5 shrink-0 transition-colors hover:text-sc-purple"
+                >
+                  {Icon && <Icon width={14} height={14} />}
+                  <span className="hidden xs:inline">{crumb.label}</span>
+                </Link>
+              ) : (
+                <span
+                  className={`flex items-center gap-1.5 font-medium text-sc-fg-primary ${
+                    isLast ? 'min-w-0 truncate' : 'shrink-0'
+                  }`}
+                >
+                  {Icon && <Icon width={14} height={14} className="shrink-0" />}
+                  <span className={isLast ? 'truncate' : ''}>{crumb.label}</span>
+                </span>
+              )}
+            </motion.span>
+          );
+        })}
+      </AnimatePresence>
     </nav>
   );
 }
 
-// Memoize to prevent unnecessary re-renders
 export const Breadcrumb = memo(BreadcrumbInner);
 
 /**
  * Context-aware breadcrumb for entity detail pages.
- * Automatically uses correct icons from ROUTE_CONFIG.
+ *
+ * Pages call this in render — it pushes the custom trail into the persistent
+ * layout breadcrumb via context and renders nothing. The breadcrumb in the
+ * layout smoothly morphs into the new trail instead of being torn down.
  */
 interface EntityBreadcrumbProps {
   entityType: 'project' | 'epic' | 'task' | 'entity' | 'source';
@@ -127,58 +139,61 @@ interface EntityBreadcrumbProps {
 }
 
 export function EntityBreadcrumb({ entityType, entityName, parentProject }: EntityBreadcrumbProps) {
-  const items: BreadcrumbItem[] = [
-    { label: ROUTE_CONFIG[''].label, href: ROUTE_CONFIG[''].href, icon: ROUTE_CONFIG[''].icon },
-  ];
+  const items = useMemo<BreadcrumbItem[]>(() => {
+    const result: BreadcrumbItem[] = [
+      { label: ROUTE_CONFIG[''].label, href: ROUTE_CONFIG[''].href, icon: ROUTE_CONFIG[''].icon },
+    ];
 
-  // Add parent context based on entity type
-  if (entityType === 'task') {
-    items.push({
-      label: ROUTE_CONFIG.tasks.label,
-      href: ROUTE_CONFIG.tasks.href,
-      icon: ROUTE_CONFIG.tasks.icon,
-    });
-    if (parentProject) {
-      items.push({
-        label: parentProject.name,
-        href: `/tasks?project=${parentProject.id}`,
+    if (entityType === 'task') {
+      result.push({
+        label: ROUTE_CONFIG.tasks.label,
+        href: ROUTE_CONFIG.tasks.href,
+        icon: ROUTE_CONFIG.tasks.icon,
+      });
+      if (parentProject) {
+        result.push({
+          label: parentProject.name,
+          href: `/tasks?project=${parentProject.id}`,
+          icon: ROUTE_CONFIG.projects.icon,
+        });
+      }
+    } else if (entityType === 'epic') {
+      result.push({
+        label: ROUTE_CONFIG.epics.label,
+        href: ROUTE_CONFIG.epics.href,
+        icon: ROUTE_CONFIG.epics.icon,
+      });
+      if (parentProject) {
+        result.push({
+          label: parentProject.name,
+          href: `/epics?project=${parentProject.id}`,
+          icon: ROUTE_CONFIG.projects.icon,
+        });
+      }
+    } else if (entityType === 'project') {
+      result.push({
+        label: ROUTE_CONFIG.projects.label,
+        href: ROUTE_CONFIG.projects.href,
         icon: ROUTE_CONFIG.projects.icon,
       });
-    }
-  } else if (entityType === 'epic') {
-    items.push({
-      label: ROUTE_CONFIG.epics.label,
-      href: ROUTE_CONFIG.epics.href,
-      icon: ROUTE_CONFIG.epics.icon,
-    });
-    if (parentProject) {
-      items.push({
-        label: parentProject.name,
-        href: `/epics?project=${parentProject.id}`,
-        icon: ROUTE_CONFIG.projects.icon,
+    } else if (entityType === 'entity') {
+      result.push({
+        label: ROUTE_CONFIG.entities.label,
+        href: ROUTE_CONFIG.entities.href,
+        icon: ROUTE_CONFIG.entities.icon,
+      });
+    } else if (entityType === 'source') {
+      result.push({
+        label: ROUTE_CONFIG.sources.label,
+        href: ROUTE_CONFIG.sources.href,
+        icon: ROUTE_CONFIG.sources.icon,
       });
     }
-  } else if (entityType === 'project') {
-    items.push({
-      label: ROUTE_CONFIG.projects.label,
-      href: ROUTE_CONFIG.projects.href,
-      icon: ROUTE_CONFIG.projects.icon,
-    });
-  } else if (entityType === 'entity') {
-    items.push({
-      label: ROUTE_CONFIG.entities.label,
-      href: ROUTE_CONFIG.entities.href,
-      icon: ROUTE_CONFIG.entities.icon,
-    });
-  } else if (entityType === 'source') {
-    items.push({
-      label: ROUTE_CONFIG.sources.label,
-      href: ROUTE_CONFIG.sources.href,
-      icon: ROUTE_CONFIG.sources.icon,
-    });
-  }
 
-  items.push({ label: entityName });
+    result.push({ label: entityName });
+    return result;
+  }, [entityType, entityName, parentProject]);
 
-  return <Breadcrumb items={items} />;
+  useSetBreadcrumb(items);
+  return null;
 }

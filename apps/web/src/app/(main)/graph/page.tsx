@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ForceGraphMethods } from 'react-force-graph-2d';
 import { EntityDetailPanel } from '@/components/graph/entity-detail-panel';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { Card } from '@/components/ui/card';
 import { GraphEmptyState } from '@/components/ui/empty-state';
 import {
@@ -1387,8 +1386,6 @@ function GraphPageContent() {
       style={isFullscreen ? { backgroundColor: colors.bg } : undefined}
       suppressHydrationWarning
     >
-      {!isFullscreen && <Breadcrumb className="hidden md:flex" />}
-
       <div className="flex-1 flex gap-4 min-h-0 mt-0 md:mt-4">
         <div
           className="flex-1 relative md:rounded-xl md:border border-sc-fg-subtle/20 overflow-hidden"

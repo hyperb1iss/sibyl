@@ -3,7 +3,6 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import {
   AddSourceDialog,
@@ -332,7 +331,6 @@ export default function SourcesPage() {
   if (error) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <Breadcrumb />
         <PageHeader description="Manage documentation sources for the knowledge graph" />
         <div className="bg-sc-red/10 border border-sc-red/30 rounded-xl p-6 text-center">
           <p className="text-sc-red font-medium mb-2">Failed to load sources</p>
@@ -353,8 +351,6 @@ export default function SourcesPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <Breadcrumb />
-
       <PageHeader
         description="Crawl documentation and upload files to build your knowledge graph"
         meta={

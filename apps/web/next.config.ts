@@ -55,15 +55,23 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_VERSION: SIBYL_VERSION,
   },
 
-  ...(Number.isFinite(buildCpus) && buildCpus > 0
-    ? {
-        experimental: {
+  experimental: {
+    // Keep client-side route segments cached between navigations so flipping
+    // between pages feels SPA-like instead of re-streaming the loading.tsx
+    // fallback every time. React Query handles data freshness; the shell
+    // should stay warm.
+    staleTimes: {
+      dynamic: 30,
+      static: 180,
+    },
+    ...(Number.isFinite(buildCpus) && buildCpus > 0
+      ? {
           cpus: buildCpus,
           staticGenerationMaxConcurrency: buildCpus,
           staticGenerationMinPagesPerWorker: 1000,
-        },
-      }
-    : {}),
+        }
+      : {}),
+  },
 
   // Proxy API requests to the Sibyl backend during local development
   // Note: When deployed behind Kong/ingress, routing is handled externally

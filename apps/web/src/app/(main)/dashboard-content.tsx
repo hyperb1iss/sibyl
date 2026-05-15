@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { WelcomeBanner } from '@/components/dashboard';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { useCaptureMemory } from '@/components/layout/capture-memory-context';
 import { VelocityLineChart } from '@/components/metrics/charts';
 import {
@@ -171,8 +170,6 @@ export function DashboardContent({ initialStats }: DashboardContentProps) {
 
   return (
     <div className="space-y-4 sm:space-y-6 animate-fade-in">
-      <Breadcrumb />
-
       {/* Welcome Banner - Shows for new users with few entities */}
       <WelcomeBanner totalEntities={stats?.total_entities ?? 0} />
 

@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EntityCard } from '@/components/entities/entity-card';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { Button } from '@/components/ui/button';
 import { EntitiesEmptyState } from '@/components/ui/empty-state';
@@ -228,8 +227,6 @@ export function EntitiesContent({
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <Breadcrumb />
-
       <PageHeader
         description="Browse and manage knowledge entities"
         meta={`${data?.total ?? 0} total`}

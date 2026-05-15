@@ -3,7 +3,6 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { EpicList } from '@/components/epics';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { ChevronDown, Search, X } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
 import { FilterChip } from '@/components/ui/toggle';
@@ -207,8 +206,6 @@ function EpicsPageContent() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <Breadcrumb />
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

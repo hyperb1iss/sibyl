@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
+import { useSetBreadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { SourceImportProgress } from '@/components/memory/source-import-progress';
 import { Button } from '@/components/ui/button';
@@ -53,6 +53,12 @@ export default function MemoryImportsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const importId = normalizeImportId(searchParams.get('id'));
+
+  useSetBreadcrumb([
+    { label: 'Home', href: '/' },
+    { label: 'Memory', href: '/memory', icon: Database },
+    { label: 'Imports', icon: Upload },
+  ]);
 
   const adaptersQuery = useSourceImportAdapters();
   const statusQuery = useMemorySourceImport(importId, { enabled: Boolean(importId) });
@@ -133,14 +139,6 @@ export default function MemoryImportsPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <Breadcrumb
-        items={[
-          { label: 'Home', href: '/' },
-          { label: 'Memory', href: '/memory', icon: Database },
-          { label: 'Imports', icon: Upload },
-        ]}
-      />
-
       <PageHeader
         title="Memory Imports"
         description="Bring source archives into a scoped memory space with visible checkpoints and dedupe receipts"

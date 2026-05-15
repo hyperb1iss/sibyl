@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { use, useCallback, useState } from 'react';
 import { toast } from 'sonner';
-import { Breadcrumb, ROUTE_CONFIG } from '@/components/layout/breadcrumb';
+import { ROUTE_CONFIG, useSetBreadcrumb } from '@/components/layout/breadcrumb';
 import {
   ArrowLeft,
   Calendar,
@@ -121,16 +121,15 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
     }
   }, [id, syncSource]);
 
-  const breadcrumbItems = [
+  useSetBreadcrumb([
     { label: ROUTE_CONFIG[''].label, href: '/', icon: ROUTE_CONFIG[''].icon },
     { label: 'Sources', href: '/sources', icon: ROUTE_CONFIG.sources.icon },
-    { label: source?.name || 'Loading...' },
-  ];
+    { label: source?.name || 'Loading…' },
+  ]);
 
   if (error) {
     return (
       <div className="space-y-4 animate-fade-in">
-        <Breadcrumb items={breadcrumbItems} />
         <div className="bg-sc-bg-base border border-sc-red/40 rounded-2xl p-8 text-center shadow-glow-red">
           <p className="text-sc-red font-medium">Failed to load source</p>
           <p className="text-sc-fg-subtle text-sm mt-2">
@@ -151,7 +150,6 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
   if (isLoading || !source) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <Breadcrumb items={breadcrumbItems} />
         <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-8 shadow-card-elevated">
           <div className="animate-pulse space-y-4">
             <div className="h-8 bg-sc-bg-highlight rounded w-1/3" />
@@ -177,8 +175,6 @@ export default function SourceDetailPage({ params }: SourceDetailPageProps) {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <Breadcrumb items={breadcrumbItems} />
-
       {/* Header */}
       <div className="bg-sc-bg-base border border-sc-fg-subtle/30 rounded-2xl p-6 shadow-card-elevated">
         <div className="flex items-start justify-between gap-4">

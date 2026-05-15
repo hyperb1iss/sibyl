@@ -2,7 +2,6 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { CodeResult } from '@/components/search/code-result';
 import { DocResult } from '@/components/search/doc-result';
@@ -220,8 +219,6 @@ export function SearchContent({ initialQuery, initialResults, initialStats }: Se
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <Breadcrumb />
-
       <PageHeader
         description="Find knowledge, documentation, and code"
         meta={

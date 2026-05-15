@@ -129,7 +129,16 @@ function receiptLinks(
   ids: string[],
   kind: 'source' | 'derived'
 ): Array<{ href: string; id: string; label: string }> {
-  return ids.slice(0, 2).map(id => ({
+  // Dedupe before slicing — duplicate ids are functionally redundant as
+  // receipt links and otherwise collide on the React key.
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    unique.push(id);
+  }
+  return unique.slice(0, 2).map(id => ({
     href:
       kind === 'source'
         ? `/memory/sources/${encodeURIComponent(id)}`
