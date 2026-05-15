@@ -191,6 +191,48 @@ def test_migrate_check_validates_archive(tmp_path: Path) -> None:
     assert "Archive validation passed" in result.output
 
 
+def test_migrate_cloud_env_writes_env_file_and_next_steps(tmp_path: Path) -> None:
+    output = tmp_path / "sibyl-cloud.env"
+
+    result = runner.invoke(
+        migrate_cli.app,
+        [
+            "cloud-env",
+            "--output",
+            str(output),
+            "--surreal-url",
+            "wss://cloud.example.test/rpc",
+            "--surreal-username",
+            "root",
+            "--surreal-password",
+            "secret",
+            "--public-url",
+            "https://sibyl.example.test",
+            "--canonical-org-id",
+            "org-canonical",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = output.read_text()
+    assert 'SIBYL_SURREAL_URL="wss://cloud.example.test/rpc"' in payload
+    assert 'SIBYL_PUBLIC_URL="https://sibyl.example.test"' in payload
+    assert 'SIBYL_MIGRATION_CANONICAL_ORG_ID="org-canonical"' in payload
+    assert "sibyld migrate export -o sibyl-$(hostname).tar.gz" in result.output
+    assert "--canonical-org-id org-canonical" in result.output
+
+
+def test_migrate_cloud_env_refuses_to_overwrite_without_force(tmp_path: Path) -> None:
+    output = tmp_path / "sibyl-cloud.env"
+    output.write_text("existing", encoding="utf-8")
+
+    result = runner.invoke(migrate_cli.app, ["cloud-env", "--output", str(output)])
+
+    assert result.exit_code == 1
+    assert output.read_text(encoding="utf-8") == "existing"
+    assert "already exists" in result.output
+
+
 def test_migrate_merge_writes_canonical_archive(tmp_path: Path) -> None:
     first_archive = tmp_path / "first.tar.gz"
     second_archive = tmp_path / "second.tar.gz"

@@ -24,20 +24,37 @@ from sibyl_core.migrate.archive import (
 
 REFERENCE_FIELDS = {
     "api_key_id",
+    "accepted_by_user_id",
+    "actor_user_id",
+    "created_by_user_id",
     "document_id",
     "entity_id",
     "group_id",
     "organization_id",
     "org_id",
+    "owner_user_id",
+    "principal_id",
     "project_id",
     "source_id",
     "source_node_uuid",
     "target_id",
     "target_node_uuid",
+    "target_principal_id",
     "team_id",
     "user_id",
 }
 REFERENCE_LIST_FIELDS = {"entity_edges", "entity_ids"}
+SCOPED_USER_KEY_FIELDS = {
+    "scope_key": "memory_scope",
+    "suggested_scope_key": "suggested_memory_scope",
+    "target_scope_key": "target_memory_scope",
+}
+VOLATILE_AUTH_TABLES = {
+    "device_authorization_requests",
+    "login_history",
+    "password_reset_tokens",
+    "user_sessions",
+}
 
 
 class EntityCollisionPolicy(StrEnum):
@@ -51,6 +68,7 @@ class ArchiveMergeOptions:
     canonical_org_name: str = ""
     canonical_org_slug: str = ""
     entity_collision_policy: EntityCollisionPolicy = EntityCollisionPolicy.MERGE_BY_TYPE_NAME
+    drop_volatile_auth: bool = True
 
 
 @dataclass(frozen=True)
@@ -59,6 +77,7 @@ class ArchiveMergeResult:
     source_count: int
     source_org_ids: tuple[str, ...]
     entity_alias_count: int
+    user_alias_count: int
     graph_counts: dict[str, int]
     auth_row_counts: dict[str, int]
     content_row_counts: dict[str, int]
@@ -120,14 +139,20 @@ def merge_archives(
     else:
         entity_id_map = {}
 
+    user_id_map: dict[str, str] = {}
+    user_alias_count = 0
+
     if auth_payloads:
+        merged_users, user_id_map, user_alias_count = _merge_user_payloads(auth_payloads)
         auth_payload = _merge_tabular_payloads(
             auth_payloads,
-            replacements=replacements,
+            replacements=replacements | user_id_map,
             canonical_org_id=options.canonical_org_id,
             canonical_org_name=options.canonical_org_name,
             canonical_org_slug=options.canonical_org_slug,
             force_canonical_org=True,
+            drop_tables=VOLATILE_AUTH_TABLES if options.drop_volatile_auth else set(),
+            table_overrides={"users": merged_users},
         )
         auth_row_counts = dict(auth_payload["row_counts"])
         files[AUTH_FILENAME] = _json_bytes(auth_payload)
@@ -140,7 +165,7 @@ def merge_archives(
     if content_payloads:
         content_payload = _merge_tabular_payloads(
             content_payloads,
-            replacements=replacements | entity_id_map,
+            replacements=replacements | entity_id_map | user_id_map,
             canonical_org_id=options.canonical_org_id,
             canonical_org_name=options.canonical_org_name,
             canonical_org_slug=options.canonical_org_slug,
@@ -171,6 +196,8 @@ def merge_archives(
                 "canonical_org_slug": options.canonical_org_slug,
                 "entity_collision_policy": options.entity_collision_policy.value,
                 "entity_alias_count": entity_alias_count,
+                "user_alias_count": user_alias_count,
+                "drop_volatile_auth": options.drop_volatile_auth,
             }
         },
     )
@@ -184,6 +211,7 @@ def merge_archives(
         source_count=len(archives),
         source_org_ids=source_org_ids,
         entity_alias_count=entity_alias_count,
+        user_alias_count=user_alias_count,
         graph_counts=graph_counts,
         auth_row_counts=auth_row_counts,
         content_row_counts=content_row_counts,
@@ -219,8 +247,106 @@ def _rewrite_value(value: Any, replacements: dict[str, str], *, field: str = "")
             for item in value
         ]
     if isinstance(value, dict):
-        return {key: _rewrite_value(item, replacements, field=key) for key, item in value.items()}
+        rewritten = {
+            key: _rewrite_value(item, replacements, field=key) for key, item in value.items()
+        }
+        _rewrite_scoped_user_keys(rewritten, replacements)
+        return rewritten
     return value
+
+
+def _rewrite_scoped_user_keys(row: dict[str, Any], replacements: dict[str, str]) -> None:
+    for key, scope_key in SCOPED_USER_KEY_FIELDS.items():
+        value = str(row.get(key) or "").strip()
+        scope = str(row.get(scope_key) or "").strip().casefold()
+        if value and scope == "private" and value in replacements:
+            row[key] = replacements[value]
+
+
+def _row_uuid(row: dict[str, Any]) -> str:
+    return str(row.get("uuid") or row.get("id") or "").strip()
+
+
+def _normalized_email(row: dict[str, Any]) -> str:
+    return str(row.get("email") or "").strip().casefold()
+
+
+def _user_identity_key(row: dict[str, Any]) -> tuple[str, str]:
+    email = _normalized_email(row)
+    if email:
+        return ("email", email)
+    github_id = str(row.get("github_id") or "").strip()
+    if github_id:
+        return ("github_id", github_id)
+    user_id = _row_uuid(row)
+    if user_id:
+        return ("uuid", user_id)
+    return ("row", json.dumps(row, sort_keys=True, default=str))
+
+
+def _merge_user_payloads(
+    payloads: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, str], int]:
+    users: list[dict[str, Any]] = []
+    by_identity: dict[tuple[str, str], dict[str, Any]] = {}
+    user_id_map: dict[str, str] = {}
+    alias_count = 0
+
+    for payload in payloads:
+        tables = payload.get("tables", {})
+        if not isinstance(tables, dict):
+            continue
+        raw_users = tables.get("users", [])
+        if not isinstance(raw_users, list):
+            continue
+        for raw_user in raw_users:
+            if not isinstance(raw_user, dict):
+                continue
+            user = dict(raw_user)
+            user_id = _row_uuid(user)
+            if email := _normalized_email(user):
+                user["email"] = email
+            key = _user_identity_key(user)
+            existing = by_identity.get(key)
+            if existing is None:
+                by_identity[key] = user
+                users.append(user)
+                if user_id:
+                    user_id_map[user_id] = _row_uuid(user)
+                continue
+
+            canonical_id = _row_uuid(existing)
+            if user_id and canonical_id:
+                user_id_map[user_id] = canonical_id
+                if user_id != canonical_id:
+                    alias_count += 1
+            _merge_user(existing, user)
+
+    return users, user_id_map, alias_count
+
+
+def _merge_user(target: dict[str, Any], source: dict[str, Any]) -> None:
+    for field in (
+        "avatar_url",
+        "bio",
+        "email",
+        "email_verified_at",
+        "github_id",
+        "last_login_at",
+        "name",
+        "password_hash",
+        "password_iterations",
+        "password_salt",
+        "timezone",
+    ):
+        if not target.get(field) and source.get(field):
+            target[field] = source[field]
+    target["is_admin"] = bool(target.get("is_admin") or source.get("is_admin"))
+    target_preferences = target.get("preferences")
+    source_preferences = source.get("preferences")
+    if isinstance(target_preferences, dict) and isinstance(source_preferences, dict):
+        for key, value in source_preferences.items():
+            target_preferences.setdefault(key, value)
 
 
 def _merge_graph_payloads(
@@ -435,17 +561,23 @@ def _merge_tabular_payloads(
     canonical_org_name: str,
     canonical_org_slug: str,
     force_canonical_org: bool,
+    drop_tables: set[str] | None = None,
+    table_overrides: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     merged_tables: dict[str, list[dict[str, Any]]] = {}
+    drop_tables = drop_tables or set()
 
     for payload in payloads:
         tables = payload.get("tables", {})
         if not isinstance(tables, dict):
             continue
         for table_name, raw_rows in tables.items():
+            table_name = str(table_name)
+            if table_name in drop_tables:
+                continue
             if not isinstance(raw_rows, list):
                 continue
-            rows = merged_tables.setdefault(str(table_name), [])
+            rows = merged_tables.setdefault(table_name, [])
             for raw_row in raw_rows:
                 if isinstance(raw_row, dict):
                     rows.append(_rewrite_value(dict(raw_row), replacements))
@@ -459,6 +591,9 @@ def _merge_tabular_payloads(
                 canonical_org_slug=canonical_org_slug,
             )
         ]
+
+    for table_name, rows in (table_overrides or {}).items():
+        merged_tables[table_name] = rows
 
     deduped_tables = {
         table_name: _dedupe_rows(table_name, rows)
@@ -506,6 +641,9 @@ def _dedupe_rows(table_name: str, rows: list[dict[str, Any]]) -> list[dict[str, 
 
 
 def _row_identity(table_name: str, row: dict[str, Any]) -> tuple[str, ...]:
+    if table_name == "users":
+        return (table_name, *_user_identity_key(row))
+
     field_groups = {
         "organization_members": ("organization_id", "user_id"),
         "team_members": ("team_id", "user_id"),
@@ -513,6 +651,9 @@ def _row_identity(table_name: str, row: dict[str, Any]) -> tuple[str, ...]:
         "team_projects": ("team_id", "project_id"),
         "api_key_project_scopes": ("api_key_id", "project_id"),
         "api_key_memory_space_scopes": ("api_key_id", "memory_space_id"),
+        "memory_spaces": ("organization_id", "memory_scope", "scope_key"),
+        "memory_space_members": ("space_id", "principal_type", "principal_id"),
+        "oauth_connections": ("provider", "provider_user_id"),
         "system_settings": ("key",),
         "backup_settings": ("key",),
         "teams": ("organization_id", "slug"),
