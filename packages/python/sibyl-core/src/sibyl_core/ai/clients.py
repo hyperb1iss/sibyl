@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from pydantic_ai import Agent
+from pydantic_ai.output import PromptedOutput
 
 from sibyl_core.ai.llm.config import LLMConfig, LLMSurface, resolve_llm_config
 from sibyl_core.ai.providers import build_model
@@ -45,7 +46,7 @@ async def get_agent(
     if key not in _agent_cache:
         _agent_cache[key] = Agent(
             model=build_model(config),
-            output_type=output_type,
+            output_type=_provider_output_type(config, output_type),
             instructions=normalized_prompt,
             output_retries=output_retries,
         )
@@ -80,6 +81,12 @@ def _output_type_key(output_type: AgentOutputType) -> str:
     if module and qualname:
         return f"{module}.{qualname}"
     return repr(output_type)
+
+
+def _provider_output_type(config: LLMConfig, output_type: AgentOutputType) -> AgentOutputType:
+    if config.provider == "gemini" and output_type is not str:
+        return PromptedOutput(output_type)
+    return output_type
 
 
 def _config_fingerprint(config: LLMConfig) -> str:

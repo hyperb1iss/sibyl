@@ -34,7 +34,7 @@ class Extractor[T]:
     async def extract(self, prompt: str) -> T:
         try:
             agent = await self._get_agent()
-            result = await agent.run(prompt, output_type=self.output_type)
+            result = await agent.run(prompt)
             return result.output
         except Exception as exc:
             raise self._classify(exc) from exc

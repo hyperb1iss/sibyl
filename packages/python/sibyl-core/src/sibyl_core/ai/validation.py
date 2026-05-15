@@ -22,6 +22,8 @@ ValidationStatus = Literal[
     "permission_denied",
 ]
 
+PROBE_MAX_TOKENS = 128
+
 
 class KeyValidationResult(BaseModel):
     provider: LLMProviderName
@@ -72,7 +74,7 @@ async def check_provider_key(provider: LLMProviderName, key: str) -> KeyValidati
             LLMConfig(
                 provider=provider,
                 model=model,
-                max_tokens=8,
+                max_tokens=PROBE_MAX_TOKENS,
                 timeout_seconds=10,
                 api_key=SecretStr(key),
             )
@@ -106,7 +108,7 @@ async def check_model_availability(
     config = LLMConfig(
         provider=provider,
         model=provider_model_id,
-        max_tokens=8,
+        max_tokens=PROBE_MAX_TOKENS,
         timeout_seconds=10,
         api_key=SecretStr(key),
     )

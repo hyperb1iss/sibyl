@@ -3,9 +3,15 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from pydantic import SecretStr
+from pydantic import BaseModel, SecretStr
+from pydantic_ai.output import PromptedOutput
 
-from sibyl_core.ai.clients import agent_cache_size, get_agent, invalidate_agent_cache
+from sibyl_core.ai.clients import (
+    _provider_output_type,
+    agent_cache_size,
+    get_agent,
+    invalidate_agent_cache,
+)
 from sibyl_core.ai.errors import LLMConfigError
 from sibyl_core.ai.llm.config import (
     ConfigField,
@@ -28,7 +34,9 @@ class StaticConfigSource:
             surface=surface,
             provider=ConfigField(value=self.config.provider, source="env", locked_by_env=True),
             model=ConfigField(value=self.config.model, source="env", locked_by_env=True),
-            temperature=ConfigField(value=self.config.temperature, source="env", locked_by_env=True),
+            temperature=ConfigField(
+                value=self.config.temperature, source="env", locked_by_env=True
+            ),
             max_tokens=ConfigField(value=self.config.max_tokens, source="env", locked_by_env=True),
             timeout_seconds=ConfigField(
                 value=self.config.timeout_seconds,
@@ -116,6 +124,24 @@ def test_build_model_resolves_registry_alias_and_settings() -> None:
     assert model.settings == {"temperature": 0.2, "timeout": 3, "max_tokens": 42}
 
 
+def test_provider_output_type_uses_prompted_output_for_gemini_structured_schema() -> None:
+    output_type = _provider_output_type(
+        LLMConfig(provider="gemini", model="gemini-3-1-flash-lite"),
+        ClientPayload,
+    )
+
+    assert isinstance(output_type, PromptedOutput)
+
+
+def test_provider_output_type_keeps_text_output_native() -> None:
+    output_type = _provider_output_type(
+        LLMConfig(provider="gemini", model="gemini-3-1-flash-lite"),
+        str,
+    )
+
+    assert output_type is str
+
+
 def test_build_model_rejects_registry_provider_mismatch() -> None:
     with pytest.raises(LLMConfigError, match="belongs to provider"):
         build_model(LLMConfig(provider="anthropic", model="gpt-5.4-nano"))
@@ -137,3 +163,7 @@ def _run_in_new_loop(coro):
         return loop.run_until_complete(coro)
     finally:
         loop.close()
+
+
+class ClientPayload(BaseModel):
+    name: str
