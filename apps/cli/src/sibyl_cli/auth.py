@@ -181,6 +181,10 @@ class _DeviceLoginError(RuntimeError):
         self.payload = payload
 
 
+class _NoBrowserLoginPrinted(RuntimeError):
+    pass
+
+
 def _start_device_flow(*, api_url: str, insecure: bool = False) -> tuple[str, str, str, int, int]:
     import httpx
 
@@ -306,6 +310,10 @@ def _oauth_pkce_login(
 
     if no_browser:
         print(auth_url)
+        httpd.shutdown()
+        raise _NoBrowserLoginPrinted(
+            "Login URL printed; approval polling skipped for --no-browser."
+        )
     else:
         webbrowser.open(auth_url, new=1, autoraise=True)
 
@@ -382,6 +390,9 @@ def _login_via_device_flow(
     info(f"User code: {user_code}")
     if no_browser:
         print(verify)
+        raise _NoBrowserLoginPrinted(
+            "Login URL printed; approval polling skipped for --no-browser."
+        )
     else:
         webbrowser.open(verify, new=1, autoraise=True)
         info(f"Opened browser to approve: {verify}")
@@ -456,6 +467,9 @@ def _login_auto(
         )
         success(f"Login complete (saved credentials for {api_url})")
         return
+    except _NoBrowserLoginPrinted as e:
+        success(str(e))
+        return
     except TimeoutError:
         error("Timed out waiting for approval")
         return
@@ -488,6 +502,9 @@ def _login_auto(
             expires_in=tok.get("expires_in"),
         )
         success(f"Login complete (saved credentials for {api_url})")
+        return
+    except _NoBrowserLoginPrinted as e:
+        success(str(e))
         return
     except TimeoutError:
         error("Timed out waiting for browser login")
