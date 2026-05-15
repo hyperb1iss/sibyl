@@ -99,9 +99,9 @@ tasks:
     - ~:typecheck
     - ~:test
   install:
-    command: uv tool install . --force
+    script: uv tool install . --force && sibyl skill --install --quiet
   install-dev:
-    command: uv tool install . --editable --force
+    script: uv tool install . --editable --force && sibyl skill --install --quiet
   setup-assistants:
     command: uv run sibyl local setup
     preset: server
