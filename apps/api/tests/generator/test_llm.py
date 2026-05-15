@@ -21,7 +21,7 @@ async def _resolved_synthesis_config() -> ResolvedLLMConfig:
 
 
 @pytest.mark.asyncio
-async def test_generate_content_uses_synthesis_surface(monkeypatch) -> None:
+async def test_generate_content_uses_synthesis_surface(monkeypatch, tmp_path) -> None:
     calls: list[tuple[LLMSurface, str, int | None]] = []
 
     class FakeGenerator:
@@ -38,6 +38,7 @@ async def test_generate_content_uses_synthesis_surface(monkeypatch) -> None:
 
     monkeypatch.setattr("sibyl.generator.llm.Generator", FakeGenerator)
     monkeypatch.setattr("sibyl.generator.llm.resolve_llm_config", fake_resolve)
+    monkeypatch.setattr("sibyl.generator.llm.CACHE_DIR", tmp_path)
 
     generator = LLMContentGenerator(GeneratorConfig())
 
