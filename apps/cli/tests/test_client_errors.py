@@ -169,6 +169,37 @@ async def test_mutating_request_survives_connect_drop_and_replays(
 
 
 @pytest.mark.asyncio
+async def test_mutating_request_refreshes_401_and_retries_same_pending_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    seen_headers: list[str] = []
+
+    def stale_then_ok(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(request.headers["Idempotency-Key"])
+        if len(seen_headers) == 1:
+            return httpx.Response(
+                401,
+                json={"error": "unauthorized", "message": "expired access token"},
+            )
+        return httpx.Response(200, json={"ok": True})
+
+    client = _client_with_transport(httpx.MockTransport(stale_then_ok))
+    refresh = AsyncMock(return_value=(True, None))
+    monkeypatch.setattr(client, "_refresh_token", refresh)
+
+    result = await client.post("/entities", json={"name": "Retry me", "content": "Body"})
+
+    await client.close()
+    assert result == {"ok": True}
+    refresh.assert_awaited_once()
+    assert len(seen_headers) == 2
+    assert seen_headers[0] == seen_headers[1]
+    assert pending_writes.list_pending_writes() == []
+
+
+@pytest.mark.asyncio
 async def test_mutating_request_keeps_pending_write_on_auth_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
