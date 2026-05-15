@@ -19,8 +19,6 @@ COPY packages/python/sibyl-core/src packages/python/sibyl-core/src
 # Copy API package
 COPY apps/api/pyproject.toml apps/api/README.md apps/api/
 COPY apps/api/src apps/api/src
-COPY apps/api/alembic apps/api/alembic
-COPY apps/api/alembic.ini apps/api/
 COPY README.md ./
 
 # Install from workspace (--no-editable for proper wheel builds in Docker)
@@ -39,8 +37,6 @@ WORKDIR /app
 
 # Copy virtual environment from builder
 COPY --from=builder --chown=sibyl:sibyl /app/.venv /app/.venv
-COPY --from=builder --chown=sibyl:sibyl /app/apps/api/alembic /app/alembic
-COPY --from=builder --chown=sibyl:sibyl /app/apps/api/alembic.ini /app/alembic.ini
 
 # Install Playwright for crawl4ai (chromium headless)
 # Manual minimal deps instead of --with-deps (which pulls ~600MB of X11/GUI stuff)
