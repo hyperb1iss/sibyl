@@ -138,6 +138,20 @@ tasks:
     options:
       envFile: .env
 
+  overview-perf-test:
+    command:
+      uv run pytest
+      tests/test_routes_admin.py::test_stats_uses_graph_stats_payload
+      tests/test_metrics.py::TestGetOrgMetrics::test_org_metrics_uses_surreal_metric_task_fast_path
+      tests/test_metrics.py::TestGetProjectSummaries::test_project_summaries_uses_surreal_metric_task_fast_path
+      -v
+    inputs:
+      - "@group(sources)"
+      - tests/test_routes_admin.py
+      - tests/test_metrics.py
+    options:
+      envFile: .env
+
   memory-trust-context-test:
     command: uv run pytest tests/test_routes_context.py tests/test_routes_session.py -v
     inputs:

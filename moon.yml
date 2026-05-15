@@ -643,6 +643,22 @@ tasks:
       - apps/api/moon.yml
       - apps/cli/moon.yml
 
+  overview-perf-gate:
+    command: uv run python -m tools.trust.overview_perf_gate
+    options:
+      cache: false
+
+  overview-perf-gate-test:
+    command: uv run pytest tools/tests/test_overview_perf_gate.py -v
+    inputs:
+      - tools/trust/**/*.py
+      - tools/tests/conftest.py
+      - tools/tests/test_overview_perf_gate.py
+      - pyproject.toml
+      - moon.yml
+      - apps/api/moon.yml
+      - apps/web/moon.yml
+
   synthesis-gate:
     command: uv run python -m tools.trust.synthesis_gate
     options:

@@ -58,6 +58,13 @@ tasks:
       - "@group(sources)"
       - "@group(tests)"
 
+  overview-perf-test:
+    command: pnpm vitest run 'src/app/(main)/dashboard-content.test.tsx' src/lib/api-server.test.ts
+    inputs:
+      - "@group(sources)"
+      - src/app/(main)/dashboard-content.test.tsx
+      - src/lib/api-server.test.ts
+
   test-watch:
     command: pnpm vitest
     preset: server
