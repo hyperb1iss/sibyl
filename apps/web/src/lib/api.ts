@@ -1114,6 +1114,7 @@ export interface Session {
   user_agent: string | null;
   ip_address: string | null;
   created_at: string;
+  expires_at: string;
   last_used_at: string | null;
   is_current: boolean;
 }
@@ -1129,7 +1130,7 @@ export interface ApiKey {
   scopes: string[];
   last_used_at: string | null;
   expires_at: string | null;
-  created_at: string;
+  created_at: string | null;
 }
 
 export interface ApiKeysResponse {
@@ -1159,6 +1160,57 @@ export interface OAuthConnection {
 
 export interface OAuthConnectionsResponse {
   connections: OAuthConnection[];
+}
+
+interface ApiKeyBackendRecord {
+  id: string;
+  name: string;
+  prefix?: string;
+  key_prefix?: string;
+  scopes?: string[];
+  last_used_at?: string | null;
+  expires_at?: string | null;
+  created_at?: string | null;
+}
+
+interface ApiKeysBackendResponse {
+  keys: ApiKeyBackendRecord[];
+}
+
+interface ApiKeyCreateBackendResponse extends ApiKeyBackendRecord {
+  api_key: string;
+}
+
+interface OAuthConnectionBackendRecord {
+  id: string;
+  provider: string;
+  provider_user_id: string;
+  provider_email: string | null;
+  connected_at: string;
+}
+
+function normalizeApiKey(record: ApiKeyBackendRecord): ApiKey {
+  return {
+    id: record.id,
+    name: record.name,
+    prefix: record.prefix ?? record.key_prefix ?? '',
+    scopes: record.scopes ?? [],
+    last_used_at: record.last_used_at ?? null,
+    expires_at: record.expires_at ?? null,
+    created_at: record.created_at ?? null,
+  };
+}
+
+function normalizeOAuthConnection(record: OAuthConnectionBackendRecord): OAuthConnection {
+  return {
+    id: record.id,
+    provider: record.provider,
+    provider_user_id: record.provider_user_id,
+    email: record.provider_email,
+    name: null,
+    avatar_url: null,
+    created_at: record.connected_at,
+  };
 }
 
 export interface PasswordChangeRequest {
@@ -2226,46 +2278,63 @@ export const api = {
   security: {
     // Sessions
     sessions: {
-      list: () => fetchApi<SessionsResponse>('/me/sessions'),
+      list: async () => ({
+        sessions: await fetchApi<Session[]>('/users/me/sessions'),
+      }),
       revoke: (sessionId: string) =>
-        fetchApi<{ success: boolean }>(`/me/sessions/${sessionId}`, {
+        fetchApi<void>(`/users/me/sessions/${sessionId}`, {
           method: 'DELETE',
-        }),
+        }).then(() => ({ success: true })),
       revokeAll: () =>
-        fetchApi<{ revoked: number }>('/me/sessions', {
+        fetchApi<{ revoked: number }>('/users/me/sessions', {
           method: 'DELETE',
         }),
     },
 
     // API Keys
     apiKeys: {
-      list: () => fetchApi<ApiKeysResponse>('/api-keys'),
-      create: (data: ApiKeyCreateRequest) =>
-        fetchApi<ApiKeyCreateResponse>('/api-keys', {
+      list: async () => {
+        const response = await fetchApi<ApiKeysBackendResponse>('/auth/api-keys');
+        return { api_keys: response.keys.map(normalizeApiKey) };
+      },
+      create: async (data: ApiKeyCreateRequest) => {
+        const response = await fetchApi<ApiKeyCreateBackendResponse>('/auth/api-keys', {
           method: 'POST',
-          body: JSON.stringify(data),
-        }),
+          body: JSON.stringify({
+            name: data.name,
+            scopes: data.scopes,
+            expires_days: data.expires_in_days,
+          }),
+        });
+        return {
+          api_key: normalizeApiKey(response),
+          key: response.api_key,
+        };
+      },
       revoke: (keyId: string) =>
-        fetchApi<{ success: boolean }>(`/api-keys/${keyId}/revoke`, {
+        fetchApi<{ success: boolean }>(`/auth/api-keys/${keyId}/revoke`, {
           method: 'POST',
         }),
     },
 
     // OAuth Connections
     connections: {
-      list: () => fetchApi<OAuthConnectionsResponse>('/me/connections'),
+      list: async () => {
+        const connections = await fetchApi<OAuthConnectionBackendRecord[]>('/users/me/connections');
+        return { connections: connections.map(normalizeOAuthConnection) };
+      },
       remove: (connectionId: string) =>
-        fetchApi<{ success: boolean }>(`/me/connections/${connectionId}`, {
+        fetchApi<void>(`/users/me/connections/${connectionId}`, {
           method: 'DELETE',
-        }),
+        }).then(() => ({ success: true })),
     },
 
     // Password
     changePassword: (data: PasswordChangeRequest) =>
-      fetchApi<{ success: boolean }>('/me/password', {
+      fetchApi<void>('/users/me/password', {
         method: 'POST',
         body: JSON.stringify(data),
-      }),
+      }).then(() => ({ success: true })),
   },
 
   // User Preferences

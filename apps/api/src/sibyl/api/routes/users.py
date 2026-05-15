@@ -103,6 +103,12 @@ class SessionResponse(BaseModel):
     is_current: bool
 
 
+class RevokeSessionsResponse(BaseModel):
+    """Session revocation response."""
+
+    revoked: int
+
+
 class OAuthConnectionResponse(BaseModel):
     """OAuth connection response."""
 
@@ -277,11 +283,11 @@ async def list_sessions(
     ]
 
 
-@router.delete("/me/sessions", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/me/sessions", response_model=RevokeSessionsResponse)
 async def revoke_all_sessions(
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
-) -> None:
+) -> RevokeSessionsResponse:
     """Revoke all sessions except current."""
     current_token_hash = None
     token = select_access_token(
@@ -298,6 +304,7 @@ async def revoke_all_sessions(
         exclude_token_hash=current_token_hash,
     )
     log.info("sessions_revoked", user_id=str(auth.user.id), count=count)
+    return RevokeSessionsResponse(revoked=count)
 
 
 @router.delete("/me/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)

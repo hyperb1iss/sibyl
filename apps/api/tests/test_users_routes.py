@@ -1,3 +1,4 @@
+import hashlib
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -217,3 +218,21 @@ async def test_list_sessions_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch
     list_sessions.assert_awaited_once_with(user_id=auth.user.id)
     assert len(response) == 1
     assert response[0].is_current is False
+
+
+@pytest.mark.asyncio
+async def test_revoke_all_sessions_returns_revoked_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    auth = _auth()
+    revoke_all = AsyncMock(return_value=2)
+    monkeypatch.setattr(user_routes, "revoke_all_user_sessions", revoke_all)
+    request = SimpleNamespace(headers={"authorization": "Bearer keep-token"}, cookies={})
+
+    response = await user_routes.revoke_all_sessions(request=request, auth=auth)
+
+    assert response.revoked == 2
+    revoke_all.assert_awaited_once_with(
+        user_id=auth.user.id,
+        exclude_token_hash=hashlib.sha256(b"keep-token").hexdigest(),
+    )
