@@ -65,6 +65,15 @@ tasks:
       - src/app/(main)/dashboard-content.test.tsx
       - src/lib/api-server.test.ts
 
+  trust-control-test:
+    command:
+      pnpm vitest run 'src/app/(main)/memory/page.test.tsx'
+      src/components/memory/source-inspect-panel.test.tsx
+    inputs:
+      - "@group(sources)"
+      - src/app/(main)/memory/page.test.tsx
+      - src/components/memory/source-inspect-panel.test.tsx
+
   test-watch:
     command: pnpm vitest
     preset: server

@@ -218,7 +218,9 @@ def coerce_auth_membership(value: object | None) -> AuthMembership | None:
         return value
     return AuthMembership(
         id=_optional_uuid(_attr(value, "id"), "membership.id"),
-        organization_id=_required_uuid(_attr(value, "organization_id"), "membership.organization_id"),
+        organization_id=_required_uuid(
+            _attr(value, "organization_id"), "membership.organization_id"
+        ),
         user_id=_required_uuid(_attr(value, "user_id"), "membership.user_id"),
         role=coerce_organization_role(_attr(value, "role")) or OrganizationRole.MEMBER,
         created_at=_optional_datetime(_attr(value, "created_at")),

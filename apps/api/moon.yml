@@ -102,6 +102,58 @@ tasks:
     options:
       envFile: .env
 
+  trust-control-auth-test:
+    command:
+      uv run pytest tests/test_auth_api_key_scopes_rest.py tests/test_routes_auth.py
+      tests/test_surreal_auth_runtime.py tests/test_organization_runtime.py -v
+    inputs:
+      - "@group(sources)"
+      - tests/test_auth_api_key_scopes_rest.py
+      - tests/test_routes_auth.py
+      - tests/test_surreal_auth_runtime.py
+      - tests/test_organization_runtime.py
+    options:
+      envFile: .env
+
+  trust-control-rest-test:
+    command: uv run pytest tests/test_routes_memory.py tests/test_routes_context.py -v
+    inputs:
+      - "@group(sources)"
+      - tests/test_routes_memory.py
+      - tests/test_routes_context.py
+    options:
+      envFile: .env
+
+  trust-control-mcp-test:
+    command:
+      uv run pytest tests/test_server_accessible_projects.py
+      tests/test_auth_mcp_token_verifier.py tests/test_mcp_oauth_session_refresh.py
+      tests/test_mcp_oauth_multi_org_selection.py -v
+    inputs:
+      - "@group(sources)"
+      - tests/test_server_accessible_projects.py
+      - tests/test_auth_mcp_token_verifier.py
+      - tests/test_mcp_oauth_session_refresh.py
+      - tests/test_mcp_oauth_multi_org_selection.py
+    options:
+      envFile: .env
+
+  trust-control-jobs-test:
+    command:
+      uv run pytest tests/test_jobs_entities.py tests/test_jobs_queue.py
+      tests/test_jobs_source_imports.py tests/test_routes_tasks.py
+      tests/test_tools_manage.py tests/test_coordination_local.py -v
+    inputs:
+      - "@group(sources)"
+      - tests/test_jobs_entities.py
+      - tests/test_jobs_queue.py
+      - tests/test_jobs_source_imports.py
+      - tests/test_routes_tasks.py
+      - tests/test_tools_manage.py
+      - tests/test_coordination_local.py
+    options:
+      envFile: .env
+
   autonomy-test:
     command:
       uv run pytest

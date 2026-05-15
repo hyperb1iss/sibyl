@@ -222,6 +222,7 @@ tasks:
       - ~:storage-access-test
       - ~:baseline-test
       - ~:memory-trust-gate-test
+      - ~:trust-control-gate-test
       - ~:synthesis-gate-test
       - ~:adapter-ingest-gate-test
       - core:check
@@ -242,6 +243,7 @@ tasks:
       - ~:storage-access-test
       - ~:baseline-test
       - ~:memory-trust-gate-test
+      - ~:trust-control-gate-test
       - ~:synthesis-gate-test
       - ~:adapter-ingest-gate-test
       - core:test
@@ -609,6 +611,24 @@ tasks:
       - tools/tests/test_memory_trust_gate.py
       - pyproject.toml
       - moon.yml
+
+  trust-control-gate:
+    command: uv run python -m tools.trust.trust_control_gate
+    options:
+      cache: false
+
+  trust-control-gate-test:
+    command: uv run pytest tools/tests/test_trust_control_gate.py -v
+    inputs:
+      - tools/trust/**/*.py
+      - tools/tests/conftest.py
+      - tools/tests/test_trust_control_gate.py
+      - pyproject.toml
+      - moon.yml
+      - apps/api/moon.yml
+      - apps/cli/moon.yml
+      - apps/web/moon.yml
+      - packages/python/sibyl-core/moon.yml
 
   autonomy-gate:
     command: uv run python -m tools.trust.autonomy_gate
