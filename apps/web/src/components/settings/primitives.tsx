@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import type { IconComponent } from '@/components/ui/icons';
 import { Database, Globe, InfoCircle, Key } from '@/components/ui/icons';
+import { Skeleton } from '@/components/ui/spinner';
 import { Tooltip } from '@/components/ui/tooltip';
 
 interface SettingsPageHeaderProps {
@@ -262,5 +263,70 @@ export function StatusPill({ tone, icon: Icon, children }: StatusPillProps) {
       {Icon && <Icon width={11} height={11} />}
       {children}
     </span>
+  );
+}
+
+interface SettingsSectionSkeletonProps {
+  rows?: number;
+  rowHeight?: number;
+  showHeader?: boolean;
+}
+
+export function SettingsSectionSkeleton({
+  rows = 3,
+  rowHeight = 56,
+  showHeader = true,
+}: SettingsSectionSkeletonProps) {
+  return (
+    <section className="rounded-lg border border-sc-fg-subtle/10 bg-sc-bg-base">
+      {showHeader && (
+        <div className="flex items-start gap-2.5 px-6 py-4">
+          <Skeleton className="mt-1 h-4 w-4 rounded" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-56" />
+          </div>
+        </div>
+      )}
+      <div className="border-t border-sc-fg-subtle/5">
+        {Array.from({ length: rows }).map((_, i) => (
+          <div
+            key={`row-${i}`}
+            className="flex items-center justify-between border-b border-sc-fg-subtle/5 px-6 last:border-b-0"
+            style={{ height: rowHeight }}
+          >
+            <div className="space-y-1.5">
+              <Skeleton className="h-3 w-32" />
+              <Skeleton className="h-2.5 w-48" />
+            </div>
+            <Skeleton className="h-7 w-28 rounded-md" />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+interface SettingsPageSkeletonProps {
+  /** Approximate number of sections to draw. */
+  sections?: number;
+  /** Optional title for the header skeleton (left blank by default). */
+  title?: string;
+}
+
+export function SettingsPageSkeleton({ sections = 3 }: SettingsPageSkeletonProps) {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start gap-3 border-b border-sc-fg-subtle/10 pb-5">
+        <Skeleton className="h-9 w-9 rounded-lg" />
+        <div className="flex-1 space-y-2">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-3 w-72" />
+        </div>
+      </div>
+      {Array.from({ length: sections }).map((_, i) => (
+        <SettingsSectionSkeleton key={`section-${i}`} rows={i === 0 ? 3 : 2} />
+      ))}
+    </div>
   );
 }

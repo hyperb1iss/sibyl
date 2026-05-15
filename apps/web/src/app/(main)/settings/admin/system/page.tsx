@@ -1,7 +1,7 @@
 'use client';
 
 import { toast } from 'sonner';
-import { SettingsPageHeader } from '@/components/settings/primitives';
+import { SettingsPageHeader, SettingsSectionSkeleton } from '@/components/settings/primitives';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -111,9 +111,9 @@ export default function SystemStatusPage() {
           title="System"
           description="Real-time health and diagnostics."
         />
-        <div className="flex items-center justify-center py-12">
-          <Spinner size="md" color="purple" />
-        </div>
+        <SettingsSectionSkeleton rows={4} rowHeight={64} showHeader={false} />
+        <SettingsSectionSkeleton rows={2} rowHeight={56} />
+        <SettingsSectionSkeleton rows={2} rowHeight={72} />
       </div>
     );
   }

@@ -9,6 +9,7 @@ import {
   SettingsField,
   SettingsPageHeader,
   SettingsSection,
+  SettingsSectionSkeleton,
   StatusPill,
 } from '@/components/settings/primitives';
 import { Button } from '@/components/ui/button';
@@ -576,9 +577,9 @@ export default function AIServicesPage() {
           title="AI Services"
           description="API keys, model routing, and embeddings."
         />
-        <div className="flex items-center justify-center py-12">
-          <Spinner size="md" color="purple" />
-        </div>
+        <SettingsSectionSkeleton rows={3} rowHeight={72} />
+        <SettingsSectionSkeleton rows={3} rowHeight={120} />
+        <SettingsSectionSkeleton rows={2} rowHeight={96} />
       </div>
     );
   }
@@ -645,9 +646,7 @@ export default function AIServicesPage() {
         flush
       >
         {isLLMLoading || !llmSettings ? (
-          <div className="flex items-center justify-center py-10">
-            <Spinner size="md" color="purple" />
-          </div>
+          <SettingsSectionSkeleton rows={3} rowHeight={120} showHeader={false} />
         ) : (
           SURFACES.map(surface => (
             <LLMSurfaceRow

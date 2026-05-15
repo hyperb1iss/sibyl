@@ -9,12 +9,12 @@ export const metadata: Metadata = {
 
 export default function SettingsLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="flex flex-col md:flex-row gap-8">
-        <aside className="w-full md:w-56 shrink-0 md:sticky md:top-6 md:self-start">
+    <div className="mx-auto max-w-6xl">
+      <div className="flex flex-col gap-8 md:flex-row">
+        <aside className="w-full shrink-0 md:sticky md:top-0 md:w-56 md:self-start md:pt-2">
           <SettingsNav />
         </aside>
-        <main className="flex-1 min-w-0">{children}</main>
+        <div className="min-h-[calc(100vh-8rem)] min-w-0 flex-1">{children}</div>
       </div>
     </div>
   );

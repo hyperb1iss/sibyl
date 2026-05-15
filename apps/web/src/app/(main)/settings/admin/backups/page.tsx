@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { SettingsPageHeader } from '@/components/settings/primitives';
+import { SettingsPageHeader, SettingsSectionSkeleton } from '@/components/settings/primitives';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -484,9 +484,8 @@ export default function BackupsPage() {
           title="Backups"
           description="Schedule and manage data + graph archives."
         />
-        <div className="flex items-center justify-center py-12">
-          <Spinner size="md" color="purple" />
-        </div>
+        <SettingsSectionSkeleton rows={4} rowHeight={64} />
+        <SettingsSectionSkeleton rows={5} rowHeight={72} />
       </div>
     );
   }

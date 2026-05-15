@@ -1,5 +1,5 @@
-import { LoadingState } from '@/components/ui/spinner';
+import { SettingsPageSkeleton } from '@/components/settings/primitives';
 
 export default function Loading() {
-  return <LoadingState message="Loading settings..." />;
+  return <SettingsPageSkeleton sections={3} />;
 }
