@@ -46,6 +46,7 @@ def test_pending_write_list_and_prefix_delete(
 
     assert pending_writes.list_pending_writes()[0]["id"] == item["id"]
     assert pending_writes.read_pending_write(item["id"])["path"] == "/tasks/task_123"
+    assert pending_writes.pending_write_status()["metrics"]["attempted"] == 1
     assert pending_writes.delete_pending_write(item["id"][:8]) is True
     assert pending_writes.list_pending_writes() == []
 

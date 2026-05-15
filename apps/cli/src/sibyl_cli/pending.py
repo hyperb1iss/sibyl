@@ -14,6 +14,7 @@ from sibyl_cli.pending_writes import (
     list_pending_writes,
     pending_write_label,
     read_pending_write,
+    record_pending_metric,
 )
 
 app = typer.Typer(help="Inspect and replay locally buffered writes")
@@ -80,6 +81,7 @@ def discard_writes(
         try:
             if delete_pending_write(write_id):
                 removed += 1
+                record_pending_metric("discarded")
         except ValueError as exc:
             error(str(exc))
             raise typer.Exit(code=1) from exc
@@ -120,6 +122,7 @@ def flush_writes(
                         _pending_write_id=write_id,
                         _idempotency_key=str(current["idempotency_key"]),
                     )
+                record_pending_metric("replayed")
                 success(f"Flushed {write_id[:12]}")
             except SibylClientError as exc:
                 failures += 1

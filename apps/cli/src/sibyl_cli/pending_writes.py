@@ -16,6 +16,10 @@ def pending_writes_dir() -> Path:
     return Path.home() / ".config" / "sibyl" / "pending_writes"
 
 
+def pending_metrics_path() -> Path:
+    return Path.home() / ".config" / "sibyl" / "pending_writes_metrics.json"
+
+
 def _ensure_secure_dir(path: Path) -> None:
     if path.exists():
         if os.name != "nt":
@@ -84,6 +88,7 @@ def create_pending_write(
         "attempts": 0,
     }
     _secure_write_json(_pending_path(write_id), data)
+    record_pending_metric("attempted")
     return data
 
 
@@ -133,6 +138,32 @@ def increment_attempts(write_id: str) -> dict[str, Any]:
     data["last_attempt_at"] = datetime.now(UTC).isoformat()
     _secure_write_json(resolve_pending_write_path(write_id), data)
     return data
+
+
+def read_pending_metrics() -> dict[str, int]:
+    path = pending_metrics_path()
+    defaults = {"attempted": 0, "replayed": 0, "expired": 0, "discarded": 0}
+    if not path.exists():
+        return defaults
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return defaults
+    return {key: int(data.get(key) or 0) for key in defaults}
+
+
+def record_pending_metric(name: str, count: int = 1) -> dict[str, int]:
+    metrics = read_pending_metrics()
+    metrics[name] = int(metrics.get(name) or 0) + count
+    _secure_write_json(pending_metrics_path(), metrics)
+    return metrics
+
+
+def pending_write_status() -> dict[str, Any]:
+    return {
+        "count": len(list_pending_writes()),
+        "metrics": read_pending_metrics(),
+    }
 
 
 def pending_write_label(item: dict[str, Any]) -> tuple[str, str]:

@@ -22,6 +22,7 @@ from sibyl_cli.common import (
     print_json,
     run_async,
 )
+from sibyl_cli.pending_writes import pending_write_status
 
 app = typer.Typer(
     name="debug",
@@ -224,6 +225,7 @@ def status(
         try:
             async with get_client() as client:
                 data = await client.get("/admin/dev-status")
+                data["pending_writes"] = pending_write_status()
 
                 if json_output:
                     print_json(data)
@@ -259,6 +261,17 @@ def status(
                 console.print(
                     f"  Durable:      [{CORAL}]{str(data.get('coordination_durable', False)).lower()}[/{CORAL}]"
                 )
+                pending = data.get("pending_writes", {})
+                if isinstance(pending, dict):
+                    metrics = pending.get("metrics", {})
+                    if not isinstance(metrics, dict):
+                        metrics = {}
+                    console.print(
+                        f"  Pending:      [{CORAL}]{pending.get('count', 0)}[/{CORAL}]"
+                        f" buffered, [{CORAL}]{metrics.get('attempted', 0)}[/{CORAL}] attempted,"
+                        f" [{CORAL}]{metrics.get('replayed', 0)}[/{CORAL}] replayed,"
+                        f" [{CORAL}]{metrics.get('discarded', 0)}[/{CORAL}] discarded"
+                    )
                 coordination_error = data.get("coordination_error")
                 if coordination_error:
                     console.print(
