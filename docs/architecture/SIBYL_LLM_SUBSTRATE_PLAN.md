@@ -37,7 +37,7 @@ synthesis, and memory-review features named in the roadmap.
 - `apps/web/src/app/(main)/settings/admin/ai/page.tsx` renders an LLM section with per-surface model
   selection, env-lock indicators, an explicit instance-wide banner, and a per-row "Test" affordance.
 - Provider key validation hits each provider with a current, non-retired model via the substrate's
-  `check_provider_key`. Setup and Settings routes drop `claude-3-haiku-20240307` references.
+  `check_provider_key`. Setup and Settings routes drop retired Haiku 3 snapshot references.
 - `moon run :check` is green across core, api, cli, and web.
 - Crawler smoke harness gates on schema success rate, required-field coverage, and type-distribution
   drift versus the current Haiku 4.5 baseline (not just entity count).
@@ -76,7 +76,7 @@ Non-Graphiti LLM-adjacent surfaces:
 Settings/setup validation:
 
 - `apps/api/src/sibyl/api/routes/setup.py:121` and `apps/api/src/sibyl/api/routes/settings.py:135`
-  both probe `claude-3-haiku-20240307` for Anthropic key validation. Retired model; replace.
+  both probe the retired Haiku 3 snapshot for Anthropic key validation. Replace them.
 
 Web UI:
 
@@ -581,7 +581,7 @@ structured logging.
 - **Implementation:**
   - Endpoints from §5.5 with `require_settings_admin`. Response schemas explicit about
     `scope: "instance_wide"` and per-field `source` + `locked_by_env`.
-  - Replace the inline `claude-3-haiku-20240307` probes in `setup.py:121` and `settings.py:135` with
+  - Replace the inline retired Haiku 3 probes in `setup.py:121` and `settings.py:135` with
     `check_provider_key`.
   - OpenAPI schemas + tests for: GET returns expected shape; PUT writes; PUT returns 409 when
     env-locked; POST `/test` runs end-to-end; non-admin returns 403.
@@ -707,7 +707,7 @@ structured logging.
 - **Implementation:**
   - `moon run :check` green.
   - `agent-browser` smoke of the settings UI in dark mode.
-  - `rg "claude-3-haiku-20240307"` empty.
+  - `rg` for the retired Haiku 3 snapshot returns empty.
   - `rg "AsyncAnthropic|anthropic\.Anthropic|openai\.AsyncOpenAI" apps/api/src/sibyl/crawler/graph_integration.py apps/api/src/sibyl/generator/llm.py`
     empty after Tasks 11-12.
   - `rg "google\.genai" apps/api/src packages/python/sibyl-core/src/sibyl_core` shows only embedding

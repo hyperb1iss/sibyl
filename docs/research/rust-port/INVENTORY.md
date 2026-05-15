@@ -3,7 +3,7 @@
 Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 
 ## Summary
-- REST routers: 25
+- REST routers: 26
 - Top-level HTTP routes: 2
 - WebSocket routes: 1
 - MCP tools: 11
@@ -12,7 +12,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - Raw SQL query usage files: 0
 - Session-backed storage access files: 0
 - Graphiti import files: 21
-- Retained legacy term files: 90
+- Retained legacy term files: 93
 - Dependency records: 4
 
 ## API Surface
@@ -27,6 +27,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - `context_router`
 - `graph_router`
 - `admin_router`
+- `ai_settings_router`
 - `auth_router`
 - `crawler_router`
 - `orgs_router`
@@ -138,18 +139,20 @@ must carry an owner and reason here.
 | `docs/api/rest-tasks.md` | `redis` | 1 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/architecture/PERMISSION_SYSTEM_AUDIT.md` | `falkor`, `postgres` | 23 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/PERMISSION_SYSTEM_PLAN.md` | `falkor`, `postgres`, `redis` | 13 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
-| `docs/architecture/SIBYL_NORTHSTAR.md` | `falkor`, `graphiti`, `postgres`, `redis` | 38 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
+| `docs/architecture/SIBYL_1_0_ROADMAP.md` | `graphiti`, `redis` | 26 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
+| `docs/architecture/SIBYL_LLM_SUBSTRATE_PLAN.md` | `graphiti` | 13 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
+| `docs/architecture/SIBYL_NORTHSTAR.md` | `falkor`, `graphiti`, `postgres`, `redis` | 43 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md` | `graphiti` | 2 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
-| `docs/architecture/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md` | `falkor`, `graphiti`, `postgres`, `redis`, `valkey` | 163 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
+| `docs/architecture/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md` | `falkor`, `graphiti`, `postgres`, `redis`, `valkey` | 165 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SIBYL_V08_PURE_SURREAL_CLOSURE_EXECUTION_PLAN.md` | `falkor`, `graphiti`, `postgres`, `redis`, `valkey` | 88 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SURREALDB_GRAPHITI_EXIT_BENCHMARK_EVIDENCE.md` | `graphiti` | 23 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
-| `docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md` | `graphiti` | 101 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
+| `docs/architecture/SURREALDB_GRAPHITI_EXIT_INVENTORY.md` | `graphiti` | 114 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SURREALDB_NATIVE_MEMORY_CORE_SPEC.md` | `falkor`, `graphiti`, `postgres` | 48 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SURREALDB_PHASE1_BUGS.md` | `postgres`, `redis` | 3 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SURREALDB_PHASE2_AUTH_MIGRATION.md` | `falkor`, `postgres`, `redis` | 69 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SURREALDB_PHASE2_LIVE_GATES.md` | `postgres` | 7 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SURREALDB_PHASE3_BURNDOWN.md` | `falkor`, `graphiti`, `postgres` | 62 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
-| `docs/architecture/SURREALDB_V07_GRAPHITI_EXIT_AND_PURE_SURREAL_PLAN.md` | `falkor`, `graphiti`, `postgres`, `redis` | 92 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
+| `docs/architecture/SURREALDB_V07_GRAPHITI_EXIT_AND_PURE_SURREAL_PLAN.md` | `falkor`, `graphiti`, `postgres`, `redis` | 93 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/TASKIQ_MIGRATION_PLAN.md` | `redis` | 57 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/cli/add.md` | `falkor`, `graphiti`, `postgres`, `redis` | 9 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/cli/entity.md` | `postgres`, `redis` | 3 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
@@ -195,6 +198,7 @@ must carry an owner and reason here.
 | `packages/python/sibyl-core/pyproject.toml` | `graphiti` | 2 | v0.7 Graphiti exit | Core package docs and tasks preserve compatibility coverage and historical Graphiti context. |
 | `pyproject.toml` | `graphiti` | 4 | repo package config | Root package configs retain compatibility extras and dev dependency boundaries. |
 | `setup-dev.sh` | `falkor`, `postgres` | 3 | dev bootstrap | Dev scripts mention legacy migration checks and optional Redis coordination. |
+| `skills/agent-activity-audit/EXAMPLES.md` | `falkor` | 1 | v0.8 skill docs | Source skill docs retain examples that mention Redis as historical troubleshooting context. |
 | `skills/sibyl/EXAMPLES.md` | `redis` | 3 | v0.8 skill docs | Source skill docs retain examples that mention Redis as historical troubleshooting context. |
 | `skills/sibyl/SKILL.md` | `redis` | 4 | v0.8 skill docs | Source skill docs retain examples that mention Redis as historical troubleshooting context. |
 | `tools/dev/run-surreal-dev.sh` | `falkor`, `postgres`, `redis` | 33 | dev bootstrap | Dev scripts mention legacy migration checks and optional Redis coordination. |

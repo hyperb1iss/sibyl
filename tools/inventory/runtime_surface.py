@@ -328,6 +328,8 @@ GRAPHITI_COMPATIBILITY_ALLOWLIST = (
 ARCHITECTURE_LEGACY_TERM_FILES = (
     "docs/architecture/PERMISSION_SYSTEM_AUDIT.md",
     "docs/architecture/PERMISSION_SYSTEM_PLAN.md",
+    "docs/architecture/SIBYL_1_0_ROADMAP.md",
+    "docs/architecture/SIBYL_LLM_SUBSTRATE_PLAN.md",
     "docs/architecture/SIBYL_NORTHSTAR.md",
     "docs/architecture/SIBYL_POST_V08_SYNTHESIS_AND_MEMORY_WORKSPACE_PLAN.md",
     "docs/architecture/SIBYL_V08_PURE_SURREAL_CLOSURE_AND_MEMORY_TRUST_PLAN.md",
@@ -392,6 +394,7 @@ APP_LEGACY_TERM_FILES = (
     "apps/cli/src/sibyl_cli/data/skills/sibyl/SKILL.md",
 )
 SKILL_SOURCE_LEGACY_TERM_FILES = (
+    "skills/agent-activity-audit/EXAMPLES.md",
     "skills/sibyl/EXAMPLES.md",
     "skills/sibyl/SKILL.md",
 )
