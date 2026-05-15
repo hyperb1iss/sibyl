@@ -23,8 +23,6 @@
 !apps/api/pyproject.toml
 !apps/api/README.md
 !apps/api/src/
-!apps/api/alembic/
-!apps/api/alembic.ini
 
 # -----------------------------------------------------------------------------
 # Web Image (apps/web/Dockerfile)
