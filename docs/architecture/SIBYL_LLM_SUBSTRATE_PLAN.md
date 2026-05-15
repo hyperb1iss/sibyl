@@ -156,6 +156,7 @@ class LLMConfig(BaseModel):
     temperature: float = 0.0
     max_tokens: int | None = None
     timeout_seconds: float = 60.0
+    api_key: SecretStr | None = None # resolved at call time; never serialized to API responses
 
 class ConfigField[T](BaseModel):
     """Per-field resolution metadata. Different fields can have different sources."""

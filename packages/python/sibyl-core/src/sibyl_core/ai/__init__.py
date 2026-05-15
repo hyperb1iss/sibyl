@@ -1,0 +1,61 @@
+"""Native AI substrate."""
+
+from sibyl_core.ai.errors import (
+    AIError,
+    LLMConfigError,
+    LLMError,
+    LLMProviderError,
+    LLMRateLimitError,
+    LLMTimeoutError,
+    LLMValidationError,
+)
+from sibyl_core.ai.llm import (
+    ConfigField,
+    EnvConfigSource,
+    LLMConfig,
+    LLMConfigSource,
+    LLMSurface,
+    ResolvedLLMConfig,
+    get_config_source,
+    invalidate_llm_config,
+    resolve_llm_config,
+    set_config_source,
+)
+from sibyl_core.ai.registry import (
+    ModelCapability,
+    ModelEntry,
+    ModelKind,
+    ModelRegistry,
+    embedding_entries,
+    llm_entries,
+    model_registry,
+    recommended_for,
+)
+
+__all__ = [
+    "AIError",
+    "ConfigField",
+    "EnvConfigSource",
+    "LLMConfig",
+    "LLMConfigError",
+    "LLMConfigSource",
+    "LLMError",
+    "LLMProviderError",
+    "LLMRateLimitError",
+    "LLMSurface",
+    "LLMTimeoutError",
+    "LLMValidationError",
+    "ModelCapability",
+    "ModelEntry",
+    "ModelKind",
+    "ModelRegistry",
+    "ResolvedLLMConfig",
+    "embedding_entries",
+    "get_config_source",
+    "invalidate_llm_config",
+    "llm_entries",
+    "model_registry",
+    "recommended_for",
+    "resolve_llm_config",
+    "set_config_source",
+]
