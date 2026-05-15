@@ -320,6 +320,8 @@ First implementation slice landed:
 - org-scoped reflection dream-cycle job with scheduled all-org maintenance
 - queue, API, CLI, and web receipts for automatic promotion and exception routing
 - `reflection-quality-gate` now runs core, API, CLI, and web reflection-quality slices
+- dogfood recall-improvement fixture covers decision, procedure, task learning, stale claim,
+  duplicate suppression, supersession exclusion, and private sensitive-note exclusion
 
 ### v0.13: Source And Synthesis Scale
 

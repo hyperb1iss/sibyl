@@ -56,10 +56,10 @@ Landed in the first implementation slice:
   nightly all-org scheduling
 - queue, owner API, CLI, and web visibility for automatic promotions and exception routing
 - `reflection-quality-gate` wired to core, API, CLI, and web reflection-quality tests
+- dogfood recall-improvement fixture proving reflected context beats the pre-reflection queue
 
 Still required before v0.12 release-candidate:
 
-- dogfood fixtures that prove recall improves after reflection
 - final release-matrix pass across autonomy, memory trust, auth/session, synthesis, source ingest,
   overview performance, and trust-control gates
 

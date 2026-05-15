@@ -6,6 +6,16 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from sibyl_core.evals import ContextPackFixture, evaluate_context_pack
+from sibyl_core.models.context import (
+    ContextFacet,
+    ContextIntent,
+    ContextItem,
+    ContextItemQualityMetadata,
+    ContextLayer,
+    ContextPack,
+    ContextSection,
+)
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.services.reflection import (
     DeterministicFakeReflectionExtractor,
@@ -314,6 +324,117 @@ def test_reflection_lifecycle_decisions_emit_stale_findings() -> None:
     assert result.reflection_findings[-1].kind == "stale"
 
 
+def test_dogfood_reflection_recall_fixture_improves_after_reflection() -> None:
+    fixture = ContextPackFixture(
+        name="reflection-os-dogfood",
+        required_item_ids={
+            "decision-auto-reflection",
+            "procedure-dream-cycle",
+            "task-learning-quality-gate",
+            "claim-current-dream-cycle",
+        },
+        forbidden_item_ids={
+            "duplicate-procedure-raw",
+            "stale-claim-old",
+            "sensitive-private-note",
+            "superseded-claim-old",
+        },
+        required_facets={
+            ContextFacet.ACTIVE_WORK,
+            ContextFacet.DECISIONS,
+            ContextFacet.PROCEDURES,
+            ContextFacet.RECENT_MEMORY,
+        },
+        required_terms={
+            "automatic memory review",
+            "reflection dream cycle",
+            "source-linked receipts",
+            "quality gate",
+        },
+        forbidden_terms={"api secret", "manual approval treadmill"},
+        require_source_metadata=True,
+        max_items=6,
+    )
+
+    before = _context_pack(
+        [
+            _context_item(
+                "duplicate-procedure-raw",
+                "procedure",
+                "Repeated raw procedure",
+                "Run reflection manually. This repeats the same procedure wording.",
+                ContextFacet.PROCEDURES,
+            ),
+            _context_item(
+                "stale-claim-old",
+                "claim",
+                "Old claim",
+                "Reflection dream cycle still requires manual approval treadmill.",
+                ContextFacet.RECENT_MEMORY,
+            ),
+            _context_item(
+                "superseded-claim-old",
+                "claim",
+                "Superseded claim",
+                "The old reflection queue blocks automation until human review.",
+                ContextFacet.RECENT_MEMORY,
+            ),
+            _context_item(
+                "sensitive-private-note",
+                "note",
+                "Private note",
+                "api secret should stay private and never promote to project recall.",
+                ContextFacet.RECENT_MEMORY,
+            ),
+        ]
+    )
+    after = _context_pack(
+        [
+            _context_item(
+                "decision-auto-reflection",
+                "decision",
+                "Automatic memory review",
+                "Automatic memory review promotes safe project memories without routine approval.",
+                ContextFacet.DECISIONS,
+            ),
+            _context_item(
+                "procedure-dream-cycle",
+                "procedure",
+                "Reflection dream cycle",
+                "Reflection dream cycle scans raw captures and drains exception-only reviews.",
+                ContextFacet.PROCEDURES,
+            ),
+            _context_item(
+                "task-learning-quality-gate",
+                "task_learning",
+                "Quality gate task learning",
+                "Run the reflection quality gate after changing lifecycle decisions.",
+                ContextFacet.ACTIVE_WORK,
+            ),
+            _context_item(
+                "claim-current-dream-cycle",
+                "claim",
+                "Source-linked receipts",
+                "Source-linked receipts explain automatic promotions and exception routing.",
+                ContextFacet.RECENT_MEMORY,
+            ),
+        ]
+    )
+
+    before_result = evaluate_context_pack(before, fixture)
+    after_result = evaluate_context_pack(after, fixture)
+
+    assert not before_result.passed
+    assert after_result.passed, after_result.failures
+    assert (
+        after_result.metrics["required_item_coverage"]
+        > before_result.metrics["required_item_coverage"]
+    )
+    assert before_result.metrics["forbidden_item_matches"] > 0
+    assert after_result.metrics["forbidden_item_matches"] == 0
+    assert after_result.metrics["forbidden_term_matches"] == 0
+
+
 @pytest.mark.asyncio
 async def test_deterministic_fake_extractor_runs_through_schema_validation() -> None:
     extractor = DeterministicFakeReflectionExtractor(
@@ -372,6 +493,50 @@ def _raw_memory(memory_id: str, content: str) -> RawMemory:
         tags=["reflection", "claim"],
         metadata={},
         capture_surface="reflection_candidate",
+    )
+
+
+def _context_item(
+    item_id: str,
+    item_type: str,
+    name: str,
+    content: str,
+    facet: ContextFacet,
+) -> ContextItem:
+    return ContextItem(
+        id=item_id,
+        type=item_type,
+        name=name,
+        content=content,
+        score=0.9,
+        facet=facet,
+        reason="dogfood reflection fixture",
+        source=f"raw:{item_id}",
+        quality=ContextItemQualityMetadata(source=f"raw:{item_id}", project_id="project_123"),
+        metadata={"source_id": f"raw:{item_id}", "project_id": "project_123"},
+    )
+
+
+def _context_pack(items: list[ContextItem]) -> ContextPack:
+    sections: list[ContextSection] = []
+    for facet in (
+        ContextFacet.ACTIVE_WORK,
+        ContextFacet.DECISIONS,
+        ContextFacet.PROCEDURES,
+        ContextFacet.RECENT_MEMORY,
+    ):
+        section_items = [item for item in items if item.facet == facet]
+        if section_items:
+            sections.append(ContextSection(facet=facet, title=facet.value, items=section_items))
+    return ContextPack(
+        goal="prove reflection improves recall",
+        intent=ContextIntent.BUILD,
+        query="reflection dream cycle automatic memory review",
+        domain="sibyl",
+        project="project_123",
+        sections=sections,
+        total_items=len(items),
+        layer=ContextLayer.RECALL,
     )
 
 
