@@ -344,11 +344,11 @@ The CLI stores credentials securely:
 # Login
 sibyl auth login
 
-# Check current user
-sibyl auth whoami
+# Check auth status
+sibyl auth status
 
-# Logout
-sibyl auth logout
+# Clear stored credentials
+sibyl auth clear-token
 ```
 
 ## Related

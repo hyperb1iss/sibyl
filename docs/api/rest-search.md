@@ -137,7 +137,7 @@ curl -X POST "https://api.example.com/api/search" \
         "source_id": "source_uuid",
         "chunk_type": "paragraph",
         "heading_path": ["Exception Handling", "Async"],
-        "hint": "Use 'sibyl entity <id>' for full content"
+        "hint": "Use 'sibyl entity show <id>' for full content"
       }
     }
   ],

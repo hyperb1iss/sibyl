@@ -87,5 +87,5 @@ sibyl reflect "..." --json | jq '.candidates[] | {kind, title}'
 
 - [`sibyl remember`](./remember.md) - Capture a single durable memory directly
 - [`sibyl recall`](./recall.md) - Recall memory into an agent context
-- [`sibyl memory`](./memory.md) - Promote and audit reflection candidates
+- [Memory governance](./memory.md) - Promote and audit reflection candidates
 - [`sibyl synthesis`](./synthesis.md) - Source-grounded synthesis from memory

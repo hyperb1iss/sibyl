@@ -115,4 +115,4 @@ git log -5 --oneline | sibyl remember "Recent auth commits" --kind episode
 - [`sibyl reflect`](./reflect.md) - Turn raw notes into reviewable candidates
 - [`sibyl capture`](./capture.md) - Quick capture without a separate title
 - [`sibyl add`](./add.md) - Add knowledge with explicit title and content
-- [`sibyl memory`](./memory.md) - Inspect, audit, and promote raw memory
+- [Memory governance](./memory.md) - Inspect, audit, and promote raw memory

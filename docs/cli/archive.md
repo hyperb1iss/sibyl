@@ -40,4 +40,4 @@ sibyl archive show 7f7b4b91-1cd8-47c5-a03e-59e2df96e6d0
 
 - [`sibyl capture`](./capture.md) - Quick capture that feeds the archive
 - [`sibyl remember`](./remember.md) - Typed memory-loop writes
-- [`sibyl memory`](./memory.md) - Inspect and audit raw memory sources
+- [Memory governance](./memory.md) - Inspect and audit raw memory sources

@@ -163,7 +163,7 @@ RelationshipType.BELONGS_TO, DEPENDS_ON, BLOCKS, REFERENCES
 ## Configuration
 
 ```bash
-SIBYL_LLM_PROVIDER=anthropic          # anthropic | gemini | openai
+SIBYL_LLM_PROVIDER=anthropic          # anthropic | openai
 SIBYL_LLM_MODEL=claude-haiku-4-5
 SIBYL_LLM_TEMPERATURE=0
 SIBYL_LLM_MAX_TOKENS=2048

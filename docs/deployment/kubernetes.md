@@ -73,7 +73,7 @@ backend:
 
   image:
     repository: ghcr.io/hyperb1iss/sibyl
-    tag: "0.1.0"
+    tag: "0.9.0"
     pullPolicy: Always
 
   # Reference pre-created secrets
@@ -137,7 +137,7 @@ frontend:
 
   image:
     repository: ghcr.io/hyperb1iss/sibyl-web
-    tag: "0.1.0"
+    tag: "0.9.0"
 
   autoscaling:
     enabled: true

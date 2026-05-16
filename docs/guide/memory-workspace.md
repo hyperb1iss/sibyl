@@ -10,8 +10,8 @@ is where a human reviews what agents captured, watches source imports land, and 
 synthesis interactively. The CLI drives the loop from the terminal; the workspace
 gives it oversight.
 
-It lives at the protected `/memory` route. (Earlier releases called this surface the
-"cockpit" - it is now the workspace.)
+It lives at the protected `/memory` route. Earlier releases called this surface the
+cockpit; it is now the workspace.
 
 ## What's in the Workspace
 
