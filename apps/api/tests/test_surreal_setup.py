@@ -119,10 +119,10 @@ async def test_require_setup_mode_or_admin_reports_initialized_without_token(
 
 
 @pytest.mark.asyncio
-async def test_require_setup_mode_or_admin_accepts_org_owner(
+async def test_require_setup_mode_or_admin_accepts_global_admin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = object()
+    user = SimpleNamespace(is_admin=True)
     monkeypatch.setattr(surreal_setup, "is_setup_mode", AsyncMock(return_value=False))
     monkeypatch.setattr(
         surreal_setup,
@@ -149,12 +149,12 @@ async def test_require_setup_mode_or_admin_accepts_org_owner(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("role", [OrganizationRole.OWNER, OrganizationRole.ADMIN])
-async def test_require_setup_mode_or_admin_accepts_org_admin_roles(
+@pytest.mark.parametrize("role", [OrganizationRole.OWNER, OrganizationRole.ADMIN, OrganizationRole.MEMBER])
+async def test_require_setup_mode_or_admin_accepts_global_admin_in_any_org_role(
     monkeypatch: pytest.MonkeyPatch,
     role: OrganizationRole,
 ) -> None:
-    user = object()
+    user = SimpleNamespace(is_admin=True)
     monkeypatch.setattr(surreal_setup, "is_setup_mode", AsyncMock(return_value=False))
     monkeypatch.setattr(
         surreal_setup,
@@ -182,13 +182,19 @@ async def test_require_setup_mode_or_admin_accepts_org_admin_roles(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("organization", "role"),
-    [(object(), OrganizationRole.MEMBER), (None, OrganizationRole.OWNER)],
+    ("organization", "role", "is_admin"),
+    [
+        (object(), OrganizationRole.OWNER, False),
+        (object(), OrganizationRole.ADMIN, False),
+        (object(), OrganizationRole.MEMBER, False),
+        (None, OrganizationRole.OWNER, False),
+    ],
 )
 async def test_require_setup_mode_or_admin_rejects_non_admin_context(
     monkeypatch: pytest.MonkeyPatch,
     organization: object | None,
     role: OrganizationRole,
+    is_admin: bool,
 ) -> None:
     monkeypatch.setattr(surreal_setup, "is_setup_mode", AsyncMock(return_value=False))
     monkeypatch.setattr(
@@ -203,7 +209,7 @@ async def test_require_setup_mode_or_admin_rejects_non_admin_context(
             return_value=SimpleNamespace(
                 organization=organization,
                 org_role=role,
-                user=object(),
+                user=SimpleNamespace(is_admin=is_admin),
             )
         ),
     )
@@ -214,7 +220,7 @@ async def test_require_setup_mode_or_admin_rejects_non_admin_context(
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "Admin or owner role required"
+    assert exc_info.value.detail == "Global admin required"
 
 
 def test_surreal_setup_exports_neutral_runtime_surface() -> None:
