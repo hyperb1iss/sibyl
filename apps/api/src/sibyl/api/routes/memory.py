@@ -2189,8 +2189,39 @@ async def drain_reflection_review(
             ),
             http_request=http_request,
         )
+        source_accessible_projects = await list_accessible_project_graph_ids(ctx)
+        readable_projects = {
+            str(project_id) for project_id in source_accessible_projects or set()
+        }
         results: list[ReflectionReviewDrainItem] = []
         for candidate in candidates:
+            policy_context = MemoryPolicyContext(
+                action=MemoryPolicyAction.READ,
+                actor_user_id=ctx.user_id,
+                organization_id=ctx.organization_id,
+                organization_role=ctx.org_role,
+                memory_space=candidate.memory_scope.value,
+                scope_key=candidate.scope_key,
+                project_id=_memory_project_id(candidate),
+                accessible_projects=readable_projects,
+                agent_id=candidate.agent_id,
+                source_surface="reflection_review_drain",
+            )
+            decision = authorize_memory_read(policy_context=policy_context)
+            if not decision.allowed:
+                results.append(
+                    ReflectionReviewDrainItem(
+                        candidate_id=candidate.id,
+                        outcome="skip",
+                        recommended_action="route_to_review",
+                        dry_run=request.dry_run,
+                        reason="policy_denied",
+                        review_state=candidate.review_state,
+                        raw_source_ids=[],
+                        policy_reasons=[decision.reason],
+                    )
+                )
+                continue
             candidate_request = ReflectionAutonomyRequest(
                 candidate_id=candidate.id,
                 promote_to_scope=request.promote_to_scope,
