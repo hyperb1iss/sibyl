@@ -40,6 +40,6 @@ Or manually: `rm -rf ~/.claude/hooks/sibyl`
 
 ## Files
 
-- `session-start.py` - Context loading at session start
-- `user-prompt-submit.py` - Knowledge injection into prompts
-- `configure.py` - Updates `~/.claude/settings.json` (includes Stop hook prompt)
+- `session-start.py` - Prints the session bundle (active tasks, recent memory, next step)
+- `user-prompt-submit.py` - Searches Sibyl and injects relevant memory into the prompt
+- `configure.py` - Registers the SessionStart and UserPromptSubmit hooks in `~/.claude/settings.json`, preserving any non-Sibyl hooks already present
