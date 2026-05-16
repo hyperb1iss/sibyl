@@ -125,8 +125,6 @@ services:
     image: valkey/valkey:8-alpine
     container_name: sibyl-redis
     command: ["valkey-server", "--save", "", "--appendonly", "no"]
-    ports:
-      - "${SIBYL_REDIS_PORT:-6381}:6379"
     restart: unless-stopped
 
   # ==========================================================================
