@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import secrets
 import time
+from html import escape
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, cast
@@ -511,7 +512,7 @@ class SibylMcpOAuthProvider(
             )
 
         client = await self.get_client(pending.client_id)
-        client_name = (client.client_name if client else None) or "MCP Client"
+        client_name = escape((client.client_name if client else None) or "MCP Client", quote=True)
 
         html = f"""
 <!doctype html>

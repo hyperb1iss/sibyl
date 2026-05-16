@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from mcp.server.auth.provider import AuthorizationParams
+from mcp.shared.auth import OAuthClientInformationFull
 from pydantic.networks import AnyUrl
 from starlette.requests import Request
 
@@ -138,3 +139,27 @@ async def test_mcp_oauth_org_selection_issues_code(monkeypatch) -> None:
     assert qs["state"] == ["state123"]
     assert "req123" not in provider._pending
     assert "req123" not in provider._authed
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_login_page_escapes_client_name() -> None:
+    provider = SibylMcpOAuthProvider()
+    provider._pending["req123"] = _PendingAuth(client_id="client1", expires_at=time.time() + 600, params=None)
+    await provider.register_client(
+        OAuthClientInformationFull(
+            client_id="client1",
+            client_secret="secret1",
+            redirect_uris=["http://127.0.0.1:9911/callback"],
+            token_endpoint_auth_method="client_secret_post",
+            scope="mcp",
+            client_name='</strong><script>alert("xss")</script><strong>',
+        )
+    )
+
+    req = _make_get_request(path="/_oauth/login", query={"req": "req123"})
+    resp = await provider.ui_login_get(req)
+
+    assert resp.status_code == 200
+    body = resp.body.decode("utf-8")
+    assert "<script>alert(\"xss\")</script>" not in body
+    assert "&lt;/strong&gt;&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;&lt;strong&gt;" in body
