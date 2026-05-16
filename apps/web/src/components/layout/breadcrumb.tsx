@@ -19,6 +19,15 @@ interface BreadcrumbProps {
   className?: string;
 }
 
+/** Title-case an unknown path segment so breadcrumb labels read cleanly. */
+function formatSegmentLabel(segment: string): string {
+  if (segment.length > 20) return `${segment.slice(0, 8)}...`;
+  return segment
+    .split(/[-_]/)
+    .map(word => (word ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+    .join(' ');
+}
+
 function useAutoCrumbs(pathname: string): BreadcrumbItem[] {
   return useMemo(() => {
     const segments = pathname.split('/').filter(Boolean);
@@ -34,9 +43,7 @@ function useAutoCrumbs(pathname: string): BreadcrumbItem[] {
       if (route) {
         crumbs.push({ label: route.label, href: currentPath, icon: route.icon });
       } else {
-        crumbs.push({
-          label: segment.length > 20 ? `${segment.slice(0, 8)}...` : segment,
-        });
+        crumbs.push({ label: formatSegmentLabel(segment) });
       }
     }
 
@@ -59,11 +66,18 @@ function BreadcrumbInner({ items, className = '' }: BreadcrumbProps) {
   // Precedence: explicit prop > context override > auto-derived from path.
   const breadcrumbs = items ?? override ?? auto;
 
-  // On the home route the trail is just Home — keep it as the active item so
-  // the row always reserves the same vertical space.
+  // On the home route the trail is just Home. Keep its href so the animation
+  // key stays `0:/` like every other route — without it the crumb re-keys and
+  // AnimatePresence redraws it instead of morphing on dashboard navigation.
   const renderable: BreadcrumbItem[] =
     breadcrumbs.length <= 1
-      ? [{ label: ROUTE_CONFIG[''].label, icon: ROUTE_CONFIG[''].icon }]
+      ? [
+          {
+            label: ROUTE_CONFIG[''].label,
+            href: ROUTE_CONFIG[''].href,
+            icon: ROUTE_CONFIG[''].icon,
+          },
+        ]
       : breadcrumbs;
 
   return (
