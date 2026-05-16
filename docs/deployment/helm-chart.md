@@ -49,7 +49,7 @@ backend:
   replicaCount: 1
 
   image:
-    repository: ghcr.io/hyperb1iss/sibyl
+    repository: ghcr.io/hyperb1iss/sibyl-api
     pullPolicy: IfNotPresent
     # Defaults to chart appVersion if empty
     tag: ""
@@ -456,8 +456,8 @@ coordinationBackend: "auto"
 backend:
   replicaCount: 3
   image:
-    repository: ghcr.io/hyperb1iss/sibyl
-    tag: "0.1.0"
+    repository: ghcr.io/hyperb1iss/sibyl-api
+    tag: "0.9.0"
     pullPolicy: Always
   existingSecret: sibyl-secrets
   surreal:

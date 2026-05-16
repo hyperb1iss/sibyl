@@ -72,7 +72,7 @@ backend:
   replicaCount: 2
 
   image:
-    repository: ghcr.io/hyperb1iss/sibyl
+    repository: ghcr.io/hyperb1iss/sibyl-api
     tag: "0.9.0"
     pullPolicy: Always
 
