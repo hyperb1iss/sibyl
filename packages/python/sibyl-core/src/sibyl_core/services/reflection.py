@@ -749,8 +749,9 @@ def _explicit_superseded_ids(
 ) -> list[str]:
     matched = _ids_from_pattern(_SUPERSESSION_PATTERN, candidate.content)
     known_ids = {source_id.lower() for source_id in prior_source_ids}
-    if known_ids:
-        matched = [source_id for source_id in matched if source_id.lower() in known_ids]
+    if not known_ids:
+        return []
+    matched = [source_id for source_id in matched if source_id.lower() in known_ids]
     return list(dict.fromkeys(matched))
 
 
