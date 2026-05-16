@@ -236,3 +236,55 @@ async def test_delete_project_routes_through_runtime_project_record() -> None:
         graph_project_id="project_new",
     )
     audit_log.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_entity_sanitizes_raw_capture_scope_metadata() -> None:
+    org = _org()
+    ctx = _ctx()
+    entity = EntityCreate(
+        name="Scoped capture",
+        content="Capture this.",
+        entity_type=EntityType.DECISION,
+        metadata={
+            "capture_mode": "remember",
+            "capture_surface": "dashboard",
+            "memory_scope": "project",
+            "scope_key": "project_forged",
+            "principal_id": "victim",
+            "project_id": "project_forged",
+            "review_state": "accepted",
+            "source_id": "source-forged",
+            "raw_source_id": "raw-source-forged",
+            "safe": "kept",
+        },
+    )
+    add_result = SimpleNamespace(success=True, id="decision_1", message="ok")
+
+    with (
+        patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)),
+        patch("sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock()),
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.entities._archive_raw_capture", AsyncMock()) as archive_capture,
+    ):
+        await create_entity(
+            request=_request(),
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+            sync=False,
+        )
+
+    sent_metadata = archive_capture.await_args.kwargs["metadata"]
+    assert sent_metadata["capture_mode"] == "remember"
+    assert sent_metadata["capture_surface"] == "dashboard"
+    assert sent_metadata["safe"] == "kept"
+    assert "memory_scope" not in sent_metadata
+    assert "scope_key" not in sent_metadata
+    assert "principal_id" not in sent_metadata
+    assert "project_id" not in sent_metadata
+    assert "review_state" not in sent_metadata
+    assert "source_id" not in sent_metadata
+    assert "raw_source_id" not in sent_metadata

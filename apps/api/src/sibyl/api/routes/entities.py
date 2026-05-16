@@ -103,6 +103,26 @@ GRAPH_ENTITY_ID_PREFIXES = frozenset(
 )
 LIST_RESPONSE_CONTENT = ""
 
+_RAW_CAPTURE_METADATA_DENYLIST = frozenset(
+    {
+        "principal_id",
+        "memory_scope",
+        "scope_key",
+        "agent_id",
+        "project_id",
+        "review_state",
+        "source_id",
+        "raw_source_id",
+    }
+)
+
+
+def _sanitize_raw_capture_metadata(metadata: dict[str, object]) -> dict[str, object]:
+    """Drop caller-controlled fields that map to authoritative capture columns."""
+    return {
+        key: value for key, value in metadata.items() if key not in _RAW_CAPTURE_METADATA_DENYLIST
+    }
+
 
 # =============================================================================
 # Helpers
@@ -1178,6 +1198,7 @@ async def create_entity(
             raise HTTPException(status_code=400, detail=message)
 
         if request_metadata.get("capture_mode") in {"quick", "remember"}:
+            raw_capture_metadata = _sanitize_raw_capture_metadata(request_metadata)
             await _archive_raw_capture(
                 content_session,
                 organization_id=org.id,
@@ -1187,7 +1208,7 @@ async def create_entity(
                 entity_content=content,
                 entity_type=entity.entity_type.value,
                 tags=list(entity.tags or []),
-                metadata=request_metadata,
+                metadata=raw_capture_metadata,
             )
 
         # For async creation, return immediately with pending response.
