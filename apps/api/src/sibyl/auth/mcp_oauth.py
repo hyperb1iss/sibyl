@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import secrets
 import time
-from html import escape
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from html import escape
 from typing import Protocol, cast
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from uuid import UUID, uuid4
@@ -450,9 +450,7 @@ class SibylMcpOAuthProvider(
     async def _create_session_record(self, **kwargs: object) -> object:
         return await create_session_record(**kwargs)
 
-    async def _load_oauth_client_registration(
-        self, client_id: str
-    ) -> dict[str, object] | None:
+    async def _load_oauth_client_registration(self, client_id: str) -> dict[str, object] | None:
         return cast(
             "dict[str, object] | None",
             await load_oauth_client_registration(client_id),
