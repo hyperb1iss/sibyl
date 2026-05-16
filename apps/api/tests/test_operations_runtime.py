@@ -41,6 +41,20 @@ async def test_operations_runtime_dispatches_settings_admin_to_surreal(
     surreal_admin.assert_awaited_once_with(request)
 
 
+@pytest.mark.asyncio
+async def test_operations_runtime_dispatches_settings_owner_to_surreal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request()
+    surreal_owner = AsyncMock()
+
+    monkeypatch.setattr(surreal_setup, "require_settings_owner", surreal_owner)
+
+    await operations_runtime.require_settings_owner(request)
+
+    surreal_owner.assert_awaited_once_with(request)
+
+
 def test_operations_runtime_exports_neutral_runtime_surface() -> None:
     assert operations_runtime.__all__ == [
         "attach_backup_job",
@@ -53,6 +67,7 @@ def test_operations_runtime_exports_neutral_runtime_surface() -> None:
         "get_setup_status",
         "is_setup_mode",
         "require_settings_admin",
+        "require_settings_owner",
         "require_setup_mode_or_admin",
         "require_setup_mode_or_auth",
         "list_backups",

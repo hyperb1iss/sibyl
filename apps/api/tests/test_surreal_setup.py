@@ -226,6 +226,7 @@ def test_surreal_setup_exports_neutral_runtime_surface() -> None:
         "get_setup_status",
         "is_setup_mode",
         "require_settings_admin",
+        "require_settings_owner",
         "require_setup_mode_or_admin",
         "require_setup_mode_or_auth",
     ]

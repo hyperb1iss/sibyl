@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sibyl.ai.llm.config_source import resolve_provider_api_key
 from sibyl.ai.llm.service import invalidate_llm_runtime
 from sibyl.crypto import mask_secret
-from sibyl.persistence.operations_runtime import require_settings_admin
+from sibyl.persistence.operations_runtime import require_settings_owner
 from sibyl.services.settings import get_settings_service
 from sibyl_core.ai.llm.config import (
     ConfigField,
@@ -88,7 +88,7 @@ class RegistryResponse(BaseModel):
 
 @router.get("/llm", response_model=LLMSettingsResponse)
 async def get_llm_settings(request: Request) -> LLMSettingsResponse:
-    await require_settings_admin(request)
+    await require_settings_owner(request)
 
     source = get_config_source()
     surfaces = {
@@ -104,7 +104,7 @@ async def update_llm_surface(
     surface: LLMSurface,
     body: UpdateLLMSurfaceRequest,
 ) -> UpdateLLMSurfaceResponse:
-    await require_settings_admin(request)
+    await require_settings_owner(request)
 
     fields = _requested_update_fields(body)
     if not fields:
@@ -126,7 +126,7 @@ async def update_llm_surface(
 
 @router.post("/llm/{surface}/test", response_model=SurfaceTestResult)
 async def test_llm_surface(request: Request, surface: LLMSurface) -> SurfaceTestResult:
-    await require_settings_admin(request)
+    await require_settings_owner(request)
     return await test_surface_config(surface, get_config_source())
 
 
@@ -135,7 +135,7 @@ async def test_provider_key(
     request: Request,
     provider: LLMProviderName,
 ) -> KeyValidationResult:
-    await require_settings_admin(request)
+    await require_settings_owner(request)
     key = await resolve_provider_api_key(get_settings_service(), provider)
     if key.value is None:
         raise HTTPException(status_code=400, detail=f"No {provider} API key configured")
@@ -147,7 +147,7 @@ async def test_model_availability(
     request: Request,
     model_alias: str,
 ) -> ModelValidationResult:
-    await require_settings_admin(request)
+    await require_settings_owner(request)
     entry = model_registry.get(model_alias)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Unknown model: {model_alias}")
@@ -174,7 +174,7 @@ async def get_ai_registry(
     request: Request,
     kind: ModelKind | None = Query(default=None),
 ) -> RegistryResponse:
-    await require_settings_admin(request)
+    await require_settings_owner(request)
     return RegistryResponse(entries=model_registry.entries(kind=kind))
 
 
