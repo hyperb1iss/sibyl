@@ -1584,6 +1584,7 @@ def test_memory_promote_auto_command_renders_decision(
     mock_resolve_project_from_cwd: MagicMock,
 ) -> None:
     mock_client = MagicMock()
+    mock_client.resolve_id_prefix = AsyncMock(return_value={"matches": [{"id": "candidate-1"}]})
     mock_client.auto_review_reflection_promotion = AsyncMock(
         return_value={
             "outcome": "auto_promote",
@@ -1628,6 +1629,10 @@ def test_memory_promote_auto_command_renders_decision(
     assert "Automatic memory review" in result.stdout
     assert "auto_promote" in result.stdout
     assert "decision_123" in result.stdout
+    mock_client.resolve_id_prefix.assert_awaited_once_with(
+        "candidate-1",
+        entity_type="raw_memory",
+    )
     mock_client.auto_review_reflection_promotion.assert_awaited_once_with(
         candidate_id="candidate-1",
         promote_to_scope="project",
