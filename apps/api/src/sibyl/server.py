@@ -272,6 +272,16 @@ async def _compile_mcp_context_pack(
 
     ctx = await _require_mcp_context()
     accessible_projects = await _resolve_mcp_project_scope(ctx, project)
+    memory_scope = "project" if project else "private"
+    scope_key = project
+    if not _mcp_memory_scope_allowed(ctx, memory_scope=memory_scope, scope_key=scope_key):
+        _deny_mcp_api_key_memory_scope(
+            ctx=ctx,
+            action=MemoryPolicyAction.READ,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            surface="mcp_context",
+        )
     pack = await _compile_context(
         goal=goal,
         intent=intent,
@@ -285,6 +295,9 @@ async def _compile_mcp_context_pack(
         include_related=include_related,
         related_limit=related_limit,
         organization_id=ctx.org_id,
+        allowed_memory_scope_keys=set(ctx.api_key_memory_scope_keys)
+        if ctx.api_key_memory_scope_keys is not None
+        else None,
     )
     payload = context_pack_to_dict(pack)
     payload["markdown"] = context_pack_to_markdown(pack)
@@ -554,6 +567,16 @@ async def _reflect_mcp_memory(
         task_ids=task_ids,
         active_task=active_task and persist,
     )
+    memory_scope = "project" if project else "private"
+    scope_key = project
+    if persist:
+        _authorize_mcp_memory_write(
+            ctx=ctx,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            accessible_projects=accessible_projects,
+            surface="mcp_reflect",
+        )
     pack = await reflect_memory(
         content=content,
         source_title=source_title,
@@ -564,8 +587,8 @@ async def _reflect_mcp_memory(
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,
         accessible_projects=accessible_projects,
-        memory_scope="project" if project else "private",
-        scope_key=project,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
         persist=persist,
         persist_source=persist_source,
         persist_review=persist_review,
@@ -787,8 +810,8 @@ async def _add_mcp_entity(
     )
     write_decision = _authorize_mcp_memory_write(
         ctx=ctx,
-        memory_scope="project" if project else "private",
-        scope_key=project,
+        memory_scope=memory_scope,
+        scope_key=scope_key,
         accessible_projects=accessible_projects,
         surface="mcp_add",
     )
@@ -904,6 +927,9 @@ async def _manage_mcp_action(
         entity_id=entity_id,
         data=full_data,
         organization_id=ctx.org_id,
+        allowed_memory_scope_keys=set(ctx.api_key_memory_scope_keys)
+        if ctx.api_key_memory_scope_keys is not None
+        else None,
     )
     payload = _to_dict(result)
     if policy_decision is not None:

@@ -189,6 +189,7 @@ async def test_compile_mcp_context_pack_audits_render_receipt() -> None:
     resolve_scope.assert_awaited_once_with(ctx, "project-a")
     compile_context.assert_awaited_once()
     assert compile_context.await_args.kwargs["accessible_projects"] == {"project-a"}
+    assert compile_context.await_args.kwargs["allowed_memory_scope_keys"] is None
     audit.assert_awaited_once()
     kwargs = audit.await_args.kwargs
     assert kwargs["action"] == "memory.context_pack"
@@ -204,6 +205,33 @@ async def test_compile_mcp_context_pack_audits_render_receipt() -> None:
     assert kwargs["details"]["domain"] == "sibyl"
     assert kwargs["details"]["layer"] == "wake"
     assert kwargs["details"]["accessible_project_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_compile_mcp_context_pack_denies_api_key_memory_scope_mismatch() -> None:
+    ctx = McpContext(
+        org_id=str(uuid4()),
+        user_id="user-1",
+        scopes=["mcp"],
+        api_key_memory_scope_keys=[api_key_memory_scope_key("project", "project-a")],
+    )
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._resolve_mcp_project_scope", AsyncMock(return_value={"project-b"})),
+        pytest.raises(ValueError, match="api_key_memory_space_denied"),
+    ):
+        await _compile_mcp_context_pack(
+            goal="ship faster",
+            intent="build",
+            layer="wake",
+            domain="sibyl",
+            project="project-b",
+            agent_id="nova",
+            limit=8,
+            include_related=False,
+            related_limit=0,
+        )
 
 
 @pytest.mark.asyncio
@@ -932,6 +960,30 @@ async def test_reflect_mcp_memory_links_single_active_task_when_persisting() -> 
     assert audit.await_args.kwargs["derived_ids"] == []
     assert audit.await_args.kwargs["details"]["related_to_count"] == 3
     explore.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reflect_mcp_memory_persist_enforces_api_key_memory_scope() -> None:
+    ctx = McpContext(
+        org_id=str(uuid4()),
+        user_id=str(uuid4()),
+        scopes=["mcp"],
+        api_key_memory_scope_keys=[api_key_memory_scope_key("project", "project-a")],
+    )
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-b"})),
+        patch("sibyl_core.tools.core.reflect_memory", AsyncMock()) as reflect_memory,
+        pytest.raises(ValueError, match="api_key_memory_space_denied"),
+    ):
+        await _reflect_mcp_memory(
+            content="Denied",
+            project="project-b",
+            persist=True,
+        )
+
+    reflect_memory.assert_not_awaited()
 
 
 @pytest.mark.asyncio

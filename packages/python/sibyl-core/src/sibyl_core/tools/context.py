@@ -414,6 +414,7 @@ async def _compile_raw_memory_section(
     agent_id: str | None,
     project: str | None,
     accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None,
     limit: int,
     recall_fn: RawMemoryRecallFn,
 ) -> ContextSection | None:
@@ -429,6 +430,11 @@ async def _compile_raw_memory_section(
     if agent_id:
         recall_specs.append(("private", None, agent_id, project))
     for memory_scope, scope_key, spec_agent_id, spec_project_id in recall_specs:
+        if allowed_memory_scope_keys is not None:
+            effective_scope_key = principal_id if memory_scope == "private" else scope_key
+            policy_key = f"{memory_scope}\x1f{'' if effective_scope_key is None else str(effective_scope_key).strip()}"
+            if policy_key not in allowed_memory_scope_keys:
+                continue
         if memory_scope == "project" and not scope_key:
             continue
         decision = authorize_memory_read(
@@ -832,6 +838,7 @@ async def compile_context(
     related_fn: RelatedFn = _default_related_items,
     raw_memory_recall_fn: RawMemoryRecallFn = recall_raw_memory,
     retrieval_mode: str | NativeRetrievalMode | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> ContextPack:
     """Build a small, structured context pack for an agent goal."""
 
@@ -904,6 +911,7 @@ async def compile_context(
             agent_id=agent_id,
             project=project,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
             limit=min(LAYER_RAW_LIMITS[normalized_layer], limit),
             recall_fn=raw_memory_recall_fn,
         )
