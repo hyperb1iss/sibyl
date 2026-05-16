@@ -370,11 +370,27 @@ def _require_namespace(value: SimpleNamespace | None, *, label: str) -> SimpleNa
 
 
 def _auth_user_namespace(record: SurrealRecord | None) -> SimpleNamespace | None:
-    return _ns(
+    user = _ns(
         record,
         uuid_fields={"uuid"},
         datetime_fields=_USER_DATETIME_FIELDS,
     )
+    if user is None:
+        return None
+
+    user.email = getattr(user, "email", None)
+    user.name = str(getattr(user, "name", None) or "")
+    user.avatar_url = getattr(user, "avatar_url", None)
+    user.github_id = getattr(user, "github_id", None)
+    user.is_admin = bool(getattr(user, "is_admin", False))
+    user.bio = getattr(user, "bio", None)
+    user.timezone = str(getattr(user, "timezone", None) or "UTC")
+    user.preferences = dict(getattr(user, "preferences", None) or {})
+    user.email_verified_at = getattr(user, "email_verified_at", None)
+    user.last_login_at = getattr(user, "last_login_at", None)
+    user.created_at = getattr(user, "created_at", None) or _utcnow()
+    user.updated_at = getattr(user, "updated_at", None)
+    return user
 
 
 def _auth_user_model(record: SurrealRecord | None) -> AuthUser | None:
@@ -602,7 +618,7 @@ class _SurrealRepository:
         if not created:
             msg = f"Failed to write {table} record {uuid}"
             raise RuntimeError(msg)
-        return created[0]
+        return {**record, **created[0]}
 
 
 async def _execute_raw_statement_records(
@@ -1188,9 +1204,7 @@ async def authenticate_api_key(raw_key: str):
                 if memory_space_ids
                 else []
             )
-            memory_spaces = [
-                _api_key_memory_space_scope(record) for record in memory_space_records
-            ]
+            memory_spaces = [_api_key_memory_space_scope(record) for record in memory_space_records]
             return ApiKeyAuth(
                 api_key_id=api_key_id,
                 user_id=_coerce_uuid(candidate.get("user_id"), field_name="api_key.user_id"),
@@ -2881,9 +2895,7 @@ async def _decorate_api_key_scopes(
     for record in memory_scope_records:
         memory_space_id = str(record.get("memory_space_id") or "").strip()
         if memory_space_id:
-            memory_spaces_by_key.setdefault(str(record["api_key_id"]), []).append(
-                memory_space_id
-            )
+            memory_spaces_by_key.setdefault(str(record["api_key_id"]), []).append(memory_space_id)
     for key in keys:
         key_id = str(key.id)
         key.project_ids = projects_by_key.get(key_id, [])
@@ -2964,7 +2976,9 @@ async def create_api_key_for_user(
             memory_space_ids=resolved_memory_space_ids,
         )
         key.project_ids = list(project_ids or [])
-        key.memory_space_ids = [str(memory_space_id) for memory_space_id in resolved_memory_space_ids]
+        key.memory_space_ids = [
+            str(memory_space_id) for memory_space_id in resolved_memory_space_ids
+        ]
         await _log_audit_event(
             client,
             action="auth.api_key.create",

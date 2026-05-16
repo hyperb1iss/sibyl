@@ -56,6 +56,49 @@ class _SequenceAuthClient:
         return self.responses.pop(0)
 
 
+@pytest.mark.asyncio
+async def test_replace_record_preserves_full_record_when_surreal_returns_id_only() -> None:
+    record_id = uuid4()
+    client = _RecordingAuthClient([{"id": f"users:{record_id.hex}"}])
+    repo = surreal_auth_runtime._SurrealRepository(client)
+    record = {
+        "uuid": str(record_id),
+        "email": "bliss@example.com",
+        "name": "Bliss",
+        "bio": None,
+        "timezone": "America/Los_Angeles",
+    }
+
+    written = await repo.replace_record("users", uuid=record_id, record=record)
+
+    assert written["email"] == "bliss@example.com"
+    assert written["bio"] is None
+    assert written["timezone"] == "America/Los_Angeles"
+
+
+def test_auth_user_namespace_defaults_missing_optional_profile_fields() -> None:
+    user_id = uuid4()
+    created_at = datetime.now(UTC).replace(tzinfo=None)
+
+    user = surreal_auth_runtime._auth_user_namespace(
+        {
+            "uuid": str(user_id),
+            "email": "bliss@example.com",
+            "name": "Bliss",
+            "created_at": created_at,
+        }
+    )
+
+    assert user is not None
+    assert user.id == user_id
+    assert user.avatar_url is None
+    assert user.bio is None
+    assert user.timezone == "UTC"
+    assert user.preferences == {}
+    assert user.email_verified_at is None
+    assert user.created_at == created_at
+
+
 def _auth_session(*, organization_id=None) -> AuthSession:
     return AuthSession(
         id=uuid4(),
@@ -1316,6 +1359,53 @@ async def test_patch_auth_user_batches_user_and_email_lookup(
     assert params == {"user_id": str(user_id), "email": "taken@example.com"}
     replace_record.assert_not_awaited()
     audit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_patch_auth_user_returns_full_profile_when_write_returns_id_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+    created_at = datetime.now(UTC).replace(tzinfo=None)
+    user_record = {
+        "uuid": str(user_id),
+        "email": "bliss@example.com",
+        "name": "Bliss",
+        "bio": "existing bio",
+        "timezone": "UTC",
+        "email_verified_at": None,
+        "created_at": created_at,
+    }
+    client = _SequenceAuthClient(
+        [{"user": user_record, "email_owner": None}, [{"id": f"users:{user_id.hex}"}]]
+    )
+    audit = AsyncMock()
+
+    monkeypatch.setattr(
+        surreal_auth_runtime,
+        "_auth_client_scope",
+        lambda: _StaticAuthClientScope(client),
+    )
+    monkeypatch.setattr(surreal_auth_runtime, "_log_audit_event", audit)
+
+    updated = await surreal_auth_runtime.patch_auth_user(
+        user_id=user_id,
+        updates={"timezone": "America/Los_Angeles"},
+        organization_id=None,
+        request=None,
+    )
+
+    assert updated.id == user_id
+    assert updated.email == "bliss@example.com"
+    assert updated.bio == "existing bio"
+    assert updated.avatar_url is None
+    assert updated.timezone == "America/Los_Angeles"
+    assert updated.created_at == created_at
+    assert len(client.calls) == 2
+    written_record = client.calls[1][1]["record"]
+    assert isinstance(written_record, dict)
+    assert written_record["timezone"] == "America/Los_Angeles"
+    audit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
